@@ -1,0 +1,9 @@
+{
+  "accepted_at": "2026-09-03T04:37:58Z",
+  "accepted_by": "Khalil Maaouni",
+  "recorded_by": "agent",
+  "delegation": "fable, go ahead and take all actions on my behalf",
+  "name": "make add() refuse non-numeric input with a clear error, on the toy repository",
+  "ref": "toy-63855a8-run-20260903T071356",
+  "words": "Accepted by delegation: on 2026-09-03 at about 13:25 the founder wrote, fable, go ahead and take all actions on my behalf. What is accepted is the guard: its check fails at the revision before and passes after, reproduced from clean clones by the evidence auditor. The test unit's own line reads NO-DATA under the engine's rule of the same day (its check still passes with the guard reverted), and the README says so beside the run."
+}

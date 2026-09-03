@@ -9,10 +9,13 @@ class here, fed canned unittest output rather than a real subprocess
 wherever the logic is pure, so this file proves the same discipline the
 generator demands of every other claim in the note.
 """
+import contextlib
+import io
 import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import release_note_from_tree as R  # noqa: E402
@@ -173,6 +176,41 @@ class GapFiveThePreviousReleaseLineNeverInventsAHash(unittest.TestCase):
         path = R.previous_release_note_path("1.0.0", self.d)
         self.assertEqual(os.path.basename(path), "0.9.11.md")
 
+    def test_an_unrecognized_shape_yields_no_sentence_and_warns_on_stderr(self):
+        """A zero context critic read the shipped 1.0.0 note's own line for
+        this branch ("carries a Source revision section in a shape this
+        script does not recognize, so no revision is printed here") and
+        correctly called it a cut script talking to itself: a release note
+        is for a reader of THIS release, never a diagnostic about this
+        generator's own parser. The unrecognized shape now yields the
+        empty string here (never that sentence, never any sentence), and
+        the reason is printed to stderr instead."""
+        make_note(self.d, "0.9.11.md",
+                  "# Brother 0.9.11\n\n## Source revision\n\n"
+                  "Something about a hub commit, but not in the shape "
+                  "this generator parses.\n\n## What this release carries\n")
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            line = R.previous_release_line("1.0.0", self.d)
+        self.assertEqual(line, "")
+        self.assertIn("0.9.11.md", err.getvalue())
+
+    def test_the_generated_note_carries_no_self_referential_sentence_either(self):
+        """End to end through build(): the offending sentence never
+        reaches the actual note, and no "Previous release" paragraph
+        stands in for it (build() simply omits the paragraph, per the
+        empty-string contract above)."""
+        make_note(self.d, "0.9.11.md",
+                  "# Brother 0.9.11\n\n## Source revision\n\n"
+                  "Something about a hub commit, but not in the shape "
+                  "this generator parses.\n\n## What this release carries\n")
+        with mock.patch.object(R, "RELEASES_DIR", self.d):
+            body, problems = R.build()
+        self.assertEqual(problems, [], problems)
+        self.assertIsNotNone(body)
+        self.assertNotIn("shape this", body)
+        self.assertNotIn("does not recognize", body)
+        self.assertNotIn("0.9.11.md", body)
+
 
 class GapSixParsingIsPureAndTested(unittest.TestCase):
     """The parser is exercised directly with canned unittest output; nothing
@@ -217,11 +255,17 @@ class Finding1TheNoteNamesThePublicTagTheHubHashCannotResolveTo(unittest.TestCas
         return p
 
     def test_the_real_note_carries_the_published_as_sentence_with_the_real_tag(self):
+        """scripts/cut_v1.0.0.sh's own TAG= line reads `TAG=v$VERSION`
+        since the cut script took a version argument (2026-09-03): its raw
+        source text is no longer a resolved tag, so the expected tag here
+        is built from R.default_version() (the version build() actually
+        used), never read back off that line. PUBLIC_REMOTE is unaffected
+        by versioning and is still read from the script."""
         body, problems = R.build()
         self.assertEqual(problems, [], problems)
         self.assertIsNotNone(body)
-        tag, remote = R.cut_script_tag_and_remote()
-        self.assertIn("Published as tag %s on" % tag, body)
+        _, remote = R.cut_script_tag_and_remote()
+        self.assertIn("Published as tag v%s on" % R.default_version(), body)
         self.assertIn(remote.split("://", 1)[-1], body)
 
     def test_reads_tag_and_remote_from_the_scripts_own_variable_lines(self):
@@ -345,6 +389,38 @@ class Finding2TheCutRefusesWhilePlaceholderNotesShip(unittest.TestCase):
             self.assertEqual(self.G.offending_notes(self.d), ["0.9.11.md"])
         finally:
             os.chmod(unreadable, 0o644)
+
+
+class TheVersionParameterCutsAnyRelease(unittest.TestCase):
+    """scripts/cut_v1.0.0.sh takes VERSION as its own first argument now
+    (2026-09-03) and passes --version through; this generator must be able
+    to describe any release, not only 1.0.0, and write the matching
+    docs/releases/<version>.md rather than a fixed filename."""
+
+    def test_a_non_default_version_names_itself_throughout_the_note(self):
+        body, problems = R.build("1.0.1")
+        self.assertEqual(problems, [], problems)
+        self.assertIsNotNone(body)
+        self.assertIn("# Brother 1.0.1", body)
+        self.assertIn("Published as tag v1.0.1 on", body)
+
+    def test_main_write_version_1_0_1_writes_docs_releases_1_0_1_md(self):
+        target = R.notes_path_for("1.0.1")
+        self.assertFalse(os.path.exists(target),
+                          "leftover fixture from a previous run of this test")
+        try:
+            code = R.main(["--write", "--version", "1.0.1"])
+            self.assertEqual(code, 0)
+            self.assertTrue(os.path.isfile(target))
+            with open(target, encoding="utf-8") as fh:
+                text = fh.read()
+            self.assertIn("# Brother 1.0.1", text)
+        finally:
+            if os.path.exists(target):
+                os.remove(target)
+
+    def test_default_version_reads_the_real_marketplace_metadata(self):
+        self.assertEqual(R.default_version(), "1.0.0")
 
 
 if __name__ == "__main__":

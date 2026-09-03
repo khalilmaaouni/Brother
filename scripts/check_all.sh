@@ -87,6 +87,11 @@ echo "Brother: every shipped check, each reporting its own exit code"
 echo
 
 run_check "surface"        /usr/bin/python3 -m unittest -v tests/test_surface.py
+# E51: parity between contracts/ (the root the charter names as the seam)
+# and the two product files it mirrors. Registered the same change that
+# builds contracts/, per this estate's own recorded lesson that an
+# unregistered check is invisible to every check the project owns.
+run_check "contracts-root" python3 scripts/test_contracts_root.py -v
 run_check "context-budget" /usr/bin/python3 -m unittest -v tests/test_context_budget.py
 run_check "truth-claims"   /usr/bin/python3 -m unittest -v tests/test_truth_claims.py
 run_check "foreign-method" /usr/bin/python3 -m unittest -v tests/test_foreign_method_compat.py

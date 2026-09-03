@@ -82,7 +82,17 @@ DEFAULT_BRANCH = "main"
 # running. If this repository is ever renamed or moved, these three lines
 # change together and the documentation consistency suite
 # (tools/test_bm_docs.py) fails until every onboarding page agrees.
-REPO_URL = "https://github.com/khalilmaaouni/BrotherModeUp.git"
+#
+# REPOINTED 2026-09-03: this used to name the standalone BrotherModeUp
+# repository. The M6 cutover moved this product into the Brother hub as a
+# git-subdir plugin at products/brothermode, and BrotherModeUp went private
+# and archived the same day, so it can no longer be cloned by anyone outside
+# this machine. REPO_URL now names the hub; the pinned and development
+# clone commands below clone the hub at a ref and change into
+# products/brothermode inside that checkout, because a raw clone of the
+# whole hub does not, by itself, land SKILL.md at its own top level the way
+# a clone of the old standalone repository did.
+REPO_URL = "https://github.com/khalilmaaouni/Brother.git"
 PRIMARY_SKILL_DIR = "~/.claude/skills/brothermode"
 DEV_SKILL_DIR = "~/.claude/skills/brothermode-dev"
 
@@ -108,7 +118,13 @@ GATE_EXPECTATION = "ALL GREEN"
 # the public install command is pinned to THIS constant instead, never to
 # release_tag. Bump it by hand, in the same change that cuts and pushes a new
 # tag, never before. See docs/RELEASE.md, "The version law".
-PUBLIC_INSTALL_TAG = "v3.4.2"
+#
+# REPOINTED 2026-09-03: before the M6 cutover this named a tag in the
+# standalone BrotherModeUp repository (last v3.4.2). BrotherModeUp is now
+# private and archived, so a tag cut there can never again be what a reader
+# clones. This now names the hub's own tag, the same ref
+# .claude-plugin/marketplace.json's git-subdir plugins[] source pins.
+PUBLIC_INSTALL_TAG = "v1.0.0"
 
 
 class FactError(Exception):
@@ -277,15 +293,37 @@ def facts(root=ROOT):
     # resolve in git, which is a fact independent of what this tree's own
     # VERSION currently claims. REPO_URL and PRIMARY_SKILL_DIR are declared
     # constants, same as DEFAULT_BRANCH.
-    install_command_pinned = ("git clone --branch %s --depth 1 %s %s"
-                              % (install_target_tag, REPO_URL, PRIMARY_SKILL_DIR))
+    #
+    # THREE LINES, NOT ONE, SINCE THE M6 CUTOVER (2026-09-03 repoint):
+    # REPO_URL now names the Brother hub, a repository that ships several
+    # products, and this product lives inside it at products/brothermode.
+    # A clone of the whole hub does not put SKILL.md at its own top level
+    # the way a clone of the old standalone repository did, so the clone
+    # target is a source checkout (PRIMARY_SKILL_DIR + "-src"), never
+    # PRIMARY_SKILL_DIR itself; the second line moves into the product's
+    # own subdirectory inside that checkout; the third runs this product's
+    # own installer from there, which copies the tree into PRIMARY_SKILL_DIR
+    # and wires the hooks, exactly as it does when driven from a plugin
+    # marketplace install. The tag is still immutable and still pinned, so
+    # the guarantee the original external audit asked for (no moving branch
+    # feeding auto-run code) still holds; only the path to it changed.
+    install_command_pinned = (
+        "git clone --branch %s --depth 1 %s %s-src\n"
+        "cd %s-src/products/brothermode\n"
+        "python3 scripts/install.py"
+        % (install_target_tag, REPO_URL, PRIMARY_SKILL_DIR, PRIMARY_SKILL_DIR))
     # The separate, clearly labeled development command: tracks the moving
-    # default branch on purpose, into its OWN directory, so a reader can never
-    # confuse it with the pinned install above.
+    # default branch on purpose, into its OWN checkout, so a reader can never
+    # confuse it with the pinned install above. `--target` is explicit here
+    # because scripts/install.py's own default target is PRIMARY_SKILL_DIR,
+    # and this command must land in DEV_SKILL_DIR instead.
     install_command_dev = (
         "# Development branch (changes over time)\n"
-        "git clone --branch %s %s %s"
-        % (DEFAULT_BRANCH, REPO_URL, DEV_SKILL_DIR))
+        "git clone --branch %s %s %s-src\n"
+        "cd %s-src/products/brothermode\n"
+        "python3 scripts/install.py --target %s"
+        % (DEFAULT_BRANCH, REPO_URL, DEV_SKILL_DIR, DEV_SKILL_DIR,
+           DEV_SKILL_DIR))
     # The boring install: two plain shell commands through the Claude Code
     # client's own plugin manager, proven end to end by
     # scripts/release-smoke-install.sh. Every part of it is read from

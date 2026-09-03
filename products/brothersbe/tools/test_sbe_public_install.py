@@ -36,7 +36,9 @@ PLUGIN = os.path.join(ROOT, ".claude-plugin", "plugin.json")
 MARKET = os.path.join(ROOT, ".claude-plugin", "marketplace.json")
 
 #: The two commands the front page promises, and the repository slug in them.
-SLUG = "khalilmaaouni/BrotherSBE"
+#: BrotherSBE ships from the Brother hub repository; the standalone
+#: BrotherSBE repository this used to name is archived.
+SLUG = "khalilmaaouni/Brother"
 
 
 def read(path):
@@ -58,7 +60,7 @@ class TheFrontPagePromise(unittest.TestCase):
                          "the install block is %d command(s), not 2. Installation is the "
                          "boring part or it is a barrier: %r" % (len(lines), lines))
         self.assertEqual(lines[0], "claude plugin marketplace add %s" % SLUG)
-        self.assertEqual(lines[1], "claude plugin install brothersbe@brothersbe")
+        self.assertEqual(lines[1], "claude plugin install brothersbe@brother")
 
     def test_the_first_move_after_install_is_named_and_real(self):
         self.assertIn("/brothersbe:start", self.readme,

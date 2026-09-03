@@ -34,10 +34,30 @@ REAL_PRODUCT_VERIFY_INSTALL_SH = os.path.join(
     EP.ROOT, "products", "brothersbe", "scripts", "verify-install.sh")
 
 
+def _git_track_all(root):
+    """Stage everything currently on disk under `root` into a fresh (or
+    existing) git index, the way the real hub tracks the paths this
+    exporter ships: build_export_tree now walks `git ls-files`, never a
+    raw filesystem walk (2026-09-03, the __pycache__/.sbe leak), so a
+    fixture `root` must be a git repository with its files staged before
+    the exporter can see any of them. `-f` mirrors how the two real CSV
+    fixtures reached the hub's own index: force-added past whatever the
+    fixture's own .gitignore says, same as a test that plants one. Safe to
+    call more than once (e.g. after writing more fixture files past the
+    first _make_fake_root call): `git add -A -f` just re-stages the delta,
+    no commit involved (git ls-files reads the index, not a commit)."""
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    subprocess.run(["git", "-C", root, "add", "-A", "-f"], check=True)
+
+
 def _make_fake_root(root, files):
     """`files`: {relative_path: content}. Always seeds scripts/cleanse.sh
     with a real copy, so cleanse runs inside the candidate tree exactly as
-    it does in production, whenever "scripts" is on the test's allowlist."""
+    it does in production, whenever "scripts" is on the test's allowlist.
+    Tracks everything it just wrote (see _git_track_all) so
+    build_export_tree's git-ls-files walk can see it; a caller that writes
+    MORE files into `root` after this returns must call
+    _git_track_all(root) again before exercising the exporter."""
     os.makedirs(os.path.join(root, "scripts"), exist_ok=True)
     shutil.copy2(REAL_CLEANSE, os.path.join(root, "scripts", "cleanse.sh"))
     for rel, content in files.items():
@@ -47,6 +67,7 @@ def _make_fake_root(root, files):
             os.makedirs(parent, exist_ok=True)
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(content)
+    _git_track_all(root)
 
 
 def _write_lines(path, lines):
@@ -579,6 +600,8 @@ class TheExportedProductManifestDescribesTheExportedBytes(unittest.TestCase):
             "%s  kept.md" % placeholder_hash,
             "%s  ci/internal.md" % placeholder_hash,
         ])
+        _git_track_all(root)  # re-track: checksums.sh and CHECKSUMS.sha256
+        # were written after _make_fake_root's own tracking pass above
 
     def test_the_regenerated_manifest_drops_the_withheld_file_and_rehashes(self):
         with tempfile.TemporaryDirectory() as root, \
@@ -620,6 +643,174 @@ class TheExportedProductManifestDescribesTheExportedBytes(unittest.TestCase):
                     os.path.join(export_dir, "myproduct", rel_path))
                 self.assertEqual(manifest_hash, real_hash, rel_path)
             self.assertNotEqual(exported["kept.md"], "0" * 64)
+
+
+class TheCommitIsExactlyTheGatedTree(unittest.TestCase):
+    """THE ALLOWLIST AND DENYLIST ARE THE ONLY FILTERS (module docstring).
+    Measured 2026-09-02 on the public v1.0.0 tag itself: two tracked CSV
+    fixtures (products/brothermode/tools/fixtures/queue-export-*.csv,
+    force-added past the hub's root .gitignore's `*.csv` line) were copied
+    by the allowlist walk, scanned by every gate, and listed in the
+    regenerated CHECKSUMS.sha256, then silently left out of the pushed
+    commit by a plain `git add -A`, which obeyed that same COPIED
+    .gitignore once it landed at the export root. A fresh clone's own
+    verify-install.sh then printed "449 file(s) match, 0 mismatched, 2
+    missing" and FAILED: the manifest described a tree the commit did not
+    ship. Reproduced here with a miniature product and one fixture .csv,
+    borrowing the real checksums.sh and verify-install.sh, same fixture
+    shape as TheExportedProductManifestDescribesTheExportedBytes and
+    ATagRefusesAnExportTreeItsOwnProductsCannotVerify above.
+
+    DRIVEN BACKWARDS: against `git show 5e58ffe7:scripts/export_public.py`
+    (the pre-fix baseline, saved to a temp path and run against this exact
+    fixture outside this suite, since that file must stay broken forever
+    and cannot be imported into a suite that has to pass) this fixture's
+    clone lacked tracked.csv and verify-install printed "1 missing" and
+    FAILED. Against the fixed export_public.py below, the clone holds the
+    file and verify-install PASSES with "0 missing"."""
+
+    ALLOWLIST = ["scripts", ".gitignore", "products/myproduct"]
+
+    def _seed_product(self, root):
+        _make_fake_root(root, {
+            ".gitignore": "*.csv\n",
+            "products/myproduct/kept.md": "kept content, shipped\n",
+            "products/myproduct/tracked.csv": "a,b,c\n1,2,3\n",
+        })
+        scripts = os.path.join(root, "products", "myproduct", "scripts")
+        os.makedirs(scripts, exist_ok=True)
+        shutil.copy2(REAL_PRODUCT_CHECKSUMS_SH,
+                     os.path.join(scripts, "checksums.sh"))
+        shutil.copy2(REAL_PRODUCT_VERIFY_INSTALL_SH,
+                     os.path.join(scripts, "verify-install.sh"))
+        placeholder_hash = "0" * 64
+        _write_lines(
+            os.path.join(root, "products", "myproduct", "CHECKSUMS.sha256"), [
+                "%s  kept.md" % placeholder_hash,
+                "%s  tracked.csv" % placeholder_hash,
+            ])
+        _git_track_all(root)  # re-track: scripts/*.sh and CHECKSUMS.sha256
+        # were written after _make_fake_root's own tracking pass above
+
+    def test_a_csv_matched_by_the_copied_gitignore_reaches_the_pushed_commit(self):
+        with tempfile.TemporaryDirectory() as remote_dir, \
+             tempfile.TemporaryDirectory() as root, \
+             tempfile.TemporaryDirectory() as clone_dir:
+            _seed_bare_remote(remote_dir)
+            self._seed_product(root)
+
+            # regenerate_product_manifests must have listed tracked.csv,
+            # exactly as it did in production, before this test can prove
+            # anything about the commit that follows it.
+            with tempfile.TemporaryDirectory() as probe:
+                EP.build_export_tree(probe, self.ALLOWLIST, root=root)
+                manifest_path = os.path.join(
+                    probe, "products", "myproduct", "CHECKSUMS.sha256")
+                with open(manifest_path, encoding="utf-8") as fh:
+                    self.assertIn("tracked.csv", fh.read())
+
+            code, lines = EP.push_appended(self.ALLOWLIST, remote_dir,
+                                           "main", root=root)
+            self.assertEqual(code, EP.EXIT_OK, lines)
+
+            subprocess.run(["git", "clone", "-q", remote_dir, clone_dir],
+                            check=True, capture_output=True, text=True)
+            self.assertTrue(
+                os.path.isfile(os.path.join(clone_dir, "products",
+                                             "myproduct", "tracked.csv")),
+                "tracked.csv did not reach the pushed commit")
+
+            proc = subprocess.run(
+                ["bash", "scripts/verify-install.sh"],
+                cwd=os.path.join(clone_dir, "products", "myproduct"),
+                capture_output=True, text=True)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            self.assertIn("0 missing", proc.stdout)
+            self.assertIn("PASSED", proc.stdout)
+
+    def test_an_untracked_file_under_an_allowlisted_path_never_ships(self):
+        """2026-09-03, the second half of the same root cause: force-adding
+        (-f) at the three git-add sites, with no other change, would ship
+        every gitignored build artifact and runtime file physically present
+        under an allowlisted path (bundle/runtime/__pycache__/*.pyc, .sbe/
+        tasks.json and friends), because the old copy step walked the raw
+        filesystem, not the hub's own index. build_export_tree now copies
+        only what `git ls-files` reports tracked; an untracked file under an
+        allowlisted directory, or an untracked file at an allowlisted root
+        path, must reach neither the candidate tree nor the pushed commit,
+        whether or not `git add -A -f` runs on the far side."""
+        with tempfile.TemporaryDirectory() as remote_dir, \
+             tempfile.TemporaryDirectory() as root, \
+             tempfile.TemporaryDirectory() as clone_dir:
+            _seed_bare_remote(remote_dir)
+            self._seed_product(root)
+            allowlist = self.ALLOWLIST + [".sbe"]
+
+            # an untracked build artifact under the allowlisted product dir
+            pycache = os.path.join(root, "products", "myproduct",
+                                    "__pycache__")
+            os.makedirs(pycache, exist_ok=True)
+            with open(os.path.join(pycache, "x.pyc"), "wb") as fh:
+                fh.write(b"\x00fake bytecode\x00")
+            # an untracked runtime file at a newly allowlisted root path
+            sbe_dir = os.path.join(root, ".sbe")
+            os.makedirs(sbe_dir, exist_ok=True)
+            with open(os.path.join(sbe_dir, "tasks.json"), "w",
+                      encoding="utf-8") as fh:
+                fh.write("{}")
+            # neither is git-added: both stay untracked, on purpose
+
+            with tempfile.TemporaryDirectory() as probe:
+                EP.build_export_tree(probe, allowlist, root=root)
+                self.assertFalse(os.path.exists(os.path.join(
+                    probe, "products", "myproduct", "__pycache__")))
+                self.assertFalse(os.path.exists(os.path.join(probe, ".sbe")))
+
+            code, lines = EP.push_appended(allowlist, remote_dir, "main",
+                                           root=root)
+            self.assertEqual(code, EP.EXIT_OK, lines)
+
+            subprocess.run(["git", "clone", "-q", remote_dir, clone_dir],
+                            check=True, capture_output=True, text=True)
+            self.assertFalse(os.path.exists(os.path.join(
+                clone_dir, "products", "myproduct", "__pycache__")))
+            self.assertFalse(os.path.exists(os.path.join(clone_dir, ".sbe")))
+            # the tracked csv, unrelated to this test's untracked files,
+            # still ships: this is about what stays out, not a new hole
+            self.assertTrue(os.path.isfile(os.path.join(
+                clone_dir, "products", "myproduct", "tracked.csv")))
+
+    def test_a_tracked_file_the_denylist_names_still_does_not_ship(self):
+        """The denylist still withholds a file even though the hub tracks
+        it: THE ALLOWLIST AND DENYLIST ARE THE ONLY FILTERS, and this is
+        the denylist half. load_denylist() reads a fixed, real path in
+        this repository (DEFAULT_DENYLIST), never the fixture root, so it
+        is patched here rather than pointed at a temp file."""
+        with tempfile.TemporaryDirectory() as remote_dir, \
+             tempfile.TemporaryDirectory() as root, \
+             tempfile.TemporaryDirectory() as clone_dir:
+            _seed_bare_remote(remote_dir)
+            self._seed_product(root)
+            withheld = os.path.join(root, "products", "myproduct",
+                                    "withheld.md")
+            with open(withheld, "w", encoding="utf-8") as fh:
+                fh.write("hub tracks this; the denylist withholds it\n")
+            _git_track_all(root)
+
+            with mock.patch.object(
+                    EP, "load_denylist",
+                    return_value=["products/myproduct/withheld.md"]):
+                code, lines = EP.push_appended(self.ALLOWLIST, remote_dir,
+                                               "main", root=root)
+            self.assertEqual(code, EP.EXIT_OK, lines)
+
+            subprocess.run(["git", "clone", "-q", remote_dir, clone_dir],
+                            check=True, capture_output=True, text=True)
+            self.assertFalse(os.path.isfile(os.path.join(
+                clone_dir, "products", "myproduct", "withheld.md")))
+            # tracked and never denylisted: still ships alongside it
+            self.assertTrue(os.path.isfile(os.path.join(
+                clone_dir, "products", "myproduct", "tracked.csv")))
 
 
 class APushTowardThePublicRemoteFromAnEditionIsRefused(unittest.TestCase):
@@ -1049,6 +1240,8 @@ class ATagRefusesAnExportTreeItsOwnProductsCannotVerify(unittest.TestCase):
         _write_lines(
             os.path.join(root, "products", "myproduct", "CHECKSUMS.sha256"),
             ["%s  kept.md" % ("0" * 64), "%s  ci/internal.md" % ("0" * 64)])
+        _git_track_all(root)  # re-track: scripts/*.sh and CHECKSUMS.sha256
+        # were written after _make_fake_root's own tracking pass above
 
     def _remote_state(self, remote_dir):
         """(commit count on main, [tags]) of the bare remote."""
@@ -1129,8 +1322,10 @@ class ATagRefusesAnExportTreeItsOwnProductsCannotVerify(unittest.TestCase):
                     % (EP.SOURCE_REVISION_HEADER,
                        EP.SOURCE_REVISION_PLACEHOLDER),
             })
-            # root is deliberately NOT a git repository, so hub_head_rev
-            # finds nothing and the stamp cannot fire: the exact 0.9.11 shape
+            # _make_fake_root stages files (git add) so build_export_tree's
+            # git-ls-files walk can see them, but never commits: HEAD stays
+            # unborn, so hub_head_rev still finds nothing and the stamp
+            # still cannot fire, the exact 0.9.11 shape this pins.
             code, lines = EP.push_appended(
                 ["scripts", "docs"], remote_dir, "main", root=root,
                 tag="v9.9.9")

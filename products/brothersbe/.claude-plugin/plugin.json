@@ -1,6 +1,6 @@
 {
   "name": "brothersbe",
-  "description": "A senior backend and data engineering colleague. Designs systems in the order the work runs (purpose, process, architecture, data, expression, verification), produces a design dossier sized by a scored intake, and holds the result to mechanical gates where absent evidence is NO-DATA and never a pass.",
+  "description": "Make missing evidence visible on risky backend and data work, with PASS, FAIL, and NO-DATA kept distinct for human review.",
   "version": "3.7.3",
   "author": {
     "name": "Khalil Maaouni"

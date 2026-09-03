@@ -1,0 +1,178 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brothermode.dev/schema/change-passport.v1.json",
+  "title": "Change Passport v1",
+  "description": "The one object that travels from BrotherMode (execution provenance) to BrotherSBE (assurance), per docs/NORTH-STAR-CHAIN.md, section 'The change passport, in full'. Five readable fields at top level, plus the change identity and the producer's own detail records that back them up. Unknown top-level keys are ignored by the consumer, so a producer may add its own detail without breaking the contract; this schema still names the ones this producer actually writes.",
+  "type": "object",
+  "required": [
+    "schema",
+    "generatedAt",
+    "whatWasDone",
+    "whoDidIt",
+    "whatWasRun",
+    "whatWasNotEstablished",
+    "whereItCameFrom",
+    "change",
+    "details",
+    "sensitivity"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "schema": {
+      "const": "change-passport/v1",
+      "description": "The one and only version marker. Unrecognised by the consumer (it checks no version key at all), read by everything else that opens this file by hand."
+    },
+    "sensitivity": {
+      "type": "string",
+      "enum": ["redacted", "raw"],
+      "description": "Which export policy produced this document (cross-family review 2026-08-20, F1). \"redacted\" (the default) routed every store-derived free text field through tools/bm_store.py's own export_column policy, so founder-typed prose that policy withholds is DROPPED from this document rather than shown as a placeholder. \"raw\" means --include-sensitive was passed: this document carries unredacted store text and needs the same handling as the store itself."
+    },
+    "generatedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 UTC timestamp, seconds precision. The only generation timestamp in the document; nothing else in this file states when it was produced."
+    },
+    "whatWasDone": {
+      "$ref": "#/$defs/nonEmptyStringList",
+      "description": "Field 1. Plain-language lines a reviewer needs to find the work: the change identity, the commit range, the files touched. Derived from `change` at generation time."
+    },
+    "whoDidIt": {
+      "$ref": "#/$defs/nonEmptyStringList",
+      "description": "Field 2. Which sessions wrote, which claims they held, and the human accountable for the result, by name. Derived from `details.who`. Carried ONLY through this deposit; the consumer has no other source for it."
+    },
+    "whatWasRun": {
+      "$ref": "#/$defs/nonEmptyStringList",
+      "description": "Field 3. Every verification executed after the last edit, its result, and whether a build system or a laptop produced it. Derived from `details.evidence`."
+    },
+    "whatWasNotEstablished": {
+      "$ref": "#/$defs/nonEmptyStringList",
+      "description": "Field 4. MANDATORY, never empty: the executing side's own honest list of what it did not check. Derived from `details.notEstablished`, including its none-claim escape."
+    },
+    "whereItCameFrom": {
+      "$ref": "#/$defs/nonEmptyStringList",
+      "description": "Field 5. The development method used, named and not judged. Derived from `details.method`. Carried ONLY through this deposit."
+    },
+    "change": {
+      "type": "object",
+      "required": ["repo", "baseCommit", "headCommit", "filesTouched", "projectId"],
+      "additionalProperties": false,
+      "properties": {
+        "repo": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The repository identity: its origin remote URL, or the directory name when no remote is configured."
+        },
+        "projectId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The BrotherMode store project id this change was generated for (cross-family review 2026-08-20, F9), always carried whether or not the project was actually found in the store."
+        },
+        "baseCommit": {
+          "$ref": "#/$defs/commitish",
+          "description": "The start of the change range."
+        },
+        "headCommit": {
+          "$ref": "#/$defs/commitish",
+          "description": "The end of the change range."
+        },
+        "filesTouched": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true,
+          "description": "Every file path changed between baseCommit and headCommit, sorted. May be empty when the range touches nothing."
+        }
+      }
+    },
+    "details": {
+      "type": "object",
+      "required": ["who", "evidence", "method", "notEstablished"],
+      "additionalProperties": false,
+      "properties": {
+        "who": {
+          "type": "object",
+          "required": ["sessions", "accountableHuman"],
+          "additionalProperties": false,
+          "properties": {
+            "sessions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["label", "claims"],
+                "additionalProperties": false,
+                "properties": {
+                  "label": { "type": "string", "minLength": 1 },
+                  "claims": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  }
+                }
+              }
+            },
+            "accountableHuman": {
+              "type": "string",
+              "minLength": 1,
+              "description": "A name, never a role. Accountability is a person, per the chain's own rule."
+            }
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["command", "verdict", "origin", "timestamp"],
+            "additionalProperties": false,
+            "properties": {
+              "command": { "type": "string" },
+              "verdict": { "type": "string" },
+              "origin": {
+                "type": "string",
+                "enum": ["local", "ci"],
+                "description": "Whether a build system or somebody's laptop produced this evidence. Provenance of evidence is part of the evidence."
+              },
+              "timestamp": { "type": "string", "minLength": 1 },
+              "ciRunId": {
+                "type": "string",
+                "description": "Optional. Present only when a build system claims the run; its absence is itself meaningful and is never invented."
+              }
+            }
+          }
+        },
+        "method": {
+          "type": "object",
+          "required": ["name"],
+          "additionalProperties": false,
+          "properties": {
+            "name": { "type": "string", "minLength": 1 }
+          }
+        },
+        "notEstablished": {
+          "type": "object",
+          "required": ["items", "noneClaimJustification"],
+          "additionalProperties": false,
+          "properties": {
+            "items": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 }
+            },
+            "noneClaimJustification": {
+              "type": ["string", "null"],
+              "description": "Null unless `items` is empty. A literal claim that nothing was left unestablished needs its own justification; the pairing is enforced by the validator, not by this schema alone, because JSON Schema cannot cheaply express 'empty implies non-null sibling' without an if/then that most readers of this file would find harder to follow than the validator's own plain code."
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "nonEmptyStringList": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "commitish": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{7,40}$",
+      "description": "A hex commit id, short or full."
+    }
+  }
+}

@@ -35,21 +35,23 @@ Code's own plugin manager, proven end to end by
 terminal.
 
 ```bash
-claude plugin marketplace add khalilmaaouni/BrotherModeUp@v3.4.2
-claude plugin install brothermode@brothermode-marketplace
+claude plugin marketplace add khalilmaaouni/Brother
+claude plugin install brothermode@brother
 ```
+
+REPOINTED 2026-09-03: this used to name the standalone `BrotherModeUp`
+repository, pinned to its own last tag. That repository is now private and
+archived; BrotherMode ships from the Brother hub, and these two lines are
+byte identical to [`README.md`](../README.md)'s own `## Install` section on
+purpose, so the command never has two independently-typed copies that can
+drift apart (`tools/test_bm_docs.py` checks the two pages agree). The hub
+carries several products, so its marketplace name is `brother`, not this
+product's own name.
 
 Already running v2? Uninstall it first (`claude plugin uninstall
 brotherme`). The plugin identity changed at v3.0.0, so the old and new ids
 are different plugins to Claude Code and installing both leaves two hook
 chains wired at once.
-
-`@v3.3.1` pins the marketplace add itself to the released tag rather than
-the repository's moving default branch, generated from the same fact the
-pinned clone below reads (`python3 tools/bm_project_facts.py --field
-install_target_tag`); `docs/RELEASE.md` step 2b makes re-pinning it an
-explicit release step, and `tools/test_bm_docs.py` fails this page if the
-pin ever disagrees.
 
 Three different things share the word "install" here. Adding this
 repository as a marketplace for the first time is what the command above
@@ -70,25 +72,34 @@ desktop app cannot install plugins at all. `scripts/release-smoke-install.sh`
 proves the terminal path above end to end; it does not exercise the
 desktop browser, which this project has not separately verified.
 
-THE PINNED CLONE, for auditors and immutable-snapshot installs:
+THE PINNED CLONE, for auditors and immutable-snapshot installs. The
+repository this clones is the Brother hub, which ships several products, so
+the clone lands in a source checkout, not the skill directory itself, and
+this product's own installer (Step 2 below) copies it the rest of the way:
 
 ```bash
-git clone --branch v3.4.2 --depth 1 https://github.com/khalilmaaouni/BrotherModeUp.git ~/.claude/skills/brothermode
+git clone --branch v1.0.0 --depth 1 https://github.com/khalilmaaouni/Brother.git ~/.claude/skills/brothermode-src
+cd ~/.claude/skills/brothermode-src/products/brothermode
 ```
 
-The path matters: Claude Code discovers skills under `~/.claude/skills/`, and the session-start script resolves its own location, so the clone is the installation. Verify:
+The path matters: Claude Code discovers skills under `~/.claude/skills/`,
+and the session-start script resolves its own location, so the copy Step 2
+makes is the installation. Verify the clone landed (you are already in
+`products/brothermode` after the `cd` above):
 
 ```bash
-ls ~/.claude/skills/brothermode/SKILL.md
+ls SKILL.md
 ```
 
 Same dated fact as the boring install above: `v3.0.0` predates the night
-rename, so this checkout carries the old flat `commands/brotherme-*.md`
-surface and the single `skills/brotherme/SKILL.md` conductor, not the nine
-`/brothermode:*` skills this project ships today. The engine underneath
-(`tools/bm_*.py`, `scripts/install.py`, `scripts/doctor.py`) is the same
-either way; only the command and skill names differ. If you want today's
-tree, use the development clone below instead.
+rename, so an old checkout at that tag carries the old flat
+`commands/brotherme-*.md` surface and the single `skills/brotherme/SKILL.md`
+conductor, not the nine `/brothermode:*` skills this project ships today;
+the tag pinned above is newer than that and does not have this problem. The
+engine underneath (`tools/bm_*.py`, `scripts/install.py`,
+`scripts/doctor.py`) is the same either way; only the command and skill
+names differ. If you want today's tree, use the development clone below
+instead.
 
 Working on BrotherMode's own code instead of just using it? Use the separate
 development command, which tracks the moving `main` branch on purpose and
@@ -96,8 +107,12 @@ installs into its own directory so the two can never be confused:
 
 ```bash
 # Development branch (changes over time)
-git clone --branch main https://github.com/khalilmaaouni/BrotherModeUp.git ~/.claude/skills/brothermode-dev
+git clone --branch main https://github.com/khalilmaaouni/Brother.git ~/.claude/skills/brothermode-dev-src
+cd ~/.claude/skills/brothermode-dev-src/products/brothermode
 ```
+
+Its own Step 2 passes `--target ~/.claude/skills/brothermode-dev` to
+`scripts/install.py`, so the two checkouts can never land in the same place.
 
 Then register the trigger in your global `~/.claude/CLAUDE.md` so every session knows the skill exists:
 
@@ -110,14 +125,20 @@ When the user types /brothermode (any casing), read and follow
 ## Step 2: wire the six hooks
 
 Hooks make the learning loop mechanical: the model cannot forget to write
-telemetry, because the model is not the one writing it. Run the installer:
+telemetry, because the model is not the one writing it. The plugin route
+above already did this step; skip to Step 3 if that is what you used. The
+pinned clone still needs it, run from inside the `products/brothermode`
+checkout Step 1 left you in (`cd ~/.claude/skills/brothermode-src/products/brothermode`
+first if you left it), and this is also the step that copies the tree into
+`~/.claude/skills/brothermode`:
 
 ```bash
-python3 ~/.claude/skills/brothermode/scripts/install.py --dry-run
-python3 ~/.claude/skills/brothermode/scripts/install.py
+python3 scripts/install.py --dry-run
+python3 scripts/install.py
 ```
 
-`--dry-run` writes nothing and prints every change it would make. Run it first.
+`--dry-run` writes nothing and prints every change it would make (including
+what would be copied). Run it first.
 
 Six hooks, not the five earlier versions of this page listed, and not the four
 the version before that listed. The fifth is `PreToolUse`, the fence hook

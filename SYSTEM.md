@@ -16,7 +16,7 @@ to run the battery.
 | Parts | 108 |
 | Parts with a purpose written in the file | 108 |
 | Parts with a suite wired into the battery | 88 |
-| Checks in the battery | 131 |
+| Checks in the battery | 132 |
 
 ## Every part, what it is for, and what proves it
 
@@ -134,6 +134,7 @@ to run the battery.
 ## What the battery actually runs
 
 - `surface`: `/usr/bin/python3 -m unittest -v tests/test_surface.py`
+- `contracts-root`: `python3 scripts/test_contracts_root.py -v`
 - `context-budget`: `/usr/bin/python3 -m unittest -v tests/test_context_budget.py`
 - `truth-claims`: `/usr/bin/python3 -m unittest -v tests/test_truth_claims.py`
 - `foreign-method`: `/usr/bin/python3 -m unittest -v tests/test_foreign_method_compat.py`

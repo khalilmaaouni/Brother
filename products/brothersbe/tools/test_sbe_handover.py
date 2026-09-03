@@ -445,7 +445,7 @@ class TestIdentity(HandoverScenario):
         self.commit_all("dossier")
         forged_pairs = [
             ("alice@example.com", "alice@example.com"),
-            ("alice.author@gmail.com", "aliceauthor@gmail.com"),
+            ("first.last@gmail.com", "firstlast@gmail.com"),
             ("Dana Author", "D. Author"),
         ]
         for outgoing, receiver in forged_pairs:

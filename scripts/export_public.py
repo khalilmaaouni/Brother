@@ -34,6 +34,19 @@ WHAT IT DOES, in order:
      historical commits in scope and cleanse.sh refused on a term already
      public before this file existed.
 
+     THE ALLOWLIST AND DENYLIST ARE THE ONLY FILTERS. Every `git add` this
+     module runs passes -f (force): a file the allowlist walk copied into
+     the candidate tree must never be silently dropped by a COPIED
+     .gitignore obeying rules written for the hub, not for what this export
+     decided to carry. Measured 2026-09-02: two tracked CSV fixtures, force-
+     added past the hub's own root .gitignore's `*.csv` line, were copied by
+     the allowlist walk, scanned by every gate, and listed in the
+     regenerated CHECKSUMS.sha256, then silently left out of the commit by
+     a plain `git add -A`, which obeyed that same copied .gitignore. The
+     manifest is generated over exactly the files build_export_tree copied
+     (regenerate_product_manifests); the commit must be that same tree,
+     never a narrower one a stale ignore rule quietly re-filtered.
+
   3. Runs scripts/cleanse.sh, scripts/identity_guard.py and
      scripts/private_terms_scan.py against the CANDIDATE EXPORT TREE, never
      against the hub. All three read ONE private-term list, handed to each
@@ -237,29 +250,56 @@ def stamp_source_revision(notes_path, version, source_rev):
     return True
 
 
+def _tracked_files_under(root, rel):
+    """Every path `git ls-files` reports at or under `rel` (root-relative,
+    no leading slash), root-relative, in the order git prints them. [] when
+    `rel` names nothing the index tracks (untracked file, untracked or
+    nonexistent directory) or `root` is not a git repository at all: the
+    hub TRACKS the files this exporter ships, so an untracked path is never
+    invented into the export tree, the same "skipped, never invented" rule
+    this function replaces at the filesystem-walk layer. Measured 2026-09-
+    03: a raw filesystem walk (the previous shutil.copytree/copy2 approach)
+    copied every gitignored build artifact and runtime file physically
+    present under an allowlisted directory (__pycache__/*.pyc, .sbe/
+    tasks.json and friends) and depended on `git add` in the CANDIDATE tree
+    to silently re-filter them by a COPIED .gitignore; once that add was
+    forced (-f, so a hub file force-tracked past its own ignore rule would
+    still ship), the dependency broke and all of it leaked through. `git
+    ls-files` is the hub's own authority on what it tracks, ignore rules
+    included or overridden exactly as the hub itself resolved them at
+    `git add` time (the two CSV fixtures are tracked despite `*.csv`
+    because someone force-added them in the hub; ls-files reports them
+    same as any other tracked path)."""
+    proc = subprocess.run(["git", "-C", root, "ls-files", "-z", "--", rel],
+                          capture_output=True, text=True)
+    if proc.returncode != 0 or not proc.stdout:
+        return []
+    return [p for p in proc.stdout.split("\0") if p]
+
+
 def build_export_tree(dest, allowlist, root=ROOT):
-    """Copy every allowlisted path from `root` into `dest`. A listed path
-    that does not exist in `root` is skipped, never invented. Last step:
-    regenerate_product_manifests(dest), so any product's own
-    CHECKSUMS.sha256 that landed in `dest` describes the files that
-    actually landed there, not the full hub tree it was generated over.
-    Returns the list of paths actually copied."""
+    """Copy every HUB-TRACKED file under an allowlisted path from `root`
+    into `dest` (see _tracked_files_under: `git ls-files` is the authority,
+    never a raw filesystem walk). A listed path that names nothing tracked
+    is skipped, never invented. Last step: regenerate_product_manifests
+    (dest), so any product's own CHECKSUMS.sha256 that landed in `dest`
+    describes the files that actually landed there, not the full hub tree
+    it was generated over. Returns the list of allowlist entries that
+    contributed at least one file."""
     copied = []
     for rel in allowlist:
         rel = rel.strip("/")
         if not rel or rel in HARD_EXCLUDE or rel.startswith("editions/"):
             continue  # the hard boundary, regardless of what the list says
-        src = os.path.join(root, rel)
-        if not os.path.exists(src):
+        tracked = _tracked_files_under(root, rel)
+        if not tracked:
             continue
-        dst = os.path.join(dest, rel)
-        parent = os.path.dirname(dst)
-        if parent:
-            os.makedirs(parent, exist_ok=True)
-        if os.path.isdir(src):
-            shutil.copytree(src, dst, dirs_exist_ok=True)
-        else:
-            shutil.copy2(src, dst)
+        for tracked_rel in tracked:
+            dst = os.path.join(dest, tracked_rel)
+            parent = os.path.dirname(dst)
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            shutil.copy2(os.path.join(root, tracked_rel), dst)
         copied.append(rel)
     for deny_rel in load_denylist():
         deny_path = os.path.join(dest, deny_rel)
@@ -349,7 +389,12 @@ def build_orphan_commit(export_dir, allowlist, root=ROOT):
     _run(["git", "config", "user.name", AUTHOR_NAME], export_dir)
     _run(["git", "config", "user.email", AUTHOR_EMAIL], export_dir)
     copied = build_export_tree(export_dir, allowlist, root)
-    _run(["git", "add", "-A"], export_dir)
+    # -f: the allowlist and denylist (build_export_tree above) are the only
+    # filters this exporter honors. A copied .gitignore (itself just another
+    # allowlisted file) must never silently drop a file the allowlist walk
+    # already decided to carry, the way it dropped two tracked CSV fixtures
+    # force-added past the hub's own root .gitignore's `*.csv` line.
+    _run(["git", "add", "-A", "-f"], export_dir)
     status = _run(["git", "status", "--porcelain"], export_dir)
     committed = bool((status.stdout or "").strip())
     if committed:
@@ -432,7 +477,9 @@ def build_identity_check_dir(identity_dir, allowlist, remote, branch, root=ROOT)
             _run(["git", "symbolic-ref", "refs/remotes/origin/HEAD",
                   "refs/remotes/origin/%s" % branch], identity_dir)
     build_export_tree(identity_dir, allowlist, root)
-    _run(["git", "add", "-A"], identity_dir)
+    # -f: same reasoning as build_orphan_commit above; the allowlist and
+    # denylist are the only filters, never a copied .gitignore.
+    _run(["git", "add", "-A", "-f"], identity_dir)
     status = _run(["git", "status", "--porcelain"], identity_dir)
     if (status.stdout or "").strip():
         author = "%s <%s>" % (AUTHOR_NAME, AUTHOR_EMAIL)
@@ -571,15 +618,28 @@ def push_appended(allowlist, remote, branch, root=ROOT, tag=None,
 
         clear_working_tree(d)
         build_export_tree(d, allowlist, root)
+        # -f: the allowlist and denylist are the only filters (see the
+        # module docstring, THE ALLOWLIST AND DENYLIST ARE THE ONLY
+        # FILTERS); staged BEFORE tag_time_checks below so that check reads
+        # the exact bytes this add just staged, never the working copy.
+        _run(["git", "add", "-A", "-f"], d)
         if tag:
-            checks_ok, check_lines = tag_time_checks(d, version)
+            with tempfile.TemporaryDirectory(
+                    prefix="brother-export-staged-") as staged:
+                # tag_time_checks must prove the COMMITTED bytes clear each
+                # product's own verifier, not merely whatever sits on disk
+                # in `d`: checkout-index reads the just-staged INDEX, so the
+                # manifest this check proves against is the manifest that
+                # will actually ship, not a working-tree proxy for it.
+                _run(["git", "checkout-index", "-a", "-f",
+                      "--prefix=%s/" % staged], d)
+                checks_ok, check_lines = tag_time_checks(staged, version)
             lines.extend(check_lines)
             if not checks_ok:
                 lines.append("REFUSED: the export tree did not clear the "
                               "tag-time checks above; nothing was pushed "
                               "and nothing was tagged")
                 return EXIT_REFUSED, lines
-        _run(["git", "add", "-A"], d)
         status = _run(["git", "status", "--porcelain"], d)
         if not (status.stdout or "").strip():
             lines.append("nothing to push: the export tree already "

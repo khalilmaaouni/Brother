@@ -1,7 +1,7 @@
 {
   "name": "brothermode",
   "version": "3.4.4",
-  "description": "Turn an idea into a verified result with a guided start, honest forecasts, clear status, and a checked delivery. Verified on Claude Code; the plugin install is proven end to end by scripts/release-smoke-install.sh, and the tagged git clone remains the immutable option for auditors.",
+  "description": "Keep long-running AI work recoverable, give each file one supported writer, and deliver a record of decisions, cost, and checks.",
   "author": {
     "name": "Khalil Maaouni"
   },

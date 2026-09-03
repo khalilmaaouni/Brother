@@ -15,9 +15,14 @@ runs or force every assertion to tolerate whatever state a prior run left):
      through a stub decomposer and a stub model, invoked from a cwd that is
      not a Brother checkout at all, exactly like test_brother_run.py's own
      TwoUnitsIntegrate but through the installed entry point.
+  5. The source stamp (harness-identity-v1): the manifest names the hub
+     revision it was generated from, says NO-DATA rather than guessing when
+     it was generated outside a checkout, and --check TOLERATES a stamp that
+     differs from a fresh generation while still refusing a hash that does.
 """
 import importlib.machinery
 import importlib.util
+import json
 import os
 import shutil
 import subprocess
@@ -115,6 +120,11 @@ def _read(path):
         return fh.read()
 
 
+def _manifest(path):
+    with open(path, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
 class ManifestMatchesTheClosure(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="bundle-runtime-manifest-")
@@ -177,6 +187,111 @@ class DriftDetectedOnSourceEditWithoutRegen(unittest.TestCase):
         self.assertFalse(ok2, "an edited source with no regeneration must "
                              "check red")
         self.assertTrue(any("claim_store.py" in p for p in problems2), problems2)
+
+
+class TheManifestStampsItsSourceRevision(unittest.TestCase):
+    """harness-identity-v1 (the zero-context critic on a fresh clone of
+    v1.0.0, 2026-09-03): an installed copy has no .git, so `git rev-parse`
+    cannot name the engine that wrote a receipt and the manifest's stamp is
+    the only honest source left. It has to be REAL when a checkout was
+    there, and NO-DATA when one was not."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="bundle-runtime-stamp-")
+
+    def test_generated_from_this_checkout_the_stamp_is_this_revision(self):
+        if not os.path.exists(os.path.join(os.path.dirname(HERE), ".git")):
+            self.skipTest("NO-DATA: not a git checkout, so there is no "
+                          "revision for the generator to stamp")
+        runtime_dir = os.path.join(self.tmp, "from-checkout", "runtime")
+        # scripts_dir is THIS repository's real scripts/, so git can answer;
+        # runtime_dir is a temp directory, so nothing here writes into the
+        # repository's own bundle/runtime.
+        BR.generate(scripts_dir=HERE, runtime_dir=runtime_dir)
+        manifest = _manifest(os.path.join(runtime_dir, BR.MANIFEST_NAME))
+        head = sh(["git", "rev-parse", "HEAD"], cwd=HERE).stdout.strip()
+        self.assertEqual(manifest["source_revision"], head)
+        self.assertNotIn(BR.NODATA, manifest["source_describe"],
+                         manifest["source_describe"])
+
+    def test_generated_outside_a_checkout_the_stamp_is_no_data(self):
+        scripts_dir = os.path.join(self.tmp, "scripts")
+        runtime_dir = os.path.join(self.tmp, "bundle", "runtime")
+        copy_scripts_subset(scripts_dir)
+        BR.generate(scripts_dir=scripts_dir, runtime_dir=runtime_dir)
+        manifest = _manifest(os.path.join(runtime_dir, BR.MANIFEST_NAME))
+        for field in BR.STAMP_FIELDS:
+            self.assertTrue(manifest[field].startswith(BR.NODATA),
+                            "%s: %s" % (field, manifest[field]))
+
+
+class TheCheckIgnoresTheStampAndNothingElse(unittest.TestCase):
+    """The stamp says where the bytes came from; the hashes say what they
+    are. A tip that moved with no source edit must not turn --check red, and
+    a hash that moved must."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="bundle-runtime-tolerance-")
+        self.scripts_dir = os.path.join(self.tmp, "scripts")
+        self.runtime_dir = os.path.join(self.tmp, "bundle", "runtime")
+        copy_scripts_subset(self.scripts_dir)
+        BR.generate(scripts_dir=self.scripts_dir, runtime_dir=self.runtime_dir)
+        self.manifest_path = os.path.join(self.runtime_dir, BR.MANIFEST_NAME)
+
+    def _rewrite(self, mutate):
+        doc = _manifest(self.manifest_path)
+        mutate(doc)
+        with open(self.manifest_path, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(doc, indent=1, sort_keys=True) + "\n")
+
+    def test_a_stamp_from_another_revision_still_checks_green(self):
+        self._rewrite(lambda d: d.update(
+            {"source_revision": "a" * 40, "source_describe": "v9.9.9"}))
+        ok, problems, _ = BR.check(scripts_dir=self.scripts_dir,
+                                   runtime_dir=self.runtime_dir)
+        self.assertTrue(ok, "only the stamp differs from a fresh generation, "
+                            "which is a moved tip, not drift: %s" % problems)
+
+    def test_that_same_stamp_survives_a_regeneration_untouched(self):
+        self._rewrite(lambda d: d.update(
+            {"source_revision": "a" * 40, "source_describe": "v9.9.9"}))
+        _closure, changed = BR.generate(scripts_dir=self.scripts_dir,
+                                        runtime_dir=self.runtime_dir)
+        self.assertEqual(changed, [], "unchanged sources must rewrite "
+                                      "nothing, stamp included: %s" % changed)
+        self.assertEqual(_manifest(self.manifest_path)["source_revision"],
+                         "a" * 40)
+
+    def test_a_provisional_dirty_stamp_is_refreshed_instead(self):
+        """The one stamp generate() does NOT carry forward: taken over
+        uncommitted edits, it names the wrong commit and says so, so the
+        next generation replaces it. Here the temp sources are not a
+        checkout at all, so the refreshed value is an honest NO-DATA."""
+        self._rewrite(lambda d: d.update(
+            {"source_revision": "a" * 40, "source_describe": "v9.9.9-dirty"}))
+        _closure, changed = BR.generate(scripts_dir=self.scripts_dir,
+                                        runtime_dir=self.runtime_dir)
+        self.assertEqual(changed, [BR.MANIFEST_NAME], changed)
+        self.assertTrue(_manifest(self.manifest_path)["source_describe"]
+                        .startswith(BR.NODATA),
+                        _manifest(self.manifest_path)["source_describe"])
+
+    def test_a_wrong_hash_is_still_refused(self):
+        self._rewrite(lambda d: d["files"].__setitem__(
+            0, {"path": d["files"][0]["path"], "sha256": "b" * 64}))
+        ok, problems, _ = BR.check(scripts_dir=self.scripts_dir,
+                                   runtime_dir=self.runtime_dir)
+        self.assertFalse(ok, "a hash that does not match a fresh generation "
+                             "is drift")
+        self.assertTrue(any("stale" in p for p in problems), problems)
+
+    def test_a_manifest_with_no_stamp_at_all_is_refused(self):
+        self._rewrite(lambda d: [d.pop(f) for f in BR.STAMP_FIELDS])
+        ok, problems, _ = BR.check(scripts_dir=self.scripts_dir,
+                                   runtime_dir=self.runtime_dir)
+        self.assertFalse(ok, "a manifest with no stamp cannot name the "
+                             "engine an installed copy runs")
+        self.assertTrue(any("source_revision" in p for p in problems), problems)
 
 
 class RealRepositoryCliIsClean(unittest.TestCase):

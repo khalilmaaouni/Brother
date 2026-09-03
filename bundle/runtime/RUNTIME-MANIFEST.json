@@ -7,7 +7,7 @@
   },
   {
    "path": "brother_run.py",
-   "sha256": "b82ca1d7e96457ce4b090ba9e49cc50edfffb6fe2af2d92dc12042482e05cb8d"
+   "sha256": "f4d9af3a1dd5d1a41782a75c3ca8ae726eda456e4dcfcae1deb825dbe11c0643"
   },
   {
    "path": "claim_store.py",
@@ -58,5 +58,7 @@
    "sha256": "7468c0a3eee3c6d3e72e15926b529eef837140c7b7d0d16760054b7430269764"
   }
  ],
- "generated_by": "scripts/bundle_runtime.py"
+ "generated_by": "scripts/bundle_runtime.py",
+ "source_describe": "v0.9.6-2803-g93f99d81",
+ "source_revision": "93f99d816cd8a9d2b9586420015e1430acb2ee20"
 }

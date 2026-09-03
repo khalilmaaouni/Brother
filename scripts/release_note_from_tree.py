@@ -66,6 +66,7 @@ Python 3, standard library only. No network. Run from anywhere; ROOT is derived 
 this file's own location, the same pattern scripts/system_doc.py uses.
 """
 import argparse
+import json
 import os
 import re
 import subprocess
@@ -74,8 +75,12 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HERE = os.path.dirname(os.path.abspath(__file__))
 NODATA = "NO-DATA"
-NOTES_PATH = os.path.join(ROOT, "docs", "releases", "1.0.0.md")
 RELEASES_DIR = os.path.join(ROOT, "docs", "releases")
+MARKETPLACE_JSON = os.path.join(ROOT, ".claude-plugin", "marketplace.json")
+#: The note's own launch version, and the fallback default when
+#: marketplace.json cannot be read: this file's original single-version
+#: behaviour, kept exactly as it was before --version existed.
+FALLBACK_VERSION = "1.0.0"
 SHIMS_DIR = os.path.join(ROOT, "products", "brothermode", "commands")
 CUT_SCRIPT = os.path.join(ROOT, "scripts", "cut_v1.0.0.sh")
 
@@ -250,14 +255,34 @@ def head_describe():
 def manifest_version():
     """The version this tree's own manifest currently declares, read with
     the stdlib json module, never copied from a note. None on any read
-    failure; the caller treats that as NO-DATA, not as "1.0.0"."""
-    import json
+    failure; the caller treats that as NO-DATA, not as a guessed default."""
     path = os.path.join(ROOT, "bundle", ".claude-plugin", "plugin.json")
     try:
         with open(path, encoding="utf-8") as fh:
             return json.load(fh).get("version")
     except (OSError, ValueError, AttributeError):
         return None
+
+
+def default_version():
+    """The version a note describes when --version is not given: read from
+    .claude-plugin/marketplace.json's own metadata.version, never typed.
+    Falls back to FALLBACK_VERSION only when that file is unreadable or
+    does not declare one, so a stale or unusual checkout still gets a sane
+    default instead of a crash; --version always overrides this."""
+    try:
+        with open(MARKETPLACE_JSON, encoding="utf-8") as fh:
+            data = json.load(fh)
+        v = (data.get("metadata") or {}).get("version")
+        return v or FALLBACK_VERSION
+    except (OSError, ValueError, AttributeError):
+        return FALLBACK_VERSION
+
+
+def notes_path_for(version):
+    """docs/releases/<version>.md, never a fixed filename: the file
+    --write actually writes and --version actually names."""
+    return os.path.join(RELEASES_DIR, "%s.md" % version)
 
 
 def cut_script_tag_and_remote(path=None):
@@ -279,18 +304,30 @@ def cut_script_tag_and_remote(path=None):
     return tag_m.group(1).strip("\"'"), remote_m.group(1).strip("\"'")
 
 
-def published_as_line(path=None):
+def published_as_line(path=None, version=None):
     """The one extra "Published as tag ..." sentence FINDING 1 (zero context
     auditor, 2026-09-02) asked for: the hub commit stamped above is private
     (the hub is not public), so a stranger reading the note on the public
     repository needs the public TAG NAME as the resolvable handle, not the
-    hash. Reads the tag and remote from scripts/cut_v1.0.0.sh itself (see
-    cut_script_tag_and_remote); None when that script does not declare them,
-    so build() can refuse rather than print an invented tag."""
+    hash. Reads the remote (and, when `version` is not given, the tag too)
+    from scripts/cut_v1.0.0.sh itself (see cut_script_tag_and_remote); None
+    when that script does not declare them, so build() can refuse rather
+    than print an invented tag.
+
+    `version`, when given, OVERRIDES the tag with `v<version>` rather than
+    trusting the file's own TAG= line: that line is now `TAG=v$VERSION`
+    (scripts/cut_v1.0.0.sh takes the version as its own first argument), so
+    its raw source text is no longer a resolved tag for any run other than
+    the one the shell actually performs. Every caller inside this file that
+    already knows the target version (build()) passes it; a caller that
+    does not (existing tests against a literal fixture script) keeps the
+    old file-read behaviour unchanged."""
     tag_remote = cut_script_tag_and_remote(path)
     if tag_remote is None:
         return None
     tag, remote = tag_remote
+    if version is not None:
+        tag = "v%s" % version
     host = remote.split("://", 1)[-1].rstrip("/")
     return ("Published as tag %s on %s; that tag is the public hash of "
             "this cut, the hub commit above is for the private record."
@@ -369,18 +406,32 @@ def previous_release_line(target_version="1.0.0", releases_dir=None):
                 "from the record." % (rel, EXP.SOURCE_REVISION_PLACEHOLDER))
     m = re.search(r"Cut from hub commit `([0-9a-f]+)`", text)
     if not m:
-        return ("`%s` carries a Source revision section in a shape this "
-                "script does not recognize, so no revision is printed "
-                "here." % rel)
+        # A zero context critic read this branch's old sentence in the
+        # shipped 1.0.0 note ("carries a Source revision section in a
+        # shape this script does not recognize, so no revision is printed
+        # here") and correctly called it a cut script talking to itself: a
+        # release note is for a reader of THIS release, not a diagnostic
+        # about this generator's own parser. The diagnostic goes to
+        # stderr; the note gets nothing where the sentence used to stand.
+        print("previous_release_line: %s carries a Source revision "
+              "section this generator does not recognize; omitting the "
+              "previous-release sentence rather than describing the "
+              "generator's own limitation inside the note" % rel,
+              file=sys.stderr)
+        return ""
     return "Previous release `%s` was cut from hub commit `%s`." % (rel, m.group(1))
 
 
-def build():
-    """Runs every cited suite and confirms every cited test name. Returns
+def build(version=None):
+    """Runs every cited suite and confirms every cited test name, for the
+    release note named `version` (default: default_version(), the tree's
+    own marketplace.json metadata.version, else FALLBACK_VERSION). Returns
     (body, lines) on success, or (None, lines) with the NO-DATA reason(s) in
     `lines` when anything cited could not be verified. `body` is the full
     note text; nothing in it is printed until every claim it makes has been
     measured."""
+    if version is None:
+        version = default_version()
     sys.path.insert(0, os.path.join(ROOT, "scripts"))
     import receipt_door as RD  # noqa: E402
 
@@ -408,15 +459,15 @@ def build():
     if rev is None:
         problems.append("%s: git rev-parse HEAD failed" % NODATA)
     describe = head_describe()
-    version = manifest_version()
-    if version is None:
+    manifest_ver = manifest_version()
+    if manifest_ver is None:
         problems.append("%s: bundle/.claude-plugin/plugin.json version unreadable" % NODATA)
 
     shims = shims_count()
     if shims is None:
         problems.append("%s: %s unreadable" % (NODATA, SHIMS_DIR))
 
-    published = published_as_line()
+    published = published_as_line(version=version)
     if published is None:
         problems.append("%s: %s does not declare TAG= and PUBLIC_REMOTE= "
                          "in a greppable shape" % (NODATA, CUT_SCRIPT))
@@ -433,24 +484,27 @@ def build():
 
     L = []
     A = L.append
-    A("# Brother 1.0.0")
+    A("# Brother %s" % version)
     A("")
     A("## Source revision")
     A("")
     A("Cut from hub commit `%s`" % rev
       + (" (`git describe --tags --always`: `%s`)." % describe if describe else "."))
-    if version == "1.0.0":
-        A("The manifests at this commit read `1.0.0`: this is the cut, "
-          "regenerated by `scripts/cut_v1.0.0.sh` from the tree itself.")
+    if manifest_ver == version:
+        A("The manifests at this commit read `%s`: this is the cut, "
+          "regenerated by `scripts/cut_v1.0.0.sh` from the tree itself."
+          % version)
     else:
         A("The manifests at this commit read `%s`; this note is regenerated by "
-          "`scripts/cut_v1.0.0.sh` once the founder bumps them to 1.0.0, and "
-          "will read `1.0.0` here when it does." % version)
+          "`scripts/cut_v1.0.0.sh` once the founder bumps them to %s, and "
+          "will read `%s` here when it does." % (manifest_ver, version, version))
     A("")
     A(published)
     A("")
-    A(previous_release_line())
-    A("")
+    prev_line = previous_release_line(version)
+    if prev_line:  # "" when the previous note's shape is unrecognized: the
+        A(prev_line)  # note gets nothing there, never a diagnostic about
+        A("")         # this generator's own parser (the reason is on stderr)
     A("## What this release carries")
     A("")
     A("Every delivery report ends with one receipt sentence per unit, the "
@@ -506,10 +560,15 @@ def build():
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--write", action="store_true",
-                     help="overwrite docs/releases/1.0.0.md instead of printing")
+                     help="overwrite docs/releases/<version>.md instead of printing")
+    ap.add_argument("--version", default=None,
+                     help="the release this note describes (default: "
+                          ".claude-plugin/marketplace.json's own "
+                          "metadata.version)")
     args = ap.parse_args(list(sys.argv[1:] if argv is None else argv))
+    version = args.version or default_version()
 
-    body, problems = build()
+    body, problems = build(version)
     if body is None:
         print("%s: could not generate the release note; not printing a note "
               "with an unmeasured claim in it." % NODATA, file=sys.stderr)
@@ -518,9 +577,10 @@ def main(argv=None):
         return 2
 
     if args.write:
-        with open(NOTES_PATH, "w", encoding="utf-8") as fh:
+        notes_path = notes_path_for(version)
+        with open(notes_path, "w", encoding="utf-8") as fh:
             fh.write(body)
-        print("wrote %s" % NOTES_PATH)
+        print("wrote %s" % notes_path)
         return 0
 
     print(body, end="")

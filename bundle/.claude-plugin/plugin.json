@@ -1,12 +1,23 @@
 {
   "name": "brother",
-  "version": "1.0.0",
-  "description": "Installs both Brother products in one step: execution provenance (brothermode) and change assurance with hard gates (brothersbe).",
+  "version": "1.0.1",
+  "description": "Turn a plain-language outcome into checked work, a rerunnable receipt, useful local memory, and a human acceptance decision.",
   "author": {
     "name": "Khalil Maaouni"
   },
   "dependencies": [
     "brothermode@^3.4.2",
     "brothersbe@^3.7.0"
+  ],
+  "repository": "https://github.com/khalilmaaouni/Brother",
+  "homepage": "https://github.com/khalilmaaouni/Brother",
+  "license": "MIT",
+  "keywords": [
+    "verified delivery",
+    "receipts",
+    "execution provenance",
+    "change assurance",
+    "local memory",
+    "claude code"
   ]
 }

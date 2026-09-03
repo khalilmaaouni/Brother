@@ -1500,6 +1500,68 @@ class UsageSidecarReachesTheClaimsBeforeTheCostBlock(unittest.TestCase):
         self.assertEqual(merged["U1"]["usage"]["tokens_in"], 9)
 
 
+class AnInstalledCopyNamesItsEngineFromTheManifest(unittest.TestCase):
+    """harness-identity-v1 (the zero-context critic reading a fresh clone of
+    the public v1.0.0, 2026-09-03): the documented install puts the engine in
+    a plugin CACHE, which is a copy and holds no .git, so `git rev-parse`
+    exits 128 there and every receipt an installed Brother produced read
+    "harness NO-DATA: git rev-parse exited 128". Driven the way the defect
+    was found: this repository's own bundle/runtime, copied to a directory
+    that is not inside any checkout, asked for its own identity."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="brother-run-installed-")
+        # The COPY is what an install ships: same bytes, no .git anywhere
+        # above it. If the temp root happens to sit inside a checkout the
+        # premise of this test is gone, so it reports NO-DATA rather than
+        # measuring the wrong thing.
+        if sh(["git", "rev-parse", "HEAD"], cwd=self.tmp).returncode == 0:
+            self.skipTest("NO-DATA: the temp root is itself inside a git "
+                          "checkout, so a copy placed here is not the "
+                          "installed case this test is about")
+        self.runtime = os.path.join(self.tmp, "runtime")
+        shutil.copytree(os.path.join(_br.REPO_ROOT, "bundle", "runtime"),
+                        self.runtime)
+        self.manifest_path = os.path.join(self.runtime, "RUNTIME-MANIFEST.json")
+
+    def _ask(self, name):
+        """One identity string out of the COPIED engine, in its own process,
+        so HERE (and the manifest it reads) is the copy's directory and not
+        this repository's scripts/."""
+        proc = sh([sys.executable, "-c",
+                   "import sys; sys.path.insert(0, sys.argv[1]);"
+                   " import brother_run;"
+                   " sys.stdout.write(getattr(brother_run, sys.argv[2])())",
+                   self.runtime, name], cwd=self.tmp)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        return proc.stdout.strip()
+
+    def test_the_revision_comes_from_the_manifest_and_says_so(self):
+        with open(self.manifest_path, encoding="utf-8") as fh:
+            stamped = json.load(fh)["source_revision"]
+        self.assertRegex(stamped, r"^[0-9a-f]{40}$",
+                         "the packaged manifest must carry a real source "
+                         "revision for an installed copy to read")
+        got = self._ask("_harness_revision")
+        self.assertNotIn(_br.NODATA, got, got)
+        self.assertEqual(got, stamped + _br.MANIFEST_SOURCE_NOTE)
+
+    def test_the_version_comes_from_the_manifest_and_says_so(self):
+        with open(self.manifest_path, encoding="utf-8") as fh:
+            stamped = json.load(fh)["source_describe"]
+        self.assertNotIn(_br.NODATA, stamped, stamped)
+        got = self._ask("_harness_version")
+        self.assertEqual(got, stamped + _br.MANIFEST_SOURCE_NOTE)
+
+    def test_neither_git_nor_a_manifest_is_still_no_data(self):
+        os.remove(self.manifest_path)
+        for name in ("_harness_revision", "_harness_version"):
+            got = self._ask(name)
+            self.assertTrue(got.startswith(_br.NODATA),
+                            "%s with no git and no manifest must stay "
+                            "NO-DATA, never a guess: %s" % (name, got))
+
+
 class HarnessVersionIsGitDescribe(unittest.TestCase):
     """harness_version is `git describe --always --dirty` of the tree that
     ran, captured at run time, never a fabricated string."""

@@ -696,26 +696,73 @@ FAILURE_CATEGORIES = ("none", "check-failed", "scope-violation", "crashed",
                       "timeout")
 
 
+#: The manifest scripts/bundle_runtime.py writes BESIDE brother_run.py in a
+#: packaged copy (bundle/runtime/RUNTIME-MANIFEST.json). A dev checkout has
+#: no such file next to scripts/brother_run.py, so this path exists only in
+#: an installed plugin, which is exactly the case git cannot answer for.
+RUNTIME_MANIFEST = os.path.join(HERE, "RUNTIME-MANIFEST.json")
+#: Appended to a value read from that manifest, so a receipt says WHICH
+#: source named the engine: a live `git` in a checkout, or the stamp the
+#: packager left behind.
+MANIFEST_SOURCE_NOTE = " (from the runtime manifest)"
+
+
+def _manifest_identity(field, manifest_path=None):
+    """`field` out of the packaged RUNTIME-MANIFEST.json, or None when there
+    is no manifest beside this file, it cannot be read, or the field itself
+    is NO-DATA (a bundle generated outside a checkout stamps NO-DATA rather
+    than guessing, and a NO-DATA is never upgraded into an answer here)."""
+    manifest_path = manifest_path or RUNTIME_MANIFEST
+    try:
+        with open(manifest_path, encoding="utf-8") as fh:
+            doc = json.load(fh)
+        value = doc.get(field) if isinstance(doc, dict) else None
+    except (OSError, ValueError):
+        return None
+    if not isinstance(value, str) or not value.strip():
+        return None
+    value = value.strip()
+    return None if value.startswith(NODATA) else value
+
+
+def _identity_or_manifest(field, nodata):
+    """harness-identity-v1 (the zero-context critic on a fresh clone of
+    v1.0.0, 2026-09-03): git has already failed, so the packaged stamp is
+    the last honest source. Its value, annotated with where it came from, or
+    the caller's own NO-DATA sentence unchanged when there is no stamp
+    either. The annotation sits AFTER the value so a reader (and
+    receipt_door's twelve-hex fragment) still reads the sha first."""
+    value = _manifest_identity(field)
+    return (value + MANIFEST_SOURCE_NOTE) if value else nodata
+
+
 def _harness_version(repo=None):
     """`git describe --always --dirty` of the tree that ran this harness
     (REPO_ROOT by default, this tool's own checkout, not the target --cwd):
     the one version string a receipt reader can match back to an exact
-    commit, dirty state included. NO-DATA, never a fabricated string, when
-    git cannot answer (not a git checkout, git missing, or any other
-    failure)."""
+    commit, dirty state included. When git cannot answer (not a git
+    checkout, git missing, or any other failure), the packaged manifest's
+    `source_describe` stamp, named as such; NO-DATA, never a fabricated
+    string, when there is no stamp either."""
     repo = repo or REPO_ROOT
     try:
         proc = subprocess.run(["git", "describe", "--always", "--dirty"],
                               cwd=repo, capture_output=True, text=True,
                               timeout=30)
     except Exception as exc:  # noqa: BLE001
-        return "%s: git describe could not run in %s: %s" % (NODATA, repo, exc)
+        return _identity_or_manifest(
+            "source_describe",
+            "%s: git describe could not run in %s: %s" % (NODATA, repo, exc))
     if proc.returncode != 0:
-        return ("%s: git describe exited %d in %s: %s"
-               % (NODATA, proc.returncode, repo,
-                  (proc.stderr or "").strip()[:200]))
+        return _identity_or_manifest(
+            "source_describe",
+            "%s: git describe exited %d in %s: %s"
+            % (NODATA, proc.returncode, repo,
+               (proc.stderr or "").strip()[:200]))
     out = (proc.stdout or "").strip()
-    return out if out else "%s: git describe produced no output in %s" % (NODATA, repo)
+    return out if out else _identity_or_manifest(
+        "source_describe",
+        "%s: git describe produced no output in %s" % (NODATA, repo))
 
 
 def _harness_revision(repo=None):
@@ -727,19 +774,32 @@ def _harness_revision(repo=None):
     cannot answer (not a git checkout, git missing, or any other failure).
     Deliberately NOT `git describe`: harness-revision-v1 (defect 2, the
     zero-context critic, 2026-09-03) asks for the one string that names the
-    exact commit, not the nearest tag."""
+    exact commit, not the nearest tag.
+
+    AN INSTALLED COPY IS NOT A CHECKOUT (harness-identity-v1, the same
+    critic on a fresh clone of v1.0.0): the plugin cache holds no .git at
+    all, so git exits 128 there and every installed run's receipt used to
+    read "harness NO-DATA". When git cannot answer, the packaged manifest's
+    `source_revision` stamp is read instead and the value says so; NO-DATA
+    stays for a copy with neither git nor a manifest."""
     repo = repo or REPO_ROOT
     try:
         proc = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo,
                               capture_output=True, text=True, timeout=30)
     except Exception as exc:  # noqa: BLE001
-        return "%s: git rev-parse could not run in %s: %s" % (NODATA, repo, exc)
+        return _identity_or_manifest(
+            "source_revision",
+            "%s: git rev-parse could not run in %s: %s" % (NODATA, repo, exc))
     if proc.returncode != 0:
-        return ("%s: git rev-parse exited %d in %s: %s"
-               % (NODATA, proc.returncode, repo,
-                  (proc.stderr or "").strip()[:200]))
+        return _identity_or_manifest(
+            "source_revision",
+            "%s: git rev-parse exited %d in %s: %s"
+            % (NODATA, proc.returncode, repo,
+               (proc.stderr or "").strip()[:200]))
     out = (proc.stdout or "").strip()
-    return out if out else "%s: git rev-parse produced no output in %s" % (NODATA, repo)
+    return out if out else _identity_or_manifest(
+        "source_revision",
+        "%s: git rev-parse produced no output in %s" % (NODATA, repo))
 
 
 def _failure_category(refused, loop_text):

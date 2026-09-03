@@ -17,10 +17,10 @@
     "BROTHERMODE_",
     "BROTHERME_"
   ],
-  "repo_slug": "BrotherModeUp",
-  "repo_url": "https://github.com/khalilmaaouni/BrotherModeUp",
+  "repo_slug": "Brother",
+  "repo_url": "https://github.com/khalilmaaouni/Brother",
   "ships_from_url": "https://github.com/khalilmaaouni/Brother",
-  "ships_from_rule": "The repository the plugin is INSTALLED FROM, which the M6 cutover made a different fact from repo_url. repo_url is the product's own repository: it owns the release tags an auditor clones, and it is what plugin.json's homepage names. ships_from_url is the hub whose marketplace source resolves the plugin, and it is what plugin.json's repository field must name (scripts/test_version_truth.py in the hub fails a subtree whose repository field disagrees with the marketplace source that installs it). Before the cutover the product had one repository and both facts were the same string, which is why one field carried both until 2026-09-03; keeping one field made the tree read as half moved and could only be settled by moving a fact that is still true.",
+  "ships_from_rule": "REPOINTED 2026-09-03, the same day this field pair last changed. The M6 cutover had made repo_url (the product's own repository, owning the release tags an auditor clones and named by plugin.json's homepage) a different fact from ships_from_url (the hub whose marketplace source resolves the plugin, named by plugin.json's repository field). That split assumed the standalone BrotherModeUp repository would stay public and clonable even after the product started shipping from the hub. It went private and archived on 2026-09-03 at 17:52, which ends the assumption: a repository nobody outside this machine can clone is not a repository an auditor's clone path can name. repo_url now names the hub too, collapsing the two facts back into one string, this time because BOTH are true of the hub rather than because nobody had moved one yet. tools/bm_project_facts.py's REPO_URL and PUBLIC_INSTALL_TAG were repointed the same day. docs/RELEASE.md's '3.4.4, shipped through the Brother hub' entry had left this open ('whether the auditor's clone path, homepage and REPO_URL move to the hub as well'); this is that decision, made because BrotherModeUp's archival forced it rather than because the crossing alone would have.",
   "durable_state_namespace": {
     "spelling": "brothermode",
     "why": "Everything a user already has written to disk. Renaming any of these breaks a real install.",

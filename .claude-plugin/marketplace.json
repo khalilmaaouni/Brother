@@ -4,8 +4,8 @@
     "name": "Khalil Maaouni"
   },
   "metadata": {
-    "description": "Marketplace for the Brother suite: execution provenance and the guided beginner surface, plus change assurance with hard gates. M6 cutover: both products and the bundle ship from this one repository now.",
-    "version": "1.0.0"
+    "description": "Brother turns a plain-language outcome into checked work, a rerunnable receipt, useful local memory, and a human acceptance decision.",
+    "version": "1.0.1"
   },
   "plugins": [
     {
@@ -14,9 +14,9 @@
         "source": "git-subdir",
         "url": "https://github.com/khalilmaaouni/Brother",
         "path": "products/brothermode",
-        "ref": "v1.0.0"
+        "ref": "v1.0.1"
       },
-      "description": "Turn an idea into a verified result with a guided start, honest forecasts, clear status, and a checked delivery.",
+      "description": "Keep long-running AI work recoverable, give each file one supported writer, and deliver a record of decisions, cost, and checks.",
       "version": "3.4.4",
       "author": {
         "name": "Khalil Maaouni"
@@ -29,9 +29,9 @@
         "source": "git-subdir",
         "url": "https://github.com/khalilmaaouni/Brother",
         "path": "products/brothersbe",
-        "ref": "v1.0.0"
+        "ref": "v1.0.1"
       },
-      "description": "A senior backend and data engineering colleague. Change assurance with hard gates, where absent evidence is NO-DATA and never a pass.",
+      "description": "Make missing evidence visible on risky backend and data work, with PASS, FAIL, and NO-DATA kept distinct for human review.",
       "version": "3.7.3",
       "author": {
         "name": "Khalil Maaouni"
@@ -40,9 +40,14 @@
     },
     {
       "name": "brother",
-      "source": "./bundle",
-      "description": "One install, one door. Say what you are trying to do and Brother routes it: proving a change safe before it ships, or running a project to a checked delivery.",
-      "version": "1.0.0",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/khalilmaaouni/Brother",
+        "path": "bundle",
+        "ref": "v1.0.1"
+      },
+      "description": "Turn a plain-language outcome into checked work, a rerunnable receipt, useful local memory, and a human acceptance decision.",
+      "version": "1.0.1",
       "author": {
         "name": "Khalil Maaouni"
       },

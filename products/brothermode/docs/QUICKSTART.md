@@ -28,24 +28,26 @@ No file editing of any kind happens on this path. You will not touch
 hand. The plugin brings its own automatic wiring with it.
 
 ```bash
-claude plugin marketplace add khalilmaaouni/BrotherModeUp@v3.4.2
+claude plugin marketplace add khalilmaaouni/Brother
 ```
 
 ```bash
-claude plugin install brothermode@brothermode-marketplace
+claude plugin install brothermode@brother
 ```
+
+REPOINTED 2026-09-03: this used to name the standalone `BrotherModeUp`
+repository, pinned to its own last tag. That repository is now private and
+archived; BrotherMode ships from the Brother hub, and these two lines are
+byte identical to [`README.md`](../README.md)'s own `## Install` section on
+purpose, so the command never has two independently-typed copies that can
+drift apart (`tools/test_bm_docs.py` checks the two pages agree). The hub
+carries several products, so its marketplace name is `brother`, not this
+product's own name.
 
 Already running v2? Uninstall it first (`claude plugin uninstall
 brotherme`). The plugin identity changed at v3.0.0, so the old and new ids
 are different plugins to Claude Code and installing both leaves two hook
 chains wired at once.
-
-The `@v3.3.1` pins the marketplace add to the released tag, generated from
-the same fact every other page reads (`python3 tools/bm_project_facts.py
---field install_target_tag`), rather than the repository's moving default
-branch; `docs/RELEASE.md` step 2b makes re-pinning it an explicit release
-step, and `tools/test_bm_docs.py` fails this page if the pin ever
-disagrees.
 
 One surface note, corrected against vendor documentation rather than
 assumed: `/plugin` itself opens an interactive panel in the terminal CLI,
@@ -79,7 +81,7 @@ To remove it later: `claude plugin uninstall brothermode` in a terminal, or `/pl
 
 To update later: type `/brothermode:update` and it walks you through it, or run
 the two lines it wraps yourself: `/plugin marketplace update
-brothermode-marketplace`, then `/plugin update brothermode`, then restart Claude
+brother`, then `/plugin update brothermode`, then restart Claude
 Code. That is the whole path. The rest of this page is Path 2 and applies only
 if you skipped Path 1.
 
@@ -106,37 +108,46 @@ in your checkout, a `.dev` identity rather than a tagged release, and this
 page deliberately does not type that identity by hand: a typed version goes
 stale the day after it is written; `docs/RELEASE.md` explains why.
 
+REPOINTED 2026-09-03: the repository cloned below is now the Brother hub,
+which ships several products, and BrotherMode lives inside it at
+`products/brothermode`. A plain clone of the whole hub does not put
+`SKILL.md` at its own top level, so the clone lands in a source checkout,
+not the skill directory itself, and the second line below moves into this
+product's own subdirectory before anything else runs.
+
 ```bash
-git clone --branch v3.4.2 --depth 1 https://github.com/khalilmaaouni/BrotherModeUp.git ~/.claude/skills/brothermode
+git clone --branch v1.0.0 --depth 1 https://github.com/khalilmaaouni/Brother.git ~/.claude/skills/brothermode-src
+cd ~/.claude/skills/brothermode-src/products/brothermode
 ```
 
 Expected: git prints a few lines ending in something like `Resolving deltas:
-100% (N/N), done.` The path matters: Claude Code looks for skills under
-`~/.claude/skills/`, and the scripts in this repo resolve their own location
-from there. This clone is step 1 of 3, not the finished install: nothing is
-wired yet. Step 3 below (`scripts/install.py`) is the step that wires the
-hooks and stamps this checkout with the commit it was installed from; skip
-it and you have a folder of files Claude Code never reads. One thing no
-step on this path ever does: register with Claude Code's own plugin manager
-(the list `claude plugin list` shows). That registry is written only by
-`claude plugin install` (Path 1 above). A clone install's health is checked
-by this project's own `scripts/doctor.py` instead, in step 3. Verify the
-clone landed:
+100% (N/N), done.` This clone is step 1 of 3, not the finished install:
+nothing is wired yet, and nothing has been copied into
+`~/.claude/skills/brothermode` yet either. Step 3 below (`scripts/install.py`)
+is the step that copies the tree there, wires the hooks, and stamps the
+result with the commit it was installed from; skip it and you have a folder
+of files Claude Code never reads. One thing no step on this path ever does:
+register with Claude Code's own plugin manager (the list `claude plugin
+list` shows). That registry is written only by `claude plugin install`
+(Path 1 above). A clone install's health is checked by this project's own
+`scripts/doctor.py` instead, in step 3. Verify the clone landed:
 
 ```bash
-ls ~/.claude/skills/brothermode/SKILL.md
+ls SKILL.md
 ```
 
-Expected: that exact path printed back. If you get "No such file or
+Expected: `SKILL.md` printed back (you are already in
+`products/brothermode` after the `cd` above). If you get "No such file or
 directory", the clone did not finish or landed somewhere else.
 
-Same dated fact as Path 1 above: `v3.0.0` predates the night rename, so this
-checkout carries the old flat `commands/brotherme-*.md` surface and the
-single `skills/brotherme/SKILL.md` conductor, not the nine `/brothermode:*`
-skills this project ships today. The engine underneath (`tools/bm_*.py`,
-`scripts/install.py`, `scripts/doctor.py`) is the same either way; only the
-command and skill names differ. If you want today's tree, use the
-development clone command below instead.
+Same dated fact as Path 1 above: `v3.0.0` predates the night rename, so an
+old checkout at that tag carries the old flat `commands/brotherme-*.md`
+surface and the single `skills/brotherme/SKILL.md` conductor, not the nine
+`/brothermode:*` skills this project ships today; the tag pinned above is
+newer than that and does not have this problem. The engine underneath
+(`tools/bm_*.py`, `scripts/install.py`, `scripts/doctor.py`) is the same
+either way; only the command and skill names differ. If you want today's
+tree, use the development clone command below instead.
 
 Working on BrotherMode's own code instead of just using it? Use the separate
 development command, which tracks the moving `main` branch on purpose and
@@ -144,13 +155,20 @@ installs into its own directory so the two can never be confused:
 
 ```bash
 # Development branch (changes over time)
-git clone --branch main https://github.com/khalilmaaouni/BrotherModeUp.git ~/.claude/skills/brothermode-dev
+git clone --branch main https://github.com/khalilmaaouni/Brother.git ~/.claude/skills/brothermode-dev-src
+cd ~/.claude/skills/brothermode-dev-src/products/brothermode
 ```
+
+Its own step 3 passes `--target ~/.claude/skills/brothermode-dev` to
+`scripts/install.py` below, so the two checkouts can never land in the same
+place.
 
 ## 2. Run the gate, to prove it works on your machine
 
+Still in `products/brothermode` from step 1 (`pwd` should end in
+`brothermode-src/products/brothermode`):
+
 ```bash
-cd ~/.claude/skills/brothermode
 python3 tools/test_all.py
 ```
 
@@ -195,15 +213,19 @@ concurrent runs; the P9 fix round removed that rename, and the header of
 
 This step makes the parts that must never be forgotten (telemetry, the
 pre-compaction safety snapshot) run automatically instead of depending on the
-model remembering to run them. One command does it:
+model remembering to run them. It also does the copy step 1's note mentioned:
+still in `products/brothermode`, this copies the tree into
+`~/.claude/skills/brothermode` because that is a different directory from the
+source checkout you cloned into. One command does it:
 
 ```bash
-python3 ~/.claude/skills/brothermode/scripts/install.py --dry-run
-python3 ~/.claude/skills/brothermode/scripts/install.py
+python3 scripts/install.py --dry-run
+python3 scripts/install.py
 ```
 
 Run the `--dry-run` first. It prints every change and writes nothing, so you
-see what is about to happen to your `settings.json` before it happens.
+see what is about to happen to your `settings.json` (and what would be
+copied) before it happens.
 
 Expected from the real run: a list of six hooks (`SessionStart`, `SessionEnd`,
 `Stop`, `PreCompact`, `PreToolUse`, `PostToolUse`), a line naming the backup of your previous

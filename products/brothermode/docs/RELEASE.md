@@ -53,7 +53,7 @@ now reads `2.0.0-rc.12.dev1`, a DEVELOPMENT identity, not a release candidate.
 tag at all. The public install target stays pinned at the last tag actually
 known to resolve, `install_target_tag`. That was `v2.0.0-rc.9` when this
 paragraph was written 2026-08-01; it has moved since. The live value is
-`PUBLIC_INSTALL_TAG` in `tools/bm_project_facts.py`, currently `v3.4.2`,
+`PUBLIC_INSTALL_TAG` in `tools/bm_project_facts.py`, currently `v1.0.0`,
 independent of whatever VERSION says. See "The version law" below for the
 rule this follows.
 
@@ -165,13 +165,19 @@ for that date.
 
 ## How a user pins a version instead of tracking a branch
 
-Tags exist now, so this is the install instruction, not a future one:
+Tags exist now, so this is the install instruction, not a future one. Since
+the M6 cutover the repository cloned is the Brother hub, which ships several
+products, so the clone lands in a source checkout and this product's own
+installer copies it the rest of the way (`README.md`, "Install and
+preflight" explains why):
 
 ```bash
-git clone --branch v3.4.2 --depth 1 https://github.com/khalilmaaouni/BrotherModeUp.git ~/.claude/skills/brothermode
+git clone --branch v1.0.0 --depth 1 https://github.com/khalilmaaouni/Brother.git ~/.claude/skills/brothermode-src
+cd ~/.claude/skills/brothermode-src/products/brothermode
+python3 scripts/install.py
 ```
 
-`--branch v3.4.2` checks out that exact tag, not a moving branch head. It
+`--branch v1.0.0` checks out that exact tag, not a moving branch head. It
 is the public install target, not necessarily the identity the tree on `main`
 currently carries: `python3 tools/bm_project_facts.py --field
 install_target_tag` prints the tag every onboarding page pins, and `python3
@@ -181,12 +187,19 @@ VERSION claims, which is `None` while a development identity is checked out.
 most users have no reason to carry this project's full history into their
 skills directory.
 
-To move to a later release deliberately, rather than by accident:
+To move to a later release deliberately, rather than by accident. Run this
+against the SOURCE checkout (`~/.claude/skills/brothermode-src`), never
+against `~/.claude/skills/brothermode` itself: since the M6 cutover
+`scripts/install.py` copies the tree there and deliberately excludes `.git`
+(`scripts/install.py`, `COPY_EXCLUDE_NAMES`), so it is a plain directory of
+files, not a checkout `git fetch` can act on.
 
 ```bash
-cd ~/.claude/skills/brothermode
+cd ~/.claude/skills/brothermode-src
 git fetch --tags
 git checkout v2.0.1   # or whatever the next tag is
+cd products/brothermode
+python3 scripts/install.py --upgrade
 ```
 
 This never runs on its own. Nothing in this project auto-updates itself; an
@@ -256,22 +269,24 @@ run of it as a test of the runbook, not just of the code.
 2b. **Re-pin the plugin marketplace install command.** Bump
    `PUBLIC_INSTALL_TAG` in `tools/bm_project_facts.py` to the tag this
    release is about to become, in the same change as step 2, so
-   `install_target_tag` names it. Then update the `claude plugin
-   marketplace add khalilmaaouni/BrotherModeUp@<tag>` line on every install
-   page (`README.md`, `docs/QUICKSTART.md`, `docs/SETUP.md`) to the same
-   tag, byte identical across all three. Run `python3 tools/test_bm_docs.py`
-   and read the pass: it fails a page whose pin disagrees with
-   `install_target_tag`. This step exists because the two install paths
-   this project calls interchangeable used not to be equally auditable:
-   the pinned git-clone command already named an immutable tag, while the
-   two-command plugin install tracked the repository's moving default
-   branch with no ref pinned at all, so code that runs automatically on
-   every future session was easiest to install in its least checkable
-   form. Anthropic's plugin marketplace format resolves an `owner/repo@ref`
-   marketplace source to that exact branch or tag on every add and every
-   later refresh, per the CLI reference for `claude plugin marketplace add`
-   at https://code.claude.com/docs/en/plugin-marketplaces, which is the
-   mechanism this pin relies on.
+   `install_target_tag` names it. Then update the `--branch` argument on the
+   pinned-clone install's `git clone` line (`README.md`, `docs/QUICKSTART.md`,
+   `docs/SETUP.md`) to the same tag, byte identical across all three. Run
+   `python3 tools/test_bm_docs.py` and read the pass: it fails a page whose
+   pin disagrees with `install_target_tag`. Historical note, kept because
+   the reasoning still explains why the pin matters even though the
+   mechanism moved: this step used to re-pin an `@<tag>` on the `claude
+   plugin marketplace add khalilmaaouni/BrotherModeUp@<tag>` line itself,
+   because the two install paths this project calls interchangeable used
+   not to be equally auditable, and Anthropic's plugin marketplace format
+   resolves an `owner/repo@ref` marketplace source to that exact branch or
+   tag on every add and every later refresh, per the CLI reference for
+   `claude plugin marketplace add` at
+   https://code.claude.com/docs/en/plugin-marketplaces. Since the M6/v1
+   cutover the marketplace add names the Brother hub, which ships several
+   products on its own release cadence, and `README.md`'s `## Install`
+   section adds it unpinned on purpose; the pinned, auditable route is now
+   the git-clone command this step still re-pins.
 3. **Generate the checksum manifest**, from the repository root, after steps
    1 and 2 are committed (the manifest must describe the exact tree being
    released, not an earlier one):
@@ -683,6 +698,40 @@ lane on the real tree and on every fixture built from it. What the v1.0
 crossing still decides is separate and unchanged: whether the auditor's
 clone path, `homepage` and `REPO_URL` move to the hub as well, and which tag
 the install pages pin once the hub cuts one that carries this product.
+
+SUPERSEDED 2026-09-03 by the section below: the open question in the
+paragraph above is answered, not by the v1.0 crossing deciding it on its own
+terms but by an event that made the old answer impossible.
+
+## v1.0.0: the standalone repository goes private and archived, the two repository facts collapse back into one (2026-09-03)
+
+CURRENT STATE: `BrotherModeUp` went private and archived at 17:52 on
+2026-09-03. A repository nobody outside this machine can clone is not a
+repository an auditor's clone path, a `homepage`, or a `REPO_URL` can
+honestly name, so the open question above is closed: `repo_url` and
+`REPO_URL` (`tools/bm_project_facts.py`) both move to the hub, the same
+value `ships_from_url` already held. `product.identity.json`'s
+`ships_from_rule` states this. `PUBLIC_INSTALL_TAG` moves with it, from
+`v3.4.2` (the last tag ever cut in the standalone repository) to `v1.0.0`
+(the hub's own tag, the same ref `.claude-plugin/marketplace.json`'s
+git-subdir `plugins[]` source pins). The pinned git-clone install
+(`README.md`, `docs/QUICKSTART.md`, `docs/SETUP.md`) now clones the hub at
+that tag into a source checkout and changes into `products/brothermode`
+before running this product's own installer, because a plain clone of the
+whole hub does not put `SKILL.md` at its own top level the way a clone of
+the old standalone repository did; the plugin marketplace route is
+unaffected, since it already named the hub. `marketplace_id` in
+`product.identity.json` (`brothermode-marketplace`) and the nested
+`.claude-plugin/marketplace.json` under `products/brothermode` (same name)
+were left untouched by this repoint: they still describe the retired
+standalone-repository marketplace, disagree with the hub root
+`.claude-plugin/marketplace.json`'s real name (`brother`), and are not the
+files a reader actually adds (`README.md`'s `## Install` section names
+`brother`). Closing that gap needs an edit to
+`.claude-plugin/marketplace.json`, outside this repoint's file list; until
+then `tools/bm_project_facts.py`'s `install_command_plugin` fact is
+generated but not displayed on any page, and any future reader of that
+field should expect it to disagree with the real marketplace name.
 
 ## The version law (release-closure program, 2026-08-01)
 

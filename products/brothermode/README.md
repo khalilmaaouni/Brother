@@ -1,244 +1,74 @@
-Product authority: [PRODUCT-DIRECTION.md](PRODUCT-DIRECTION.md) (founder
-direction, 2026-08-11) defines what BrotherMode is, who it serves, and what it
-will not build. It supersedes conflicting product-scope guidance elsewhere.
-
-This page is for one person already running Claude Code who wants a plan
-agreed before anything is touched, one writer per file, and a check quoted
-before anything is called done, paid for with the cost of installing hooks and
-state files. If what you want is a no-setup editor, a bounded background task
-run from GitHub Issues, or several people coordinating on the same project
-with roles, approvals, and merge control, look elsewhere: see
-[docs/ECOSYSTEM.md](docs/ECOSYSTEM.md) for what fits each of those situations
-better.
-
-BrotherMode is built for one person doing serious work, not for coordinating
-several people on the same project at once. That is a deliberate choice, not
-an oversight: it scales down to one person doing the work of several roles,
-and adding shared state, accounts, and multi-user merge control would cost the
-single-writer discipline that the plan-then-verify guarantees above depend on.
-Where a genuine multi-person need exists, a team coordination tool is the
-honest answer, not this one, and the sibling product is that answer:
-BrotherMode governs one person's session, BrotherSBE governs one change's
-passage between people. A team runs both, one session each plus the sibling
-between them, and
-[docs/WORKING-WITH-BROTHERSBE.md](docs/WORKING-WITH-BROTHERSBE.md) is the
-worked guide to using them together, including what team use does and does
-not cover today.
-
-Everything it shows you is a file you own. The page of where a project stands
-is written as one self contained HTML file with nothing fetched from anywhere:
-open it by double clicking, mail it, or paste it into your own wiki, with no
-account and no network. Produce it whenever you want with
-
-    python3 tools/bm_view.py render --project-id <your-project> --out page.html --actor-name "<you>"
-
-A real page measures about 22 kilobytes, so it travels anywhere a document
-travels. Nothing is hosted unless you choose to host it.
-
-The handover procedure is published as a plain document you can run with
-nothing installed: [docs/HANDOVER-BY-HAND.md](docs/HANDOVER-BY-HAND.md).
-Using it costs you nothing and tells us nothing, and it is worth having
-even if you never install anything here.
-
----
-
 # BrotherMode
 
-**A verified delivery layer for AI agents.**
+**Long work loses trust when decisions, ownership, cost, and proof disappear between sessions. BrotherMode keeps that record until a person accepts the result.**
 
-The reliability layer for serious Claude Code work.
+## Install through Brother
 
-From intent to verified delivery.
-
-Resume the work. Control the execution. Prove the result.
-
-Describe the outcome. BrotherMode keeps the decisions, the ownership of every
-file, and the evidence intact from the first sentence to the delivery packet.
-
-The long-term vision is an autonomous product team. That is stated here as the
-direction, not as the claim: what is proven today is the memory, the
-guardrails and the proof, each with its evidence in the register below. The
-founder chose a narrower headline on 2026-08-07, over keeping the broader one,
-precisely because three independent reviews said the broader one ran ahead of
-the evidence. The four lines above are the 2026-08-11 wording of that same
-narrower claim, and they are copy rather than a new capability: every
-capability they gesture at already has its own row and its own evidence in the
-register below, and none of them was added to say this.
-
-## Install
-
-Two lines, inside Claude Code. Full detail, the clone alternative and the
-uninstall path are in [Install and preflight](#install-and-preflight) further
-down.
+The root [Brother install](../../README.md#install) is the public route:
 
 ```bash
-claude plugin marketplace add khalilmaaouni/BrotherModeUp@v3.4.2
-claude plugin install brothermode@brothermode-marketplace
+claude plugin marketplace add khalilmaaouni/Brother && claude plugin install brother@brother
 ```
 
-## Who this is for
+Success looks like this:
 
-**A technical solo founder, a senior solo builder, or a maintainer using AI
-agents on serious multi-session work.** In plain terms: you are accountable
-for the final result, you already use Claude Code or another serious coding
-agent, your work spans many files and more than one sitting, you sometimes run
-more than one agent at once, and you have already been burned by context loss,
-stale evidence, rework, or two workers editing the same file. You know Git and
-a terminal, you would rather have dependable delivery than the fastest first
-draft, and you want the records to live on your own disk where you can read
-them.
+```text
+Successfully added marketplace
+Successfully installed plugin
+```
 
-The job it exists to do, in the founder's own words: let me delegate serious
-work to AI without repeatedly explaining the project, losing decisions,
-colliding with another worker, or accepting a false claim of completion.
+Then open a repository and use `/brother`. With no unfinished work, it reports `no unfinished run found` and asks what you are trying to do.
 
-**Who it is NOT for**, stated plainly because disqualifying the wrong user is
-a product strength rather than a marketing failure: anyone who wants an
-instant website or app with no code; anyone making a one-line reversible edit;
-anyone unwilling to use Git or a terminal; a team wanting shared accounts,
-role-based access, approvals and enterprise project management; a buyer
-shopping for the best model, editor or cloud coding runtime; anyone wanting
-GitHub-native background delegation with no local environment; anyone
-expecting full operating-system containment; anyone expecting autonomous
-production deployment with no human gate; and a team that only needs a
-planning methodology or a test-driven workflow.
+## The pain it answers
 
-## Which runtimes this actually works on
+A long task can outlive the chat that started it. Two workers can reach for the same file. A restart can erase the reason behind a choice. A completion message can omit the command that checked the final bytes. A cost estimate can replace a real number.
 
-**Claude Code is the one verified runtime.** Everything this page promises was
-measured there.
+BrotherMode keeps the work record on disk. It can resume open work, keep one supported writer per claimed file, record decisions, report real cost fields when returned, and produce a delivery packet from the checks that actually ran.
 
-BrotherMode also ships instruction files for Generic AGENTS.md, OpenAI Codex
-CLI, GitHub Copilot, Google Antigravity, Qwen Code, iFlow CLI, Cursor and
-Gemini CLI. Read [docs/RUNTIMES.md](docs/RUNTIMES.md) before relying on any of
-them, and take that table's own words rather than a stronger summary of them.
-Two things it says that matter more than the rest: every non-Claude answer in
-its BrotherMode-hooks column is UNVERIFIED except one, and UNVERIFIED there
-means do not wire it, because a fence that fails open while looking installed
-is worse than no fence at all. The one measured exception is OpenAI Codex CLI,
-and what was measured is a NO rather than a yes.
+## Prove the benefits
 
-BrotherMode is a Claude Code plugin: a written set of working rules plus a
-small toolchain of Python and shell scripts. You install it once, and from then
-on a session behaves like a colleague rather than an assistant waiting for
-instructions. It agrees the shape of the work with you before touching
-anything, keeps one writer per file across the write tools it can see so two
-parallel efforts cannot silently overwrite
-each other, refuses the word done until a check has run after the last change,
-and writes the decisions and the progress to plain files so a crash or a
-restart does not lose the thread.
+From this product directory, run:
 
-Receipts is the word to hold this page to. Every claim below names the file or
-the command behind it, the capability table further down is generated from a
-register in this repository rather than typed here, and `tools/test_bm_docs.py`
-fails when a page and the tree disagree.
+```bash
+python3 tools/test_bm_store.py
+python3 tools/test_bm_fence_hook.py
+python3 tools/test_bm_controller.py
+python3 tools/test_bm_consent.py
+```
 
-## The public surface: six names, and what each one really does today
+These commands check recovery, file ownership, bounded delivery, and consent before telemetry is written.
 
-The documented surface is six names. It used to be seven. Two of the six are
-named but not yet shipped, and they are marked as such rather than listed as
-peers, because a name that does nothing teaches you that this page cannot be
-trusted.
+For the complete product gate, run:
 
-| Name | Status today |
-|---|---|
-| `start` | Works |
-| `status` | Works |
-| `deliver` | Works |
-| `doctor` | Works |
-| `verify` | A NAME FOR A FLOW, NOT AN ENTRY POINT. Settled by ruling on 2026-08-11: verify stays a routing name over the review and deliver flow that already exists, with no folder of its own, so the canonical skill count stays at nine and ruling B5 of [docs/decisions/V3-FREEZE-2026-08-07.md](docs/decisions/V3-FREEZE-2026-08-07.md) is untouched. Ask for a review and you reach exactly the flow this name describes. There is no `/brothermode:verify` command and there will not be one. |
-| `toolkit` | NOT BUILT. It arrives with the Toolkit release. No stub ships, no placeholder folder, no entry point that fails quietly. |
+```bash
+python3 tools/test_all.py
+```
 
-**Nothing was removed or deprecated.** `next`, `review`, `view` and `help`
-keep working exactly as they do today, along with `auto`, `auto-status`,
-`brief`, `decisions`, `handback`, `handover-pack`, `stop` and `update`. They
-are advanced internal surface now, which means they are off the public list
-and nothing else. `review` is the engine `verify` routes to. The fifteen files
-under `commands/` are unchanged and still work; each now carries a one-line
-notice saying its documented status changed and its behaviour did not.
-Consolidating them physically is a later tranche.
+For the installed bytes, run:
 
-The documented surface shrank from seven names to six. The working surface
-shrank by nothing.
+```bash
+sh scripts/checksums.sh CHECKSUMS.sha256
+bash scripts/verify-install.sh
+```
 
-## One minute with it
+## What a person receives
 
-Real commands, described rather than transcribed. There is no screenshot on
-this page standing in for a session you have not had yet, and the wording your
-session uses will be its own. Type these into Claude Code once it is installed.
+The status view answers where the work stands and names one next action. The delivery packet names what changed, what checks ran after the final edit, and what remains unproven. The Vault can return a relevant lesson before a later edit reaches the same area.
 
-1. `/brothermode:start I run a bakery and want a one-page site: our story,
-   photos, opening hours, and cake pre-orders.`
-   It sizes up the goal and asks only the questions whose answers change the
-   scope, one decision at a time, recommended option first. It ends with one
-   written project brief (`CANVAS.md`, generated from the project's own
-   records) and a first decision to make, with a time and cost range given as
-   a range rather than a promise.
-2. `/brothermode:status` prints where the project stands, in plain language,
-   read out of those records rather than out of the conversation.
-3. `/brothermode:next` recommends the single next step, and says why that one.
-4. Work happens. A file one session has CLAIMED is refused to a second session
-   by a hook, not by a reminder in a prompt. Stated exactly, because the
-   difference is the whole guarantee: the refusal covers claimed paths written
-   through the editing tools. By default an UNCLAIMED path is allowed, and a
-   write made by a shell command crosses a fence unrefused and is caught only
-   afterwards by the audit. Set `BM_FENCE_MODE=enforced` and
-   `BM_FENCE_STRICT=1` to require a claim before any project edit.
-   `docs/KNOWN-LIMITS.md` states what the hook misses.
-5. `/brothermode:review` checks the work against the written definition of done
-   and reports what passes and what does not, bad news first.
-6. `/brothermode:deliver` writes the delivery packet: what was built, every check
-   that ran after the last change, and what was left out on purpose. If a check
-   is missing or failing it says so instead of delivering.
+The benefit is not more confidence. It is a record another person can inspect, rerun, and disagree with.
 
-Nothing in that sequence asks you to read a log. `/brothermode:help` explains any
-of it again in plain language.
+## Limits
 
-## What you get out of it
+- The file fence covers supported write tools. Other shell or external writes may be detected after the fact rather than contained.
+- Hooks run in every supported session on the machine. There is no per-repository opt-out yet.
+- Local rescue snapshots are not backups and disappear with the repository data that holds them.
+- Cost is reported only when the worker returns it. Missing fields remain NO-DATA.
+- Recalled Vault lessons are untrusted context, and their measured effect on repeated mistakes remains NO-DATA.
+- BrotherMode does not publish, spend, delete, merge, or accept on a person's behalf.
 
-Three outcomes, each one grounded in a capability the register below marks
-certified, with its own honest gap named beside it.
+The detailed capability register below is generated from `capabilities.status.json`. It is retained byte for byte because the product documentation gate compares this page with that register.
 
-**A guided project that ends in a packet you can hand to someone.** The guided
-flow (`skills/brotherme/SKILL.md`, entered by `commands/brotherme-start.md`)
-takes you from a sentence to a delivery packet built from the project's own
-records by `python3 tools/bm_project.py deliver`. The packet's own exit rule,
-in `project-template/DELIVERY-PACKET.md`, forbids the words ready to deliver
-unless every acceptance check has evidence produced after the final edit. The
-gap: the packet proves what was checked, not that the checks were the right
-ones. That judgement stays yours.
-
-**A killed session you can pick up instead of restarting.** Decisions, open
-work and next intent live in a durable local store (`tools/bm_store.py`), and
-right before Claude Code compacts its context, a hook snapshots your whole
-working tree, untracked files included, into a private local git reference
-(`tools/bm_autosave.py`, never pushed, `recover` prints how to restore it).
-`tools/test_bm_store.py` exercises the recovery path, and the store job in
-`.github/workflows/tests.yml` runs that suite on three operating systems. The
-gap: a snapshot is a rescue, not a backup service. It lives in your own `.git`
-directory and goes when that goes.
-
-**A scorecard built from your own corrections rather than from self-report.**
-A hook, not the model, records what each session actually cost in tokens, tool
-calls and time (`tools/bm_telemetry.py`, recorded only after you consent, which
-`tools/test_bm_consent.py` enforces). Corrections you make can be captured,
-approved into a rule by a human-confirmed receipt, retrieved with the reason
-shown, and graded on whether the correction was applied before the same
-situation came round again
-(`tools/bm_learn.py`, walked through in `docs/CORRECTION-LEARNING.md`). The
-gap, and it is the largest one on this page: this has been used for real but
-never MEASURED on a real project. There is no counted project, no recorded
-rework rate and no comparison against working without it
-(`docs/KNOWN-LIMITS.md`, "Used for real, but never MEASURED on a real
-project"; `docs/NOT-FINALIZED.md` item 1).
-
-## What is certified, and what is not
-
-The section below is GENERATED. It is rendered from `capabilities.status.json`
-by `python3 tools/bm_docs.py capability-status --write`, and `tools/test_bm_docs.py`
-fails if the block here and the register disagree, so a claim cannot quietly
-drift out of the page it was written on. To change what this says, change the
-register and re-run the command.
+## Generated capability status
 
 <!-- BEGIN GENERATED CAPABILITY STATUS -->
 <!-- Generated from capabilities.status.json by `bm-docs capability-status --write` (the packaged console script; from a clone, tools/bm_docs.py). Edit the register, not this block. -->
@@ -297,515 +127,36 @@ Four states and no others, read out of `capabilities.status.json`, updated 2026-
 
 <!-- END GENERATED CAPABILITY STATUS -->
 
-## How it works: guide, execute, verify, land, record
+## Test-pinned standalone compatibility
 
-Five steps, and each one names the machinery that holds it up rather than the
-intention behind it.
-
-**Guide.** The session maps what is already true (git status, what else is
-mid-flight) before writing anything, sizes the work, and brings decisions to
-you one at a time with a recommended option first and the tradeoff in plain
-words. `references/kickoff.md` is the written procedure; `SKILL.md` is the law
-it belongs to.
-
-**Execute.** Work is claimed before it is written, and the claim is enforced:
-`tools/bm_fence_hook.py` runs on the PreToolUse hook and REFUSES a write to a
-file another live session owns, whether it arrives as an Edit tool call or,
-since L06, as a Bash apply_patch envelope naming a fenced path. It is the one
-hook that can say no.
-`tools/test_bm_fence_hook.py` holds that behaviour in place, and
-`scripts/doctor.py` proves the wired fence is live on your machine by
-simulating a blocked foreign write in a throwaway project.
-
-**Verify.** Done means a check that ran after the last change and passed.
-Evidence gathered before the final edit proves nothing about what is being
-delivered, which is why `commands/brotherme-review.md` reports what passes and
-what does not instead of summarizing.
-
-**Land.** The delivery packet is generated from the records, never filled in
-by hand, so what it claims and what the store holds cannot differ.
-
-**Record.** Session cost, decisions and corrections are written down
-mechanically: a model reporting on its own performance is not evidence. Your
-memory lives in a vault folder on your own disk, outside this repository.
-
-## Install and preflight
-
-Two ways in. The plugin way is two lines and no folders; the pinned clone is
-the path that has been proven end to end the most times. The full,
-copy-pasteable, ten-minute walkthrough with the expected output of every
-command is [`docs/QUICKSTART.md`](docs/QUICKSTART.md). With no interactive
-Claude Code session to type `/plugin` commands into, for example a script
-installing this unattended, use the pinned clone below rather than the plugin
-way.
-
-Requirements: Claude Code (CLI or desktop app) with skills enabled, Python 3.9
-or newer using the standard library only with nothing to install, and git.
-
-**The plugin way (two lines, inside Claude Code).** This repository is its own
-plugin marketplace: add it once, install from it, and the six hooks register
-on the next start. Upgrading later is one `/plugin` update from the same
-source; uninstalling removes the plugin and leaves your project data and
-vault untouched.
+The root bundle command above is the public install. Current product documentation checks also require the product's own install and clone commands below to remain visible and identical across this product's install pages. They are retained as test-pinned compatibility evidence, not as the recommended Brother route.
 
 ```bash
-claude plugin marketplace add khalilmaaouni/BrotherModeUp@v3.4.2
-claude plugin install brothermode@brothermode-marketplace
+claude plugin marketplace add khalilmaaouni/Brother
+claude plugin install brothermode@brother
 ```
 
-Already running v2? Uninstall it first (`claude plugin uninstall brotherme`). The plugin identity changed at v3.0.0, so the old and new
-ids are different plugins to Claude Code and installing both leaves two
-hook chains wired at once.
-
-The `@v3.3.1` pins the marketplace add itself to the released tag rather
-than the repository's moving default branch. Anthropic's plugin
-marketplace format resolves an `owner/repo@ref` source to that exact
-branch or tag on every add and every later update, per the CLI reference
-for `claude plugin marketplace add` at
-https://code.claude.com/docs/en/plugin-marketplaces. `docs/RELEASE.md`
-step 2b makes re-pinning this line to the newly cut tag an explicit
-release step, and `tools/test_bm_docs.py` fails this page if the pin ever
-disagrees with `install_target_tag` (`python3 tools/bm_project_facts.py
---field install_target_tag`).
-
-Those are plain shell commands: paste them into any terminal once. Inside
-the terminal client, the interactive `/plugin marketplace add ...` and
-`/plugin install ...` forms do the same thing.
-
-The word "install" covers three different things here, and vendor
-documentation draws the line between them differently than an earlier
-version of this page did:
-
-- **Adding this repository as a marketplace, the first time.** Vendor
-  documentation shows this done from `/plugin marketplace add` or the
-  `claude plugin marketplace add` shell command above, both run from a
-  terminal-backed Claude Code surface (see "Add marketplaces" at
-  https://code.claude.com/docs/en/discover-plugins); it does not document
-  a desktop-app GUI path for registering a brand new marketplace source.
-  That is the one step this page asks you to run in a terminal, once.
-- **Installing a plugin from a marketplace already configured, inside the
-  desktop app, no terminal needed.** Once the marketplace above has been
-  added, the desktop app's own **+** button next to the prompt box, then
-  **Plugins**, then **Add plugin**, opens a plugin browser over your
-  configured marketplaces, official and third party alike, and installs
-  from there without a terminal (see "Install plugins" at
-  https://code.claude.com/docs/en/desktop). This project's own proof,
-  `scripts/release-smoke-install.sh`, exercises the terminal path only;
-  the desktop browser is a vendor-documented path this project has not
-  separately verified.
-- **Installing through the terminal client.** The two lines above, or the
-  interactive `/plugin` panel, which vendor documentation describes as
-  opening in the terminal CLI, not the desktop app (see
-  https://code.claude.com/docs/en/discover-plugins). Founder-reproduced
-  2026-08-06 against the desktop app directly: the `/plugin` slash form
-  itself does not run there, which is the narrow, still-true fact behind
-  the older wording on this page; it never meant the desktop app cannot
-  install plugins at all.
-
-Proven, not promised: `scripts/release-smoke-install.sh` runs the terminal
-path end to end inside a throwaway configuration on every release:
-marketplace add, install, the installed version matched against `VERSION`,
-all hook groups registered, then a clean uninstall that leaves settings
-untouched. A release whose smoke run does not print PASSED does not ship
-(docs/RELEASE.md names the step).
-
-**Updating.** Type `/brothermode:update` and it walks you through it, or run the
-two lines it wraps yourself: `/plugin marketplace update brothermode-marketplace`,
-then `/plugin update brothermode`. Updating never touches your projects or your
-records.
-
-**The pinned clone (the most-proven path).** This clones an immutable, tagged
-release, not a moving branch, because code that runs automatically on every
-future session should come from a fixed, checkable snapshot; a moving branch
-feeding auto-run code was the weakest link the original external audit named.
+The pinned clone, for anyone who wants the bytes of one release on disk and a checksum they can run themselves:
 
 ```bash
-git clone --branch v3.4.2 --depth 1 https://github.com/khalilmaaouni/BrotherModeUp.git ~/.claude/skills/brothermode
+git clone --branch v1.0.0 --depth 1 https://github.com/khalilmaaouni/Brother.git ~/.claude/skills/brothermode-src
+cd ~/.claude/skills/brothermode-src/products/brothermode
+python3 scripts/install.py
 ```
 
-That tag is not typed by hand: it is generated from the same release fact every
-other page reads (`python3 tools/bm_project_facts.py --field
-install_target_tag`), the last tag actually cut and known to resolve, and
-`tools/test_bm_docs.py` fails if this page ever disagrees with it. The tree on
-the default branch carries a development identity of its own, which is not the
-public install target; `docs/RELEASE.md` explains why the two can differ on
-purpose, and `python3 tools/bm_project_facts.py --field version` prints what
-this checkout claims. Do not run both paths at once on one machine: the plugin
-wires the same six hooks the clone's installer wires, so a machine carrying
-both runs every hook twice (docs/KNOWN-LIMITS.md records this; pick one).
-
-What that tag carries, read out of the tag rather than remembered: both
-surfaces at once. `git ls-tree --name-only v3.0.0 skills/` lists all
-seventeen `skills/<name>/` directories, the nine this page describes among
-them (`start`, `status`, `next`, `review`, `deliver`, `view`, `help`,
-`doctor`, `update`), and `git show v3.0.0:skills/start/SKILL.md` prints that
-skill's own front matter at the tag. `git show
-v3.0.0:.claude-plugin/plugin.json` prints the post-rename plugin id
-`brothermode`, the same dated fact as the v2 uninstall note in the plugin
-way above. The flat `commands/brotherme-*.md` files ship at that tag too,
-kept on purpose so a v2 install or a v2 habit still resolves during the
-migration window: `git ls-tree --name-only v3.0.0 commands/` lists them, and
-`git show v3.0.0:commands/brotherme-start.md` opens with a LEGACY v2
-COMPATIBILITY SHIM banner naming `/brothermode:start` as its replacement.
-An earlier version of this paragraph said the tag carried only the old flat
-surface and the single `skills/brotherme/SKILL.md` conductor; that was
-wrong, and the `git ls-tree` line above is the command that disproves it.
-The engine underneath (`tools/bm_*.py`, `scripts/install.py`,
-`scripts/doctor.py`) is the same at the tag and on the default branch. If
-you want the moving tree rather than the fixed snapshot, use the development
-clone below instead.
-
-**Bitbucket.** The engine speaks plain git and never calls a host API, so a
-project whose remote lives on Bitbucket Cloud gets the same fences, gates and
-ceremony as one on GitHub; that is a standing rule (the two-host law in this
-repository's CLAUDE.md), with GitHub as the canonical home and the target
-stated in PRODUCT-DIRECTION.md: individual contributors and 2 to 15 person
-technical teams using GitHub or Bitbucket. `docs/BITBUCKET.md` carries the
-full picture: install from a mirror (Claude Code's marketplace command
-accepts full git URLs), the pull request flow through Bitbucket's REST API
-now that app passwords are gone, `bitbucket-pipelines.yml` beside
-`.github/workflows/` honest about its Linux-only runners, and an explicit
-list of what has not yet been executed against a live mirror, labeled
-UNVERIFIED on the page rather than implied. An Azure Repos page exists in
-docs/ as a dormant record of executed checks; it is not a target.
-
-Working on BrotherMode's own code, rather than just using it? Use the separate
-development command instead, which tracks the moving `main` branch on purpose
-and installs into its own directory so the two can never be confused:
+The development checkout is separate and changes over time:
 
 ```bash
 # Development branch (changes over time)
-git clone --branch main https://github.com/khalilmaaouni/BrotherModeUp.git ~/.claude/skills/brothermode-dev
+git clone --branch main https://github.com/khalilmaaouni/Brother.git ~/.claude/skills/brothermode-dev-src
+cd ~/.claude/skills/brothermode-dev-src/products/brothermode
+python3 scripts/install.py --target ~/.claude/skills/brothermode-dev
 ```
 
-**Preflight.** Then follow `docs/QUICKSTART.md` (or the longer reference,
-`docs/SETUP.md`) to run the gate, wire the hooks (one installer command does
-it), and point a vault folder somewhere on your disk. `python3
-scripts/doctor.py` runs ten environment checks with plain-language remediation,
-including whether this install's pinned public tag has since been moved on
-the public origin: [`docs/PUBLIC-RELEASE-CHECK-2026-08-18.md`](docs/PUBLIC-RELEASE-CHECK-2026-08-18.md).
-Invoke with `/brothermode` at the start of a sizable task.
+The same checks require every installed hook event to be named: SessionStart, SessionEnd, Stop, PreCompact, PreToolUse, and PostToolUse.
 
-Which release this is, and how many hooks get wired, are not typed by hand on
-this page. Both come out of the tree:
-
-```bash
-python3 tools/bm_project_facts.py
-```
-
-It prints the current version and release tag, the storage schema version, the
-hook events the installer writes (`SessionStart`, `SessionEnd`, `Stop`,
-`PreCompact`, `PreToolUse`, which is the fence that can refuse a write, and
-`PostToolUse`, which reports a shell write that crossed a fence), the suite
-files the gate runs, and the Python floor. What it deliberately does not print
-is a test count, for the reason given under "Evidence" below.
-
-### Uninstall
-
-Two different things get removed: the skill itself, and whatever it wrote
-inside each project you used it in. Doing only the first leaves real files,
-including the one file `SECURITY.md` calls sensitive, behind.
-
-**The skill.** Unwire the hooks first, while the files are still there: the
-installer's counterpart removes only the entries it wrote, and leaves your own
-hooks and your vault alone.
-
-```bash
-python3 ~/.claude/skills/brothermode/scripts/uninstall.py
-rm -rf ~/.claude/skills/brothermode
-```
-
-By hand instead, remove from `~/.claude/settings.json` every entry whose command
-names this installation's own `tools/bm_*` files, across every hook event this
-project wires (`python3 tools/bm_project_facts.py --field hook_events` lists
-them; `docs/SETUP.md` explains what each one does).
-
-**Per project.** Measured 2026-07-26 by actually installing, using, and then
-removing this skill in a scratch project: for every project where you ran
-it, it leaves behind
-
-- `.brothermode/store.sqlite3` (plus `-wal` and `-shm` sidecar files while a
-  session is open). This is the file `SECURITY.md` calls the raw sensitive
-  artifact: your objectives, decisions, and directives as you typed them,
-  before redaction.
-- `threads/`, including `threads/thread-mode.json` and a
-  `threads/<name>-<id>/` folder (`STATE.md`, `inbox.md`, `outbox.md`,
-  `digest.md`) for every thread you ever started, completed or not.
-- `STATE.md` at your project root, plus one `STATE.md.bak-<timestamp>` file
-  for every time it was regenerated (it is backed up before every rewrite,
-  by design, so these accumulate).
-- Local git refs under `refs/brothermode/autosave/...`, written by the
-  PreCompact hook. These live inside `.git` and are not touched by deleting
-  any of the files above.
-- Three lines in that project's `.git/info/exclude` (`.brothermode/`,
-  `threads/`, `STATE.md`), added by `bm_store.py init` so none of the above
-  is committed by accident. Harmless to leave, but they are this project's
-  lines, not git's own.
-
-To remove all of it, run this from the project root (run `git status` first
-if you want to see what is there before it goes; none of this touches your
-own tracked files):
-
-```bash
-git for-each-ref --format='%(refname)' refs/brothermode | \
-  while read -r ref; do git update-ref -d "$ref"; done
-rm -rf .brothermode threads STATE.md STATE.md.bak-*
-grep -vxE '\.brothermode/|threads/|STATE\.md' .git/info/exclude \
-  > .git/info/exclude.tmp && mv .git/info/exclude.tmp .git/info/exclude
-```
-
-Verified 2026-07-26 in a scratch project: after those three commands plus
-deleting the skill folder, `git status` reports a clean working tree with no
-BrotherMode trace, and `git for-each-ref` shows no `refs/brothermode/*`
-entries left.
-
-Your vault (default `~/BrotherModeVault`) is a separate, ordinary folder: none
-of the above touches it, and it is yours to keep or delete on its own, per
-project or entirely.
-
-## Evidence: gates, receipts, and the docs suite
-
-**The gate.** To check that the tools do what they claim mechanically (secret
-redaction, owner-only file permissions on POSIX, no silent overwrite between
-two writers), run it yourself rather than trusting this page:
-
-```bash
-python3 tools/test_all.py
-```
-
-Expect it to end `ALL GREEN` and exit 0. It runs every suite serially, in its
-own process each, and is the command this project actually gates on. It takes
-several minutes; that is the real cost of the isolation, not a hang. Individual
-suites still run on their own (`python3 tools/test_bm_store.py` and so on) when
-you are working on one of them; a single suite passing is not the gate.
-
-**No test count is quoted on this page, on purpose.** Counts move with every
-test that lands, and a reader who sees a mismatch cannot tell a stale page from
-a broken install, which is exactly backwards. If you want the suite list rather
-than the count, `python3 tools/bm_project_facts.py` prints it from
-`tools/test_all.py` itself. Exact counts, tied to the date and the commit they
-were true of, live in `CHANGELOG.md` and in the dated evidence files under
-`docs/`.
-
-**Receipts.** Approving a correction into a rule is one-time and
-receipt-gated: no part of this system, automatic capture included, can approve
-or promote its own candidate. The receipt proves an answer was supplied for
-this exact proposed rule and has not already been used; it does not
-cryptographically prove which human supplied the answer.
-
-**The docs suite.** `tools/test_bm_docs.py` is why this page can be trusted
-about itself. It refuses an active page that pins a test count, that claims a
-version other than the one `VERSION` holds, that states a hook count the
-installer does not wire, that clones the skill directory off a moving branch,
-that carries a capability block disagreeing with the register, or that uses a
-name the identity contract (`docs/brand/IDENTITY-CONTRACT.md`) does not allow
-there. Where this project stands as a whole is in `CHANGELOG.md`, and the
-current program baseline is
-[`docs/program/BASELINE-AFTER-HANDOVER-2026-08-04.md`](docs/program/BASELINE-AFTER-HANDOVER-2026-08-04.md).
-
-## Safety, privacy, and cost
-
-**Your data stays on your disk.** There is no account, no server and no
-subscription. The project claims it makes no network calls; do not take that on
-faith, it is checkable in under a minute:
-
-```bash
-cd ~/.claude/skills/brothermode
-grep -rnE "^[[:space:]]*(import|from)[[:space:]]+(urllib|http|socket|requests|ftplib|smtplib|telnetlib|xmlrpc)\b" tools/*.py
-```
-
-Expected: no output. That is the check that matters, because a network call
-needs an import, and `tools/test_bm.py` enforces exactly this ban on every
-shipping module in `tools/` so it cannot regress quietly.
-
-The broader keyword sweep is worth running too, as long as you read its output
-rather than expecting silence:
-
-```bash
-grep -rnE "urllib|requests|socket|http|curl|wget" tools/*.py tools/*.sh | grep -v "^tools/test_"
-```
-
-Expect a handful of hits, and expect every one of them to be a URL written down
-rather than a URL fetched: vendor documentation links in comments and in the
-runtime registry's source table, which records where each runtime fact was read
-and on what date. Read the hits by KIND, not by count: what would matter is an
-import of `urllib` or `requests`, or a `socket`, `curl` or `wget` invocation,
-and the sweep shows none. Counting them here instead was a mistake, corrected
-on 2026-08-02: this paragraph claimed two lines while the sweep returned
-fifteen, which is the worst place in the document to be wrong, because it sits
-in the section inviting you to distrust us and check. The `test_` files are
-excluded because they deliberately contain these words in fixture data and in
-the test that enforces the ban above. The one thing that shells out at all is
-the autosave mechanism, and it only ever calls local `git`, never a network
-command; `grep -rn subprocess tools/*.py tools/*.sh | grep -v test_` shows
-exactly where.
-
-**Telemetry is consent-gated.** Nothing is recorded until you say yes:
-`scripts/setup.py` writes the consent record, `tools/bm_telemetry.py` is the
-only writer, and `tools/test_bm_consent.py` refuses a write without consent.
-What it records is your own session cost, and it stays on your disk with
-everything else.
-
-**The risky moments stay yours.** Sign-ins, payments, publishing and deletions
-are prepared and handed back rather than performed; credentials are never
-typed. Cutting and publishing a release is a founder-gated sequence in
-`docs/RELEASE.md`, and the suite skips the release checks until a human has cut
-the tag. `SECURITY.md` states the data model, including which file holds your
-raw text before redaction.
-
-**Cost.** The money you spend is Claude Code's own token cost, and the
-telemetry hook is what tells you what a session actually spent, per session,
-instead of leaving you to guess at the end of the month.
-
-## Where other tools are better
-
-Fair is more useful than flattering, so: this is not the right tool for every
-job, and two categories beat it outright today. What is said about a peer below
-is a desk assessment, read from that project's own public material, because no
-file in this tree can carry evidence about a codebase this project does not
-own. What is said about BrotherMode traces to a file named beside it. The
-longer comparison, peer by peer and dimension by dimension, is
-[`docs/market/CATEGORY.md`](docs/market/CATEGORY.md).
-
-**Hosted agent platforms** that run in a browser and deploy for you get a
-working URL with far less setup than this. There is no BrotherMode hosting, no
-deploy button and no preview environment; the register above marks deployment
-previews and the web delivery lane experimental, meaning not measured. If your
-goal is a live site tonight and you do not care where the work is recorded,
-start there.
-
-**Coding runtimes such as Cline** execute across more tool surfaces today than
-this project gates. BrotherMode's gates are machinery on Claude Code and
-advisory instruction files everywhere else, where they fail open rather than
-lock you out; `docs/RUNTIMES.md` carries the capability table saying which
-runtime has hook points and where the hooks are verified.
-
-No score, ranking or benchmark percentage appears here, in either direction:
-the shared run that would earn one has not happened, and the register above
-says so by marking the benchmark harness experimental.
-
-What this trades those things for is the record: one writer per file refused by
-a hook for the write tools it can see (and detected, not contained, beyond
-them), a check that has to run after the last change before anything is called
-done, and a written trail you can read afterwards. That trade is worth it when
-the work matters more than the demo, and it is a bad trade when it does not.
-
-Also not here, and not planned: a distributed lock service, multi-machine
-coordination, or an organization-wide governance layer. Those serve a different
-kind of user than the one this project is built for, and adding them would cost
-the simplicity that makes this useful for one person. It is built to scale down
-to one person doing the work of several roles, not up to a team: there is no
-shared server, no account system and no multi-user coordination layer. Handing
-a project to a teammate occasionally is supported (`bm_telemetry.py handoff`);
-running this as a control plane for several people at once is not what it is
-for.
-
-## Under the hood, and what is not proven yet
-
-Read the limits before the features. Two registers hold them, and both are
-believed over this page when they disagree with it:
-[`docs/KNOWN-LIMITS.md`](docs/KNOWN-LIMITS.md), which is what is not proven,
-and [`docs/NOT-FINALIZED.md`](docs/NOT-FINALIZED.md), the numbered defect
-register with its status words defined at the top. They are not restated here,
-because a second copy of a limits list is a copy that goes stale.
-
-The mechanics, if you want them: [`docs/HOW-IT-WORKS.md`](docs/HOW-IT-WORKS.md)
-explains the tools that run today, [`docs/HOOKS.md`](docs/HOOKS.md) explains
-what each hook receives and what the fence can refuse,
-[`docs/CONTINUITY.md`](docs/CONTINUITY.md) states what a session owes the next
-one when it ends with work still open, and
-`docs/BrotherMode-Design-Document.pdf` is the whitepaper: philosophy, code,
-data flow and cost.
-
-### The booklet: the long-form explanation of this project
-
-[`docs/book/brothermode-solo-builder-booklet.html`](docs/book/brothermode-solo-builder-booklet.html)
-is the official long-form explanation of what this is and whether it is worth
-your overhead. It is one self-contained file: no script, no external font, no
-network request, so it opens by double clicking it and keeps working offline.
-
-It is written for a solo founder or individual contributor deciding whether to
-adopt this, and it is ordered pain first. What goes wrong when you hand serious
-work to Claude, what relieves that immediately, what stops it coming back, and
-only then the machinery. Five acts, nineteen diagrams, and a language toggle at
-the top: the whole booklet exists in English and Japanese, prose and diagram
-labels alike.
-
-Three blocks in it are real captured output rather than mock-ups: the
-eight-field status, the section headings of a generated project page, and the
-node labels of the three drawings that page produced, taken by running a
-project through `tools/brothermode_cli.py` against a throwaway repository and
-pasted exactly as printed.
-
-What it deliberately does not carry: any productivity number, because none has
-been measured; any test count, because counts move and a reader seeing a
-mismatch cannot tell a stale page from a broken install; and any ranking
-against another product, because the shared run that would earn one has not
-happened. It states its own limits in the same voice as this page, including
-that nobody outside this project has read it.
-
-`docs/book/brothermode-for-dummies.html` is a different book for a different
-reader, for someone who has never heard the word hook.
-[`docs/book/README.md`](docs/book/README.md) explains which is which, and why
-each remaining HTML file in this repository is still here.
-
-### What is in the box
-
-| File | What it does |
-|---|---|
-| `SKILL.md` | The law: numbered sections covering classification, delegation, fences, budgets, research, honesty, memory, scoring |
-| `DIGEST.md` | A short compression of the law, injected at every session start so the rules survive context loss |
-| `RUBRIC.md` | A template for the metrics a weekly review scores against |
-| `STATE.template.md` | The running state file format: fences, decisions, the never-forget list |
-| `tools/bm_telemetry.py` | The mechanical half of the learning loop: session telemetry, corrections capture, scorecard, nags |
-| `tools/bm_score.py` | Code-graded weekly checks, so an LLM judge only scores what code cannot decide |
-| `tools/bm_sessionstart.py` | Session-start hook: injects the digest, overdue-review nags, and a recovery pointer after a compaction. Python since 2026-08-17, so it runs on a machine with no POSIX shell |
-| `tools/bm_hookchain.py` | The hook chain driver: reads the payload once and hands it to each program in a named chain (Stop, PreCompact). Replaces the `sh -c` pipelines those two events used to run, which no Windows machine without Git Bash could execute |
-| `tools/bm_bbstatus.py` | The gate runner's reporting arm: routes a local gate verdict on the origin remote and posts a Bitbucket build status. The only module that makes a network write, never wired into a hook, documented in `SECURITY.md` |
-| `scripts/bm_ci_context.py` | Captures which revision a CI run is actually testing (source, destination, tested tree) and refuses a pull request run that cannot say, before the gate runs |
-| `tools/bm_autosave.py` | On the PreCompact hook, snapshots your whole working tree (untracked files included) to a private local git reference. Never pushes. `recover` restores it |
-| `tools/bm_threads.py` | Thread mode (opt-in): one persistent thread per key feature, plus a dashboard. Reversible mid-project |
-| `tools/bm_fence_hook.py` | The PreToolUse fence: the one hook that can REFUSE a write to a file another live session owns. Explained in `docs/HOOKS.md` |
-| `tools/bm_store.py`, `tools/test_bm_store.py` | The V2 storage engine and its tests, wired into the tools above since Phase 3 (2026-07-26) |
-| `tools/bm_project.py` | The project surface the guided commands drive: start, status, next, review, deliver, and the canonical objects behind them |
-| `tools/bm_learn.py` | The founder-facing correction-learning CLI: capture, approve, retrieve, grade. No direct database access, no automatic approval |
-| `tools/bm_packs.py` | Gate deep-dive packs: on demand, writes one markdown document per decision under `Documentation/30-decisions/`, with the code quoted live from disk, the callers and tests found by search, the rollback, and the review slots. A citation that no longer resolves fails the build rather than quoting stale code |
-| `tools/bm_docs.py` | The documentation engine: writes the numbered `Documentation/` folder from what is recorded, and renders the capability block on this page from `capabilities.status.json` |
-| `tools/bm_learning.py` | Pure helper functions the CLI and store share: normalization, hashing, ranking. No database, clock, or file access |
-| `tools/bm_project_facts.py` | Prints the facts documentation is allowed to state (version, release tag, schema version, hook events, suite list, Python floor), read out of the tree rather than typed into a page |
-| `tools/bm_runtimes.py` | Generates the instruction file that wires BrotherMode into another AI coding runtime (Codex CLI, GitHub Copilot, Google Antigravity, Qwen Code, iFlow CLI, or a generic AGENTS.md). Each generated file carries the vendor URL its convention was read from and the date it was read |
-| `tools/test_bm.py`, `tools/test_bm_autosave.py`, `tools/test_bm_fence_hook.py`, `tools/test_install.py`, `tools/test_bm_runtimes.py`, `tools/test_bm_docs.py` | The regression suites: the running tools, the autosave and its recovery, the fence hook, the installer, the runtime adapters, and the documentation facts. Standard library only |
-| `tools/test_all.py` | Runs every suite serially, one process each, with one exit code. The actual gate; read this before running any single suite by hand |
-| `tools/WEEKLY-REVIEW.md` | The weekly self-review procedure |
-| `scripts/install.py`, `scripts/uninstall.py` | Wire and unwire the hooks in `~/.claude/settings.json`, backing it up first, touching no hook entry they did not write |
-| `scripts/doctor.py` | Ten environment checks with plain-language remediation (table in docs/SETUP.md); the deepest proves the wired fence is LIVE by simulating a blocked foreign write and an allowed owner write in a throwaway project |
-| `docs/QUICKSTART.md` | The literal ten-minute path, with expected output at every step |
-| `docs/engineering/` | The engineering onboarding pack for a development team: a task-oriented README, one runnable first-project tutorial, the workflow map, the command reference, and the per-stage verification page. Ships as a standalone zip in the same folder |
-| `docs/SETUP.md` | The fuller installation and hooks reference |
-| `docs/HOOKS.md` | What each hook receives, what the fence can refuse, and the exact contract it implements |
-| `docs/RELEASE.md` | The release discipline: tags, checksums, and the steps a machine must refuse to take on its own |
-| `docs/HOW-IT-WORKS.md` | The mechanics of the tools that run today, explained exactly |
-| `docs/RUNTIMES.md`, `docs/runtimes/` | Running BrotherMode in other AI coding runtimes: the capability table and the generated adapter files. Both regenerated by `tools/bm_runtimes.py` |
-| `docs/CORRECTION-LEARNING.md` | The correction-learning system in plain language, with real command output and honest limits |
-| `docs/brand/IDENTITY-CONTRACT.md`, `product.identity.json`, `capabilities.status.json` | The names this project uses, and the register every claim on a page has to agree with |
-| `docs/KNOWN-LIMITS.md` | What is not proven yet. Read this before the rest |
-| `docs/NOT-FINALIZED.md` | The numbered defect and limits register, status words defined at the top |
-| `docs/BrotherMode-Design-Document.pdf` | The whitepaper: philosophy, the code, data flow and cost |
-| `CHANGELOG.md` | What changed release to release, and the known limits of each addition |
-| `vault-template/` | A ready-made memory vault folder: copy it and start working |
+For the resume contract those checks pin, read [docs/CONTINUITY.md](docs/CONTINUITY.md).
 
 ## License
 
-MIT. Use it, fork it, rewrite the law to fit how you work. `RUBRIC.md` ships
-as a template on purpose: measure your own baselines before freezing it.
-
-Created by Khalil Maaouni.
-
-## Part of Brother
-
-This product is one capability area of Brother, the umbrella that carries the
-shared chain, the verdict tuple and the evidence law across all three.
-
-Read COORDINATION.md in https://github.com/khalilmaaouni/Brother before adding
-a command, an agent, a hook, or a state vocabulary: the merge enforces surface
-caps and a single state vocabulary, and work that fails them will be deleted.
+MIT. See [LICENSE](LICENSE).

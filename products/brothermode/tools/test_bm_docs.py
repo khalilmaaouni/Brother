@@ -618,9 +618,19 @@ class TestOneInstall(unittest.TestCase):
     carry that line at all any more, which
     `test_no_active_page_clones_the_primary_skill_directory_unpinned` below
     now asserts directly, and the identical-everywhere claim moves to the
-    PINNED command that replaces it."""
+    PINNED command that replaces it.
 
-    CLONE = re.compile(r"^git clone .*BrotherModeUp\.git.*$", re.MULTILINE)
+    REPOINTED 2026-09-03: the standalone BrotherModeUp repository this
+    class's regex named went private and archived, so it can never again be
+    what a reader clones. The clone now names the Brother hub instead
+    (`tools/bm_project_facts.py`'s REPO_URL), and because the hub ships
+    several products, the pinned install command is now three lines, not
+    one: clone to a source checkout, change into `products/brothermode`,
+    run this product's own installer from there. The comparisons below moved
+    with it: they compare pages against `install_command_pinned` line by
+    line rather than as a single string."""
+
+    CLONE = re.compile(r"^git clone .*Brother\.git.*$", re.MULTILINE)
 
     def test_no_active_page_clones_the_primary_skill_directory_unpinned(self):
         offenders = []
@@ -641,7 +651,15 @@ class TestOneInstall(unittest.TestCase):
         docs/QUICKSTART.md and
         docs/SETUP.md, and must match what bm_project_facts.py generates: a
         page that hand types its own version of the pinned tag is exactly
-        the drift this loop exists to make impossible."""
+        the drift this loop exists to make impossible.
+
+        install_command_pinned is three lines since the M6/v1 repoint (clone
+        to a source checkout, cd into products/brothermode, run
+        scripts/install.py), so the clone LINE is checked the same way as
+        before (one regex match, one canonical value), and the other two
+        lines are checked the way test_the_generated_plugin_command_is_on
+        _every_install_page already checks a multi-line generated command:
+        each line, verbatim, on every page."""
         seen = {}
         for rel in INSTALL_DOCS:
             for line in self.CLONE.findall(read(rel)):
@@ -651,11 +669,22 @@ class TestOneInstall(unittest.TestCase):
             len(seen), 1,
             "the install pages disagree about the pinned clone command: %s"
             % json.dumps(seen, indent=2, sort_keys=True))
+        pinned_lines = FACTS["install_command_pinned"].split("\n")
         self.assertEqual(
-            list(seen)[0], FACTS["install_command_pinned"],
+            list(seen)[0], pinned_lines[0],
             "the pinned clone command on the install pages does not match "
             "the one bm_project_facts.py generates; it was hand typed "
             "rather than copied from the tool")
+        offenders = []
+        for line in pinned_lines[1:]:
+            for rel in INSTALL_DOCS:
+                if line not in read(rel):
+                    offenders.append("%s: %s" % (rel, line))
+        self.assertEqual(
+            offenders, [],
+            "an install page does not carry the cd / installer line(s) "
+            "bm_project_facts.py generates alongside the pinned clone: %s"
+            % "; ".join(offenders))
 
     def test_the_pinned_install_uses_the_public_install_target_tag(self):
         """The pinned tag is install_target_tag, not release_tag: the public
@@ -744,35 +773,49 @@ class TestPluginMarketplacePin(unittest.TestCase):
     (the marketplace add) tracked the repository's moving default branch,
     while only the pinned git-clone install was auditable. For code whose
     hooks run on every future session, the easiest path and the most
-    auditable path should not be different ones. Anthropic's plugin
-    marketplace format resolves an `owner/repo@ref` marketplace source to a
-    fixed branch or tag on every add and every later refresh (the CLI
-    reference for `claude plugin marketplace add`,
-    https://code.claude.com/docs/en/plugin-marketplaces), which is the
-    mechanism `docs/RELEASE.md` step 2b and the three install pages now use.
+    auditable path should not be different ones. That defect was closed by
+    pinning the marketplace add to a tag in the standalone BrotherModeUp
+    repository.
 
-    Mirrors TestOneInstall's shape for the git-clone pin: one test that no
-    active page adds the marketplace unpinned, one that the pinned line is
-    byte identical everywhere it appears, and one, the requirement this
-    class exists for, that FAILS the moment a page's pin disagrees with
-    install_target_tag."""
+    REPOINTED 2026-09-03, and the pin came off rather than moving with the
+    repository. BrotherModeUp went private and archived; the marketplace add
+    now names the Brother hub, which ships several products (this one,
+    BrotherSBE, and the umbrella bundle) on its own release cadence, and
+    `README.md`'s `## Install` section (a different lane's file, not
+    repointed here) already added it unpinned by design: a moving default
+    branch feeding auto-run code is no longer this route's only guarantee,
+    because the PINNED, auditable route now lives in the git-clone install
+    (`TestOneInstall`), which still resolves to an immutable tag even though
+    it clones a different repository than it used to. Requiring a SECOND
+    independent pin here, on a hub with its own gates and a separate release
+    process, would fight a decision this file does not own rather than
+    protect a reader; what still matters, and what this class still checks,
+    is that the marketplace add and the plugin install are not silently
+    hand typed differently on three different pages."""
 
     MARKETPLACE_ADD = re.compile(
-        r"^claude plugin marketplace add khalilmaaouni/BrotherModeUp\S*$",
+        r"^claude plugin marketplace add khalilmaaouni/Brother\S*$",
         re.MULTILINE)
+    INSTALL_LINE = re.compile(
+        r"^claude plugin install brothermode@\S+$", re.MULTILINE)
 
-    def test_no_active_page_adds_the_marketplace_unpinned(self):
+    def test_the_marketplace_add_is_unpinned_by_design_and_names_the_hub(self):
+        """Mirrors the shape of the old DEFECT A test, inverted: the design
+        decided unpinned is correct here (see class docstring), so this
+        checks the marketplace add names the hub, generated from REPO_URL
+        rather than hand typed, not that it carries a tag."""
+        owner_repo = bpf._owner_repo(FACTS["repo_url"])
         offenders = []
-        for rel in ACTIVE_DOCS:
+        for rel in INSTALL_DOCS:
             for line in self.MARKETPLACE_ADD.findall(read(rel)):
-                if "@" not in line:
+                if line.strip() != "claude plugin marketplace add %s" % owner_repo:
                     offenders.append("%s: %s" % (rel, line.strip()))
         self.assertEqual(
             offenders, [],
-            "an active page adds the marketplace with no ref pinned, which "
-            "tracks the repository's moving default branch and auto-installs "
-            "hooks that then run in every future session with no signal "
-            "anything changed: %s" % "; ".join(offenders))
+            "an install page's marketplace add does not name %s (derived "
+            "from tools/bm_project_facts.py's REPO_URL), or carries a pin "
+            "this design does not use: %s"
+            % (owner_repo, "; ".join(offenders)))
 
     def test_the_marketplace_add_line_is_identical_on_every_install_page(self):
         seen = {}
@@ -781,53 +824,29 @@ class TestPluginMarketplacePin(unittest.TestCase):
                 seen.setdefault(line.strip(), []).append(rel)
         self.assertEqual(
             len(seen), 1,
-            "the install pages disagree about the pinned marketplace add "
+            "the install pages disagree about the marketplace add "
             "command: %s" % json.dumps(seen, indent=2, sort_keys=True))
 
-    def test_the_marketplace_pin_matches_install_target_tag(self):
-        """THE DEFECT A TEST: a pin that disagrees with install_target_tag
-        (the same fact the pinned git-clone command is checked against) must
-        fail here, not pass silently. install_target_tag, not VERSION, is
-        deliberately the comparison: rule 5 of the version law pins public
-        install instructions to the last tag known to actually resolve,
-        independent of whatever identity VERSION carries mid-development."""
-        offenders = []
+    def test_the_install_line_is_identical_on_every_install_page(self):
+        """The `claude plugin install brothermode@<marketplace>` line, same
+        invariant as the marketplace add above: one canonical value, byte
+        identical on every install page. Not checked against
+        FACTS["install_command_plugin"]: that field is generated from
+        product.identity.json's marketplace_id (`brothermode-marketplace`),
+        which still names the retired standalone-repository marketplace and
+        disagrees with the hub's real one (`brother`, see
+        `.claude-plugin/marketplace.json` at the hub root). Fixing that is
+        outside this repoint's file list (docs/RELEASE.md's v1.0.0 section
+        names the gap); until then this test holds the pages to each other,
+        which is the invariant a reader actually depends on."""
+        seen = {}
         for rel in INSTALL_DOCS:
-            for line in self.MARKETPLACE_ADD.findall(read(rel)):
-                m = re.search(r"@(\S+)$", line)
-                tag = m.group(1) if m else None
-                if tag != FACTS["install_target_tag"]:
-                    offenders.append("%s pins %r" % (rel, tag))
+            for line in self.INSTALL_LINE.findall(read(rel)):
+                seen.setdefault(line.strip(), []).append(rel)
         self.assertEqual(
-            offenders, [],
-            "a page pins the marketplace add to a ref that disagrees with "
-            "install_target_tag (%s): %s"
-            % (FACTS["install_target_tag"], "; ".join(offenders)))
-
-    def test_the_generated_plugin_command_is_on_every_install_page(self):
-        """THE DEFECT THIS TEST ADDS A CHECK FOR, 2026-08-08: the two tests
-        above hold the PAGES to install_target_tag and to each other, and the
-        pinned git clone is held to what bm_project_facts.py generates, but
-        nothing held the tool's own install_command_plugin to anything. It
-        went through the v3 rename untouched and printed
-        `claude plugin install brotherme@brotherme-marketplace` (a plugin id
-        that no longer exists) while all three pages had moved, which is the
-        worst direction for this drift to run: the tool is what a page or a
-        script is supposed to copy from.
-
-        Line by line rather than as one block, because docs/QUICKSTART.md
-        deliberately splits the two commands into separate fences with prose
-        between them."""
-        offenders = []
-        for line in FACTS["install_command_plugin"].split("\n"):
-            for rel in INSTALL_DOCS:
-                if line not in read(rel):
-                    offenders.append("%s: %s" % (rel, line))
-        self.assertEqual(
-            offenders, [],
-            "an install page does not carry the plugin install command "
-            "bm_project_facts.py generates; one of the two was hand typed: %s"
-            % "; ".join(offenders))
+            len(seen), 1,
+            "the install pages disagree about the plugin install "
+            "command: %s" % json.dumps(seen, indent=2, sort_keys=True))
 
     def test_the_generated_plugin_command_names_the_declared_ids(self):
         """install_command_plugin is assembled from product.identity.json, so
@@ -1096,7 +1115,7 @@ class TestReleaseTruth(unittest.TestCase):
         checked_any = False
         for rel in INSTALL_DOCS:
             text = read(rel)
-            for line in re.findall(r"^git clone .*BrotherModeUp\.git.*$", text,
+            for line in re.findall(r"^git clone .*Brother\.git.*$", text,
                                    re.MULTILINE):
                 if not _clones_primary_dir(line):
                     continue
