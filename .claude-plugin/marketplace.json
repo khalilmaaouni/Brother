@@ -1,0 +1,52 @@
+{
+  "name": "brother",
+  "owner": {
+    "name": "Khalil Maaouni"
+  },
+  "metadata": {
+    "description": "Marketplace for the Brother suite: execution provenance and the guided beginner surface, plus change assurance with hard gates. M6 cutover: both products and the bundle ship from this one repository now.",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "brothermode",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/khalilmaaouni/Brother",
+        "path": "products/brothermode",
+        "ref": "v1.0.0"
+      },
+      "description": "Turn an idea into a verified result with a guided start, honest forecasts, clear status, and a checked delivery.",
+      "version": "3.4.4",
+      "author": {
+        "name": "Khalil Maaouni"
+      },
+      "category": "productivity"
+    },
+    {
+      "name": "brothersbe",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/khalilmaaouni/Brother",
+        "path": "products/brothersbe",
+        "ref": "v1.0.0"
+      },
+      "description": "A senior backend and data engineering colleague. Change assurance with hard gates, where absent evidence is NO-DATA and never a pass.",
+      "version": "3.7.3",
+      "author": {
+        "name": "Khalil Maaouni"
+      },
+      "category": "engineering"
+    },
+    {
+      "name": "brother",
+      "source": "./bundle",
+      "description": "One install, one door. Say what you are trying to do and Brother routes it: proving a change safe before it ships, or running a project to a checked delivery.",
+      "version": "1.0.0",
+      "author": {
+        "name": "Khalil Maaouni"
+      },
+      "category": "productivity"
+    }
+  ]
+}

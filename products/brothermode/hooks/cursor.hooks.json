@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "_comment": "TEMPLATE. scripts/install_cursor.py and bm-cursor emit-hooks write the real file with absolute paths. Do not copy this into ~/.cursor/hooks.json with the placeholder still in it.",
+  "hooks": {
+    "preToolUse": [
+      {
+        "command": "python3 \"${BROTHERMODE_ROOT}/tools/bm_cursor_hook.py\" preToolUse",
+        "matcher": "Write|Shell|Delete|Edit",
+        "timeout": 10
+      }
+    ],
+    "beforeShellExecution": [
+      {
+        "command": "python3 \"${BROTHERMODE_ROOT}/tools/bm_cursor_hook.py\" beforeShellExecution",
+        "timeout": 10
+      }
+    ],
+    "postToolUse": [
+      {
+        "command": "python3 \"${BROTHERMODE_ROOT}/tools/bm_cursor_hook.py\" postToolUse",
+        "matcher": "Shell",
+        "timeout": 15
+      }
+    ],
+    "afterShellExecution": [
+      {
+        "command": "python3 \"${BROTHERMODE_ROOT}/tools/bm_cursor_hook.py\" afterShellExecution",
+        "timeout": 15
+      }
+    ],
+    "afterFileEdit": [
+      {
+        "command": "python3 \"${BROTHERMODE_ROOT}/tools/bm_cursor_hook.py\" afterFileEdit",
+        "timeout": 10
+      }
+    ],
+    "sessionStart": [
+      {
+        "command": "python3 \"${BROTHERMODE_ROOT}/tools/bm_cursor_hook.py\" sessionStart",
+        "timeout": 30
+      }
+    ],
+    "preCompact": [
+      {
+        "command": "python3 \"${BROTHERMODE_ROOT}/tools/bm_cursor_hook.py\" preCompact",
+        "timeout": 60
+      }
+    ],
+    "stop": [
+      {
+        "command": "python3 \"${BROTHERMODE_ROOT}/tools/bm_cursor_hook.py\" stop",
+        "timeout": 30
+      }
+    ]
+  }
+}

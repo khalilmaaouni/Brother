@@ -1,0 +1,18 @@
+{
+  "name": "brothermode",
+  "version": "3.4.4",
+  "description": "Turn an idea into a verified result with a guided start, honest forecasts, clear status, and a checked delivery. Verified on Claude Code; the plugin install is proven end to end by scripts/release-smoke-install.sh, and the tagged git clone remains the immutable option for auditors.",
+  "author": {
+    "name": "Khalil Maaouni"
+  },
+  "homepage": "https://github.com/khalilmaaouni/Brother",
+  "repository": "https://github.com/khalilmaaouni/Brother",
+  "license": "MIT",
+  "keywords": [
+    "orchestration",
+    "project-management",
+    "delivery",
+    "forecasting",
+    "beginner-friendly"
+  ]
+}

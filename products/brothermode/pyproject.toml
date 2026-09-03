@@ -1,0 +1,475 @@
+# BrotherMode packaging metadata (PEP 621).
+#
+# What this buys: `pipx install brothermode`, `uv tool install brothermode`,
+# or `pip install brothermode` puts the tool commands on PATH without the
+# founder cloning a repository or knowing where the Python files live.
+#
+# Three deliberate choices, each of which someone will want to change later,
+# so the reason is recorded here rather than in a commit message.
+#
+# 1. No dependencies. Not "few": none. Every shipping tool is standard
+#    library only, which is an invariant of this project rather than an
+#    accident, so the dependency list stays empty and any future addition is
+#    a decision the founder makes on purpose.
+#
+# 2. Flat top-level modules, not a package. The tools load each other by
+#    absolute path off their own directory (importlib against
+#    os.path.dirname(__file__)) rather than by import name, precisely so a
+#    hostile sys.path cannot shadow bm_store. Wrapping them in a package
+#    would mean rewriting that loader in every file. Instead the modules
+#    install side by side exactly as they sit in tools/, and the loader
+#    keeps working unchanged. The cost is real and named in
+#    docs/PACKAGING.md: 13 bm_* names land at the top level of the
+#    environment's site-packages. The figure was already stale at nine
+#    when the documentation engine landed on 2026-07-30; it is the length
+#    of the py-modules list below, which is the only thing that decides
+#    it.
+#
+# 3. Console scripts cover the CLIs, not the hooks. bm_autosave and
+#    bm_fence_hook ship as modules so a packaged install has them, but they
+#    get no console script: Claude Code hooks are wired by explicit command
+#    path in settings.json, and a name on PATH is not what that wiring
+#    wants.
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "brothermode"
+version = "3.4.4"
+description = "A Claude Code skill and toolchain that makes an AI coding session behave like a colleague: durable memory, single-writer fences, honest reporting."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+authors = [{ name = "Khalil Maaouni" }]
+keywords = ["claude", "claude-code", "agent", "skill", "memory", "orchestration"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS :: MacOS X",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/khalilmaaouni/BrotherModeUp"
+Source = "https://github.com/khalilmaaouni/BrotherModeUp"
+Changelog = "https://github.com/khalilmaaouni/BrotherModeUp/blob/main/CHANGELOG.md"
+
+[project.scripts]
+brothermode = "brothermode_cli:cli"
+bm-store = "bm_store:main"
+bm-threads = "bm_threads:main"
+bm-telemetry = "bm_telemetry:main"
+bm-learn = "bm_learn:cli"
+bm-packs = "bm_packs:cli"
+bm-docs = "bm_docs:cli"
+bm-docs-export = "bm_docs_export:cli"
+bm-runtimes = "bm_runtimes:cli"
+bm-score = "bm_score:cli"
+bm-project = "bm_project:cli"
+bm-ledger = "bm_ledger:main"
+bm-sentinel = "bm_sentinel:main"
+bm-autonomy = "bm_autonomy:cli"
+bm-controller = "bm_controller:cli"
+bm-lead = "bm_lead:cli"
+bm-view = "bm_view:cli"
+bm-statusline = "bm_statusline:main"
+bm-cursor = "bm_cursor:cli"
+
+[tool.setuptools]
+# "" (the root) maps to tools/, where every flat py-module below lives.
+# brotherme is a real package (brotherme/, brotherme/core/) that sits next
+# to tools/ at the repo root, not inside it, so it needs its own mapping;
+# without this second entry setuptools looks for it at tools/brotherme and
+# finds nothing (reproduced: built wheel lists brotherme/ zero times
+# without this line, three times with it).
+package-dir = { "" = "tools", "brotherme" = "brotherme" }
+# Explicit list, never a wildcard. A wildcard would sweep in test_*.py and
+# would also silently ship whatever new file lands in tools/ next. Adding a
+# module here is a decision, and the packaging test in tools/test_bm.py
+# fails if this list and the shipping tools in tools/ disagree.
+py-modules = [
+    "bm_bench",
+    "bm_passport",
+    "bm_passport_validator",
+    "brothermode_cli",
+    "bm_continue",
+    "bm_store",
+    "bm_reconcile",
+    "bm_reconcile_worktrees",
+    "bm_release_invariant",
+    "bm_learning",
+    "bm_learn",
+    "bm_packs",
+    "bm_docs",
+    "bm_docs_export",
+    "bm_score",
+    "bm_telemetry",
+    "bm_threads",
+    "bm_runtimes",
+    "bm_autosave",
+    "bm_fence_hook",
+    "bm_bash_audit",
+    "bm_project_facts",
+    "bm_project",
+    "bm_ledger",
+    "bm_handover",
+    "bm_sentinel",
+    "bm_session_cap",
+    "bm_autonomy",
+    "bm_controller",
+    "bm_lead",
+    "bm_visual",
+    "bm_view",
+    "bm_hookbench",
+    "bm_statusline",
+    "bm_lint_walltime",
+    "bm_progress_check",
+    "bm_effects",
+    "bm_escalate",
+    "bm_stall",
+    "bm_messages",
+    "bm_forecast",
+    "bm_idle",
+    "bm_toolkit",
+    # 2026-08-28, the vault memory tooling. All eight arrived because the
+    # packaging gate REFUSED them, which is the reason that list is checked
+    # rather than trusted: every one of these is a plain module in tools/, so
+    # a pipx or pip install that does not name them here simply does not have
+    # them. vault_recall_hook ships as a module and gets no console script,
+    # for the same reason bm_autosave and bm_fence_hook do not: a Claude Code
+    # hook is wired by explicit command path in settings.json, and a name on
+    # PATH is not what that wiring wants.
+    "bm_vault",
+    "bm_vault_catalog",
+    "bm_vault_graph",
+    "bm_private_scan",
+    "bm_memory_budget",
+    "bm_gate",
+    "bm_embed_bge",
+    "vault_recall_hook",
+    # 2026-08-29, the vault writer lock. Arrived on the branch without a
+    # declaration, which the packaging gate refused: a module in tools/ that
+    # pyproject does not name is simply absent from a pipx or pip install, and
+    # both bm_vault_catalog and the pre-commit hook resolve this one at runtime.
+    "bm_vault_lock",
+    # 2026-08-29, the memory ceremony. Same gap as bm_vault_lock right above,
+    # caught the same way: the packaging gate refuses a module in tools/ that
+    # pyproject does not name, because that is exactly what a pipx or pip
+    # install would silently omit.
+    "bm_vault_distill",
+    # 2026-08-29, WBS 16 and WBS 9: the typed-edge traversal lives inside the existing
+    # bm_vault_graph module (no new file), but bm_vault_promote is a new one and needs
+    # its own declaration for the same reason the two entries right above do.
+    "bm_vault_promote",
+    # 2026-08-29, benchmark row D05: stable note identity. Declared in the
+    # same change that lands it, because every entry above this one arrived
+    # only after the packaging gate refused it.
+    "bm_vault_ids",
+    # 2026-08-29, D09: the bi-temporal contract, reading half.
+    "bm_vault_temporal",
+    # 2026-08-29, D08: the authority contract and comparator.
+    "bm_vault_authority",
+    # 2026-08-30, D07: claim-level provenance, the tooling half.
+    "bm_vault_provenance",
+    # 2026-08-29, D12: the lifecycle state machine (candidate to canonical).
+    "bm_vault_lifecycle",
+    # 2026-08-30, D12 part B: the write side, recording a promotion the
+    # contract above already decided is legal. Named promotionS, not
+    # promote, because bm_vault_promote already means the WBS 9 nudge
+    # counter and this module must not collide with it.
+    "bm_vault_promotions",
+    # 2026-08-30, VB10-04: the LLM enrichment lane, a machine-drafted candidate
+    # filed through the same intake gate and the same promotion field as
+    # every other note. Declared in the same change that lands it.
+    "bm_vault_enrich",
+    # 2026-08-30, D14: the entity layer, an ontology of things rather than a
+    # taxonomy of pages. Declared in the same change that lands it.
+    "bm_vault_entity",
+    # 2026-08-30, D06: the crosswalk, many source-IDs denoting one entity.
+    # Declared in the same change that lands it.
+    "bm_vault_crosswalk",
+    # 2026-08-30, D13: retention and deletion propagation (census and
+    # targeted propagate over the retrieval index's derived tables).
+    "bm_vault_retention",
+    # 2026-08-30, VB2-06: staleness and consolidation, the reading half.
+    # A note's verified_at (bm_vault_temporal's field) ages past its class
+    # horizon and demotes its own authority rank in bm_vault's recall sort.
+    "bm_vault_staleness",
+    # 2026-08-30, VB2-01: permission-aware retrieval. The access policy
+    # contract: recall trims by querying identity before content is served,
+    # and a withheld note is counted, never named.
+    "bm_vault_policy",
+    # 2026-08-30, D09 part B: the as-of query, a fact asked what it was at a
+    # past instant. Missed at its own merge (the packaging gate caught it on
+    # two independent branches); declared here rather than left as the red
+    # every tree inherits.
+    "bm_vault_asof",
+    # 2026-08-30, VB2-05: the answer ledger, what a recall actually read.
+    # Same miss, same gate, same fix.
+    "bm_vault_ledger",
+    # 2026-08-30, VB6-08: the interchange replay contract (payload-free
+    # events, idempotency, out-of-order tolerance, corrections, tombstones).
+    # Declared in the same change that lands it, same packaging-gate lesson
+    # as every entry above.
+    "bm_vault_events",
+    # 2026-08-30, VB4-04: the frontmatter schema linter. Required fields per
+    # type, id format, ISO dates, the authority/lifecycle vocabularies and
+    # duplicate-field detection, closing the gap bm_vault_graph's status/type
+    # enum check leaves open. Declared in the same change that lands it, per
+    # the same packaging-gate lesson as every entry above.
+    "bm_vault_lint",
+    # 2026-08-30, VB2-02: the vault answers over the wire. A localhost-first
+    # HTTP front on the real recall subprocess; declared in the same change
+    # that lands it, same packaging-gate lesson as every entry above.
+    "bm_vault_serve",
+    # 2026-08-31, VB3-03: RequestContext and tenancy for the served vault --
+    # the immutable per-request id and the tenant-to-subprocess-env seam
+    # bm_vault_serve.py composes with. Declared in the same change that
+    # lands it, same packaging-gate lesson as every entry above.
+    "bm_vault_context",
+    # 2026-08-30, VB4-02: the typed-edge curation queue and its three
+    # finders (duplicate titles, Jaccard link prediction, co-citation).
+    # Declared in the same change that lands it, same lesson as above.
+    "bm_vault_curate",
+    # 2026-08-29, the W9 controller train plus the freshness half of WBS 17.
+    # All four arrived the same way every entry above this one did: the
+    # packaging gate REFUSED them, because a module in tools/ that pyproject
+    # does not name is simply absent from a pipx or pip install. bm_freshness
+    # is the one that matters most here, because the point-of-need memory hook
+    # resolves it at runtime through bm_vault, so an install missing it has a
+    # memory path that cannot classify anything.
+    "bm_freshness",
+    "bm_plan",
+    "bm_recurrence",
+    "bm_verify",
+    "bm_repair",
+    "bm_summary",
+    "bm_worker_spawn",
+    # 2026-08-20, A5: the smallest verified-reality record. No console
+    # script, matching bm_passport (its own closest structural sibling,
+    # a tool this loop reads as its style template): both are invoked as
+    # `python3 <path>/bm_reality.py <verb>`, never a bare `bm-reality`.
+    "bm_reality",
+    # 2026-08-17, the two-host law and the Windows hook port. All three
+    # arrived because the packaging gate REFUSED them, which is the whole
+    # reason that list is checked rather than trusted: bm_bbstatus is the
+    # gate runner's reporting arm, and bm_sessionstart and bm_hookchain are
+    # the two hook entry points that used to be POSIX shell and are now
+    # Python, so for the first time they are modules a packaged install can
+    # even carry.
+    "bm_bbstatus",
+    "bm_sessionstart",
+    "bm_hookchain",
+    "bm_cursor",
+    "bm_cursor_hook",
+    # ADDED 2026-08-29. Eight tools shipped in tools/ that a pipx or pip
+    # install would NOT have delivered, found by measuring the two sets
+    # directly rather than reading the test message, which showed only
+    # one of the eight because unittest truncates a set difference.
+    # Three of them are the worker, the verifier and the repair loop.
+    "bm_freshness",
+    "bm_plan",
+    "bm_queue_numbers",
+    "bm_recurrence",
+    "bm_repair",
+    "bm_summary",
+    "bm_verify",
+    "bm_worker_spawn",
+    # 2026-08-30, the MCP connector catalog. Declared in the same change
+    # that lands it, because every module above arrived only after the
+    # packaging gate refused it: a module in tools/ that pyproject does
+    # not name is simply absent from a pipx or pip install.
+    "bm_connectors",
+    # 2026-08-30, same day: the local mock MCP server bm_connectors.py's
+    # conformance subcommand spawns as a subprocess. Same reasoning as
+    # bm_connectors right above; declared in the same change that lands it.
+    "bm_mock_mcp",
+    # 2026-08-30, VB4-06: split and merge. Landed without a declaration and
+    # the packaging gate refused it on main, same lesson as every entry
+    # above: a module in tools/ that pyproject does not name is absent from
+    # a pipx or pip install.
+    "bm_vault_compose",
+    # VB3-13, 2026-08-31: derived memory cannot declassify. Declared in the
+    # same change that lands it, same packaging-gate lesson as every entry
+    # above.
+    "bm_vault_labels",
+    # VB7-04: the access audit, every recall records its principal. Declared
+    # in the same change that lands it, same packaging-gate lesson as every
+    # entry above.
+    "bm_vault_audit",
+    # 2026-08-30, VB7-01: the vault front door. One CLI routing to the 25+
+    # bm_vault_* tools plus a read-only doctor. Declared in the same change
+    # that lands it, same packaging-gate lesson as every entry above.
+    "bm_vault_cli",
+    # 2026-08-30, VB6-05: scope-first contradiction triage, report-only.
+    # Declared in the same change that lands it, same packaging-gate lesson
+    # as every entry above: a module in tools/ that pyproject does not name
+    # is absent from a pipx or pip install.
+    "bm_vault_triage",
+    # 2026-08-30, VB6-01: the intake airlock, the one front door for content
+    # entering a vault (hard credential/deny-list rejection, dirt
+    # classification, quarantine, spreadsheet capsules). Declared in the
+    # same change that lands it, same packaging-gate lesson as every entry
+    # above.
+    "bm_vault_intake",
+    # 2026-08-30, VB6-02: citations that bind to the content they cited, not
+    # just a note's name. Declared in the same change that lands it, same
+    # packaging-gate lesson as every entry above.
+    "bm_vault_cite",
+    # 2026-08-30, VB7-05: the principal registry and the offboarding proof.
+    # Declared in the same change that lands it, same packaging-gate lesson
+    # as every entry above: a module in tools/ that pyproject does not name
+    # is absent from a pipx or pip install.
+    "bm_vault_principals",
+    # VB8-02: vault-to-vault exchange over an age-encrypted relay. Declared
+    # in the same change that lands it, same packaging-gate lesson as every
+    # entry above: a module in tools/ that pyproject does not name is absent
+    # from a pipx or pip install.
+    "bm_vault_exchange",
+    # 2026-08-30, VB8-01: the encryption posture census. Declared in the same
+    # change that lands it, same packaging-gate lesson as every entry above:
+    # a module in tools/ that pyproject does not name is absent from a pipx
+    # or pip install.
+    "bm_vault_posture",
+    # VB8-04: the secure clearing house, JSONL assertions/events tables plus
+    # a sha256 manifest, optional whole-bundle age encryption. Declared in
+    # the same change that lands it, same packaging-gate lesson as every
+    # entry above: a module in tools/ that pyproject does not name is absent
+    # from a pipx or pip install.
+    "bm_vault_export",
+    # 2026-08-30, VB12-01: the survivorship ranking for contested facts.
+    # Declared here because the packaging gate refused it, same lesson as
+    # every entry above.
+    "bm_vault_survivorship",
+    "bm_vault_tiers",
+    "bm_vault_contract",
+    # 2026-08-30, VB13-03: attribute-management discipline (inheritance,
+    # per-channel requiredness, governed code lists) extending the per-class
+    # contract above. Declared here because the packaging gate refused it,
+    # same lesson as every entry above.
+    "bm_vault_attributes",
+    # F5, the compact repository map. Declared in the same change that lands
+    # it, same packaging-gate lesson as every entry above: a module in tools/
+    # that pyproject does not name is absent from a pipx or pip install.
+    "bm_repomap",
+    # F7 and F8, 2026-08-31: playbook promotion earned by recurrence receipts,
+    # and the stale-tail consolidation that never mutates a raw note. Named
+    # here for the same packaging gate as every entry above.
+    "bm_playbook",
+    "bm_consolidate",
+    # VB10-03, 2026-08-30: per-owner defect routing across the estate's own
+    # findings. Declared here because the packaging gate refused it, same
+    # lesson as every entry above.
+    "bm_vault_route",
+    # 2026-08-30, VB12-02: named hierarchy edges, dated placement records and
+    # the competitor namespace's syndicated-id mapping table. Declared here
+    # because the packaging gate refuses it, same lesson as every entry above.
+    "bm_vault_shapes",
+    # VB13-06, 2026-08-30: hierarchy and attribute census extensions. Declared
+    # here because the packaging gate refuses it, same lesson as every entry
+    # above.
+    "bm_vault_census_ext",
+    # VB13-01, 2026-08-30: named hierarchy query modes (direct/transitive)
+    # and the hierarchy_edges request flow (add/close items, preview,
+    # atomic approve, queryable reject). Declared here because the
+    # packaging gate refuses it, same lesson as every entry above.
+    "bm_vault_hierarchy_req",
+    # VB13-04, 2026-08-30: per-attribute provenance with verification status.
+    # Declared here because the packaging gate refuses it, same lesson as
+    # every entry above.
+    "bm_vault_attribute_provenance",
+    # VB13-02, 2026-08-30: the closure table for ragged rollups, derived
+    # from hierarchy_edges and kept consistent by rebuild/verify. Declared
+    # here because the packaging gate refuses it, same lesson as every
+    # entry above.
+    "bm_vault_closure",
+    # VB13-05, 2026-08-30: real business data (GLEIF LEI, Toyota group) as
+    # a golden set validating hierarchy_edges, closure and crosswalk
+    # together. Declared here because the packaging gate refuses it, same
+    # lesson as every entry above. test_bm_vault_realdata is NOT added here:
+    # this file's own py-modules comment and tools/test_bm.py's
+    # test_py_modules_names_nothing_that_does_not_exist both refuse a
+    # test_*.py entry, so adding it would fail that existing gate.
+    "bm_vault_realdata",
+    # VB11-01, 2026-08-30: lineage read, one origin answer over the intake,
+    # events and citation seams, no new store. Declared here because the
+    # packaging gate refuses it, same lesson as every entry above.
+    "bm_vault_lineage",
+    # VB11-03, 2026-08-30: the retrieval enrichment pre-compute lane. Model-
+    # drafted aliases and question-forms ride the existing enrichment lane
+    # (bm_vault_enrich); this module adds the draft-aliases CLI, the
+    # bake-time promoted-metadata reader bm_vault_catalog imports, and the
+    # lexical-first hit-rate measure. Declared here because the packaging
+    # gate refuses it, same lesson as every entry above.
+    "bm_vault_enrich_index",
+    # VB11-04, 2026-08-30: per-person daily digests built on bm_vault_route's
+    # own routing lanes, the pending-work Bases view, and the immediate-class
+    # bypass for revocations and security findings. Declared in the same
+    # change that lands it, same lesson as every entry above.
+    "bm_vault_digest",
+    # VB11-05, 2026-08-30: the approval pane, pending promotions and
+    # curation accepts click-driven through bm_vault_serve.py's own posture.
+    # Declared here because the packaging gate refuses it, same lesson as
+    # every entry above.
+    "bm_vault_pane",
+    # VB11-06, 2026-08-30: one renderer, three outputs (page, HTML email,
+    # Teams Adaptive Card) from one facts dict, plus the email and
+    # fixture-mode teams send adapters. Declared here because the packaging
+    # gate refuses it, same lesson as every entry above.
+    "bm_vault_notify",
+    # VB13-05, 2026-08-30: the enrichment draft gate and golden-set evals.
+    # Schema-constrained drafts (enum-bound, value-range checked in code)
+    # riding the existing enrichment lane (bm_vault_enrich); adds one new
+    # ENRICH_FIELDS entry (entity_extract), the golden-set gate for a
+    # prompt-version bump, and the confidence-ranked review queue.
+    # Declared here because the packaging gate refuses it, same lesson as
+    # every entry above. test_bm_vault_enrich_gate is NOT added here: this
+    # file own py-modules comment and tools/test_bm.py both refuse a
+    # test_*.py entry, same as bm_vault_realdata above.
+    "bm_vault_enrich_gate",
+    # VB5-06, 2026-08-31: the warm embedder, a loopback daemon holding
+    # bge-small in memory across calls, with bm_vault.py's own _embed_texts
+    # falling back to the original subprocess path when it is absent.
+    # every entry above.
+    "bm_embed_warm",
+    # VB3-05, 2026-08-31: subject-predicate assertions and scoped
+    # CanonicalResolutions, institutional truth above the note layer.
+    # Declared here because the packaging gate refuses it, same lesson as
+    # every entry above.
+    "bm_vault_assertions",
+    # VB3-17, 2026-08-31: opaque ids, tenant as a field, merge history as
+    # events. Declared here because the packaging gate refuses it, same
+    # lesson as every entry above.
+    "bm_vault_identity",
+    "bm_vault_interchange",
+    # VB3-09, 2026-08-31: the service contract's companion, a minimal
+    # stdlib-only Python client for bm_vault_serve.py's recall and health
+    # routes. Declared here because the packaging gate refuses it, same
+    # lesson as every entry above.
+    "vault_client",
+    # VB2-03, 2026-08-31: the Japanese-first analyzer seam (normalize,
+    # segment, kana_alias, analyze), consulted by bm_vault.py only when a
+    # query carries a CJK character. Declared here because the packaging
+    # gate refuses it, same lesson as every entry above.
+    "bm_vault_analyzer",
+    # VB2-03, 2026-08-31: the Japanese-first retrieval benchmark runner,
+    # 245 cases across six classes against a fixture vault it builds
+    # directly via bm_vault._schema/_upsert_note. Declared here because
+    # the packaging gate refuses it, same lesson as every entry above.
+    "bm_vault_jbench",
+]
+# brotherme/core/schema.py is library code tools/bm_store.py loads by path
+# (see _schema() there); without this the wheel/sdist never contain it and
+# every packaged command touching a project/task/forecast/alert fails at
+# runtime with FileNotFoundError. Verified in the built wheel file list.
+packages = ["brotherme", "brotherme.core"]
+include-package-data = false

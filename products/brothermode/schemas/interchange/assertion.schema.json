@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brothermode.local/schemas/interchange/assertion.schema.json",
+  "title": "VB3-16 interchange: assertion record",
+  "description": "Mirrors tools/bm_vault_assertions.py's 99-System/assertions.jsonl record exactly (see cmd_mint_assertion): the append-only subject-predicate assertion, never a note. valid_from/valid_to/observed_at/ingested_at/verified_at and supersedes are ABSENT (not present with an empty value) when the caller never supplied them; recorded_at is always bookkeeping, never a claim field.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "subject", "predicate", "value", "authority", "lifecycle",
+               "source_locator", "recorded_at"],
+  "properties": {
+    "id": {"x-field-id": 1, "type": "string", "pattern": "^as-[0-9a-f]{16}$"},
+    "subject": {"x-field-id": 2, "type": "string", "pattern": "^n-[0-9a-f]{16}$",
+                "description": "an ENTITY id (bm_vault_ids n-<16 hex>), never a filename or note stem"},
+    "predicate": {"x-field-id": 3, "type": "string", "maxLength": 500},
+    "value": {"x-field-id": 4, "type": "string", "maxLength": 2000},
+    "authority": {"x-field-id": 5, "type": "string",
+                  "enum": ["casual", "derived", "source_of_record"]},
+    "lifecycle": {"x-field-id": 6, "type": "string",
+                  "enum": ["candidate", "validated", "canonical", "rejected",
+                           "under_review", "revoked", "expired"]},
+    "source_locator": {"x-field-id": 7, "type": "string", "maxLength": 2000},
+    "recorded_at": {"x-field-id": 8, "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$"},
+    "valid_from": {"x-field-id": 9, "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$"},
+    "valid_to": {"x-field-id": 10, "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$"},
+    "observed_at": {"x-field-id": 11, "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$"},
+    "ingested_at": {"x-field-id": 12, "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$"},
+    "verified_at": {"x-field-id": 13, "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$"},
+    "supersedes": {"x-field-id": 14, "type": "string", "pattern": "^as-[0-9a-f]{16}$",
+                   "description": "audit trail only; never inferred retirement, see bm_vault_assertions.py CEILING"}
+  }
+}

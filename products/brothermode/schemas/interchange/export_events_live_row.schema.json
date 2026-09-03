@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brothermode.local/schemas/interchange/export_events_live_row.schema.json",
+  "title": "VB3-16 interchange: export table row, events.jsonl, status=live (VB8-04)",
+  "description": "Mirrors tools/bm_vault_export.py's build_events() output for a state[\"live\"] row exactly (bm_vault_events.fold()'s own live shape, plus the status column build_events adds). THIS IS A DIFFERENT SHAPE from the plain event record in event.schema.json: fold() replays a stream of raw events down to one WINNER per ref, and the exported row carries only the winner's resolved fields (root_event_key/winning_event_key/winning_kind/occurred_at/recorded_at), never the raw event's own corrects/into/rule_version/effective fields. winning_kind is restricted to upsert/correct because those are the only two kinds fold() ever resolves a live winner from (tombstone/merged_into/unmerged never appear here). See export_events_tombstoned_row.schema.json for the sibling status=tombstoned shape, which carries a different field set again.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["ref", "root_event_key", "winning_event_key", "winning_kind",
+               "occurred_at", "recorded_at", "status"],
+  "properties": {
+    "ref": {"x-field-id": 17, "type": "string", "maxLength": 200, "pattern": "^[^\\n]{1,200}$"},
+    "root_event_key": {"x-field-id": 30, "type": "string", "maxLength": 200, "pattern": "^[^\\n]{1,200}$"},
+    "winning_event_key": {"x-field-id": 31, "type": "string", "maxLength": 200, "pattern": "^[^\\n]{1,200}$"},
+    "winning_kind": {"x-field-id": 32, "type": "string", "enum": ["upsert", "correct"]},
+    "occurred_at": {"x-field-id": 19, "type": "string", "maxLength": 200,
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}(T\\d{2}:\\d{2}:\\d{2}(Z|[+-]\\d{2}:\\d{2}))?$"},
+    "recorded_at": {"x-field-id": 8, "type": "string", "maxLength": 200,
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}(T\\d{2}:\\d{2}:\\d{2}(Z|[+-]\\d{2}:\\d{2}))?$"},
+    "status": {"x-field-id": 33, "type": "string", "enum": ["live"]}
+  }
+}

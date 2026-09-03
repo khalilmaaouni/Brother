@@ -1,0 +1,62 @@
+{
+ "entry": "brother_run.py",
+ "files": [
+  {
+   "path": "brother-run",
+   "sha256": "832d92a307e7053981da4c48e6a1f383ec439ad7257f3d10a404820a1e03ee73"
+  },
+  {
+   "path": "brother_run.py",
+   "sha256": "b82ca1d7e96457ce4b090ba9e49cc50edfffb6fe2af2d92dc12042482e05cb8d"
+  },
+  {
+   "path": "claim_store.py",
+   "sha256": "a49cfc6b018d202c8abc9d92ba1ce42e75ec7d75a8a4235be70fdbfbf83442fe"
+  },
+  {
+   "path": "decide.py",
+   "sha256": "1f19cbcb4327f9ce99216fc80a3eb3cd5e7196f5f8df56290b503c3a27ba254a"
+  },
+  {
+   "path": "door.py",
+   "sha256": "2ae903db5d52d694be0206e8dd024307c517cc8152aa88d3bb5b82fdcd99027a"
+  },
+  {
+   "path": "graph_loop.py",
+   "sha256": "55081b0c6e924c63b93c5d143cfd256dcec88353750c81b5bc2ee7e92443d981"
+  },
+  {
+   "path": "integrate.py",
+   "sha256": "2569f5460cdbcf91b09f678ec6bbd3ec8577eef0481e1fd76d100d8a325ec7e4"
+  },
+  {
+   "path": "loom.py",
+   "sha256": "e343cb70ed49dd9170a2edc3052c0aed1518212de0179fd9f79a840dae8dd562"
+  },
+  {
+   "path": "loop_bridge.py",
+   "sha256": "b66f688fb6d3d6e9c1de28ef75bf0aaeb31ced4f9dbe8a3b295548249597fe76"
+  },
+  {
+   "path": "model_worker.py",
+   "sha256": "79f6730113c9a2b2bf1ba1225bd56a91ffdf2ce5671d273047aba49dd068eb6c"
+  },
+  {
+   "path": "receipt_door.py",
+   "sha256": "2d0f34f8ce34d8c875070b6629c2ab21f1e03ff26420a62e434808376a08522d"
+  },
+  {
+   "path": "scope_audit.py",
+   "sha256": "6fcc04cda788a2a6eea232b96734368c61d0f8e8a639af74158015822aab7239"
+  },
+  {
+   "path": "work_record.py",
+   "sha256": "5bd897f5d1d32481b6cb54f3515221ec6db6386ddee33f3da8ce7b24d028bea2"
+  },
+  {
+   "path": "worktree_lane.py",
+   "sha256": "7468c0a3eee3c6d3e72e15926b529eef837140c7b7d0d16760054b7430269764"
+  }
+ ],
+ "generated_by": "scripts/bundle_runtime.py"
+}

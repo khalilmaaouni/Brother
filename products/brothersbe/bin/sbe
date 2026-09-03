@@ -1,0 +1,25 @@
+#!/usr/bin/env python3
+"""The `sbe` launcher.
+
+No install step, on purpose. This project's promise is that a clone works with
+nothing else installed, and requiring `pip install` to reach the command line
+would quietly retract that promise for anyone on a locked-down machine or inside
+a CI image with no package index. So this script puts `src/` on the path itself
+and calls the package.
+
+Put this directory on your PATH, or call it by path:
+
+    bin/sbe doctor
+"""
+import os
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+SRC = os.path.join(os.path.dirname(HERE), "src")
+if SRC not in sys.path:
+    sys.path.insert(0, SRC)
+
+from brothersbe.cli import main  # noqa: E402  (path setup has to come first)
+
+if __name__ == "__main__":
+    sys.exit(main())

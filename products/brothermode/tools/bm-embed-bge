@@ -1,0 +1,6 @@
+#!/bin/sh
+# Resolves next to this script, so the checkout can live anywhere and the
+# path names no account. BROTHERMODE_EMBED_PYTHON overrides the interpreter.
+dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+exec "${BROTHERMODE_EMBED_PYTHON:-$dir/../.venv-embed/bin/python}" \
+     "$dir/bm_embed_bge.py" "$@"

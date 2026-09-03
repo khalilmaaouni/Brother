@@ -1,0 +1,8 @@
+# Local telemetry: per-session counts and short excerpts of your own messages.
+# Machine-local, owner-only, best-effort secret-redacted. It never leaves this
+# machine and never enters a shared repo. See SECURITY.md in the skill root.
+99-System/telemetry/
+
+# Editor and OS noise
+.DS_Store
+*.swp

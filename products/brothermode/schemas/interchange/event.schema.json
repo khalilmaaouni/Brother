@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brothermode.local/schemas/interchange/event.schema.json",
+  "title": "VB3-16 interchange: event record",
+  "description": "Mirrors tools/bm_vault_events.py's REQUIRED_FIELDS/ALLOWED_FIELDS/KINDS exactly (VB6-08, VB3-15, VB3-17): the payload-free replay-contract event, five kinds. SCOPE, STATED HONESTLY: this flat schema (types/required/enum/pattern/maxLength/additionalProperties, see tools/bm_vault_interchange.py's own docstring for the validator's honest subset) expresses the STRUCTURAL shape only. The CROSS-FIELD conditional rules -- corrects required and non-empty iff kind=correct, forbidden otherwise; into/rule_version/effective required iff kind=merged_into, into/effective required (rule_version optional) iff kind=unmerged, all three forbidden otherwise -- are NOT expressible in this subset (they need if/then/else) and are NOT reproduced here. Those rules remain bm_vault_events.py's own runtime validation (_validate); a record can pass this schema and still be refused by that module, which is a NARROWER schema, never a wider one, than the code it describes. The maxLength/pattern bound below is a partial, honest reproduction of bm_vault_events.MAX_FIELD_LEN=200 plus its no-newline rule; the module's third payload-shape check (MAX_FIELD_WORDS, a word-count heuristic) has no JSON Schema equivalent in this subset and is likewise left to the module. occurred_at/recorded_at PATTERN, CORRECTED AGAINST A REAL FIXTURE: bm_vault_events.py itself never validates date format at all (see _validate), and the real producers disagree on shape -- bm_vault_export._now_iso uses Z-suffixed UTC ('...T00:00:00Z'), tools/bm_vault_identity.py's cmd_merge/cmd_unmerge write datetime.now(timezone.utc).isoformat(timespec='seconds'), which is '+00:00'-suffixed, never 'Z', and several test fixtures use a bare date with no time component at all. The pattern below accepts all three shapes because all three are genuinely emitted; a Z-only pattern would REFUSE a real merged_into/unmerged event minted through bm_vault_identity.py's own command, which was checked and confirmed by running it rather than assumed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event_key", "kind", "ref", "occurred_at", "recorded_at"],
+  "properties": {
+    "event_key": {"x-field-id": 15, "type": "string", "maxLength": 200, "pattern": "^[^\\n]{1,200}$"},
+    "kind": {"x-field-id": 16, "type": "string",
+             "enum": ["upsert", "correct", "tombstone", "merged_into", "unmerged"]},
+    "ref": {"x-field-id": 17, "type": "string", "maxLength": 200, "pattern": "^[^\\n]{1,200}$"},
+    "corrects": {"x-field-id": 18, "type": "string", "maxLength": 200, "pattern": "^[^\\n]{1,200}$",
+                 "description": "required and non-empty iff kind=correct, forbidden otherwise; enforced by bm_vault_events.py, not this schema (see description above)"},
+    "occurred_at": {"x-field-id": 19, "type": "string", "maxLength": 200,
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}(T\\d{2}:\\d{2}:\\d{2}(Z|[+-]\\d{2}:\\d{2}))?$"},
+    "recorded_at": {"x-field-id": 8, "type": "string", "maxLength": 200,
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}(T\\d{2}:\\d{2}:\\d{2}(Z|[+-]\\d{2}:\\d{2}))?$"},
+    "into": {"x-field-id": 20, "type": "string", "maxLength": 200, "pattern": "^[^\\n]{1,200}$",
+             "description": "required iff kind=merged_into/unmerged, forbidden otherwise; enforced by bm_vault_events.py"},
+    "rule_version": {"x-field-id": 21, "type": "string", "maxLength": 200, "pattern": "^[^\\n]{1,200}$",
+                      "description": "required iff kind=merged_into, optional iff kind=unmerged, forbidden otherwise; enforced by bm_vault_events.py"},
+    "effective": {"x-field-id": 22, "type": "string", "maxLength": 200, "pattern": "^[^\\n]{1,200}$",
+                  "description": "required iff kind=merged_into/unmerged, forbidden otherwise; enforced by bm_vault_events.py"}
+  }
+}

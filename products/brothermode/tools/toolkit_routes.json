@@ -1,0 +1,120 @@
+{
+  "schema": 1,
+  "_comment": "The routing table tools/bm_toolkit.py route reads: which existing capability does a task class, and what to do when it is absent from this machine. Seeded from the founder's own six examples (docs/plan/TOOLKIT-PLAN-2026-08-12.md section F3, ratified 2026-08-12). FOUNDER-EDITABLE BY DESIGN, decision 34's pattern: this file, present and valid, REPLACES the module's embedded default entirely; a change here is a one-line diff rather than an edit to the router. Every route names a reason and a flip condition so a later reader can see why the choice was made and what would change it, never a bare capability name. Routing composes with the delegation ladder rather than replacing it: this table picks the CAPABILITY, delegation still picks the TIER.",
+  "classes": [
+    {
+      "id": "tdd",
+      "title": "Test-driven implementation",
+      "routes": [
+        {
+          "capability": "Superpowers (TDD workflow)",
+          "match": {
+            "kind": "plugin",
+            "name": "superpowers"
+          },
+          "reason": "Superpowers ships a red-green-refactor TDD skill. BrotherMode's own native floor is discipline plus the gate battery, deliberately not a TDD engine (decision 22), so TDD is routed rather than built.",
+          "flip_condition": "Routing friction against Superpowers is MEASURED, not felt (decision 22); only then does a minimal native TDD core get built.",
+          "degrade_path": "Fall back to the native floor: the gate battery (tools/test_all.py) alone, with no automated red-green cycling and nothing that enforces writing a test before the code it covers; that discipline is on the operator, not the machine.",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "id": "product-strategy",
+      "title": "Product strategy and PRD elaboration",
+      "routes": [
+        {
+          "capability": "Compound Engineering",
+          "match": {
+            "kind": "plugin",
+            "name": "compound-engineering"
+          },
+          "reason": "Compound Engineering's product-elaboration commands turn an idea into a PRD. BrotherMode absorbs only its compounding-learning ESSENCE (bm_learn plus the vault), never the tool itself.",
+          "flip_condition": "The plugin is removed from this machine, or its state namespace collides with another installed capability's (state-namespace-collision).",
+          "degrade_path": "Fall back to the native floor: the store's own goal, scope, success_criteria and non_goals fields, elaborated by hand.",
+          "enabled": true
+        },
+        {
+          "capability": "BMAD-METHOD",
+          "match": {
+            "kind": "plugin",
+            "name": "bmad"
+          },
+          "reason": "BMAD's nine personas and PRD flow are a second route for the same task class, for when Compound Engineering is absent or a persona-driven flow fits the work better.",
+          "flip_condition": "Somebody confirms BMAD's on-disk state footprint against a real repository tree, per the state-namespace-collision conflict class.",
+          "degrade_path": "Fall back to Compound Engineering if present, otherwise the native floor: the store's own goal, scope, success_criteria and non_goals fields, elaborated by hand.",
+          "enabled": false,
+          "disabled_reason": "on-disk footprint unconfirmed"
+        }
+      ]
+    },
+    {
+      "id": "long-phase-planning",
+      "title": "Long, multi-phase project planning",
+      "routes": [
+        {
+          "capability": "GSD-class planning",
+          "match": {
+            "kind": "plugin",
+            "name": "gsd"
+          },
+          "reason": "GSD owns .planning/ with machine-verifiable acceptance criteria per task. BrotherMode absorbs the essence, criterion-linked verification folded into T5, without absorbing the tool.",
+          "flip_condition": "GSD's .planning/ namespace collides with a project already using that path for something else.",
+          "degrade_path": "Fall back to the native floor: bm_project.py tasks with acceptance checks, the plan law of files plus done-checks.",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "id": "security-check",
+      "title": "Security review of a change",
+      "routes": [
+        {
+          "capability": "Security Guidance",
+          "match": {
+            "kind": "plugin",
+            "name": "security-guidance"
+          },
+          "reason": "Security Guidance provides review depth beyond the native floor's dash scan and write-site inventory.",
+          "flip_condition": "The plugin is disabled or removed from this machine.",
+          "degrade_path": "Fall back to the native floor: dash scan, write-site inventory and effect classes, all already in the gate. Credential leak scanning is NOT part of that floor: no suite in this project scans the tree for leaked credentials.",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "id": "pr-review",
+      "title": "Pull request or diff review",
+      "routes": [
+        {
+          "capability": "Anthropic Code Review",
+          "match": {
+            "kind": "skill",
+            "name": "code-review"
+          },
+          "reason": "Code Review is the founder's own named example for this task class. BrotherMode's falsification-only review brief (PO-5) is borrowed into the native floor as its own core artifact (T6); review depth is routed.",
+          "flip_condition": "The skill is uninstalled, or superseded by a differently named review capability.",
+          "degrade_path": "Fall back to the native floor: the falsification-only review brief, PO-5, attacks executed and COULD NOT BREAK or findings stated.",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "id": "historical-recall",
+      "title": "Recall of past session or project history",
+      "routes": [
+        {
+          "capability": "claude-mem-class memory",
+          "match": {
+            "kind": "plugin",
+            "name": "claude-mem"
+          },
+          "reason": "A claude-mem-class capability gives episodic session recall. BrotherMode's own position is settled (decision 23): the store is the sole delivery-state authority and the Obsidian vault is the knowledge backbone, so this route is read-only and never authoritative.",
+          "flip_condition": "A claude-mem-class capability is found claiming exclusive hook access (multi-memory-authority conflict class); it is then quarantined rather than routed.",
+          "degrade_path": "Fall back to the native floor: the store for delivery state, the Obsidian vault for knowledge.",
+          "enabled": true
+        }
+      ]
+    }
+  ]
+}

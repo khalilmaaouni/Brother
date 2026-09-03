@@ -1,0 +1,31 @@
+{
+  "name": "brothersbe",
+  "owner": {
+    "name": "Khalil Maaouni"
+  },
+  "metadata": {
+    "description": "A senior backend and data engineering colleague, as an installable Claude Code plugin.",
+    "version": "3.7.3"
+  },
+  "plugins": [
+    {
+      "name": "brothersbe",
+      "source": "./",
+      "description": "A senior backend and data engineering colleague. Designs systems in the order the work runs (purpose, process, architecture, data, expression, verification), produces a design dossier sized by a scored intake, and holds the result to mechanical gates where absent evidence is NO-DATA and never a pass.",
+      "version": "3.7.3",
+      "author": {
+        "name": "Khalil Maaouni"
+      },
+      "keywords": [
+        "backend",
+        "data-engineering",
+        "design-review",
+        "evidence",
+        "verification",
+        "migrations",
+        "code-review"
+      ],
+      "category": "engineering"
+    }
+  ]
+}

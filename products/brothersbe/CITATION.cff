@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+title: BrotherSBE
+message: If you use BrotherSBE in your work, please cite it using this metadata.
+type: software
+authors:
+  - given-names: Khalil
+    family-names: Maaouni
+repository-code: "https://github.com/khalilmaaouni/BrotherSBE"
+version: 1.0.0-rc.28
+date-released: 2026-08-08
+abstract: >-
+  A Claude Code plugin that acts as a senior backend and data engineering
+  colleague. It designs systems in the order the work runs (purpose, process,
+  architecture, data, expression, then verification), produces a design dossier
+  sized by a scored intake, and holds the result to mechanical gates in which
+  absent evidence is reported as NO-DATA and is never treated as a pass.
+keywords:
+  - claude-code
+  - backend-engineering
+  - data-engineering
+  - design-review
+  - software-verification
+license: MIT

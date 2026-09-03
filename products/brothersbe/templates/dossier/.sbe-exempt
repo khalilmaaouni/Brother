@@ -1,0 +1,6 @@
+checks: artifacts, adr, datamodel, diagrams, placeholder
+reason: These are the shipped dossier TEMPLATES, not a dossier. They carry the
+SBE-TEMPLATE-UNFILLED marker on purpose and have no 00-intake.json, because
+nobody filled them in for a real change. Copy them into design/<project>/ and
+edit there. Every check is named because every one of them reads a file that is
+deliberately unfilled here.

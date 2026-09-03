@@ -1,0 +1,68 @@
+{
+  "product_name": "BrotherMode",
+  "persona_name": "BrotherME",
+  "persona_scope": "The voice of the guided beginner skill at skills/brotherme (v3: kept as a hidden internal reference, not a public skill; see v3_revision) and the fifteen legacy /brotherme-* command shims retained for v2 compatibility. Never the product name in a current page.",
+  "plugin_id": "brothermode",
+  "marketplace_id": "brothermode-marketplace",
+  "pip_package": "brothermode",
+  "python_package": "brotherme",
+  "command_prefixes": [
+    "bm-",
+    "bm_",
+    "/brothermode",
+    "/brothermode:",
+    "/brotherme-"
+  ],
+  "env_prefixes": [
+    "BROTHERMODE_",
+    "BROTHERME_"
+  ],
+  "repo_slug": "BrotherModeUp",
+  "repo_url": "https://github.com/khalilmaaouni/BrotherModeUp",
+  "ships_from_url": "https://github.com/khalilmaaouni/Brother",
+  "ships_from_rule": "The repository the plugin is INSTALLED FROM, which the M6 cutover made a different fact from repo_url. repo_url is the product's own repository: it owns the release tags an auditor clones, and it is what plugin.json's homepage names. ships_from_url is the hub whose marketplace source resolves the plugin, and it is what plugin.json's repository field must name (scripts/test_version_truth.py in the hub fails a subtree whose repository field disagrees with the marketplace source that installs it). Before the cutover the product had one repository and both facts were the same string, which is why one field carried both until 2026-09-03; keeping one field made the tree read as half moved and could only be settled by moving a fact that is still true.",
+  "durable_state_namespace": {
+    "spelling": "brothermode",
+    "why": "Everything a user already has written to disk. Renaming any of these breaks a real install.",
+    "owns": [
+      "~/.claude/skills/brothermode",
+      "~/.cursor/brothermode",
+      "~/.cursor/hooks.json",
+      "~/.cursor/brothermode-install.json",
+      "~/BrotherModeVault",
+      ".brothermode/",
+      ".brothermode/cursor-mailbox/",
+      ".cursor/rules/brothermode.mdc",
+      ".cursor/hooks.json",
+      "refs/brothermode",
+      "settings.json.brothermode-backup-<timestamp>",
+      "brothermode-install.json",
+      "BROTHERMODE_*"
+    ]
+  },
+  "code_identity_namespace": {
+    "spelling": "brotherme",
+    "why": "v3 STATUS (see v3_revision below): this namespace used to be permanent and total. As of the 2026-08-07 night rename it owns only the two surfaces v3 left untouched, because renaming them needs an owner outside this run's file list (product.identity.json names the gap; it does not close it).",
+    "owns": [
+      "python import package brotherme",
+      "~/.brotherme/config.json",
+      "BROTHERME_CONFIG"
+    ]
+  },
+  "v3_revision": {
+    "status": "The 2026-08-04 two-namespace split below is SUPERSEDED for plugin id and marketplace id, effective the founder's store row of 2026-08-07 night (cited by V3-FREEZE-2026-08-07.md, founder decision 1 and freeze answer 5; adjudicated in the refutation's ruling B3, v3/architecture-refutation.md).",
+    "what_changed": "plugin id brotherme -> brothermode; marketplace id brotherme-marketplace -> brothermode-marketplace; public skill invocations /brotherme-* -> /brothermode:* (the nine canonical skills; the seven full-auto and founder-mode flows became hidden internal skills under the same plugin, not public /brotherme-* replacements).",
+    "what_was_weighed": "Keep the 2026-08-04 permanent split (rejected: the founder's 2026-08-07 night decision explicitly reverses it, stated as a conflict-aware supersession of the earlier keep-brotherme answer). Rename everything code-identity-scoped in one pass, including the Python import package and the consent config (deferred: brotherme/, scripts/setup.py and scripts/uninstall.py sit outside this dispatch's file-ownership fence; renaming them touches tools/bm_store.py's by-path loader, which is runtime core this dispatch must not refactor).",
+    "cost_accepted": "The identity contract's twelve break surfaces (section 5) are accepted wholesale for the plugin id and marketplace id, per ruling B3, except the upgrade path, ruled separately under B4 (v2 declared abandoned, migration note owed, not an upgrade).",
+    "not_renamed_this_run": [
+      "python import package brotherme/ (brotherme/__init__.py, brotherme/core/schema.py) and its pyproject.toml package-dir mapping",
+      "the consent config ~/.brotherme/config.json and BROTHERME_CONFIG (scripts/setup.py, scripts/uninstall.py)",
+      "the console script prefix bm- and the tools/bm_*.py module names (identity contract section 2 already held these fixed regardless of plugin id)"
+    ],
+    "authority": "Founder store row, 2026-08-07 night (V3-FREEZE-2026-08-07.md founder decision 1); ruling B3, v3/architecture-refutation.md"
+  },
+  "repo_slug_rule": "Repository slug only, never a product name. Legal in a URL, in a clone or plugin-install command, and inside a code fence. Not legal in prose.",
+  "historical_records": "Dated records under docs/closure and docs/evidence, the review records under docs/craft, the design specs under docs/superpowers, and the entries already in CHANGELOG.md keep whatever names they were written with. They are never rewritten.",
+  "contract_doc": "docs/brand/IDENTITY-CONTRACT.md",
+  "updated": "2026-09-03"
+}

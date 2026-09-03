@@ -1,0 +1,9 @@
+{
+  "ci": "consumer",
+  "codeGuideDepth": "maintainer",
+  "dossierRoot": "design",
+  "schemaVersion": "1.0",
+  "tool": "sbe init",
+  "toolVersion": "3.4.2",
+  "vaultPathPattern": "~/BrotherSBEVault"
+}

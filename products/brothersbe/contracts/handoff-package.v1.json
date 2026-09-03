@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "brothersbe:contracts/handoff-package.v1.json",
+  "title": "Handoff package, version 1",
+  "description": "The wire format one product hands to a sibling product at the moment an evaluation is ready to be scored, carrying exactly what a reader who was not in the room needs: the dataset, the harness that runs it, the metrics it computes, the labelled ground truth to score against, and whatever is still unresolved. This is a DATA CONTRACT, never a command, an agent or a hook: nothing in this repository executes this file, and nothing here grows a CLI surface, a skill or a flag because it exists. Stdlib-only readers are expected: this file is written in JSON Schema vocabulary because that is a readable lingua franca, not because a validator library is required or assumed on the reading side. Unknown top-level or nested fields are ALLOWED everywhere in this document: a document that carries more than this schema names is forward compatible, not broken, and is never refused for that alone; an unknown schemaVersion is the opposite case and IS refused, by name, never parsed hopefully.",
+  "type": "object",
+  "required": ["schemaVersion", "preparedDataset", "evaluationHarness", "metricDefinitions", "labelledHoldout", "openQuestions"],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "enum": ["1.0"],
+      "description": "The version of this handoff package wire format this document was written against, not the version of the dataset, the harness or any metric it names. Currently only 1.0 is known; a document declaring any other value is refused rather than parsed hopefully, so a reader is never told two different things by the same field name across a version it does not recognize."
+    },
+    "preparedDataset": {
+      "type": "object",
+      "description": "The dataset a sibling product will read at evaluation time, named down to the row it promises. All three sub facts below are foundational and none of them may carry a NO-DATA marker: a dataset that cannot answer what a row means, what it structurally promises, or which exact version was handed off is not yet prepared enough to hand off at all.",
+      "required": ["grain", "contract", "snapshotId"],
+      "properties": {
+        "grain": {
+          "type": "string",
+          "description": "The unit one row of this dataset represents, in plain language (for example, one customer order line, or one labelled conversation turn). Never a table name alone: a reader needs to know what identifies a row, not just where the rows live."
+        },
+        "contract": {
+          "type": "string",
+          "description": "The structural promise this dataset makes about its own rows: the fields present, their types, and any invariant a consumer may rely on (for example, no duplicate rows per the stated grain, or a column that is never null). Point at a schema or a data dictionary a sibling product can check itself against where one already exists, rather than restating it here."
+        },
+        "snapshotId": {
+          "type": "string",
+          "description": "The exact, immutable version of this dataset this package hands off (a commit hash, a table snapshot id, a partition date, or an equivalent pin). This is the one fact that lets a later dispute about a result be traced back to the data actually used; a dataset whose snapshot cannot be named has not actually been prepared yet, so this field is never a NO-DATA marker."
+        }
+      }
+    },
+    "evaluationHarness": {
+      "type": "object",
+      "description": "The process that will run the prepared dataset through whatever is being evaluated and produce the numbers the metric definitions below score.",
+      "required": ["split"],
+      "properties": {
+        "split": {
+          "type": "string",
+          "description": "How this dataset's rows are divided for evaluation (for example, a fixed holdout by date, a k-fold scheme, or a named test partition already carved out). Required as a real, answered value: a harness cannot be run at all without a split, so this field is never a NO-DATA marker; a handoff still deciding its split is not yet a handoff."
+        }
+      }
+    },
+    "metricDefinitions": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Every metric that will be computed over the evaluation harness's output, so a sibling product knows exactly what a reported number claims to measure before it scores whether that number held.",
+      "items": {
+        "type": "object",
+        "required": ["name", "formula"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The metric's name, exactly as it will appear in a reported result (for example, precision at rank 10, or checkout conversion rate). Stable across runs: a consumer matches a reported number back to this list by this string."
+          },
+          "formula": {
+            "type": "string",
+            "description": "The exact computation the name refers to, precise enough that a sibling product could reimplement it independently and get the same answer (for example, true positives divided by predicted positives, or the specific query or pseudocode). May carry the literal string NO-DATA when the metric's name has been agreed but its formula has not been finalized at handoff time; when it does, record the same gap in openQuestions below rather than leaving a reader to guess why. Never omitted: a name with no formula behind it is a metric nobody has actually defined yet, and that is a fact a reader needs stated, not a blank to infer."
+          }
+        }
+      }
+    },
+    "labelledHoldout": {
+      "type": "object",
+      "description": "The labelled, held out sample a sibling product can use as ground truth, separate from whatever the evaluation harness's own split produces from unlabelled data.",
+      "required": ["labelledWho", "labelledWhen"],
+      "properties": {
+        "labelledWho": {
+          "type": "string",
+          "description": "Who labelled this holdout: a named team, role or vendor, never blank. May carry the literal string NO-DATA when this holdout was inherited with no labelling provenance ever recorded (for example, a long-standing benchmark set whose original labellers were never tracked); when it does, record the same gap in openQuestions below. Never omitted: an untracked provenance is itself a fact a consumer needs, not an absence to leave silent."
+        },
+        "labelledWhen": {
+          "type": "string",
+          "description": "When this holdout was labelled, or the window over which labelling happened, as a date or a date range. May carry the literal string NO-DATA under the same inherited-holdout condition labelledWho describes, and for the same reason: an unknown labelling date is a fact about the holdout's provenance, not a blank to leave unfilled."
+        }
+      }
+    },
+    "openQuestions": {
+      "type": "array",
+      "description": "Everything about this handoff the preparing side already knows is unresolved: an unfinalized metric formula, an untracked holdout provenance, or anything else a reader should not assume is settled just because a field above carries a value. An empty list is a real claim (nothing outstanding), so the key itself stays required: its absence would read the same as a considered 'none' when it might instead mean nobody asked.",
+      "items": {
+        "type": "string",
+        "description": "One open question, in plain language, naming the field it concerns where one of the fields above is the reason it exists."
+      }
+    }
+  }
+}

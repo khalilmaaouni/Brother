@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brothermode.local/schemas/interchange/export_events_tombstoned_row.schema.json",
+  "title": "VB3-16 interchange: export table row, events.jsonl, status=tombstoned (VB8-04)",
+  "description": "Mirrors tools/bm_vault_export.py's build_events() output for a state[\"tombstoned\"] row exactly (bm_vault_events.fold()'s own tombstoned shape, plus the status column build_events adds). See export_events_live_row.schema.json for why this is a distinct shape rather than one schema with an optional field: a tombstoned row carries tombstone_event_key and no winning_event_key/winning_kind/root_event_key at all.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["ref", "tombstone_event_key", "occurred_at", "recorded_at", "status"],
+  "properties": {
+    "ref": {"x-field-id": 17, "type": "string", "maxLength": 200, "pattern": "^[^\\n]{1,200}$"},
+    "tombstone_event_key": {"x-field-id": 34, "type": "string", "maxLength": 200, "pattern": "^[^\\n]{1,200}$"},
+    "occurred_at": {"x-field-id": 19, "type": "string", "maxLength": 200,
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}(T\\d{2}:\\d{2}:\\d{2}(Z|[+-]\\d{2}:\\d{2}))?$"},
+    "recorded_at": {"x-field-id": 8, "type": "string", "maxLength": 200,
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}(T\\d{2}:\\d{2}:\\d{2}(Z|[+-]\\d{2}:\\d{2}))?$"},
+    "status": {"x-field-id": 33, "type": "string", "enum": ["tombstoned"]}
+  }
+}

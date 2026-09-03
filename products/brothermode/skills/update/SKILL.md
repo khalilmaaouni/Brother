@@ -1,0 +1,20 @@
+---
+name: update
+description: Check the installed version against the newest release and explain how to update, in plain language
+disable-model-invocation: true
+---
+
+Outcome to produce: tell the user their installed version, the newest available version, whether they match, and the exact update steps for their install path.
+
+Run the mechanical command `python3 "${CLAUDE_PLUGIN_ROOT}/tools/brothermode_cli.py" update` (the packaged console script is `brothermode update`) and read its output; it is a read-only report and issues no command that writes anything itself. A plugin install exports `${CLAUDE_PLUGIN_ROOT}` for skill and command content, so that path resolves on its own; on a clone install, where the variable is unset, run `python3 tools/brothermode_cli.py update` instead, from the BrotherMode root (`~/.claude/skills/brothermode`). If the network refuses, the command says plainly the check could not run; never guess a version yourself.
+
+The command already applies the safety rules that matter: it never sends a development copy (a version ending `.dev1`, or anything newer than the newest release) toward a checkout, because that would be a downgrade wearing the word "update"; and it reports "up to date" or "development copy" and stops, with nothing further to do, before ever reaching the steps below.
+
+When an update is genuinely available, give the exact steps for the user's own install path:
+
+- **Pinned clone** (inside the skill folder): `git fetch --tags`, then `git checkout <the newest tag the command named>`, then `python3 scripts/doctor.py` to confirm the checkout landed clean (its CHECKSUMS.sha256 self-check catches a half-finished update by naming the exact file that does not match). Run `python3 scripts/doctor.py` a second time afterward the same way you would right after a fresh install; every one of its ten checks should read PASS or SKIP. If any check reads FAIL, follow the one-sentence fix it prints before doing anything else. If a FAIL will not clear, roll back with `git checkout <the tag you were on before>` and run `python3 scripts/doctor.py` again to confirm the rollback itself is healthy.
+- **Plugin install**: v2 installs (anything installed before the 2026-08-07 night rename) are declared abandoned rather than upgraded (the founder's 2026-08-07 night rename decision, refutation ruling B4): the old plugin id `brotherme` and the new plugin id `brothermode` are two different registrations to Claude Code, so a marketplace update on the old id never becomes the new one. Tell the user plainly to remove the old plugin (`/plugin uninstall brotherme@brotherme-marketplace`) and add and install the new one fresh (`/plugin marketplace add khalilmaaouni/BrotherModeUp@<released-tag>` then `/plugin install brothermode@brothermode-marketplace`), per the plugin-install steps in README.md, rather than following any `/plugin marketplace update` line the command itself may still print for the old name: that line predates the rename and is a known, disclosed gap, not a verified instruction.
+
+Give one recommended next action, and state any time cost as a range, never a promise, in plain words a non-engineer would follow. Say plainly: updating never touches the user's project data or records; it only replaces the BrotherMode files themselves.
+
+v3 note: this skill is the canonical replacement for the legacy `/brotherme-update` command (the founder's 2026-08-07 night rename decision). Its mechanical command now calls `tools/brothermode_cli.py update`, which automates the READING half of the legacy command's eleven manual steps (version comparison, development-copy detection, remote-refusal handling); the doctor-verification and rollback steps above stay this skill's own prose, since the CLI's own printed output does not restate them. `disable-model-invocation: true` per plan section 3.3's side-effect table: update starts a real upgrade flow at a moment the user should control, matching `deploy` in the official skills reference's own example.

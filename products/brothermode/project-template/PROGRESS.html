@@ -1,0 +1,227 @@
+<!--
+  THE BREVITY BUDGET. Read this before you add a word to this page.
+
+  This page is read in ten seconds by someone who has been away for a week.
+  Every session that refreshes it wants to explain itself, and if each one
+  appends its own paragraph the page becomes a wall nobody reads. So the top
+  of the page is capped, by rule:
+
+    - The summary line under the title: at most 300 characters. It says who
+      refreshed the page, when, and the tick rule. Nothing else.
+    - Each card: at most 250 characters. One or two sentences. If it needs
+      more than that, it is not a card.
+    - Each evidence line: at most 240 characters, ending at a sentence or a
+      clause boundary, then an ellipsis and a pointer to the full text.
+    - Everything longer is MOVED, never deleted, into the collapsed section
+      at the foot of this page ("Full history, nothing removed").
+
+  The second half of that last rule is not decoration. This project never
+  destroys a working file, a piece of evidence or a deliverable in order to
+  tidy up, and a brevity rule that deleted history would be a worse defect
+  than the wall of text it replaced. Shorten by MOVING. The reader who wants
+  the long version must always be one click away from it, unedited.
+
+  THE TICK CONTRACT, unchanged, and the reason this page exists: a box ticks
+  ONLY when its done-check ran after the last edit and that command's output
+  is quoted in the evidence line beside it. Percentages are counts of
+  records, never impressions.
+
+  HOW TO USE THIS FILE: copy it into your project beside README.md, replace
+  every <placeholder>, and refresh it at every closed loop. The rule is
+  written in full in references/status-view.md, section "The brevity budget".
+-->
+<title>&lt;Project name&gt;: progress</title>
+<style>
+:root{
+  --paper:#F7F8F6; --ink:#1C2530; --muted:#5A6672; --line:#D8DEDC;
+  --accent:#0E7A6F; --accent-soft:#E3EFED;
+  --good:#2E7D42; --good-soft:#E4F0E6;
+  --warn:#9A6A0B; --warn-soft:#F5ECD8;
+  --crit:#B3382E; --crit-soft:#F6E4E2;
+  --card:#FFFFFF; --track:#EBEEEC;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --paper:#141B22; --ink:#E5EAE8; --muted:#94A1AB; --line:#2A343C;
+    --accent:#3AA893; --accent-soft:#17322E;
+    --good:#5CB870; --good-soft:#1B2E20;
+    --warn:#D9A648; --warn-soft:#33290F;
+    --crit:#E06A5F; --crit-soft:#37201D;
+    --card:#1B242D; --track:#232D36;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#141B22; --ink:#E5EAE8; --muted:#94A1AB; --line:#2A343C;
+  --accent:#3AA893; --accent-soft:#17322E;
+  --good:#5CB870; --good-soft:#1B2E20;
+  --warn:#D9A648; --warn-soft:#33290F;
+  --crit:#E06A5F; --crit-soft:#37201D;
+  --card:#1B242D; --track:#232D36;
+}
+:root[data-theme="light"]{
+  --paper:#F7F8F6; --ink:#1C2530; --muted:#5A6672; --line:#D8DEDC;
+  --accent:#0E7A6F; --accent-soft:#E3EFED;
+  --good:#2E7D42; --good-soft:#E4F0E6;
+  --warn:#9A6A0B; --warn-soft:#F5ECD8;
+  --crit:#B3382E; --crit-soft:#F6E4E2;
+  --card:#FFFFFF; --track:#EBEEEC;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);
+  font:16px/1.55 "Seravek","Avenir Next","Segoe UI",system-ui,sans-serif}
+.wrap{max-width:1080px;margin:0 auto;padding:40px 24px 72px}
+header h1{font-family:"Iowan Old Style","Palatino",Georgia,serif;
+  font-size:clamp(28px,4vw,40px);font-weight:600;margin:0 0 6px;text-wrap:balance}
+.stamp{color:var(--muted);font-size:13.5px;margin:0 0 4px}
+.stamp code{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:12.5px}
+.northstar{margin:14px 0 0;padding:14px 18px;border-left:3px solid var(--accent);
+  background:var(--card);border-radius:0 8px 8px 0;font-size:15.5px}
+.northstar b{color:var(--accent)}
+h2{font-family:"Iowan Old Style","Palatino",Georgia,serif;font-weight:600;
+  font-size:21px;margin:44px 0 14px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin-top:18px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+.card .k{font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 6px}
+.card .v{font-size:15px;margin:0}
+.card.alert{border-color:var(--warn);background:var(--warn-soft)}
+.card.crit{border-color:var(--crit);background:var(--crit-soft)}
+.card.now{border-color:var(--accent);background:var(--accent-soft)}
+.pill{display:inline-block;padding:1px 9px;border-radius:99px;font-size:12px;font-weight:600}
+.pill.done{background:var(--good-soft);color:var(--good)}
+.pill.wait{background:var(--warn-soft);color:var(--warn)}
+.pill.todo{background:var(--track);color:var(--muted)}
+.gwrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--card);padding:18px 18px 10px}
+.gantt{display:grid;grid-template-columns:190px repeat(10,minmax(34px,1fr));gap:4px 0;min-width:760px;
+  font-variant-numeric:tabular-nums}
+.gantt .hd{font-size:11px;color:var(--muted);text-align:center;padding-bottom:6px;border-bottom:1px solid var(--line)}
+.gantt .hd.name{text-align:left;font-size:11.5px;letter-spacing:.08em;text-transform:uppercase}
+.gantt .rowname{font-size:13.5px;padding:7px 10px 7px 0;border-bottom:1px solid var(--line);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gantt .cell{border-bottom:1px solid var(--line);position:relative;min-height:34px}
+.bar{position:absolute;top:8px;bottom:8px;left:2px;right:2px;border-radius:5px;background:var(--track);overflow:hidden}
+.bar .fill{position:absolute;inset:0;width:var(--p,0%);background:var(--accent)}
+.bar.range{background:repeating-linear-gradient(45deg,var(--track),var(--track) 5px,var(--card) 5px,var(--card) 9px)}
+.bar .lbl{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  font-size:11px;font-weight:600;color:var(--ink)}
+.legend{display:flex;gap:18px;flex-wrap:wrap;font-size:12.5px;color:var(--muted);padding:12px 2px 4px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.sw{width:14px;height:10px;border-radius:3px;display:inline-block}
+.phase{background:var(--card);border:1px solid var(--line);border-radius:10px;margin:10px 0;padding:4px 18px 10px}
+.phase summary{cursor:pointer;list-style:none;display:flex;align-items:baseline;gap:10px;padding:10px 0;flex-wrap:wrap}
+.phase summary::-webkit-details-marker{display:none}
+.phase summary:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:6px}
+.phase summary .t{font-weight:600;font-size:15.5px}
+.phase summary .est{color:var(--muted);font-size:13px;margin-left:auto}
+ul.tasks{list-style:none;margin:0 0 8px;padding:0 0 0 2px}
+ul.tasks li{display:flex;gap:10px;padding:7px 0;border-top:1px dashed var(--line);font-size:14.5px;align-items:baseline}
+.box{flex:0 0 auto;width:17px;height:17px;border:1.5px solid var(--muted);border-radius:4px;position:relative;top:2px}
+.box.tick{border-color:var(--good);background:var(--good)}
+.box.tick::after{content:"";position:absolute;left:4.5px;top:1px;width:5px;height:9px;
+  border:solid #fff;border-width:0 2.5px 2.5px 0;transform:rotate(42deg)}
+.ev{display:block;color:var(--muted);font-size:12.5px;font-family:ui-monospace,"SF Mono",Menlo,monospace;margin-top:2px;overflow-wrap:anywhere}
+.gate{color:var(--warn);font-weight:600;font-size:12.5px}
+.decisions{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px}
+.dec{border:1px solid var(--line);border-left:3px solid var(--warn);border-radius:8px;background:var(--card);padding:10px 14px;font-size:13.5px}
+.dec b{display:block;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--warn);margin-bottom:4px}
+.history{margin:8px 0}
+.history summary{cursor:pointer;color:var(--muted);font-size:13px}
+.history .full{font-size:13px;color:var(--muted);padding:8px 0;overflow-wrap:anywhere}
+footer{margin-top:48px;padding-top:16px;border-top:1px solid var(--line);color:var(--muted);font-size:13px;max-width:65ch}
+@media (prefers-reduced-motion: no-preference){ .bar .fill{transition:width .5s ease} }
+</style>
+
+<div class="wrap">
+<header>
+  <h1>&lt;Project name&gt;</h1>
+  <!-- BUDGET: 300 characters. Who refreshed it, when, the tick rule. Nothing else. -->
+  <p class="stamp">Refreshed <b>&lt;date and time&gt;</b> by &lt;session or person&gt;. A box ticks only when its check ran after the last edit and printed the result quoted beside it. Every earlier refresh note is kept in full at the foot of this page.</p>
+  <div class="northstar"><b>North star:</b> &lt;one sentence naming the outcome this project exists to reach, in the founder's own words. If a task cannot be traced back to this line, it does not belong in the ledger below.&gt;</div>
+</header>
+
+<h2>Today at a glance</h2>
+<!-- BUDGET: 250 characters per card. One or two sentences each. Anything longer
+     is moved into "Full history, nothing removed" at the foot of this page. -->
+<div class="cards">
+  <div class="card now"><p class="k">Now</p><p class="v">&lt;The one thing in flight, in a sentence. Name the piece of work and what it is waiting on.&gt;</p></div>
+  <div class="card alert"><p class="k">Waiting on you</p><p class="v">&lt;The single decision, credential or approval blocked on the founder, or "Nothing is blocked on you.".&gt;</p></div>
+  <div class="card alert"><p class="k">Watch</p><p class="v">&lt;One risk whose severity changed, with the file or check that shows it. Not a standing worry list.&gt;</p></div>
+  <div class="card"><p class="k">Forecast</p><p class="v">&lt;A range with confidence, never a point date. Say what has landed against its estimate so far.&gt;</p></div>
+</div>
+
+<h2>Timeline</h2>
+<div class="gwrap">
+  <div class="gantt">
+    <div class="hd name">Phase</div>
+    <div class="hd">D1</div><div class="hd">D2</div><div class="hd">D3</div><div class="hd">D4</div><div class="hd">D5</div><div class="hd">D6</div><div class="hd">D7</div><div class="hd">D8</div><div class="hd">D9</div><div class="hd">D10</div>
+
+    <div class="rowname">P0 &lt;phase name&gt;</div>
+    <div class="cell" style="grid-column:2/span 2"><div class="bar"><div class="fill" style="--p:100%"></div><span class="lbl">3/3</span></div></div>
+    <div class="cell" style="grid-column:4/span 8;border-bottom:1px solid var(--line)"></div>
+
+    <div class="rowname">P1 &lt;phase name&gt;</div>
+    <div class="cell" style="grid-column:4/span 2"><div class="bar"><div class="fill" style="--p:50%"></div><span class="lbl">1/2</span></div></div>
+    <div class="cell" style="grid-column:2/span 2;border-bottom:1px solid var(--line)"></div>
+    <div class="cell" style="grid-column:6/span 6;border-bottom:1px solid var(--line)"></div>
+
+    <div class="rowname">P2 &lt;phase name&gt;</div>
+    <div class="cell" style="grid-column:7/span 3"><div class="bar range"><span class="lbl">0/4</span></div></div>
+    <div class="cell" style="grid-column:2/span 5;border-bottom:1px solid var(--line)"></div>
+    <div class="cell" style="grid-column:10/span 2;border-bottom:1px solid var(--line)"></div>
+  </div>
+  <div class="legend">
+    <span><span class="sw" style="background:var(--accent)"></span>done portion</span>
+    <span><span class="sw" style="background:var(--track)"></span>scheduled</span>
+    <span><span class="sw" style="background:repeating-linear-gradient(45deg,var(--track),var(--track) 4px,var(--card) 4px,var(--card) 7px)"></span>estimate range, not yet started</span>
+    <span>Columns: &lt;first date&gt; to &lt;last date&gt;. &lt;What would move these bars.&gt;</span>
+  </div>
+</div>
+
+<h2>The ledger: every box, its proof</h2>
+<!-- BUDGET: 240 characters per evidence line, cut at a sentence or clause
+     boundary, then an ellipsis and a pointer to the entry below that holds the
+     full text. A box with no evidence line stays unticked. -->
+
+<details class="phase" open>
+  <summary><span class="pill done">3/3</span><span class="t">P0 &lt;phase name&gt;</span><span class="est">done &lt;date&gt;</span></summary>
+  <ul class="tasks">
+    <li><span class="box tick"></span><span>&lt;What was done, in plain words&gt;<span class="ev">&lt;the exact done-check command&gt; printed &lt;the exact result&gt;, run after the last edit</span></span></li>
+    <li><span class="box tick"></span><span>&lt;What was done, in plain words&gt;<span class="ev">&lt;command&gt;, &lt;result quoted verbatim&gt;</span></span></li>
+    <li><span class="box tick"></span><span>&lt;What was done, in plain words&gt;<span class="ev">Long evidence gets cut at 240 characters, at a clause boundary, like this ... full text in "Full history, nothing removed" below</span></span></li>
+  </ul>
+</details>
+
+<details class="phase" open>
+  <summary><span class="pill wait">1/2</span><span class="t">P1 &lt;phase name&gt;</span><span class="est">in flight</span></summary>
+  <ul class="tasks">
+    <li><span class="box tick"></span><span>&lt;What was done&gt;<span class="ev">&lt;command&gt;, &lt;result quoted verbatim&gt;</span></span></li>
+    <li><span class="box"></span><span>&lt;What is not done yet. An empty box needs no evidence, only an honest name.&gt;<span class="gate">waiting on &lt;what&gt;</span></span></li>
+  </ul>
+</details>
+
+<details class="phase">
+  <summary><span class="pill todo">0/4</span><span class="t">P2 &lt;phase name&gt;</span><span class="est">estimate &lt;range&gt;</span></summary>
+  <ul class="tasks">
+    <li><span class="box"></span><span>&lt;Planned piece of work, named well enough that its done-check is obvious.&gt;</span></li>
+    <li><span class="box"></span><span>&lt;Planned piece of work.&gt;</span></li>
+    <li><span class="box"></span><span>&lt;Planned piece of work.&gt;</span></li>
+    <li><span class="box"></span><span>&lt;Planned piece of work.&gt;</span></li>
+  </ul>
+</details>
+
+<h2>Decisions</h2>
+<div class="decisions">
+  <div class="dec"><b>Open</b>&lt;The decision waiting on the founder, its options, and what it blocks. Delete this card when nothing is open.&gt;</div>
+  <div class="dec" style="border-left-color:var(--good)"><b style="color:var(--good)">Settled</b>&lt;A decision already taken, in one line, so it is not reopened by accident. Its full reasoning lives in decisions/.&gt;</div>
+</div>
+
+<h2>Full history, nothing removed</h2>
+<p style="color:var(--muted);font-size:13.5px;max-width:65ch">The summaries above are short on purpose. Every word they replaced is kept here, unedited, so the page can be read in ten seconds or in full. Nothing on this page is ever shortened by deleting it: over-length text is moved here and stays.</p>
+<div>
+  <details class="history"><summary>Refresh log, every entry as originally written</summary><div class="full">&lt;Paste each refresh note here in full, newest first, when it is cut from the stamp line above. Never edit an older entry: append the new one ahead of it.&gt;</div></details>
+  <details class="history"><summary>Card: Now, as originally written</summary><div class="full">&lt;The full text of any "Now" card that exceeded 250 characters, kept exactly as it was written.&gt;</div></details>
+  <details class="history"><summary>Evidence line 1, in full</summary><div class="full">&lt;The complete command output and reasoning behind evidence line 1, kept whole because the short version on the ledger is a pointer, not a replacement.&gt;</div></details>
+</div>
+<footer>
+  The contract of this page: a box ticks only when its done-check ran after the last edit and the output is quoted in its evidence line. Percentages are counts of records, never impressions.
+  The second contract, which keeps the first one honest: this page is kept short by MOVING text, never by deleting it. The stamp line holds 300 characters, a card 250, an evidence line 240, and everything longer lives one click away in the section above with nothing edited out.
+</footer>
+</div>

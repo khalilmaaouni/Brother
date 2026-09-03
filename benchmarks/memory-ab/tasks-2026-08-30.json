@@ -1,0 +1,71 @@
+{
+  "comment": "VB-11 task set, 2026-08-30. 11 tasks grounded in this estate's recorded lessons (~/.claude/repeat-guard/lessons.jsonl). Each prompt contains the lesson's trigger string so the product retrieval (repeat_guard.matching_lessons) fires on the ON pass. Each check is a python3 -c grep over stdout, calibrated both ways: it must FAIL on the wrong_sample and PASS on the right_sample recorded per task. Calibration run and quoted in docs/plan/VB-11-MEMORY-AB-RESULTS-2026-08-30.md. t02, t10, t11 are near-control tasks a capable model may answer without memory; a 'no difference' result there is expected and honest.",
+  "tasks": [
+    {
+      "id": "t01-grep-c-two-lines",
+      "prompt": "In bash: n=$(grep -c PATTERN file || echo 0). The pattern does not occur in the file. What exactly does the variable n contain afterwards? Answer in one or two sentences, be precise about the value.",
+      "check": ["python3", "-c", "import sys,re; s=sys.stdin.read().lower(); sys.exit(0 if re.search(r'two|0\\W{0,6}0', s) else 1)"],
+      "comment": {"lesson": "grep -c prints 0 AND exits 1 on no match, so n gets the two-line value 0\\n0", "right_sample": "n contains the two line value '0\\n0' because grep -c prints 0 and exits 1", "wrong_sample": "n contains 0"}
+    },
+    {
+      "id": "t02-pipe-exit-control",
+      "prompt": "In bash you run ./gate.sh | tail -20 and then quote $? in a report as the gate's exit code. What is wrong with that? One sentence.",
+      "check": ["python3", "-c", "import sys; s=sys.stdin.read().lower(); sys.exit(0 if ('tail' in s or 'last command' in s or 'pipestatus' in s) else 1)"],
+      "comment": {"lesson": "$? after a pipe is the LAST command's exit code", "right_sample": "$? is tail's exit code, the last command in the pipe, not gate.sh's", "wrong_sample": "Nothing is wrong, $? holds the gate's exit code", "note": "control task, a capable model likely answers without memory"}
+    },
+    {
+      "id": "t03-spend-guard-until",
+      "prompt": "On this machine, the spend-guard hook reads project blocks from ~/.claude/spend-guard.json. What happens when a project block raises a ceiling above the default but carries no future 'until' date? One or two sentences.",
+      "check": ["python3", "-c", "import sys; s=sys.stdin.read().lower(); sys.exit(0 if ('ignor' in s or 'baseline' in s) else 1)"],
+      "comment": {"lesson": "a raise without a future 'until' is IGNORED and the baseline applies", "right_sample": "The raise is ignored and the default baseline silently applies", "wrong_sample": "The raised ceiling applies indefinitely until someone removes it"}
+    },
+    {
+      "id": "t04-or-ask-exit0",
+      "prompt": "This machine has a bridge script or_ask.py that calls OpenRouter. If a call through or_ask.py exits 0, is that proof the model produced an answer? Name the known failure shape in one or two sentences.",
+      "check": ["python3", "-c", "import sys; s=sys.stdin.read().lower(); sys.exit(0 if (('empty' in s or 'null' in s or 'blank' in s) and ('content' in s or 'choices' in s)) else 1)"],
+      "comment": {"lesson": "exit 0 with message.content null or empty prints a blank line and returns 0", "right_sample": "No: choices present with message.content null or empty prints a blank line and still returns 0", "wrong_sample": "No, exit 0 only proves the HTTP request succeeded, the model could have been rate limited"}
+    },
+    {
+      "id": "t05-cleanse-scope",
+      "prompt": "This estate's push gate scripts/cleanse.sh: what is the known defect in its scan scope? One or two sentences.",
+      "check": ["python3", "-c", "import sys; s=sys.stdin.read().lower(); sys.exit(0 if ('union' in s or ('untracked' in s and 'ignor' in s)) else 1)"],
+      "comment": {"lesson": "scope is git ls-files UNION find, so it refuses on untracked and git-ignored files that can never be pushed", "right_sample": "Its scope is git ls-files union find, so it scans and refuses on untracked and ignored files that can never be pushed", "wrong_sample": "It only scans tracked files so it misses secrets in new files"}
+    },
+    {
+      "id": "t06-port01-authoritative",
+      "prompt": "In this estate's docs/plan/PORT-01-HARNESS-INVENTORY-2026-08-24.md, which part of the file carries the authoritative call-site counts, and which part must not be trusted? One or two sentences.",
+      "check": ["python3", "-c", "import sys; s=sys.stdin.read().lower(); sys.exit(0 if ('re-derived' in s or 'rederived' in s) else 1)"],
+      "comment": {"lesson": "the RE-DERIVED section at the end is authoritative; the original tables are unverified", "right_sample": "The RE-DERIVED section at the end is authoritative, the original tables above it are unverified", "wrong_sample": "The summary table at the top carries the verified counts"}
+    },
+    {
+      "id": "t07-local-gates-log",
+      "prompt": "This estate's local-gates runner finishes and its console log shows no FAIL anywhere. Is the battery green? Where does the verdict actually live? One or two sentences.",
+      "check": ["python3", "-c", "import sys; s=sys.stdin.read().lower(); sys.exit(0 if (('separate' in s or 'named' in s or 'its own' in s) and 'log' in s) else 1)"],
+      "comment": {"lesson": "the runner writes real output to a separate log named in its first six lines; the console log contains no verdict", "right_sample": "Not proven green: the runner writes its real output to a separate named log and the console log carries no verdict at all", "wrong_sample": "Yes, no FAIL in the console log means the battery passed"}
+    },
+    {
+      "id": "t08-blocker-inverted",
+      "prompt": "In this estate's freshness tool, a blocker row's done_check PASSES when re-run. Is that healthy or an alarm, and why? One or two sentences.",
+      "check": ["python3", "-c", "import sys; s=sys.stdin.read().lower(); sys.exit(0 if ('alarm' in s or 'stale' in s or 'invert' in s) else 1)"],
+      "comment": {"lesson": "verdict semantics are inverted for blockers: a passing check means the row is stale and should be closed, which is the alarm", "right_sample": "It is the alarm: for a blocker a passing done_check means the row is stale and should already be closed", "wrong_sample": "Healthy: the check passing means the blocker is resolved and everything is fine"}
+    },
+    {
+      "id": "t09-checksums-dirty-tree",
+      "prompt": "Regenerating this estate's checksums.sh manifest over a dirty working tree: which direction does the resulting defect fail, and who sees it? One or two sentences.",
+      "check": ["python3", "-c", "import sys; s=sys.stdin.read().lower(); sys.exit(0 if ('green' in s or 'adopter' in s) else 1)"],
+      "comment": {"lesson": "it fails toward green: the author's checkout passes and every adopter's clean export fails", "right_sample": "It fails toward green: the manifest records the uncommitted copy's sha, so the author's tree passes and every adopter's clean export fails", "wrong_sample": "It fails toward red, producing spurious mismatches on the author's machine"}
+    },
+    {
+      "id": "t10-revlist-divergence",
+      "prompt": "Before pushing, a script runs git rev-list --count origin/main..HEAD, sees 3, and reports safe to push. What can that reading hide? One sentence.",
+      "check": ["python3", "-c", "import sys; s=sys.stdin.read().lower(); sys.exit(0 if ('diverg' in s or 'behind' in s) else 1)"],
+      "comment": {"lesson": "ahead-count alone hides that the tree may also be behind, i.e. diverged", "right_sample": "It hides that the branch may also be behind origin, a divergence a plain ahead-count never shows", "wrong_sample": "It can hide uncommitted local changes that will not be pushed", "note": "near-control, a capable model may answer without memory"}
+    },
+    {
+      "id": "t11-sqlite-shm",
+      "prompt": "Should a SQLite database's sqlite3-shm file be included in a hash set asserting zero bytes were written to the database? Why or why not? One or two sentences.",
+      "check": ["python3", "-c", "import sys; s=sys.stdin.read().lower(); sys.exit(0 if ('connect' in s or 'read-only' in s or 'read only' in s) else 1)"],
+      "comment": {"lesson": "the shm index changes on connection alone, including read-only, so never include it", "right_sample": "No: the shared-memory index changes on connection alone, even a read-only connect, so it would false-alarm", "wrong_sample": "Yes, include it, any change to it indicates the database was modified", "note": "near-control, a capable model may answer without memory"}
+    }
+  ]
+}

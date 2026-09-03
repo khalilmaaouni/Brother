@@ -1,0 +1,137 @@
+{
+  "schema": 1,
+  "_comment": "The conflict classes tools/bm_toolkit.py checks for, their severities, and a real fixture for each. FOUNDER-EDITABLE BY DESIGN (decision 6 of the toolkit ratification): severity is a judgement about how a particular team works, not a property of the code, so it lives here where a change is a one-line diff rather than an edit to a checker. Three severities and nothing else: info, warn, fail. A class whose surface cannot be read reports NO-DATA and is never silently omitted, because a check that cannot tell must not read as a pass. Every fixture below was MEASURED on the founder's machine on 2026-08-12 by walking ~/.claude/plugins/cache/*/*/*/hooks/hooks.json and ~/.claude/settings.json; none is invented, and a fixture that stops reproducing is a finding about the machine rather than a reason to delete the class.",
+  "severities": {
+    "info": "Worth knowing. Two capabilities overlap in a way that is usually deliberate.",
+    "warn": "Worth acting on. Two capabilities can produce different answers to the same question, and nothing decides which wins.",
+    "fail": "Worth stopping for. Two capabilities claim the same authority over state, so one of them is silently losing."
+  },
+  "classes": [
+    {
+      "id": "multi-stop-hook",
+      "title": "More than one capability registers a Stop hook",
+      "severity": "warn",
+      "why": "A Stop hook decides what happens when the model tries to finish. Several of them run, in an order nothing here documents, and each may block, warn, or rewrite the ending. A user who sees one of them fire has no way to know which capability spoke.",
+      "detect": "count distinct plugins whose hooks.json declares the Stop event",
+      "threshold": 2,
+      "fixture_2026_08_12": {
+        "count": 7,
+        "members": ["brotherme@brotherme-marketplace", "brothersbe@brothersbe", "hookify@claude-plugins-official", "ralph-loop@claude-plugins-official", "security-guidance@claude-plugins-official", "slop-gate@claude-community", "ultrapowers@claude-community"]
+      },
+      "remedy_shape": "claude plugin disable <plugin>@<marketplace>, for the ones whose Stop behaviour you do not want"
+    },
+    {
+      "id": "multi-pretooluse-blocker",
+      "title": "More than one capability can refuse a tool call",
+      "severity": "warn",
+      "why": "A PreToolUse hook can block. When several can, a refusal arrives with no indication of which one refused, and two of them disagreeing is undefined behaviour rather than a decision. This is the class where the machine-wide settings layer matters as much as the plugins: the founder's own spend guard and session cap sit here too, and they are meant to.",
+      "detect": "count plugin registrations of PreToolUse, plus hook commands under PreToolUse in every settings layer, and report the two counts separately",
+      "threshold": 2,
+      "fixture_2026_08_12": {
+        "plugin_registrations": 8,
+        "distinct_plugins": 7,
+        "settings_commands": 2,
+        "total_layers": 10,
+        "note": "8 registrations from 7 distinct plugins because brothersbe is cached at two versions; the 2 settings commands are the founder's spend guard and session cap, which are deliberate"
+      },
+      "remedy_shape": "read the layers in order and decide which are deliberate; the settings-layer ones usually are"
+    },
+    {
+      "id": "multi-version-cached",
+      "title": "One capability is present at more than one version",
+      "severity": "fail",
+      "why": "Version is part of identity. Two versions of one plugin cached together means any statement about what that plugin does is ambiguous, and a capability record describing one of them does not describe the other. This is the class behind the failure where a command line tool ran two major versions behind what was installed, and the missing command was reported as a product defect when it was an install defect.",
+      "detect": "group cached plugin directories by marketplace and plugin name; more than one version directory is a finding",
+      "threshold": 2,
+      "fixture_2026_08_12": {
+        "count": 1,
+        "members": ["brothersbe@brothersbe at 1.0.0-rc.1 and 1.0.0-rc.38"]
+      },
+      "remedy_shape": "remove the stale version directory, or reinstall to pin one"
+    },
+    {
+      "id": "multi-memory-authority",
+      "title": "More than one capability claims to be the memory",
+      "severity": "fail",
+      "why": "Two systems that both believe they hold the session's history will disagree, and nothing arbitrates. Worse, at least one known memory plugin documents assuming exclusive hook access, so its correctness depends on being alone. BrotherMode's own position is settled: the store is the sole authority for delivery state and the Obsidian vault is the knowledge backbone, so any other memory system is a guest that must be routed read-only.",
+      "detect": "capabilities registering three or more of SessionStart, UserPromptSubmit, PostToolUse, Stop, SessionEnd AND declaring a persistent store of their own",
+      "threshold": 2,
+      "known_members": ["claude-mem registers five hooks and keeps its own SQLite through a local worker service, and its documentation assumes exclusive hook access", "claude-cortex writes into the same per-project memory directory tree the harness's own auto-memory uses"],
+      "fixture_2026_08_12": {
+        "count": 0,
+        "note": "neither is installed on this machine today; the class ships with named members so it fires the day one arrives, rather than being written after the collision"
+      },
+      "remedy_shape": "pick one authority for delivery state and route the others read-only"
+    },
+    {
+      "id": "state-namespace-collision",
+      "title": "Two capabilities own overlapping project state directories",
+      "severity": "warn",
+      "why": "A capability that owns a directory of project state expects to be the only writer of it. Two of them in one repository produce a state file whose history has two authors and no merge rule.",
+      "detect": "compare each installed capability's declared state namespace against the others and against the project tree",
+      "threshold": 2,
+      "known_namespaces": {
+        "gsd": ".planning/ holding STATE.md, ROADMAP.md, REQUIREMENTS.md, plus .gsd-backups/",
+        "arc": ".arc/log.md and docs/arc/",
+        "compound-engineering": "docs/solutions/ and docs/plans/, relocatable",
+        "brothermode": ".brothermode/ and STATE.md",
+        "bmad": "UNCONFIRMED, which is why the route to it ships disabled until a repository-tree read settles it"
+      },
+      "remedy_shape": "relocate the movable one, or scope one capability to a different project"
+    },
+    {
+      "id": "definition-of-done-collision",
+      "title": "More than one capability defines when work is finished",
+      "severity": "warn",
+      "why": "This is the one that matters most to a delivery product, because it is the question BrotherMode exists to answer. Several installed capabilities carry their own completion rule, and a user following two of them can satisfy one while failing the other. BrotherMode's position is settled and is not a compromise: its own rerun after the last edit closes the work, and every other definition is recorded as claimed output.",
+      "detect": "count capabilities shipping a completion or verification gate",
+      "threshold": 2,
+      "fixture_2026_08_12": {
+        "count": 5,
+        "members": ["superpowers verification-before-completion", "ultrapowers verification-before-completion", "brothermode definition-of-done", "brothersbe evidence receipts", "slop-gate premature-completion detection"]
+      },
+      "remedy_shape": "none needed inside BrotherMode: its rerun is the closing authority and the others are recorded, not obeyed. The finding exists so a user knows why two tools disagree."
+    },
+    {
+      "id": "duplicate-planning-workflow",
+      "title": "Several capabilities offer a planning workflow",
+      "severity": "info",
+      "why": "Overlap here is usually deliberate and often useful; a person picks the planner that fits the work. It is info rather than warn because nothing breaks, and the cost is only a user wondering which to use.",
+      "detect": "count capabilities exposing a plan or spec authoring command",
+      "threshold": 3,
+      "fixture_2026_08_12": {
+        "count": 5,
+        "members": ["superpowers writing-plans", "ultrapowers planner", "ultraplan", "mattpocock to-spec", "feature-dev"]
+      },
+      "remedy_shape": "none; the routing table names which one a task class prefers"
+    },
+    {
+      "id": "installed-not-enabled",
+      "title": "A capability is cached but not enabled",
+      "severity": "info",
+      "why": "Its files are on disk and its hooks are not running. Harmless, and worth reporting because it is the most common explanation for a capability that somebody believes is active and is not.",
+      "detect": "a cached plugin directory whose name@marketplace is absent from enabledPlugins in the user settings",
+      "threshold": 1,
+      "remedy_shape": "claude plugin enable <plugin>@<marketplace>, or remove the cache directory"
+    },
+    {
+      "id": "scope-split",
+      "title": "The same capability is configured at more than one scope",
+      "severity": "warn",
+      "why": "A capability enabled globally and configured per project can behave differently depending on which directory a session started in, which is the hardest class of surprise to diagnose because the tool is behaving correctly in both.",
+      "detect": "compare capability presence across the user settings layer, the project settings layer, and the project local layer",
+      "threshold": 2,
+      "remedy_shape": "pick one scope; state which in the project README so a new person does not rediscover it"
+    },
+    {
+      "id": "undeclared-network-or-credential-reach",
+      "title": "A capability reaches the network or a credential without saying so",
+      "severity": "fail",
+      "why": "Two proven incidents on this machine: a local proxy defaulted to listening on every network interface with no authentication when its token was empty, which was the default; and a token-saving hook returned allow on everything it wrapped, which would have auto-approved reading any file including private keys and environment files. Neither was a bug. Each was a tool behaving as documented, trusted more than it had earned.",
+      "detect": "static scan of a capability's own scripts for network and credential-shaped references, compared against what its capability record declares",
+      "threshold": 1,
+      "limits": "DECLARED reach only. This class reads what a capability's files say, never what a running process does. It cannot see syscalls, traffic, or reads that leave no artifact, and any claim otherwise about this checker is wrong.",
+      "remedy_shape": "declare the reach in the capability record, or quarantine the capability until somebody does"
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+.sbe/*
+!.sbe/team-profile.json
+__pycache__/
+.DS_Store
+# built evidence bundles are reproducible from scripts/make_evidence_bundle.sh
+dist/
+*.duckdb
+*.parquet
+*.csv
+
+# The timestamped backups the autosave writes beside STATE.md. STATE.md itself
+# is already ignored, these were not, and the gap is not cosmetic: the sibling
+# repository learned it the expensive way when `git add -A` swept 477 KB of
+# working state into a release manifest, including files whose own first line
+# read "gitignored, not shipped".
+#
+# Added 2026-08-24 after BrotherSBE's scope control named four of them here as
+# changes outside every declared owning path. They were written by the autosave
+# at 06:58 to 07:06, by the tool rather than by any session, so no session could
+# have declared them and every session gets blamed for them in turn. Ignoring
+# them is the fix; deleting them is not, because they are the autosave's own
+# safety net and nobody named them as disposable.
+STATE.md.bak-*
+# sbe init: the install receipt below records this machine's absolute path, so it stays out of git
+.brothersbe/install-receipt.json
+# Microsoft Office lock files (~$ prefix): created while a document is open, never content
+~$*
+**/~$*

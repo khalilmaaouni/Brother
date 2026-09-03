@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Project map</title>
+<meta name="description" content="A generated, offline map of one BrotherSBE project: where it stands, how work moves through it, what was decided, and who owns which files right now.">
+<style>
+  /* ---------- Tokens: light palette (default), copied from docs/explainer/index.html ---------- */
+  :root {
+    --color-page: #FAF9F6;
+    --color-ink: #1F2933;
+    --color-muted: #52606D;
+    --color-accent: #0F766E;
+    --color-amber: #B45309;
+    --color-red: #B91C1C;
+
+    --font-display: "Iowan Old Style", Palatino, Georgia, serif;
+    --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+
+    --ratio: 1.25;
+    --text-sm: 1rem;
+    --text-eyebrow: 0.8rem;
+    --text-md: 1.25rem;
+    --text-lg: 1.5625rem;
+    --text-xl: 1.953rem;
+    --text-2xl: 2.441rem;
+
+    --space-1: 0.5rem;
+    --space-2: 1rem;
+    --space-3: 1.5rem;
+    --space-4: 2.5rem;
+    --space-5: 4rem;
+    --space-6: 6rem;
+
+    --measure: 68ch;
+    --border: color-mix(in srgb, var(--color-ink) 14%, transparent);
+    --card-bg: color-mix(in srgb, var(--color-ink) 4%, var(--color-page));
+  }
+
+  /* ---------- Tokens: dark palette, system preference ---------- */
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --color-page: #161B22;
+      --color-ink: #E6EDF3;
+      --color-muted: #9BA7B4;
+      --color-accent: #2DD4BF;
+      --color-amber: #F59E0B;
+      --color-red: #F87171;
+    }
+  }
+
+  /* ---------- Tokens: explicit toggle wins over system preference, both ways ---------- */
+  :root[data-theme="dark"] {
+    --color-page: #161B22;
+    --color-ink: #E6EDF3;
+    --color-muted: #9BA7B4;
+    --color-accent: #2DD4BF;
+    --color-amber: #F59E0B;
+    --color-red: #F87171;
+  }
+  :root[data-theme="light"] {
+    --color-page: #FAF9F6;
+    --color-ink: #1F2933;
+    --color-muted: #52606D;
+    --color-accent: #0F766E;
+    --color-amber: #B45309;
+    --color-red: #B91C1C;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+
+  html { font-size: 17px; }
+
+  body {
+    margin: 0;
+    background: var(--color-page);
+    color: var(--color-ink);
+    font-family: var(--font-body);
+    font-size: var(--text-sm);
+    line-height: 1.65;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: var(--space-5) var(--space-2);
+    gap: var(--space-6);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+
+  .page {
+    width: 100%;
+    max-width: 960px;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-5);
+  }
+
+  h1, h2, h3 {
+    font-family: var(--font-display);
+    font-weight: 600;
+    text-wrap: balance;
+    margin: 0;
+  }
+
+  h1 { font-size: var(--text-2xl); line-height: 1.15; }
+  h2 { font-size: var(--text-xl); line-height: 1.2; }
+
+  p { margin: 0; }
+
+  .eyebrow {
+    font-family: var(--font-body);
+    font-size: var(--text-eyebrow);
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+    margin: 0;
+  }
+
+  .muted { color: var(--color-muted); }
+
+  a { color: var(--color-accent); }
+
+  header.hero {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    border-top: 1px solid var(--border);
+    padding-top: var(--space-3);
+  }
+
+  section > p, section > div, section > ul, section > ol {
+    max-width: var(--measure);
+  }
+
+  code, pre {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+
+  code {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.1em 0.4em;
+    font-size: 0.92em;
+  }
+
+  pre {
+    margin: 0;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: var(--space-2);
+    overflow-x: auto;
+  }
+
+  .diagram-box {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: var(--space-3);
+    overflow-x: auto;
+  }
+
+  pre.mermaid {
+    background: none;
+    border: none;
+    padding: 0;
+    text-align: center;
+  }
+
+  footer {
+    border-top: 1px solid var(--border);
+    padding-top: var(--space-3);
+    color: var(--color-muted);
+    font-size: var(--text-eyebrow);
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="hero">
+    <p class="eyebrow">Project map, generated offline</p>
+    <!--
+      Project name slot below: filled with the project's name as sbe status
+      reports it (or the repository directory name when status carries no
+      name). Absent source: write the plain sentence "Project name
+      unavailable: sbe status did not return one," never a guessed name.
+    -->
+    <h1>{{PROJECT_NAME}}</h1>
+    <!--
+      Generation timestamp slot below: filled with the local timestamp at
+      the moment this file was written, in a plain human-readable form.
+      Absent source: write "Generation time unavailable: the system clock
+      could not be read," never a blank or a fabricated time.
+    -->
+    <p class="muted">Generated {{GENERATED_AT}}. Open this file in any browser; it needs no network connection.</p>
+  </header>
+
+  <section id="stage">
+    <h2>Where things stand</h2>
+    <!--
+      Stage summary slot below: filled with the current tier and lifecycle
+      stop as sbe status reports them, in one or two plain sentences.
+      Absent source: write "Stage summary unavailable: sbe status did not
+      return a current tier or stop," never an invented stage.
+    -->
+    <p>{{STAGE_SUMMARY}}</p>
+  </section>
+
+  <section id="status">
+    <h2>Status detail</h2>
+    <!--
+      Status detail slot below: filled with the fuller detail behind the
+      summary above, built from the actual output of sbe status and sbe
+      fences (open tasks, held fences, gate results), formatted as short
+      paragraphs or lists.
+      Absent source: write "Status detail unavailable: sbe status and sbe
+      fences returned nothing to show," never a fabricated status.
+    -->
+    <div>{{STATUS_SECTIONS}}</div>
+  </section>
+
+  <section id="process">
+    <h2>How work moves through this project</h2>
+    <!--
+      Process diagram slot below: filled with the mermaid source copied
+      verbatim from the dossier's 06-diagrams.md when a process diagram
+      exists there. When no diagram exists in the dossier, fill it instead
+      with a minimal mermaid flowchart of the six lifecycle stops (intake,
+      design, plan, build, prove, merge) with the current stop marked.
+      Absent source: when even the current stop is unknown, write the plain
+      sentence "Process diagram unavailable: no diagram source and no known
+      current stage," never an invented diagram.
+    -->
+    <div class="diagram-box">
+      <pre class="mermaid">{{PROCESS_DIAGRAM}}</pre>
+    </div>
+  </section>
+
+  <section id="data-model">
+    <h2>The data model</h2>
+    <!--
+      Data model slot below: filled with the mermaid source copied verbatim
+      from the dossier's 06-diagrams.md when a data model diagram exists
+      there, alongside a short summary drawn from 05-data-model.
+      Absent source: write "Data model unavailable: 05-data-model was not
+      found in the dossier," never a guessed schema.
+    -->
+    <div class="diagram-box">
+      <pre class="mermaid">{{DATA_MODEL}}</pre>
+    </div>
+  </section>
+
+  <section id="decisions">
+    <h2>Decisions on record</h2>
+    <!--
+      Decisions slot below: filled with the decision records found under
+      the dossier's 03-adr directory (and any other decision records the
+      probe turns up), one short entry per decision naming what was chosen
+      and why.
+      Absent source: write "Decisions unavailable: no decision records were
+      found under 03-adr," never an invented decision.
+    -->
+    <div>{{DECISIONS}}</div>
+  </section>
+
+  <section id="file-claims">
+    <h2>Who owns which files right now</h2>
+    <!--
+      File claims slot below: filled with the live fence state from sbe
+      fences, listing each held fence, the file paths it covers, and who
+      holds it.
+      Absent source: write "File claims unavailable: sbe fences returned
+      nothing to show," never a guessed ownership list.
+    -->
+    <div>{{FILE_CLAIMS}}</div>
+  </section>
+
+  <section id="next-action">
+    <h2>The one recommended next action</h2>
+    <!--
+      Next action slot below: filled with the single recommended next
+      action and the reason for it, drawn from the project's own
+      recommendation surface (the same recommendation /brothersbe:next
+      would give).
+      Absent source: write "Next action unavailable: no recommended next
+      action was found," never an invented recommendation.
+    -->
+    <p>{{NEXT_ACTION}}</p>
+  </section>
+
+  <section id="code-guide">
+    <h2>Where the code actually lives</h2>
+    <!--
+      Code guide slot below: filled with a short guide to where the real
+      logic sits, drawn from the dossier's 01-purpose and 08-plan.json
+      (module names, entry points, the file paths a task named).
+      Absent source: write "Code guide unavailable: no purpose document or
+      plan was found to build one from," never an invented file layout.
+    -->
+    <div>{{CODE_GUIDE}}</div>
+  </section>
+
+  <footer>
+    <p>This page is self-contained: no network request, no external script, no external stylesheet. It keeps working after the project changes because it is a snapshot, not a live view; regenerate it to see anything new.</p>
+  </footer>
+
+</div>
+<!--
+  Mermaid script slot below: filled at generation time by inlining the
+  plugin's vendored docs/book/assets/mermaid.min.js verbatim, so the
+  diagrams above render without any network request. This shipped template
+  leaves it empty on purpose. Absent source: when the vendored file cannot
+  be found at generation time, leave this empty rather than inventing
+  script content; the diagram containers then show their raw mermaid text
+  instead of a rendered picture.
+-->
+<script>{{MERMAID_JS}}</script>
+<script>
+if (window.mermaid) { mermaid.initialize({ startOnLoad: true }); }
+</script>
+</body>
+</html>

@@ -1,0 +1,1723 @@
+{
+ "_meta": {
+  "wbs": "VB2-03",
+  "description": "Japanese-first retrieval benchmark: lexical, mixed-language, kana-alias, width-variant, dictionary-dependent and negative cases, run against a fixture vault bm_vault_jbench.py builds directly from the notes below (see tools/bm_vault_jbench.py).",
+  "provenance": "The six gleif-* notes use REAL legal names from tools/fixtures/gleif-toyota-group.json (GLEIF LEI data, CC0). Every other note and every query is a CONSTRUCTED vault-domain fixture written for this benchmark, not real vault content.",
+  "dictionary_terms": [
+   "特殊配送",
+   "深夜臨時便"
+  ],
+  "classes": [
+   "lexical_only",
+   "mixed",
+   "kana_alias",
+   "width_variant",
+   "dictionary_dependent",
+   "negative"
+  ]
+ },
+ "notes": [
+  {
+   "stem": "gleif-toyota-motor",
+   "title": "GLEIF Toyota Motor",
+   "body": "トヨタ自動車株式会社の与信審査ルールを更新した。この記録はGLEIFのLEIデータに基づく。"
+  },
+  {
+   "stem": "gleif-daihatsu",
+   "title": "GLEIF Daihatsu",
+   "body": "ダイハツ工業株式会社の子会社登録情報を確認した。この記録はGLEIFのLEIデータに基づく。"
+  },
+  {
+   "stem": "gleif-hino",
+   "title": "GLEIF Hino Motors",
+   "body": "日野自動車株式会社の取引先マスタを更新した。この記録はGLEIFのLEIデータに基づく。"
+  },
+  {
+   "stem": "gleif-toyota-financial",
+   "title": "GLEIF Toyota Financial Services",
+   "body": "トヨタファイナンシャルサービス株式会社の与信限度額を見直した。この記録はGLEIFのLEIデータに基づく。"
+  },
+  {
+   "stem": "gleif-toyota-finance",
+   "title": "GLEIF Toyota Finance",
+   "body": "トヨタファイナンス株式会社の口座情報を照合した。この記録はGLEIFのLEIデータに基づく。"
+  },
+  {
+   "stem": "gleif-toyota-korea",
+   "title": "GLEIF Toyota Financial Services Korea",
+   "body": "토요타파이낸셜서비스코리아 주식회사の韓国拠点情報を記録した。この記録はGLEIFのLEIデータに基づく。"
+  },
+  {
+   "stem": "night-batch",
+   "title": "夜間バッチ処理",
+   "body": "夜間バッチ処理はセッションログに毎回記録される。担当者はナイトバッチの実行結果をbatchダッシュボードで確認する。"
+  },
+  {
+   "stem": "budget-review",
+   "title": "予算上限審査",
+   "body": "予算上限審査は各セッションの開始前に必ず行う。バジェットとも呼ばれるこの手続きの申請番号はB-014である。"
+  },
+  {
+   "stem": "secret-scan",
+   "title": "秘密情報漏洩防止",
+   "body": "秘密情報漏洩防止のためシークレットスキャンを毎回のプッシュ前に実行する。違反番号はS-207として記録された。"
+  },
+  {
+   "stem": "write-fence",
+   "title": "単一書き込み者原則",
+   "body": "単一書き込み者原則はフェンスフックにより強制される。違反時のイベント番号はF-091である。"
+  },
+  {
+   "stem": "watchdog-setup",
+   "title": "夜間見張り番設定",
+   "body": "夜間見張り番設定はウォッチドッグの起動時刻を毎回記録する。監視は午前七時に停止する。"
+  },
+  {
+   "stem": "standup-log",
+   "title": "定例進捗確認会議",
+   "body": "定例進捗確認会議はスタンドアップと呼ばれ、議事録番号M-033に保存された。"
+  },
+  {
+   "stem": "decision-ledger",
+   "title": "決定記録台帳更新",
+   "body": "決定記録台帳更新は毎回のディシジョンごとに追記される。台帳は誰でも閲覧できる。"
+  },
+  {
+   "stem": "dictionary-policy",
+   "title": "辞書登録手続き",
+   "body": "辞書登録手続きはディクショナリー管理者の承認を必要とする。今回の登録番号はD-118である。"
+  },
+  {
+   "stem": "vendor-review",
+   "title": "委託先契約審査",
+   "body": "委託先契約審査はベンダーごとに個別のフォルダで管理される。"
+  },
+  {
+   "stem": "support-log",
+   "title": "顧客対応履歴記録",
+   "body": "顧客対応履歴記録はサポートチームが毎日更新する。チケット番号T-450が本日発行された。"
+  },
+  {
+   "stem": "auth-setup",
+   "title": "二段階認証設定",
+   "body": "二段階認証設定は認証担当のエンジニアが管理する。"
+  },
+  {
+   "stem": "health-check",
+   "title": "定期健全性診断",
+   "body": "定期健全性診断はヘルスチェックスクリプトにより毎朝実行される。診断番号H-076が記録された。"
+  },
+  {
+   "stem": "escalation-form",
+   "title": "権限昇格申請書",
+   "body": "権限昇格申請書はエスカレーションフォームを通じて提出する。"
+  },
+  {
+   "stem": "incident-response",
+   "title": "深夜緊急対応手順",
+   "body": "深夜緊急対応手順はインシデント発生時に即座に参照される。事案番号I-812が本日発生した。"
+  },
+  {
+   "stem": "autosave-design",
+   "title": "自動保存機能設計",
+   "body": "自動保存機能設計はオートセーブモジュールにより実現されている。"
+  },
+  {
+   "stem": "benchmark-standard",
+   "title": "検索精度評価基準",
+   "body": "検索精度評価基準はベンチマークスイートによって毎回測定される。"
+  },
+  {
+   "stem": "weekly-retro",
+   "title": "週次振り返り記録",
+   "body": "週次振り返り記録はレトロミーティングの後に作成される。今回の番号はR-029である。"
+  },
+  {
+   "stem": "postmortem-doc",
+   "title": "障害根本原因分析",
+   "body": "障害根本原因分析はポストモーテム文書としてまとめられる。"
+  },
+  {
+   "stem": "keychain-policy",
+   "title": "認証鍵管理方針",
+   "body": "認証鍵管理方針はキーチェーンに保存する運用を定めている。"
+  },
+  {
+   "stem": "dev-setup",
+   "title": "開発環境構築手順",
+   "body": "開発環境構築手順はセットアップスクリプトを一度実行すれば完了する。環境番号E-500が割り当てられた。"
+  },
+  {
+   "stem": "webhook-design",
+   "title": "通知経路設計文書",
+   "body": "通知経路設計文書はウェブフック経由の連携を前提としている。"
+  },
+  {
+   "stem": "dedupe-policy",
+   "title": "二重支払い防止策",
+   "body": "二重支払い防止策はディデュープロジックにより保証される。"
+  },
+  {
+   "stem": "contract-renewal",
+   "title": "契約更新期限管理",
+   "body": "契約更新期限管理はリニューアルカレンダーで一元管理されている。今回の更新番号はC-311である。"
+  },
+  {
+   "stem": "disclosure-policy",
+   "title": "情報開示範囲判定",
+   "body": "情報開示範囲判定はディスクロージャーポリシーに従って毎回確認される。"
+  },
+  {
+   "stem": "backup-ops",
+   "title": "定期バックアップ運用",
+   "body": "定期バックアップ運用はバックアップジョブが毎晩自動で実行する。ジョブ番号B-620が今回実行された。"
+  },
+  {
+   "stem": "deadline-tracker",
+   "title": "締め切り管理表作成",
+   "body": "締め切り管理表作成はデッドラインごとに更新される表である。"
+  },
+  {
+   "stem": "qa-proposal",
+   "title": "品質保証体制強化",
+   "body": "品質保証体制強化はキューエーチームの提案により決定された。提案番号Q-144が承認された。"
+  },
+  {
+   "stem": "inventory-system",
+   "title": "資産棚卸し記録簿",
+   "body": "資産棚卸し記録簿はインベントリシステムと連携している。"
+  },
+  {
+   "stem": "audit-retention",
+   "title": "監査証跡保存規程",
+   "body": "監査証跡保存規程はオーディットログを最低一年間保存すると定める。証跡番号A-955が記録された。"
+  },
+  {
+   "stem": "commute-form",
+   "title": "通勤経路変更申請",
+   "body": "通勤経路変更申請はコミュートフォームを通じて提出される。"
+  },
+  {
+   "stem": "payroll-review",
+   "title": "定期報酬改定審議",
+   "body": "定期報酬改定審議はペイロール委員会が毎年実施する。"
+  },
+  {
+   "stem": "contract-template",
+   "title": "業務委託契約書式",
+   "body": "業務委託契約書式はコントラクトテンプレートに基づき作成される。書式番号K-777が最新版である。"
+  },
+  {
+   "stem": "runbook-revision",
+   "title": "障害復旧手順書改訂",
+   "body": "障害復旧手順書改訂はランブックの内容を毎四半期見直す。"
+  },
+  {
+   "stem": "survey-form",
+   "title": "顧客満足度調査票",
+   "body": "顧客満足度調査票はサーベイフォームを用いて回収される。"
+  },
+  {
+   "stem": "special-delivery-correct",
+   "title": "special delivery, correct",
+   "body": "夜間の特殊配送は禁止されている。"
+  },
+  {
+   "stem": "special-delivery-decoy",
+   "title": "special delivery, decoy",
+   "body": "特殊いろは殊配いろは配送いろは送いろは。"
+  },
+  {
+   "stem": "midnight-extra-run-correct",
+   "title": "midnight extra run, correct",
+   "body": "台風時の深夜臨時便は特別手当の対象になる。"
+  },
+  {
+   "stem": "midnight-extra-run-decoy",
+   "title": "midnight extra run, decoy",
+   "body": "深夜いろは夜臨いろは臨時いろは時便いろは。"
+  },
+  {
+   "stem": "negative-trap-a",
+   "title": "unrelated note A",
+   "body": "駐車場の清掃当番は毎週交代で担当する。"
+  },
+  {
+   "stem": "negative-trap-b",
+   "title": "unrelated note B",
+   "body": "会議室の予約は前日までに済ませておく。"
+  }
+ ],
+ "cases": [
+  {
+   "id": "L001",
+   "class": "lexical_only",
+   "query": "Toyota Motor",
+   "expected_note": "gleif-toyota-motor"
+  },
+  {
+   "id": "L002",
+   "class": "lexical_only",
+   "query": "Daihatsu",
+   "expected_note": "gleif-daihatsu"
+  },
+  {
+   "id": "L003",
+   "class": "lexical_only",
+   "query": "Hino Motors",
+   "expected_note": "gleif-hino"
+  },
+  {
+   "id": "L004",
+   "class": "lexical_only",
+   "query": "Toyota Financial Services",
+   "expected_note": "gleif-toyota-financial"
+  },
+  {
+   "id": "L005",
+   "class": "lexical_only",
+   "query": "Toyota Finance",
+   "expected_note": "gleif-toyota-finance"
+  },
+  {
+   "id": "L006",
+   "class": "lexical_only",
+   "query": "Toyota Financial Services Korea",
+   "expected_note": "gleif-toyota-korea"
+  },
+  {
+   "id": "L007",
+   "class": "lexical_only",
+   "query": "夜間バッチ処理",
+   "expected_note": "night-batch"
+  },
+  {
+   "id": "L008",
+   "class": "lexical_only",
+   "query": "ッチ処理",
+   "expected_note": "night-batch"
+  },
+  {
+   "id": "L009",
+   "class": "lexical_only",
+   "query": "夜間バッ",
+   "expected_note": "night-batch"
+  },
+  {
+   "id": "L010",
+   "class": "lexical_only",
+   "query": "予算上限審査",
+   "expected_note": "budget-review"
+  },
+  {
+   "id": "L011",
+   "class": "lexical_only",
+   "query": "上限審査",
+   "expected_note": "budget-review"
+  },
+  {
+   "id": "L012",
+   "class": "lexical_only",
+   "query": "予算上限",
+   "expected_note": "budget-review"
+  },
+  {
+   "id": "L013",
+   "class": "lexical_only",
+   "query": "秘密情報漏洩防止",
+   "expected_note": "secret-scan"
+  },
+  {
+   "id": "L014",
+   "class": "lexical_only",
+   "query": "漏洩防止",
+   "expected_note": "secret-scan"
+  },
+  {
+   "id": "L015",
+   "class": "lexical_only",
+   "query": "秘密情報",
+   "expected_note": "secret-scan"
+  },
+  {
+   "id": "L016",
+   "class": "lexical_only",
+   "query": "単一書き込み者原則",
+   "expected_note": "write-fence"
+  },
+  {
+   "id": "L017",
+   "class": "lexical_only",
+   "query": "み者原則",
+   "expected_note": "write-fence"
+  },
+  {
+   "id": "L018",
+   "class": "lexical_only",
+   "query": "単一書き",
+   "expected_note": "write-fence"
+  },
+  {
+   "id": "L019",
+   "class": "lexical_only",
+   "query": "夜間見張り番設定",
+   "expected_note": "watchdog-setup"
+  },
+  {
+   "id": "L020",
+   "class": "lexical_only",
+   "query": "り番設定",
+   "expected_note": "watchdog-setup"
+  },
+  {
+   "id": "L021",
+   "class": "lexical_only",
+   "query": "夜間見張",
+   "expected_note": "watchdog-setup"
+  },
+  {
+   "id": "L022",
+   "class": "lexical_only",
+   "query": "定例進捗確認会議",
+   "expected_note": "standup-log"
+  },
+  {
+   "id": "L023",
+   "class": "lexical_only",
+   "query": "確認会議",
+   "expected_note": "standup-log"
+  },
+  {
+   "id": "L024",
+   "class": "lexical_only",
+   "query": "定例進捗",
+   "expected_note": "standup-log"
+  },
+  {
+   "id": "L025",
+   "class": "lexical_only",
+   "query": "決定記録台帳更新",
+   "expected_note": "decision-ledger"
+  },
+  {
+   "id": "L026",
+   "class": "lexical_only",
+   "query": "台帳更新",
+   "expected_note": "decision-ledger"
+  },
+  {
+   "id": "L027",
+   "class": "lexical_only",
+   "query": "決定記録",
+   "expected_note": "decision-ledger"
+  },
+  {
+   "id": "L028",
+   "class": "lexical_only",
+   "query": "辞書登録手続き",
+   "expected_note": "dictionary-policy"
+  },
+  {
+   "id": "L029",
+   "class": "lexical_only",
+   "query": "録手続き",
+   "expected_note": "dictionary-policy"
+  },
+  {
+   "id": "L030",
+   "class": "lexical_only",
+   "query": "辞書登録",
+   "expected_note": "dictionary-policy"
+  },
+  {
+   "id": "L031",
+   "class": "lexical_only",
+   "query": "委託先契約審査",
+   "expected_note": "vendor-review"
+  },
+  {
+   "id": "L032",
+   "class": "lexical_only",
+   "query": "契約審査",
+   "expected_note": "vendor-review"
+  },
+  {
+   "id": "L033",
+   "class": "lexical_only",
+   "query": "委託先契",
+   "expected_note": "vendor-review"
+  },
+  {
+   "id": "L034",
+   "class": "lexical_only",
+   "query": "顧客対応履歴記録",
+   "expected_note": "support-log"
+  },
+  {
+   "id": "L035",
+   "class": "lexical_only",
+   "query": "履歴記録",
+   "expected_note": "support-log"
+  },
+  {
+   "id": "L036",
+   "class": "lexical_only",
+   "query": "顧客対応",
+   "expected_note": "support-log"
+  },
+  {
+   "id": "L037",
+   "class": "lexical_only",
+   "query": "二段階認証設定",
+   "expected_note": "auth-setup"
+  },
+  {
+   "id": "L038",
+   "class": "lexical_only",
+   "query": "認証設定",
+   "expected_note": "auth-setup"
+  },
+  {
+   "id": "L039",
+   "class": "lexical_only",
+   "query": "二段階認",
+   "expected_note": "auth-setup"
+  },
+  {
+   "id": "L040",
+   "class": "lexical_only",
+   "query": "定期健全性診断",
+   "expected_note": "health-check"
+  },
+  {
+   "id": "L041",
+   "class": "lexical_only",
+   "query": "全性診断",
+   "expected_note": "health-check"
+  },
+  {
+   "id": "L042",
+   "class": "lexical_only",
+   "query": "定期健全",
+   "expected_note": "health-check"
+  },
+  {
+   "id": "L043",
+   "class": "lexical_only",
+   "query": "権限昇格申請書",
+   "expected_note": "escalation-form"
+  },
+  {
+   "id": "L044",
+   "class": "lexical_only",
+   "query": "格申請書",
+   "expected_note": "escalation-form"
+  },
+  {
+   "id": "L045",
+   "class": "lexical_only",
+   "query": "権限昇格",
+   "expected_note": "escalation-form"
+  },
+  {
+   "id": "L046",
+   "class": "lexical_only",
+   "query": "深夜緊急対応手順",
+   "expected_note": "incident-response"
+  },
+  {
+   "id": "L047",
+   "class": "lexical_only",
+   "query": "対応手順",
+   "expected_note": "incident-response"
+  },
+  {
+   "id": "L048",
+   "class": "lexical_only",
+   "query": "深夜緊急",
+   "expected_note": "incident-response"
+  },
+  {
+   "id": "L049",
+   "class": "lexical_only",
+   "query": "自動保存機能設計",
+   "expected_note": "autosave-design"
+  },
+  {
+   "id": "L050",
+   "class": "lexical_only",
+   "query": "機能設計",
+   "expected_note": "autosave-design"
+  },
+  {
+   "id": "L051",
+   "class": "lexical_only",
+   "query": "自動保存",
+   "expected_note": "autosave-design"
+  },
+  {
+   "id": "L052",
+   "class": "lexical_only",
+   "query": "検索精度評価基準",
+   "expected_note": "benchmark-standard"
+  },
+  {
+   "id": "L053",
+   "class": "lexical_only",
+   "query": "評価基準",
+   "expected_note": "benchmark-standard"
+  },
+  {
+   "id": "L054",
+   "class": "lexical_only",
+   "query": "検索精度",
+   "expected_note": "benchmark-standard"
+  },
+  {
+   "id": "L055",
+   "class": "lexical_only",
+   "query": "週次振り返り記録",
+   "expected_note": "weekly-retro"
+  },
+  {
+   "id": "L056",
+   "class": "lexical_only",
+   "query": "返り記録",
+   "expected_note": "weekly-retro"
+  },
+  {
+   "id": "L057",
+   "class": "lexical_only",
+   "query": "週次振り",
+   "expected_note": "weekly-retro"
+  },
+  {
+   "id": "L058",
+   "class": "lexical_only",
+   "query": "障害根本原因分析",
+   "expected_note": "postmortem-doc"
+  },
+  {
+   "id": "L059",
+   "class": "lexical_only",
+   "query": "原因分析",
+   "expected_note": "postmortem-doc"
+  },
+  {
+   "id": "L060",
+   "class": "lexical_only",
+   "query": "障害根本",
+   "expected_note": "postmortem-doc"
+  },
+  {
+   "id": "L061",
+   "class": "lexical_only",
+   "query": "認証鍵管理方針",
+   "expected_note": "keychain-policy"
+  },
+  {
+   "id": "L062",
+   "class": "lexical_only",
+   "query": "管理方針",
+   "expected_note": "keychain-policy"
+  },
+  {
+   "id": "L063",
+   "class": "lexical_only",
+   "query": "認証鍵管",
+   "expected_note": "keychain-policy"
+  },
+  {
+   "id": "L064",
+   "class": "lexical_only",
+   "query": "開発環境構築手順",
+   "expected_note": "dev-setup"
+  },
+  {
+   "id": "L065",
+   "class": "lexical_only",
+   "query": "構築手順",
+   "expected_note": "dev-setup"
+  },
+  {
+   "id": "L066",
+   "class": "lexical_only",
+   "query": "開発環境",
+   "expected_note": "dev-setup"
+  },
+  {
+   "id": "L067",
+   "class": "lexical_only",
+   "query": "通知経路設計文書",
+   "expected_note": "webhook-design"
+  },
+  {
+   "id": "L068",
+   "class": "lexical_only",
+   "query": "設計文書",
+   "expected_note": "webhook-design"
+  },
+  {
+   "id": "L069",
+   "class": "lexical_only",
+   "query": "通知経路",
+   "expected_note": "webhook-design"
+  },
+  {
+   "id": "L070",
+   "class": "lexical_only",
+   "query": "二重支払い防止策",
+   "expected_note": "dedupe-policy"
+  },
+  {
+   "id": "L071",
+   "class": "lexical_only",
+   "query": "い防止策",
+   "expected_note": "dedupe-policy"
+  },
+  {
+   "id": "L072",
+   "class": "lexical_only",
+   "query": "二重支払",
+   "expected_note": "dedupe-policy"
+  },
+  {
+   "id": "L073",
+   "class": "lexical_only",
+   "query": "契約更新期限管理",
+   "expected_note": "contract-renewal"
+  },
+  {
+   "id": "L074",
+   "class": "lexical_only",
+   "query": "期限管理",
+   "expected_note": "contract-renewal"
+  },
+  {
+   "id": "L075",
+   "class": "lexical_only",
+   "query": "契約更新",
+   "expected_note": "contract-renewal"
+  },
+  {
+   "id": "L076",
+   "class": "lexical_only",
+   "query": "情報開示範囲判定",
+   "expected_note": "disclosure-policy"
+  },
+  {
+   "id": "L077",
+   "class": "lexical_only",
+   "query": "範囲判定",
+   "expected_note": "disclosure-policy"
+  },
+  {
+   "id": "L078",
+   "class": "lexical_only",
+   "query": "情報開示",
+   "expected_note": "disclosure-policy"
+  },
+  {
+   "id": "L079",
+   "class": "lexical_only",
+   "query": "定期バックアップ運用",
+   "expected_note": "backup-ops"
+  },
+  {
+   "id": "L080",
+   "class": "lexical_only",
+   "query": "ップ運用",
+   "expected_note": "backup-ops"
+  },
+  {
+   "id": "L081",
+   "class": "lexical_only",
+   "query": "定期バッ",
+   "expected_note": "backup-ops"
+  },
+  {
+   "id": "L082",
+   "class": "lexical_only",
+   "query": "締め切り管理表作成",
+   "expected_note": "deadline-tracker"
+  },
+  {
+   "id": "L083",
+   "class": "lexical_only",
+   "query": "理表作成",
+   "expected_note": "deadline-tracker"
+  },
+  {
+   "id": "L084",
+   "class": "lexical_only",
+   "query": "締め切り",
+   "expected_note": "deadline-tracker"
+  },
+  {
+   "id": "L085",
+   "class": "lexical_only",
+   "query": "品質保証体制強化",
+   "expected_note": "qa-proposal"
+  },
+  {
+   "id": "L086",
+   "class": "lexical_only",
+   "query": "体制強化",
+   "expected_note": "qa-proposal"
+  },
+  {
+   "id": "L087",
+   "class": "lexical_only",
+   "query": "品質保証",
+   "expected_note": "qa-proposal"
+  },
+  {
+   "id": "L088",
+   "class": "lexical_only",
+   "query": "資産棚卸し記録簿",
+   "expected_note": "inventory-system"
+  },
+  {
+   "id": "L089",
+   "class": "lexical_only",
+   "query": "し記録簿",
+   "expected_note": "inventory-system"
+  },
+  {
+   "id": "L090",
+   "class": "lexical_only",
+   "query": "資産棚卸",
+   "expected_note": "inventory-system"
+  },
+  {
+   "id": "L091",
+   "class": "lexical_only",
+   "query": "監査証跡保存規程",
+   "expected_note": "audit-retention"
+  },
+  {
+   "id": "L092",
+   "class": "lexical_only",
+   "query": "保存規程",
+   "expected_note": "audit-retention"
+  },
+  {
+   "id": "L093",
+   "class": "lexical_only",
+   "query": "監査証跡",
+   "expected_note": "audit-retention"
+  },
+  {
+   "id": "L094",
+   "class": "lexical_only",
+   "query": "通勤経路変更申請",
+   "expected_note": "commute-form"
+  },
+  {
+   "id": "L095",
+   "class": "lexical_only",
+   "query": "変更申請",
+   "expected_note": "commute-form"
+  },
+  {
+   "id": "L096",
+   "class": "lexical_only",
+   "query": "通勤経路",
+   "expected_note": "commute-form"
+  },
+  {
+   "id": "L097",
+   "class": "lexical_only",
+   "query": "定期報酬改定審議",
+   "expected_note": "payroll-review"
+  },
+  {
+   "id": "L098",
+   "class": "lexical_only",
+   "query": "改定審議",
+   "expected_note": "payroll-review"
+  },
+  {
+   "id": "L099",
+   "class": "lexical_only",
+   "query": "定期報酬",
+   "expected_note": "payroll-review"
+  },
+  {
+   "id": "L100",
+   "class": "lexical_only",
+   "query": "業務委託契約書式",
+   "expected_note": "contract-template"
+  },
+  {
+   "id": "L101",
+   "class": "lexical_only",
+   "query": "契約書式",
+   "expected_note": "contract-template"
+  },
+  {
+   "id": "L102",
+   "class": "lexical_only",
+   "query": "業務委託",
+   "expected_note": "contract-template"
+  },
+  {
+   "id": "L103",
+   "class": "lexical_only",
+   "query": "障害復旧手順書改訂",
+   "expected_note": "runbook-revision"
+  },
+  {
+   "id": "L104",
+   "class": "lexical_only",
+   "query": "順書改訂",
+   "expected_note": "runbook-revision"
+  },
+  {
+   "id": "L105",
+   "class": "lexical_only",
+   "query": "障害復旧",
+   "expected_note": "runbook-revision"
+  },
+  {
+   "id": "L106",
+   "class": "lexical_only",
+   "query": "顧客満足度調査票",
+   "expected_note": "survey-form"
+  },
+  {
+   "id": "L107",
+   "class": "lexical_only",
+   "query": "度調査票",
+   "expected_note": "survey-form"
+  },
+  {
+   "id": "L108",
+   "class": "lexical_only",
+   "query": "顧客満足",
+   "expected_note": "survey-form"
+  },
+  {
+   "id": "M109",
+   "class": "mixed",
+   "query": "batch 夜間バッ",
+   "expected_note": "night-batch"
+  },
+  {
+   "id": "M110",
+   "class": "mixed",
+   "query": "ッチ処理 batch",
+   "expected_note": "night-batch"
+  },
+  {
+   "id": "M111",
+   "class": "mixed",
+   "query": "budget 予算上限",
+   "expected_note": "budget-review"
+  },
+  {
+   "id": "M112",
+   "class": "mixed",
+   "query": "上限審査 budget",
+   "expected_note": "budget-review"
+  },
+  {
+   "id": "M113",
+   "class": "mixed",
+   "query": "secret 秘密情報",
+   "expected_note": "secret-scan"
+  },
+  {
+   "id": "M114",
+   "class": "mixed",
+   "query": "漏洩防止 secret",
+   "expected_note": "secret-scan"
+  },
+  {
+   "id": "M115",
+   "class": "mixed",
+   "query": "fence 単一書き",
+   "expected_note": "write-fence"
+  },
+  {
+   "id": "M116",
+   "class": "mixed",
+   "query": "み者原則 fence",
+   "expected_note": "write-fence"
+  },
+  {
+   "id": "M117",
+   "class": "mixed",
+   "query": "watchdog 夜間見張",
+   "expected_note": "watchdog-setup"
+  },
+  {
+   "id": "M118",
+   "class": "mixed",
+   "query": "り番設定 watchdog",
+   "expected_note": "watchdog-setup"
+  },
+  {
+   "id": "M119",
+   "class": "mixed",
+   "query": "standup 定例進捗",
+   "expected_note": "standup-log"
+  },
+  {
+   "id": "M120",
+   "class": "mixed",
+   "query": "確認会議 standup",
+   "expected_note": "standup-log"
+  },
+  {
+   "id": "M121",
+   "class": "mixed",
+   "query": "decision 決定記録",
+   "expected_note": "decision-ledger"
+  },
+  {
+   "id": "M122",
+   "class": "mixed",
+   "query": "台帳更新 decision",
+   "expected_note": "decision-ledger"
+  },
+  {
+   "id": "M123",
+   "class": "mixed",
+   "query": "dictionary 辞書登録",
+   "expected_note": "dictionary-policy"
+  },
+  {
+   "id": "M124",
+   "class": "mixed",
+   "query": "録手続き dictionary",
+   "expected_note": "dictionary-policy"
+  },
+  {
+   "id": "M125",
+   "class": "mixed",
+   "query": "vendor 委託先契",
+   "expected_note": "vendor-review"
+  },
+  {
+   "id": "M126",
+   "class": "mixed",
+   "query": "契約審査 vendor",
+   "expected_note": "vendor-review"
+  },
+  {
+   "id": "M127",
+   "class": "mixed",
+   "query": "support 顧客対応",
+   "expected_note": "support-log"
+  },
+  {
+   "id": "M128",
+   "class": "mixed",
+   "query": "履歴記録 support",
+   "expected_note": "support-log"
+  },
+  {
+   "id": "M129",
+   "class": "mixed",
+   "query": "auth 二段階認",
+   "expected_note": "auth-setup"
+  },
+  {
+   "id": "M130",
+   "class": "mixed",
+   "query": "認証設定 auth",
+   "expected_note": "auth-setup"
+  },
+  {
+   "id": "M131",
+   "class": "mixed",
+   "query": "health 定期健全",
+   "expected_note": "health-check"
+  },
+  {
+   "id": "M132",
+   "class": "mixed",
+   "query": "全性診断 health",
+   "expected_note": "health-check"
+  },
+  {
+   "id": "M133",
+   "class": "mixed",
+   "query": "escalation 権限昇格",
+   "expected_note": "escalation-form"
+  },
+  {
+   "id": "M134",
+   "class": "mixed",
+   "query": "格申請書 escalation",
+   "expected_note": "escalation-form"
+  },
+  {
+   "id": "M135",
+   "class": "mixed",
+   "query": "incident 深夜緊急",
+   "expected_note": "incident-response"
+  },
+  {
+   "id": "M136",
+   "class": "mixed",
+   "query": "対応手順 incident",
+   "expected_note": "incident-response"
+  },
+  {
+   "id": "M137",
+   "class": "mixed",
+   "query": "autosave 自動保存",
+   "expected_note": "autosave-design"
+  },
+  {
+   "id": "M138",
+   "class": "mixed",
+   "query": "機能設計 autosave",
+   "expected_note": "autosave-design"
+  },
+  {
+   "id": "M139",
+   "class": "mixed",
+   "query": "benchmark 検索精度",
+   "expected_note": "benchmark-standard"
+  },
+  {
+   "id": "M140",
+   "class": "mixed",
+   "query": "評価基準 benchmark",
+   "expected_note": "benchmark-standard"
+  },
+  {
+   "id": "M141",
+   "class": "mixed",
+   "query": "retro 週次振り",
+   "expected_note": "weekly-retro"
+  },
+  {
+   "id": "M142",
+   "class": "mixed",
+   "query": "返り記録 retro",
+   "expected_note": "weekly-retro"
+  },
+  {
+   "id": "M143",
+   "class": "mixed",
+   "query": "postmortem 障害根本",
+   "expected_note": "postmortem-doc"
+  },
+  {
+   "id": "M144",
+   "class": "mixed",
+   "query": "原因分析 postmortem",
+   "expected_note": "postmortem-doc"
+  },
+  {
+   "id": "M145",
+   "class": "mixed",
+   "query": "keychain 認証鍵管",
+   "expected_note": "keychain-policy"
+  },
+  {
+   "id": "M146",
+   "class": "mixed",
+   "query": "管理方針 keychain",
+   "expected_note": "keychain-policy"
+  },
+  {
+   "id": "M147",
+   "class": "mixed",
+   "query": "setup 開発環境",
+   "expected_note": "dev-setup"
+  },
+  {
+   "id": "M148",
+   "class": "mixed",
+   "query": "構築手順 setup",
+   "expected_note": "dev-setup"
+  },
+  {
+   "id": "M149",
+   "class": "mixed",
+   "query": "webhook 通知経路",
+   "expected_note": "webhook-design"
+  },
+  {
+   "id": "M150",
+   "class": "mixed",
+   "query": "設計文書 webhook",
+   "expected_note": "webhook-design"
+  },
+  {
+   "id": "M151",
+   "class": "mixed",
+   "query": "dedupe 二重支払",
+   "expected_note": "dedupe-policy"
+  },
+  {
+   "id": "M152",
+   "class": "mixed",
+   "query": "い防止策 dedupe",
+   "expected_note": "dedupe-policy"
+  },
+  {
+   "id": "M153",
+   "class": "mixed",
+   "query": "renewal 契約更新",
+   "expected_note": "contract-renewal"
+  },
+  {
+   "id": "M154",
+   "class": "mixed",
+   "query": "期限管理 renewal",
+   "expected_note": "contract-renewal"
+  },
+  {
+   "id": "M155",
+   "class": "mixed",
+   "query": "disclosure 情報開示",
+   "expected_note": "disclosure-policy"
+  },
+  {
+   "id": "M156",
+   "class": "mixed",
+   "query": "範囲判定 disclosure",
+   "expected_note": "disclosure-policy"
+  },
+  {
+   "id": "M157",
+   "class": "mixed",
+   "query": "backup 定期バッ",
+   "expected_note": "backup-ops"
+  },
+  {
+   "id": "M158",
+   "class": "mixed",
+   "query": "ップ運用 backup",
+   "expected_note": "backup-ops"
+  },
+  {
+   "id": "M159",
+   "class": "mixed",
+   "query": "deadline 締め切り",
+   "expected_note": "deadline-tracker"
+  },
+  {
+   "id": "M160",
+   "class": "mixed",
+   "query": "理表作成 deadline",
+   "expected_note": "deadline-tracker"
+  },
+  {
+   "id": "M161",
+   "class": "mixed",
+   "query": "qa 品質保証",
+   "expected_note": "qa-proposal"
+  },
+  {
+   "id": "M162",
+   "class": "mixed",
+   "query": "体制強化 qa",
+   "expected_note": "qa-proposal"
+  },
+  {
+   "id": "M163",
+   "class": "mixed",
+   "query": "inventory 資産棚卸",
+   "expected_note": "inventory-system"
+  },
+  {
+   "id": "M164",
+   "class": "mixed",
+   "query": "し記録簿 inventory",
+   "expected_note": "inventory-system"
+  },
+  {
+   "id": "M165",
+   "class": "mixed",
+   "query": "audit 監査証跡",
+   "expected_note": "audit-retention"
+  },
+  {
+   "id": "M166",
+   "class": "mixed",
+   "query": "保存規程 audit",
+   "expected_note": "audit-retention"
+  },
+  {
+   "id": "M167",
+   "class": "mixed",
+   "query": "commute 通勤経路",
+   "expected_note": "commute-form"
+  },
+  {
+   "id": "M168",
+   "class": "mixed",
+   "query": "変更申請 commute",
+   "expected_note": "commute-form"
+  },
+  {
+   "id": "M169",
+   "class": "mixed",
+   "query": "payroll 定期報酬",
+   "expected_note": "payroll-review"
+  },
+  {
+   "id": "M170",
+   "class": "mixed",
+   "query": "改定審議 payroll",
+   "expected_note": "payroll-review"
+  },
+  {
+   "id": "M171",
+   "class": "mixed",
+   "query": "contract 業務委託",
+   "expected_note": "contract-template"
+  },
+  {
+   "id": "M172",
+   "class": "mixed",
+   "query": "契約書式 contract",
+   "expected_note": "contract-template"
+  },
+  {
+   "id": "M173",
+   "class": "mixed",
+   "query": "runbook 障害復旧",
+   "expected_note": "runbook-revision"
+  },
+  {
+   "id": "M174",
+   "class": "mixed",
+   "query": "順書改訂 runbook",
+   "expected_note": "runbook-revision"
+  },
+  {
+   "id": "M175",
+   "class": "mixed",
+   "query": "survey 顧客満足",
+   "expected_note": "survey-form"
+  },
+  {
+   "id": "M176",
+   "class": "mixed",
+   "query": "度調査票 survey",
+   "expected_note": "survey-form"
+  },
+  {
+   "id": "K177",
+   "class": "kana_alias",
+   "query": "ないとばっち",
+   "expected_note": "night-batch"
+  },
+  {
+   "id": "K178",
+   "class": "kana_alias",
+   "query": "ばじぇっと",
+   "expected_note": "budget-review"
+  },
+  {
+   "id": "K179",
+   "class": "kana_alias",
+   "query": "しーくれっと",
+   "expected_note": "secret-scan"
+  },
+  {
+   "id": "K180",
+   "class": "kana_alias",
+   "query": "ふぇんす",
+   "expected_note": "write-fence"
+  },
+  {
+   "id": "K181",
+   "class": "kana_alias",
+   "query": "うぉっちどっぐ",
+   "expected_note": "watchdog-setup"
+  },
+  {
+   "id": "K182",
+   "class": "kana_alias",
+   "query": "すたんどあっぷ",
+   "expected_note": "standup-log"
+  },
+  {
+   "id": "K183",
+   "class": "kana_alias",
+   "query": "でぃくしょなりー",
+   "expected_note": "dictionary-policy"
+  },
+  {
+   "id": "K184",
+   "class": "kana_alias",
+   "query": "べんだー",
+   "expected_note": "vendor-review"
+  },
+  {
+   "id": "K185",
+   "class": "kana_alias",
+   "query": "さぽーと",
+   "expected_note": "support-log"
+  },
+  {
+   "id": "K186",
+   "class": "kana_alias",
+   "query": "へるすちぇっく",
+   "expected_note": "health-check"
+  },
+  {
+   "id": "K187",
+   "class": "kana_alias",
+   "query": "いんしでんと",
+   "expected_note": "incident-response"
+  },
+  {
+   "id": "K188",
+   "class": "kana_alias",
+   "query": "べんちまーく",
+   "expected_note": "benchmark-standard"
+  },
+  {
+   "id": "K189",
+   "class": "kana_alias",
+   "query": "れとろ",
+   "expected_note": "weekly-retro"
+  },
+  {
+   "id": "K190",
+   "class": "kana_alias",
+   "query": "ぽすともーてむ",
+   "expected_note": "postmortem-doc"
+  },
+  {
+   "id": "K191",
+   "class": "kana_alias",
+   "query": "きーちぇーん",
+   "expected_note": "keychain-policy"
+  },
+  {
+   "id": "K192",
+   "class": "kana_alias",
+   "query": "せっとあっぷ",
+   "expected_note": "dev-setup"
+  },
+  {
+   "id": "K193",
+   "class": "kana_alias",
+   "query": "うぇぶふっく",
+   "expected_note": "webhook-design"
+  },
+  {
+   "id": "K194",
+   "class": "kana_alias",
+   "query": "りにゅーある",
+   "expected_note": "contract-renewal"
+  },
+  {
+   "id": "K195",
+   "class": "kana_alias",
+   "query": "ばっくあっぷ",
+   "expected_note": "backup-ops"
+  },
+  {
+   "id": "K196",
+   "class": "kana_alias",
+   "query": "でっどらいん",
+   "expected_note": "deadline-tracker"
+  },
+  {
+   "id": "K197",
+   "class": "kana_alias",
+   "query": "いんべんとり",
+   "expected_note": "inventory-system"
+  },
+  {
+   "id": "K198",
+   "class": "kana_alias",
+   "query": "おーでぃっと",
+   "expected_note": "audit-retention"
+  },
+  {
+   "id": "K199",
+   "class": "kana_alias",
+   "query": "こんとらくと",
+   "expected_note": "contract-template"
+  },
+  {
+   "id": "K200",
+   "class": "kana_alias",
+   "query": "らんぶっく",
+   "expected_note": "runbook-revision"
+  },
+  {
+   "id": "K201",
+   "class": "kana_alias",
+   "query": "さーべい",
+   "expected_note": "survey-form"
+  },
+  {
+   "id": "W202",
+   "class": "width_variant",
+   "query": "Ｂ－０１４",
+   "expected_note": "budget-review"
+  },
+  {
+   "id": "W203",
+   "class": "width_variant",
+   "query": "Ｓ－２０７",
+   "expected_note": "secret-scan"
+  },
+  {
+   "id": "W204",
+   "class": "width_variant",
+   "query": "Ｆ－０９１",
+   "expected_note": "write-fence"
+  },
+  {
+   "id": "W205",
+   "class": "width_variant",
+   "query": "Ｍ－０３３",
+   "expected_note": "standup-log"
+  },
+  {
+   "id": "W206",
+   "class": "width_variant",
+   "query": "Ｄ－１１８",
+   "expected_note": "dictionary-policy"
+  },
+  {
+   "id": "W207",
+   "class": "width_variant",
+   "query": "Ｔ－４５０",
+   "expected_note": "support-log"
+  },
+  {
+   "id": "W208",
+   "class": "width_variant",
+   "query": "Ｈ－０７６",
+   "expected_note": "health-check"
+  },
+  {
+   "id": "W209",
+   "class": "width_variant",
+   "query": "Ｉ－８１２",
+   "expected_note": "incident-response"
+  },
+  {
+   "id": "W210",
+   "class": "width_variant",
+   "query": "Ｒ－０２９",
+   "expected_note": "weekly-retro"
+  },
+  {
+   "id": "W211",
+   "class": "width_variant",
+   "query": "Ｅ－５００",
+   "expected_note": "dev-setup"
+  },
+  {
+   "id": "W212",
+   "class": "width_variant",
+   "query": "Ｃ－３１１",
+   "expected_note": "contract-renewal"
+  },
+  {
+   "id": "W213",
+   "class": "width_variant",
+   "query": "Ｂ－６２０",
+   "expected_note": "backup-ops"
+  },
+  {
+   "id": "W214",
+   "class": "width_variant",
+   "query": "Ｑ－１４４",
+   "expected_note": "qa-proposal"
+  },
+  {
+   "id": "W215",
+   "class": "width_variant",
+   "query": "Ａ－９５５",
+   "expected_note": "audit-retention"
+  },
+  {
+   "id": "W216",
+   "class": "width_variant",
+   "query": "Ｋ－７７７",
+   "expected_note": "contract-template"
+  },
+  {
+   "id": "W217",
+   "class": "width_variant",
+   "query": "ﾍﾞﾝﾀﾞｰ",
+   "expected_note": "vendor-review"
+  },
+  {
+   "id": "W218",
+   "class": "width_variant",
+   "query": "ｻﾎﾟｰﾄ",
+   "expected_note": "support-log"
+  },
+  {
+   "id": "W219",
+   "class": "width_variant",
+   "query": "ｲﾝｼﾃﾞﾝﾄ",
+   "expected_note": "incident-response"
+  },
+  {
+   "id": "W220",
+   "class": "width_variant",
+   "query": "ﾍﾞﾝﾁﾏｰｸ",
+   "expected_note": "benchmark-standard"
+  },
+  {
+   "id": "W221",
+   "class": "width_variant",
+   "query": "ﾚﾄﾛ",
+   "expected_note": "weekly-retro"
+  },
+  {
+   "id": "W222",
+   "class": "width_variant",
+   "query": "ﾎﾟｽﾄﾓｰﾃﾑ",
+   "expected_note": "postmortem-doc"
+  },
+  {
+   "id": "W223",
+   "class": "width_variant",
+   "query": "ｲﾝﾍﾞﾝﾄﾘ",
+   "expected_note": "inventory-system"
+  },
+  {
+   "id": "W224",
+   "class": "width_variant",
+   "query": "ｺﾝﾄﾗｸﾄ",
+   "expected_note": "contract-template"
+  },
+  {
+   "id": "W225",
+   "class": "width_variant",
+   "query": "ｻｰﾍﾞｲ",
+   "expected_note": "survey-form"
+  },
+  {
+   "id": "D226",
+   "class": "dictionary_dependent",
+   "query": "特殊配送",
+   "expected_note": "special-delivery-correct"
+  },
+  {
+   "id": "D227",
+   "class": "dictionary_dependent",
+   "query": "深夜臨時便",
+   "expected_note": "midnight-extra-run-correct"
+  },
+  {
+   "id": "D228",
+   "class": "dictionary_dependent",
+   "query": "特殊配送",
+   "expected_note": "special-delivery-correct"
+  },
+  {
+   "id": "D229",
+   "class": "dictionary_dependent",
+   "query": "特殊配送",
+   "expected_note": "special-delivery-correct"
+  },
+  {
+   "id": "D230",
+   "class": "dictionary_dependent",
+   "query": "特殊配送",
+   "expected_note": "special-delivery-correct"
+  },
+  {
+   "id": "D231",
+   "class": "dictionary_dependent",
+   "query": "特殊配送",
+   "expected_note": "special-delivery-correct"
+  },
+  {
+   "id": "D232",
+   "class": "dictionary_dependent",
+   "query": "特殊配送",
+   "expected_note": "special-delivery-correct"
+  },
+  {
+   "id": "D233",
+   "class": "dictionary_dependent",
+   "query": "特殊配送",
+   "expected_note": "special-delivery-correct"
+  },
+  {
+   "id": "D234",
+   "class": "dictionary_dependent",
+   "query": "特殊配送",
+   "expected_note": "special-delivery-correct"
+  },
+  {
+   "id": "D235",
+   "class": "dictionary_dependent",
+   "query": "特殊配送",
+   "expected_note": "special-delivery-correct"
+  },
+  {
+   "id": "N236",
+   "class": "negative",
+   "query": "宇宙飛行士訓練施設",
+   "forbidden_note": "negative-trap-a"
+  },
+  {
+   "id": "N237",
+   "class": "negative",
+   "query": "深海探査船建造計画",
+   "forbidden_note": "negative-trap-a"
+  },
+  {
+   "id": "N238",
+   "class": "negative",
+   "query": "南極観測隊派遣記録",
+   "forbidden_note": "negative-trap-b"
+  },
+  {
+   "id": "N239",
+   "class": "negative",
+   "query": "火山噴火予知研究",
+   "forbidden_note": "negative-trap-b"
+  },
+  {
+   "id": "N240",
+   "class": "negative",
+   "query": "量子重力波検出装置",
+   "forbidden_note": "gleif-toyota-motor"
+  },
+  {
+   "id": "N241",
+   "class": "negative",
+   "query": "恐竜化石発掘調査",
+   "forbidden_note": "gleif-daihatsu"
+  },
+  {
+   "id": "N242",
+   "class": "negative",
+   "query": "砂漠緑化実験区画",
+   "forbidden_note": "gleif-hino"
+  },
+  {
+   "id": "N243",
+   "class": "negative",
+   "query": "氷河期気候変動予測",
+   "forbidden_note": "night-batch"
+  },
+  {
+   "id": "N244",
+   "class": "negative",
+   "query": "古代文字解読研究",
+   "forbidden_note": "budget-review"
+  },
+  {
+   "id": "N245",
+   "class": "negative",
+   "query": "深海熱水噴出孔調査",
+   "forbidden_note": "secret-scan"
+  }
+ ]
+}

@@ -1,0 +1,15 @@
+BROTHERMODE ACTIVE-LAWS DIGEST (mechanically injected; full law: SKILL.md at the BrotherMode root, which on a clone install is ~/.claude/skills/brothermode/SKILL.md)
+- Beginner surface: the guided skill under skills/brotherme (internal reference) and the nine /brothermode commands; every user-facing sentence obeys references/terminology.md (plain words, outcome first, one recommended next action).
+- NORTH STAR, founder direction 2026-08-15 (docs/NORTH-STAR-CHAIN.md): human intent, then whichever development method the team already uses (interchangeable, never required), then BrotherMode for EXECUTION PROVENANCE, then the CHANGE PASSPORT as the only seam, then BrotherSBE's eight concerns (behaviour, business impact, risk, required proof, evidence integrity, accountability, release readiness, production observation), then HUMAN DECISION, release, and VERIFIED REALITY. The chain ends in observed reality, never in a green verdict. The human decision node is unconditional: no change may remove, bypass or pre-answer the four points where a person decides (intent, a forcing condition, release, acceptance). Every backlog item names the stage it serves; tools/bm_idle.py reports the ones that do not and refuses a stage that is not on the chain.
+- Decision ladder: answer, search, ask founder, inline, one agent, fleet. Stop at the first sufficient rung.
+- Safety floor (unconditional when any write occurs, never trainable away): ground map, fence-then-dispatch registration in STATE.md, git status first.
+- Caps: 1 writer per fence; 3 fences shared tree; 3 agents with builds (6 read-only); 1 suite at a time; 1 GUI driver; worktrees beyond that.
+- Telemetry is mechanical: SessionEnd hook writes outcomes.jsonl; weekly review (tools/WEEKLY-REVIEW.md vs RUBRIC.md) moves scores; felt-outcome 1-5 ask at loop close.
+- Effort tiers declared per brief (T1 1 session 3-10 calls / T2 2-4 subagents / T3 10+); independent subagents launch as ONE wave; returns hard-capped ~1500 tokens; shared-dir cache hygiene (no mid-task model/effort flips); fences carry TTL + check: + evidence block at close.
+- Disk gate: under 15 GiB free = cleanup before builds; under 8 = refuse.
+- Waits: run-in-background or Monitor; sleep-and-check loops are a violation.
+- Nothing merges unverified; deliverables missing done-checks are rejected back; self-scores cap at 8 without external evidence.
+- Never-forget: safety invariants, founder gates (credentials never, releases and destructive ops confirmed), live fences, unmerged work, open founder asks.
+- Handovers deliver as ONE zip holding every file they refer to (start-here, references, progress page). Never the pack plus its parts side by side, never a document beside the zip that contains it. Founder directive 2026-08-15, no exceptions unless he asks for a loose file, and that exception covers only that request. [human]
+- Bad news first; calibrated claims; push back with the founder's own values, then execute their call.
+- After compaction or resume: re-read references/fences.md, references/context.md, references/mistakes.md, and STATE.md before acting.

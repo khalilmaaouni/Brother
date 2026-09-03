@@ -1,0 +1,12 @@
+{
+  "name": "brother",
+  "version": "1.0.0",
+  "description": "Installs both Brother products in one step: execution provenance (brothermode) and change assurance with hard gates (brothersbe).",
+  "author": {
+    "name": "Khalil Maaouni"
+  },
+  "dependencies": [
+    "brothermode@^3.4.2",
+    "brothersbe@^3.7.0"
+  ]
+}

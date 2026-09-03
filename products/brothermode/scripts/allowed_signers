@@ -1,0 +1,8 @@
+# Public keys trusted to sign gate receipts, in ssh-keygen allowed_signers format.
+# The PRIVATE half lives only on the machine that runs the gate and is never a
+# push credential: a leaked GitHub token can forge a green commit status, and
+# this key is the second, different credential that makes the forgery visible.
+# Verify a receipt with:
+#   ssh-keygen -Y verify -f scripts/allowed_signers -I gates@brothermode \
+#     -n gates-receipt -s evidence/gates/<sha12>.txt.sig < evidence/gates/<sha12>.txt
+gates@brothermode ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBSXd42HWJJCqgsTOil/GEzE0nYgGkMyt1Kymefe92ER

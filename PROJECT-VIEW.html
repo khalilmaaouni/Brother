@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Where your project stands<[PATH WITHHELD]>
+<style>
+:root {
+  --bm-accent: #0E7A6F;
+  --bm-accent-tint: #E4EFED;
+  --bm-at-risk-ink: #6B4400;
+  --bm-at-risk-rule: #A06A00;
+  --bm-at-risk-tint: #FFF6E5;
+  --bm-body: #1A1D21;
+  --bm-for-info-ink: #00436B;
+  --bm-for-info-rule: #0072B2;
+  --bm-for-info-tint: #EAF3FA;
+  --bm-idle-ink: #3F4650;
+  --bm-idle-rule: #767B84;
+  --bm-idle-tint: #F1F2F4;
+  --bm-muted: #575E68;
+  --bm-needs-you-ink: #8C2D00;
+  --bm-needs-you-rule: #D55E00;
+  --bm-needs-you-tint: #FDEFE8;
+  --bm-node-ink: #1A1D21;
+  --bm-node-rule: #5B6470;
+  --bm-node-tint: #EFF1F4;
+  --bm-page: #FFFFFF;
+  --bm-paper: #F7F8F6;
+  --bm-settled-ink: #00543A;
+  --bm-settled-rule: #009E73;
+  --bm-settled-tint: #E8F6F0;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+  --bm-accent: #3AA893;
+  --bm-accent-tint: #10241F;
+  --bm-at-risk-ink: #F0B95A;
+  --bm-at-risk-rule: #E69F00;
+  --bm-at-risk-tint: #2A2110;
+  --bm-body: #E9ECF1;
+  --bm-for-info-ink: #7FC4F5;
+  --bm-for-info-rule: #56B4E9;
+  --bm-for-info-tint: #0F1E2A;
+  --bm-idle-ink: #A7AEB9;
+  --bm-idle-rule: #767B84;
+  --bm-idle-tint: #1E242C;
+  --bm-muted: #A7AEB9;
+  --bm-needs-you-ink: #FFA582;
+  --bm-needs-you-rule: #FF7A47;
+  --bm-needs-you-tint: #2A1710;
+  --bm-node-ink: #E9ECF1;
+  --bm-node-rule: #8A93A0;
+  --bm-node-tint: #1E242C;
+  --bm-page: #12151A;
+  --bm-paper: #141B22;
+  --bm-settled-ink: #5FD3AE;
+  --bm-settled-rule: #3FBF97;
+  --bm-settled-tint: #0E2018;
+  }
+}
+:root[data-theme="light"] {
+  --bm-accent: #0E7A6F;
+  --bm-accent-tint: #E4EFED;
+  --bm-at-risk-ink: #6B4400;
+  --bm-at-risk-rule: #A06A00;
+  --bm-at-risk-tint: #FFF6E5;
+  --bm-body: #1A1D21;
+  --bm-for-info-ink: #00436B;
+  --bm-for-info-rule: #0072B2;
+  --bm-for-info-tint: #EAF3FA;
+  --bm-idle-ink: #3F4650;
+  --bm-idle-rule: #767B84;
+  --bm-idle-tint: #F1F2F4;
+  --bm-muted: #575E68;
+  --bm-needs-you-ink: #8C2D00;
+  --bm-needs-you-rule: #D55E00;
+  --bm-needs-you-tint: #FDEFE8;
+  --bm-node-ink: #1A1D21;
+  --bm-node-rule: #5B6470;
+  --bm-node-tint: #EFF1F4;
+  --bm-page: #FFFFFF;
+  --bm-paper: #F7F8F6;
+  --bm-settled-ink: #00543A;
+  --bm-settled-rule: #009E73;
+  --bm-settled-tint: #E8F6F0;
+}
+:root[data-theme="dark"] {
+  --bm-accent: #3AA893;
+  --bm-accent-tint: #10241F;
+  --bm-at-risk-ink: #F0B95A;
+  --bm-at-risk-rule: #E69F00;
+  --bm-at-risk-tint: #2A2110;
+  --bm-body: #E9ECF1;
+  --bm-for-info-ink: #7FC4F5;
+  --bm-for-info-rule: #56B4E9;
+  --bm-for-info-tint: #0F1E2A;
+  --bm-idle-ink: #A7AEB9;
+  --bm-idle-rule: #767B84;
+  --bm-idle-tint: #1E242C;
+  --bm-muted: #A7AEB9;
+  --bm-needs-you-ink: #FFA582;
+  --bm-needs-you-rule: #FF7A47;
+  --bm-needs-you-tint: #2A1710;
+  --bm-node-ink: #E9ECF1;
+  --bm-node-rule: #8A93A0;
+  --bm-node-tint: #1E242C;
+  --bm-page: #12151A;
+  --bm-paper: #141B22;
+  --bm-settled-ink: #5FD3AE;
+  --bm-settled-rule: #3FBF97;
+  --bm-settled-tint: #0E2018;
+}
+body { background: var(--bm-page); color: var(--bm-body); }
+.bm-muted { color: var(--bm-muted); }
+.bm-figure { overflow-x: auto; margin: 0 0 1.5rem 0; }
+.bm-node { fill: var(--bm-node-tint); stroke: var(--bm-node-rule); }
+.bm-node-label { fill: var(--bm-node-ink); }
+.bm-now { stroke-width: 3; fill: var(--bm-for-info-tint);
+          stroke: var(--bm-for-info-rule); }
+.bm-complete { fill: var(--bm-settled-tint); stroke: var(--bm-settled-rule); }
+.bm-waiting { fill: var(--bm-idle-tint); stroke: var(--bm-idle-rule); }
+.bm-passed { fill: var(--bm-settled-tint); stroke: var(--bm-settled-rule); }
+.bm-not-run { fill: var(--bm-idle-tint); stroke: var(--bm-idle-rule); }
+.bm-open { fill: var(--bm-at-risk-tint); stroke: var(--bm-at-risk-rule); }
+.bm-chosen { fill: var(--bm-idle-tint); stroke: var(--bm-idle-rule); }
+.bm-counted { fill: var(--bm-idle-tint); stroke: var(--bm-idle-rule); }
+.bm-working { fill: var(--bm-for-info-tint);
+              stroke: var(--bm-for-info-rule); }
+.bm-blocked { fill: var(--bm-needs-you-tint);
+              stroke: var(--bm-needs-you-rule); stroke-width: 3; }
+.bm-failing { fill: var(--bm-needs-you-tint);
+              stroke: var(--bm-needs-you-rule); stroke-width: 3; }
+.bm-handback { stroke-width: 3; fill: var(--bm-for-info-tint);
+               stroke: var(--bm-for-info-rule); }
+.bm-insight { border-left: 3px dotted var(--bm-for-info-rule);
+              padding: .5rem .75rem; margin: 0 0 1rem 0; }
+.bm-failure { border-left: 3px solid var(--bm-at-risk-rule);
+              padding: .5rem .75rem; margin: 0 0 1rem 0; }
+.bm-action { margin: .25rem 0 0 0; }
+.bm-bar-track { fill: var(--bm-idle-tint); stroke: var(--bm-idle-rule); }
+.bm-bar-fill { fill: var(--bm-for-info-tint);
+               stroke: var(--bm-for-info-rule); }
+.bm-phase-label { fill: var(--bm-accent); font-weight: 600; }
+.bm-span { fill: var(--bm-accent); stroke: var(--bm-accent); }
+.bm-tick-on { fill: var(--bm-accent); stroke: var(--bm-accent); }
+.bm-tick-off { fill: var(--bm-accent-tint); stroke: var(--bm-idle-rule); }
+.bm-progress-surface { background: var(--bm-paper); }
+.bm-alert { padding: .5rem .75rem; margin: 0 0 .75rem 0; }
+.bm-rung-bar { display: inline-block; width: 100%; }
+.bm-needs-you { border-left: 6px solid var(--bm-needs-you-rule);
+                background: var(--bm-needs-you-tint);
+                color: var(--bm-needs-you-ink); }
+.bm-at-risk { border-left: 3px solid var(--bm-at-risk-rule);
+              background: var(--bm-at-risk-tint);
+              color: var(--bm-at-risk-ink); }
+.bm-for-info { border-left: 3px dotted var(--bm-for-info-rule);
+               background: var(--bm-for-info-tint);
+               color: var(--bm-for-info-ink); }
+.bm-settled { border-left: 0; color: var(--bm-muted); }
+
+body { font-family: Seravek, "Avenir Next", "Segoe UI", system-ui,
+       sans-serif; background: var(--bm-paper); margin: 0 auto;
+       max-width: 60rem; padding: 1rem 1.5rem 4rem; line-height: 1.55; }
+h1, h2, h3 { font-family: "Iowan Old Style", Palatino, Georgia, serif;
+             font-weight: 600; line-height: 1.25; }
+h1 { color: var(--bm-accent); }
+a { color: var(--bm-for-info-ink); }
+code { color: var(--bm-body); background: var(--bm-node-tint);
+       padding: 0 .25rem; }
+.bm-section { margin: 0 0 2rem 0; }
+.bm-what { color: var(--bm-muted); margin: -0.25rem 0 1rem 0; }
+.bm-card { overflow-x: auto; background: var(--bm-node-tint);
+           color: var(--bm-body); padding: .5rem .75rem; margin: 0; }
+.bm-empty { border: 1px dashed var(--bm-idle-rule);
+            background: var(--bm-idle-tint); padding: .75rem 1rem; }
+.bm-decision { margin: 0 0 1.25rem 0; }
+.bm-catchup { border-left: 3px solid var(--bm-idle-rule);
+              padding: .25rem .75rem; margin: 0 0 1rem 0; }
+.bm-header dt { color: var(--bm-muted); }
+.bm-header dd { margin: 0 0 .5rem 0; }
+<[PATH WITHHELD]>
+<[PATH WITHHELD]>
+<body>
+<h1>Where your project stands<[PATH WITHHELD]>
+<section id="header" class="bm-section"><h2>Where this stands<[PATH WITHHELD]><p class="bm-what">The outcome in your words, and what this page was built from.<[PATH WITHHELD]><dl class="bm-header"><dt>Outcome<[PATH WITHHELD]><dd>no outcome recorded yet<[PATH WITHHELD]><dt>Where we are<[PATH WITHHELD]><dd>a step is being worked on right now<[PATH WITHHELD]><dt>Progress<[PATH WITHHELD]><dd>2 of 7 steps accepted<[PATH WITHHELD]><dt>Setup<[PATH WITHHELD]><dd>5 of 8<[PATH WITHHELD]><dt>Built from<[PATH WITHHELD]><dd>records up to 2026-08-27T08:20:28Z, fingerprint <span class="bm-fingerprint">474588ff38fe<[PATH WITHHELD]><[PATH WITHHELD]><[PATH WITHHELD]><[PATH WITHHELD]>
+<section id="needs-you" class="bm-section"><h2>Waiting on you<[PATH WITHHELD]><p class="bm-what">The one thing waiting on you, if anything is.<[PATH WITHHELD]><div class="bm-alert bm-needs-you" role="alert"><strong>NEEDS YOU<[PATH WITHHELD]> a Bash command run by session 8cb24186-a8fa-4b62-b64e-042a0a2a6b2f changed docs/plan/LIVE-STATE.json, which is inside the active fence &#39;plan-refresh-2026-08-24-session-b-round2&#39; (lifecycle 0db2c1f347294ccf85e1e419c38c6e4e), and that session is not the fence&#39;s owner. The fence hook cannot see Bash... 7 more like this are waiting.<p class="bm-action">review the change to the path named above, confirm it was intended, and if the fence should move, adopt it deliberately with `bm_store.py adopt ... --adopt-from-live-session` rather than leaving it...<[PATH WITHHELD]><[PATH WITHHELD]><[PATH WITHHELD]>
+<section id="next-step" class="bm-section"><h2>Your next step<[PATH WITHHELD]><p class="bm-what">One recommended step, its why, and its command.<[PATH WITHHELD]><div data-bm-next-step="1"><p><strong>let the work in flight finish<[PATH WITHHELD]><[PATH WITHHELD]><p>Why: 1 piece(s) of work are already running<[PATH WITHHELD]><p>Run: <code>bm-lead status --project-id brother --ic<[PATH WITHHELD]><[PATH WITHHELD]><[PATH WITHHELD]><[PATH WITHHELD]>
+<section id="pipeline" class="bm-section"><h2>The path of the work<[PATH WITHHELD]><p class="bm-what">Where the work is on its path.<[PATH WITHHELD]><figure class="bm-figure"><svg role="img" viewBox="0 0 1054 64" width="1054" height="64" aria-labelledby="bm-pipelinet" aria-describedby="bm-pipelined"><title id="bm-pipelinet">Where the work stands now<[PATH WITHHELD]><desc id="bm-pipelined">6 stages left to right. Build is the stage in progress. a step is being worked on right now<[PATH WITHHELD]><rect class="bm-node bm-complete" x="10" y="10" width="156" height="44" rx="6"><[PATH WITHHELD]><text class="bm-node-label" x="24" y="37">Set up, complete<[PATH WITHHELD]><rect class="bm-node bm-complete" x="192" y="10" width="188" height="44" rx="6"><[PATH WITHHELD]><text class="bm-node-label" x="206" y="37">Understand, complete<[PATH WITHHELD]><rect class="bm-node bm-complete" x="406" y="10" width="140" height="44" rx="6"><[PATH WITHHELD]><text class="bm-node-label" x="420" y="37">Plan, complete<[PATH WITHHELD]><rect class="bm-node bm-now" x="572" y="10" width="108" height="44" rx="6"><[PATH WITHHELD]><text class="bm-node-label" x="586" y="37">Build, NOW<[PATH WITHHELD]><rect class="bm-node bm-waiting" x="706" y="10" width="140" height="44" rx="6"><[PATH WITHHELD]><text class="bm-node-label" x="720" y="37">Check, waiting<[PATH WITHHELD]><rect class="bm-node bm-waiting" x="872" y="10" width="156" height="44" rx="6"><[PATH WITHHELD]><text class="bm-node-label" x="886" y="37">Deliver, waiting<[PATH WITHHELD]><[PATH WITHHELD]><figcaption>The work is at Build. Everything to its left is complete and everything to its right has not started. In words: a step is being worked on right now.<[PATH WITHHELD]><[PATH WITHHELD]><[PATH WITHHELD]>
+<section id="programme" class="bm-section"><h2>Where the programme stands<[PATH WITHHELD]><p class="bm-what">Every phase of the work, and how much of each one is finished and checked.<[PATH WITHHELD]><div class="bm-empty"><h3>The phases of your work will be charted here<[PATH WITHHELD]><p>Each phase gets a bar, and each piece a box that ticks when it is finished and checked.<[PATH WITHHELD]><p class="bm-action">Start the work: <code>[PATH WITHHELD]<[PATH WITHHELD]><[PATH WITHHELD]><[PATH WITHHELD]><[PATH WITHHELD]>
+<section id="progress" class="bm-section"><h2>How far each lane has moved<[PATH WITHHELD]><p class="bm-what">Each piece of work, its lane, and how far it has moved.<[PATH WITHHELD]><div class="bm-empty"><h3>Progress by lane will build here<[PATH WITHHELD]><p>As pieces of work are planned, each one shows its lane, how far it has moved, and what checked it.<[PATH WITHHELD]><p class="bm-action">Ask for the next step: <code>[PATH WITHHELD]<[PATH WITHHELD]><[PATH WITHHELD]><[PATH WITHHELD]><[PATH WITHHELD]>
+<section id="counts" class="bm-section"><h2>How much, against what limit<[PATH WITHHELD]><p class="bm-what">The numbers, each against its limit.<[PATH WITHHELD]><figure class="bm-figure"><svg role="img" viewBox="0 0 540 330" width="540" height="330" aria-labelledby="bm-countst" aria-describedby="bm-countsd"><title id="bm-countst">How much, against what limit<[PATH WITHHELD]><desc id="bm-countsd">5 labelled rows, each with its own numbers written out.<[PATH WITHHELD]><text class="bm-node-label" x="10" y="24">Gates, counted  2 of 7 gates passed<[PATH WITHHELD]><g role="progressbar" aria-valuemin="0" aria-valuemax="7" aria-valuenow="2" aria-valuetext="2 of 7 gates passed"><rect class="bm-bar-track" x="10" y="32" width="240" height="18" rx="4"><[PATH WITHHELD]><rect class="bm-bar-fill" x="10" y="32" width="68" height="18" rx="4"><[PATH WITHHELD]><[PATH WITHHELD]><text class="bm-node-label" x="10" y="88">Steps, counted  2 of 7 steps accepted<[PATH WITHHELD]><g role="progressbar" aria-valuemin="0" aria-valuemax="7" aria-valuenow="2" aria-valuetext="2 of 7 steps accepted"><rect class="bm-bar-track" x="10" y="96" width="240" height="18" rx="4"><[PATH WITHHELD]><rect class="bm-bar-fill" x="10" y="96" width="68" height="18" rx="4"><[PATH WITHHELD]><[PATH WITHHELD]><text class="bm-node-label" x="10" y="152">Work budget, counted  0 of 700000 tokens used<[PATH WITHHELD]><g role="progressbar" aria-valuemin="0" aria-valuemax="700000" aria-valuenow="0" aria-valuetext="0 of 700000 tokens used"><rect class="bm-bar-track" x="10" y="160" width="240" height="18" rx="4"><[PATH WITHHELD]><rect class="bm-bar-fill" x="10" y="160" width="0" height="18" rx="4"><[PATH WITHHELD]><[PATH WITHHELD]><text class="bm-node-label" x="10" y="216">Working time, counted  0 minutes used, no limit agreed yet<[PATH WITHHELD]><text class="bm-node-label" x="10" y="280">Findings, counted  needs you 1, at risk 1, for info 2, settled 2<[PATH WITHHELD]><[PATH WITHHELD]><figcaption>2 of 7 gates passed; 2 of 7 steps accepted; 0 of 700000 tokens used; 0 minutes used, no limit agreed yet; needs you 1, at risk 1, for info 2, settled 2<[PATH WITHHELD]><[PATH WITHHELD]><[PATH WITHHELD]>
+<section id="risks" class="bm-section"><h2>What could still go wrong<[PATH WITHHELD]><p class="bm-what">What could still go wrong, and what would settle it.<[PATH WITHHELD]><div class="bm-empty"><h3>You are clear of open risks right now<[PATH WITHHELD]><p>When something could still go wrong, it lands here with what would settle it and who is watching it.<[PATH WITHHELD]><p class="bm-action">See where things stand: <code>[PATH WITHHELD]<[PATH WITHHELD]><[PATH WITHHELD]><[PATH WITHHELD]><[PATH WITHHELD]>
+<section id="decisions" class="bm-section"><h2>Decisions waiting for your answer<[PATH WITHHELD]><p class="bm-what">Open choices, the highest stakes first.<[PATH WITHHELD]><div class="bm-empty"><h3>Decisions will wait for you here<[PATH WITHHELD]><p>When a choice needs your answer, it appears here with a recommendation and what happens either way.<[PATH WITHHELD]><p class="bm-action">Ask for the next step: <code>[PATH WITHHELD]<[PATH WITHHELD]><[PATH WITHHELD]><[PATH WITHHELD]><[PATH WITHHELD]>
+<section id="insights" class="bm-section"><h2>What I now believe, and what proved it<[PATH WITHHELD]><p class="bm-what">What was learned, and what proved it.<[PATH WITHHELD]><div class="bm-empty"><h3>What I learn lands here<[PATH WITHHELD]><p>Each thing learned is shown with what proved it, what was rejected, and what would change it.<[PATH WITHHELD]><p class="bm-action">Ask for the next step: <code>[PATH WITHHELD]<[PATH WITHHELD]><[PATH WITHHELD]><[PATH WITHHELD]><[PATH WITHHELD]>
+<section id="gates" class="bm-section"><h2>What has to be true before this ships<[PATH WITHHELD]><p class="bm-what">What still stands between the work and done.<[PATH WITHHELD]><figure class="bm-figure"><svg role="img" viewBox="0 0 504 412" width="504" height="412" aria-labelledby="bm-gatest" aria-describedby="bm-gatesd"><title id="bm-gatest">What has to be true before this is finished<[PATH WITHHELD]><desc id="bm-gatesd">A single column of 7 gates in order, each with its own status word beside it.<[PATH WITHHELD]><rect class="bm-node bm-passed" x="10" y="10" width="452" height="44" rx="6"><[PATH WITHHELD]><text class="bm-node-label" x="24" y="37">Brother s 3 local commits 4a7e21c fac2b63 ..., passed<[PATH WITHHELD]><rect class="bm-node bm-passed" x="10" y="66" width="476" height="44" rx="6"><[PATH WITHHELD]><text class="bm-node-label" x="24" y="93">The uncommitted docs/guides/00-sandbox.md has..., passed<[PATH WITHHELD]><rect class="bm-node bm-not-run" x="10" y="122" width="484" height="44" rx="6"><[PATH WITHHELD]><text class="bm-node-label" x="24" y="149">The full 52 command battery runs at the new e..., not run<[PATH WITHHELD]><rect class="bm-node bm-not-run" x="10" y="178" width="484" height="44" rx="6"><[PATH WITHHELD]><text class="bm-node-label" x="24" y="205">The first-run pull request opens for ease/fir..., not run<[PATH WITHHELD]><rect class="bm-node bm-not-run" x="10" y="234" width="460" height="44" rx="6"><[PATH WITHHELD]><text class="bm-node-label" x="24" y="261">PR 68 the adaptive intake head e3c23d2 unb..., not run<[PATH WITHHELD]><rect class="bm-node bm-not-run" x="10" y="290" width="476" height="44" rx="6"><[PATH WITHHELD]><text class="bm-node-label" x="24" y="317">The Kay Vault brother space gains this day s..., not run<[PATH WITHHELD]><rect class="bm-node bm-not-run" x="10" y="346" width="484" height="44" rx="6"><[PATH WITHHELD]><text class="bm-node-label" x="24" y="373">The day plan rows carry final statuses with q..., not run<[PATH WITHHELD]><[PATH WITHHELD]><figcaption>2 of 7 gates have passed. A gate marked BLOCKED is the reason the work is not finished.<[PATH WITHHELD]><[PATH WITHHELD]><[PATH WITHHELD]>
+<section id="lanes" class="bm-section"><h2>Who holds the pen<[PATH WITHHELD]><p class="bm-what">Who owns each open step right now.<[PATH WITHHELD]><div class="bm-empty"><h3>You hold the pen on everything open right now<[PATH WITHHELD]><p>When the work is split between you and BrotherMode, this shows who owns each open step.<[PATH WITHHELD]><p class="bm-action">Ask for the next step: <code>[PATH WITHHELD]<[PATH WITHHELD]><[PATH WITHHELD]><[PATH WITHHELD]><[PATH WITHHELD]>
+<section id="documents" class="bm-section"><h2>What each finished piece produced<[PATH WITHHELD]><p class="bm-what">What each finished piece produced, as a path.<[PATH WITHHELD]><div class="bm-empty"><h3>What gets produced will be listed here<[PATH WITHHELD]><p>Each finished piece of work shows the paths it produced and the checks that ran on it.<[PATH WITHHELD]><p class="bm-action">See where things stand: <code>[PATH WITHHELD]<[PATH WITHHELD]><[PATH WITHHELD]><[PATH WITHHELD]><[PATH WITHHELD]>
+<section id="timeline" class="bm-section"><h2>The story so far<[PATH WITHHELD]><p class="bm-what">The catch-ups, oldest first.<[PATH WITHHELD]><article class="bm-catchup" data-bm-trace="b:609183cf235e4b8294a36e163a444934"><h3>2026-08-27T08:20:28Z<[PATH WITHHELD]><p>Where we are: a step is being worked on right now (2 of 7 steps accepted)<[PATH WITHHELD]><p>What changed: autonomy.checkpoint.recorded x4, autonomy.contract.amend x1, autonomy.contract.sign x1, controller.dispatch.resulted x2, controller.dispatch.verified x2, controller.run.adopted x1, controller.run.opened x1, controller.run.state_changed x12, controller.unit.claimed x3, controller.unit.dispatched x3, controller.unit.done x2, controller.units.upserted x1, project.upserted x1<[PATH WITHHELD]><p>What it cost: 0 tokens and 0 minutes of model work so far, against what you authorised (700000 tokens, no agreed limit minutes)<[PATH WITHHELD]><[PATH WITHHELD]><[PATH WITHHELD]>
+<section id="your-move" class="bm-section"><h2>Your move<[PATH WITHHELD]><p class="bm-what">The standing offer to take the work back.<[PATH WITHHELD]><p>Hand this back to me: I take this decision and the work under it, and BrotherMode records where it stopped and what it would have done.<[PATH WITHHELD]><p>Nothing is lost. Your authorisation is paused so no further automatic work can start, the work in progress is parked with a note about what to do next, what BrotherMode would have chosen is recorded, and a page for whoever picks it up is written.<[PATH WITHHELD]><details><summary>Copy this into the chat to take it back<[PATH WITHHELD]><pre class="bm-card">[PATH WITHHELD]
+
+Take back: the work as it stands
+Why: &lt;the founder types this&gt;<[PATH WITHHELD]><[PATH WITHHELD]><[PATH WITHHELD]>
+<section id="help" class="bm-section"><h2>About this page<[PATH WITHHELD]><p class="bm-what">What this page is, and what it cannot do.<[PATH WITHHELD]><p>This page is written from your project's records. Every line on it comes from a record, and the short code in the header changes whenever your records change, so an old tab is visibly older than a fresh one.<[PATH WITHHELD]><ul><li><a href="#header">Where this stands<[PATH WITHHELD]>: The outcome, where the work is, the setup count, and the newest record this page was built from.<[PATH WITHHELD]><li><a href="#needs-you">Waiting on you<[PATH WITHHELD]>: At most one thing interrupts you at a time; anything else waits its turn here.<[PATH WITHHELD]><li><a href="#next-step">Your next step<[PATH WITHHELD]>: Always exactly one recommended step; a page with two recommendations is a page with none.<[PATH WITHHELD]><li><a href="#pipeline">The path of the work<[PATH WITHHELD]>: The stages of the work drawn left to right, with the current one marked NOW.<[PATH WITHHELD]><li><a href="#programme">Where the programme stands<[PATH WITHHELD]>: One bar per piece of work, grouped into the phase its own record names, with a box that ticks only on a finished piece that has a check on file.<[PATH WITHHELD]><li><a href="#progress">How far each lane has moved<[PATH WITHHELD]>: One bar per piece of work inside its own lane, plus what is finished and what is blocked and on what.<[PATH WITHHELD]><li><a href="#counts">How much, against what limit<[PATH WITHHELD]>: Checks passed, work budget used and findings, each as a number against its agreed limit.<[PATH WITHHELD]><li><a href="#risks">What could still go wrong<[PATH WITHHELD]>: Each open risk with what would settle it and who is watching it, the most pressing first.<[PATH WITHHELD]><li><a href="#decisions">Decisions waiting for your answer<[PATH WITHHELD]>: Each open choice with a recommendation, what else was weighed, and the option to take it back.<[PATH WITHHELD]><li><a href="#insights">What I now believe, and what proved it<[PATH WITHHELD]>: Each thing learned, with its proof, what was rejected, what would change it, and your standing option.<[PATH WITHHELD]><li><a href="#gates">What has to be true before this ships<[PATH WITHHELD]>: The checks that have to pass before the work ships, drawn as a ladder.<[PATH WITHHELD]><li><a href="#lanes">Who holds the pen<[PATH WITHHELD]>: Drawn only when the work is split between more than one owner.<[PATH WITHHELD]><li><a href="#documents">What each finished piece produced<[PATH WITHHELD]>: Every finished piece of work with the paths it produced and the checks that ran on it, timed.<[PATH WITHHELD]><li><a href="#timeline">The story so far<[PATH WITHHELD]>: Every catch-up in order, so the run replays forwards from the beginning.<[PATH WITHHELD]><li><a href="#your-move">Your move<[PATH WITHHELD]>: The exact text to paste into the chat to take the work and any open decision back into your hands.<[PATH WITHHELD]><li><a href="#help">About this page<[PATH WITHHELD]>: The one place the page explains itself; each section above carries one line and the rest lives here.<[PATH WITHHELD]><[PATH WITHHELD]><p>What this page cannot do:<[PATH WITHHELD]><ul><li>It is a picture of your records at the moment it was written, not a live screen. It updates when it is written again, which happens on command and when a working session stops.<[PATH WITHHELD]><li>Opening it reads and changes nothing in your project.<[PATH WITHHELD]><li>Buttons on a web page cannot act on your project. The one way back in is copying the text under Your move into the chat.<[PATH WITHHELD]><li>It cannot show your application running, because BrotherMode does not run your application.<[PATH WITHHELD]><[PATH WITHHELD]><[PATH WITHHELD]>
+<[PATH WITHHELD]>
+<[PATH WITHHELD]>

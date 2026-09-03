@@ -1,0 +1,162 @@
+{
+  "_comment": "Golden fixture for tools/bm_vault_enrich_gate.py, WBS VB13-05. Every input below is copied verbatim from tools/fixtures/gleif-toyota-group.json (GLEIF LEI API v1, real data, fetched 2026-08-30, CC0), and every expected output is exactly what tools/bm_vault_enrich_gate.py's extract() computes from that same input under bm_vault_enrich_gate.EXTRACTION_SCHEMA. Nine cases, including 254900XT9AC8T3VD5P25 (Japanese jurisdiction-adjacent Philippines entity is NOT the Japanese case; the Japanese-script legal-name case is 5493006W3QUS5LMH6R84, the Toyota Motor Corporation root record) and 3538009ZU0PHKNHJM202 which carries registration_status LAPSED rather than ISSUED, the one non-default status value in the fixture.",
+  "cases": [
+    {
+      "id": "5493006W3QUS5LMH6R84",
+      "input": {
+        "legalName": "トヨタ自動車株式会社",
+        "legalName_lang": "ja",
+        "otherNames": ["Toyota Motor Corporation"],
+        "country": "JP",
+        "city": "愛知県 豊田市",
+        "jurisdiction": "JP",
+        "category": "GENERAL",
+        "entity_status": "ACTIVE",
+        "registration_status": "ISSUED"
+      },
+      "expected": {
+        "legal_name": "トヨタ自動車株式会社",
+        "country": "JP",
+        "entity_status": "ACTIVE",
+        "registration_status": "ISSUED"
+      }
+    },
+    {
+      "id": "213800LRITLBTS6TX578",
+      "input": {
+        "legalName": "KOROMO UK 2 PLC",
+        "country": "GB",
+        "city": "LONDON",
+        "jurisdiction": "GB",
+        "entity_status": "ACTIVE",
+        "registration_status": "ISSUED"
+      },
+      "expected": {
+        "legal_name": "KOROMO UK 2 PLC",
+        "country": "GB",
+        "entity_status": "ACTIVE",
+        "registration_status": "ISSUED"
+      }
+    },
+    {
+      "id": "254900OR20P23DBVOT48",
+      "input": {
+        "legalName": "TOYOTA AUTO LOAN EXTENDED NOTE TRUST 2026-1",
+        "country": "US",
+        "city": "WILMINGTON",
+        "jurisdiction": "US-DE",
+        "entity_status": "ACTIVE",
+        "registration_status": "ISSUED"
+      },
+      "expected": {
+        "legal_name": "TOYOTA AUTO LOAN EXTENDED NOTE TRUST 2026-1",
+        "country": "US",
+        "entity_status": "ACTIVE",
+        "registration_status": "ISSUED"
+      }
+    },
+    {
+      "id": "254900P6N1P23K5FYA48",
+      "input": {
+        "legalName": "TOYOTA SOUTH AFRICA MOTORS",
+        "country": "ZA",
+        "city": "Sandton",
+        "jurisdiction": "ZA",
+        "entity_status": "ACTIVE",
+        "registration_status": "ISSUED"
+      },
+      "expected": {
+        "legal_name": "TOYOTA SOUTH AFRICA MOTORS",
+        "country": "ZA",
+        "entity_status": "ACTIVE",
+        "registration_status": "ISSUED"
+      }
+    },
+    {
+      "id": "254900XT9AC8T3VD5P25",
+      "input": {
+        "legalName": "Toyota Financial Services Philippines Corporation",
+        "country": "PH",
+        "city": "Makati",
+        "jurisdiction": "PH",
+        "entity_status": "ACTIVE",
+        "registration_status": "ISSUED"
+      },
+      "expected": {
+        "legal_name": "Toyota Financial Services Philippines Corporation",
+        "country": "PH",
+        "entity_status": "ACTIVE",
+        "registration_status": "ISSUED"
+      }
+    },
+    {
+      "id": "335800VNMGPNUH6Z9110",
+      "input": {
+        "legalName": "TOYOTA KIRLOSKAR MOTOR PRIVATE LIMITED",
+        "country": "IN",
+        "city": "BANGALORE",
+        "jurisdiction": "IN",
+        "entity_status": "ACTIVE",
+        "registration_status": "ISSUED"
+      },
+      "expected": {
+        "legal_name": "TOYOTA KIRLOSKAR MOTOR PRIVATE LIMITED",
+        "country": "IN",
+        "entity_status": "ACTIVE",
+        "registration_status": "ISSUED"
+      }
+    },
+    {
+      "id": "3538009ZU0PHKNHJM202",
+      "input": {
+        "legalName": "日野自動車株式会社",
+        "otherNames": ["Hino Motors, Ltd."],
+        "country": "JP",
+        "city": "東京都 日野市",
+        "jurisdiction": "JP",
+        "entity_status": "ACTIVE",
+        "registration_status": "LAPSED"
+      },
+      "expected": {
+        "legal_name": "日野自動車株式会社",
+        "country": "JP",
+        "entity_status": "ACTIVE",
+        "registration_status": "LAPSED"
+      }
+    },
+    {
+      "id": "529900TP68LKVLHKNE55",
+      "input": {
+        "legalName": "TOYOTA Kreditbank GmbH",
+        "country": "DE",
+        "city": "Köln",
+        "jurisdiction": "DE",
+        "entity_status": "ACTIVE",
+        "registration_status": "ISSUED"
+      },
+      "expected": {
+        "legal_name": "TOYOTA Kreditbank GmbH",
+        "country": "DE",
+        "entity_status": "ACTIVE",
+        "registration_status": "ISSUED"
+      }
+    },
+    {
+      "id": "3UKPTDP5PGQRH8AUK042",
+      "input": {
+        "legalName": "TOYOTA FINANCE AUSTRALIA LIMITED",
+        "country": "AU",
+        "city": "Sydney",
+        "jurisdiction": "AU",
+        "entity_status": "ACTIVE",
+        "registration_status": "ISSUED"
+      },
+      "expected": {
+        "legal_name": "TOYOTA FINANCE AUSTRALIA LIMITED",
+        "country": "AU",
+        "entity_status": "ACTIVE",
+        "registration_status": "ISSUED"
+      }
+    }
+  ]
+}

@@ -1,0 +1,187 @@
+{
+  "product_name": "BrotherMode",
+  "updated": "2026-08-10",
+  "source_of_truth": "This file is the register a page must agree with before it claims anything. Four states only: certified means proven in this tree today by the evidence named; beta means real but with a named gap; experimental means built or planned but not measured; unsupported means it is not offered and no plan makes it offered. An evidence value of 'not measured' means exactly that, and on an unsupported row it also means the non-promise is not yet written into a shipped page. tools/test_bm_docs.py refuses an entry with an unknown state, an empty evidence field, or an evidence pointer naming a file that is not in the tree.",
+  "capabilities": [
+    {
+      "id": "single-writer-enforcement",
+      "title": "Single writer per file for supported write tools, refused by a hook; other writes detected, not contained",
+      "state": "beta",
+      "evidence": "Conflicting writes are refused for the Claude Code write tools (Edit, Write, MultiEdit, NotebookEdit) and readable apply_patch envelopes on the Bash leg, wired by hooks/hooks.json and proven by tools/test_bm_fence_hook.py. Other shell and external writes are detected where possible by tools/bm_bash_audit.py but are NOT contained. Hooks are cooperative enforcement: no container or operating system sandbox is provided. MEASURED 2026-08-07 on OpenAI Codex CLI 0.146.0: the fence does NOT fire in the codex exec path. A live run overwrote a file another session had claimed, twice, and a marker probe proved the PreToolUse hook never executed, with config syntax, project trust and hook-trust bypass all ruled out (docs/mistakes/M19-the-codex-fence-does-not-fire-in-exec-mode.md). Under Codex, BrotherMode is an instruction file plus a working command line, not an enforcement layer. Downgraded to beta: proven in this tree with tools/test_bm_fence_hook.py, but not proven on an installed plugin because the install writes no INSTALLED-FROM stamp and the detector scripts/doctor.py check_install_identity can only return SKIP. Since 2026-08-17 the same hook also refuses a write to any git-tracked file while a live tools/test_all.py gate lock covers the checkout (the battery fence), for every session including the one that started the gate; a lock it cannot read is reported and, in advisory mode, never blocks. The battery classes in tools/test_bm_fence_hook.py prove it in this tree, under the same beta caveat as the rest of this row. ENFORCED MODE DRIVEN 2026-09-02 for the first time, by ../../scripts/fence_enforced_drill.py: 20 conditions, each fed to the hook twice, advisory against enforced, 20 PASS and 0 NO-DATA. Fifteen conditions that fail OPEN with the mode unset fail CLOSED with BM_FENCE_MODE=enforced, and a properly claimed write still ALLOWS under enforced, so enforcement is selective rather than blanket. The drill was itself driven backwards against a mutant copy of the hook whose enforced_mode() returns False, which produced 15 FAIL at exit 1. ONE GAP FOUND AND NOT FIXED, recorded here rather than left in a transcript: a payload whose tool_name is not a string leaves decide() at the not-a-write-tool branch BEFORE any mode check, so enforced mode cannot refuse it. That is one of the five shapes of malformed payload this row's C-01 note claims enforcement covers, so the claim is one shape wider than the code until that branch moves."
+    },
+    {
+      "id": "durable-store-and-recovery",
+      "title": "Durable local store that survives a crash and can be recovered",
+      "state": "certified",
+      "evidence": "tools/bm_store.py holds the state and tools/test_bm_store.py exercises recovery; the store job in .github/workflows/tests.yml runs that suite on Linux, macOS and Windows."
+    },
+    {
+      "id": "evidence-discipline",
+      "title": "Current pages are held to the facts read out of the tree",
+      "state": "certified",
+      "evidence": "tools/test_bm_docs.py refuses a current page carrying a stale count, a stale version, or a dated record that declares no status; docs/ba/QA-GATES.md states the gates."
+    },
+    {
+      "id": "guided-beginner-flow",
+      "title": "Guided beginner flow on Claude Code",
+      "state": "certified",
+      "evidence": "skills/brotherme/SKILL.md drives the flow, commands/brotherme-start.md is its entry point, and docs/QUICKSTART.md is the install path a beginner follows."
+    },
+    {
+      "id": "ci-macos-and-linux",
+      "title": "Continuous integration on macOS and Linux",
+      "state": "certified",
+      "evidence": ".github/workflows/tests.yml runs the suite job on ubuntu-latest and macos-latest at Python 3.9 and 3.x, with fail-fast disabled so one platform cannot erase another's result."
+    },
+    {
+      "id": "telemetry-with-consent",
+      "title": "Session telemetry recorded only after the user consents",
+      "state": "certified",
+      "evidence": "scripts/setup.py writes the consent record, tools/bm_telemetry.py is the only writer, and tools/test_bm_consent.py refuses a write without consent."
+    },
+    {
+      "id": "plugin-packaging",
+      "title": "Two-command plugin install through Claude Code's own plugin manager",
+      "state": "certified",
+      "evidence": "scripts/release-smoke-install.sh proves the whole path on every release inside a throwaway configuration: marketplace add, install, installed version matched against VERSION, every hook group registered, uninstall leaving settings clean; first PASSED run 2026-08-07 on the release candidate tree, with a live sandboxed end to end run the same night. claude plugin validate passes both manifests. SURFACE LIMIT, founder-reproduced 2026-08-06: the desktop app cannot run /plugin itself; the two commands run once in a terminal and the app consumes the installed plugin. The plugin line tracks the repository's default branch by the plugin system's design; the tagged clone remains the immutable option and docs/RELEASE.md states both."
+    },
+    {
+      "id": "windows",
+      "title": "Windows",
+      "state": "beta",
+      "evidence": "Only the store job in .github/workflows/tests.yml runs on windows-latest; the suite and gate jobs run on Linux and macOS only. docs/KNOWN-LIMITS.md records that the installer refuses Windows and that WSL works. There is no native Windows install lifecycle."
+    },
+    {
+      "id": "web-delivery-lane",
+      "title": "Delivering a web build through the same guided flow",
+      "state": "experimental",
+      "evidence": "not measured"
+    },
+    {
+      "id": "deployment-previews",
+      "title": "Deployment previews attached to a delivery",
+      "state": "experimental",
+      "evidence": "not measured"
+    },
+    {
+      "id": "benchmark-harness",
+      "title": "Benchmark harness comparing runs",
+      "state": "experimental",
+      "evidence": "docs/BENCHMARK.md describes the method and docs/BENCHMARK-V1-V2-RC2.md records a dated run. No run against the current tree is recorded, so no current number is claimed."
+    },
+    {
+      "id": "cursor-compat-mode",
+      "title": "Cursor compatibility mode: independent install, manage, uninstall, and a local Fable-to-Cursor harness",
+      "state": "experimental",
+      "evidence": "scripts/install_cursor.py and scripts/uninstall_cursor.py own the Cursor lifecycle; tools/bm_cursor.py is the manage and mailbox harness CLI; tools/bm_cursor_hook.py adapts Cursor hook payloads to the Claude fence contract; tools/test_bm_cursor.py covers adapter translation, install ownership, and dispatch-claim-record-adopt. docs/CURSOR-COMPAT.md states the honest limit: fence enforcement under Cursor is ADVISORY until a live Agent canary is recorded. No live Cursor Agent or Cloud Agent canary is in this tree yet."
+    },
+    {
+      "id": "autonomous-production-publication",
+      "title": "Publishing to production on its own",
+      "state": "unsupported",
+      "evidence": "Not offered. Cutting and publishing a release is a founder-gated sequence of steps in docs/RELEASE.md, and the suite skips the release checks until a human has cut the tag."
+    },
+    {
+      "id": "automatic-spending",
+      "title": "Spending money on the user's behalf",
+      "state": "unsupported",
+      "evidence": "Not offered. SECURITY.md states there is no account and no server, and that the only outbound call is a version check the user invokes by hand."
+    },
+    {
+      "id": "legal-or-security-certification",
+      "title": "Legal or security certification of any kind",
+      "state": "unsupported",
+      "evidence": "not measured"
+    },
+    {
+      "id": "guaranteed-native-mobile",
+      "title": "A guaranteed native mobile result",
+      "state": "unsupported",
+      "evidence": "not measured"
+    },
+    {
+      "id": "replacement-of-specialist-review",
+      "title": "Replacing a human specialist review",
+      "state": "unsupported",
+      "evidence": "not measured"
+    },
+    {
+      "id": "multi-user-enterprise-pm",
+      "title": "Multi-user or enterprise project management",
+      "state": "unsupported",
+      "evidence": "Not offered. README.md states there is no shared server, no account system and no multi-user coordination layer, and that running this as a control plane for several people is not what it is for."
+    },
+    {
+      "id": "self-modification-of-safety-rules",
+      "title": "Changing its own safety rules",
+      "state": "unsupported",
+      "evidence": "not measured"
+    },
+    {
+      "id": "autonomy-contract",
+      "title": "The signed authorisation an autonomous session has to work inside",
+      "state": "beta",
+      "evidence": "tools/bm_autonomy.py is the command line, tools/test_bm_autonomy.py is its suite, and the store job in .github/workflows/tests.yml runs that suite on Linux, macOS and Windows; docs/AUTONOMY.md is the page. It stays beta because docs/KNOWN-LIMITS.md records open items against this layer and no use outside this project is recorded."
+    },
+    {
+      "id": "full-auto-controller",
+      "title": "The durable controller that carries a signed outcome to a checked deliverable",
+      "state": "beta",
+      "evidence": "tools/bm_controller.py is the engine and its command line, tools/test_bm_controller.py is its suite including an end to end run that is killed and resumed (its transcript is docs/program/absolute-lead/evidence/L03/E4-endtoend.json), the store job in .github/workflows/tests.yml runs that suite on Linux, macOS and Windows, and docs/FULL-AUTO.md is the page. Not experimental, because experimental here means not measured and this is measured. It stays beta because docs/KNOWN-LIMITS.md carries its own list of what the controller does not yet do, and no pilot outside this project exists."
+    },
+    {
+      "id": "decision-record-and-briefing",
+      "title": "A record of what was decided and why, and the short catch-up built from it",
+      "state": "beta",
+      "evidence": "tools/bm_lead.py records and renders them over two append only tables in tools/bm_store.py, tools/test_bm_lead.py is its suite, and docs/program/absolute-lead/DESIGN-insight-ledger-and-handback.md states what a record has to carry before it may be written. It stays beta because the record holds the coordinator's judgement rather than a measurement, because no continuous integration run covers it yet, and because docs/KNOWN-LIMITS.md names what it does not do."
+    },
+    {
+      "id": "handing-control-back",
+      "title": "Handing a decision and the work under it back to the person who owns it",
+      "state": "beta",
+      "evidence": "Offered on every key decision and enforced by a refusal in tools/bm_store.py rather than by a rendering convention: a key decision that offers no handback cannot be recorded at all. tools/bm_lead.py performs the handback and writes the page a developer picks the work up from, and tools/test_bm_lead.py drives both, including the refusal of a second handback on one decision. It stays beta because no continuous integration run covers it yet and no handback outside this project is recorded."
+    },
+    {
+      "id": "half-hour-watchdog",
+      "title": "A half hour catch-up that arrives on its own, on by default after setup",
+      "state": "beta",
+      "evidence": "hooks/hooks.json wires it to the Stop hook as a due check rather than a background process, tools/test_bm_consent.py drives every hook wired command against a fresh home directory and fails if any of them writes before consent (the suite job in .github/workflows/tests.yml runs that suite), and SECURITY.md discloses that it ships on by default, what it writes when a catch-up is due, and that it writes nothing when it is not. It stays beta because it cannot fire inside a turn that never ends and because its activity ceiling is a chosen constant, both recorded in docs/KNOWN-LIMITS.md."
+    },
+    {
+      "id": "analyst-handover-pack",
+      "title": "Handover pages an analyst or a project lead can take a project over from",
+      "state": "beta",
+      "evidence": "tools/bm_lead.py generates them from rows and tools/test_bm_lead.py checks both directions: every row the store says belongs on a page reaches that page, and every claim on a page resolves back to the row it came from. It stays beta because no continuous integration run covers it yet and because nobody outside this project has read a pack, which is the empty rung docs/ROADMAP.md section 1 describes."
+    },
+    {
+      "id": "live-project-view",
+      "title": "One page showing where a project stands, generated from that project's own records",
+      "state": "beta",
+      "evidence": "PROVEN: tools/bm_view.py writes the page as one self contained file from the records, through the collectors in tools/bm_lead.py rather than a second reading of its own, tools/bm_visual.py draws it, and tools/test_bm_view.py and tools/test_bm_visual.py check the structure instead of the pixels (a drawn node for each row, a label matching the row it came from, no address outside the file, one file, exactly one recommended next action). NOT PROVEN, and it is a separate half: publishing that file as a private page needs a paid plan, a signed in session and four further conditions listed in docs/KNOWN-LIMITS.md, so what the product promises is the file on disk and the published page is an addition that can be unavailable. OPEN: nobody outside this project has opened either one."
+    },
+    {
+      "id": "visual-onboarding",
+      "title": "A scripted first fifteen minutes with three commands and something to look at at each step",
+      "state": "beta",
+      "evidence": "PROVEN: commands/brotherme-start.md carries the opening block that writes nothing before consent and the first page after it, commands/brotherme-help.md asks one question instead of listing every command, and tools/test_bm_view.py drives the path from an empty folder and fails if a fourth command is offered before the first piece of work completes, if anything is written before consent, or if a section with no rows renders blank instead of the short note tools/bm_view.py holds for it. OPEN, and this is the whole gap: fifteen minutes is a target, no first run by a person who has never used this has been measured, and the checks are structural rather than behavioural."
+    },
+    {
+      "id": "alert-ladder",
+      "title": "Four levels of alert where exactly one interrupts, computed from the records rather than stored",
+      "state": "beta",
+      "evidence": "PROVEN: tools/bm_visual.py computes the levels as one function over rows with no table behind them, so a condition that clears takes its alert with it and nothing has to be dismissed, and tools/test_bm_visual.py holds the four anti noise rules to that (at most one interrupting alert on screen, at most two levels in any one message, no promotion by age, one interrupt per cause per catch-up window). NOT PROVEN: that the ladder keeps a reader engaged, which is a claim about a person rather than about code. OPEN: hooks/hooks.json runs the check when a session stops, so it cannot fire inside a turn that never ends, which is the limit docs/KNOWN-LIMITS.md already records for the half hour catch-up."
+    },
+    {
+      "id": "visible-handback",
+      "title": "The offer to take a decision and the work under it back, on screen whether or not a decision is open",
+      "state": "beta",
+      "evidence": "PROVEN: tools/bm_view.py renders the standing panel on every page, its wording comes byte for byte from tools/bm_lead.py rather than being retyped, tools/test_bm_view.py fails a page that drops it and fails a drawn decision whose last branch is not the handback, and tools/bm_store.py already refuses to record a key decision that offers no handback at all. NOT PROVEN, and by design: nothing on the page can act on the project, the control copies a prompt the reader pastes back into the session, and docs/KNOWN-LIMITS.md states that as a limit rather than dressing it up. OPEN: no handback by anyone outside this project is recorded."
+    },
+    {
+      "id": "hook-cost-measurement",
+      "title": "What the hooks cost per action, measured on a stated machine, with the parts nobody measured named as unmeasured",
+      "state": "beta",
+      "evidence": "MEASURED: tools/bm_hookbench.py reads which programs fire at which event from hooks/hooks.json, feeds each one the payload shape docs/HOOKS.md documents, and times it against a store built for the run inside a temporary directory with HOME and every BrotherMode variable pinned there. It reports, per user action, the cost of each program AND the cost of the whole chain (the four Stop programs share one budget, so those are two different numbers), each as a median with its spread over a stated number of repetitions, plus the machine and interpreter the run was taken on, and the exit codes and fail open lines the run actually produced. docs/PERFORMANCE.md is generated from that run and carries the record it was rendered from; tools/test_bm_hookbench.py re-renders the page from that record and fails on one differing byte, so a number cannot be typed onto the page by hand, and it also refuses a sandbox whose fence fails open rather than reporting the cost of a hook that checked nothing. NOT MEASURED, named on the page rather than estimated: the fork, the exec and the interpreter bootstrap every hook process pays before any code of this project runs, which is why every published total is a LOWER BOUND (the tool runs the programs in process because tools/test_bm.py bans import subprocess in shipping modules and its allowlist does not name this one); the SessionStart hook, which is a shell script; store lock contention frequency in real use; hook failure frequency in the field; and the share of real sessions hitting a warning or a false refusal, which needs telemetry this project deliberately does not collect. OPEN: the numbers are one machine, one operating system and one Python version, and nothing here says what they are on anyone else's."
+    }
+  ]
+}

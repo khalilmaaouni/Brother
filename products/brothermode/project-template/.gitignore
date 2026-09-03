@@ -1,0 +1,31 @@
+# What this is: keeps machine-generated state and local secrets out of
+# version control starting from this project's very first commit, before any
+# tool (including BrotherMode's own store) has had a chance to set up its own
+# ignore rules. Who reads this: git, and any human wondering why a file they
+# expected to see committed is missing.
+
+# BrotherMode's own local state, if this project uses it. A fresh copy of
+# this template has none of these yet; this line stops the very first commit
+# from accidentally capturing them once they appear.
+.brothermode/
+STATE.md
+threads/
+
+# Local secrets and environment files. Never commit a real key; if one of
+# these already has real content, that content should live in your secret
+# manager or your shell environment instead, not in this file's contents.
+.env
+.env.local
+*.pem
+*.key
+
+# Editor and OS noise.
+.DS_Store
+*.swp
+__pycache__/
+*.bak*
+
+# Placeholder: add your language or framework's own build output directory
+# here once you have chosen one (for example node_modules/, dist/, build/,
+# .venv/). Record that choice in decisions/, do not just add the line here
+# silently.

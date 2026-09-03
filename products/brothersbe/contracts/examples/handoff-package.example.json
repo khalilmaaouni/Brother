@@ -1,0 +1,29 @@
+{
+  "schemaVersion": "1.0",
+  "preparedDataset": {
+    "grain": "one wholesale order line, keyed by order id plus line number",
+    "contract": "docs/data-contracts/order-lines.md: seven required columns, order id and line number unique together, quantity never null",
+    "snapshotId": "warehouse-orders-2026-08-01T00:00:00Z"
+  },
+  "evaluationHarness": {
+    "split": "fixed holdout: order lines dated 2026-07-01 through 2026-07-31, no overlap with the training window"
+  },
+  "metricDefinitions": [
+    {
+      "name": "fill rate at line level",
+      "formula": "lines shipped complete divided by lines ordered, over the holdout window"
+    },
+    {
+      "name": "next day fulfillment rate",
+      "formula": "NO-DATA"
+    }
+  ],
+  "labelledHoldout": {
+    "labelledWho": "the warehouse operations review team",
+    "labelledWhen": "2026-08-05 through 2026-08-10"
+  },
+  "openQuestions": [
+    "the formula for next day fulfillment rate is agreed by name but not yet finalized; the operations team is still deciding whether a partial ship counts",
+    "whether returned lines should be excluded from fill rate is unresolved"
+  ]
+}

@@ -1,0 +1,62 @@
+{
+  "entries": {
+    "brother": [
+      "brother",
+      "using-brother"
+    ],
+    "brothermode": [
+      "auto",
+      "brotherme-auto",
+      "brotherme-auto-status",
+      "brotherme-brief",
+      "brotherme-decisions",
+      "brotherme-deliver",
+      "brotherme-handback",
+      "brotherme-handover-pack",
+      "brotherme-help",
+      "brotherme-next",
+      "brotherme-review",
+      "brotherme-start",
+      "brotherme-status",
+      "brotherme-stop",
+      "brotherme-update",
+      "brotherme-view",
+      "cursor-dispatch",
+      "cursor-execute",
+      "deliver",
+      "doctor",
+      "handback",
+      "handover-pack",
+      "help",
+      "next",
+      "review",
+      "start",
+      "status",
+      "stop",
+      "update",
+      "view"
+    ],
+    "brothersbe": [
+      "adopt",
+      "design",
+      "handover",
+      "help",
+      "kickoff",
+      "learn",
+      "next",
+      "prove-this-change",
+      "review",
+      "spec-and-data-prep",
+      "start",
+      "status",
+      "verify",
+      "work"
+    ]
+  },
+  "shipped_plugins": [
+    "brother",
+    "brothermode",
+    "brothersbe"
+  ],
+  "total": 46
+}

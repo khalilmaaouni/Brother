@@ -1,0 +1,65 @@
+{
+  "_comment": "VB-15 / D15. Real questions this estate asks whose answers plausibly need a hop over the entity layer (30-Entities typed edges) or wikilinks. 'expected' are note stems (entity or document) that MUST all appear in an arm's hit list for that arm to score success on the query. Expected sets were derived by hand from the typed edges actually present in the vault on 2026-08-30 (grep of 30-Entities frontmatter), so the checks are deterministic and vault-grounded, not invented.",
+  "queries": [
+    {
+      "id": "q01-depends-on-kay-vault",
+      "question": "what depends on the Kay Vault",
+      "expected": ["brothermode", "vault-benchmark"]
+    },
+    {
+      "id": "q02-tool-measures-proven-score",
+      "question": "which tool measures proven_score",
+      "expected": ["vault-benchmark"]
+    },
+    {
+      "id": "q03-proven-score-derives-from",
+      "question": "what is proven_score derived from",
+      "expected": ["kay-vault"]
+    },
+    {
+      "id": "q04-systems-part-of-brother",
+      "question": "what systems are part of the brother program",
+      "expected": ["brothermode", "brothersbe", "kay-vault"]
+    },
+    {
+      "id": "q05-hosted-in-bmu-repo",
+      "question": "what is hosted in the brothermodeup repo",
+      "expected": ["brothermode", "graph-gate"]
+    },
+    {
+      "id": "q06-graph-gate-measures",
+      "question": "what does the graph gate measure",
+      "expected": ["kay-vault"]
+    },
+    {
+      "id": "q07-graph-loop-part-of",
+      "question": "what is the graph loop part of",
+      "expected": ["brothermode"]
+    },
+    {
+      "id": "q08-metrics-derive-from-brother",
+      "question": "which metrics derive from the brother program",
+      "expected": ["accepted-external-deliveries"]
+    },
+    {
+      "id": "q09-brothermode-depends-on",
+      "question": "what does brothermode depend on",
+      "expected": ["kay-vault"]
+    },
+    {
+      "id": "q10-graph-gate-described-by",
+      "question": "which failure notes describe the graph gate",
+      "expected": ["the-graph-the-tools-maintain-is-not-the-graph-retrieval-uses"]
+    },
+    {
+      "id": "q11-renaming-kay-vault-breaks",
+      "question": "what does renaming the kay-vault note break",
+      "expected": ["brothermode", "vault-benchmark", "graph-gate", "proven-score"]
+    },
+    {
+      "id": "q12-vault-benchmark-depends-on",
+      "question": "what does the vault benchmark depend on",
+      "expected": ["kay-vault"]
+    }
+  ]
+}

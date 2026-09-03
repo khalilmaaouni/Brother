@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brothermode.local/schemas/interchange/export_assertions_row.schema.json",
+  "title": "VB3-16 interchange: export table row, assertions.jsonl (VB8-04)",
+  "description": "Mirrors tools/bm_vault_export.py's build_assertions() row exactly (the bundle --vault emitter, not bm_vault_assertions' own record above -- this is the note-provenance table, one row per claim line). Governance columns tenant/authority/lifecycle/sensitivity/evidence_locator are ALWAYS present (never omitted), and the five temporal columns are ALWAYS present but may be the empty string when the note is unmigrated (bm_vault_export._iso_date's own '' default) -- so their pattern allows empty or ISO date, unlike assertion.schema.json's own valid_from/valid_to/etc, which are simply absent when unset. claim_text is deliberately NOT payload-free (it is the note's claim prose, verbatim) -- this table is an outbound artifact by design, restricted notes excluded by default, see the module docstring's RESTRICTED NOTES section. ICEBERG COLUMN MAPPING (the shape contract, no metadata is written): note_id/relpath/content_hash/tenant/authority/lifecycle/sensitivity/evidence_locator/claim_text -> string; valid_from/valid_to/observed_at/ingested_at/verified_at -> string (ISO date or empty; an Iceberg table would carry these as `date`, this shape contract keeps them string until a real writer normalizes empty to null).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["note_id", "relpath", "content_hash", "tenant", "valid_from", "valid_to",
+               "observed_at", "ingested_at", "verified_at", "authority", "lifecycle",
+               "sensitivity", "evidence_locator", "claim_text"],
+  "properties": {
+    "note_id": {"x-field-id": 23, "type": "string", "pattern": "^n-[0-9a-f]{16}$"},
+    "relpath": {"x-field-id": 24, "type": "string", "maxLength": 4096},
+    "content_hash": {"x-field-id": 25, "type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "tenant": {"x-field-id": 26, "type": "string", "maxLength": 200},
+    "valid_from": {"x-field-id": 9, "type": "string", "pattern": "^$|^\\d{4}-\\d{2}-\\d{2}$"},
+    "valid_to": {"x-field-id": 10, "type": "string", "pattern": "^$|^\\d{4}-\\d{2}-\\d{2}$"},
+    "observed_at": {"x-field-id": 11, "type": "string", "pattern": "^$|^\\d{4}-\\d{2}-\\d{2}$"},
+    "ingested_at": {"x-field-id": 12, "type": "string", "pattern": "^$|^\\d{4}-\\d{2}-\\d{2}$"},
+    "verified_at": {"x-field-id": 13, "type": "string", "pattern": "^$|^\\d{4}-\\d{2}-\\d{2}$"},
+    "authority": {"x-field-id": 5, "type": "string",
+                  "enum": ["casual", "derived", "source_of_record", "unrankable"]},
+    "lifecycle": {"x-field-id": 6, "type": "string",
+                  "enum": ["candidate", "validated", "canonical", "rejected",
+                           "under_review", "revoked", "expired", "legacy", "unrankable"]},
+    "sensitivity": {"x-field-id": 27, "type": "string", "enum": ["restricted", "standard"]},
+    "evidence_locator": {"x-field-id": 28, "type": "string", "maxLength": 4096,
+                          "description": "opaque to the exporter, any of the seven locator kinds (path/id/commit/url/query_id/document_span/capture)"},
+    "claim_text": {"x-field-id": 29, "type": "string", "maxLength": 20000,
+                    "description": "verbatim note prose, NOT payload-free by design"}
+  }
+}

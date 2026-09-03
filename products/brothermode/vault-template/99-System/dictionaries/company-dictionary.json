@@ -1,0 +1,4 @@
+{
+  "_comment": "Company dictionary for the Japanese-first analyzer seam (VB2-03, tools/bm_vault_analyzer.py). Same shape and same segmentation role as user-dictionary.json in this folder, meant for an organization own legal names, product names, and internal terms of art rather than one person vocabulary. Empty by default.",
+  "terms": []
+}

@@ -1,0 +1,16 @@
+---
+name: status
+description: Show where the project stands right now, in plain language
+---
+
+Outcome to produce: one short status view the user can read in under a minute, leading with what has been achieved, not with process.
+
+Enter the status flow of the brotherme skill. Run the mechanical command `python3 "${CLAUDE_PLUGIN_ROOT}/tools/brothermode_cli.py" status --project-id <id>` (the packaged console script is `brothermode status`) and read its output; never answer from memory of this conversation about where the project stands. A plugin install exports `${CLAUDE_PLUGIN_ROOT}` for skill and command content, so that path resolves on its own; on a clone install, where the variable is unset, run `python3 tools/brothermode_cli.py status --project-id <id>` instead, from the BrotherMode root (`~/.claude/skills/brothermode`). Either way, run it from the user's project folder so it reads that project's own records.
+
+The command prints the default status view of references/status-view.md itself: exactly Goal, Direction, Progress, Time remaining, Decision needed, Risk, Evidence, and Next step, in that order, each field computed from that project's own records rather than translated out of a report. Read them out as printed. A field the records cannot answer says so in its own words, and that stays in: "not forecast yet" is information, and a smoothed-over sentence is not. Time remaining is always a range with a confidence level and never a single number (references/forecasting.md). When a decision is waiting, it travels as a decision card in the shape of references/kickoff.md rather than as prose, and the last option on that card is always the user's own: they can take the decision and the work under it back. For what counts as worth flagging, follow references/pulse.md.
+
+After the eight fields have been read out, and never before them, offer the page in ONE line: the same eight answers plus the drawings, the history of what was learned and the standing offer to take the work back are in `PROJECT-VIEW.html`, and `/brothermode:view` writes it. One line, at the end, and only once there is something in the records worth looking at. A status answer that opens by pointing somewhere else has not answered the question that was asked.
+
+Deeper detail only on an explicit request, and never by default. `--advanced` adds the nine machinery items references/status-view.md lists, for that one request only; the next status returns to the eight fields. `--ic` is the separate engineer's view described on the same page, and every render in that mode names the switch that turned it on. When the user asks how the project got here, run `python3 tools/bm_project.py status --history N` and read out the last N recorded actions (who did what, and when); leave that off the default view.
+
+v3 note: this skill is the canonical replacement for the legacy `/brotherme-status` command (the founder's 2026-08-07 night rename decision). Its mechanical command now calls `tools/brothermode_cli.py status`, which dispatches to the exact same `bm_lead.py status` function the legacy command named, byte for byte (tools/test_brothermode_cli.py's own load-bearing contract test). The `--history N` deep-detail path stays a direct `bm_project.py` call: it is a different tool answering a different, opt-in question, not one of the ten verbs the boundary owns.

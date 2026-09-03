@@ -1,0 +1,7 @@
+{
+  "method": "team-local-kanban",
+  "version": "2.1",
+  "board": {"todo": ["TCK-403"], "doing": ["TCK-401"], "review": ["TCK-402"]},
+  "owner": "the team",
+  "note": "Brother reads this at most. It never writes it."
+}

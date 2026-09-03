@@ -1,0 +1,131 @@
+"""N1: discussion before planning stops being something you have to know to ask for.
+
+The complaint, in the reviewer's own terms: they wanted a discussion before
+anyone planned the work, did not get one, and nothing flagged or logged the
+skip. check_clarify in tools/sbe_design.py is the answer: 09-clarify.md
+records what is still undecided while it is still cheap to decide, and
+check_clarify refuses a verdict while any row is open.
+
+This file drives the seven verdict paths the introducing commit described by
+hand (absent NO-DATA, template NO-DATA, open row FAIL, answer without a date
+FAIL, malformed row FAIL, all answered PASS, empty table PASS) as repeatable
+assertions, because a claim made only in a commit message is a claim nobody
+re-checks the next time the parser changes.
+"""
+import os
+import sys
+import tempfile
+import shutil
+import unittest
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sbe_design as D  # noqa: E402
+
+NAME = D.ARTIFACT_FILES["09"]
+
+
+def _dossier(text=None):
+    d = tempfile.mkdtemp()
+    if text is not None:
+        with open(os.path.join(d, NAME), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    return d
+
+
+_HEADER = ("# 09. Open questions\n\n"
+           "| ID | Question | Asked by | Asked of | Answer | Answered |\n"
+           "|---|---|---|---|---|---|\n")
+
+
+class ClarifyVerdicts(unittest.TestCase):
+    def setUp(self):
+        self._dirs = []
+
+    def tearDown(self):
+        for d in self._dirs:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def _root(self, text=None):
+        d = _dossier(text)
+        self._dirs.append(d)
+        return d
+
+    def test_no_file_at_all_is_NO_DATA(self):
+        verdict, note = D.check_clarify(self._root())
+        self.assertEqual(verdict, "NO-DATA")
+        self.assertIn("not a pass", note)
+
+    def test_the_shipped_template_marker_is_NO_DATA(self):
+        text = "<!-- %s -->\n%s" % (D.UNFILLED_MARKER, _HEADER)
+        verdict, note = D.check_clarify(self._root(text))
+        self.assertEqual(verdict, "NO-DATA")
+        self.assertIn(NAME, note)
+
+    def test_an_open_row_FAILs(self):
+        text = _HEADER + "| Q1 | Which address wins? | analyst | owner | | |\n"
+        verdict, note = D.check_clarify(self._root(text))
+        self.assertEqual(verdict, "FAIL")
+        self.assertIn("still open", note)
+
+    def test_an_answer_with_no_date_FAILs(self):
+        text = _HEADER + "| Q1 | Which address wins? | analyst | owner | The newest one. | |\n"
+        verdict, _ = D.check_clarify(self._root(text))
+        self.assertEqual(verdict, "FAIL")
+
+    def test_a_date_with_no_answer_FAILs(self):
+        text = _HEADER + "| Q1 | Which address wins? | analyst | owner | | 2026-08-29 |\n"
+        verdict, _ = D.check_clarify(self._root(text))
+        self.assertEqual(verdict, "FAIL")
+
+    def test_a_malformed_row_FAILs_and_is_named(self):
+        text = _HEADER + "| Q1 | too few cells |\n"
+        verdict, note = D.check_clarify(self._root(text))
+        self.assertEqual(verdict, "FAIL")
+        self.assertIn("could not be read", note)
+
+    def test_every_row_answered_and_dated_PASSes(self):
+        text = _HEADER + ("| Q1 | Which address wins? | analyst | owner | The newest one. "
+                           "| 2026-08-29 |\n")
+        verdict, note = D.check_clarify(self._root(text))
+        self.assertEqual(verdict, "PASS")
+        self.assertIn("1 question", note)
+
+    def test_an_empty_table_PASSes(self):
+        """Deliberately different from check_behaviour: a design with nothing
+        open is a real and common state, not an absence."""
+        verdict, note = D.check_clarify(self._root(_HEADER))
+        self.assertEqual(verdict, "PASS")
+        self.assertIn("0 question", note)
+
+    def test_an_unreadable_file_FAILs_not_NO_DATA(self):
+        """A broken claim is not an absent one."""
+        d = self._root()
+        path = os.path.join(d, NAME)
+        os.mkdir(path)  # a directory wearing the artifact's name
+        verdict, note = D.check_clarify(d)
+        self.assertEqual(verdict, "FAIL")
+        self.assertIn("broken claim", note)
+
+
+class ClarifyIsRegisteredAsAGateCheck(unittest.TestCase):
+    def test_the_clarify_check_is_in_the_registry(self):
+        self.assertIn("clarify", D.CHECKS)
+        self.assertIs(D.CHECKS["clarify"].fn, D.check_clarify)
+
+    def test_the_worked_example_passes(self):
+        """The honesty meta-test enforces this generically; pinned here too so
+        a break shows up in the suite that names this check."""
+        d = self._root_from_fixture()
+        verdict, _ = D.check_clarify(d)
+        self.assertEqual(verdict, "PASS")
+        shutil.rmtree(d, ignore_errors=True)
+
+    def _root_from_fixture(self):
+        d = tempfile.mkdtemp()
+        with open(os.path.join(d, NAME), "w", encoding="utf-8") as fh:
+            fh.write(D._FX_CLARIFY)
+        return d
+
+
+if __name__ == "__main__":
+    unittest.main()

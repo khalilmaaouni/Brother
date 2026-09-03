@@ -1,0 +1,323 @@
+{
+ "fetched_at": "2026-08-30T12:54:16.782142Z",
+ "source": "GLEIF LEI API v1, https://api.gleif.org/api/v1",
+ "license": "GLEIF data is public, CC0",
+ "root": "5493006W3QUS5LMH6R84",
+ "records": {
+  "213800LRITLBTS6TX578": {
+   "legalName": "KOROMO UK 2 PLC",
+   "legalName_lang": "en",
+   "otherNames": [],
+   "country": "GB",
+   "city": "LONDON",
+   "jurisdiction": "GB",
+   "category": "GENERAL",
+   "entity_status": "ACTIVE",
+   "registration_status": "ISSUED",
+   "lastUpdate": "2026-08-07T16:14:08Z",
+   "url": "https://api.gleif.org/api/v1/lei-records/213800LRITLBTS6TX578"
+  },
+  "254900OR20P23DBVOT48": {
+   "legalName": "TOYOTA AUTO LOAN EXTENDED NOTE TRUST 2026-1",
+   "legalName_lang": "en",
+   "otherNames": [],
+   "country": "US",
+   "city": "WILMINGTON",
+   "jurisdiction": "US-DE",
+   "category": "GENERAL",
+   "entity_status": "ACTIVE",
+   "registration_status": "ISSUED",
+   "lastUpdate": "2026-04-17T04:34:47Z",
+   "url": "https://api.gleif.org/api/v1/lei-records/254900OR20P23DBVOT48"
+  },
+  "254900P6N1P23K5FYA48": {
+   "legalName": "TOYOTA SOUTH AFRICA MOTORS",
+   "legalName_lang": "en",
+   "otherNames": [],
+   "country": "ZA",
+   "city": "Sandton",
+   "jurisdiction": "ZA",
+   "category": "GENERAL",
+   "entity_status": "ACTIVE",
+   "registration_status": "ISSUED",
+   "lastUpdate": "2026-03-03T12:22:20Z",
+   "url": "https://api.gleif.org/api/v1/lei-records/254900P6N1P23K5FYA48"
+  },
+  "254900QVX5SBHB37FT67": {
+   "legalName": "TOYOTA AUTO LOAN EXTENDED NOTE TRUST 2025-1",
+   "legalName_lang": "en",
+   "otherNames": [],
+   "country": "US",
+   "city": "WILMINGTON",
+   "jurisdiction": "US-DE",
+   "category": "GENERAL",
+   "entity_status": "ACTIVE",
+   "registration_status": "ISSUED",
+   "lastUpdate": "2026-04-08T18:18:50Z",
+   "url": "https://api.gleif.org/api/v1/lei-records/254900QVX5SBHB37FT67"
+  },
+  "254900XT9AC8T3VD5P25": {
+   "legalName": "Toyota Financial Services Philippines Corporation",
+   "legalName_lang": "en",
+   "otherNames": [],
+   "country": "PH",
+   "city": "Makati",
+   "jurisdiction": "PH",
+   "category": "GENERAL",
+   "entity_status": "ACTIVE",
+   "registration_status": "ISSUED",
+   "lastUpdate": "2026-03-02T17:29:28Z",
+   "url": "https://api.gleif.org/api/v1/lei-records/254900XT9AC8T3VD5P25"
+  },
+  "335800VNMGPNUH6Z9110": {
+   "legalName": "TOYOTA KIRLOSKAR MOTOR PRIVATE LIMITED",
+   "legalName_lang": "en",
+   "otherNames": [],
+   "country": "IN",
+   "city": "BANGALORE",
+   "jurisdiction": "IN",
+   "category": "GENERAL",
+   "entity_status": "ACTIVE",
+   "registration_status": "ISSUED",
+   "lastUpdate": "2026-01-29T06:14:40Z",
+   "url": "https://api.gleif.org/api/v1/lei-records/335800VNMGPNUH6Z9110"
+  },
+  "3538009ZU0PHKNHJM202": {
+   "legalName": "日野自動車株式会社",
+   "legalName_lang": "ja",
+   "otherNames": [
+    "Hino Motors, Ltd."
+   ],
+   "country": "JP",
+   "city": "東京都 日野市",
+   "jurisdiction": "JP",
+   "category": "GENERAL",
+   "entity_status": "ACTIVE",
+   "registration_status": "LAPSED",
+   "lastUpdate": "2026-01-22T00:00:00Z",
+   "url": "https://api.gleif.org/api/v1/lei-records/3538009ZU0PHKNHJM202"
+  },
+  "353800V2F8HPSGF0M011": {
+   "legalName": "ダイハツ工業株式会社",
+   "legalName_lang": "ja",
+   "otherNames": [
+    "DAIHATSU MOTOR CO., LTD."
+   ],
+   "country": "JP",
+   "city": "大阪府 池田市",
+   "jurisdiction": "JP",
+   "category": "GENERAL",
+   "entity_status": "ACTIVE",
+   "registration_status": "ISSUED",
+   "lastUpdate": "2026-08-17T00:00:25Z",
+   "url": "https://api.gleif.org/api/v1/lei-records/353800V2F8HPSGF0M011"
+  },
+  "353800WDOBRSAV97BA75": {
+   "legalName": "トヨタファイナンシャルサービス株式会社",
+   "legalName_lang": "ja",
+   "otherNames": [
+    "Toyota Financial Services Corporation"
+   ],
+   "country": "JP",
+   "city": "愛知県 名古屋市西区",
+   "jurisdiction": "JP",
+   "category": "GENERAL",
+   "entity_status": "ACTIVE",
+   "registration_status": "ISSUED",
+   "lastUpdate": "2026-08-16T00:00:22Z",
+   "url": "https://api.gleif.org/api/v1/lei-records/353800WDOBRSAV97BA75"
+  },
+  "3UKPTDP5PGQRH8AUK042": {
+   "legalName": "TOYOTA FINANCE AUSTRALIA LIMITED",
+   "legalName_lang": "en",
+   "otherNames": [],
+   "country": "AU",
+   "city": "Sydney",
+   "jurisdiction": "AU",
+   "category": "GENERAL",
+   "entity_status": "ACTIVE",
+   "registration_status": "ISSUED",
+   "lastUpdate": "2025-12-26T06:06:24Z",
+   "url": "https://api.gleif.org/api/v1/lei-records/3UKPTDP5PGQRH8AUK042"
+  },
+  "529900TP68LKVLHKNE55": {
+   "legalName": "TOYOTA Kreditbank GmbH",
+   "legalName_lang": "de",
+   "otherNames": [],
+   "country": "DE",
+   "city": "Köln",
+   "jurisdiction": "DE",
+   "category": "GENERAL",
+   "entity_status": "ACTIVE",
+   "registration_status": "ISSUED",
+   "lastUpdate": "2025-10-20T09:50:47Z",
+   "url": "https://api.gleif.org/api/v1/lei-records/529900TP68LKVLHKNE55"
+  },
+  "5493006W3QUS5LMH6R84": {
+   "legalName": "トヨタ自動車株式会社",
+   "legalName_lang": "ja",
+   "otherNames": [
+    "Toyota Motor Corporation"
+   ],
+   "country": "JP",
+   "city": "愛知県 豊田市",
+   "jurisdiction": "JP",
+   "category": "GENERAL",
+   "entity_status": "ACTIVE",
+   "registration_status": "ISSUED",
+   "lastUpdate": "2025-11-13T00:00:26Z",
+   "url": "https://api.gleif.org/api/v1/lei-records/5493006W3QUS5LMH6R84"
+  },
+  "549300O0TLY14RH83Z89": {
+   "legalName": "TOYOTA AUTO CONDUIT TRUST 2022-2",
+   "legalName_lang": "en",
+   "otherNames": [],
+   "country": "US",
+   "city": "WILMINGTON",
+   "jurisdiction": "US-DE",
+   "category": "GENERAL",
+   "entity_status": "ACTIVE",
+   "registration_status": "ISSUED",
+   "lastUpdate": "2025-12-02T11:49:13Z",
+   "url": "https://api.gleif.org/api/v1/lei-records/549300O0TLY14RH83Z89"
+  },
+  "5M0EBIWWZRPS22MVDC43": {
+   "legalName": "TOYOTA FINANCIAL SERVICES (UK) PLC",
+   "legalName_lang": "en",
+   "otherNames": [],
+   "country": "GB",
+   "city": "EPSOM",
+   "jurisdiction": "GB",
+   "category": "GENERAL",
+   "entity_status": "ACTIVE",
+   "registration_status": "ISSUED",
+   "lastUpdate": "2025-09-19T10:26:08Z",
+   "url": "https://api.gleif.org/api/v1/lei-records/5M0EBIWWZRPS22MVDC43"
+  },
+  "724500OPA8GZSQUNSR96": {
+   "legalName": "Toyota Motor Finance (Netherlands) B.V.",
+   "legalName_lang": "nl",
+   "otherNames": [],
+   "country": "NL",
+   "city": "Amsterdam",
+   "jurisdiction": "NL",
+   "category": "GENERAL",
+   "entity_status": "ACTIVE",
+   "registration_status": "ISSUED",
+   "lastUpdate": "2025-11-14T06:11:13Z",
+   "url": "https://api.gleif.org/api/v1/lei-records/724500OPA8GZSQUNSR96"
+  },
+  "988400PSRSJJPV6WSG19": {
+   "legalName": "토요타파이낸셜서비스코리아 주식회사",
+   "legalName_lang": "ko",
+   "otherNames": [
+    "Toyota Financial Services Korea Co., Ltd."
+   ],
+   "country": "KR",
+   "city": "Seoul",
+   "jurisdiction": "KR",
+   "category": "GENERAL",
+   "entity_status": "ACTIVE",
+   "registration_status": "ISSUED",
+   "lastUpdate": "2026-07-28T17:32:42Z",
+   "url": "https://api.gleif.org/api/v1/lei-records/988400PSRSJJPV6WSG19"
+  },
+  "NV4VOPP7EGAR4BW0SB02": {
+   "legalName": "トヨタファイナンス株式会社",
+   "legalName_lang": "ja",
+   "otherNames": [
+    "Toyota Finance Corporation"
+   ],
+   "country": "JP",
+   "city": "愛知県 名古屋市",
+   "jurisdiction": "JP",
+   "category": "GENERAL",
+   "entity_status": "ACTIVE",
+   "registration_status": "ISSUED",
+   "lastUpdate": "2026-08-16T00:00:22Z",
+   "url": "https://api.gleif.org/api/v1/lei-records/NV4VOPP7EGAR4BW0SB02"
+  }
+ },
+ "edges": [
+  {
+   "parent": "5493006W3QUS5LMH6R84",
+   "child": "254900OR20P23DBVOT48",
+   "rel": "IS_DIRECTLY_CONSOLIDATED_BY"
+  },
+  {
+   "parent": "5493006W3QUS5LMH6R84",
+   "child": "213800LRITLBTS6TX578",
+   "rel": "IS_DIRECTLY_CONSOLIDATED_BY"
+  },
+  {
+   "parent": "5493006W3QUS5LMH6R84",
+   "child": "254900QVX5SBHB37FT67",
+   "rel": "IS_DIRECTLY_CONSOLIDATED_BY"
+  },
+  {
+   "parent": "5493006W3QUS5LMH6R84",
+   "child": "549300O0TLY14RH83Z89",
+   "rel": "IS_DIRECTLY_CONSOLIDATED_BY"
+  },
+  {
+   "parent": "5493006W3QUS5LMH6R84",
+   "child": "353800V2F8HPSGF0M011",
+   "rel": "IS_DIRECTLY_CONSOLIDATED_BY"
+  },
+  {
+   "parent": "5493006W3QUS5LMH6R84",
+   "child": "353800WDOBRSAV97BA75",
+   "rel": "IS_DIRECTLY_CONSOLIDATED_BY"
+  },
+  {
+   "parent": "5493006W3QUS5LMH6R84",
+   "child": "254900P6N1P23K5FYA48",
+   "rel": "IS_DIRECTLY_CONSOLIDATED_BY"
+  },
+  {
+   "parent": "5493006W3QUS5LMH6R84",
+   "child": "335800VNMGPNUH6Z9110",
+   "rel": "IS_DIRECTLY_CONSOLIDATED_BY"
+  },
+  {
+   "parent": "5493006W3QUS5LMH6R84",
+   "child": "3538009ZU0PHKNHJM202",
+   "rel": "IS_DIRECTLY_CONSOLIDATED_BY"
+  },
+  {
+   "parent": "5493006W3QUS5LMH6R84",
+   "child": "529900TP68LKVLHKNE55",
+   "rel": "IS_DIRECTLY_CONSOLIDATED_BY"
+  },
+  {
+   "parent": "5493006W3QUS5LMH6R84",
+   "child": "NV4VOPP7EGAR4BW0SB02",
+   "rel": "IS_DIRECTLY_CONSOLIDATED_BY"
+  },
+  {
+   "parent": "353800WDOBRSAV97BA75",
+   "child": "988400PSRSJJPV6WSG19",
+   "rel": "IS_DIRECTLY_CONSOLIDATED_BY"
+  },
+  {
+   "parent": "353800WDOBRSAV97BA75",
+   "child": "254900XT9AC8T3VD5P25",
+   "rel": "IS_DIRECTLY_CONSOLIDATED_BY"
+  },
+  {
+   "parent": "353800WDOBRSAV97BA75",
+   "child": "724500OPA8GZSQUNSR96",
+   "rel": "IS_DIRECTLY_CONSOLIDATED_BY"
+  },
+  {
+   "parent": "353800WDOBRSAV97BA75",
+   "child": "3UKPTDP5PGQRH8AUK042",
+   "rel": "IS_DIRECTLY_CONSOLIDATED_BY"
+  },
+  {
+   "parent": "353800WDOBRSAV97BA75",
+   "child": "5M0EBIWWZRPS22MVDC43",
+   "rel": "IS_DIRECTLY_CONSOLIDATED_BY"
+  }
+ ]
+}

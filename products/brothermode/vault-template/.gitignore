@@ -1,0 +1,9 @@
+# Machine-written ledgers: append-constantly, so they conflict on every pull if
+# a team commits a shared vault. They are also derived data, not knowledge.
+99-System/telemetry/*.jsonl
+
+# Correction candidates hold excerpts of your own messages. Secret-shaped text
+# is redacted before writing and the file is owner-only, but it is still your
+# private material: never commit it. Purge with
+#   python3 tools/bm_telemetry.py purge-corrections --yes
+99-System/telemetry/corrections.jsonl

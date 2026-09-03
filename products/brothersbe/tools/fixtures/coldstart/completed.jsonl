@@ -1,0 +1,7 @@
+{"type":"system","subtype":"init","session_id":"s1","output":"BROTHERSBE ACTIVE-LAWS DIGEST\nfour hundred bytes of digest text here padding the injection to a known size for the test to assert on exactly."}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"/brothersbe:start"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Reading the ground."}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Read","input":{"file_path":"/sandbox/docs/HOW-IT-WORKS.md"}}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Write","input":{"file_path":"/sandbox/design/00-intake.json"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"/brothersbe:verify"}]}}
+{"type":"result","subtype":"success","is_error":false}

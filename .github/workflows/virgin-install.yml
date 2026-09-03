@@ -1,0 +1,29 @@
+# Virgin environment install proof. Policy: docs/plan/ACTIONS-POLICY-2026-09-01.md.
+# Runs IN the public repository after export: a fresh ubuntu runner is a virgin
+# machine (no dotfiles, no plugin cache, no hooks), which is what the board's
+# virgin-VM item wants proven. Dispatch only, ubuntu only, hard timeout. On a
+# public repository standard runners are free, so a run costs zero.
+# The first dispatch is the proving run: if the headless runner lacks something
+# the script needs, this fails loudly and that is recorded, never worked around.
+name: virgin-install
+
+on:
+  workflow_dispatch
+
+concurrency:
+  group: virgin-install
+  cancel-in-progress: true
+
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+      - name: Bundle install smoke, the repository's own documented proof
+        run: |
+          sh scripts/bundle-install-smoke.sh --github 2>&1 | tail -30
+          exit "${PIPESTATUS[0]}"
+        shell: bash

@@ -1,0 +1,4 @@
+{
+  "_comment": "User dictionary for the Japanese-first analyzer seam (VB2-03, tools/bm_vault_analyzer.py). Each string in terms becomes a longest-match segmentation boundary when a CJK query is analyzed, ahead of the character-bigram fallback. Empty by default: no user has customized this vault yet. Loaded fresh at every query, so an edit here takes effect on the next search with no reindex.",
+  "terms": []
+}

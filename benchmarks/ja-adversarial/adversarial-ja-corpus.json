@@ -1,0 +1,658 @@
+{
+  "_meta": {
+    "author": "blind adversarial author",
+    "date": "2026-08-31",
+    "purpose": "independent adversarial Japanese entity-retrieval benchmark, authored without access to system ranking behavior",
+    "frozen": true,
+    "dictionary_terms": [
+      "大和精密工業=ダイワプレシジョン(2020年社名変更)",
+      "北海道牛乳=北海道乳業(2015年商号変更)",
+      "全国青果卸協同組合=JA全青果(2018年改称)",
+      "精工会=一般社団法人日本精密機器工業会(略称)",
+      "金山物産=金山商事の関連会社(創業家が同じ)",
+      "令和6年=2024年",
+      "肥後物産=九州物産(1960年当時の旧社名)"
+    ]
+  },
+  "notes": [
+    {
+      "stem": "sakurada_bussan",
+      "title": "桜田物産株式会社",
+      "body": "桜田物産株式会社は東京都中央区日本橋に本社を置く総合商社である。設立は1958年、主に繊維製品と食品の輸出入を手掛ける。代表取締役社長は田村健一。従業員数は約320名。"
+    },
+    {
+      "stem": "sakurada_bussan_hr",
+      "title": "桜田物産株式会社 人事部",
+      "body": "桜田物産株式会社の人事部は採用及び労務管理を担当する。部長は鈴木陽子。所在地は本社と同じ東京都中央区日本橋一丁目3番2号。毎年4月に新卒採用を実施する。"
+    },
+    {
+      "stem": "sakurada_butsuryu",
+      "title": "桜田物流株式会社",
+      "body": "桜田物流株式会社は桜田物産株式会社の子会社で、神奈川県横浜市に本社を置く物流会社である。設立は1985年。代表取締役は佐々木修。倉庫及び配送事業を主とする。"
+    },
+    {
+      "stem": "fujimi_tech",
+      "title": "富士見テクノロジーズ株式会社(通称フジミテック)",
+      "body": "富士見テクノロジーズ株式会社は静岡県富士市に本社を置くソフトウェア企業。通称は「フジミテック」。2003年設立、クラウド会計ソフトを開発する。代表は小林彩香。"
+    },
+    {
+      "stem": "fujimi_tech_solutions",
+      "title": "フジミテックソリューションズ株式会社",
+      "body": "フジミテックソリューションズ株式会社は富士見テクノロジーズ株式会社の完全子会社で、東京都千代田区に本社を置くITコンサルティング会社。2018年設立。代表は木村さやか。"
+    },
+    {
+      "stem": "fujimi_tech_finance",
+      "title": "富士見テクノロジーズ株式会社 決算公告",
+      "body": "富士見テクノロジーズ株式会社は令和6年3月31日を決算日とする。同年6月20日の株主総会にて剰余金の配当を決議した。決算公告は日本経済新聞に掲載された。"
+    },
+    {
+      "stem": "hokkaido_dairy",
+      "title": "北海道乳業株式会社",
+      "body": "北海道乳業株式会社は札幌市に本社を置く乳製品メーカーである。バターとチーズの製造で知られる。代表取締役は山口誠一。2015年に商号を変更した。"
+    },
+    {
+      "stem": "kaneyama_shoji",
+      "title": "金山商事株式会社",
+      "body": "金山商事株式会社は大阪府大阪市中央区に本社を置く鉄鋼卸売業者。1972年創業。代表は金山太郎。"
+    },
+    {
+      "stem": "kaneyama_bussan",
+      "title": "金山物産株式会社",
+      "body": "金山物産株式会社は大阪府堺市に本社を置く非鉄金属卸売業者。1998年設立。代表は金山次郎。アルミニウム及び銅の卸売を主業務とする。"
+    },
+    {
+      "stem": "tozai_bank",
+      "title": "東西銀行株式会社",
+      "body": "東西銀行株式会社は名古屋市に本店を置く地方銀行。1923年設立。頭取は森田隆。個人向け及び法人向け融資を手掛ける。"
+    },
+    {
+      "stem": "tozai_shinkin",
+      "title": "東西信用金庫",
+      "body": "東西信用金庫は岐阜県岐阜市に本店を置く信用金庫。東西銀行株式会社とは資本関係のない別法人である。理事長は中村博。"
+    },
+    {
+      "stem": "abc_shokai",
+      "title": "ABC商会",
+      "body": "ABC商会は東京都渋谷区に本社を置く輸入雑貨卸売業者。1990年設立。代表者は伊藤真理子。ヨーロッパ製の家具及び食器を取り扱う。"
+    },
+    {
+      "stem": "global_impact",
+      "title": "株式会社グローバル・インパクト",
+      "body": "株式会社グローバル・インパクトは福岡市に本社を置くマーケティング会社。2011年設立。代表取締役は松本圭。SNS運用代行を主業務とする。"
+    },
+    {
+      "stem": "tanaka_denki",
+      "title": "タナカ電機株式会社",
+      "body": "タナカ電機株式会社は愛知県名古屋市に本社を置く電子部品メーカー。1965年創業。代表は田中良一。車載用センサーを製造する。"
+    },
+    {
+      "stem": "daiwa_precision",
+      "title": "ダイワプレシジョン株式会社",
+      "body": "ダイワプレシジョン株式会社は精密機械メーカーで、埼玉県川口市に本社を置く。2020年に社名変更を行った。代表は大和敬一。自動車部品向け精密部品を製造する。"
+    },
+    {
+      "stem": "takahashi_kensetsu",
+      "title": "高橋建設株式会社",
+      "body": "高橋建設株式会社は宮城県仙台市に本社を置く総合建設業者。1948年創業。代表取締役は高橋誠。公共工事及び住宅建築を手掛ける。"
+    },
+    {
+      "stem": "takahashi_shoten",
+      "title": "髙橋商店",
+      "body": "髙橋商店は青森県弘前市でりんごの卸売を営む個人商店である。創業1930年。店主は髙橋和夫。高橋建設株式会社とは無関係である。"
+    },
+    {
+      "stem": "kawasaki_seiki_river",
+      "title": "河崎精機株式会社",
+      "body": "河崎精機株式会社は兵庫県尼崎市に本社を置く精密機械メーカー。1977年設立。代表取締役は河崎誠。油圧機器を製造する。"
+    },
+    {
+      "stem": "kawasaki_seiki_river2",
+      "title": "川崎精機株式会社",
+      "body": "川崎精機株式会社は神奈川県川崎市に本社を置く精密機械メーカー。1983年設立。代表取締役は川崎健太。空圧機器を製造する。河崎精機株式会社とは資本関係のない別法人である。"
+    },
+    {
+      "stem": "seikoukai",
+      "title": "精工会",
+      "body": "精工会は精密機器メーカーの業界団体である。1980年設立。会長は理事長の輪番制。事務局は東京都港区に置く。会員企業は全国で約450社。"
+    },
+    {
+      "stem": "zenseika",
+      "title": "JA全青果",
+      "body": "JA全青果は青果卸売業者の協同組合で、本部は東京都大田区に置く。理事長は野田健。2018年に改称した。"
+    },
+    {
+      "stem": "kyushu_bussan",
+      "title": "九州物産株式会社",
+      "body": "九州物産株式会社は熊本県熊本市に本社を置く農産物卸売業者。1960年創業。代表は熊本太郎。"
+    },
+    {
+      "stem": "yamada_denshi",
+      "title": "山田電子株式会社",
+      "body": "山田電子株式会社は大阪府東大阪市に本社を置く電子機器メーカー。主力製品は型番ＹＤ－３００のセンサーユニットである。代表は山田修司。設立1990年。資本金は５０００万円。"
+    },
+    {
+      "stem": "yamaguchi_denki",
+      "title": "山口電気株式会社",
+      "body": "山口電気株式会社は広島県広島市に本社を置く家庭用電化製品の卸売業者。1978年設立。代表は山口博之。"
+    },
+    {
+      "stem": "eco_mart",
+      "title": "エコマート株式会社",
+      "body": "エコマート株式会社は千葉県船橋市に本社を置くリサイクル用品販売店チェーンである。英語表記はＥＣＯＭＡＲＴ　ＣＯ．，ＬＴＤ．。1999年設立。代表は清水直樹。"
+    },
+    {
+      "stem": "morita_shoji",
+      "title": "森田商事株式会社",
+      "body": "森田商事株式会社は北海道函館市に本社を置く水産物卸売業者。主力製品は水産加工機のＭＳ－５００である。1982年設立。代表は森田一郎。"
+    },
+    {
+      "stem": "nakamura_shokai",
+      "title": "中村商会株式会社",
+      "body": "中村商会株式会社は福岡県北九州市に本社を置く食品卸売業者。1965年設立。代表取締役は中村隆。地元産の海産物を全国に卸す。"
+    },
+    {
+      "stem": "kimura_seiko",
+      "title": "木村精工株式会社",
+      "body": "木村精工株式会社は長野県岡谷市に本社を置く精密部品メーカー。1955年創業。代表は木村弘。時計部品の製造で知られる。"
+    },
+    {
+      "stem": "motomura_seiko",
+      "title": "本村精工株式会社",
+      "body": "本村精工株式会社は山梨県甲府市に本社を置く精密部品メーカー。1968年創業。代表は本村健。医療機器部品を製造する。"
+    },
+    {
+      "stem": "nippon_kizai",
+      "title": "日本器材株式会社",
+      "body": "日本器材株式会社は医療機器の卸売を行う企業で、大阪府大阪市北区に本社を置く。1975年設立。代表は西村隆。院内向け消耗品の販売を主とする。"
+    },
+    {
+      "stem": "sun_rise_kikaku",
+      "title": "サンライズ企画株式会社",
+      "body": "サンライズ企画株式会社は英語表記でSUNRISE PLANNING CO., LTD.と称する広告代理店。東京都新宿区に本社を置く。1988年設立。代表は太田陽子。"
+    },
+    {
+      "stem": "nittsu_soken",
+      "title": "日本通商総合研究所(日通総研)",
+      "body": "日本通商総合研究所は貿易実務に関する調査研究を行うシンクタンクで、略称は「日通総研」。東京都千代田区に本社を置く。1995年設立。所長は加藤誠。"
+    }
+  ],
+  "cases": [
+    {
+      "id": "ka01",
+      "class": "kana_alias",
+      "query": "かねやましょうじの代表者は誰ですか",
+      "expected_note": "kaneyama_shoji"
+    },
+    {
+      "id": "ka02",
+      "class": "kana_alias",
+      "query": "カネヤマショウジの本社はどこですか",
+      "expected_note": "kaneyama_shoji"
+    },
+    {
+      "id": "ka03",
+      "class": "kana_alias",
+      "query": "Kaneyama Shoji の創業年は何年ですか",
+      "expected_note": "kaneyama_shoji"
+    },
+    {
+      "id": "ka04",
+      "class": "kana_alias",
+      "query": "たなかでんきは車載用センサーを作っていますか",
+      "expected_note": "tanaka_denki"
+    },
+    {
+      "id": "ka05",
+      "class": "kana_alias",
+      "query": "タナカデンキの代表は誰ですか",
+      "expected_note": "tanaka_denki"
+    },
+    {
+      "id": "ka06",
+      "class": "kana_alias",
+      "query": "Tanaka Denki Corporation の所在地はどこですか",
+      "expected_note": "tanaka_denki"
+    },
+    {
+      "id": "ka07",
+      "class": "kana_alias",
+      "query": "さくらだぶっさんの設立年は何年ですか",
+      "expected_note": "sakurada_bussan"
+    },
+    {
+      "id": "ka08",
+      "class": "kana_alias",
+      "query": "サクラダブッサンの従業員数は何名ですか",
+      "expected_note": "sakurada_bussan"
+    },
+    {
+      "id": "ka09",
+      "class": "kana_alias",
+      "query": "Sakurada Bussan の代表取締役社長は誰ですか",
+      "expected_note": "sakurada_bussan"
+    },
+    {
+      "id": "ka10",
+      "class": "kana_alias",
+      "query": "ふじみテクノロジーズのクラウド会計ソフトについて教えてください",
+      "expected_note": "fujimi_tech"
+    },
+    {
+      "id": "ka11",
+      "class": "kana_alias",
+      "query": "フジミテクノロジーズの代表は誰ですか",
+      "expected_note": "fujimi_tech"
+    },
+    {
+      "id": "ka12",
+      "class": "kana_alias",
+      "query": "Fujimi Technologies の設立年はいつですか",
+      "expected_note": "fujimi_tech"
+    },
+    {
+      "id": "ka13",
+      "class": "kana_alias",
+      "query": "ほっかいどうにゅうぎょうの代表取締役は誰ですか",
+      "expected_note": "hokkaido_dairy"
+    },
+    {
+      "id": "ka14",
+      "class": "kana_alias",
+      "query": "カワサキセイキ(油圧機器)の設立年は何年ですか",
+      "expected_note": "kawasaki_seiki_river"
+    },
+    {
+      "id": "ka15",
+      "class": "kana_alias",
+      "query": "もりたしょうじは函館市にありますか",
+      "expected_note": "morita_shoji"
+    },
+    {
+      "id": "wv01",
+      "class": "width_variant",
+      "query": "YD-300 センサーユニットを作っているのは山田電子ですか",
+      "expected_note": "yamada_denshi"
+    },
+    {
+      "id": "wv02",
+      "class": "width_variant",
+      "query": "資本金5000万円の山田電子について教えてください",
+      "expected_note": "yamada_denshi"
+    },
+    {
+      "id": "wv03",
+      "class": "width_variant",
+      "query": "ﾀﾅｶ電機の代表者は誰ですか",
+      "expected_note": "tanaka_denki"
+    },
+    {
+      "id": "wv04",
+      "class": "width_variant",
+      "query": "ＡＢＣ商会の設立年はいつですか",
+      "expected_note": "abc_shokai"
+    },
+    {
+      "id": "wv05",
+      "class": "width_variant",
+      "query": "ECOMART Co., Ltd. の代表は誰ですか",
+      "expected_note": "eco_mart"
+    },
+    {
+      "id": "wv06",
+      "class": "width_variant",
+      "query": "ﾀﾅｶﾃﾞﾝｷの車載用センサーについて教えてください",
+      "expected_note": "tanaka_denki"
+    },
+    {
+      "id": "wv07",
+      "class": "width_variant",
+      "query": "ＥＣＯＭＡＲＴの創業は１９９９年ですか",
+      "expected_note": "eco_mart"
+    },
+    {
+      "id": "wv08",
+      "class": "width_variant",
+      "query": "abc商会は輸入雑貨を扱っていますか",
+      "expected_note": "abc_shokai"
+    },
+    {
+      "id": "wv09",
+      "class": "width_variant",
+      "query": "MS-500 水産加工機を扱う森田商事について教えてください",
+      "expected_note": "morita_shoji"
+    },
+    {
+      "id": "wv10",
+      "class": "width_variant",
+      "query": "森田商事の水産加工機（型番ms-500）について教えてください",
+      "expected_note": "morita_shoji"
+    },
+    {
+      "id": "wv11",
+      "class": "width_variant",
+      "query": "ＴＡＮＡＫＡ電機は自動車部品を作っていますか",
+      "expected_note": "tanaka_denki"
+    },
+    {
+      "id": "wv12",
+      "class": "width_variant",
+      "query": "ｸﾞﾛｰﾊﾞﾙ・ｲﾝﾊﾟｸﾄ株式会社の代表は誰ですか",
+      "expected_note": "global_impact"
+    },
+    {
+      "id": "mx01",
+      "class": "mixed",
+      "query": "㈱日本器材の代表は誰ですか",
+      "expected_note": "nippon_kizai"
+    },
+    {
+      "id": "mx02",
+      "class": "mixed",
+      "query": "日本器材(株)の設立年はいつですか",
+      "expected_note": "nippon_kizai"
+    },
+    {
+      "id": "mx03",
+      "class": "mixed",
+      "query": "日本 器材 株式会社 の所在地はどこですか",
+      "expected_note": "nippon_kizai"
+    },
+    {
+      "id": "mx04",
+      "class": "mixed",
+      "query": "日本器材は医療機器を卸していますか",
+      "expected_note": "nippon_kizai"
+    },
+    {
+      "id": "mx05",
+      "class": "mixed",
+      "query": "サン・ライズ企画の代表者は誰ですか",
+      "expected_note": "sun_rise_kikaku"
+    },
+    {
+      "id": "mx06",
+      "class": "mixed",
+      "query": "Sunrise Planning Co., Ltd. の設立年はいつですか",
+      "expected_note": "sun_rise_kikaku"
+    },
+    {
+      "id": "mx07",
+      "class": "mixed",
+      "query": "SUNRISE企画株式会社という広告代理店はありますか",
+      "expected_note": "sun_rise_kikaku"
+    },
+    {
+      "id": "mx08",
+      "class": "mixed",
+      "query": "日通総研の所長は誰ですか",
+      "expected_note": "nittsu_soken"
+    },
+    {
+      "id": "mx09",
+      "class": "mixed",
+      "query": "グローバルインパクトの主業務はSNS運用代行ですか",
+      "expected_note": "global_impact"
+    },
+    {
+      "id": "mx10",
+      "class": "mixed",
+      "query": "株式会社グローバルインパクト(福岡)の代表は誰ですか",
+      "expected_note": "global_impact"
+    },
+    {
+      "id": "mx11",
+      "class": "mixed",
+      "query": "中村 商会 株式会社の代表取締役は誰ですか",
+      "expected_note": "nakamura_shokai"
+    },
+    {
+      "id": "mx12",
+      "class": "mixed",
+      "query": "フジミテックという略称を持つ会社の代表は誰ですか",
+      "expected_note": "fujimi_tech"
+    },
+    {
+      "id": "mx13",
+      "class": "mixed",
+      "query": "㈱桜田物産の設立は1958年ですか",
+      "expected_note": "sakurada_bussan"
+    },
+    {
+      "id": "lx01",
+      "class": "lexical_only",
+      "query": "桜田物産の人事部長は誰ですか",
+      "expected_note": "sakurada_bussan_hr"
+    },
+    {
+      "id": "lx02",
+      "class": "lexical_only",
+      "query": "船橋市にあるリサイクル用品販売店チェーンは何という会社ですか",
+      "expected_note": "eco_mart"
+    },
+    {
+      "id": "lx03",
+      "class": "lexical_only",
+      "query": "東西銀行の頭取は誰ですか",
+      "expected_note": "tozai_bank"
+    },
+    {
+      "id": "lx04",
+      "class": "lexical_only",
+      "query": "東西信用金庫の理事長は誰ですか",
+      "expected_note": "tozai_shinkin"
+    },
+    {
+      "id": "lx05",
+      "class": "lexical_only",
+      "query": "髙橋商店の店主は誰ですか",
+      "expected_note": "takahashi_shoten"
+    },
+    {
+      "id": "lx06",
+      "class": "lexical_only",
+      "query": "高橋建設の創業年はいつですか",
+      "expected_note": "takahashi_kensetsu"
+    },
+    {
+      "id": "lx07",
+      "class": "lexical_only",
+      "query": "河崎精機の代表取締役は誰ですか",
+      "expected_note": "kawasaki_seiki_river"
+    },
+    {
+      "id": "lx08",
+      "class": "lexical_only",
+      "query": "川崎精機は空圧機器を製造していますか",
+      "expected_note": "kawasaki_seiki_river2"
+    },
+    {
+      "id": "lx09",
+      "class": "lexical_only",
+      "query": "木村精工は時計部品を作っていますか",
+      "expected_note": "kimura_seiko"
+    },
+    {
+      "id": "lx10",
+      "class": "lexical_only",
+      "query": "本村精工は医療機器部品を製造していますか",
+      "expected_note": "motomura_seiko"
+    },
+    {
+      "id": "lx11",
+      "class": "lexical_only",
+      "query": "金山物産はアルミニウムを卸していますか",
+      "expected_note": "kaneyama_bussan"
+    },
+    {
+      "id": "lx12",
+      "class": "lexical_only",
+      "query": "桜田物流の本社は横浜市にありますか",
+      "expected_note": "sakurada_butsuryu"
+    },
+    {
+      "id": "lx13",
+      "class": "lexical_only",
+      "query": "北海道乳業のバターとチーズについて教えてください",
+      "expected_note": "hokkaido_dairy"
+    },
+    {
+      "id": "lx14",
+      "class": "lexical_only",
+      "query": "フジミテックソリューションズの設立年はいつですか",
+      "expected_note": "fujimi_tech_solutions"
+    },
+    {
+      "id": "dd01",
+      "class": "dictionary_dependent",
+      "query": "大和精密工業の本社所在地はどこですか",
+      "expected_note": "daiwa_precision"
+    },
+    {
+      "id": "dd02",
+      "class": "dictionary_dependent",
+      "query": "北海道牛乳株式会社の代表者は誰ですか",
+      "expected_note": "hokkaido_dairy"
+    },
+    {
+      "id": "dd03",
+      "class": "dictionary_dependent",
+      "query": "全国青果卸協同組合の理事長は誰ですか",
+      "expected_note": "zenseika"
+    },
+    {
+      "id": "dd04",
+      "class": "dictionary_dependent",
+      "query": "一般社団法人日本精密機器工業会の事務局所在地はどこですか",
+      "expected_note": "seikoukai"
+    },
+    {
+      "id": "dd05",
+      "class": "dictionary_dependent",
+      "query": "金山商事の関連会社で非鉄金属を扱う会社はどこですか",
+      "expected_note": "kaneyama_bussan"
+    },
+    {
+      "id": "dd06",
+      "class": "dictionary_dependent",
+      "query": "令和6年3月31日を決算日とする会社はどこですか",
+      "expected_note": "fujimi_tech_finance"
+    },
+    {
+      "id": "dd07",
+      "class": "dictionary_dependent",
+      "query": "2024年3月31日を決算日とする会社の株主総会はいつ開かれましたか",
+      "expected_note": "fujimi_tech_finance"
+    },
+    {
+      "id": "dd08",
+      "class": "dictionary_dependent",
+      "query": "精工会に加盟する企業は何社ありますか",
+      "expected_note": "seikoukai"
+    },
+    {
+      "id": "dd09",
+      "class": "dictionary_dependent",
+      "query": "JA全青果という名前になる前の組合名は何でしたか",
+      "expected_note": "zenseika"
+    },
+    {
+      "id": "dd10",
+      "class": "dictionary_dependent",
+      "query": "ダイワプレシジョンの旧社名は何ですか",
+      "expected_note": "daiwa_precision"
+    },
+    {
+      "id": "dd11",
+      "class": "dictionary_dependent",
+      "query": "肥後物産株式会社の現在の代表者は誰ですか",
+      "expected_note": "kyushu_bussan"
+    },
+    {
+      "id": "ng01",
+      "class": "negative",
+      "query": "東西信用金庫の理事長は誰ですか",
+      "forbidden_note": "tozai_bank"
+    },
+    {
+      "id": "ng02",
+      "class": "negative",
+      "query": "東西銀行の理事長は誰ですか",
+      "forbidden_note": "tozai_shinkin"
+    },
+    {
+      "id": "ng03",
+      "class": "negative",
+      "query": "桜田物流株式会社の倉庫は横浜市にありますか",
+      "forbidden_note": "sakurada_bussan"
+    },
+    {
+      "id": "ng04",
+      "class": "negative",
+      "query": "桜田物産株式会社の倉庫及び配送事業について教えてください",
+      "forbidden_note": "sakurada_butsuryu"
+    },
+    {
+      "id": "ng05",
+      "class": "negative",
+      "query": "たかはししょうてんはりんごを卸していますか",
+      "forbidden_note": "takahashi_kensetsu"
+    },
+    {
+      "id": "ng06",
+      "class": "negative",
+      "query": "高橋建設はりんごの卸売を行っていますか",
+      "forbidden_note": "takahashi_shoten"
+    },
+    {
+      "id": "ng07",
+      "class": "negative",
+      "query": "かわさきせいき(空圧機器)の本社は兵庫県尼崎市ですか",
+      "forbidden_note": "kawasaki_seiki_river"
+    },
+    {
+      "id": "ng08",
+      "class": "negative",
+      "query": "山口電子株式会社(型番YD-300のセンサーユニット)の代表者は誰ですか",
+      "forbidden_note": "yamaguchi_denki"
+    },
+    {
+      "id": "ng09",
+      "class": "negative",
+      "query": "本村精工株式会社(時計部品の製造)の創業年はいつですか",
+      "forbidden_note": "motomura_seiko"
+    },
+    {
+      "id": "ng10",
+      "class": "negative",
+      "query": "木村精工株式会社(医療機器部品の製造)の代表は誰ですか",
+      "forbidden_note": "kimura_seiko"
+    },
+    {
+      "id": "ng11",
+      "class": "negative",
+      "query": "金山商事株式会社はアルミニウム及び銅の卸売を主業務としていますか",
+      "forbidden_note": "kaneyama_shoji"
+    },
+    {
+      "id": "ng12",
+      "class": "negative",
+      "query": "東西銀行株式会社は岐阜県岐阜市に本店を置く信用金庫ですか",
+      "forbidden_note": "tozai_shinkin"
+    },
+    {
+      "id": "ng13",
+      "class": "negative",
+      "query": "肥後物産株式会社は東京都中央区日本橋に本社を置く繊維商社ですか",
+      "forbidden_note": "sakurada_bussan"
+    }
+  ],
+  "dictionary": [
+    "大和精密工業=ダイワプレシジョン(2020年社名変更)",
+    "北海道牛乳=北海道乳業(2015年商号変更)",
+    "全国青果卸協同組合=JA全青果(2018年改称)",
+    "精工会=一般社団法人日本精密機器工業会(略称)",
+    "金山物産=金山商事の関連会社(創業家が同じ)",
+    "令和6年=2024年",
+    "肥後物産=九州物産(1960年当時の旧社名)"
+  ]
+}

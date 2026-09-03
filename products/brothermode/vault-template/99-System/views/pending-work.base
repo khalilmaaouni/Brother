@@ -1,0 +1,18 @@
+filters:
+  and:
+    - file.hasProperty("promotion")
+    - promotion == "candidate"
+
+views:
+  - type: table
+    name: "Pending review"
+    order:
+      - file.name
+      - promotion
+      - type
+      - drafter_kind
+      - drafting_model
+      - target_note
+      - enrich_field
+      - provenance_actor
+      - created

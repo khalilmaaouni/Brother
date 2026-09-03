@@ -1,0 +1,44 @@
+;; Seatbelt profile for the gate battery. Applied by scripts/local-gates.sh to
+;; the battery invocation ONLY, never to the runner's own fetch or status post.
+;;
+;; WHAT THIS REPLACES. GitHub Actions gave a fork pull request an isolated
+;; runner and a read-only token. A local runner has no such boundary: the
+;; battery executes files from the checkout as the machine owner, with the
+;; keychain, the ssh keys and a GitHub token carrying repo, workflow, gist and
+;; user scopes all readable. Nothing local reproduces a container, and this
+;; profile does not pretend to. It removes the two things a hostile test file
+;; would actually want: the credentials, and a way to send them anywhere.
+;;
+;; ALLOW-DEFAULT WITH A DENYLIST, deliberately, and the trade is stated rather
+;; than buried. A deny-default profile is stronger and would need every
+;; toolchain path the two batteries read enumerated, which is a long tail that
+;; breaks on the next dependency and gets switched off the first time it fires
+;; on honest work. A gate that fires on normal work gets disabled, and a
+;; disabled gate protects nothing. So this denies exactly the assets the parity
+;; audit named, and an unlisted path stays readable. That is a real gap and it
+;; is written into docs/KNOWN-LIMITS.md rather than left implicit.
+;;
+;; SECOND KNOWN LIMIT: sandbox-exec is deprecated by Apple. It is present and
+;; functional on this machine and has been for many releases, but it is not a
+;; guarantee for the future. If it is ever removed, the honest response is to
+;; report the loss as a regression in the parity ledger, not to quietly drop
+;; the wrapper and keep the old score.
+(version 1)
+(allow default)
+
+;; No network. A test that needs the network is a test that can exfiltrate, and
+;; neither battery legitimately reaches out: BrotherSBE's PR-verify suite is
+;; explicitly the canned, offline one ("every GitHub API call is routed through
+;; a fake fetch, so it needs no network and no token"), and the citation check
+;; states on every run that it opens no network connection.
+(deny network*)
+
+;; The credentials themselves. These are the paths a leaked-token forger or a
+;; hostile fixture would go for, and none of them is anything a test of this
+;; code has any business reading.
+(deny file-read*
+  (subpath (param "HOME_SSH"))
+  (subpath (param "HOME_GH"))
+  (subpath (param "HOME_KEYCHAINS"))
+  (subpath (param "HOME_AWS"))
+  (subpath (param "VAULT")))

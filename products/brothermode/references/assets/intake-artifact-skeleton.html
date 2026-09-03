@@ -1,0 +1,330 @@
+<!--
+  Intake artifact skeleton. See references/intake-artifact-template.md for
+  how to fill this in. CSS is Brother's own design system (petrol/paper/
+  slate, Iowan Old Style over Seravek) and should not be re-derived per use.
+  Placeholders are {{DOUBLE_BRACE}}. Repeatable blocks (DECISION, MERMAID,
+  CODE_REF, RESEARCH_REF) are marked with START/END comments: copy the block
+  between them once per item, delete the comments in the final artifact.
+-->
+<title>{{PAGE_TITLE}}</title>
+<style>
+  :root {
+    --paper: #F7F8F6;
+    --paper-raised: #FFFFFF;
+    --ink: #1B2320;
+    --ink-soft: #4B564F;
+    --line: #DCE3DD;
+    --line-strong: #C3CDC5;
+    --petrol: #0E7A6F;
+    --petrol-tint: #E4F2EE;
+    --slate: #141B22;
+    --amber: #9A6A1E;
+    --amber-tint: #FBF2E2;
+    --code-bg: #EEF1EC;
+    --font-display: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
+    --font-body: 'Seravek', 'Gill Sans Nova', 'Gill Sans MT', 'Myriad Pro', sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #12181A;
+      --paper-raised: #182022;
+      --ink: #E7EEE9;
+      --ink-soft: #A9B6AF;
+      --line: #2A3538;
+      --line-strong: #3B4A4D;
+      --petrol: #3AA893;
+      --petrol-tint: #16302B;
+      --slate: #D8E4DE;
+      --amber: #D9A55A;
+      --amber-tint: #2E2617;
+      --code-bg: #1B2224;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #12181A;
+    --paper-raised: #182022;
+    --ink: #E7EEE9;
+    --ink-soft: #A9B6AF;
+    --line: #2A3538;
+    --line-strong: #3B4A4D;
+    --petrol: #3AA893;
+    --petrol-tint: #16302B;
+    --slate: #D8E4DE;
+    --amber: #D9A55A;
+    --amber-tint: #2E2617;
+    --code-bg: #1B2224;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 16.5px;
+    line-height: 1.6;
+    margin: 0;
+    padding: 0 24px 96px;
+  }
+  main { max-width: 780px; margin: 0 auto; }
+
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--petrol);
+    margin-top: 56px;
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+  .eyebrow .sep { color: var(--line-strong); }
+
+  h1 {
+    font-family: var(--font-display);
+    font-weight: 500;
+    font-size: clamp(2.1rem, 5vw, 2.9rem);
+    line-height: 1.12;
+    text-wrap: balance;
+    margin: 10px 0 6px;
+    color: var(--ink);
+  }
+  .subtitle { font-size: 1.08rem; color: var(--ink-soft); max-width: 58ch; margin: 0 0 8px; }
+
+  .ask-block {
+    margin: 22px 0 40px;
+    padding: 16px 20px;
+    background: var(--paper-raised);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--petrol);
+    border-radius: 6px;
+    font-size: 0.98rem;
+    color: var(--ink-soft);
+  }
+  .ask-block strong { color: var(--ink); font-weight: 600; }
+
+  h2 {
+    font-family: var(--font-display);
+    font-weight: 500;
+    font-size: 1.5rem;
+    margin: 52px 0 6px;
+    color: var(--ink);
+    text-wrap: balance;
+  }
+  h2 .num {
+    font-family: var(--font-mono);
+    font-size: 0.62em;
+    color: var(--ink-soft);
+    letter-spacing: 0.04em;
+    margin-right: 10px;
+    vertical-align: 2px;
+  }
+  .section-note { color: var(--ink-soft); font-size: 0.95rem; max-width: 62ch; margin: 0 0 22px; }
+
+  .decision {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--paper-raised);
+    overflow: hidden;
+    margin-bottom: 18px;
+  }
+  .decision-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--line);
+    background: var(--petrol-tint);
+  }
+  .decision-head h3 { font-family: var(--font-body); font-weight: 700; font-size: 0.98rem; margin: 0; color: var(--ink); }
+  .settled {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--petrol);
+    border: 1px solid var(--petrol);
+    border-radius: 20px;
+    padding: 3px 10px;
+    white-space: nowrap;
+  }
+
+  .options { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
+  .option { padding: 18px 20px 20px; border-right: 1px solid var(--line); }
+  .option:last-child { border-right: none; }
+  .option.chosen { background: var(--petrol-tint); }
+  .option-label { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 0.96rem; margin-bottom: 10px; }
+  .check {
+    width: 17px; height: 17px;
+    border-radius: 50%;
+    border: 1.5px solid var(--petrol);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+  }
+  .chosen .check { background: var(--petrol); }
+  .chosen .check::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--paper-raised); }
+  .option:not(.chosen) .option-label { color: var(--ink-soft); }
+  .option:not(.chosen) .check { border-color: var(--line-strong); }
+
+  .pc { margin: 0; padding: 0; list-style: none; font-size: 0.92rem; }
+  .pc li { display: flex; gap: 8px; margin-bottom: 6px; color: var(--ink-soft); }
+  .pc li::before { flex: none; font-family: var(--font-mono); font-size: 11px; margin-top: 3px; }
+  .pc.pro li::before { content: "+"; color: var(--petrol); }
+  .pc.con li::before { content: "\2212"; color: var(--amber); }
+  .pc-label {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    margin: 12px 0 6px;
+  }
+  .pc-label:first-of-type { margin-top: 0; }
+
+  .why { padding: 12px 20px; font-size: 0.92rem; color: var(--ink-soft); border-top: 1px solid var(--line); background: var(--paper); }
+  .why strong { color: var(--ink); }
+
+  pre.mermaid { background: var(--paper-raised); border: 1px solid var(--line); border-radius: 10px; padding: 20px; overflow-x: auto; margin: 0 0 10px; }
+  .diagram-caption { font-size: 0.88rem; color: var(--ink-soft); margin: 0 0 8px; }
+
+  .ref-list { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 0; list-style: none; }
+  .ref {
+    display: grid;
+    grid-template-columns: minmax(180px, 260px) 1fr;
+    gap: 16px;
+    padding: 12px 16px;
+    background: var(--code-bg);
+    border-radius: 8px;
+    font-size: 0.88rem;
+    align-items: baseline;
+  }
+  .ref code { font-family: var(--font-mono); font-size: 0.84rem; color: var(--petrol); word-break: break-word; }
+  .ref span { color: var(--ink-soft); }
+
+  .research-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
+  .research-list li { padding: 12px 16px; border: 1px solid var(--line); border-radius: 8px; font-size: 0.9rem; }
+  .research-list .doc { font-weight: 700; color: var(--ink); }
+  .research-list .doc code { font-family: var(--font-mono); font-size: 0.82em; color: var(--petrol); font-weight: 500; }
+  .research-list p { margin: 4px 0 0; color: var(--ink-soft); }
+
+  .forecast { margin-top: 52px; padding: 20px 22px; border-radius: 10px; border: 1px solid var(--line); background: var(--paper-raised); }
+  .forecast-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 14px; }
+  .forecast-stat .label {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    margin-bottom: 3px;
+  }
+  .forecast-stat .value { font-family: var(--font-mono); font-size: 1.15rem; font-variant-numeric: tabular-nums; color: var(--ink); }
+  .forecast ul { margin: 6px 0 0; padding-left: 20px; color: var(--ink-soft); font-size: 0.9rem; }
+  .forecast li { margin-bottom: 4px; }
+
+  .footer-note { margin-top: 40px; padding-top: 20px; border-top: 1px solid var(--line); font-size: 0.9rem; color: var(--ink-soft); }
+  .footer-note strong { color: var(--ink); }
+
+  @media (max-width: 640px) {
+    .options { grid-template-columns: 1fr; }
+    .option { border-right: none; border-bottom: 1px solid var(--line); }
+    .option:last-child { border-bottom: none; }
+    .forecast-grid { grid-template-columns: 1fr; }
+    .ref { grid-template-columns: 1fr; }
+  }
+</style>
+
+<main>
+  <div class="eyebrow">Brother <span class="sep">&middot;</span> Intake / Kickoff <span class="sep">&middot;</span> {{DATE}}</div>
+  <h1>{{PAGE_TITLE}}</h1>
+  <p class="subtitle">{{ONE_SENTENCE_OUTCOME}}</p>
+
+  <div class="ask-block">
+    <strong>Your ask, verbatim:</strong> &ldquo;{{USER_ASK_VERBATIM}}&rdquo;
+  </div>
+
+  <!-- DECISION START: copy this whole block once per decision -->
+  <h2><span class="num">{{NN}}</span>Decision &mdash; {{DECISION_TITLE}}</h2>
+  <p class="section-note">{{WHY_THIS_DECISION_MATTERS}}</p>
+
+  <div class="decision">
+    <div class="decision-head">
+      <h3>{{DECISION_NAME}}</h3>
+      <span class="settled">Settled &middot; {{CHOSEN_OPTION_SHORT}}</span>
+      <!-- if not yet answered by the user, drop the .settled span entirely -->
+    </div>
+    <div class="options">
+      <div class="option chosen">
+        <div class="option-label"><span class="check"></span>{{RECOMMENDED_OPTION}}</div>
+        <div class="pc-label">Pros</div>
+        <ul class="pc pro">
+          <li>{{PRO_1}}</li>
+        </ul>
+        <div class="pc-label">Cons</div>
+        <ul class="pc con">
+          <li>{{CON_1}}</li>
+        </ul>
+      </div>
+      <div class="option">
+        <div class="option-label"><span class="check"></span>{{ALTERNATIVE_OPTION}}</div>
+        <div class="pc-label">Pros</div>
+        <ul class="pc pro">
+          <li>{{PRO_1}}</li>
+        </ul>
+        <div class="pc-label">Cons</div>
+        <ul class="pc con">
+          <li>{{CON_1}}</li>
+        </ul>
+      </div>
+      <!-- a third .option div is fine if there is a genuine third path -->
+    </div>
+    <div class="why"><strong>Why {{RECOMMENDED_OPTION}}:</strong> {{ONE_LINE_REASON}}</div>
+  </div>
+  <!-- DECISION END -->
+
+  <!-- MERMAID START: copy once per workflow/architecture diagram -->
+  <h2><span class="num">{{NN}}</span>{{DIAGRAM_SECTION_TITLE}}</h2>
+  <p class="diagram-caption">{{ONE_SENTENCE_CAPTION_SAME_FACTS_AS_DIAGRAM}}</p>
+  <pre class="mermaid">
+flowchart LR
+    A["{{STEP}}"] --> B["{{STEP}}"]
+  </pre>
+  <!-- MERMAID END -->
+
+  <!-- CODE_REF START: one section holding every code reference -->
+  <h2><span class="num">{{NN}}</span>Code this reuses</h2>
+  <p class="section-note">{{ONE_LINE_INTRO}}</p>
+  <ul class="ref-list">
+    <li class="ref"><code>{{PATH}}</code></li><li class="ref"><span></span><span>{{WHY_THIS_FILE}}</span></li>
+    <!-- repeat the two <li class="ref"> lines per file, VERIFY EACH PATH EXISTS FIRST -->
+  </ul>
+  <!-- CODE_REF END -->
+
+  <!-- RESEARCH_REF START: one section holding every doc reference -->
+  <h2><span class="num">{{NN}}</span>What this plan is built from</h2>
+  <ul class="research-list">
+    <li><div class="doc"><code>{{DOC_PATH}}</code></div><p>{{WHY_THIS_DOC}}</p></li>
+    <!-- repeat per document, VERIFY EACH PATH EXISTS FIRST -->
+  </ul>
+  <!-- RESEARCH_REF END -->
+
+  <div class="forecast">
+    <div class="forecast-grid">
+      <div class="forecast-stat"><div class="label">Likely time</div><div class="value">{{RANGE}}</div></div>
+      <div class="forecast-stat"><div class="label">Token range</div><div class="value">{{RANGE}}</div></div>
+      <div class="forecast-stat"><div class="label">Confidence</div><div class="value">{{Low|Medium|High}}</div></div>
+    </div>
+    <div class="pc-label">Why</div>
+    <ul>
+      <li>{{ASSUMPTION_1}}</li>
+    </ul>
+    <div class="pc-label">Reforecast after</div>
+    <ul><li>{{TRIGGER}}</li></ul>
+  </div>
+
+  <p class="footer-note"><strong>{{STATE_OF_WORK}}.</strong> {{ONE_LINE_NEXT_ACTION}}</p>
+</main>

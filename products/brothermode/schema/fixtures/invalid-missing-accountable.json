@@ -1,0 +1,74 @@
+{
+  "change": {
+    "baseCommit": "49d6f580d750973c60d024fe8d647a7d550fc62c",
+    "filesTouched": [
+      "a.txt"
+    ],
+    "headCommit": "884269e65c34f6006c144221bd12f9df6a2d6d60",
+    "projectId": "proj-fixture-canonical",
+    "repo": "passport-fixture-canonical"
+  },
+  "details": {
+    "evidence": [
+      {
+        "command": "python3 tools/test_all.py",
+        "origin": "local",
+        "timestamp": "2026-08-20T09:30:00Z",
+        "verdict": "green"
+      }
+    ],
+    "method": {
+      "name": "no method plugin detected; native flow"
+    },
+    "notEstablished": {
+      "items": [
+        "no regression pass is recorded in the store for this change",
+        "no performance measurement is recorded in the store for this change",
+        "no cross-device check is recorded in the store for this change",
+        "no interface behaviour review is recorded in the store for this change",
+        "the translated copy was not read by anyone who speaks the language, per this record",
+        "the accountable person was INFERRED from the newest human attribution event recorded for this project; no --accountable flag was given",
+        "evidence origin (build system vs laptop) is not tracked by the BrotherMode store's own evidence table; every entry above is reported as local until that distinction exists"
+      ],
+      "noneClaimJustification": null
+    },
+    "who": {
+      "accountableHuman": "",
+      "sessions": [
+        {
+          "claims": [
+            "Do the thing",
+            "upsert_project"
+          ],
+          "label": "sess-xyz"
+        }
+      ]
+    }
+  },
+  "generatedAt": "2026-08-20T10:00:00Z",
+  "schema": "change-passport/v1",
+  "sensitivity": "redacted",
+  "whatWasDone": [
+    "change in passport-fixture-canonical, commit range 49d6f580d750973c60d024fe8d647a7d550fc62c..884269e65c34f6006c144221bd12f9df6a2d6d60",
+    "1 file(s) touched: a.txt"
+  ],
+  "whatWasNotEstablished": [
+    "no regression pass is recorded in the store for this change",
+    "no performance measurement is recorded in the store for this change",
+    "no cross-device check is recorded in the store for this change",
+    "no interface behaviour review is recorded in the store for this change",
+    "the translated copy was not read by anyone who speaks the language, per this record",
+    "the accountable person was INFERRED from the newest human attribution event recorded for this project; no --accountable flag was given",
+    "evidence origin (build system vs laptop) is not tracked by the BrotherMode store's own evidence table; every entry above is reported as local until that distinction exists"
+  ],
+  "whatWasRun": [
+    "`python3 tools/test_all.py` returned green (local, 2026-08-20T09:30:00Z)"
+  ],
+  "whereItCameFrom": [
+    "no method plugin detected; native flow"
+  ],
+  "whoDidIt": [
+    "accountable: Fixture Person",
+    "session sess-xyz: claims Do the thing, upsert_project"
+  ]
+}

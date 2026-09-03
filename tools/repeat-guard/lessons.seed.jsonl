@@ -1,0 +1,11 @@
+{"trigger": "gh api", "note": "A listing that answers with SILENCE looks exactly like one answering zero. gh api .../tags returned nothing for a repo holding 36 tags. Ask the underlying store: git ls-remote --tags.", "recorded": "2026-08-23"}
+{"trigger": "ps -", "note": "A process-table match finds the string inside its own calling command and counts itself. Match by executable path, not command text.", "recorded": "2026-08-24"}
+{"trigger": "tail -f", "note": "A tail on a live log buffers into a file that reads zero bytes on disk, which looks exactly like a dead process.", "recorded": "2026-08-24"}
+{"trigger": "git push --force", "note": "Irreversible over a shared branch. Print exactly what it affects and get explicit confirmation first.", "recorded": "2026-08-09"}
+{"trigger": "git restore", "note": "In a SHARED checkout another session's uncommitted work may sit under this path, and an UNTRACKED file has no HEAD to restore from, so removal is final. Check ListAgents and mtimes first.", "recorded": "2026-08-24"}
+{"trigger": "git add -a", "note": "The documented checksums command stages the OLD manifest then rewrites it on disk, so a plain commit ships a stale manifest. Re-stage after regenerating.", "recorded": "2026-08-23"}
+{"trigger": "| tail", "note": "$? after a pipe is the LAST command's exit code, not the gate's. Capture the gate's own code before quoting a verdict.", "recorded": "2026-08-24"}
+{"trigger": "grep -c", "note": "Counting a phrase answers a narrower question than 'is this recorded'. A record written in other words reads as absent.", "recorded": "2026-08-24"}
+{"trigger": "unittest", "note": "Assert the EXIT CODE, not the printed verdict. A gate here printed FAIL and exited 0 and eleven tests passed over it.", "recorded": "2026-08-23"}
+{"trigger": "open(", "note": "A file handle never bound to a name leaks. Use with-open; the pre-write gate cannot see io.open(path).read().", "recorded": "2026-08-23"}
+{"trigger": "--github", "note": "A check whose two halves come from different places is not checking the thing it names. Read the promise from the same place you install from.", "recorded": "2026-08-24"}
