@@ -7,6 +7,21 @@ import subprocess
 import tempfile
 import unittest
 
+# E100: one sandbox for every temp tree this process makes, removed at exit.
+import os as _e100_os, sys as _e100_sys  # noqa: E402
+_e100_sys.path.append(_e100_os.path.join(
+    _e100_os.path.dirname(_e100_os.path.abspath(__file__)), '../../../scripts'))
+try:  # noqa: E402
+    import tmp_sandbox as _e100_tmp
+    _e100_tmp.install()
+except ImportError:
+    # A packager (scripts/export_public.py, make_benchmark_bundle.py)
+    # can copy this test without scripts/tmp_sandbox.py beside it. Say
+    # so rather than dying: the sandbox is hygiene, not the subject.
+    _e100_sys.stderr.write(
+        "tmp_sandbox absent: %s leaves its temp trees behind\n"
+        % _e100_os.path.basename(__file__))
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -1252,6 +1267,230 @@ class TestRollbackInstallScript(unittest.TestCase):
                              env=env, timeout=120)
         self.assertEqual(out.returncode, 1, out.stdout + out.stderr)
         self.assertIn("REFUSED: git is not on PATH", out.stdout, out.stdout + out.stderr)
+
+
+class ChecksumVerifierComparisonIsWatched(unittest.TestCase):
+    """E97, 2026-09-04. t5's failure-injection gauntlet (~/.claude/evidence/
+    evad-internal-2026-09-04/t5/REPORT.md) forced scripts/verify-install.sh
+    line 153, `if [ "$actual" = "$expected" ]; then`, to `if true` and no
+    suite noticed: the one line that decides MATCH vs MISMATCH had nothing
+    driving it backward. This builds a tiny disposable installed tree,
+    tampers one manifested file by a single byte, and proves the real
+    script reports FAILED with that file named, then restores it and proves
+    PASSED again. The second test proves this class actually depends on
+    line 153, not on some other signal: it guts a throwaway copy of the
+    exact comparison to `if true` and shows the identical tamper is then
+    missed."""
+
+    VERIFY_SCRIPT = os.path.join(ROOT, "scripts", "verify-install.sh")
+    CHECKSUMS_SCRIPT = os.path.join(ROOT, "scripts", "checksums.sh")
+    COMPARE_LINE = 'if [ "$actual" = "$expected" ]; then'
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.tree = os.path.join(self.tmp, "install")
+        os.makedirs(os.path.join(self.tree, "scripts"))
+        shutil.copy(self.VERIFY_SCRIPT,
+                    os.path.join(self.tree, "scripts", "verify-install.sh"))
+        shutil.copy(self.CHECKSUMS_SCRIPT,
+                    os.path.join(self.tree, "scripts", "checksums.sh"))
+        self.payload = os.path.join(self.tree, "payload.txt")
+        with io.open(self.payload, "w", encoding="utf-8") as fh:
+            fh.write("original bytes, untampered\n")
+        for args in (["init", "-q"],
+                     ["config", "user.email", "checksum-fixture@fixture.test"],
+                     ["config", "user.name", "Checksum Fixture"],
+                     ["add", "-A"],
+                     ["commit", "-q", "-m", "fixture"]):
+            subprocess.run(["git"] + args, cwd=self.tree, check=True)
+        gen = subprocess.run(
+            ["sh", os.path.join(self.tree, "scripts", "checksums.sh"),
+             "CHECKSUMS.sha256"],
+            cwd=self.tree, capture_output=True, text=True)
+        self.assertEqual(gen.returncode, 0, gen.stdout + gen.stderr)
+
+    def _verify(self, script=None):
+        """Run `script` (default: the real copy inside the fixture tree)
+        with the manifest and installed-dir passed EXPLICITLY, so a script
+        living outside the tree (the gutted throwaway below) checks the
+        tree without itself being walked as part of it."""
+        script = script or os.path.join(self.tree, "scripts",
+                                        "verify-install.sh")
+        manifest = os.path.join(self.tree, "CHECKSUMS.sha256")
+        out = subprocess.run(["sh", script, manifest, self.tree],
+                             capture_output=True, text=True)
+        return out.returncode, out.stdout + out.stderr
+
+    def _tamper(self):
+        with io.open(self.payload, "a", encoding="utf-8") as fh:
+            fh.write("X")
+
+    def _restore(self):
+        with io.open(self.payload, "w", encoding="utf-8") as fh:
+            fh.write("original bytes, untampered\n")
+
+    def test_a_tampered_file_is_named_failed_then_restoring_passes(self):
+        code, out = self._verify()
+        self.assertEqual(code, 0, out)
+        self.assertIn("verify-install: PASSED", out, out)
+
+        self._tamper()
+        code, out = self._verify()
+        self.assertEqual(code, 1, out)
+        self.assertIn("verify-install: FAILED", out, out)
+        self.assertIn("MISMATCH:  payload.txt", out, out)
+
+        self._restore()
+        code, out = self._verify()
+        self.assertEqual(code, 0, out)
+        self.assertIn("verify-install: PASSED", out, out)
+
+    def test_gutting_the_compare_to_always_true_misses_the_same_tamper(self):
+        """Proves the test above actually watches line 153: a throwaway copy
+        of verify-install.sh with only that comparison replaced by `if
+        true` reports PASSED over the identical single-byte tamper the real
+        script just caught, which is exactly the injection t5 found live
+        and unnoticed."""
+        self._tamper()
+
+        with io.open(os.path.join(self.tree, "scripts", "verify-install.sh"),
+                     encoding="utf-8") as fh:
+            original = fh.read()
+        self.assertEqual(original.count(self.COMPARE_LINE), 1,
+                         "the compare line moved; update this fixture to match")
+        gutted_source = original.replace(self.COMPARE_LINE, "if true; then")
+        # Outside self.tree on purpose: a copy of the script left inside the
+        # tree would itself be walked as an untracked EXTRA file (a real
+        # defect the second direction of the check exists to catch), which
+        # would fail this test for the wrong reason and prove nothing about
+        # line 153.
+        gutted_path = os.path.join(self.tmp, "verify-install-gutted.sh")
+        with io.open(gutted_path, "w", encoding="utf-8") as fh:
+            fh.write(gutted_source)
+        os.chmod(gutted_path, 0o755)
+
+        code, out = self._verify(script=gutted_path)
+        self.assertEqual(code, 0, out)
+        self.assertIn("verify-install: PASSED", out, out)
+        self.assertNotIn("MISMATCH", out, out)
+
+class TestInstalledManifestGap(unittest.TestCase):
+    """The manifest an install ships must describe the bytes it ships.
+
+    Row E29. The published plugin 3.7.3 shipped a CHECKSUMS.sha256 naming 396
+    markdown files of which 291 were never copied into the install, because the
+    manifest was generated over the full product tree and then copied verbatim
+    past an export allowlist that leaves internal directories out. The scorer's
+    citation-inventory check reads that manifest as the shipped file list, and
+    every user who ran `sbe score --strict` over their own clean repository got
+    a gate severity FAIL reading "291 path(s) under <the plugin cache> exist and
+    could not be read", which was untrue twice over: the paths did not exist,
+    and the verdict was about the vendor's tree rather than theirs.
+
+    These tests drive the check through the real user path, a whole scorer run
+    launched from an installed layout, because the defect only appears when the
+    check's root DEFAULTS to the install (SBE_CITATION_ROOT unset). The layout
+    is a disposable directory whose `tools` is a symlink to this checkout's own,
+    so the run costs a fraction of a second and nothing outside self.tmp is
+    touched.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="sbe-e29-")
+        self.restore = []
+        self.repo = os.path.join(self.tmp, "cleanrepo")
+        os.makedirs(self.repo)
+        with io.open(os.path.join(self.repo, "README.md"), "w", encoding="utf-8") as fh:
+            fh.write("a repository with nothing to cite\n")
+
+    def tearDown(self):
+        for path in self.restore:
+            try:
+                os.chmod(path, 0o644)
+            except OSError:
+                pass
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _install(self, manifest_lines, files):
+        """A disposable installed layout: real tools, a manifest, some files."""
+        root = os.path.join(self.tmp, "install")
+        os.makedirs(os.path.join(root, "docs"))
+        os.symlink(os.path.join(ROOT, "tools"), os.path.join(root, "tools"))
+        for rel, body in files.items():
+            full = os.path.join(root, rel)
+            os.makedirs(os.path.dirname(full), exist_ok=True)
+            with io.open(full, "w", encoding="utf-8") as fh:
+                fh.write(body)
+        with io.open(os.path.join(root, "CHECKSUMS.sha256"), "w", encoding="utf-8") as fh:
+            for rel in manifest_lines:
+                fh.write("0000000000000000000000000000000000000000000000000000000000000000  %s\n"
+                         % rel)
+        return root
+
+    def _citation_line(self, root):
+        """The citation-inventory line of a real scorer run from that install."""
+        env = dict(os.environ)
+        env.pop("SBE_CITATION_ROOT", None)
+        env["CLAUDE_CONFIG_DIR"] = os.path.join(self.tmp, "no-such-claude-config")
+        out = subprocess.run(["python3", os.path.join(root, "tools", "sbe_score.py"),
+                              self.repo, "--strict"],
+                             capture_output=True, text=True, env=env, cwd=self.repo,
+                             timeout=300)
+        both = out.stdout + out.stderr
+        for line in both.splitlines():
+            if line.startswith("citation-inventory"):
+                return line, both
+        self.fail("no citation-inventory line in the scorer output:\n" + both)
+
+    def test_a_manifest_naming_a_file_the_install_does_not_carry_reads_no_data(self):
+        """The E29 defect itself: an absence is NO-DATA, and it names the install.
+
+        Never a FAIL, because the missing files and the manifest that names them
+        both belong to the install, not to the repository the user asked about;
+        never a silent pass either, because a scan scope nobody can establish is
+        not a covered citation set.
+        """
+        root = self._install(["README.md", "docs/GONE.md"],
+                             {"README.md": "no urls here\n"})
+        line, both = self._citation_line(root)
+        self.assertIn("NO-DATA", line, both)
+        self.assertNotIn("FAIL", line, both)
+        self.assertIn("docs/GONE.md", line, both)
+        self.assertIn(root, line, both)
+        self.assertIn("the installed skill's own tree", line, both)
+        self.assertNotIn("exist and could not be read", line, both)
+
+    def test_a_manifest_that_matches_the_install_says_nothing_about_the_manifest(self):
+        """The other way: files present, so the check gets on with its own job.
+
+        Without this, a verdict that read NO-DATA for every install would look
+        identical to the fix and prove nothing.
+        """
+        root = self._install(["README.md"], {"README.md": "no urls here\n"})
+        line, both = self._citation_line(root)
+        self.assertNotIn("that are not on disk", line, both)
+
+    def test_a_manifest_entry_that_exists_and_cannot_be_read_still_fails(self):
+        """The guard the fix must not soften.
+
+        A file that is THERE and refuses to open is a broken claim, not an
+        absence, and it can be hiding a URL this verdict would miss. It keeps
+        its gate severity FAIL.
+        """
+        root = self._install(["README.md", "docs/SEALED.md"],
+                             {"README.md": "no urls here\n",
+                              "docs/SEALED.md": "sealed\n"})
+        sealed = os.path.join(root, "docs", "SEALED.md")
+        os.chmod(sealed, 0o000)
+        self.restore.append(sealed)
+        if os.access(sealed, os.R_OK):
+            self.skipTest("this process can read a chmod 000 file, so the access "
+                          "axis cannot be exercised here")
+        line, both = self._citation_line(root)
+        self.assertIn("FAIL", line, both)
+        self.assertIn("docs/SEALED.md", line, both)
+        self.assertIn("exist and could not be read", line, both)
 
 
 if __name__ == "__main__":

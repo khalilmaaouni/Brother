@@ -72,6 +72,32 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 WORKFLOW = os.path.join(REPO, ".github", "workflows", "tests.yml")
 
+# Is this the private hub, or a published subset of it?
+#
+# WHY THE QUESTION HAS TO BE ASKED HERE. A suite named in SUITES that is not on
+# disk is normally a defect: someone deleted a gate or renamed it and left the
+# tuple behind, and this file refuses to run at all until that is fixed. But
+# one suite is withheld from the public export ON PURPOSE
+# (docs/plan/EXPORT-DENYLIST.txt names test_bm_vault_contract.py and says
+# why), so in a clone of the published release the same refusal fires over a
+# file that was never meant to be there. Measured on a fresh clone of the
+# v1.0.2 tag, 2026-09-04: `python3 tools/test_all.py` exited 2 with "REFUSING
+# to run. These suites are in the gate but not on disk:
+# test_bm_vault_contract.py" and ran nothing at all, so the release shipped a
+# gate its own README told a newcomer to run and that could not run.
+#
+# WHY THIS MARKER. scripts/export_public.py HARD_EXCLUDEs `editions` in its
+# own code rather than by a list entry, so no export can ever carry that
+# directory, and every hub checkout tracks it. That makes its presence the one
+# answer to this question that a list change cannot quietly flip.
+#
+# WHAT THIS DELIBERATELY DOES NOT DO. It does not turn "a suite is missing"
+# into a skip everywhere. In the hub the refusal is unchanged, because there
+# the file is supposed to exist and its absence is the exact defect this gate
+# was written for.
+IN_PRIVATE_HUB = os.path.isdir(
+    os.path.join(os.path.dirname(os.path.dirname(REPO)), "editions"))
+
 # A suite that hangs is worse than a suite that fails: it burns the whole gate
 # with no diagnosis. 900s is roughly 4x the worst observed wall time under heavy
 # contention (test_bm went 20s to 202s on 2026-07-27), so it fires on a wedge
@@ -1077,6 +1103,22 @@ def _discover():
     known = list(SUITES)
     unlisted = [n for n in on_disk if n not in known]
     missing = [n for n in known if n not in on_disk]
+    if missing and not IN_PRIVATE_HUB:
+        # Outside the hub, a suite the export withholds is NO-DATA, not a
+        # defect: there is nothing to run and nothing to conclude from that.
+        # It is reported by name on stdout so the run says which claims it
+        # could not test, and the remaining suites still gate. See
+        # IN_PRIVATE_HUB above for why the hub keeps the refusal.
+        sys.stdout.write(
+            "test_all: NO-DATA for %d of %d suite(s), absent from this "
+            "checkout: %s. This is not the private hub, so they are treated "
+            "as withheld by the export rather than deleted, and the other %d "
+            "suite(s) still run. NO-DATA is not a pass: nothing here says "
+            "whether those suites would pass.\n"
+            % (len(missing), len(known), ", ".join(missing),
+               len(known) - len(missing)))
+        known = [n for n in known if n in on_disk]
+        missing = []
     return known, unlisted, missing
 
 

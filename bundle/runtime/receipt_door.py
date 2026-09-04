@@ -33,7 +33,8 @@ become theatre:
 
 A FOURTH, added by E79 (the delivery-proof skeptic, 2026-09-04): A HARNESS
 SHA IS NAMED RESOLVABLE OR PRIVATE, NEVER BARE. harness_label() checks the
-sha against the public export remote in this checkout before printing it;
+sha against the public export remote in this checkout (found by URL, never
+by the name origin, E101) before printing it;
 a hub commit almost never resolves there (scripts/export_public.py builds
 new commits, it does not mirror hashes), so the honest default is the
 private label, not a bare fragment that reads as though any reader could
@@ -785,19 +786,61 @@ def receipts_for(record, claims, refused, log_path=None,
     return out
 
 
-#: The remote this checkout treats as the public export target (see
-#: docs/plan/claims.json history and the estate's own rule: origin is
-#: public, hub is where development happens, scripts/export_public.py is
-#: the only door between them). Read once here, not hardcoded three ways.
-PUBLIC_REMOTE_REF = "origin/main"
+#: The URL tail that names the public export repository. A remote is the
+#: public export target when its URL, minus a trailing ".git", ends in this
+#: path, so an SSH remote, an HTTPS remote and a local mirror of the same
+#: repository all match.
+PUBLIC_REMOTE_URL_TAIL = "khalilmaaouni/Brother"
+
+#: Explicit override of the ref the public export target is read through.
+#: None means "find it by URL" (E101). The NAME origin decides nothing:
+#: origin is the private hub in ~/brother-hub and the public repository in
+#: the dual-remote lane checkouts, so a hub commit read as publicly
+#: resolvable in one tree and private in the other (measured 2026-09-04:
+#: the README honesty gate flipped with the checkout). Tests and
+#: scripts/readme_receipt_sample.py pin a ref here.
+PUBLIC_REMOTE_REF = None
+
+
+def public_remote_ref(repo=None, branch="main"):
+    """The '<remote>/<branch>' ref this checkout can reach the PUBLIC export
+    repository through, found by reading each remote's URL rather than by
+    trusting the name origin (E101), or NODATA when no remote points at it.
+
+    Never a network call: `git remote -v` reads this checkout's own config.
+    NODATA is never a pass: harness_label prints the unknown rather than
+    guessing that a commit nobody can resolve is private."""
+    try:
+        proc = subprocess.run(["git", "remote", "-v"], cwd=repo or _ROOT,
+                              capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return NODATA
+    if proc.returncode != 0:
+        return NODATA
+    for line in proc.stdout.splitlines():
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        name, url = parts[0], parts[1]
+        tail = url.rstrip("/")
+        tail = tail[:-4] if tail.endswith(".git") else tail
+        if tail.endswith(PUBLIC_REMOTE_URL_TAIL):
+            return "%s/%s" % (name, branch)
+    return NODATA
 
 
 def harness_label(harness_revision, repo=None, public_ref=None):
     """(E79, harness-revision-v1 follow-up) The one clause a receipt prints
     for the harness that produced it: 'harness <sha12>' only when that
     exact commit is an ancestor of the public export remote's own HEAD in
-    THIS checkout, 'harness <sha12> (private hub revision)' otherwise, and
-    plain 'harness NO-DATA' when no revision was recorded at all.
+    THIS checkout, 'harness <sha12> (private hub revision)' otherwise,
+    'harness <sha12> (public remote NO-DATA)' when this checkout has no
+    remote pointing at the public repository at all (E101: the question
+    cannot be answered here, and an unanswerable question is never a
+    private answer), and plain 'harness NO-DATA' when no revision was
+    recorded. The public ref is found by remote URL, never by the name
+    origin, so the same commit reads the same way in the hub checkout and
+    in a lane worktree.
 
     A hub commit is never mirrored byte for byte into the public repo
     (scripts/export_public.py builds new commits from a gated tree, it
@@ -811,7 +854,9 @@ def harness_label(harness_revision, repo=None, public_ref=None):
         return "harness %s" % NODATA
     short = revision[:12]
     repo = repo or _ROOT
-    public_ref = public_ref or PUBLIC_REMOTE_REF
+    public_ref = public_ref or PUBLIC_REMOTE_REF or public_remote_ref(repo)
+    if str(public_ref).startswith(NODATA):
+        return "harness %s (public remote %s)" % (short, NODATA)
     try:
         proc = subprocess.run(
             ["git", "merge-base", "--is-ancestor", revision, public_ref],

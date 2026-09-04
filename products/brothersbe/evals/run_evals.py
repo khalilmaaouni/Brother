@@ -4349,6 +4349,47 @@ def v30f(root):
     return "caught" if not missing else "the lint did not see %s" % ", ".join(missing)
 
 
+#: The product's CI wiring. The public export deliberately does not carry it
+#: (docs/plan/EXPORT-ALLOWLIST.txt, the M6 note: "CI wiring not needed to
+#: install or run the plugin"), so every eval that reads it has to say so in a
+#: public clone instead of dying on FileNotFoundError. Measured on the v1.0.2
+#: tag: four evals in this bed reported ERROR:FileNotFoundError for exactly
+#: this reason, which reads as a broken product and is really a file the tree
+#: was never meant to carry.
+SHIPPED_WORKFLOW = ".github/workflows/brothersbe-gates.yml"
+
+
+def _withheld(rel):
+    """`NO-DATA: ...` naming `rel` when this tree does not carry it, else None.
+
+    Same three-state honesty as PLATFORM-GAP in main(): counted apart, printed
+    with its reason, never a pass and never a block. A tree that DOES carry the
+    file gets None and the caller runs its real check unchanged, so this can
+    never soften the hub, where every one of these files is present.
+    """
+    if os.path.exists(os.path.join(_REPO, rel)):
+        return None
+    return ("NO-DATA: this clone does not carry %s, so nothing was opened and "
+            "this case proved nothing. An absent file is not a pass." % rel)
+
+
+def _tracked_here(rels):
+    """The subset of `rels` git tracks in this tree; empty when git cannot answer.
+
+    Boundary call with an explicit failure path: a git that will not run
+    returns an empty set, which makes the caller treat the paths as untracked
+    and report rather than pass.
+    """
+    try:
+        out = subprocess.run(["git", "-C", _REPO, "ls-files", "-z", "--"] + list(rels),
+                             capture_output=True, text=True)
+    except OSError:
+        return set()
+    if out.returncode != 0:
+        return set()
+    return set(p for p in out.stdout.split("\0") if p)
+
+
 def _waiver_grep_pattern():
     """The pattern the shipped CI actually uses to decide a waiver happened.
 
@@ -4384,6 +4425,9 @@ def v30e(root):
     outputs are produced by running the real tool, so this cannot pass by
     agreeing with itself.
     """
+    gap = _withheld(SHIPPED_WORKFLOW)
+    if gap:
+        return gap
     import re as _re
     flags, pattern = _waiver_grep_pattern()
     if pattern is None:
@@ -5059,6 +5103,15 @@ def dc_cite(root):
 @case("every-shipped-doc-path-in-this-suite-opens-a-file", "docs", "consistent")
 def dc0(root):
     missing = [rel for rel in SHIPPED_DOCS if not os.path.isfile(os.path.join(_REPO, rel))]
+    if missing and not _tracked_here(missing):
+        # Neither on disk nor tracked here, so this is a tree that does not
+        # CARRY these documents (the public export withholds the internal
+        # process pages by name), not a list naming files that open nothing.
+        # The defect this case was written for is the opposite shape and is
+        # still caught below: a path present on one machine and in no clone.
+        return ("NO-DATA: this clone does not carry %s, so nothing was opened "
+                "for them and this case proved nothing about them. An absent "
+                "document is not a pass." % sorted(missing))
     return "consistent" if not missing else "SHIPPED_DOCS names %s, which opens nothing" % missing
 
 
@@ -5086,8 +5139,20 @@ def dc6(root):
         # what runs, and the absence of git is reported in the evidence.
         tracked = None
     if tracked is not None:
-        problems += ["%s is not tracked by git, so it is in nobody's clone" % rel
-                     for rel in SHIPPED_DOCS if rel not in tracked]
+        for rel in SHIPPED_DOCS:
+            if rel in tracked:
+                continue
+            if not os.path.isfile(os.path.join(_REPO, rel)):
+                # Absent from disk AND untracked: this tree does not carry the
+                # document at all. That is NO-DATA about it, never a pass, and
+                # it is a different fact from the STATE.md defect above, which
+                # is a file PRESENT on one machine and tracked by nobody.
+                problems.append("NO-DATA: %s is neither on disk nor tracked "
+                                "here, so this clone does not carry it and "
+                                "nothing about it was proved" % rel)
+            else:
+                problems.append("%s is not tracked by git, so it is in "
+                                "nobody's clone" % rel)
     # The .gitignore reading runs either way, because a source tarball has no git
     # and a guard that can only run in a working repository is the same blindness
     # one layer out. Plain patterns only: a name, or a name anchored to the root.
@@ -5106,6 +5171,10 @@ def dc6(root):
             if fnmatch.fnmatch(rel, pat) or fnmatch.fnmatch(os.path.basename(rel), pat):
                 problems.append("%s is excluded by .gitignore rule %r, so it is in nobody's clone"
                                 % (rel, pat))
+    if problems and all(x.startswith("NO-DATA:") for x in problems):
+        # One prefix, not two: main() strips the leading one to label the row.
+        bare = sorted(set(x[len("NO-DATA:"):].strip() for x in problems))
+        return "NO-DATA: " + "; ".join(bare[:4])
     return "consistent" if not problems else "; ".join(sorted(set(problems))[:4])
 
 
@@ -5765,6 +5834,9 @@ def dc8(root):
     # everything else rests on (no SHA pinning, no read-only permissions, no
     # seeded meta-test), and a prior sync claim about this fence was false.
     # Byte comparison, so "verbatim" means verbatim.
+    gap = _withheld(SHIPPED_WORKFLOW)
+    if gap:
+        return gap
     guide = open(os.path.join(_REPO, "docs/guides/01-quickstart.md"), errors="replace").read()
     wf = open(os.path.join(_REPO, ".github/workflows/brothersbe-gates.yml"),
               errors="replace").read()
@@ -5920,6 +5992,9 @@ def dc3(root):
     # regression evals, the honesty meta-test and the tool tests: exactly the
     # suites whose absence from the merge path this project had just finished
     # fixing. A prose count and a fence are both claims about a file that ships.
+    gap = _withheld(SHIPPED_WORKFLOW)
+    if gap:
+        return gap
     import re as _re
     wf = open(os.path.join(_REPO, ".github/workflows/brothersbe-gates.yml"),
               errors="replace").read()
@@ -5951,6 +6026,9 @@ def dc_seed(root):
     # silently installed weaker coverage than the copy-the-file path. The
     # workflow's own seeded invocation is the bar; any doc CI block that runs
     # the meta-test at all must run it too, or it degrades in silence.
+    gap = _withheld(SHIPPED_WORKFLOW)
+    if gap:
+        return gap
     import re as _re
     wf = open(os.path.join(_REPO, ".github/workflows/brothersbe-gates.yml"),
               errors="replace").read()
@@ -8800,6 +8878,12 @@ _program_mod = SourceFileLoader(
 
 @case("program-status-md-matches-the-live-ledger", "docs", "fresh")
 def dc_prog_fresh(root):
+    # program/ is the internal program-management ledger and the public export
+    # does not carry it (docs/plan/EXPORT-ALLOWLIST.txt, the M6 note). Without
+    # it there is no ledger to render and nothing to compare STATUS.md against.
+    gap = _withheld(os.path.join("program", "PROGRAM.yaml"))
+    if gap:
+        return gap
     try:
         fresh = _program_mod.check_status_md(_REPO)
     except _program_mod.ProgramParseError as exc:
@@ -8886,15 +8970,33 @@ def main():
                     verdict = run_gate(d, klass)
             except Exception as e:
                 verdict = "ERROR:%r" % e
-        if isinstance(verdict, str) and verdict.startswith("PLATFORM-GAP:"):
-            gaps.append((name, verdict[len("PLATFORM-GAP:"):].strip()))
-            print("  %-38s want=%-8s got=PLATFORM-GAP (%s)" % (name, expect, gaps[-1][1]))
+        # A case may also return "NO-DATA: <reason>" when THIS TREE does not
+        # carry a file the scenario reads. Counted and printed exactly as
+        # PLATFORM-GAP is, for the same reason: never a pass (the guarantee
+        # went unmeasured here) and never a block (only regressions decide the
+        # exit code). Added for row E112, after a public clone of v1.0.2
+        # reported ERROR:FileNotFoundError on four cases whose files the
+        # export deliberately withholds, which reads as a broken product.
+        # A case whose EXPECTED verdict is itself NO-DATA is untouched: the
+        # equality below is reached only when the case did not return one of
+        # these two prefixes, and no expectation in this bed is a prefix.
+        gap_label = None
+        if isinstance(verdict, str) and verdict != expect:
+            for prefix in ("PLATFORM-GAP:", "NO-DATA:"):
+                if verdict.startswith(prefix):
+                    gap_label = prefix.rstrip(":")
+                    reason = verdict[len(prefix):].strip()
+                    break
+        if gap_label is not None:
+            gaps.append((name, reason))
+            print("  %-38s want=%-8s got=%s (%s)" % (name, expect, gap_label, reason))
             continue
         ok = verdict == expect
         passed += ok
         failed += not ok
         print("  %-38s want=%-8s got=%-8s %s" % (name, expect, verdict, "ok" if ok else "REGRESSION"))
-    tail = "" if not gaps else ", %d platform gap(s), each named above, never a pass" % len(gaps)
+    tail = "" if not gaps else (", %d gap(s) (platform or absent-file), each named above, "
+                                "never a pass" % len(gaps))
     if only is None:
         print("\n%d evals: %d passed, %d regressions%s." % (len(CASES), passed, failed, tail))
         sys.exit(1 if failed else 0)

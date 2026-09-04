@@ -39,9 +39,11 @@ Exit codes: 0 every claim is supported by measurement; 1 an overclaim or a NO-DA
 2 the inputs themselves could not be read.
 """
 import argparse
+import atexit
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -148,6 +150,16 @@ def claimed_containment(path=CLAIM_FILE, claim_id=CLAIM_ID):
     return None, "no %r row in the register" % claim_id
 
 
+def _remove_tree(path):
+    """Delete the fixture, reporting rather than dying: cleanup must never
+    fail a finished proof, and it must never pretend it succeeded either."""
+    try:
+        shutil.rmtree(path)
+    except OSError as exc:
+        sys.stderr.write(
+            "tool_bypass_test: left behind %s: %s\n" % (path, exc))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -167,6 +179,11 @@ def main(argv=None):
         return 1
 
     tmp = tempfile.mkdtemp(prefix="bypass-")
+    # E100: check_all.sh runs this command directly, and it left one bypass-*
+    # git tree in the shared temp directory on every battery run. Registered
+    # at exit rather than wrapped in a finally because main() returns from
+    # six places below and the fixture must live until the last of them.
+    atexit.register(_remove_tree, tmp)
     os.makedirs(os.path.join(tmp, ".sbe"), exist_ok=True)
     # The registry must carry a schema version the guard reads, or the guard FAILS
     # OPEN and says so. That is correct behaviour and it is also how a fixture

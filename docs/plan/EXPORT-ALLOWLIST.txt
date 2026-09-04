@@ -99,6 +99,10 @@ docs/deliveries
 # which left three of its six relative links dead in the tag.
 docs/plan/RESTORE-DRILL-ENTERPRISE-RESULT.json
 docs/plan/BATTERY-EXPECTATIONS.json
+# The acceptance areas scripts/product_acceptance.py loads at import; the
+# README proof suite test_brother_run_continue.py imports it, and the 1.0.3
+# tag attempt was refused because the export did not carry it.
+docs/plan/CAPABILITY-AREAS.json
 # E80, 2026-09-04: this file itself. An external release integrity trial on
 # the public v1.0.1 clone found scripts/export_public.py and
 # scripts/reproduce_export.py both refusing at once, because load_allowlist()
@@ -219,6 +223,35 @@ products/brothermode/docs/WHITEPAPER.md
 products/brothermode/docs/WHY-THE-CORE-IS-SMALL.md
 products/brothermode/docs/WINDOWS-CHECK.md
 products/brothermode/docs/WORKING-WITH-BROTHERSBE.md
+# Added 2026-09-04, row E111. A Codex pass read the published v1.0.2 tag as a
+# newcomer and found the product's own gates naming pages the export does not
+# carry: `python3 tools/test_bm_docs.py` exited 1 with 7 failures and 26
+# errors in a fresh clone, and four of those failures traced to one absent
+# file. These three are product documentation, not hub records, and each one
+# is already POINTED AT by something the export does carry, so withholding
+# them published a dangling pointer rather than a smaller surface:
+#   docs/brand/IDENTITY-CONTRACT.md is the human half of
+#   product.identity.json (exported), and product.identity.json names it in
+#   its own contract_doc field, which is why identity_manifest_offenders
+#   reported "contract_doc ... is not in the tree" in the tag;
+#   docs/VAULT-ENTRA-APPROVAL-CONTRACT.md is named by
+#   docs/VAULT-TRUST-BOUNDARY.md line 116, which the export does carry
+#   (tools/bm_vault_pane.py's docstring calls it "the approved VB10-05
+#   contract, not built here" without naming the path);
+#   docs/CORRECTION-LEARNING.md is on the suite's own ACTIVE_DOCS list, so
+#   every page-wide guard (dashes, stale counts, version agreement, install
+#   lines) errored in a clone instead of checking it.
+# All three carry no relative link (nothing new to resolve in the export's
+# link graph), no em or en dash, no machine path, and scanned clean of the
+# private terms before being added.
+products/brothermode/docs/brand/IDENTITY-CONTRACT.md
+products/brothermode/docs/VAULT-ENTRA-APPROVAL-CONTRACT.md
+products/brothermode/docs/CORRECTION-LEARNING.md
+# E114, 2026-09-05: hub-tracked but missing here, so a Windows clone of the
+# export rewrote its line endings and products/brothersbe/CHECKSUMS.sha256
+# stopped matching the rewritten bytes (found by lane XM2's Windows leg
+# against the public v1.0.2 tag).
+products/brothersbe/.gitattributes
 products/brothersbe/.claude-plugin
 products/brothersbe/CHANGELOG.md
 products/brothersbe/CHECKSUMS.sha256
@@ -280,6 +313,103 @@ products/brothersbe/docs/commands.md
 products/brothersbe/docs/getting-started.md
 products/brothersbe/docs/technical-qa.md
 products/brothersbe/docs/workflow-map.md
+# Added 2026-09-04, row E112. A fresh clone of the public tag v1.0.2 ran the
+# two commands this product's own README names as its proof and both were
+# red: tools/test_sbe.py failed 10 of 175 tests and evals/run_evals.py
+# reported 11 regressions, several of them FileNotFoundError. Every one of
+# those failures traced to a file the hub tracks and the export did not
+# carry, not to a defect in the product. These are the ones that are public
+# teaching or shipped-config content and that the product's own gate reads:
+# the three .sbe files the CLI loads before it can evaluate anything (a
+# clone without policy.yml gets `sbe policy evaluate: BLOCKED` and `doctor`
+# exits 1), the three field guides three doc-truth evals replay verbatim,
+# the eight engineer role pages the citation inventory scans, and the five
+# worked example dossiers the shipped-example gate re-executes (its rerun
+# check re-ran zero figures in the tag, so it proved nothing about any
+# published number). Named leaf by leaf, never as a directory, per the
+# security finding above. All 74 scanned clean of the private terms and of
+# machine paths before being added, and every relative link in every page
+# added here resolves inside the export tree.
+#
+# docs/for-engineers/00-READ-ME-FIRST.md is deliberately NOT here: its one
+# relative link points at docs/fieldbook/BrotherSBE-Booklet.html, which this
+# list does not carry, so adding the page alone would plant a dead link the
+# tag-time check_markdown_links refuses. The evals that name it read NO-DATA
+# instead.
+products/brothersbe/.sbe/checks.yml
+products/brothersbe/.sbe/policy.yml
+products/brothersbe/.sbe/team-profile.json
+products/brothersbe/docs/for-engineers/01-install-and-first-run.md
+products/brothersbe/docs/for-engineers/10-backend-engineer.md
+products/brothersbe/docs/for-engineers/11-data-engineer.md
+products/brothersbe/docs/for-engineers/12-infrastructure-architect.md
+products/brothersbe/docs/for-engineers/13-etl-builder.md
+products/brothersbe/docs/for-engineers/14-data-scientist.md
+products/brothersbe/docs/for-engineers/20-what-it-will-not-tell-you.md
+products/brothersbe/docs/for-engineers/30-adopting-it-on-a-team.md
+products/brothersbe/docs/for-engineers/examples/README.md
+products/brothersbe/docs/for-engineers/examples/backend-idempotency/00-intake.json
+products/brothersbe/docs/for-engineers/examples/backend-idempotency/01-purpose.md
+products/brothersbe/docs/for-engineers/examples/backend-idempotency/02-process.md
+products/brothersbe/docs/for-engineers/examples/backend-idempotency/03-adr.md
+products/brothersbe/docs/for-engineers/examples/backend-idempotency/05-data-model.md
+products/brothersbe/docs/for-engineers/examples/backend-idempotency/06-diagrams.md
+products/brothersbe/docs/for-engineers/examples/backend-idempotency/07-verification.md
+products/brothersbe/docs/for-engineers/examples/backend-idempotency/08-behaviour.md
+products/brothersbe/docs/for-engineers/examples/backend-idempotency/ran-receipt.json
+products/brothersbe/docs/for-engineers/examples/data-warehouse/00-intake.json
+products/brothersbe/docs/for-engineers/examples/data-warehouse/01-purpose.md
+products/brothersbe/docs/for-engineers/examples/data-warehouse/02-process.md
+products/brothersbe/docs/for-engineers/examples/data-warehouse/03-adr.md
+products/brothersbe/docs/for-engineers/examples/data-warehouse/04-technology-map.md
+products/brothersbe/docs/for-engineers/examples/data-warehouse/05-data-model.md
+products/brothersbe/docs/for-engineers/examples/data-warehouse/06-diagrams.md
+products/brothersbe/docs/for-engineers/examples/data-warehouse/07-verification.md
+products/brothersbe/docs/for-engineers/examples/data-warehouse/08-behaviour.md
+products/brothersbe/docs/for-engineers/examples/data-warehouse/numbers-manifest.json
+products/brothersbe/docs/for-engineers/examples/etl-job/00-intake.json
+products/brothersbe/docs/for-engineers/examples/etl-job/01-purpose.md
+products/brothersbe/docs/for-engineers/examples/etl-job/02-process.md
+products/brothersbe/docs/for-engineers/examples/etl-job/03-adr.md
+products/brothersbe/docs/for-engineers/examples/etl-job/04-technology-map.md
+products/brothersbe/docs/for-engineers/examples/etl-job/05-data-model.md
+products/brothersbe/docs/for-engineers/examples/etl-job/06-diagrams.md
+products/brothersbe/docs/for-engineers/examples/etl-job/07-verification.md
+products/brothersbe/docs/for-engineers/examples/etl-job/08-behaviour.md
+products/brothersbe/docs/for-engineers/examples/etl-job/migration-receipt.json
+products/brothersbe/docs/for-engineers/examples/etl-job/ran-receipt.json
+products/brothersbe/docs/for-engineers/examples/infra-topology/.sbe-exempt
+products/brothersbe/docs/for-engineers/examples/infra-topology/00-intake.json
+products/brothersbe/docs/for-engineers/examples/infra-topology/01-purpose.md
+products/brothersbe/docs/for-engineers/examples/infra-topology/02-process.md
+products/brothersbe/docs/for-engineers/examples/infra-topology/03-adr.md
+products/brothersbe/docs/for-engineers/examples/infra-topology/04-technology-map.md
+products/brothersbe/docs/for-engineers/examples/infra-topology/05-data-model.md
+products/brothersbe/docs/for-engineers/examples/infra-topology/06-diagrams.md
+products/brothersbe/docs/for-engineers/examples/infra-topology/07-verification.md
+products/brothersbe/docs/for-engineers/examples/infra-topology/08-behaviour.md
+products/brothersbe/docs/for-engineers/examples/infra-topology/APPROVAL
+products/brothersbe/docs/for-engineers/examples/model-promotion/00-intake.json
+products/brothersbe/docs/for-engineers/examples/model-promotion/01-purpose.md
+products/brothersbe/docs/for-engineers/examples/model-promotion/02-process.md
+products/brothersbe/docs/for-engineers/examples/model-promotion/03-adr.md
+products/brothersbe/docs/for-engineers/examples/model-promotion/04-technology-map.md
+products/brothersbe/docs/for-engineers/examples/model-promotion/05-data-model.md
+products/brothersbe/docs/for-engineers/examples/model-promotion/06-diagrams.md
+products/brothersbe/docs/for-engineers/examples/model-promotion/07-verification.md
+products/brothersbe/docs/for-engineers/examples/model-promotion/08-behaviour.md
+products/brothersbe/docs/for-engineers/examples/model-promotion/compute_auc_rank.py
+products/brothersbe/docs/for-engineers/examples/model-promotion/compute_auc_trapezoid.py
+products/brothersbe/docs/for-engineers/examples/model-promotion/holdout.csv
+products/brothersbe/docs/for-engineers/examples/model-promotion/numbers-manifest.json
+products/brothersbe/docs/for-engineers/examples/model-promotion/promotion_threshold_check.py
+products/brothersbe/docs/for-engineers/examples/model-promotion/ran-receipt.json
+products/brothersbe/docs/for-engineers/examples/model-promotion/seed_recorded_check.py
+products/brothersbe/docs/for-engineers/examples/model-promotion/train.csv
+products/brothersbe/docs/for-engineers/examples/model-promotion/training-run.json
+products/brothersbe/docs/guides/01-quickstart.md
+products/brothersbe/docs/guides/02-the-gates-in-practice.md
+products/brothersbe/docs/guides/04-teams-and-evolution.md
 
 # products/brotherds excluded entirely, 2026-08-31: not in marketplace.json
 # today, and its own PROJECT.md says "scope defined by the founder; nothing

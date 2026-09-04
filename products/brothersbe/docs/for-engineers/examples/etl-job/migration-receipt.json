@@ -1,0 +1,3 @@
+{"forward": {"ran_against_restore": true},
+ "reverse": {"ran_against_restore": true, "rehearsal_run_id": "af_run_20260726_0231"},
+ "row_counts": {"before": 41288, "after_reverse": 41288}}

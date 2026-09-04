@@ -10,6 +10,21 @@ identity does not collide, and the autosave captures untracked work non-invasive
 import ast, contextlib, glob, hashlib, io, os, json, re, shutil, stat, sys, tempfile, time, subprocess, importlib.util
 from unittest import mock
 
+# E100: one sandbox for every temp tree this process makes, removed at exit.
+import os as _e100_os, sys as _e100_sys  # noqa: E402
+_e100_sys.path.append(_e100_os.path.join(
+    _e100_os.path.dirname(_e100_os.path.abspath(__file__)), '../../../scripts'))
+try:  # noqa: E402
+    import tmp_sandbox as _e100_tmp
+    _e100_tmp.install()
+except ImportError:
+    # A packager (scripts/export_public.py, make_benchmark_bundle.py)
+    # can copy this test without scripts/tmp_sandbox.py beside it. Say
+    # so rather than dying: the sandbox is hygiene, not the subject.
+    _e100_sys.stderr.write(
+        "tmp_sandbox absent: %s leaves its temp trees behind\n"
+        % _e100_os.path.basename(__file__))
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 
@@ -607,8 +622,15 @@ class TestTelemetryWriterSerialization(unittest.TestCase):
             original = '{"session_id":"a"}\n'
             with io.open(t.LEDGER, "w") as f:
                 f.write(original)
-            done = t._rewrite_locked(t.LEDGER, ['{"x":1}'], len(original) + 50, "migrate")
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                done = t._rewrite_locked(t.LEDGER, ['{"x":1}'],
+                                         len(original) + 50, "migrate")
+            said = buf.getvalue()
             self.assertIsNone(done, "a shrunken file was replaced anyway")
+            self.assertIn("SHRANK", said, "the refusal never told the operator why")
+            self.assertIn("19 on disk", said,
+                          "the refusal did not name what it measured")
             self.assertEqual(original, io.open(t.LEDGER).read(), "the refusal still wrote")
             self.assertEqual([], [p for p in os.listdir(t.TEL_DIR) if ".tmp." in p],
                              "the refusal leaked its temp file")
@@ -2157,8 +2179,34 @@ class TestCliSurface(unittest.TestCase):
                              "%s refuses without saying what will build it" % name)
 
     def test_the_exit_codes_a_ci_job_would_branch_on(self):
+        import re as _re
         cli = self._commands()
-        self.assertEqual(self._run("doctor").returncode, cli.EXIT_OK)
+        doctor = self._run("doctor")
+        if doctor.returncode != cli.EXIT_OK:
+            # A clone nobody has run `sbe init` in has no .brothersbe/
+            # config.json, so doctor reports project-init SETUP and exits
+            # EXIT_CONTROL_FAILED. That is a TRUE report about that clone, and
+            # the public export deliberately does not ship the maintainer's
+            # own setup marker: shipping it would tell a stranger their fresh
+            # clone is already set up when it is not, which is exactly the
+            # false green this product exists to refuse. So SETUP with no FAIL
+            # is accepted here and named; every other nonzero exit is still a
+            # failure, and a run that FAILED a check is never waved through.
+            body = doctor.stdout + doctor.stderr
+            self.assertEqual(
+                doctor.returncode, cli.EXIT_CONTROL_FAILED,
+                "doctor exited %d, which is neither EXIT_OK nor the "
+                "EXIT_CONTROL_FAILED a not-yet-set-up clone reports: %s"
+                % (doctor.returncode, body))
+            self.assertIn(
+                "project-init", body,
+                "doctor exited nonzero without reporting project-init, so the "
+                "nonzero exit is not the not-yet-set-up case this branch "
+                "accepts: %s" % body)
+            self.assertRegex(
+                body, r"\b0 FAIL\b",
+                "doctor exited nonzero with at least one FAIL, which is a real "
+                "defect and must never be accepted as a set-up gap: %s" % body)
         self.assertEqual(self._run("bogus-command").returncode, cli.EXIT_USAGE,
                          "an unknown command must be a usage error, never a silent success")
         self.assertEqual(self._run("verify", "/nonexistent-path-on-purpose").returncode,
@@ -4648,7 +4696,32 @@ class TestVersionMark(unittest.TestCase):
     the sibling's commit hash as their own drift. Observed on a real machine
     2026-07-31, the day both vaults were pointed at one directory."""
 
-    SIBLING = os.path.expanduser("~/.claude/skills/brothermode/tools/bm_telemetry.py")
+    @staticmethod
+    def _resolve_sibling():
+        """Where BrotherModeUp telemetry can actually be read.
+
+        The legacy skills path was the only candidate, so on a machine
+        where the sibling ships as a plugin, or simply sits next door in
+        this repository, this test skipped with a NO-DATA reason and the
+        battery counted the whole green suite as NO-DATA (the 1.0.2 cut
+        line, 2026-09-03). The in repo copy is preferred because it is
+        the source this repository actually ships and it reads no
+        operator home at all; the two install paths remain for a
+        standalone checkout with no sibling product beside it.
+        """
+        candidates = [os.path.join(os.path.dirname(ROOT), "brothermode",
+                                   "tools", "bm_telemetry.py")]
+        candidates += sorted(glob.glob(os.path.expanduser(
+            "~/.claude/plugins/cache/*/brothermode/*/tools/bm_telemetry.py")),
+            reverse=True)
+        candidates.append(os.path.expanduser(
+            "~/.claude/skills/brothermode/tools/bm_telemetry.py"))
+        for c in candidates:
+            if os.path.isfile(c):
+                return c
+        return candidates[-1]
+
+    SIBLING = _resolve_sibling.__func__()
 
     def test_the_marker_basename_is_owned_by_this_tool(self):
         base = os.path.basename(bm.VERSION_MARK)
@@ -5090,20 +5163,32 @@ class TestEverySuiteIsWiredIntoAGate(unittest.TestCase):
             "result means this check looked in the wrong place")
 
         wf_files = sorted(glob.glob(os.path.join(root, self.WORKFLOWS, "*.yml")))
-        self.assertTrue(
-            wf_files,
-            "no workflow files under %s, which is NO-DATA rather than a pass: "
-            "with nothing to read every suite would look unwired and this "
-            "would report a catastrophe that is really a missing directory"
-            % self.WORKFLOWS)
+        if not wf_files:
+            # The public export deliberately does not carry this product's CI
+            # wiring (docs/plan/EXPORT-ALLOWLIST.txt, the M6 note: "CI wiring
+            # not needed to install or run the plugin"), so in a public clone
+            # there is nothing to read. That is NO-DATA and it says so by
+            # name, rather than a FAIL that reports a catastrophe which is
+            # really a directory this tree was never meant to carry. In the
+            # hub, where the gate matters, the files are present and every
+            # assertion below still runs.
+            self.skipTest(
+                "NO-DATA: no workflow files under %s, so neither gate's "
+                "invocation set could be read here. A clone that does not "
+                "carry the CI wiring cannot answer this question, and an "
+                "empty read is not a pass" % self.WORKFLOWS)
         wf = "\n".join(io.open(f, encoding="utf-8", errors="replace").read()
                        for f in wf_files)
 
         bat_path = os.path.join(root, self.BATTERY)
-        self.assertTrue(
-            os.path.isfile(bat_path),
-            "no battery at %s, which is NO-DATA rather than a pass: it is the "
-            "gate that runs every release" % self.BATTERY)
+        if not os.path.isfile(bat_path):
+            # Same boundary as the workflows above: release-control/ is the
+            # internal release kit and the public export does not carry it.
+            self.skipTest(
+                "NO-DATA: no battery at %s, so the battery's invocation set "
+                "could not be read here. This clone does not carry the "
+                "release-control kit, and an empty read is not a pass"
+                % self.BATTERY)
         bat = io.open(bat_path, encoding="utf-8", errors="replace").read()
 
         # INVOKED, never merely mentioned. A name inside a comment is not a run,
@@ -6057,6 +6142,98 @@ class TestEveryShippedExampleStillPassesItsOwnGate(unittest.TestCase):
             checked, 0,
             "no recorded rerun value was actually re-executed, so this test "
             "proved nothing about any published figure")
+
+
+class TestTheReadmeVerificationBlockNamesTheVerifierFirst(unittest.TestCase):
+    """One assertion per claim an outside audit of the public v1.0.2 tag
+    corrected on this front page (row E112).
+
+    The audit read the README as a newcomer checking an installation and found
+    the block told them to run `sh scripts/checksums.sh` FIRST, which rewrites
+    the very manifest they were about to trust: a tampered tree then verifies
+    clean against its own fresh manifest. It also found the block claiming the
+    verifier "refuses a missing, extra, or changed shipped file" while the
+    verifier itself reports 125 entries under excluded paths and says it proves
+    only agreement with the manifest it was handed, and it found a negative
+    capability claim ("does not approve, merge, release, or deploy") that named
+    no evidence at all.
+
+    These are assertions about ORDER and WORDING because that is what was
+    wrong. Prose is the interface here, and a front page that names a writer
+    before a verifier teaches an unsafe habit however correct both commands are.
+    """
+
+    def setUp(self):
+        with io.open(os.path.join(ROOT, "README.md"), encoding="utf-8") as fh:
+            self.readme = fh.read()
+
+    def test_the_verifier_is_named_before_the_manifest_writer(self):
+        verify = self.readme.find("scripts/verify-install.sh")
+        write = self.readme.find("scripts/checksums.sh")
+        self.assertNotEqual(verify, -1, "the README no longer names the verifier at all")
+        self.assertNotEqual(write, -1, "the README no longer names the manifest writer at all")
+        self.assertLess(
+            verify, write,
+            "the README names scripts/checksums.sh (the manifest WRITER, at offset %d) "
+            "before scripts/verify-install.sh (the VERIFIER, at offset %d). A reader "
+            "checking an installation follows the order on the page, and that order "
+            "destroys the reference before it is read." % (write, verify))
+
+    def test_the_page_says_plainly_that_the_writer_rewrites_the_manifest(self):
+        self.assertIn(
+            "rewrites CHECKSUMS.sha256", self.readme,
+            "the README describes scripts/checksums.sh without saying it REWRITES "
+            "CHECKSUMS.sha256. 'refreshes the manifest' reads to a newcomer as an "
+            "update that preserves what was there.")
+        self.assertIn(
+            "replaces the reference you meant to check against", self.readme,
+            "the README no longer states the consequence of running the writer before "
+            "the verifier, which is the whole reason the order matters")
+
+    def test_the_verifier_claim_is_narrowed_to_what_the_verifier_proves(self):
+        self.assertNotIn(
+            "refuses a missing, extra, or changed shipped file", self.readme,
+            "the README still makes the broad claim the verifier does not support: it "
+            "compares against the manifest it is HANDED and reports excluded paths "
+            "separately, so it cannot refuse a changed file the manifest never named")
+        self.assertIn(
+            "agree with the manifest it was handed", self.readme,
+            "the README no longer states what the verifier actually proves")
+        self.assertIn(
+            "excluded paths separately", self.readme,
+            "the README no longer mentions that the verifier counts excluded paths "
+            "apart, which is the gap between what it prints and what a reader assumes")
+        self.assertIn(
+            "does not authenticate", self.readme,
+            "the README no longer says the verifier cannot authenticate the manifest, "
+            "which the verifier itself warns about in its own output")
+
+    def test_the_no_merge_claim_names_the_check_that_establishes_it(self):
+        """A negative capability claim either names its evidence or is not
+        called proven. The claim about merge, rebase, push and deploy HAS a
+        check, so the page names it; approval and release do not, so the page
+        says they are a design limit. This test also proves the named check
+        exists, because a citation to a test nobody can find is the same empty
+        claim in a more confident register."""
+        self.assertIn(
+            "TestNoMergeLaw", self.readme,
+            "the README claims the tool does not merge, push or deploy without naming "
+            "the check that establishes it")
+        named = os.path.join(ROOT, "tools", "test_sbe_work.py")
+        self.assertTrue(os.path.isfile(named),
+                        "the README cites %s and it does not exist" % named)
+        with io.open(named, encoding="utf-8") as fh:
+            body = fh.read()
+        self.assertIn("class TestNoMergeLaw", body,
+                      "the README cites TestNoMergeLaw and tools/test_sbe_work.py does "
+                      "not define it")
+        self.assertIn(
+            "design limit", self.readme,
+            "approval and release are not established by any check here, so the page "
+            "must say so rather than carry them inside a proven-sounding sentence")
+        self.assertNotIn(
+            "The tool does not approve, merge, release, or deploy.", self.readme,
+            "the unevidenced four-verb claim is back on the front page")
 
 
 if __name__ == "__main__":

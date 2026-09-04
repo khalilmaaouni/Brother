@@ -148,15 +148,16 @@ def checks():
 
 
 #: The harness clause is rendered against a ref that never resolves, so the
-#: README block reads the same in every checkout. receipt_door.harness_label
-#: decides "private hub revision" by asking whether the sample's fixed
-#: HARNESS_REVISION is an ancestor of PUBLIC_REMOTE_REF ("origin/main"), and
-#: origin is the hub in ~/brother-hub but the public repository in the
-#: dual-remote checkouts, so the same commit read as public in one tree and
-#: private in the other (2026-09-04: readme-honesty green on the hub checkout,
-#: red in every lane worktree). The README's own prose explains the clause;
-#: the sample commits to the private form, which is the honest one for a hub
-#: commit that the export never mirrors byte for byte.
+#: README block reads the same in every checkout. The name collision that
+#: first forced this pin is fixed at the root (E101: receipt_door finds the
+#: public export remote by URL, so the hub checkout and a lane worktree now
+#: label one commit identically, measured 2026-09-04). The pin STAYS, on its
+#: own merits rather than as that workaround: this is a fixed historical
+#: sample the README carries verbatim, so its clause must not depend on
+#: which remotes the reader clone happens to have, and a fork whose URL
+#: names another account would otherwise read "public remote NO-DATA" here
+#: and turn the honesty gate red. The private form is the honest one for a
+#: hub commit the export never mirrors byte for byte.
 SAMPLE_PUBLIC_REF = "refs/readme-sample/never-resolves"
 
 

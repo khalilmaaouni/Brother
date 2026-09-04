@@ -1,0 +1,12 @@
+{
+  "answers": {
+    "changes_contract": true,
+    "crosses_boundary": true,
+    "reversible_under_hour": false,
+    "touches_sensitive": true,
+    "consumers": "some"
+  },
+  "tier": "T3",
+  "override": null,
+  "override_reason": null
+}

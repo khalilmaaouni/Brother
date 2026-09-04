@@ -1,0 +1,120 @@
+{
+  "id": "acceptance-compression",
+  "name": "Acceptance Compression",
+  "frozen_at": "2026-09-05",
+  "status": "SPECIFIED, NOT YET RUN",
+  "source": {
+    "document": "SWITCHING-STRATEGY-2026-09-04.md",
+    "sections": [7, 19, 20],
+    "gauntlet_section": "20.3"
+  },
+  "zone": {
+    "id": 5,
+    "name": "Acceptance Compression",
+    "section": "7, Zone 5"
+  },
+  "workload_families": [
+    {"n": 2, "name": "medium multi-file feature"},
+    {"n": 4, "name": "authentication/payment/security change"},
+    {"n": 5, "name": "schema/data migration"}
+  ],
+  "seeded_conditions": [
+    "raw diff",
+    "ordinary agent summary",
+    "Brother receipt"
+  ],
+  "seeded_conditions_note": "Section 20.3 is a comparison, not an injection: the same delivered change is presented to reviewers three ways, and the three strings above are its own list of the three presentations. Each round's change carries one seeded defect whose location is known to the harness and to nobody reviewing, so accept and reject decisions have a ground truth. The three presentations are built from one run: the raw diff is git diff, the ordinary agent summary is a prose summary with no per file check, the Brother receipt is the delivery record as scripts/receipt_door.py builds it, with its REVIEW FIRST, NOT PROVEN, LOW-RISK MECHANICAL and NO NEED TO RE-READ ordering.",
+  "fairness_controls": [
+    "starting repository",
+    "model where possible",
+    "task instruction",
+    "hardware/environment",
+    "maximum human interventions",
+    "scoring rubric before execution"
+  ],
+  "fairness_notes": {
+    "starting repository": "One frozen repository per round, and one identical delivered change behind all three presentations. A presentation built from a different run is not a comparison.",
+    "model where possible": "The same model produced the change for all three presentations, because the thing under test is the presentation, not the code.",
+    "task instruction": "Reviewers get one instruction, frozen here: decide accept or reject, and name the lines you inspected.",
+    "hardware/environment": "One reviewing environment, no search tools beyond what the presentation itself carries, so a reviewer who goes hunting is recorded as such.",
+    "maximum human interventions": "The reviewer is the subject here, so the control is inverted: no help from the harness once the presentation is handed over, and no clarifying answer given.",
+    "scoring rubric before execution": "scoring_rubric below is frozen with this file, including which seeded defect counts as found."
+  },
+  "fairness_controls_not_applicable": {
+    "token budget": "The rounds measure a human reading a finished artifact. No tokens are spent inside a round, so the control has nothing to bind. The token cost of producing the change is recorded once per round, outside the comparison."
+  },
+  "metrics": [
+    {
+      "metric": "ACCEPTANCE TIME",
+      "status": "none",
+      "instrument": "NO INSTRUMENT YET",
+      "row": null,
+      "would_require": "A timed reviewer trial: a clock started when the presentation is handed over and stopped at the decision, with the reviewer's identity and prior exposure recorded. Nothing on this estate times a human. scripts/test_acceptance_compression.py is the nearest thing and it counts what the receipt says, not how long a person took to read it."
+    },
+    {
+      "metric": "ACCEPT/REJECT ACCURACY",
+      "status": "none",
+      "instrument": "NO INSTRUMENT YET",
+      "row": null,
+      "would_require": "The same trial plus a stored ground truth of which rounds carried a real defect, so a decision can be scored right or wrong. The seeded defect exists in the harness design above; no file on this estate stores such a ground truth or scores a decision against it today."
+    },
+    {
+      "metric": "DEFECTS DETECTED",
+      "status": "partial",
+      "instrument": "scripts/test_acceptance_compression.py",
+      "row": "E75",
+      "proved": "On a seeded diff mixing a middleware change, a generated file and a new dependency, the middleware and the dependency land under REVIEW FIRST and the generated file under LOW-RISK MECHANICAL, driven through the receipt's own seam so no signal is read off prose.",
+      "gap": "This proves the receipt POINTS at the risky lines. Whether a reviewer then found the defect is a property of the reviewer, and no trial has run, so the detection half of this metric is unmeasured."
+    },
+    {
+      "metric": "TOKEN COST",
+      "status": "partial",
+      "instrument": "scripts/brother_run.py",
+      "row": "E52",
+      "proved": "The delivery report's cost block carries tokens_in, tokens_out and tokens_cached, quoted in the adversity run record at docs/plan/runs/live-autonomous-adversity-2026-09-04/run.log lines 359 to 362.",
+      "gap": "The cache hit rate is NO-DATA by the block's own admission because the cache creation count is not forwarded, and row E92 is open on exactly that. So cost is comparable between Brother runs and is not yet a clean per round figure."
+    }
+  ],
+  "measures_outside_the_fifteen": [
+    {
+      "measure": "unnecessary lines inspected",
+      "from": "section 20.3",
+      "status": "none",
+      "instrument": "NO INSTRUMENT YET",
+      "would_require": "The reviewer trial recording which lines were opened, compared against the lines the seeded defect actually touches. The denominator, which lines the receipt called mechanical or not worth re-reading, already exists in the receipt; the numerator needs the trial."
+    }
+  ],
+  "scoring_rubric": {
+    "fixed_before_execution": true,
+    "rules": [
+      "Each reviewer sees exactly one presentation of a given round, never two, so no round is read twice by the same person.",
+      "A decision is correct when it matches the seeded ground truth for that round. Accepting a defective change and rejecting a clean one are both wrong, and are counted separately, never netted off.",
+      "Time is reported per presentation as a distribution, never a single mean, because a small trial's mean hides its spread.",
+      "A round with fewer than the pre-declared number of reviewers reports NO-DATA for that round and is excluded from every total.",
+      "The receipt wins a round only when it beats BOTH the raw diff and the ordinary summary on the same reviewers. Beating the raw diff alone proves only that a summary helps.",
+      "Raw per reviewer records are published. No mean is published without them."
+    ]
+  },
+  "win_condition": {
+    "section": "7, Zone 5",
+    "definition": "Acceptance Time: time required for a competent reviewer to reach the correct accept/reject decision.",
+    "ordering": ["REVIEW FIRST", "NOT PROVEN", "LOW-RISK MECHANICAL", "NO NEED TO RE-READ"],
+    "text": [
+      "reach the correct decision faster",
+      "inspect fewer irrelevant lines",
+      "miss fewer high-risk defects",
+      "calibrate confidence more accurately"
+    ],
+    "met_when": "On the same rounds and the same reviewers, the receipt presentation beats both others on decision correctness and on time, and the raw per reviewer records are published beside the summary."
+  },
+  "raw_artifacts": {
+    "rule": "Publish raw artifacts. Do not publish only a synthetic score.",
+    "root": "docs/plan/runs/gauntlet-acceptance-compression-<date>/",
+    "contents": [
+      "the three presentations per round, byte for byte as the reviewers saw them",
+      "the seeded defect location per round, published only after the trial",
+      "one record per reviewer per round: decision, elapsed seconds, lines named",
+      "the delivery record the receipt presentation was built from"
+    ]
+  }
+}

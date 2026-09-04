@@ -95,6 +95,16 @@ python3 scripts/release_note_from_tree.py --write --version "$VERSION"
 echo "== 2c. refuse if any release note the export ships still carries the placeholder stamp =="
 python3 scripts/release_notes_stamped.py
 
+echo "== 2d. drive the note's own files table: every file it names must go red =="
+# Row E95. The generator above MEASURES this table, so this line is the
+# independent read-back: it parses the note that was just written and breaks
+# each file it names, requiring the suite beside it to fail. Slow (one suite
+# run per file row) and deliberately part of the cut rather than the fast
+# battery. Not tolerated with an "expected pre-tag" note like the invariant
+# below: a table naming a check that cannot fail is a defect at any point in
+# the release, so this one stops the cut.
+python3 scripts/release_note_perturb.py --version "$VERSION"
+
 echo "== 3. validate the manifests =="
 claude plugin validate bundle
 claude plugin validate .

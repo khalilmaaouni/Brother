@@ -21,6 +21,21 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import pre_push_gate as G  # noqa: E402
 
+# E100: one sandbox for every temp tree this process makes, removed at exit.
+import os as _e100_os, sys as _e100_sys  # noqa: E402
+_e100_sys.path.append(_e100_os.path.join(
+    _e100_os.path.dirname(_e100_os.path.abspath(__file__)), '.'))
+try:  # noqa: E402
+    import tmp_sandbox as _e100_tmp
+    _e100_tmp.install()
+except ImportError:
+    # A packager (scripts/export_public.py, make_benchmark_bundle.py)
+    # can copy this test without scripts/tmp_sandbox.py beside it. Say
+    # so rather than dying: the sandbox is hygiene, not the subject.
+    _e100_sys.stderr.write(
+        "tmp_sandbox absent: %s leaves its temp trees behind\n"
+        % _e100_os.path.basename(__file__))
+
 TRAILER_LINE = "Co-" + "Authored" + "-By: Claude <no" + "reply@anthropic.com>"
 
 
@@ -256,6 +271,128 @@ class AttachedBranchBehindOriginStillBlocks(unittest.TestCase):
         out = proc.stdout + proc.stderr
         self.assertEqual(proc.returncode, G.EXIT_BLOCKED, out)
         self.assertIn("BLOCK", out)
+
+
+class ADetachedPushIsScannedFromTheRefsOnStdin(unittest.TestCase):
+    """E105, measured 2026-09-04 21:10: a push from a worktree with a
+    detached HEAD printed "NO-DATA collision", "NO-DATA correctness" and
+    "HEAD is detached (a pinned worktree); nothing pushes from here", and
+    LANDED on the hub unscanned. The gate read the checkout's HEAD instead of
+    the ref lines git feeds a pre-push hook on stdin, and a detached HEAD
+    pushes perfectly well: git push <remote> <sha>:refs/heads/<branch>.
+
+    Driven through a real git push against a real (local, bare) remote, so
+    the ref lines come from git's own protocol rather than a hand-built
+    string. The hook here calls the two families under test ALONE: the full
+    gate's drift and remote-rules checks have nothing to say about a scratch
+    repository and would report NO-DATA regardless, muddying the verdict (the
+    same reason test_handback_guard.py runs a thin hook)."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="ppg-detached-push-")
+        self.bare = os.path.join(self.tmp, "remote.git")
+        self.repo = os.path.join(self.tmp, "repo")
+        sh(["git", "init", "-q", "--bare", "-b", "main", self.bare],
+           cwd=self.tmp)
+        os.makedirs(self.repo)
+        for args in (["init", "-q", "-b", "main"],
+                     ["config", "user.email", "a@b.c"],
+                     ["config", "user.name", "t"]):
+            sh(["git"] + args, cwd=self.repo)
+        with open(os.path.join(self.repo, "base.txt"), "w",
+                  encoding="utf-8") as fh:
+            fh.write("clean base\n")
+        sh(["git", "add", "-A"], cwd=self.repo)
+        sh(["git", "commit", "-q", "-m", "clean base"], cwd=self.repo)
+        sh(["git", "remote", "add", "origin", self.bare], cwd=self.repo)
+        sh(["git", "push", "-q", "origin", "main"], cwd=self.repo)
+        base = sh(["git", "rev-parse", "HEAD"], cwd=self.repo).stdout.strip()
+        # The shape that leaked: a pinned worktree checkout, HEAD detached.
+        sh(["git", "checkout", "-q", "--detach", base], cwd=self.repo)
+        hooks = os.path.join(self.tmp, "hooks")
+        os.makedirs(hooks)
+        runner = os.path.join(hooks, "two_families.py")
+        with open(runner, "w", encoding="utf-8") as fh:
+            fh.write(
+                "import sys\n"
+                "sys.path.insert(0, %r)\n"
+                "import pre_push_gate as g\n"
+                "text = sys.stdin.read()\n"
+                "found = g.check_collision(cwd='.', stdin_text=text) + \\\n"
+                "        g.check_correctness(cwd='.', stdin_text=text)\n"
+                "for f in found:\n"
+                "    print('%%-8s %%-12s %%s' %% f)\n"
+                "sys.exit(1 if any(f[0] == g.BLOCK for f in found)\n"
+                "         else 2 if any(f[0] == g.NODATA for f in found)\n"
+                "         else 0)\n" % HERE)
+        hook = os.path.join(hooks, "pre-push")
+        with open(hook, "w", encoding="utf-8") as fh:
+            fh.write("#!/bin/sh\nexec %s %s\n" % (sys.executable, runner))
+        os.chmod(hook, 0o755)
+        sh(["git", "config", "core.hooksPath", hooks], cwd=self.repo)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def commit(self, name, body):
+        with open(os.path.join(self.repo, name), "w", encoding="utf-8") as fh:
+            fh.write(body)
+        sh(["git", "add", "-A"], cwd=self.repo)
+        sh(["git", "commit", "-q", "-m", "a detached commit"], cwd=self.repo)
+
+    def push(self):
+        """The real thing: a detached HEAD pushed to a branch on the remote,
+        which is exactly the command that landed unscanned."""
+        proc = sh(["git", "push", "origin", "HEAD:refs/heads/wbs/scratch"],
+                  cwd=self.repo)
+        return proc.returncode, proc.stdout + proc.stderr
+
+    def test_a_detached_push_carrying_a_dash_is_refused(self):
+        # The dash is built from its code point for the same reason the gate
+        # builds it: a scanner's test must not carry what the scanner forbids.
+        self.commit("copy.md", "a line %s with the forbidden dash\n"
+                    % chr(0x2014))
+        code, out = self.push()
+        self.assertNotEqual(code, 0, out)
+        self.assertIn("BLOCK", out)
+        self.assertIn("dash", out)
+
+    def test_a_detached_push_carrying_a_trailer_is_refused(self):
+        self.commit("bad.md", "outgoing\n%s\n" % TRAILER_LINE)
+        code, out = self.push()
+        self.assertNotEqual(code, 0, out)
+        self.assertIn("BLOCK", out)
+        self.assertIn("attribution", out)
+
+    def test_a_clean_detached_push_is_allowed(self):
+        # The other direction, and the one that keeps the fix honest: a
+        # detached push with nothing forbidden in it must still go through,
+        # scanned rather than waved past. Before the fix both families read
+        # NO-DATA here, which is not a pass.
+        self.commit("work.md", "ordinary outgoing work\n")
+        code, out = self.push()
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("BLOCK", out)
+        self.assertNotIn("NO-DATA", out)
+
+    def test_empty_stdin_is_a_no_op_not_a_scan(self):
+        # No ref lines means no push in flight (the battery running the gate
+        # as a plain command), and a detached checkout then genuinely has no
+        # outgoing range: NO-DATA, which main() turns into a clean exit.
+        self.commit("copy.md", "a line %s with the forbidden dash\n"
+                    % chr(0x2014))
+        self.assertEqual(G._pushed_updates(""), [])
+        findings = G.check_correctness(cwd=self.repo, stdin_text="")
+        self.assertEqual([f[0] for f in findings], [G.NODATA], findings)
+        self.assertIn("detached", findings[0][2])
+        proc = subprocess.run(
+            [sys.executable, os.path.join(HERE, "pre_push_gate.py"),
+             "--cwd", self.repo],
+            capture_output=True, text=True, stdin=subprocess.DEVNULL,
+            timeout=60)
+        self.assertEqual(proc.returncode, G.EXIT_OK,
+                         proc.stdout + proc.stderr)
 
 
 class ThePublicExampleValueIsNotASecret(unittest.TestCase):

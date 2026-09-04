@@ -59,7 +59,8 @@ is what the smoke uses so it tests the tree it is run from:
 For the PUBLIC repository the same command takes the HTTPS Git URL, which is
 the form the README already documents and the form the founder will use:
 
-    codex plugin marketplace add https://github.com/khalilmaaouni/Brother --ref v1.0.1
+    codex plugin marketplace add https://github.com/khalilmaaouni/Brother --ref <the release you are testing>
+    # worked example: --ref v1.0.2
 
 Step 2, the plugin:
 
@@ -174,20 +175,33 @@ below assumes this is exported in the shell you are using:
     export CODEX_HOME=~/codex-smoke-home
     mkdir -p "$CODEX_HOME"
 
+If your throwaway home instead lands under `/tmp` or `/var` (both are
+symlinks into `/private/tmp` and `/private/var` on macOS), note that Codex
+canonicalizes `CODEX_HOME` before reading anything back, so
+`scripts/codex_hooks_install.py` resolves the same path with
+`os.path.realpath` before it writes; before that fix, step 4 below wrote a
+hooks file under the unresolved spelling and Codex read it back under the
+resolved one, matching nothing. `~/codex-smoke-home` above is not a symlinked
+path, so this only matters if you choose `mktemp -d` or a literal `/tmp/...`
+instead.
+
 Your credentials still resolve through `CODEX_HOME`, so if this home has no
 `auth.json` you will hit the same 401 above. Two ways round it, pick one:
 copy your own `~/.codex/auth.json` into it (`cp ~/.codex/auth.json
 "$CODEX_HOME"/`), or skip step 0 entirely and use your real home, accepting
 that steps 1, 2 and 4 then write into it (step 4 needs `--allow-default-home`
-in that case, and `codex plugin remove brother` plus deleting the `hooks.json`
-it wrote undoes it).
+in that case). The uninstall route at the end of this runbook undoes it;
+see that section rather than deleting `hooks.json` by hand, which can hold
+hooks that are not Brother's.
 
-Step 1, the marketplace. Until a public tag carries the Codex package (the
-first will be v1.0.2), point Codex at a checkout of the hub's main, which has
-everything; after that tag ships, the public form works too:
+Step 1, the marketplace. A public tag has carried the Codex package since
+v1.0.2, so the public form works for a released version; point Codex at a
+checkout of the hub's main instead when testing work that has not shipped in
+a tag yet:
 
-    codex plugin marketplace add ~/brother-hub
-    # after the tag: codex plugin marketplace add https://github.com/khalilmaaouni/Brother --ref v1.0.2
+    codex plugin marketplace add https://github.com/khalilmaaouni/Brother --ref <the release you are testing>
+    # worked example: codex plugin marketplace add https://github.com/khalilmaaouni/Brother --ref v1.0.2
+    # testing unreleased work: codex plugin marketplace add ~/brother-hub
 
   PASS: "Added marketplace `brother`", exit 0.
 
@@ -207,7 +221,7 @@ Step 4, the hooks, which the plugin install does NOT deliver. The installer is
 a maintainer script and does NOT ship inside `bundle/`, so it is run from a
 checkout of this repository, not from the installed plugin:
 
-    # the same checkout as step 1 (~/brother-hub here; a public clone once the tag ships)
+    # the same checkout as step 1 (~/brother-hub here, or a public clone at your tag)
     python3 ~/brother-hub/scripts/codex_hooks_install.py \
         --codex-home "$CODEX_HOME" --trust --cwd <your repo>
 
@@ -240,6 +254,29 @@ Step 6, the task:
 When that passes, row C7's credentialled half closes, and the evidence to file
 is the transcript of step 6 plus the receipt file it names.
 
+## Uninstalling what the runbook wired
+
+In the same shell (same `CODEX_HOME` if you used the throwaway one from step
+0):
+
+    python3 ~/brother-hub/scripts/codex_hooks_install.py --codex-home "$CODEX_HOME" --uninstall
+    codex plugin remove brother@brother
+    codex plugin marketplace remove brother
+
+  PASS: the first line names what it removed, for example "removed 18 Brother
+  hook command(s) across PostToolUse, PreCompact, PreToolUse, SessionEnd,
+  SessionStart, Stop from <path>" and "removed Brother's trust section from
+  <path>"; a second run answers "NO-DATA: nothing of Brother's to remove"
+  rather than an error, at exit 0. `--uninstall` strips only the hook
+  commands this installer wrote and only its own marked trust section in
+  `config.toml`; any other hook already in that file survives. Do not delete
+  `$CODEX_HOME/hooks.json` by hand instead: on a real, non-throwaway home it
+  can hold hooks that are not Brother's, and `--uninstall` is what tells them
+  apart. Write `brother@brother` in the plugin removal: `codex plugin remove
+  brother` is refused as ambiguous. If you used step 0's real-home option,
+  pass `--codex-home ~/.codex --allow-default-home --uninstall` here to
+  match.
+
 ## What this gate still does not prove
 
 1. A REAL MODEL'S TOOL SHAPES. The stub turn exercises one tool call. What a
@@ -252,3 +289,8 @@ is the transcript of step 6 plus the receipt file it names.
    `sh scripts/required_fast.sh` and `sh scripts/check_all.sh`.
 3. NOTHING IS WIRED BY AN INSTALL. Step 4 is a deliberate second act. Until a
    Codex user runs it, they have skills and no fence.
+4. THE UNINSTALL ROUTE ABOVE IS UNIT-TESTED, NOT RUN THROUGH THIS RUNBOOK.
+   `scripts/test_codex_hooks_install.py`'s `TestUninstall` cases and a live
+   audit run drove `--uninstall`, including the foreign-hook-survives and
+   second-run-NO-DATA cases; nobody has yet driven it inside this runbook's
+   own signed-in Codex flow end to end.

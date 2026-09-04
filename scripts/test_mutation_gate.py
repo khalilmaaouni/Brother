@@ -29,11 +29,27 @@ never in this repository's own scripts/ directory.
 import io
 import os
 import sys
+import tokenize
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import mutation_gate as MG  # noqa: E402
+
+# E100: one sandbox for every temp tree this process makes, removed at exit.
+import os as _e100_os, sys as _e100_sys  # noqa: E402
+_e100_sys.path.append(_e100_os.path.join(
+    _e100_os.path.dirname(_e100_os.path.abspath(__file__)), '.'))
+try:  # noqa: E402
+    import tmp_sandbox as _e100_tmp
+    _e100_tmp.install()
+except ImportError:
+    # A packager (scripts/export_public.py, make_benchmark_bundle.py)
+    # can copy this test without scripts/tmp_sandbox.py beside it. Say
+    # so rather than dying: the sandbox is hygiene, not the subject.
+    _e100_sys.stderr.write(
+        "tmp_sandbox absent: %s leaves its temp trees behind\n"
+        % _e100_os.path.basename(__file__))
 
 
 class RegisteredMutantsMatchTheRealSource(unittest.TestCase):
@@ -121,16 +137,43 @@ class TheBackwardsDriveAnUnkillableMutantFailsTheGateByName(unittest.TestCase):
         # COMMENT only: no test asserts anything about comment text, so no
         # killer can ever notice it moved. This is "mutate something no
         # observer covers", the plan's own second option for this drive.
+        #
+        # THE ANCHOR IS READ OUT OF THE REAL SOURCE, NEVER PINNED HERE. An
+        # earlier version hard coded one docstring sentence from
+        # claim_store.py, which made this fixture a second, silent copy of
+        # product prose: the E85 refactor split live() into dead_reason()
+        # plus a wrapper, moved that sentence one function down, and both
+        # backwards drive tests went red on a stale fixture assumption
+        # rather than on anything the gate actually guards. tokenize is
+        # asked for the real comment tokens (never a "#" that only lives
+        # inside a string literal), and the first whole line unique one
+        # becomes the anchor, so a later comment edit leaves this drive
+        # standing.
         target_path = os.path.join(HERE, "claim_store.py")
         with open(target_path, encoding="utf-8") as fh:
             text = fh.read()
-        anchor_old = ('    """A claim is dead when EITHER its lease expired '
-                     'OR its owning pid is gone\n')
+        with open(target_path, "rb") as fh:
+            try:
+                tokens = list(tokenize.tokenize(fh.readline))
+            except (tokenize.TokenError, SyntaxError) as exc:
+                self.fail("claim_store.py did not tokenize, so no comment "
+                          "anchor can be derived: %s" % exc)
+        candidates = [t.line for t in tokens
+                      if t.type == tokenize.COMMENT
+                      and t.line.strip().startswith("#")
+                      and t.line.endswith("\n")
+                      and text.count(t.line) == 1]
+        self.assertTrue(candidates,
+                       "claim_store.py has no unique whole line comment left "
+                       "to mutate, so this drive has nothing uncovered to "
+                       "seed; point it at another product module rather than "
+                       "dropping the drive")
+        anchor_old = candidates[0]
         self.assertEqual(text.count(anchor_old), 1,
-                        "fixture anchor assumption broke; live()'s docstring "
-                        "opening line changed")
-        anchor_new = ('    """A claim is declared dead when its lease '
-                     'expired OR its owning pid is gone\n')
+                        "the derived comment anchor is not unique in the "
+                        "real current source")
+        anchor_new = (anchor_old[:-1]
+                      + " (rewritten by the mutation gate self test)\n")
         return {
             "class": "comment-only (deliberately unkillable, for this test)",
             "guards": "nothing; this entry exists only to prove the gate "

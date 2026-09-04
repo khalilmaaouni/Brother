@@ -105,7 +105,9 @@ import io
 import json
 import os
 import re
+import shlex
 import shutil
+import statistics
 import subprocess
 import sys
 import tempfile
@@ -461,6 +463,77 @@ def previous_runs_line(durations):
                ", ".join("%ds" % int(round(d)) for d in durations)))
 
 
+#: E90's price block, and why its field names echo the cost block above.
+#: The founder's ruling on docs/decisions/light-path-for-small-changes-
+#: 2026-09-04.json was option B, "say the price before the run": no engine
+#: path changes, the figure simply moves from the receipt a person reads
+#: AFTER the wait to the screen posed BEFORE it. So this block and
+#: build_cost_block's block are two readings of one thing, this run's
+#: price, and they share a vocabulary on purpose:
+#: `wall_clock_seconds_expected` here is the same measurement
+#: `wall_clock_seconds` reports there, once it has actually happened. A
+#: reader who has learned one has learned both.
+PRICE_FIELDS = ("model_sessions", "previous_runs_measured",
+                "wall_clock_seconds_expected", "wall_clock_seconds_range")
+
+
+def build_price_block(model_sessions, durations):
+    """What this run is about to cost, built before any worker starts.
+
+    `model_sessions` is COUNTED, never estimated: one planning session (the
+    decomposer the door already asked) plus one worker session per piece of
+    work in the plan on disk. That count is the honest unit of price here,
+    because the measurement behind the ruling found the engine's own code
+    costs a median 2.58 seconds of a 568 second run, so what a person waits
+    for is model sessions and not this code.
+
+    `durations` is previous_run_durations' output for this same target, so
+    an expected wall clock is DERIVED from measured runs and from nothing
+    else. With no measurable earlier run both wall-clock fields read
+    NO-DATA naming why, never a guessed figure: this estate does not invent
+    a duration to comfort somebody. That is not in tension with the
+    governor line further down, which says the same thing in its own words;
+    a figure read off real finished runs is evidence, not a prediction."""
+    if durations:
+        expected = round(statistics.median(durations), 1)
+        span = "%ds to %ds" % (int(round(min(durations))),
+                               int(round(max(durations))))
+    else:
+        expected = ("%s: no earlier run against this target left a measured "
+                    "wall clock, and none is guessed" % NODATA)
+        span = "%s: nothing measured to take a range from" % NODATA
+    return {"model_sessions": model_sessions,
+            "previous_runs_measured": len(durations),
+            "wall_clock_seconds_expected": expected,
+            "wall_clock_seconds_range": span}
+
+
+def price_paragraph(block):
+    """The price block in plain words, for the intent screen (and so, since
+    E91 put every screen's own summary into the run log, for run.log too).
+    Split from the block above so the wording is testable without a run."""
+    sessions = block.get("model_sessions") or 0
+    counted = ("this run opens %d model session(s), one to plan the work and "
+               "one for each of the %d piece(s) of work in the plan."
+               % (sessions, max(0, sessions - 1)))
+    measured = block.get("previous_runs_measured") or 0
+    if measured:
+        wait = ("The last %d run(s) against this target really took %s "
+                "(measured), so their median, %ss of wall clock, is what "
+                "this one is expected to cost, derived from those and from "
+                "nothing else."
+                % (measured, block.get("wall_clock_seconds_range"),
+                   block.get("wall_clock_seconds_expected")))
+    else:
+        wait = ("The expected wall clock reads %s: no earlier run against "
+                "this target left a measured one, and this estate will not "
+                "invent a duration." % NODATA)
+    return ("Price, before anything is claimed or run: %s %s What the same "
+            "edit would cost you by hand is not measured here, and nothing "
+            "below claims to beat it: the run proves what it does."
+            % (counted, wait))
+
+
 def _is_unfinished(record):
     """A run is terminal once every row it decomposed into is DONE. A run
     with no rows at all (should not happen past a real door success, but
@@ -522,6 +595,30 @@ def _outcomes_match(new_outcome, recorded_outcome):
     if not a or not b:
         return False
     return a == b or a in b or b in a
+
+
+def _next_command(cwd, runs_root, lead):
+    """E81: the one copyable line a refusal ends on.
+
+    A refusal that names no next command leaves the person who typed the
+    first one with nothing to type second, which is exactly what the
+    2026-09-04 stranger trial found. This builds that line out of the
+    arguments THIS process actually received, so it works verbatim when
+    pasted back into the same shell: the same interpreter, the same
+    absolute path to this script, the same --cwd, and --runs-root only when
+    one was chosen (the default is this tool's own repository, and printing
+    it would turn a short line into a long one for no gain).
+
+    `lead` is whatever comes before --cwd: the outcome to ask again when
+    the door refused and left nothing behind, or --continue (with its N
+    when the repository holds more than one unfinished run) when there IS a
+    run to resume. Every element is shell-quoted, so a path or an outcome
+    holding a space or a quote survives the round trip."""
+    parts = [sys.executable, os.path.abspath(__file__)] + list(lead)
+    parts += ["--cwd", os.path.abspath(cwd)]
+    if os.path.abspath(runs_root) != os.path.abspath(REPO_ROOT):
+        parts += ["--runs-root", os.path.abspath(runs_root)]
+    return " ".join(shlex.quote(str(p)) for p in parts)
 
 
 def _guard_record_checks(record):
@@ -975,7 +1072,8 @@ def _reason_for(uid, loop_text):
 #: A field is only "absent" when its KEY is missing from the block; NO-DATA
 #: (plus a reason) is a present, honest value and is never confused with a
 #: missing key by validate_cost_block below.
-COST_FIELDS = ("tokens_in", "tokens_out", "tokens_cached", "turns",
+COST_FIELDS = ("tokens_in", "tokens_out", "tokens_cached",
+              "tokens_cache_write", "turns",
               "wall_clock_seconds", "cache_hit_rate", "failure_category",
               "harness_version", "harness_revision")
 
@@ -1198,30 +1296,54 @@ def build_cost_block(claims, refused, loop_text, wall_clock_seconds,
     _usage_gap_reason's sentence, appended to every token field that reads
     NO-DATA so the block says why in its own words, never a bare NO-DATA.
 
-    THE RATE IS NEVER PRINTED ABOVE ONE. model_worker.py names the claude
-    CLI's `input_tokens` as tokens_in, and that count EXCLUDES cache reads
-    and cache writes (measured live 2026-09-03: input_tokens 2 beside
-    cache_read_input_tokens 22972 and cache_creation_input_tokens 70272 on
-    a one word reply), so on a real worker tokens_cached can exceed
-    tokens_in and cached over tokens_in is not a rate. A real hit rate
-    needs the cache-creation count, which the worker does not forward. So:
-    the rate is cached over tokens_in only while that quotient can be a
-    share (tokens_cached at most tokens_in), and otherwise NO-DATA naming
-    exactly this, with the two real counts still printed above it."""
+    THE RATE IS NEVER PRINTED ABOVE ONE, AND IT IS A REAL SHARE. model_worker
+    names the claude CLI's `input_tokens` as tokens_in, and that count
+    EXCLUDES cache reads and cache writes (measured live 2026-09-03:
+    input_tokens 2 beside cache_read_input_tokens 22972 and
+    cache_creation_input_tokens 70272 on a one word reply), so tokens_cached
+    over tokens_in is not a share of anything: on a real run it read
+    NO-DATA with tokens_cached 1,329,026 against tokens_in 30 (roadmap row
+    E92, the t7 overhead gauntlet). model_worker now forwards the
+    cache-creation count as tokens_cache_write, so the DENOMINATOR is the
+    run's whole input, tokens_in + tokens_cached + tokens_cache_write, and
+    the rate is the share of that input the model read from cache. Three
+    cases, in this order:
+
+      all three counts real     the share, which cannot exceed one because
+                                the numerator is one of the three terms of
+                                its own denominator.
+      no cache-write count,     the old quotient, kept for the adapters and
+      tokens_cached <= in       the recorded fixtures that carry only the
+                                three original fields and are already a
+                                share on their own terms.
+      no cache-write count,     NO-DATA naming the adapter that lacks the
+      tokens_cached > in        field (the codex adapter's own wire schema
+                                has no cache-creation count), never a
+                                zero standing in for it."""
     if harness_revision is None:
         harness_revision = _harness_revision()
     tokens_in = _sum_usage_field(claims, "tokens_in", usage_gap)
     tokens_out = _sum_usage_field(claims, "tokens_out", usage_gap)
     tokens_cached = _sum_usage_field(claims, "tokens_cached", usage_gap)
-    if (isinstance(tokens_in, int) and isinstance(tokens_cached, int)
+    tokens_cache_write = _sum_usage_field(claims, "tokens_cache_write",
+                                          usage_gap)
+    real = [isinstance(v, int) for v in (tokens_in, tokens_cached,
+                                        tokens_cache_write)]
+    total_input = (tokens_in + tokens_cached + tokens_cache_write
+                   if all(real) else 0)
+    if all(real) and total_input > 0:
+        cache_hit_rate = round(tokens_cached / total_input, 4)
+    elif (isinstance(tokens_in, int) and isinstance(tokens_cached, int)
             and tokens_in > 0 and tokens_cached <= tokens_in):
         cache_hit_rate = round(tokens_cached / tokens_in, 4)
     elif isinstance(tokens_in, int) and isinstance(tokens_cached, int):
-        cache_hit_rate = ("%s: tokens_cached (%d) exceeds tokens_in (%d); the "
+        cache_hit_rate = ("%s: tokens_cached (%d) exceeds tokens_in (%d) and "
+                          "this run recorded no tokens_cache_write; the "
                           "worker's tokens_in counts only uncached input "
-                          "tokens (the claude CLI's input_tokens) and the "
-                          "cache-creation count a real rate needs is not "
-                          "forwarded, so no rate is printed"
+                          "tokens (the claude CLI's input_tokens), so the "
+                          "cache-creation count a real share needs (the "
+                          "codex adapter's wire schema has none) is missing "
+                          "and no rate is printed"
                           % (NODATA, tokens_cached, tokens_in))
     else:
         cache_hit_rate = ("%s: cannot compute a cache hit rate without real "
@@ -1231,7 +1353,8 @@ def build_cost_block(claims, refused, loop_text, wall_clock_seconds,
     turns = sum(int(c.get("attempt") or 0) for c in (claims or {}).values()
                if isinstance(c, dict))
     return {"tokens_in": tokens_in, "tokens_out": tokens_out,
-           "tokens_cached": tokens_cached, "turns": turns,
+           "tokens_cached": tokens_cached,
+           "tokens_cache_write": tokens_cache_write, "turns": turns,
            "wall_clock_seconds": wall_clock_seconds,
            "cache_hit_rate": cache_hit_rate,
            "failure_category": _failure_category(refused, loop_text),
@@ -1306,7 +1429,8 @@ def _data_identity_for_row(row, cwd):
 
 
 def build_report(record, claims, before, after, changed=None,
-                 log_path=None, loop_text="", cost_block=None, cwd=None):
+                 log_path=None, loop_text="", cost_block=None, cwd=None,
+                 price_block=None):
     """The delivery report: what happened, named, never inferred from a
     worker's own claim. `record` is the canonical Work document door wrote.
 
@@ -1318,10 +1442,18 @@ def build_report(record, claims, before, after, changed=None,
     worker's self-report.
 
     `cost_block`, when given (T1), is printed one field per line, in
-    COST_FIELDS order, so the eight required fields are always readable in
+    COST_FIELDS order, so every required field is always readable in
     the same place a person already reads the rest of the record; omitted
     (None) leaves the existing callers of this function, which predate the
     cost block, byte-for-byte unchanged.
+
+    `price_block` (E90) is the same treatment for what this run said it
+    would cost BEFORE it ran, printed above the cost so the two readings
+    sit together and a reader can see the expectation beside the bill. The
+    Delivery Receipt v1 contract allows this: within v1 a field is never
+    removed and never renamed, it may only be added, and the receipt's
+    `report` key is this report verbatim. Omitted (None), every caller that
+    predates E90 gets a byte-for-byte unchanged report.
 
     `cwd` (P9, persona integration plan 2026-09-04 row P9; doc 12.6 code,
     environment and model identity; doc F14 reproducibility failure): the
@@ -1512,6 +1644,11 @@ def build_report(record, claims, before, after, changed=None,
                         pending_challenge.get("question") or NODATA))
     lines.append("")
     lines.append("  " + receipt_door.SCOPING_SENTENCE)
+    if price_block is not None:
+        lines.append("")
+        lines.append("  price (said before the run):")
+        for field in PRICE_FIELDS:
+            lines.append("    %s: %s" % (field, price_block.get(field, NODATA)))
     if cost_block is not None:
         lines.append("")
         lines.append("  cost:")
@@ -2470,6 +2607,82 @@ def _stamp_dependency_mutations(record_path, claims, cwd, log=None,
 #: not argued with round after round.
 MAX_CHECK_REWRITE_ATTEMPTS = 1
 
+#: How many EXTRA asks a unit gets when its replacement parsed fine but
+#: door.guard_adopted_check refused it (a `;`, a pipe, an interpreter off
+#: the allowlist). ONE: measured live in two independent 2026-09-04 trials
+#: (docs/plan/runs/decomposition-adversity-2026-09-04/trial1,
+#: docs/plan/runs/live-autonomous-adversity-2026-09-04/trial1), the outcome
+#: phrasing "raises X with a clear message" produced a replacement carrying
+#: a `;`, it was refused, and nothing was said back to the planner. This is
+#: separate from MAX_CHECK_REWRITE_ATTEMPTS above, which counts asks about a
+#: check that RAN and was broken; a guard refusal means the reply never ran
+#: at all, and the refusal reason is new information the planner did not
+#: have on the first ask.
+MAX_CHECK_GUARD_REFUSAL_RETRIES = 1
+
+
+def _ask_planner_for_replacement_check(cmd, objective, original, stderr_text,
+                                       uid, log):
+    """One unit's whole replacement conversation, up to
+    1 + MAX_CHECK_GUARD_REFUSAL_RETRIES asks. Returns the guarded
+    replacement command, or None when this unit keeps its original check
+    (which then falls through to _refuse_broken_precheck_units and refuses
+    THIS unit alone; every other unit in the document is untouched).
+
+    A reply that is not valid JSON, not a JSON object, or whose done_check
+    is empty ends the conversation immediately: nothing about it says what
+    a second ask should do differently. A reply that parses but is REFUSED
+    by door.guard_adopted_check is different, and is the E88 case: the
+    refusal names a rule the planner can obey, so it is quoted back and one
+    more ask is made. The refused COMMAND is never logged or quoted (it came
+    from the same untrusted reply), only the reason."""
+    refusal_reason = None
+    for attempt in range(1 + MAX_CHECK_GUARD_REFUSAL_RETRIES):
+        prompt = door.build_check_rewrite_prompt(
+            objective, original, stderr_text, refusal_reason=refusal_reason)
+        log.note("brother_run: asking the planner for a replacement "
+                 "done_check for %s (ask %d of %d)"
+                 % (uid, attempt + 1, 1 + MAX_CHECK_GUARD_REFUSAL_RETRIES))
+        try:
+            proc = door.ask_decomposer(cmd, prompt)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            log.note("brother_run: the planner could not be asked for a "
+                     "replacement done_check for %s: %s; keeping the "
+                     "original check" % (uid, exc))
+            return None
+        try:
+            raw = json.loads(door.strip_code_fences(proc.stdout))
+        except ValueError as exc:
+            log.note("brother_run: %s's replacement done_check could not "
+                     "be read as JSON, keeping the original: %s"
+                     % (uid, exc))
+            return None
+        if not isinstance(raw, dict):
+            log.note("brother_run: %s's replacement was not a JSON "
+                     "object, keeping the original" % uid)
+            return None
+        new_check = str(raw.get("done_check") or "").strip()
+        if not new_check:
+            log.note("brother_run: %s's replacement named no done_check, "
+                     "keeping the original" % uid)
+            return None
+        resolved, note = door.resolve_done_check_interpreter(new_check)
+        if note:
+            new_check = resolved
+            log.note("door: %s" % note)
+        # E78: the planner's reply is untrusted text; refuse it before it
+        # ever becomes this row's done_check rather than filter what runs.
+        # The refusal names the unit and the rule broken, never the command.
+        allowed, refusal_reason = door.guard_adopted_check(new_check)
+        if allowed:
+            return new_check
+        log.note("brother_run: refusing %s's replacement done_check (%s)"
+                 % (uid, refusal_reason))
+    log.note("brother_run: %s's replacement done_check was refused on every "
+             "ask; keeping the original, so this unit alone is refused "
+             "before any worker starts" % uid)
+    return None
+
 
 def _rewrite_broken_checks(record_path, cwd, log, runner=None, model_cmd=None):
     """THE FIX (rule 4 follow-through, the zero-context critic, 2026-09-03):
@@ -2487,7 +2700,11 @@ def _rewrite_broken_checks(record_path, cwd, log, runner=None, model_cmd=None):
     whatever is still broken after this returns falls through to
     _refuse_broken_precheck_units exactly as it did before this fix, same
     wording, same reason. Never asks the planner more than
-    MAX_CHECK_REWRITE_ATTEMPTS (1) time per unit.
+    MAX_CHECK_REWRITE_ATTEMPTS (1) time per unit about a check that RAN and
+    was broken; a reply REFUSED by door.guard_adopted_check never ran at
+    all, and gets MAX_CHECK_GUARD_REFUSAL_RETRIES (1) further ask with the
+    refusal reason quoted back (E88, see
+    _ask_planner_for_replacement_check).
 
     Reuses door.py's own decomposer plumbing wholesale rather than a second
     implementation of any of it: resolve_cmd (so this obeys the same
@@ -2529,46 +2746,10 @@ def _rewrite_broken_checks(record_path, cwd, log, runner=None, model_cmd=None):
         uid = row.get("id")
         original = str(row.get("done_check") or "")
         stderr_text = row.get("check_stderr_before") or ""
-        prompt = door.build_check_rewrite_prompt(
-            row.get("objective") or row.get("title") or "", original,
-            stderr_text)
-        log.note("brother_run: asking the planner once for a replacement "
-                 "done_check for %s" % uid)
-        try:
-            proc = door.ask_decomposer(cmd, prompt)
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            log.note("brother_run: the planner could not be asked for a "
-                     "replacement done_check for %s: %s; keeping the "
-                     "original check" % (uid, exc))
-            continue
-        try:
-            raw = json.loads(door.strip_code_fences(proc.stdout))
-        except ValueError as exc:
-            log.note("brother_run: %s's replacement done_check could not "
-                     "be read as JSON, keeping the original: %s"
-                     % (uid, exc))
-            continue
-        if not isinstance(raw, dict):
-            log.note("brother_run: %s's replacement was not a JSON "
-                     "object, keeping the original" % uid)
-            continue
-        new_check = str(raw.get("done_check") or "").strip()
+        new_check = _ask_planner_for_replacement_check(
+            cmd, row.get("objective") or row.get("title") or "", original,
+            stderr_text, uid, log)
         if not new_check:
-            log.note("brother_run: %s's replacement named no done_check, "
-                     "keeping the original" % uid)
-            continue
-        resolved, note = door.resolve_done_check_interpreter(new_check)
-        if note:
-            new_check = resolved
-            log.note("door: %s" % note)
-        # E78: the planner's reply is untrusted text; refuse it before it
-        # ever becomes this row's done_check rather than filter what runs.
-        # The refusal names the unit and the rule broken, never the command
-        # (the command came from the same untrusted reply this is refusing).
-        allowed, refusal_reason = door.guard_adopted_check(new_check)
-        if not allowed:
-            log.note("brother_run: refusing %s's replacement done_check "
-                     "(%s); keeping the original" % (uid, refusal_reason))
             continue
         capture = {}
         passed, exit_before, looks_broken, _note = _check_passes_now(
@@ -2791,7 +2972,10 @@ def _dirty_tree_lines(cwd, rows):
         shown += ", ..." if len(hits) > 3 else ""
         return ("brother_run: the repository at %s is dirty inside this "
                 "run's write set: %d uncommitted path(s) a unit owns (%s); "
-                "commit or stash them first, nothing was claimed or run"
+                "commit or stash them first, nothing was claimed or run. "
+                "A tracked modification and an untracked file both count "
+                "here; only interpreter bytecode (__pycache__/, .pyc, .pyo) "
+                "never does"
                 % (cwd, len(hits), shown)), ""
     shown = ", ".join(paths[:3]) + (", ..." if len(paths) > 3 else "")
     return "", ("brother_run: the repository at %s is dirty on %d "
@@ -3124,6 +3308,64 @@ def _interactive_resolver(stream, prompt_stream=None):
     return _resolve
 
 
+def _moment_screen_path(log, moment, spec):
+    """E91: where this moment's page lives, written here when it is not
+    already on disk, so the log can name a file instead of carrying its
+    markup. Returns the path, or a NO-DATA sentence saying why there is no
+    file, never raising: a screen that cannot be written must not fail the
+    run it describes (receipt_door.write_screen's own rule, reused rather
+    than reimplemented, so the spec JSON lands beside the HTML exactly as it
+    does for every other screen).
+
+    WRITTEN ONCE, still. release and acceptance are already written by
+    receipt_door.render_run_screens before this seam poses them, under these
+    same names in this same directory, so an existing file is named rather
+    than rewritten and that "written exactly once" rule stands."""
+    if not log.path:
+        return ("%s: this run has no run directory yet, so the %s screen's "
+                "page could not be written; its plain summary above is the "
+                "whole of it" % (NODATA, moment))
+    out_path = os.path.join(os.path.dirname(log.path), "screens",
+                            "%s-screen.html" % moment)
+    if os.path.isfile(out_path):
+        return out_path
+    written, problem = receipt_door.write_screen(spec, out_path)
+    return written or problem
+
+
+def _screen_summary(spec, scored, screen_path):
+    """E91: a decide.py screen in plain words, for the run log.
+
+    THE MARKUP NEVER REACHES THE LOG OR THE TERMINAL. decide.render builds a
+    web page (a <title>, a :root{ CSS block, about 150 lines of it), and
+    logging that verbatim put lines 5 to 165 of a real run.log beyond
+    reading in a terminal (roadmap row E91, measured on v1.0.1 by the t7
+    overhead gauntlet). The page still exists, at `screen_path`, named on
+    the last line here so a reader can open it.
+
+    Every sentence is the spec's own, never re-worded: the title, the
+    plain_summary paragraph and the question the caller already wrote, then
+    one line per option with the score decide.rank() already computed and
+    that option's own one_liner. A spec that carries none of those (an
+    acceptance spec built by receipt_door, whose options carry different
+    keys) still gets its title and its scored options, which is why nothing
+    here is required to be present."""
+    lines = [str(spec.get("title") or NODATA)]
+    for key in ("plain_summary", "question"):
+        text = str(spec.get(key) or "").strip()
+        if text:
+            lines.append(text)
+    for entry in scored:
+        option = entry.get("option") or {}
+        one_liner = str(option.get("one_liner") or "").strip()
+        lines.append("  %5.2f/10  %s%s"
+                     % (entry.get("total") or 0.0,
+                        option.get("name") or option.get("id") or NODATA,
+                        (": " + one_liner) if one_liner else ""))
+    lines.append("  the full screen: %s" % screen_path)
+    return "\n".join(lines)
+
+
 def _human_moment(log, moment, spec, resolver=None):
     """I3, the screen loom: pause at one of the charter's four human moments
     (MOMENTS, above). `spec` is a decide.py spec whose every option already
@@ -3132,12 +3374,15 @@ def _human_moment(log, moment, spec, resolver=None):
     reuses decide.rank() and decide.render() outright rather than forking
     either.
 
-    THE MACHINERY, the full rendered screen, goes to the run log only,
-    verbatim, the same rule RunLog already holds for loop_bridge's own
-    output (RunLog's own docstring: "THE MACHINERY IS NOT DELETED, it is
-    moved"). THE CHAT STREAM gets exactly two lines: one ECHO (a screen was
-    posed: how many options, which one the arithmetic recommends and at
-    what score) and one PROOF (what was chosen, and how).
+    THE MACHINERY goes to the run log only, the same rule RunLog already
+    holds for loop_bridge's own output (RunLog's own docstring: "THE
+    MACHINERY IS NOT DELETED, it is moved"), and since E91 it goes there in
+    PLAIN WORDS: the log carries _screen_summary's paragraph and the path of
+    the HTML page, while the page itself (decide.render's markup) is written
+    to screens/<moment>-screen.html and read by opening it. THE CHAT STREAM
+    gets exactly two lines: one ECHO (a screen was posed: how many options,
+    which one the arithmetic recommends and at what score) and one PROOF
+    (what was chosen, and how).
 
     `resolver(moment, spec, scored, close) -> {"choice", "name", "by", ...}`
     is how a choice is recorded, and THE RUN DOES NOT PROCEED PAST THIS
@@ -3148,8 +3393,11 @@ def _human_moment(log, moment, spec, resolver=None):
     exactly as long as that takes; `resolver=None` uses _auto_resolver, the
     recorded default, which never blocks at all."""
     _criteria, _note, scored, close = decide.rank(spec)
-    # THE MACHINERY, to the log, never the chat stream.
-    log.note("---- %s screen ----\n%s" % (moment, decide.render(spec)))
+    # THE MACHINERY, to the log, never the chat stream, and in words rather
+    # than markup (E91): the page goes to a file, its path goes to the log.
+    log.note("---- %s screen ----\n%s"
+             % (moment, _screen_summary(
+                 spec, scored, _moment_screen_path(log, moment, spec))))
     top = scored[0] if scored else None
     log.say("brother_run: %s: %d option(s) considered, %s recommended at "
             "%.2f/10%s"
@@ -3217,7 +3465,17 @@ def main(argv=None):
                     help="where the run's Work document and claim store live "
                          "(under docs/plan/runs); defaults to this tool's own "
                          "repository, never the target --cwd, which "
-                         "integration requires to stay clean")
+                         "integration requires to stay clean. WHAT CLEAN "
+                         "MEANS HERE, exactly: every path git status reports "
+                         "in the target counts, a tracked modification and "
+                         "an untracked file alike, EXCEPT interpreter "
+                         "bytecode (__pycache__/, .pyc, .pyo), which never "
+                         "counts, so an untracked __pycache__/ does not stop "
+                         "a run. Of the paths that do count, only one kind "
+                         "refuses the run: a path inside this run's own "
+                         "write set. Dirt outside that write set is reported "
+                         "and left untouched, and the merge refuses later "
+                         "rather than the door refusing now")
     args = ap.parse_args(list(sys.argv[1:] if argv is None else argv))
 
     cwd = os.path.abspath(args.cwd)
@@ -3265,7 +3523,17 @@ def main(argv=None):
         # terminal" mean.
         matches = find_unfinished_runs(runs_root, cwd)
         if not matches:
-            print("brother_run: no unfinished run found for %s" % cwd)
+            # E81: nothing to continue is an ABSENCE, not a success and not
+            # a failure, so it is labelled NO-DATA in the estate's own
+            # vocabulary rather than left as a bare sentence a reader has to
+            # classify. The words the README promises a first-time reader,
+            # "no unfinished run found", are kept verbatim inside it.
+            print("brother_run: NO-DATA: no unfinished run found for %s; "
+                  "there is nothing to continue. Ask for an outcome "
+                  "instead:\n  %s"
+                  % (cwd, _next_command(cwd, runs_root, ["<what should be "
+                                                         "true when this is "
+                                                         "done>"])))
             return 0
         if args.cont == CONTINUE_BARE:
             if len(matches) > 1:
@@ -3368,6 +3636,15 @@ def main(argv=None):
             if not ok:
                 print("brother_run: the door refused this outcome; nothing "
                       "was claimed or run", file=sys.stderr)
+                # E81, THE NEXT COMMAND. Nothing was claimed, so there is no
+                # run to continue and --continue would honestly find none;
+                # the recovery route after a door refusal is to ask again,
+                # and this is that ask, already quoted for the shell.
+                print("brother_run: nothing to continue: the store is "
+                      "untouched. Ask again, in the same words or clearer "
+                      "ones:\n  %s"
+                      % _next_command(cwd, runs_root, [args.outcome]),
+                      file=sys.stderr)
                 return 1
             if not args.dry_run:
                 # RUN START, and only here: --resume and --continue both
@@ -3609,6 +3886,16 @@ def main(argv=None):
         "claimed or run, one line per piece of work, exactly as the "
         "planning model wrote it:\n\n" + "\n".join(unit_lines))
     summary_blocks.append(bounds_line)
+    # E90, THE PRICE, SAID BEFORE THE WAIT rather than after it. The founder
+    # ruled option B on docs/decisions/light-path-for-small-changes-
+    # 2026-09-04.json: the door keeps its shape and says what it charges on
+    # the screen a person reads before anything is claimed. The durations
+    # are read ONCE here and handed to the governor line further down as
+    # well, so the two sentences can never disagree about what earlier runs
+    # took, and so this costs one directory walk rather than two.
+    price_durations = previous_run_durations(runs_root, cwd)
+    price_block = build_price_block(1 + total_units, price_durations)
+    summary_blocks.append(price_paragraph(price_block))
     summary_blocks.append(rollback_line)
     intent_choice = _human_moment(log, "intent", _fact_spec(
         title="Proceed with this outcome", eyebrow="Intent",
@@ -3771,7 +4058,7 @@ def main(argv=None):
         # Real figures from finished runs are not an estimate of this one and
         # the wording says so; --quiet drops them with the heartbeat.
         earlier = ("" if heartbeat_seconds <= 0 else
-                   previous_runs_line(previous_run_durations(runs_root, cwd)))
+                   previous_runs_line(price_durations))
         log.say("brother_run: %d piece(s) of work, none finished yet. How "
                 "long this takes is not knowable in advance, so no estimate "
                 "is given; each piece reports as it lands. Each piece gets "
@@ -4026,7 +4313,8 @@ def main(argv=None):
                                                   after, changed,
                                                   log_path=log_path,
                                                   loop_text=loop_text_all,
-                                                  cwd=cwd)
+                                                  cwd=cwd,
+                                                  price_block=price_block)
     cost_block = build_cost_block(
         claims, refused, loop_text_all,
         (datetime.datetime.now() - run_start).total_seconds(),
@@ -4037,7 +4325,8 @@ def main(argv=None):
                                                log_path=log_path,
                                                loop_text=loop_text_all,
                                                cost_block=cost_block,
-                                               cwd=cwd)
+                                               cwd=cwd,
+                                               price_block=price_block)
 
     # THE TWO SCREENS, computed from the receipts above and nothing else,
     # and ONLY when this run actually integrated something. A run that
@@ -4172,6 +4461,21 @@ def main(argv=None):
                        "provable from disk: %s (the delivery itself ended: "
                        "%s)" % (receipt_problem, exit_reason))
     print("brother_run: exit %d: %s" % (exit_code, exit_reason))
+    # E81, THE NEXT COMMAND AFTER A REFUSAL. Printed only when it will
+    # actually work: the candidate list is read back off disk through the
+    # SAME discovery --continue itself uses, and this run has to be in it,
+    # so a line is never offered for a run that is finished or that
+    # --continue could not find. The index is carried when the repository
+    # holds more than one unfinished run, because a bare --continue lists
+    # them instead of picking one.
+    if exit_code != 0:
+        matches = find_unfinished_runs(runs_root, cwd)
+        index = next((i for i, (d, _o, _r) in enumerate(matches, 1)
+                      if os.path.abspath(d) == os.path.abspath(run_dir)), None)
+        if index is not None:
+            lead = ["--continue"] + ([] if len(matches) == 1 else [str(index)])
+            print("brother_run: this run is not finished. Continue it with:"
+                  "\n  %s" % _next_command(cwd, runs_root, lead))
     if receipt_path:
         print("brother_run: receipt: %s" % receipt_path)
     else:

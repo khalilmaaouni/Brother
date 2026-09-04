@@ -34,6 +34,21 @@ import receipt_door as RD  # noqa: E402
 import run_heartbeat  # noqa: E402
 import work_record as WR  # noqa: E402
 
+# E100: one sandbox for every temp tree this process makes, removed at exit.
+import os as _e100_os, sys as _e100_sys  # noqa: E402
+_e100_sys.path.append(_e100_os.path.join(
+    _e100_os.path.dirname(_e100_os.path.abspath(__file__)), '.'))
+try:  # noqa: E402
+    import tmp_sandbox as _e100_tmp
+    _e100_tmp.install()
+except ImportError:
+    # A packager (scripts/export_public.py, make_benchmark_bundle.py)
+    # can copy this test without scripts/tmp_sandbox.py beside it. Say
+    # so rather than dying: the sandbox is hygiene, not the subject.
+    _e100_sys.stderr.write(
+        "tmp_sandbox absent: %s leaves its temp trees behind\n"
+        % _e100_os.path.basename(__file__))
+
 
 class DeliveryReportProvesItself(unittest.TestCase):
     """The harsh EVAD 2026-08-31 finding: the report named units and revisions
@@ -1956,6 +1971,37 @@ class CostBlockCarriesAllEightFields(unittest.TestCase):
         self.assertEqual(block["turns"], 4)
         self.assertAlmostEqual(block["cache_hit_rate"], 50 / 150, places=4)
 
+    def test_a_forwarded_cache_write_count_makes_the_rate_a_real_share(self):
+        """E92 (roadmap row E92; t7 overhead gauntlet: tokens_cached
+        1,329,026 against tokens_in 30). With the cache-creation count
+        forwarded, the denominator is the run's whole input and the rate is
+        a share, on exactly the shape that used to read NO-DATA."""
+        claims = {"U1": {"attempt": 1,
+                        "usage": {"tokens_in": 30, "tokens_out": 40,
+                                  "tokens_cached": 1329026,
+                                  "tokens_cache_write": 70272}}}
+        block = _br.build_cost_block(claims, [], "", 2.0, "v1")
+        self.assertEqual(block["tokens_cache_write"], 70272)
+        self.assertAlmostEqual(block["cache_hit_rate"],
+                               round(1329026 / (30 + 1329026 + 70272), 4),
+                               places=4)
+        self.assertLessEqual(block["cache_hit_rate"], 1.0)
+
+    def test_an_adapter_without_the_field_still_says_no_data(self):
+        """The other way (the codex adapter, whose wire schema carries no
+        cache-creation count): no tokens_cache_write and tokens_cached above
+        tokens_in stays NO-DATA, never a rate invented from a missing count
+        read as zero."""
+        claims = {"U1": {"attempt": 1,
+                        "usage": {"tokens_in": 30, "tokens_out": 40,
+                                  "tokens_cached": 1329026}}}
+        block = _br.build_cost_block(claims, [], "", 2.0, "v1")
+        self.assertTrue(str(block["cache_hit_rate"]).startswith(_br.NODATA),
+                        block["cache_hit_rate"])
+        self.assertTrue(
+            str(block["tokens_cache_write"]).startswith(_br.NODATA),
+            block["tokens_cache_write"])
+
     def test_failure_category_reads_the_engines_own_words(self):
         cases = [
             ([], "", "none"),
@@ -2285,13 +2331,85 @@ class TheScreenLoomSplitsMachineryFromTheChatStream(unittest.TestCase):
 
         with open(log.path, encoding="utf-8") as fh:
             logged = fh.read()
-        # THE MACHINERY (decide.py's own rendered screen, including its
-        # title, which the two short chat-stream lines above never carry)
-        # reached the log and never the chat stream.
+        # THE MACHINERY (the screen's own title and its plain summary, which
+        # the two short chat-stream lines above never carry) reached the log
+        # and never the chat stream. Since E91 it reaches the log in WORDS:
+        # the markup itself lives in the file the log names.
         self.assertNotIn("<style>", printed)
-        self.assertIn("<style>", logged)
+        self.assertNotIn("<style>", logged)
         self.assertNotIn("A title only the log should ever see", printed)
         self.assertIn("A title only the log should ever see", logged)
+        self.assertIn("plain", logged)
+
+    def test_the_log_carries_words_and_a_path_never_the_markup(self):
+        """E91 (roadmap row E91; t7 overhead gauntlet, v1.0.1: run.log lines
+        5 to 165 began with <title> and :root{ --paper). Driven at the two
+        strings that measured the defect: neither may appear in the log or
+        on stdout, the log must name the screen file, and that file must
+        still hold the page, so this proves the markup MOVED rather than
+        that it was thrown away."""
+        tmp = tempfile.mkdtemp(prefix="human-moment-markup-")
+        log = _br.RunLog()
+        log.to(tmp)
+        spec = _br._fact_spec("A screen title", "Test", "the plain words",
+                              "question?", "opt", "The option", "one liner",
+                              {"a": (1.0, 8.0, "why a")})
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            _br._human_moment(log, "intent", spec)
+        printed = out.getvalue()
+        with open(log.path, encoding="utf-8") as fh:
+            logged = fh.read()
+        for marker in ("<title>", ":root{"):
+            self.assertNotIn(marker, logged, logged)
+            self.assertNotIn(marker, printed, printed)
+        self.assertIn("the plain words", logged)
+        screen = os.path.join(tmp, "screens", "intent-screen.html")
+        self.assertIn(screen, logged, logged)
+        self.assertIn(os.path.join("screens", "intent"), logged)
+        with open(screen, encoding="utf-8") as fh:
+            page = fh.read()
+        for marker in ("<title>", ":root{"):
+            self.assertIn(marker, page)
+
+    def test_an_already_written_screen_is_named_never_rewritten(self):
+        """release and acceptance are written once by
+        receipt_door.render_run_screens before this seam poses them, so a
+        second write here would break that rule. Proven by putting a marker
+        file at the path and checking its bytes survive."""
+        tmp = tempfile.mkdtemp(prefix="human-moment-once-")
+        log = _br.RunLog()
+        log.to(tmp)
+        screen = os.path.join(tmp, "screens", "acceptance-screen.html")
+        os.makedirs(os.path.dirname(screen))
+        with open(screen, "w", encoding="utf-8") as fh:
+            fh.write("written by render_run_screens")
+        spec = _br._fact_spec("t", "e", "p", "q", "x", "X", "one",
+                              {"k": (1.0, 5.0, "w")})
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            _br._human_moment(log, "acceptance", spec,
+                              resolver=lambda *a: {"choice": "x", "name": "X",
+                                                   "by": "test"})
+        with open(screen, encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), "written by render_run_screens")
+        with open(log.path, encoding="utf-8") as fh:
+            self.assertIn(screen, fh.read())
+
+    def test_no_run_directory_yet_says_so_and_never_falls_back_to_markup(self):
+        """A log with no run directory (the seam called before log.to) can
+        write no page at all. It must say that in words, never print the
+        markup instead, which is the shape the defect had."""
+        log = _br.RunLog()
+        spec = _br._fact_spec("t", "e", "p", "q", "x", "X", "one",
+                              {"k": (1.0, 5.0, "w")})
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            _br._human_moment(log, "intent", spec)
+        logged = "\n".join(log.lines)
+        self.assertIn(_br.NODATA, logged)
+        self.assertNotIn("<title>", logged)
+        self.assertNotIn("<title>", out.getvalue())
 
 
 class TheScreenLoomHasALiveInteractiveResolver(unittest.TestCase):
@@ -2965,6 +3083,84 @@ class RewriteBrokenChecksAsksThePlannerOnce(unittest.TestCase):
         self.assertNotIn("check_rewritten", row)
         self.assertEqual(row["done_check"], original)
 
+    def test_a_semicolon_replacement_is_asked_again_with_the_reason(self):
+        # E88: measured live in two independent 2026-09-04 trials, the
+        # outcome "raises X with a clear message" produced a replacement
+        # carrying a `;`. It was refused with nothing said back, so the
+        # unit was refused before any worker started. The second ask now
+        # quotes the refusal reason; here the planner keeps writing the
+        # same shape, so the unit alone is refused, exactly as before.
+        log_path = os.path.join(self.tmp, "semicolon.log")
+        stub = write_stub(self.tmp, "rewriter_semicolon.py", """
+            import json, sys
+            prompt = sys.stdin.read()
+            with open(%r, "a") as fh:
+                fh.write("---\\n" + prompt)
+            print(json.dumps({"done_check":
+                "python3 -c 'import m; assert m.divide'"}))
+        """ % log_path)
+        original = "python3 -c 'this is not python('"
+        doc = _write_doc(self.tmp, [
+            {"id": "B1", "status": "SCHEDULED",
+             "objective": "divide raises ZeroDivisionError with a clear "
+                          "message",
+             "done_check": original, "check_looks_broken": True,
+             "check_exit_before": 1,
+             "check_stderr_before": "python3: SyntaxError"},
+            {"id": "B2", "status": "SCHEDULED", "objective": "unrelated",
+             "done_check": "test -f other.txt"},
+        ])
+        rows = _br._rewrite_broken_checks(
+            doc, self.checkcwd, self.log,
+            model_cmd="%s %s" % (sys.executable, stub))
+        with open(log_path, encoding="utf-8") as fh:
+            captured = fh.read()
+        # ASKED TWICE, and the second ask carries the refusal reason.
+        self.assertEqual(captured.count("---"), 2, captured)
+        self.assertIn("`;` command separator", captured, captured)
+        broken = [r for r in rows if r["id"] == "B1"][0]
+        self.assertNotIn("check_rewritten", broken)
+        self.assertEqual(broken["done_check"], original)
+        # The refused command itself is never echoed into the log.
+        log_text = "\n".join(self.log.lines)
+        self.assertNotIn("assert m.divide", log_text)
+        # REFUSED ALONE: B2 is untouched and still schedulable.
+        refused = _br._refuse_broken_precheck_units(doc)
+        self.assertEqual(set(refused), {"B1"})
+        with open(doc, encoding="utf-8") as fh:
+            saved = json.load(fh)
+        self.assertEqual([r["id"] for r in saved["rows"]], ["B2"])
+
+    def test_a_second_ask_that_obeys_the_reason_is_adopted(self):
+        # E88, the other side: the planner writes a `;` once, is told why,
+        # and its next answer is a single command. The unit proceeds.
+        state = os.path.join(self.tmp, "asks.log")
+        stub = write_stub(self.tmp, "rewriter_learns.py", """
+            import json, os, sys
+            sys.stdin.read()
+            n = 0
+            if os.path.exists(%r):
+                with open(%r) as fh:
+                    n = len(fh.read())
+            with open(%r, "a") as fh:
+                fh.write("x")
+            if n == 0:
+                print(json.dumps({"done_check": "python3 a.py; rm b"}))
+            else:
+                print(json.dumps({"done_check": "test -f fixed.txt"}))
+        """ % (state, state, state))
+        doc = self._doc()
+        rows = _br._rewrite_broken_checks(
+            doc, self.checkcwd, self.log,
+            model_cmd="%s %s" % (sys.executable, stub))
+        row = rows[0]
+        self.assertTrue(row["check_rewritten"])
+        self.assertEqual(row["done_check"], "test -f fixed.txt")
+        self.assertFalse(row["check_looks_broken"])
+        with open(state, encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), "xx")
+        self.assertEqual(_br._refuse_broken_precheck_units(doc), {})
+
     def test_a_plain_python3_replacement_is_still_adopted(self):
         # The guard's floor: an ordinary single-command rewrite still works.
         stub = write_stub(self.tmp, "rewriter_plain.py", """
@@ -3250,7 +3446,11 @@ class TheDirtyTreeIsRefusedBeforeAnyClaim(unittest.TestCase):
         self.assertIn("1 uncommitted path(s) a unit owns "
                       "(one.txt (owned by A1))", line, out)
         self.assertNotIn("u1.txt", line, line)     # unrelated dirt not named
-        self.assertNotIn("__pycache__", line, line)
+        # E93: bytecode is still absent from the PATHS this refusal names.
+        # The rule sentence after them does name __pycache__, on purpose, so
+        # only the path list is searched here.
+        self.assertNotIn("__pycache__", line.split("; commit or stash")[0],
+                         line)
         self.assertIn("nothing was claimed or run", line, line)
         # AFTER THE DOOR (the write set comes from it), BEFORE ANY CLAIM: a
         # run directory exists, the claim store was never written, no
@@ -3381,16 +3581,19 @@ class RealUsageReachesTheCostBlock(unittest.TestCase):
         proc, out = self._run(USAGE_MODEL, "usage_model.py")
         self.assertEqual(proc.returncode, 0, out)
         self.assertIn("integrated (2):", out, out)
-        # 30 + 30, 7 + 7, 12 + 12 across the two units; the rate is a share.
+        # 30 + 30, 7 + 7, 12 + 12, 5 + 5 across the two units; the rate is a
+        # share of the run's WHOLE input (E92): 24 / (60 + 24 + 10).
         self.assertIn("tokens_in: 60", out, out)
         self.assertIn("tokens_out: 14", out, out)
         self.assertIn("tokens_cached: 24", out, out)
-        self.assertIn("cache_hit_rate: 0.4", out, out)
+        self.assertIn("tokens_cache_write: 10", out, out)
+        self.assertIn("cache_hit_rate: %s" % round(24 / 94, 4), out, out)
         run_dir = _only_run_dir(self.tmp)
         self.assertTrue(os.path.isfile(
             os.path.join(run_dir, "claims_usage.json")), out)
         # FINDING 5 ON THE SAME RUN: the bound is on the intent screen (the
-        # run log holds the rendered screen) and on the chat surface,
+        # run log holds that screen in plain words, see E91 below) and on
+        # the chat surface,
         # beside the attempt cap, read from the loaded adapter.
         with open(os.path.join(run_dir, _br.LOG_FILENAME),
                   encoding="utf-8") as fh:
@@ -3402,6 +3605,14 @@ class RealUsageReachesTheCostBlock(unittest.TestCase):
                       "attempt's worker is stopped after %d seconds."
                       % (_br.MAX_UNIT_ATTEMPTS, _br.WORKER_TIME_LIMIT_SECONDS),
                       out, out)
+        # E91 ON A REAL RUN, the row's own done-check: no markup anywhere in
+        # run.log or on stdout, and the intent screen named by its path.
+        for marker in ("<title>", ":root{"):
+            self.assertNotIn(marker, log, log[:2000])
+            self.assertNotIn(marker, out, out[:2000])
+        self.assertIn(os.path.join("screens", "intent"), log)
+        self.assertTrue(os.path.isfile(
+            os.path.join(run_dir, "screens", "intent-screen.html")), log)
         # FINDING 2'S FRESH HALF ON THE SAME RUN: the creator is stamped on
         # disk, the receipts name it, and nothing says resumed.
         with open(_br._find_work_doc(run_dir), encoding="utf-8") as fh:
@@ -3605,8 +3816,13 @@ class AResumedRunRerunsAnAbandonedClaimUpToTheBound(unittest.TestCase):
                     if l.strip().startswith("A1 delivered"))
         # E79: neither sha is a real object anywhere origin/main can reach,
         # so harness_label labels the creator's clause private too.
-        self.assertIn("harness %s (private hub revision)." % ("c" * 12),
-                      line, out)
+        # The clause after the sha depends on the checkout's remotes (E101):
+        # a hub checkout reads "private hub revision", a public clone with
+        # no remote reads "public remote NO-DATA"; the twelve-hex cut is
+        # the claim.
+        self.assertIn("harness %s (" % ("c" * 12), line, out)
+        self.assertTrue("(private hub revision)." in line
+                        or "(public remote NO-DATA)." in line, out)
         self.assertIn("Resumed by harness %s." % _hub_head()[:12], line, out)
         self.assertIn("verdict: PASS", line, out)
 
@@ -4872,6 +5088,290 @@ class EarlierRunsAreMeasuredNotGuessed(unittest.TestCase):
     def test_no_runs_directory_at_all_is_empty_never_an_exception(self):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertEqual(_br.previous_run_durations(tmp, tmp), [])
+
+
+class ThePriceIsSaidBeforeTheWait(unittest.TestCase):
+    """E90, the founder's option B on docs/decisions/light-path-for-small-
+    changes-2026-09-04.json: the door keeps its shape and says what it
+    charges BEFORE the wait rather than in the receipt after it.
+
+    DRIVEN BACKWARDS. Against the brother_run.py this branch started from
+    (hub/wbs/batch-2026-09-04-night at a4e80a47) every test in this class
+    fails, because no run log there contains the string "Price, before
+    anything is claimed or run" at all: the engine had nothing to print
+    before the drain but the governor line, which names a bound and never a
+    price. The two real runs below go through the same DOOR_MODEL_CMD and
+    MODEL_WORKER_CMD stub seam the rest of this file uses, so no model is
+    called and no network is touched."""
+
+    #: The first line in run.log that belongs to a worker rather than to the
+    #: screens before it: loop_bridge's own round marker, written by
+    #: brother_run right after run_loop returns. The price must come before
+    #: this, or it is not a price said before the wait.
+    FIRST_WORKER_LINE = "brother_run: loop_bridge round 1"
+    PRICE_OPENING = "Price, before anything is claimed or run:"
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="brother-price-")
+        self.repo = make_repo(self.tmp)
+        self.decomposer = write_stub(self.tmp, "decomposer.py", """
+            import json, sys
+            sys.stdin.read()
+            print(json.dumps([
+                {"id": "A1", "objective": "create file one",
+                 "done_check": "test -f one.txt", "writes": ["one.txt"],
+                 "deps": []},
+                {"id": "A2", "objective": "create file two",
+                 "done_check": "test -f two.txt", "writes": ["two.txt"],
+                 "deps": []},
+            ]))
+        """)
+        self.model = write_stub(self.tmp, "writer_model.py", WRITER_MODEL)
+        self.env = dict(os.environ)
+        self.env["DOOR_MODEL_CMD"] = "%s %s" % (sys.executable, self.decomposer)
+        self.env["MODEL_WORKER_CMD"] = "%s %s" % (sys.executable, self.model)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _seed_earlier_run(self, name, seconds):
+        """An earlier finished run against this same target, exactly as
+        previous_run_durations reads one: a target marker plus a log
+        carrying the cost block's own wall_clock_seconds line."""
+        run_dir = os.path.join(self.tmp, "docs", "plan", "runs", name)
+        os.makedirs(run_dir)
+        with open(os.path.join(run_dir, _br.TARGET_FILENAME), "w",
+                  encoding="utf-8") as fh:
+            json.dump({"cwd": self.repo}, fh)
+        with open(os.path.join(run_dir, _br.LOG_FILENAME), "w",
+                  encoding="utf-8") as fh:
+            fh.write("    wall_clock_seconds: %s\n" % seconds)
+
+    def _run_and_read_log(self):
+        runs = os.path.join(self.tmp, "docs", "plan", "runs")
+        before = set(os.listdir(runs)) if os.path.isdir(runs) else set()
+        proc = sh([sys.executable, BROTHER_RUN, "two files exist",
+                  "--cwd", self.repo, "--runs-root", self.tmp], env=self.env)
+        out = proc.stdout + proc.stderr
+        self.assertEqual(proc.returncode, 0, out)
+        fresh = sorted(set(os.listdir(runs)) - before)
+        self.assertEqual(len(fresh), 1, fresh)
+        with open(os.path.join(runs, fresh[0], _br.LOG_FILENAME),
+                  encoding="utf-8") as fh:
+            return fh.read(), out
+
+    def test_the_price_is_in_the_log_before_the_first_worker_line(self):
+        log, out = self._run_and_read_log()
+        self.assertIn(self.PRICE_OPENING, log, log)
+        self.assertIn(self.FIRST_WORKER_LINE, log, log)
+        self.assertLess(log.index(self.PRICE_OPENING),
+                        log.index(self.FIRST_WORKER_LINE), log)
+        # COUNTED, not estimated: one planning session plus one per unit,
+        # and this plan has two units.
+        self.assertIn("this run opens 3 model session(s)", log, log)
+        # And the same block, in the same vocabulary, on the receipt's own
+        # report after the run, beside the cost it turned out to be.
+        self.assertIn("price (said before the run):", out, out)
+        self.assertIn("model_sessions: 3", out, out)
+
+    def test_with_no_earlier_run_the_expected_wall_clock_reads_no_data(self):
+        log, out = self._run_and_read_log()
+        self.assertIn("The expected wall clock reads %s: no earlier run "
+                      "against this target left a measured one" % _br.NODATA,
+                      log, log)
+        # NO-DATA is never a number: nothing in the sentence may read as a
+        # duration this run invented for itself.
+        self.assertNotIn("is what this one is expected to cost", log, log)
+        self.assertIn("wall_clock_seconds_expected: %s" % _br.NODATA, out, out)
+
+    def test_two_earlier_runs_are_quoted_by_their_median(self):
+        self._seed_earlier_run("20260901T000000-a", 100.0)
+        self._seed_earlier_run("20260902T000000-b", 300.0)
+        log, out = self._run_and_read_log()
+        self.assertIn("The last 2 run(s) against this target really took "
+                      "100s to 300s (measured), so their median, 200.0s of "
+                      "wall clock, is what this one is expected to cost",
+                      log, log)
+        self.assertIn("wall_clock_seconds_expected: 200.0", out, out)
+        self.assertNotIn(_br.NODATA, log[log.index(self.PRICE_OPENING):
+                                        log.index("What the same edit")], log)
+
+    def test_the_hand_route_is_named_and_never_claimed_to_be_beaten(self):
+        """The ruling's own concession, in the wording: the door does not
+        pretend a one-line edit is cheaper through it."""
+        paragraph = _br.price_paragraph(_br.build_price_block(2, [4.0]))
+        self.assertIn("What the same edit would cost you by hand is not "
+                      "measured here, and nothing below claims to beat it: "
+                      "the run proves what it does.", paragraph)
+
+    def test_the_block_carries_every_field_and_a_real_median(self):
+        block = _br.build_price_block(4, [12.0, 2245.0, 1517.2])
+        for field in _br.PRICE_FIELDS:
+            self.assertIn(field, block)
+        self.assertEqual(block["model_sessions"], 4)
+        self.assertEqual(block["previous_runs_measured"], 3)
+        self.assertEqual(block["wall_clock_seconds_expected"], 1517.2)
+        self.assertEqual(block["wall_clock_seconds_range"], "12s to 2245s")
+
+    def test_an_empty_history_names_why_rather_than_printing_a_zero(self):
+        block = _br.build_price_block(2, [])
+        self.assertEqual(block["previous_runs_measured"], 0)
+        for field in ("wall_clock_seconds_expected", "wall_clock_seconds_range"):
+            self.assertTrue(str(block[field]).startswith(_br.NODATA),
+                            block[field])
+        self.assertNotEqual(block["wall_clock_seconds_expected"], 0)
+
+
+#: E87: the done_check of a unit that names an evidence family carrying a
+#: contract. Writes the five E18 fields into the file the verifier reads,
+#: $BROTHER_RUN_DIR/evidence/<unit id>.json, which is the whole contract.
+E18_CHECK = """
+    import json, os, sys
+    unit = sys.argv[1]
+    run_dir = os.environ.get("BROTHER_RUN_DIR") or ""
+    if not run_dir:
+        sys.exit("BROTHER_RUN_DIR was not exported to the check")
+    out = os.path.join(run_dir, "evidence")
+    os.makedirs(out, exist_ok=True)
+    with open(os.path.join(out, "%s.json" % unit), "w") as fh:
+        json.dump({"metric": "accuracy", "value": 0.91, "baseline": 0.80,
+                   "seed": 7, "holdout_id": "h-e87"}, fh)
+    print("wrote the metric for %s" % unit)
+"""
+
+
+class MetricsAreRecordedUnderTwoSlots(unittest.TestCase):
+    """E87. The E52 parallel-scheduling adversity run scored its two test
+    units NO-DATA ("no metric recorded: no evidence file") while its two
+    other units passed, and the four --slots 1 runs in the same lane scored
+    0 NO-DATA, so the audit suspected the second slot of losing or racing on
+    the evidence file. IT IS NOT THE SLOTS. The variable is evidence_family:
+    those two test units were the only rows in the whole lane classified E2,
+    and E2 (with E8, receipt_door.NUMBERS_EVIDENCE_FAMILIES, and E18) demands
+    the unit's own done_check write $BROTHER_RUN_DIR/evidence/<id>.json
+    before the verifier reads it. Both tests below run the SAME two units at
+    --slots 1 and --slots 2 and get the same verdict either way: green when
+    the checks meet the contract, NO-DATA when they do not.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="e87-slots-")
+        self.repo = make_repo(self.tmp)
+        self.check = write_stub(self.tmp, "e18_check.py", E18_CHECK)
+        self.model = write_stub(self.tmp, "writer_model.py", WRITER_MODEL)
+
+    def _decomposer(self, name, checks):
+        units = [{"id": uid, "objective": "create %s" % path,
+                  "done_check": check, "writes": [path], "deps": [],
+                  "evidence_family": "E18"}
+                 for uid, path, check in checks]
+        return write_stub(self.tmp, name, """
+            import json, sys
+            sys.stdin.read()
+            print(json.dumps(%s))
+        """ % json.dumps(units))
+
+    def _run(self, decomposer, slots):
+        env = dict(os.environ)
+        env["DOOR_MODEL_CMD"] = "%s %s" % (sys.executable, decomposer)
+        env["MODEL_WORKER_CMD"] = "%s %s" % (sys.executable, self.model)
+        runs_root = tempfile.mkdtemp(prefix="e87-runs-", dir=self.tmp)
+        repo = make_repo(runs_root)
+        proc = sh([sys.executable, BROTHER_RUN, "two files exist",
+                   "--cwd", repo, "--runs-root", runs_root,
+                   "--slots", str(slots)], env=env)
+        return proc, proc.stdout + proc.stderr, runs_root
+
+    def _evidence_files(self, runs_root):
+        found = []
+        for root, _dirs, names in os.walk(runs_root):
+            if os.path.basename(root) == "evidence":
+                found += [os.path.join(root, n) for n in names]
+        return found
+
+    def test_two_units_under_two_slots_both_record_their_metric(self):
+        """The row's own done-check, as a targeted repro: every integrated
+        unit's evidence file is present and no unit is scored NO-DATA, with
+        the second slot open."""
+        dec = self._decomposer("dec_ok.py", [
+            ("A1", "one.txt", "test -f one.txt && %s %s A1"
+             % (sys.executable, self.check)),
+            ("A2", "two.txt", "test -f two.txt && %s %s A2"
+             % (sys.executable, self.check)),
+        ])
+        proc, out, runs_root = self._run(dec, 2)
+        self.assertEqual(proc.returncode, 0, out)
+        self.assertIn("integrated (2):", out, out)
+        self.assertIn("verdicts: 2 PASS, 0 FAIL, 0 NO-DATA", out, out)
+        self.assertNotIn("no metric recorded", out, out)
+        names = sorted(os.path.basename(p)
+                       for p in self._evidence_files(runs_root))
+        self.assertEqual(names, ["A1.json", "A2.json"], names)
+
+    def test_one_slot_scores_the_same_two_units_exactly_the_same_way(self):
+        """The disproof. Same two units, one slot: identical verdict line, so
+        the second slot never was the variable."""
+        dec = self._decomposer("dec_ok1.py", [
+            ("A1", "one.txt", "test -f one.txt && %s %s A1"
+             % (sys.executable, self.check)),
+            ("A2", "two.txt", "test -f two.txt && %s %s A2"
+             % (sys.executable, self.check)),
+        ])
+        proc, out, _root = self._run(dec, 1)
+        self.assertEqual(proc.returncode, 0, out)
+        self.assertIn("verdicts: 2 PASS, 0 FAIL, 0 NO-DATA", out, out)
+
+    def test_a_check_that_writes_no_metric_is_no_data_at_either_slot_count(self):
+        """The other half of driving it both ways: the SAME family, checks
+        that exit 0 without writing the evidence file, are NO-DATA at one
+        slot and at two alike. A green check is not proof of a number."""
+        dec = self._decomposer("dec_bare.py", [
+            ("A1", "one.txt", "test -f one.txt"),
+            ("A2", "two.txt", "test -f two.txt"),
+        ])
+        for slots in (1, 2):
+            proc, out, _root = self._run(dec, slots)
+            self.assertIn("verdicts: 0 PASS, 0 FAIL, 2 NO-DATA", out,
+                          "slots=%d: %s" % (slots, out))
+            self.assertIn("no metric recorded: no evidence file", out,
+                          "slots=%d: %s" % (slots, out))
+            self.assertNotEqual(proc.returncode, 0, out)
+
+
+class TheCleanTargetRuleIsStatedNotImplied(unittest.TestCase):
+    """E93. --runs-root's help said the target "integration requires to stay
+    clean" and stopped there, so a reader could not tell that an untracked
+    __pycache__/ passes while an untracked source file does not. Both the
+    help text and the refusal now name the one rule integrate.dirty_paths
+    actually enforces."""
+
+    def test_the_help_names_what_counts_and_what_does_not(self):
+        out = sh([sys.executable, BROTHER_RUN, "--help"]).stdout
+        self.assertIn("a tracked modification and an untracked file alike",
+                      " ".join(out.split()), out)
+        self.assertIn("__pycache__", out, out)
+        self.assertIn("which never counts", " ".join(out.split()), out)
+
+    def test_the_refusal_names_the_same_rule_the_help_does(self):
+        tmp = tempfile.mkdtemp(prefix="e93-")
+        repo = make_repo(tmp)
+        with open(os.path.join(repo, "stray.txt"), "w",
+                  encoding="utf-8") as fh:
+            fh.write("untracked, and not bytecode\n")
+        rows = [{"id": "A1", "status": "SCHEDULED", "owns": ["stray.txt"]}]
+        refusal, notice = _br._dirty_tree_lines(repo, rows)
+        self.assertEqual(notice, "")
+        self.assertIn("A tracked modification and an untracked file both "
+                      "count here; only interpreter bytecode (__pycache__/, "
+                      ".pyc, .pyo) never does", refusal)
+        # Driven backwards: the ignored kind really is ignored, so the
+        # sentence above is a description and not a slogan.
+        os.makedirs(os.path.join(repo, "__pycache__"))
+        with open(os.path.join(repo, "__pycache__", "x.pyc"), "wb") as fh:
+            fh.write(b"\x00")
+        clean = [{"id": "A1", "status": "SCHEDULED", "owns": ["__pycache__"]}]
+        os.remove(os.path.join(repo, "stray.txt"))
+        self.assertEqual(_br._dirty_tree_lines(repo, clean), ("", ""))
 
 
 if __name__ == "__main__":

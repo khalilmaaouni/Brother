@@ -1,0 +1,7 @@
+{
+  "ci": "consumer",
+  "codeGuideDepth": "maintainer",
+  "dossierRoot": "design",
+  "schemaVersion": "1.0",
+  "vaultPathPattern": "~/BrotherSBEVault"
+}

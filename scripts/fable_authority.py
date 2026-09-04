@@ -258,8 +258,24 @@ def decide(decision, overrule=None, cost_if_wrong=None, session='fable', now=Non
 def selftest():
     """Drive all three classes once each, in memory paths, and say so.
     Never touches the real logs under .sbe/."""
+    import shutil
     import tempfile
-    d = tempfile.mkdtemp()
+    d = tempfile.mkdtemp(prefix='fable-authority-selftest-')
+    try:
+        return _selftest_in(d)
+    finally:
+        # E100: check_all.sh runs --selftest on every battery run and this
+        # directory was never removed. Cleanup reports rather than dies: a
+        # finished proof must not fail on tidying up.
+        try:
+            shutil.rmtree(d)
+        except OSError as exc:
+            sys.stderr.write(
+                'fable_authority: left behind %s: %s\n' % (d, exc))
+
+
+def _selftest_in(d):
+    """The three drives themselves, against logs under the caller's dir."""
     amber_path = os.path.join(d, 'amber.jsonl')
     red_path = os.path.join(d, 'red.jsonl')
 

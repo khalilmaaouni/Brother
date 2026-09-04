@@ -29,6 +29,21 @@ import journal_projection  # noqa: E402
 import decide  # noqa: E402
 import receipt_door as RD  # noqa: E402
 
+# E100: one sandbox for every temp tree this process makes, removed at exit.
+import os as _e100_os, sys as _e100_sys  # noqa: E402
+_e100_sys.path.append(_e100_os.path.join(
+    _e100_os.path.dirname(_e100_os.path.abspath(__file__)), '.'))
+try:  # noqa: E402
+    import tmp_sandbox as _e100_tmp
+    _e100_tmp.install()
+except ImportError:
+    # A packager (scripts/export_public.py, make_benchmark_bundle.py)
+    # can copy this test without scripts/tmp_sandbox.py beside it. Say
+    # so rather than dying: the sandbox is hygiene, not the subject.
+    _e100_sys.stderr.write(
+        "tmp_sandbox absent: %s leaves its temp trees behind\n"
+        % _e100_os.path.basename(__file__))
+
 #: The teaching manifest P7's own brief names: products/brothersbe/docs/
 #: for-engineers/examples/data-warehouse/numbers-manifest.json, which the
 #: constraint "do not write into the examples" keeps read-only here; every
@@ -777,8 +792,13 @@ class HarnessRevisionNamesTheProducerOfTheReceipt(unittest.TestCase):
         self.assertEqual(receipts[0]["harness_revision"],
                          "abcdef0123456789fedcba")
         sentence = RD.receipt_sentence(receipts[0])
-        self.assertIn("harness abcdef012345 (private hub revision).",
-                      sentence)
+        # The clause after the sha depends on the checkout's remotes (E101):
+        # a hub checkout reads "private hub revision", a public clone with
+        # no remote reads "public remote NO-DATA". Only the twelve-hex cut
+        # is this test's claim.
+        self.assertIn("harness abcdef012345 (", sentence)
+        self.assertTrue("(private hub revision)." in sentence
+                        or "(public remote NO-DATA)." in sentence, sentence)
         self.assertNotIn("6789fedcba", sentence)
 
     def test_a_record_with_no_harness_revision_prints_no_data(self):
@@ -1541,6 +1561,115 @@ class HarnessLabelNamesTheRemoteThatCanResolveTheSha(unittest.TestCase):
         self.assertEqual(RD.harness_label(RD.NODATA), "harness NO-DATA")
 
 
+def make_bare(path):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    sh(["git", "init", "-q", "--bare", "-b", "main", path])
+    return path
+
+
+class ThePublicRemoteIsFoundByUrlNotByTheNameOrigin(unittest.TestCase):
+    """E101: the public ref was the literal string "origin/main", but origin
+    is the PRIVATE hub in ~/brother-hub and the PUBLIC repository in the
+    dual-remote lane checkouts, so one commit read as publicly resolvable in
+    one tree and private in the other (measured 2026-09-04: the README
+    honesty gate was green on the hub checkout and red in every lane
+    worktree). Both shapes, and the reverse naming that states the trap
+    outright, are built here as real repositories on disk and driven
+    offline: the remote URLs decide, never the names."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.public = make_bare(os.path.join(self.tmp, "khalilmaaouni",
+                                             "Brother.git"))
+        self.hub = make_bare(os.path.join(self.tmp, "khalilmaaouni",
+                                          "brother-hub.git"))
+        source = make_repo(self.tmp)
+        # One commit the public repository carries, and one only the hub
+        # ever sees: the two cases the label distinguishes.
+        self.public_sha = sh(["git", "rev-parse", "HEAD"],
+                             cwd=source).stdout.strip()
+        sh(["git", "push", "-q", self.public, "main"], cwd=source)
+        with open(os.path.join(source, "hub-only.txt"), "w",
+                  encoding="utf-8") as fh:
+            fh.write("hub\n")
+        sh(["git", "add", "-A"], cwd=source)
+        sh(["git", "commit", "-q", "-m", "hub only"], cwd=source)
+        self.hub_sha = sh(["git", "rev-parse", "HEAD"],
+                          cwd=source).stdout.strip()
+        sh(["git", "push", "-q", self.hub, "main"], cwd=source)
+
+    def _checkout(self, name, remotes):
+        path = os.path.join(self.tmp, name)
+        os.makedirs(path)
+        sh(["git", "init", "-q", "-b", "main"], cwd=path)
+        for remote, url in remotes:
+            sh(["git", "remote", "add", remote, url], cwd=path)
+            self.assertEqual(sh(["git", "fetch", "-q", remote],
+                                cwd=path).returncode, 0, remote)
+        return path
+
+    def test_every_checkout_shape_labels_one_commit_the_same_way(self):
+        shapes = {
+            # The lane worktrees: origin IS the public repository.
+            "lane": [("origin", self.public), ("hub", self.hub)],
+            # ~/brother-hub: origin is the private hub.
+            "hub-tree": [("origin", self.hub), ("public", self.public)],
+            # The reverse naming, the trap stated outright: the remote
+            # called "hub" is the public repository.
+            "reversed": [("origin", self.hub), ("hub", self.public)],
+        }
+        for name, remotes in shapes.items():
+            repo = self._checkout(name, remotes)
+            self.assertEqual(RD.harness_label(self.public_sha, repo=repo),
+                             "harness %s" % self.public_sha[:12], name)
+            self.assertEqual(RD.harness_label(self.hub_sha, repo=repo),
+                             "harness %s (private hub revision)"
+                             % self.hub_sha[:12], name)
+
+    def test_the_ref_name_comes_from_the_remote_whose_url_matched(self):
+        repo = self._checkout("named", [("origin", self.hub),
+                                        ("upstream", self.public)])
+        self.assertEqual(RD.public_remote_ref(repo=repo), "upstream/main")
+
+    def test_no_public_remote_reads_no_data_and_never_private(self):
+        repo = self._checkout("only-hub", [("origin", self.hub)])
+        self.assertEqual(RD.public_remote_ref(repo=repo), RD.NODATA)
+        label = RD.harness_label(self.hub_sha, repo=repo)
+        self.assertEqual(label, "harness %s (public remote NO-DATA)"
+                         % self.hub_sha[:12])
+        self.assertNotIn("private hub revision", label)
+
+    def test_a_directory_that_is_not_a_checkout_reads_no_data(self):
+        not_a_repo = os.path.join(self.tmp, "not-a-repo")
+        os.makedirs(not_a_repo)
+        self.assertEqual(RD.public_remote_ref(repo=not_a_repo), RD.NODATA)
+
+    def test_the_url_forms_of_the_same_repository_all_match(self):
+        matches = ("git@github.com:khalilmaaouni/Brother.git",
+                   "https://github.com/khalilmaaouni/Brother",
+                   "https://github.com/khalilmaaouni/Brother.git/",
+                   "/somewhere/local/khalilmaaouni/Brother.git")
+        misses = ("https://github.com/khalilmaaouni/brother-hub.git",
+                  "https://github.com/someone-else/Brother.git",
+                  "https://github.com/khalilmaaouni/BrotherModeUp.git")
+        for i, url in enumerate(matches):
+            repo = self._checkout("m%d" % i, [])
+            sh(["git", "remote", "add", "x", url], cwd=repo)
+            self.assertEqual(RD.public_remote_ref(repo=repo), "x/main", url)
+        for i, url in enumerate(misses):
+            repo = self._checkout("n%d" % i, [])
+            sh(["git", "remote", "add", "x", url], cwd=repo)
+            self.assertEqual(RD.public_remote_ref(repo=repo), RD.NODATA, url)
+
+    def test_an_explicit_ref_still_overrides_the_url_search(self):
+        repo = self._checkout("override", [("origin", self.public)])
+        self.assertEqual(
+            RD.harness_label(self.public_sha, repo=repo,
+                             public_ref="refs/does/not/exist"),
+            "harness %s (private hub revision)" % self.public_sha[:12])
+
+
 class PerFileChecksNameTheCommandBehindEachChangedFile(unittest.TestCase):
     """E79: the README named two changed files and two PASS units and
     printed no check command; per_file_checks is the function that turns a
@@ -1678,7 +1807,11 @@ class ADeliveryRecordWithNoPerFileChecksIsRefused(unittest.TestCase):
 
     def test_omitting_checks_entirely_still_records_a_plain_acceptance(self):
         # Backward compatibility: a human accepting a bare PR reference
-        # (this tool's original shape) is unaffected by E79.
+        # (this tool's original shape) is unaffected by E79, the acceptance
+        # is still written. E94 changed what the FIELD says: an omitted
+        # "checks" made a record that proves nothing the same shape on disk
+        # as one that never claimed to, so it now reads NO-DATA with the
+        # reason rather than being absent.
         ok, path = _ad.record(
             "a PR with no run behind it", "khalilmaaouni/Brother#1",
             "Khalil Maaouni", "2026-09-04T02:00:00+09:00", "person",
@@ -1686,7 +1819,8 @@ class ADeliveryRecordWithNoPerFileChecksIsRefused(unittest.TestCase):
         self.assertTrue(ok)
         with open(path, encoding="utf-8") as fh:
             stored = json.load(fh)
-        self.assertNotIn("checks", stored)
+        self.assertEqual(stored["checks"], "NO-DATA")
+        self.assertIn("--run-dir", stored["checks_reason"])
 
 
 class ReceiptIdentityFieldsRendered(unittest.TestCase):

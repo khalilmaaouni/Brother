@@ -29,6 +29,7 @@ absence of data.
 """
 import os
 import re
+import subprocess
 import sys
 import unittest
 
@@ -209,7 +210,7 @@ DUAL_CLIENT_COMMANDS = {
     "Codex install (plugin)": "codex plugin add brother@brother --json",
     "Codex start": "python3 scripts/brother_run.py",
     "Codex upgrade": "codex plugin marketplace add https://github.com/khalilmaaouni/Brother --ref",
-    "Codex uninstall (plugin)": "codex plugin remove brother",
+    "Codex uninstall (plugin)": "codex plugin remove brother@brother",
     "Codex uninstall (marketplace)": "codex plugin marketplace remove brother",
 }
 
@@ -249,6 +250,126 @@ class TheReadmeNamesBothClientsFullLifecycle(unittest.TestCase):
         self.assertIn("~/.codex/hooks.json", text)
 
 
+#: A marketplace-naming command and the name it was handed. `claude plugin
+#: marketplace add` takes a repository slug, which really is `khalilmaaouni/
+#: Brother`; every other verb takes the marketplace's declared name, which
+#: .claude-plugin/marketplace.json spells `brother`, in lower case.
+CLAUDE_MARKETPLACE_RE = re.compile(
+    r"claude plugin marketplace (update|remove|info)\s+(\S+)")
+
+#: A Codex plugin removal and the argument it names.
+CODEX_REMOVE_RE = re.compile(r"codex plugin remove\s+(\S+)")
+
+
+class TheCommandsAReaderTypesAreTheOnesTheClientsAccept(unittest.TestCase):
+    """2026-09-04, row E109: a newcomer audit of the public 1.0.2 page ran
+    every install, update and uninstall command in throwaway homes and four
+    of them were rejected by the client they were written for. Each one gets
+    an assertion here, each written to go red on the 1.0.2 wording."""
+
+    def test_every_marketplace_command_uses_the_declared_lower_case_name(self):
+        """`claude plugin marketplace update Brother` answers "Marketplace
+        'Brother' not found. Available marketplaces: brother" and exits 1,
+        measured 2026-09-04 in an isolated CLAUDE_CONFIG_DIR. Only fenced
+        blocks are read: the page also names the rejected spelling in prose,
+        as the warning it is."""
+        for block, line_no in fenced_blocks(readme_text()):
+            for verb, name in CLAUDE_MARKETPLACE_RE.findall(block):
+                self.assertEqual(
+                    name.strip("`"), "brother",
+                    "README.md:%d hands `claude plugin marketplace %s` the "
+                    "name %r. The marketplace declared by "
+                    ".claude-plugin/marketplace.json is `brother`, in lower "
+                    "case, and any other spelling is rejected."
+                    % (line_no, verb, name))
+
+    def test_the_v1_0_2_capitalised_marketplace_lines_would_be_refused(self):
+        """The positive control: the exact lines the public tag handed a
+        reader to run."""
+        for block, line_no in fenced_blocks(readme_text()):
+            self.assertNotIn("claude plugin marketplace update Brother",
+                             block, "README.md:%d" % line_no)
+            self.assertNotIn("claude plugin marketplace remove Brother",
+                             block, "README.md:%d" % line_no)
+
+    def test_every_codex_removal_names_the_plugin_and_its_marketplace(self):
+        """`codex plugin remove brother` is refused with "plugin requires
+        --marketplace unless passed as <plugin>@<marketplace>", measured
+        2026-09-04 against the app-bundled codex."""
+        for block, line_no in fenced_blocks(readme_text()):
+            for argument in CODEX_REMOVE_RE.findall(block):
+                self.assertIn(
+                    "@", argument.strip("`"),
+                    "README.md:%d tells a reader to run `codex plugin remove "
+                    "%s`. Codex refuses a bare plugin name: write it as "
+                    "<plugin>@<marketplace>." % (line_no, argument))
+
+    def test_both_runtime_verifier_paths_are_named_with_where_each_works(self):
+        """The bundle is unwrapped on install: an installed plugin root holds
+        `runtime/` and no `bundle/`, so the single path the 1.0.2 page named
+        for an installed plugin could not exist there. Measured 2026-09-04:
+        `python3 bundle/runtime/verify_runtime.py` exits 2 with No such file
+        from an installed Codex plugin root, and `python3
+        runtime/verify_runtime.py` prints PASS over 33 files there."""
+        text = readme_text()
+        self.assertIn("python3 bundle/runtime/verify_runtime.py", text)
+        self.assertIn("python3 runtime/verify_runtime.py", text)
+        self.assertNotIn(
+            "run `python3 bundle/runtime/verify_runtime.py` from an installed "
+            "plugin", text)
+
+    def test_the_codex_hook_uninstall_route_is_named_not_a_file_deletion(self):
+        """1.0.2 told a reader to delete the whole Codex hooks file, which
+        takes unrelated hooks with it. The installer now has --uninstall,
+        which removes only the commands it wrote."""
+        text = readme_text()
+        self.assertIn("--uninstall", text)
+        self.assertNotIn("has no uninstall or `--uninstall` route", text)
+
+
+class TheSmallChangePriceMatchesItsOwnDecisionRecord(unittest.TestCase):
+    """E90. The limits section now carries what a small change really costs
+    through the door. Those figures came out of one measurement, recorded in
+    docs/decisions/light-path-for-small-changes-2026-09-04.json, and the
+    front page must not drift from it: every number the paragraph quotes is
+    read back out of the record here rather than trusted where it is typed.
+
+    Driven backwards: before the paragraph existed the README carried none
+    of these figures and this failed on the first one."""
+
+    RECORD = os.path.join(ROOT, "docs", "decisions",
+                          "light-path-for-small-changes-2026-09-04.json")
+
+    #: The engine-cost figures the ruling turned on, which is why the
+    #: paragraph may quote them at all.
+    FIGURES = ("0.78", "568.03", "728", "2.58", "1.69")
+
+    def test_every_figure_in_the_readme_paragraph_is_in_the_record(self):
+        if not os.path.exists(self.RECORD):
+            # The public export does not carry docs/decisions, so a public
+            # clone cannot check the paragraph against the record it cites.
+            # That is a limit of the clone, not a pass: the hub runs this
+            # test with the record present.
+            self.skipTest("NO-DATA: this checkout does not carry %s, so the "
+                          "README's price paragraph cannot be checked against "
+                          "its decision record here; NO-DATA is not a pass"
+                          % os.path.relpath(self.RECORD, ROOT))
+        with open(self.RECORD, encoding="utf-8") as fh:
+            record = fh.read()
+        readme = readme_text()
+        for figure in self.FIGURES:
+            self.assertIn(figure, record,
+                          "%s is quoted on the front page but is not in the "
+                          "decision record it cites" % figure)
+            self.assertIn(figure, readme,
+                          "the decision record's %s is not on the front page"
+                          % figure)
+        # And the record itself is named, so a reader can reach the
+        # alternative that was declined.
+        self.assertIn("docs/decisions/light-path-for-small-changes-"
+                      "2026-09-04.json", readme)
+
+
 class TheTagSentenceIsNeverATypedVersion(unittest.TestCase):
 
     def test_no_concrete_tag_is_typed_into_a_git_tag_v_instruction(self):
@@ -269,6 +390,50 @@ class TheTagSentenceIsNeverATypedVersion(unittest.TestCase):
         self.assertTrue(notes, "docs/releases carries no release note")
         for note in notes:
             self.assertRegex(note, r"^\d+\.\d+\.\d+$", note)
+
+
+#: E99 (2026-09-04): the README's Limits section described the file fence
+#: and the single-writer claim in prose without ever naming the tests that
+#: prove them, and never mentioned the push-time gate or the private-term
+#: scan at all, so a reader had to find the proof by listing scripts/.
+#: Reuses readiness_gate.py's own suite-running shape: run the script, its
+#: exit code is the evidence.
+NEWLY_NAMED_LIMITS_SUITES = [
+    "test_claim_store.py",
+    "test_lifecycle_hooks.py",
+    "test_private_terms_scan.py",
+    "test_pre_push_gate.py",
+]
+
+
+class TheFourLimitsControlsAreNamedAndActuallyRun(unittest.TestCase):
+
+    def test_each_suite_is_named_in_the_readme(self):
+        """The positive control: before this class existed, README.md's
+        proof list named eight suites and none of these four, so this
+        assertion failed on that wording and only passes now that the
+        Limits section names them."""
+        text = readme_text()
+        missing = [s for s in NEWLY_NAMED_LIMITS_SUITES if s not in text]
+        self.assertFalse(
+            missing,
+            "README.md's Limits section describes hook-driven controls it "
+            "does not name a proof for: missing %s from the proof-suite "
+            "list." % missing)
+
+    def test_each_named_suite_exists_and_exits_zero(self):
+        for name in NEWLY_NAMED_LIMITS_SUITES:
+            path = os.path.join(HERE, name)
+            with self.subTest(suite=name):
+                self.assertTrue(os.path.isfile(path), path)
+                proc = subprocess.run(
+                    [sys.executable, path],
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                self.assertEqual(
+                    proc.returncode, 0,
+                    "%s exited %d:\n%s" % (
+                        name, proc.returncode,
+                        proc.stdout.decode("utf-8", "replace")))
 
 
 if __name__ == "__main__":

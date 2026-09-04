@@ -690,7 +690,14 @@ def build_prompt(outcome, refusal=None, existing_files=None):
         "after this unit cannot match against the file it actually wrote.",
         "  deps: a list of other units' ids this unit depends on (may be empty)",
         "  evidence_family: OPTIONAL. One of E1 through E18, naming which "
-        "evidence family the done_check belongs to. Omit if unsure.",
+        "evidence family the done_check belongs to. Omit if unsure. "
+        "THREE OF THEM CARRY A CONTRACT THE CHECK ITSELF MUST MEET, and a "
+        "unit that names one without meeting it is scored NO-DATA however "
+        "green its check exits: E2 and E8 require the done_check to write a "
+        "numbers_manifest path into $BROTHER_RUN_DIR/evidence/<unit id>.json, "
+        "and E18 requires it to write metric, value, baseline, seed and "
+        "holdout_id into that same file. Name E2, E8 or E18 ONLY when this "
+        "unit's own done_check writes that file; otherwise omit the field.",
         "  oracle_source: OPTIONAL. One of requirement, business_rule, "
         "independent_query, reference_impl, prior_release, "
         "generated_from_impl, human_observation, none: what the "
@@ -714,7 +721,8 @@ def build_prompt(outcome, refusal=None, existing_files=None):
     return "\n".join(lines) + "\n"
 
 
-def build_check_rewrite_prompt(objective, original_check, stderr_text):
+def build_check_rewrite_prompt(objective, original_check, stderr_text,
+                               refusal_reason=None):
     """The single-unit companion to build_prompt() above: asked only when a
     generated done_check turned out to be unrunnable (measured live
     2026-09-03: the planner twice wrote a multi-line `python3 -c "..."`
@@ -722,7 +730,18 @@ def build_check_rewrite_prompt(objective, original_check, stderr_text):
     error before and after any work), never as a second attempt at the
     whole plan. Same contract as build_prompt's own done_check field,
     stated narrower: one unit, one replacement command, nothing else about
-    the plan changes."""
+    the plan changes.
+
+    `refusal_reason`, when given, is the SECOND and last ask for this same
+    unit (E88): the previous replacement parsed but guard_adopted_check
+    refused it, and the reason it names is quoted back so the planner can
+    write a different command instead of the same one again. Measured
+    live in two independent 2026-09-04 trials, the outcome phrasing
+    "raises X with a clear message" produced a replacement carrying a `;`,
+    which was refused with nothing said back to the planner. Only the
+    REASON is quoted, never the refused command: that command came from
+    the same untrusted reply this is refusing, per guard_adopted_check's
+    own contract."""
     lines = [
         "One unit of a work plan has a done_check that cannot run at all.",
         "",
@@ -741,11 +760,26 @@ def build_check_rewrite_prompt(objective, original_check, stderr_text):
         "already happened.",
         "  - Use python3, never python, and name only programs that exist "
         "on a normal machine.",
+        "  - ONE COMMAND, not two: no `;`, no `&&`, no `||`, no `|`, no "
+        "backticks and no `$(...)`. The check runs as a single command and "
+        "any of those gets it refused outright. For an outcome like "
+        "\"raises X with a clear message\", put the whole assertion inside "
+        "one python3 -c '...' program, using commas between statements "
+        "where you would reach for a separator.",
         "",
         "Answer with PURE JSON: a single JSON object of the form "
         '{"done_check": "..."}. No prose, no explanation, no markdown, no '
         "code fences.",
     ]
+    if refusal_reason:
+        lines += [
+            "",
+            "Your previous replacement for this same unit was REFUSED "
+            "before it ever ran: %s." % refusal_reason,
+            "Write a DIFFERENT command that does not break that rule. This "
+            "is the last attempt; if it is refused again the unit is "
+            "refused and no worker starts on it.",
+        ]
     return "\n".join(lines) + "\n"
 
 

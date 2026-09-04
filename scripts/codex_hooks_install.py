@@ -163,13 +163,23 @@ def build(products):
 
 def resolve_home(named, allow_default):
     """{"path": ..., "problem": None} or a refusal. The founder's own
-    ~/.codex is refused unless it was asked for by name AND allowed."""
+    ~/.codex is refused unless it was asked for by name AND allowed.
+
+    The path is RESOLVED, not merely made absolute. On macOS /tmp and /var are
+    symlinks and Codex canonicalizes CODEX_HOME before it reports a hook's
+    sourcePath, so a hooks file written under the un-resolved spelling is read
+    back under the resolved one: the sourcePath filter in main() then matches
+    nothing, hooks/list reports 0 hook(s), the trust block comes out empty, and
+    every hook stays untrusted. Measured 2026-09-04 against the app-bundled
+    codex with an isolated CODEX_HOME under mktemp -d, which hands out
+    /var/folders/... for /private/var/folders/...
+    """
     path = named or os.environ.get("CODEX_HOME") or ""
     if not path:
         return {"path": None, "problem":
                 "no Codex home given: pass --codex-home <dir> or set CODEX_HOME"}
-    path = os.path.abspath(os.path.expanduser(path))
-    default_home = os.path.abspath(os.path.expanduser(os.path.join("~", ".codex")))
+    path = os.path.realpath(os.path.expanduser(path))
+    default_home = os.path.realpath(os.path.expanduser(os.path.join("~", ".codex")))
     if path == default_home and not allow_default:
         return {"path": None, "problem":
                 "refusing to write %s, the real Codex home: a hooks file can "
@@ -342,6 +352,113 @@ def _split_trust(text):
     return (text[:start], text[start:end], text[end:])
 
 
+def brother_commands(document):
+    """Every command string this script writes for the named products. This is
+    the identity used by --uninstall: a hook is Brother's because Brother wrote
+    that exact command, never because it sits in a file Brother also wrote."""
+    return set(hook.get("command")
+               for blocks in document.get("hooks", {}).values()
+               for block in blocks
+               for hook in block.get("hooks", [])
+               if hook.get("command"))
+
+
+def strip_hooks(existing, commands):
+    """{"document": ..., "removed": [(event, command), ...]}: the same hooks
+    document with Brother's own commands taken out and everything else left
+    exactly where it was, empty blocks and empty events dropped."""
+    removed = []
+    kept = {}
+    for event, blocks in (existing or {}).get("hooks", {}).items():
+        kept_blocks = []
+        for block in blocks:
+            entries = []
+            for hook in block.get("hooks", []):
+                if hook.get("command") in commands:
+                    removed.append((event, hook.get("command")))
+                    continue
+                entries.append(hook)
+            if entries:
+                kept_block = dict(block)
+                kept_block["hooks"] = entries
+                kept_blocks.append(kept_block)
+        if kept_blocks:
+            kept[event] = kept_blocks
+    document = dict(existing or {})
+    document["hooks"] = kept
+    return {"document": document, "removed": removed}
+
+
+def uninstall(home, commands):
+    """Remove Brother's hooks and its trust section from `home`, printing what
+    went. 0 when something was removed, 0 with a NO-DATA line when there was
+    nothing of Brother's to remove, 1 on a refusal."""
+    path = hooks_json_path(home)
+    removed = []
+    hooks_left = None
+    if os.path.exists(path):
+        loaded = read_json(path)
+        if loaded["problem"]:
+            print("codex_hooks_install: FAIL: %s" % loaded["problem"])
+            return 1
+        stripped = strip_hooks(loaded["data"], commands)
+        removed = stripped["removed"]
+        hooks_left = stripped["document"]["hooks"]
+        if removed:
+            try:
+                if hooks_left:
+                    with io.open(path, "w", encoding="utf-8") as handle:
+                        handle.write(dump(stripped["document"]))
+                else:
+                    os.remove(path)
+            except OSError as exc:
+                print("codex_hooks_install: FAIL: could not rewrite %s: %s"
+                      % (path, exc))
+                return 1
+
+    config_path = os.path.join(home, "config.toml")
+    trust_removed = False
+    if os.path.exists(config_path):
+        try:
+            with io.open(config_path, encoding="utf-8") as handle:
+                existing = handle.read()
+        except OSError as exc:
+            print("codex_hooks_install: FAIL: could not read %s: %s"
+                  % (config_path, exc))
+            return 1
+        before, ours, after = _split_trust(existing)
+        if ours:
+            try:
+                with io.open(config_path, "w", encoding="utf-8") as handle:
+                    handle.write(before + after)
+            except OSError as exc:
+                print("codex_hooks_install: FAIL: could not rewrite %s: %s"
+                      % (config_path, exc))
+                return 1
+            trust_removed = True
+
+    if not removed and not trust_removed:
+        print("codex_hooks_install: NO-DATA: nothing of Brother's to remove "
+              "from %s" % home)
+        return 0
+    if removed:
+        events = sorted(set(event for event, _command in removed))
+        print("codex_hooks_install: removed %d Brother hook command(s) across "
+              "%s from %s" % (len(removed), ", ".join(events), path))
+        for event, command in removed:
+            print("codex_hooks_install:   %s: %s" % (event, command))
+        if hooks_left:
+            print("codex_hooks_install: kept %d event(s) of other hooks in %s"
+                  % (len(hooks_left), path))
+        else:
+            print("codex_hooks_install: removed %s: no other hooks were in it"
+                  % path)
+    if trust_removed:
+        print("codex_hooks_install: removed Brother's trust section from %s"
+              % config_path)
+    return 0
+
+
 def check(home, document):
     """PASS, FAIL or NO-DATA on what is on disk against what would be written.
     NO-DATA when no Codex hooks file exists at all: unexamined is never clean.
@@ -371,6 +488,9 @@ def main(argv):
                              "(repeatable; defaults to both Brother products)")
     parser.add_argument("--check", action="store_true",
                         help="report PASS, FAIL or NO-DATA and write nothing")
+    parser.add_argument("--uninstall", action="store_true",
+                        help="remove Brother's own hook commands and its trust "
+                             "section, leaving every other hook in place")
     parser.add_argument("--trust", action="store_true",
                         help="also persist Codex's hook trust in config.toml, "
                              "using the hash Codex itself reports")
@@ -396,6 +516,13 @@ def main(argv):
         print("codex_hooks_install: FAIL: %s" % resolved["problem"])
         return 1
     home = resolved["path"]
+
+    if args.uninstall:
+        if args.check:
+            print("codex_hooks_install: FAIL: --check reports and --uninstall "
+                  "writes; run one or the other")
+            return 1
+        return uninstall(home, brother_commands(built["document"]))
 
     if args.check:
         verdict, detail = check(home, built["document"])

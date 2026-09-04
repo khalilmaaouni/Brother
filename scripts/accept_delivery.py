@@ -26,6 +26,17 @@ it under delegation, honestly, in its own words. --list counts a week's
 acceptances only over person-recorded entries; an agent-recorded one is
 printed on its own line and never folded into the count.
 
+A PATH IS NOT AN IDENTITY (row E94, the second half of the same
+delivery-proof finding). The one record this repository shipped cited a run
+directory under the running machine's home, which nobody reading the
+repository can open, and carried nothing else by which that run could be
+recognised. Every record written from a run now carries that run's own
+identity (its run id and a sha256 over the exact receipt bytes the checks
+were read from) BESIDE the local path, and the path is labelled with whether
+it is inside this repository or only on one machine. A record given no
+receipt at all reads NO-DATA in its checks field rather than omitting the
+field, because an absent claim and a proved one used to look alike on disk.
+
 ONE RECORD PER DELIVERY, append-only. Each acceptance is its own JSON file
 under docs/deliveries/, named for the commit or PR it points at (its "ref" is
 the delivery's identity here, not its plain-language name, because the same
@@ -59,6 +70,7 @@ Python 3, standard library only. No network.
 """
 import argparse
 import datetime
+import hashlib
 import json
 import os
 import re
@@ -93,7 +105,7 @@ def parse_iso(value):
 
 
 def record(name, ref, accepted_by, accepted_at, recorded_by, delegation=None,
-           words=None, directory=None, checks=None):
+           words=None, directory=None, checks=None, run=None):
     """Write one acceptance. Returns (True, path) on success or
     (False, reason) on refusal. Pure enough to test without a subprocess.
 
@@ -138,8 +150,21 @@ def record(name, ref, accepted_by, accepted_at, recorded_by, delegation=None,
         entry["delegation"] = str(delegation).strip()
     if words and words.strip():
         entry["words"] = words.strip()
-    if checks is not None:
+    # E94: a record given no receipt says so in the field a reader looks
+    # at. Omitting "checks" made a record that proves nothing the same shape
+    # on disk as one that was never claimed to prove anything, which is how
+    # the shipped record read for a day. NO-DATA, with what stopped it, is
+    # never an empty list and never a pass.
+    if checks is None:
+        entry["checks"] = NODATA
+        entry["checks_reason"] = (
+            "no run receipt was given to accept-delivery (--run-dir or "
+            "--checks-file), so this record names no changed file and no "
+            "command a reader could re-run")
+    else:
         entry["checks"] = checks
+    if run:
+        entry["run"] = run
 
     os.makedirs(directory, exist_ok=True)
     try:
@@ -227,6 +252,72 @@ def per_week(entries):
     return counts
 
 
+def _inside_repo(path):
+    """True when `path` lies inside this repository. A run directory inside
+    the tree can be shipped with the record; one outside it cannot, and the
+    record has to say which it is rather than printing a path and leaving
+    the reader to find out."""
+    return os.path.abspath(path).startswith(os.path.abspath(ROOT) + os.sep)
+
+
+def _tilde(path):
+    """The caller's home directory collapsed back to ~, so a stored path
+    names a location rather than one account's spelling of it. Anything
+    outside home (and NO-DATA) is returned untouched."""
+    home = os.path.expanduser("~")
+    if path == home or path.startswith(home + os.sep):
+        return "~" + path[len(home):]
+    return path
+
+
+def run_identity(run_dir):
+    """(identity, "") naming the run a record's checks were read from, or
+    (None, reason) when the run's own files cannot be read.
+
+    E94: the shipped record pointed at a run directory under the running
+    machine's home and carried nothing else, so a reader who could not open
+    that path had no way to tell which run the record meant, or whether a
+    run directory they were handed was that one. A path is not an identity.
+    The two facts that are: the run's own id (the run directory's name,
+    which brother_run.py mints and which a delivery ref already carries),
+    and a sha256 over the exact bytes of the Work document and claims.json
+    the per-file checks were derived from. The local path is kept beside
+    them, under a name that says what it is, because it is still the
+    fastest way to the output on the machine that ran the work.
+
+    This reads files and hashes them. It runs no check and invents nothing:
+    a run whose receipt files cannot be read is refused, not summarised."""
+    if not os.path.isdir(run_dir):
+        return None, "--run-dir %r is not a directory" % run_dir
+    names = sorted(n for n in os.listdir(run_dir)
+                   if (n.startswith("W-") and n.endswith(".json"))
+                   or n == "claims.json")
+    if not names:
+        return None, ("--run-dir %r holds neither a W-*.json Work document "
+                      "nor claims.json, so there is nothing to identify the "
+                      "run by" % run_dir)
+    digest = hashlib.sha256()
+    for name in names:
+        try:
+            with open(os.path.join(run_dir, name), "rb") as fh:
+                blob = fh.read()
+        except OSError as exc:
+            return None, ("--run-dir %r: %s could not be read (%s)"
+                          % (run_dir, name, exc))
+        # Length-prefixed per file, so two different splits of the same
+        # bytes across files cannot collide into one digest.
+        digest.update(("%s\0%d\0" % (name, len(blob))).encode("utf-8"))
+        digest.update(blob)
+    abs_dir = os.path.abspath(run_dir)
+    return {
+        "run_id": os.path.basename(abs_dir),
+        "receipt_digest": "sha256:%s" % digest.hexdigest(),
+        "receipt_files": names,
+        "run_dir_local": _tilde(abs_dir),
+        "run_dir_in_repository": _inside_repo(abs_dir),
+    }, ""
+
+
 def checks_from_run_dir(run_dir):
     """(checks, "") for the per-file check list a completed run's own
     directory already holds, or (None, reason) naming what stopped it.
@@ -268,7 +359,18 @@ def checks_from_run_dir(run_dir):
     receipts = receipt_door.receipts_for(
         record_doc, claims, [],
         log_path=log_path if os.path.isfile(log_path) else None)
-    return receipt_door.per_file_checks(record_doc, receipts), ""
+    checks = receipt_door.per_file_checks(record_doc, receipts)
+    # E94: every one of these output_locations is the run.log inside the
+    # run directory the caller named, and that directory is very often
+    # outside this repository. Say which, on the entry itself, so a reader
+    # who cannot open the path knows it is not a broken link but a machine
+    # they do not have, and reaches for the record's run block instead.
+    scope = "in-repository" if _inside_repo(run_dir) else "machine-local"
+    for entry in checks:
+        entry["output_location"] = _tilde(
+            str(entry.get("output_location") or NODATA))
+        entry["output_location_scope"] = scope
+    return checks, ""
 
 
 def main(argv=None):
@@ -357,9 +459,14 @@ def main(argv=None):
     if args.checks_file and args.run_dir:
         ap.error("--checks-file and --run-dir both name where the per-file "
                  "checks come from; pass one, never both")
+    run = None
     if args.run_dir:
         checks, reason = checks_from_run_dir(args.run_dir)
         if checks is None:
+            print("accept-delivery: refused: %s" % reason, file=sys.stderr)
+            return 2
+        run, reason = run_identity(args.run_dir)
+        if run is None:
             print("accept-delivery: refused: %s" % reason, file=sys.stderr)
             return 2
     if args.checks_file:
@@ -373,7 +480,7 @@ def main(argv=None):
 
     ok, result = record(args.name, args.ref, args.accepted_by, args.accepted_at,
                         args.recorded_by, args.delegation, args.words, args.dir,
-                        checks)
+                        checks, run)
     if not ok:
         print("accept-delivery: refused: %s" % result, file=sys.stderr)
         return 2

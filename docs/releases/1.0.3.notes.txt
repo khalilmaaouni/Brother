@@ -1,0 +1,34 @@
+This release exists because the post-cut closeout of 1.0.2 found that the export manifest
+beside its release note described the first cut commit, not the tagged tree: 18 of its 1198
+lines named a hash that differed from the shipped file. A tag is never moved, so 1.0.2 stays
+public with that known issue stated on its Release page, and 1.0.3 carries a manifest
+regenerated from the tagged tree plus a tag-time check in `scripts/export_public.py` that
+refuses any export whose manifest disagrees with the tree it ships. The cut script regenerates
+the release note and drives the note's own files table, and `scripts/refresh_cut.py`
+regenerates the manifest and verifies it with `--check`, which is the documented step run
+after the cut script and again after any later commit on a cut branch.
+
+The README files in this release were made with Codex: a signed-in Codex CLI followed the
+root README and both product READMEs as a newcomer against the public 1.0.2 clone, ran every
+command they name, and reported each false, stale or unverifiable sentence with the command
+and exit code that showed it. What survived re-verification landed: the Claude update and
+uninstall commands name the marketplace as `brother`, the Codex removal form is
+`codex plugin remove brother@brother`, the verifier path inside an installed Codex plugin is
+`runtime/verify_runtime.py`, the checksum writer is never named before the verifier, and the
+hooks installer resolves a symlinked Codex home before writing so Codex trusts what it wrote.
+The installer also gained `--uninstall`, which removes only Brother's hook entries.
+
+The public export now carries the files the products' own gates name, so
+`python3 tools/test_all.py` in BrotherMode and the BrotherSBE suite and evals run in a fresh
+public clone instead of stopping on an absent file. Findings from the evaluator's audit that
+landed here: the public remote is found by URL rather than by the name `origin`, a push from a
+detached HEAD is scanned by the pre-push gate, a delivery record carries the run it was proved
+by and reads NO-DATA without one, tests clean their temporary trees, and the fence refusal's
+fix-it command runs from the project root.
+
+This release still does NOT claim Codex compatibility. The credentialled half of the Codex
+smoke, one real task run end to end in a signed-in Codex, is row C7.2 and closeout gate X8 of
+the readiness roadmap and waits on the founder's own run of `docs/codex/SMOKE-RUNBOOK.md`.
+The closeout gate X2, a Codex upgrade from the previous public release, reads NO-DATA for
+1.0.2 because 1.0.1 shipped no Codex package; for this release it is real and upgrades a
+1.0.2 Codex install to 1.0.3.

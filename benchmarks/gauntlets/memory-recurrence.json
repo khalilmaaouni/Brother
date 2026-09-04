@@ -1,0 +1,134 @@
+{
+  "id": "memory-recurrence",
+  "name": "Memory Recurrence",
+  "frozen_at": "2026-09-05",
+  "status": "SPECIFIED, NOT YET RUN",
+  "source": {
+    "document": "SWITCHING-STRATEGY-2026-09-04.md",
+    "sections": [7, 19, 20],
+    "gauntlet_section": "20.4"
+  },
+  "zone": {
+    "id": 4,
+    "name": "Skeptical Memory",
+    "section": "7, Zone 4"
+  },
+  "workload_families": [
+    {"n": 1, "name": "tiny bug fix"},
+    {"n": 2, "name": "medium multi-file feature"},
+    {"n": 10, "name": "stale memory contradicting current source"}
+  ],
+  "seeded_conditions": [
+    "memory off",
+    "memory on",
+    "stale memory",
+    "contradictory memory",
+    "superseded memory"
+  ],
+  "seeded_conditions_note": "The five strings above are section 20.4's own arm list, copied without addition. How each is planted on this estate: memory off and memory on are the BM_MEMORY seam scripts/memory_ab.py already drives, one run per task per mode; stale memory is a seeded lesson whose applies_to names a path that no longer exists in the tree, the exact shape scripts/test_recall_revalidation.py drives; contradictory memory is a seeded lesson asserting the opposite of what the current source says, planted so the evidence hierarchy of Zone 4 can be observed choosing; superseded memory is a lesson carrying a superseded_by pointer to a newer one, both retrievable, so the run must apply the newer. Every arm runs the same frozen task set so the arms differ only in what memory holds.",
+  "fairness_controls": [
+    "starting repository",
+    "model where possible",
+    "token budget",
+    "task instruction",
+    "hardware/environment",
+    "maximum human interventions",
+    "scoring rubric before execution"
+  ],
+  "fairness_notes": {
+    "starting repository": "One frozen repository and one frozen memory store per arm, both rebuilt from the same snapshot before each arm so an earlier arm cannot teach a later one.",
+    "model where possible": "The same model id across all five arms. A memory result measured across two models measures the models.",
+    "token budget": "One ceiling per task per arm. A memory-on arm that wins by spending twice as much has not won the same thing.",
+    "task instruction": "The task set is DATA, frozen in a JSON file the way benchmarks/memory-ab/tasks-2026-08-30.json already is, and passed identically to every arm.",
+    "hardware/environment": "One machine, hooks in the same state, the recall hook wired identically except for the seam under test.",
+    "maximum human interventions": "Zero. A human hint about a lesson would be the lesson.",
+    "scoring rubric before execution": "scoring_rubric below is frozen with this file, including each task's own check command."
+  },
+  "metrics": [
+    {
+      "metric": "REPEATED FAILURE",
+      "status": "partial",
+      "instrument": "scripts/repeat_control.py",
+      "row": "E53",
+      "proved": "The instrument is built and proven honest: driven once over the real logs it printed 'recall off: 434 session(s), 60851 tool call(s), 0 lesson(s) shown, 0 repeat(s)' and refused to compose a comparison, exiting 2 with NO-DATA on the other arm.",
+      "gap": "Row E53 is OPEN precisely because both arms have not filled. The counter that exists measures lessons shown and repeats observed in real session logs; the controlled two week comparison it was built for has not run. scripts/e53_lesson_ab.py is the fast lab version of the same question and has run once, on eight tasks per arm."
+    },
+    {
+      "metric": "TIME TO OUTCOME",
+      "status": "partial",
+      "instrument": "scripts/memory_ab.py",
+      "row": "E53",
+      "proved": "The harness records a duration per task per mode and writes it into benchmarks/memory-ab/results-2026-08-30.json.",
+      "gap": "In the one real run those durations measured a file replay, not the model, and the result document says so and treats the column as NO-DATA. Time to correction, which is what section 20.4 asks for, needs the arms run live rather than replayed."
+    },
+    {
+      "metric": "DEFECTS INTRODUCED",
+      "status": "measured",
+      "instrument": "scripts/test_recall_revalidation.py",
+      "row": "E74",
+      "proved": "A seeded lesson whose applies_to names a path absent from the tree is recalled, refused by name with the line 'recall: STALE <slug>: anchor <x> not found in <tree>; not applied', and is absent from the applied section of the receipt, while a current lesson is applied. This is the false-memory-induced failure of section 20.4, measured as a refusal."
+    },
+    {
+      "metric": "TASK CORRECTNESS",
+      "status": "measured",
+      "instrument": "scripts/memory_ab.py",
+      "row": "E53",
+      "proved": "Each task carries its own check command and the harness scores every task in every mode by that check's exit code; the first real run reported per mode success of 4 of 11 off and 11 of 11 on, with the harness exiting 0."
+    },
+    {
+      "metric": "NO-DATA HONESTY",
+      "status": "measured",
+      "instrument": "scripts/memory_ab.py",
+      "row": "E53",
+      "proved": "Four of the six measures the run could not honestly fill were written into the result rows as NO-DATA strings naming the reason, for example 'NO-DATA: no mistake ledger is wired to compare against', rather than left blank or filled with a zero."
+    }
+  ],
+  "measures_outside_the_fifteen": [
+    {
+      "measure": "evidence override",
+      "from": "section 20.4",
+      "status": "partial",
+      "instrument": "scripts/test_recall_revalidation.py",
+      "would_require": "Zone 4 ranks current evidence above verified memory above unverified recall. The stale case is enforced and tested. The contradictory case, where a retrievable lesson disagrees with what the source says right now and the source must win, has no test of its own, so this arm reports NO-DATA until one exists."
+    }
+  ],
+  "scoring_rubric": {
+    "fixed_before_execution": true,
+    "rules": [
+      "Each task is scored by its own frozen check command's exit code, never by reading the output.",
+      "A lift is claimed only as a property of this task set, named with its n. The task set is published with the result.",
+      "A stale, contradictory or superseded lesson that reaches the applied section of the receipt fails the arm outright, whatever the task score.",
+      "A refusal that names the stale lesson counts as a pass for that arm, because the required behaviour is refusal, not silence.",
+      "Repeated failure is counted per failure class, from the ledger, never from an impression of the transcript.",
+      "Any measure the run cannot fill honestly is written NO-DATA with its reason in the result row itself."
+    ]
+  },
+  "win_condition": {
+    "section": "7, Zone 4",
+    "text": [
+      "memory can change behavior",
+      "memory reduces repeated failure",
+      "stale memory is detected",
+      "contradictory evidence wins",
+      "the agent can explain which lesson influenced the run"
+    ],
+    "hierarchy": [
+      "CURRENT EVIDENCE",
+      "AUTHORITATIVE CURRENT STATE",
+      "VERIFIED MEMORY",
+      "HISTORICAL MEMORY",
+      "UNVERIFIED RECALL"
+    ],
+    "met_when": "All five statements hold on the frozen task set, each from a published arm record, with the fifth read off the receipt's own applied-memory section rather than from prose."
+  },
+  "raw_artifacts": {
+    "rule": "Publish raw artifacts. Do not publish only a synthetic score.",
+    "root": "docs/plan/runs/gauntlet-memory-recurrence-<date>/",
+    "contents": [
+      "the frozen task set, in the shape of benchmarks/memory-ab/tasks-2026-08-30.json",
+      "one result row per task per arm, in the shape of benchmarks/memory-ab/results-2026-08-30.json, NO-DATA strings included",
+      "the seeded lessons for the stale, contradictory and superseded arms, verbatim",
+      "every run's receipt, so the applied-memory section can be read by anyone"
+    ]
+  }
+}

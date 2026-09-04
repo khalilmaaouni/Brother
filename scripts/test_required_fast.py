@@ -125,5 +125,81 @@ class RequiredFastScript(unittest.TestCase):
         self.assertIn("pass 0   fail 1   no-data 1", out)
 
 
+class TwoWorktreesShareOneTempDirectory(unittest.TestCase):
+    """Row E100. Lane BM2's gate run read a traceback out of lane AW2's tree,
+    because the failure capture was keyed by check name and pid inside one
+    shared $TMPDIR. These drive the real script from two differently named
+    parent directories, sharing one temp root, which is the collision itself.
+    """
+
+    def build_in_lane(self, lane, stub_lines):
+        """A stub of the real script under <root>/<lane>/scripts, so the
+        script's own `cd $(dirname $0)/..` resolves to a lane directory and
+        its worktree key is that lane's name."""
+        root = tempfile.mkdtemp(prefix="two-worktrees-")
+        scripts_dir = os.path.join(root, lane, "scripts")
+        os.makedirs(scripts_dir)
+        path = os.path.join(scripts_dir, "required_fast.sh")
+        with open(path, "w") as fh:
+            fh.write(HEADER + "\n".join(stub_lines) + "\n" + FOOTER)
+        os.chmod(path, os.stat(path).st_mode | stat.S_IEXEC)
+        return path
+
+    def run_sharing(self, path, shared_tmp):
+        env = dict(os.environ)
+        env["TMPDIR"] = shared_tmp
+        proc = subprocess.run(["sh", path], capture_output=True, text=True,
+                              timeout=20, env=env)
+        return proc.returncode, proc.stdout + proc.stderr
+
+    def test_two_lanes_never_write_the_same_failure_file(self):
+        shared = tempfile.mkdtemp(prefix="shared-tmpdir-")
+        one = self.build_in_lane(
+            "lane-one", ['run_check "export-public" sh -c '
+                         '"echo LANE-ONE-TRACEBACK; exit 1"'])
+        two = self.build_in_lane(
+            "lane-two", ['run_check "export-public" sh -c '
+                         '"echo LANE-TWO-TRACEBACK; exit 1"'])
+        code_one, out_one = self.run_sharing(one, shared)
+        code_two, out_two = self.run_sharing(two, shared)
+        self.assertEqual((code_one, code_two), (1, 1), out_one + out_two)
+
+        kept = sorted(n for n in os.listdir(shared)
+                      if n.startswith("required-fast-fail-"))
+        self.assertEqual(len(kept), 2, kept)
+        self.assertTrue(any("lane-one" in n for n in kept), kept)
+        self.assertTrue(any("lane-two" in n for n in kept), kept)
+        for name in kept:
+            with open(os.path.join(shared, name)) as fh:
+                body = fh.read()
+            lane = "ONE" if "lane-one" in name else "TWO"
+            other = "TWO" if lane == "ONE" else "ONE"
+            self.assertIn("LANE-%s-TRACEBACK" % lane, body)
+            self.assertNotIn("LANE-%s-TRACEBACK" % other, body)
+
+    def test_a_run_that_dies_early_says_no_data_and_not_a_pass(self):
+        shared = tempfile.mkdtemp(prefix="shared-tmpdir-")
+        path = self.build_in_lane("lane-killed", [
+            'run_check "stub-a" true',
+            'exit 7',
+        ])
+        code, out = self.run_sharing(path, shared)
+        self.assertEqual(code, 7, out)
+        self.assertIn("NO-DATA: required-fast stopped after 1 check(s)", out)
+        self.assertIn("lane-killed", out)
+        self.assertIn("This is NOT a pass", out)
+        self.assertNotIn("pass 1   fail 0", out)
+
+    def test_a_finished_run_says_nothing_about_no_data(self):
+        """The positive control: without it the trap could fire always, or
+        never, and the test above would pass either way."""
+        shared = tempfile.mkdtemp(prefix="shared-tmpdir-")
+        path = self.build_in_lane("lane-finished", ['run_check "stub-a" true'])
+        code, out = self.run_sharing(path, shared)
+        self.assertEqual(code, 0, out)
+        self.assertIn("pass 1   fail 0   no-data 0", out)
+        self.assertNotIn("required-fast stopped after", out)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

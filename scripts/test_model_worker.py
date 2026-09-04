@@ -14,6 +14,21 @@ import tempfile
 import textwrap
 import unittest
 
+# E100: one sandbox for every temp tree this process makes, removed at exit.
+import os as _e100_os, sys as _e100_sys  # noqa: E402
+_e100_sys.path.append(_e100_os.path.join(
+    _e100_os.path.dirname(_e100_os.path.abspath(__file__)), '.'))
+try:  # noqa: E402
+    import tmp_sandbox as _e100_tmp
+    _e100_tmp.install()
+except ImportError:
+    # A packager (scripts/export_public.py, make_benchmark_bundle.py)
+    # can copy this test without scripts/tmp_sandbox.py beside it. Say
+    # so rather than dying: the sandbox is hygiene, not the subject.
+    _e100_sys.stderr.write(
+        "tmp_sandbox absent: %s leaves its temp trees behind\n"
+        % _e100_os.path.basename(__file__))
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 WORKER = os.path.join(HERE, "model_worker.py")
 sys.path.insert(0, HERE)
@@ -230,6 +245,34 @@ class TestCodexOutputParser(unittest.TestCase):
         self.assertEqual(claim, "hello")
         self.assertEqual(usage, {"tokens_in": 5, "tokens_out": 6,
                                  "tokens_cached": 7})
+
+    def test_the_cache_creation_count_is_forwarded_when_the_cli_sends_it(self):
+        """E92: the CLI's cache_creation_input_tokens is the count
+        build_cost_block needs to divide by a real denominator, so it is
+        renamed and forwarded rather than dropped."""
+        _claim, usage = _mw()._parse_model_output(json.dumps(
+            {"result": "hello", "usage": {"input_tokens": 2,
+                                          "output_tokens": 6,
+                                          "cache_read_input_tokens": 22972,
+                                          "cache_creation_input_tokens":
+                                              70272}}))
+        self.assertEqual(usage["tokens_cache_write"], 70272)
+
+    def test_an_answer_without_it_forwards_no_cache_write_at_all(self):
+        """The other way: absent from the answer, the key is ABSENT from the
+        usage dict, never a zero, so the cost block can say NO-DATA instead
+        of dividing by a count nobody measured."""
+        _claim, usage = _mw()._parse_model_output(json.dumps(
+            {"result": "hello", "usage": {"input_tokens": 2,
+                                          "output_tokens": 6,
+                                          "cache_read_input_tokens": 9}}))
+        self.assertNotIn("tokens_cache_write", usage)
+
+    def test_the_codex_adapter_genuinely_lacks_the_field(self):
+        """The NO-DATA in the cost block has to be true of a real adapter,
+        not only of a fixture: codex's own field map names no cache-creation
+        count, which is why a codex run cannot print a share."""
+        self.assertNotIn("tokens_cache_write", _mw().CODEX_USAGE_FIELD_MAP)
 
 
 if __name__ == "__main__":

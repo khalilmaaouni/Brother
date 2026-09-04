@@ -1,0 +1,5 @@
+{"checks": [
+  {"name": "batch-reconciliation", "exit_code": 0, "duration_ms": 2610},
+  {"name": "duplicate-file-idempotency", "exit_code": 0, "duration_ms": 1184},
+  {"name": "partial-batch-rollback", "exit_code": 0, "duration_ms": 3907}
+]}
