@@ -1,0 +1,28 @@
+{
+ "name": "docs-only",
+ "reconstructs": "the negative control: a delivery that crosses no risk boundary at all",
+ "unit": {
+  "id": "U1",
+  "status": "DONE",
+  "title": "write the README section that shows how to run the tool",
+  "done_check": "grep -q 'Running it' README.md",
+  "owns": [
+   "README.md"
+  ],
+  "files_changed_by_unit": [
+   "README.md"
+  ]
+ },
+ "base_files": [
+  "README.md"
+ ],
+ "reviewer_output": null,
+ "expected": {
+  "tier": "low",
+  "class": "",
+  "reviewer": "",
+  "dispatched": false,
+  "findings": 0,
+  "score": 0.0
+ }
+}

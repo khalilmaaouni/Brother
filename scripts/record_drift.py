@@ -155,6 +155,14 @@ def _commit_exists(sha, repo=None, runner=None):
 #: honest, each one found by looking at what it flagged rather than trusting it.
 COMMIT_WORDS = ("commit", "committed", "pushed", "landed", "at ", "sha", "rev")
 
+#: A hex token labelled as a FILE DIGEST, not a commit. "corpus sha1
+#: f3920b31b83f, unchanged" reads DRIFT on row E96 because "sha" above is a
+#: substring of "sha1", so the word this checker uses to spot a commit is
+#: also the word every digest label is built from. The eighth false-positive
+#: class this one checker has produced, found 2026-09-04 the same way as the
+#: other seven: by reading what it flagged.
+DIGEST_WORDS = ("sha1", "sha256", "hash", "digest", "checksum")
+
 
 def commit_shas(text, window=44):
     """Hex strings this text presents AS commits, not every hex string in it."""
@@ -175,6 +183,8 @@ def commit_shas(text, window=44):
         if "://" in text[word_start:m.end()]:
             continue
         before = (head[max(0, m.start() - window):] or "").lower()
+        if any(w in before for w in DIGEST_WORDS):
+            continue
         if any(w in before for w in COMMIT_WORDS):
             out.append(sha)
     return out

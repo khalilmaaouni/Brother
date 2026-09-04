@@ -26,12 +26,24 @@ printed. A gate whose witness moved FAILS.
 Usage:
   python3 scripts/release_closeout.py all --marketplace <url-or-path> [--ref TAG]
   python3 scripts/release_closeout.py virgin-codex --marketplace .
+  python3 scripts/release_closeout.py virgin --version 1.0.4 --grant PATH [--dispatch]
   python3 scripts/release_closeout.py --help
+
+THE `virgin` VERB is the S4 row: one dispatch of the public repository's
+dispatch-only .github/workflows/virgin-install.yml per release candidate,
+authorised by a per-tag grant file (default ~/.claude/actions-grant.json,
+the same file github_cost_wall.py already reads for `gh workflow run`,
+carrying an added "tag" field). Without --dispatch it only prints the two
+commands a founder or orchestrator would run and reports NO-DATA; with
+--dispatch it requires a grant naming THIS tag, unexpired, then runs and
+polls `gh` for the run id and conclusion. It is never wired into `all`:
+X6 depends on it (S4 depends_on X6, E77) and quotes the run once one exists.
 
 Exit codes for `all`: 0 when every REQUIRED gate is PASS, 1 otherwise.
 Exit codes for a single gate: 0 PASS, 1 FAIL, 2 NO-DATA, 0 FOUNDER.
 """
 import argparse
+import datetime
 import hashlib
 import json
 import os
@@ -41,6 +53,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -319,6 +332,45 @@ def source_revision(source, ref):
     return "%s (no ref pinned)" % source
 
 
+#: The upgrade route README.md documents, in the runner's own words, so X2
+#: drives what a reader is actually told to run. Measured 2026-09-05 against
+#: the app-bundled codex in isolated homes: `plugin marketplace add` of a name
+#: already configured from another ref is refused ("marketplace 'brother' is
+#: already added from a different source; remove it before adding this
+#: source", exit 1), and `plugin marketplace upgrade brother` exits 0 while
+#: leaving the installed version and its hashes exactly where they were,
+#: because it only refreshes the snapshot at the ref already configured.
+#: Removing the configured marketplace first is what makes an upgrade move.
+#: test_release_closeout.py holds this equal to the README block, so the page
+#: and the gate cannot drift apart.
+UPGRADE_ROUTE = (
+    ("plugin", "marketplace", "remove", "brother"),
+    ("plugin", "marketplace", "add", "{source}", "--ref", "{ref}"),
+    ("plugin", "add", "brother@brother", "--json"),
+)
+
+#: What each route step is called on the gate's own record, in route order.
+UPGRADE_ROUTE_LABELS = ("marketplace remove", "marketplace add target",
+                        "plugin add target")
+
+#: The lines worth lifting out of each route step's output onto the record.
+UPGRADE_ROUTE_NEEDLES = ("Removed marketplace", "Added marketplace",
+                         "Installed marketplace root", "installedPath",
+                         "version", "error", "Error")
+
+
+def upgrade_route_steps(source, ref):
+    """The documented route with its two placeholders filled in."""
+    return [[part.format(source=source, ref=ref) for part in tail]
+            for tail in UPGRADE_ROUTE]
+
+
+def upgrade_route_shell(source, ref):
+    """The route as one shell line, exactly as README.md prints it."""
+    return " && ".join("codex " + " ".join(tail)
+                       for tail in upgrade_route_steps(source, ref))
+
+
 def marketplace_add(gate, ev, iso, source, ref, label="marketplace add",
                     env=None):
     args = [gate.codex_bin, "plugin", "marketplace", "add", source]
@@ -436,7 +488,14 @@ def gate_virgin_codex(args, ev, gate):
     if why:
         return gate.settle("FAIL", why)
     stubs = os.path.join(iso.work, "stubs")
-    runs_root = os.path.join(iso.work, "runs")
+    # Under $TMPDIR, never under a caller-supplied --work. A workspace-write
+    # turn grants exactly "[workdir, /tmp, $TMPDIR]", and the engine keeps its
+    # run directory outside the tree it integrates into, so a --work somewhere
+    # else would put that directory outside every granted root and Codex would
+    # drop the tool call silently, at exit 0, with no receipt.
+    runs_root = os.path.join(tempfile.gettempdir(), "closeout-c7-runs")
+    if os.path.isdir(runs_root):
+        shutil.rmtree(runs_root)
     for path in (stubs, runs_root):
         os.makedirs(path, exist_ok=True)
     hooks = step(gate, ev, "codex hooks install",
@@ -461,7 +520,8 @@ def gate_virgin_codex(args, ev, gate):
                    runs_root))
     turn = codex_smoke.stub_turn(gate.codex_bin, stub_env, toy, command)
     kept = ev.keep(gate.id, "codex exec through the stub provider", turn)
-    gate.say("$ codex exec (stub provider on 127.0.0.1) -C %s" % toy)
+    gate.say("$ codex exec %s (stub provider on 127.0.0.1) -C %s"
+             % (" ".join(codex_smoke.sandbox_flags(toy)), toy))
     for line in decisive(turn, ("brother", "receipt"), tail=4):
         gate.say("    %s" % line)
     gate.say("  exit %d   [stub codex turn]   full output: %s" % (
@@ -486,6 +546,10 @@ def gate_virgin_codex(args, ev, gate):
     gate.say("the CREDENTIALLED invocation is X8, not this gate: an isolated "
              "home holds no credentials, and %s is the runbook that closes "
              "it." % RUNBOOK)
+    gate.say("the turn above carried the runbook's own sandbox flags. Codex "
+             "defaults to read-only, which refuses every patch, and plain "
+             "workspace-write still refuses the .git write Brother's unit "
+             "isolation needs: %s" % RUNBOOK)
     broke = iso.check_isolation(gate)
     if broke:
         return gate.settle("FAIL", broke)
@@ -556,15 +620,22 @@ def gate_upgrade_codex(args, ev, gate):
     gate.say("seeded state under the isolated home: %s" %
              ", ".join(sorted(os.path.basename(p) for p in seeds)))
 
-    up = marketplace_add(gate, ev, iso, args.marketplace, args.ref or tag,
-                         label="marketplace add target")
-    if up.returncode != 0:
-        return gate.settle("FAIL", "marketplace add at %s exited %d" %
-                           (tag, up.returncode))
-    got2 = plugin_add(gate, ev, iso, label="plugin add target")
-    if got2.returncode != 0:
-        return gate.settle("FAIL", "plugin add at %s exited %d" %
-                           (tag, got2.returncode))
+    # The upgrade itself, run as README.md documents it and in that order.
+    ref = args.ref or tag
+    gate.say("the documented upgrade route: %s" %
+             upgrade_route_shell(args.marketplace, ref))
+    got2 = None
+    for tail, label in zip(upgrade_route_steps(args.marketplace, ref),
+                           UPGRADE_ROUTE_LABELS):
+        got2 = step(gate, ev, label, [gate.codex_bin] + tail, env=iso.env(),
+                    needles=UPGRADE_ROUTE_NEEDLES)
+        if got2.returncode != 0:
+            return gate.settle("FAIL", "`%s` exited %d on the way to %s" %
+                               (" ".join(["codex"] + tail), got2.returncode,
+                                tag))
+    if got2 is None:
+        return gate.settle("NO-DATA", "the upgrade route is empty, so "
+                                      "nothing was run")
     installed2, detail = installed_path_from(got2)
     if installed2 is None:
         return gate.settle("FAIL", detail)
@@ -1052,7 +1123,87 @@ def windows_leg(gate, ev):
                     "simulation, never a real Windows machine)" % WINDOWS_SIM)
 
 
+def hub_versus_tag(gate, ev, tree):
+    """Print how far THIS checkout has drifted from the tag. Never a verdict.
+
+    The drift is real and worth reading: a post-tag merge that touches
+    bundle/runtime does break the "no shipped-runtime mutation under the same
+    version" rule for the NEXT cut. But the gate that owns that complaint is
+    the estate's own battery (scripts/required_fast.sh runs release_invariant
+    against this tree, and X6 runs that battery in its macOS leg), not a
+    post-tag closeout gate whose subject is the released artifact. So this
+    runs, prints, and decides nothing.
+    """
+    hub_tool = os.path.join(REPO, "scripts", "release_invariant.py")
+    if os.path.realpath(tree) == os.path.realpath(REPO):
+        gate.say("hub main versus the tag: NO-DATA (the tree under test IS "
+                 "this checkout, so there is no second tree to compare)")
+        return
+    if not os.path.isfile(hub_tool):
+        gate.say("hub main versus the tag: NO-DATA (no %s on disk)" % hub_tool)
+        return
+    proc = step(gate, ev, "hub main versus the tag (informational)",
+                [sys.executable, hub_tool, "--public-checkout", tree],
+                cwd=REPO, timeout=900,
+                needles=("OK:", "CONTRADICTS", "NO-DATA", "FAIL"))
+    reading = {0: "agrees", 2: "NO-DATA"}.get(proc.returncode, "DRIFTED")
+    gate.say("hub main versus the tag: %s (this checkout's own "
+             "release_invariant.py exited %d in %s). INFORMATIONAL ONLY: X6 "
+             "judges the tagged artifact, and this line judges the working "
+             "checkout, which is the estate battery's own row." %
+             (reading, proc.returncode, REPO))
+
+
+def invariant_leg(gate, ev, tree):
+    """(verdict, why) for the release-identity half of item 6.
+
+    THE SUBJECT IS THE TAGGED ARTIFACT. This leg used to run the HUB's
+    scripts/release_invariant.py, whose ROOT is the hub, with
+    --public-checkout pointed at the tag clone: that compares the HUB's
+    working bundle against the tag, so the first post-tag merge touching
+    bundle/runtime turned X6 red. Measured on 1.0.3 the night PR 256 landed:
+    "shipped runtime content has changed since tag v1.0.3 but the version
+    string is still 1.0.3; 2 of 34 shipped runtime file(s) differ", with
+    every other X6 leg green.
+
+    docs/plan/RELEASE-POLICY.md item 6 says the subject of a post-tag gate is
+    the released artifact after the final tag, so the leg now runs the TAG
+    CLONE'S OWN copy of the tool, inside the tag clone, pointed at itself:
+    the tag's tree must agree with itself and with its own links. The hub's
+    drift is printed beside the verdict by hub_versus_tag, never inside it.
+    """
+    subject = os.path.join(tree, "scripts", "release_invariant.py")
+    if not os.path.isfile(subject):
+        hub_versus_tag(gate, ev, tree)
+        return ("NO-DATA", "the tree under test ships no scripts/"
+                           "release_invariant.py at %s, so the released "
+                           "artifact cannot check its own identity" % subject)
+    inv = step(gate, ev, "release invariant (inside the tagged artifact)",
+               [sys.executable, subject, "--public-checkout", tree], cwd=tree,
+               timeout=900, needles=("OK:", "CONTRADICTS", "NO-DATA", "FAIL"))
+    hub_versus_tag(gate, ev, tree)
+    if inv.returncode == 2:
+        return ("NO-DATA", "release_invariant.py exited 2 inside %s" % tree)
+    if inv.returncode != 0:
+        return ("FAIL", "the tagged artifact's own release_invariant.py "
+                        "exited %d inside %s: the released tree contradicts "
+                        "itself" % (inv.returncode, tree))
+    return ("PASS", "release_invariant.py exited 0 inside the tagged "
+                    "artifact at %s" % tree)
+
+
 def gate_claude_side(args, ev, gate):
+    if not args.tag_checkout:
+        # X6's subject is the released artifact, so this gate needs the tag
+        # checkout. Under `all` X7 runs first and hands one over; run on its
+        # own, X6 clones the tag itself rather than quietly falling back to
+        # the working tree and reporting on the wrong thing.
+        checkout, why = fetch_tag(args.work, "v%s" % args.version,
+                                  args.public_url, gate, ev)
+        if checkout is None:
+            gate.say("no tag checkout: %s" % why)
+        else:
+            args.tag_checkout = checkout
     tree = args.tag_checkout or REPO
     gate.revision = ("the tag checkout at %s" % tree) if args.tag_checkout \
         else ("the working tree at %s (NO public tag checkout: X7 is the gate "
@@ -1099,18 +1250,7 @@ def gate_claude_side(args, ev, gate):
             verdicts.append(("PASS", "%s verify-install.sh exited 0" %
                              product))
 
-    inv = step(gate, ev, "release invariant",
-               [sys.executable, os.path.join(REPO, "scripts",
-                                             "release_invariant.py"),
-                "--public-checkout", tree],
-               timeout=900, needles=("OK:", "CONTRADICTS", "NO-DATA", "FAIL"))
-    if inv.returncode == 2:
-        verdicts.append(("NO-DATA", "release_invariant.py exited 2"))
-    elif inv.returncode != 0:
-        verdicts.append(("FAIL", "release_invariant.py exited %d" %
-                         inv.returncode))
-    else:
-        verdicts.append(("PASS", "release_invariant.py exited 0"))
+    verdicts.append(invariant_leg(gate, ev, tree))
 
     exp = step(gate, ev, "export dry run",
                [sys.executable, os.path.join(REPO, "scripts",
@@ -1373,8 +1513,154 @@ def gate_founder(args, ev, gate):
     gate.say("An isolated Codex home holds no credentials, so no script here "
              "can drive a real signed-in turn. This gate is the founder's "
              "hand, and the runbook above is exactly what he runs.")
+    gate.say("The command it ends on, defined once in codex_smoke and "
+             "mirrored by the runbook and by C7:")
+    gate.say("  %s" % codex_smoke.documented_shell_command())
+    gate.say("Both flags are this gate's own 2026-09-04 failure, not a "
+             "Brother failure: Codex defaults to the read-only sandbox, which "
+             "refuses every patch, and plain workspace-write still refuses "
+             "the .git write Brother's unit isolation needs.")
     return gate.settle("FOUNDER", "needs a signed-in Codex session; runbook "
                                   "%s" % runbook)
+
+
+# ---------------------------------------------------------------------------
+# S4: the virgin-install workflow dispatch, per release candidate.
+# ---------------------------------------------------------------------------
+
+#: The dispatch-only workflow in the PUBLIC repository (.github/workflows/
+#: virgin-install.yml), never the hub. It fires only on workflow_dispatch,
+#: per docs/plan/ACTIONS-POLICY-2026-09-01.md.
+VIRGIN_WORKFLOW = "virgin-install.yml"
+
+#: Same TTL the cost wall already enforces on the same grant file, so one
+#: number governs both: ~/.claude/hooks/github_cost_wall.py, GRANT_TTL_HOURS.
+VIRGIN_GRANT_TTL_HOURS = 24
+
+#: The wall's own grant path (github_cost_wall.py, GRANT). One file serves
+#: both: the wall checks repo and workflow appear in the `gh workflow run`
+#: command it is about to allow, and this gate additionally requires the
+#: grant to name THIS tag, so a grant minted for v1.0.3 cannot silently
+#: authorise a v1.0.4 dispatch.
+DEFAULT_VIRGIN_GRANT = os.path.expanduser("~/.claude/actions-grant.json")
+
+
+def repo_slug_from_url(url):
+    """"https://github.com/owner/name" -> "owner/name", read off PUBLIC_URL
+    rather than typed a second time."""
+    return url.rstrip("/").split("github.com/")[-1]
+
+
+def read_virgin_grant(path):
+    """(grant_dict, why). why is set only when grant_dict is None."""
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            body = fh.read()
+    except OSError as exc:
+        return None, "no grant at %s (%s)" % (path, exc)
+    try:
+        grant = json.loads(body)
+    except ValueError as exc:
+        return None, "the grant at %s is not valid JSON: %s" % (path, exc)
+    if not isinstance(grant, dict):
+        return None, "the grant at %s is not a JSON object" % path
+    return grant, ""
+
+
+def virgin_grant_ok(grant, tag, now=None):
+    """(ok, why): does this grant authorise a virgin-install dispatch for
+    exactly this tag, right now? Mirrors github_cost_wall.py's own age check
+    on the same "issued" field, plus the tag match this gate adds."""
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    grant_tag = str(grant.get("tag") or "")
+    if grant_tag != tag:
+        return False, "the grant names tag %s, not %s" % (
+            grant_tag or "(none)", tag)
+    try:
+        issued = datetime.datetime.fromisoformat(
+            str(grant.get("issued", "")).replace("Z", "+00:00"))
+        if issued.tzinfo is None:
+            issued = issued.replace(tzinfo=datetime.timezone.utc)
+    except ValueError:
+        return False, "the grant carries no readable 'issued' timestamp, so " \
+                      "its age cannot be checked"
+    age_h = (now - issued).total_seconds() / 3600.0
+    if age_h > VIRGIN_GRANT_TTL_HOURS or age_h < 0:
+        return False, "the grant is %.1f hours old (limit %d), so it has " \
+                      "expired" % (age_h, VIRGIN_GRANT_TTL_HOURS)
+    return True, "grant for %s issued %.1fh ago, within the %dh limit" % (
+        tag, age_h, VIRGIN_GRANT_TTL_HOURS)
+
+
+def gate_virgin_install(args, ev, gate):
+    tag = "v%s" % args.version
+    gate.revision = "%s workflow %s at %s" % (args.repo, VIRGIN_WORKFLOW, tag)
+
+    dispatch_cmd = ["gh", "workflow", "run", VIRGIN_WORKFLOW, "--ref", tag]
+    list_cmd = ["gh", "run", "list", "--workflow", VIRGIN_WORKFLOW,
+                "--branch", tag]
+    gate.say("dispatch command: %s" % " ".join(dispatch_cmd))
+    gate.say("list command: %s" % " ".join(list_cmd))
+
+    grant, why = read_virgin_grant(args.grant)
+    if grant is None:
+        gate.say(why)
+        return gate.settle("NO-DATA", "%s; the matrix stays BLOCKED without "
+                                      "a per-tag founder grant" % why)
+    ok, detail = virgin_grant_ok(grant, tag)
+    gate.say(detail)
+    if not ok:
+        return gate.settle("NO-DATA", detail)
+
+    if not args.dispatch:
+        return gate.settle("NO-DATA", "grant for %s is valid; pass "
+                                      "--dispatch to actually run the two "
+                                      "commands above" % tag)
+
+    env = dict(os.environ)
+    env["GH_REPO"] = args.repo
+    disp = step(gate, ev, "gh workflow run virgin-install", dispatch_cmd,
+                env=env, needles=("error", "Error"))
+    if disp.returncode != 0:
+        return gate.settle("FAIL", "gh workflow run exited %d" %
+                           disp.returncode)
+
+    poll_cmd = list_cmd + ["--json", "databaseId,status,conclusion",
+                           "--limit", "5"]
+    deadline = time.monotonic() + args.poll_timeout
+    run_id, status, conclusion = None, None, None
+    while True:
+        poll = step(gate, ev, "gh run list poll", poll_cmd, env=env,
+                    needles=("databaseId", "status", "conclusion"))
+        if poll.returncode == 0:
+            try:
+                runs = json.loads(poll.stdout or "[]")
+            except ValueError:
+                runs = []
+            if runs:
+                run_id = runs[0].get("databaseId")
+                status = runs[0].get("status")
+                conclusion = runs[0].get("conclusion")
+                if status == "completed":
+                    break
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(args.poll_interval)
+
+    gate.say("run id: %s   status: %s   conclusion: %s   tag: %s" %
+             (run_id, status, conclusion, tag))
+    if run_id is None:
+        return gate.settle("NO-DATA", "gh run list never reported a run for "
+                                      "%s on %s" % (VIRGIN_WORKFLOW, tag))
+    if status != "completed":
+        return gate.settle("NO-DATA", "run %s did not complete within %ss "
+                                      "(last status %s)" %
+                           (run_id, args.poll_timeout, status))
+    if conclusion != "success":
+        return gate.settle("FAIL", "run %s concluded %s for %s" %
+                           (run_id, conclusion, tag))
+    return gate.settle("PASS", "run %s concluded success for %s" %
+                       (run_id, tag))
 
 
 GATE_FUNCS = {
@@ -1442,8 +1728,9 @@ def main(argv=None):
     ap = argparse.ArgumentParser(
         description=__doc__.splitlines()[0],
         formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("gate", choices=sorted(GATE_FUNCS) + ["all"],
-                    help="which gate to run, or `all` for the whole matrix")
+    ap.add_argument("gate", choices=sorted(GATE_FUNCS) + ["all", "virgin"],
+                    help="which gate to run, `all` for the whole matrix, or "
+                         "`virgin` for the S4 virgin-install dispatch")
     ap.add_argument("--marketplace", default=PUBLIC_URL,
                     help="the marketplace source: a local path or an HTTPS "
                          "Git URL (default: the public repository)")
@@ -1470,7 +1757,27 @@ def main(argv=None):
     ap.add_argument("--actions-run-id", default=None,
                     help="the Linux GitHub Actions run id the orchestrator "
                          "dispatched, reported verbatim in X6")
+    ap.add_argument("--grant", default=DEFAULT_VIRGIN_GRANT,
+                    help="verb `virgin` only: path to the per-tag "
+                         "virgin-install dispatch grant (default: the same "
+                         "file github_cost_wall.py reads)")
+    ap.add_argument("--dispatch", action="store_true",
+                    help="verb `virgin` only: actually run gh workflow run "
+                         "and wait for it; without this flag the two "
+                         "commands are only printed")
+    ap.add_argument("--repo", default=None,
+                    help="verb `virgin` only: owner/name for the "
+                         "virgin-install workflow (default: read off "
+                         "--public-url)")
+    ap.add_argument("--poll-timeout", type=float, default=1200.0,
+                    help="verb `virgin` only: seconds to wait for the "
+                         "dispatched run to complete")
+    ap.add_argument("--poll-interval", type=float, default=15.0,
+                    help="verb `virgin` only: seconds between gh run list "
+                         "polls")
     args = ap.parse_args(argv)
+    if not args.repo:
+        args.repo = repo_slug_from_url(args.public_url)
 
     if not args.version:
         version, why = declared_version()
@@ -1519,6 +1826,17 @@ def main(argv=None):
     print("evidence (whole output of every command): %s" % args.evidence_dir)
 
     try:
+        if args.gate == "virgin":
+            gate = Gate("S4", "virgin-install",
+                        "virgin-install workflow dispatched per release "
+                        "candidate, quoted into X6", True)
+            try:
+                gate_virgin_install(args, ev, gate)
+            except (OSError, ValueError, KeyError) as exc:
+                gate.settle("FAIL", "the gate itself raised %s: %s" %
+                            (type(exc).__name__, exc))
+            print_gate(gate)
+            return gate.exit_code()
         if args.gate != "all":
             gate = run_gate(args.gate, args, ev)
             print_gate(gate)

@@ -14,6 +14,7 @@ Standard library only. Run: python3 tools/test_bm_idle.py
 """
 import datetime
 import hashlib
+import importlib.util
 import io
 import json
 import os
@@ -25,6 +26,11 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 TOOL_PATH = os.path.join(HERE, "bm_idle.py")
+
+_seam_spec = importlib.util.spec_from_file_location(
+    "bm_export_seam", os.path.join(HERE, "bm_export_seam.py"))
+_seam = importlib.util.module_from_spec(_seam_spec)
+_seam_spec.loader.exec_module(_seam)
 
 #: Fixed epoch instants. NOW is the reference "current" instant used by the
 #: check() fixtures below; HARD_STOP sits an hour after it so tests 7 to 9
@@ -524,6 +530,12 @@ class ReconcileTests(unittest.TestCase):
             result.stdout)
 
     def test_real_queue_file_is_untouched_by_a_reconcile_run(self):
+        # docs/plan/QUEUE.json is a HUB record the export withholds, so
+        # a clone of the published release has no real queue to leave
+        # untouched and this check has nothing to measure. In the hub its
+        # absence still errors. See tools/bm_export_seam.py.
+        _seam.no_data_outside_the_hub(
+            [os.path.join("docs", "plan", "QUEUE.json")])
         real_queue = os.path.join(ROOT, "docs", "plan", "QUEUE.json")
         with io.open(real_queue, "rb") as handle:
             before = hashlib.sha256(handle.read()).hexdigest()

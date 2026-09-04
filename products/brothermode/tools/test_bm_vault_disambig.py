@@ -132,5 +132,86 @@ class TestHonestQueryUntouched(DisambigBase):
         self.assertIn(self.stem["otsu_seiko"], served)
 
 
+class NamedAbsentBase(DisambigBase):
+    """JA13. The estate above plus a 物産 family: one member owns an address and a
+    trade, its peers own neither. The queries below NAME a 物産 company that the
+    vault does not hold, so the family cannot be resolved by name at all."""
+    NOTES = DisambigBase.NOTES + [
+        ("teihara_bussan", u"丁原物産株式会社",
+         u"丁原物産株式会社は東京都港区赤坂に本社を置く総合商社。皮革製品の輸出入を手掛ける。代表は丁原七郎。"),
+        ("boya_bussan", u"戊野物産株式会社",
+         u"戊野物産株式会社は秋田県秋田市の水産物卸売業者。代表は戊野八郎。"),
+    ]
+
+    #: names a 物産 company absent from the estate, and describes it with the address
+    #: and trade that belong to 丁原物産.
+    QUERY = u"丙沢物産株式会社は東京都港区赤坂に本社を置く皮革商社ですか"
+
+
+class TestDescribedButNotNamed(NamedAbsentBase):
+    def test_description_match_is_not_served_for_an_absent_name(self):
+        # The asker named 丙沢物産. Nothing in the estate is 丙沢物産, so the address
+        # and trade in the query are unverified claims about a company nobody holds.
+        # Serving 丁原物産 because it fits that description answers a question the
+        # asker did not ask.
+        served = self.served(self.QUERY)
+        self.assertNotIn(self.stem["teihara_bussan"], served)
+
+    def test_the_dominator_is_the_note_this_rule_drops(self):
+        # The mechanism claim, asserted on the pass's own trace rather than on the
+        # served set: with the name absent, R2 stops electing a survivor by the
+        # attributes (no "attribute mismatch" is recorded at all) and instead drops
+        # the note that owns them. What happens to the remaining family members is
+        # R3's business, unchanged by this rule and not asserted here.
+        explain = []
+        self.bm._search(self.con, text=self.QUERY, limit=10, fast=True,
+                        explain=explain)
+        drops = [line for line in explain if "disambiguation: dropped" in line]
+        mine = [line for line in drops if "described but not named" in line]
+        self.assertEqual(
+            len(mine), 1, "expected exactly one described-but-not-named drop, got %r"
+            % drops)
+        self.assertIn("note %d " % self.stem["teihara_bussan"], mine[0])
+        self.assertFalse([line for line in drops if "attribute mismatch" in line],
+                         "the domination arm must not also elect a survivor: %r"
+                         % drops)
+
+    def test_a_named_and_present_company_still_wins_its_family(self):
+        # The inversion is gated on the named company being ABSENT. Name one the
+        # estate holds and R2's original direction must stand: the subject is served
+        # and is not dropped as its own decoy.
+        served = self.served(
+            u"丁原物産株式会社は東京都港区赤坂に本社を置く皮革商社ですか")
+        self.assertIn(self.stem["teihara_bussan"], served)
+
+    def test_no_legal_form_leaves_the_original_direction_alone(self):
+        # The rule reads the company the asker WROTE WITH A LEGAL FORM. A query that
+        # names no company that way is outside it, and R2 keeps electing a survivor
+        # from the attributes: 丁原物産 is served.
+        served = self.served(u"東京都港区赤坂の皮革商社について教えてください")
+        self.assertIn(self.stem["teihara_bussan"], served)
+
+
+class TestNamedAbsentMutation(NamedAbsentBase):
+    """The mutation control for the rule above: disable it and the case must fail
+    again. _ja_query_named returning nothing is exactly 'the query names no company',
+    which is the one input the inversion is gated on, so patching it restores the
+    pre-JA13 behaviour without touching any other signal."""
+
+    def test_disabling_the_rule_serves_the_decoy_again(self):
+        self.bm._ja_query_named = lambda qnorm: []
+        served = self.served(self.QUERY)
+        self.assertIn(
+            self.stem["teihara_bussan"], served,
+            "with _ja_query_named disabled the decoy must come back; if it does "
+            "not, this test is no longer proving the inversion is what drops it")
+
+    def test_the_rule_enabled_drops_it(self):
+        # The other half of the same control, in one file: same fixture, same query,
+        # rule left alone.
+        served = self.served(self.QUERY)
+        self.assertNotIn(self.stem["teihara_bussan"], served)
+
+
 if __name__ == "__main__":
     unittest.main()

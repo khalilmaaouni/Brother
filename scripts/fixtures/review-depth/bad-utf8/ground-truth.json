@@ -1,0 +1,34 @@
+{
+ "name": "bad-utf8",
+ "reconstructs": "part B round 2: an uncaught crash on invalid UTF-8 input, caught by a competitor's own review layer and by no reading this estate had",
+ "unit": {
+  "id": "U1",
+  "status": "DONE",
+  "title": "convert a JSONL file to CSV on standard output",
+  "done_check": "python3 test_jsonl2csv.py",
+  "owns": [
+   "jsonl2csv.py"
+  ],
+  "files_changed_by_unit": [
+   "jsonl2csv.py"
+  ]
+ },
+ "base_files": [
+  "check_exit.py",
+  "test_jsonl2csv.py"
+ ],
+ "reviewer_output": "reviewer.json",
+ "expected": {
+  "tier": "high",
+  "class": "encoding",
+  "reviewer": "backend-reviewer",
+  "file": "jsonl2csv.py",
+  "seeded_finding_state": "confirmed",
+  "fixed_finding_state": "not_reproduced",
+  "score": 1.0
+ },
+ "readings_that_must_not_fire": {
+  "declared_words": "the unit's own title, done_check and owns name no risk class",
+  "changed_paths": "jsonl2csv.py names no risk class"
+ }
+}

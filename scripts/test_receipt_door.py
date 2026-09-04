@@ -2056,6 +2056,162 @@ class TheReceiptRecordAnswersTheEightAcceptanceQuestions(unittest.TestCase):
         self.assertIsNone(rec["continuity"]["capsule"])
 
 
+class TheReceiptSaysWhetherTheRevertRanAndWhichEngineRanIt(unittest.TestCase):
+    """E115, the two questions the frozen contract (docs/plan/
+    DELIVERY-RECEIPT-V1.md) found the receipt could not answer.
+
+    QUESTION 6. dependency_note() built the sentence and receipts_for()
+    stamped it, and receipt_record() never copied it onto the record, so the
+    only trace a dependency revert left on the FILE was one sided: a revert
+    that passed, and therefore disproved the check, wrote a refusal into
+    unproven[].reason, while a revert that RAN AND CORRECTLY FAILED wrote
+    nothing at all and read exactly like a revert nobody ever made. The
+    first case below is that indistinguishability, driven directly: two
+    verified units, one with a failed revert behind it and one with no
+    dependency at all, which must not read the same.
+
+    QUESTION 10. harness_version and harness_revision were measured for the
+    cost block and reached the file only as prose inside `report`.
+
+    Every case here reads the RECORD receipt_record() returns, never the
+    in-memory receipt, because the in-memory receipt already carried the
+    dependency note before this row and carrying it there was never the
+    gap."""
+
+    def _record(self, extra_row_fields=None):
+        row = {"id": "test", "objective": "cover the guard",
+               "done_check": "python3 -m pytest -k type", "status": "DONE",
+               "check_passed_before": False, "owns": ["test_mathlib.py"],
+               "files_changed_by_unit": ["test_mathlib.py"]}
+        row.update(extra_row_fields or {})
+        return {"outcome": "o", "work_id": "w", "rows": [row]}
+
+    def _claims(self):
+        return {"test": {"state": "done", "evidence": {
+            "check_command": "python3 -m pytest -k type", "exit_code": 0,
+            "output": "", "canonical_rev": "abc"}}}
+
+    def _stamp(self, exit_code):
+        return [{"unit": "guard", "files": ["mathlib.py"],
+                 "revision": "abc", "exit_code": exit_code, "note": ""}]
+
+    def _entry(self, record, refused=()):
+        receipts = RD.receipts_for(record, self._claims(), list(refused))
+        rec = RD.receipt_record(record, receipts)
+        entries = rec["evidence"] + rec["unproven"]
+        self.assertEqual(1, len(entries), entries)
+        return rec, entries[0]
+
+    def test_a_revert_that_ran_and_failed_is_not_a_revert_that_never_ran(self):
+        """THE GAP ITSELF. Both units below are verified, both write one
+        file, both carry no reason, and before this row their record entries
+        agreed on every field. One had its dependency's change reverted and
+        went red, which is what coverage looks like; the other never declared
+        a dependency at all. A receipt that cannot separate those two is not
+        answering question 6, it is silent about it."""
+        _rec_a, ran = self._entry(self._record(
+            {"depends_on": ["guard"], RD.CHECK_WITHOUT_FIELD: self._stamp(1)}))
+        _rec_b, never = self._entry(self._record())
+        self.assertEqual("verified", ran["state"])
+        self.assertEqual("verified", never["state"])
+        self.assertNotEqual(ran["dependency_check"],
+                            never["dependency_check"])
+        self.assertEqual("re-run with guard's files reverted: exit 1",
+                         ran["dependency_check"])
+        self.assertEqual("no dependency declared: this check proves its own "
+                         "change only", never["dependency_check"])
+
+    def test_a_declared_dependency_never_re_run_says_so_on_the_record(self):
+        """The third state, and the one a NO-DATA rule exists for: a
+        dependency was declared and the revert was never made. Absent from
+        the stamp is not absent from the receipt."""
+        _rec, entry = self._entry(self._record({"depends_on": ["guard"]}))
+        self.assertEqual("declared dependency on guard, never re-run with it "
+                         "reverted", entry["dependency_check"])
+
+    def test_the_field_is_the_notes_own_words_never_a_second_judgement(self):
+        """receipt_record() copies dependency_note()'s sentence and forms no
+        opinion of its own. Asserted against the function itself, so the two
+        cannot drift into disagreeing about the same row."""
+        record = self._record({"depends_on": ["guard"],
+                               RD.CHECK_WITHOUT_FIELD: self._stamp(1)})
+        _rec, entry = self._entry(record)
+        self.assertEqual(RD.dependency_note(record["rows"][0]),
+                         entry["dependency_check"])
+
+    def test_an_unproven_entry_carries_it_too(self):
+        """The unproven half. A revert that PASSED disproves the check, so
+        this unit is no-data and its reason already said so; the field has
+        to be there as well, or a reader looking for one answer finds it on
+        some entries and not others."""
+        record = self._record({"depends_on": ["guard"],
+                               RD.CHECK_WITHOUT_FIELD: self._stamp(0)})
+        rec, entry = self._entry(record)
+        self.assertEqual([], rec["evidence"])
+        self.assertEqual("no-data", entry["state"])
+        self.assertEqual("re-run with guard's files reverted: exit 0",
+                         entry["dependency_check"])
+
+    def test_a_refused_entry_carries_it_too(self):
+        """And the refused half, whose receipt never reaches the dependency
+        rules at all: the field is stamped by receipts_for before any state
+        is decided, so a refusal does not swallow it."""
+        record = self._record({"depends_on": ["guard"],
+                               RD.CHECK_WITHOUT_FIELD: self._stamp(1)})
+        rec, entry = self._entry(record, refused=[("test", "worker died")])
+        self.assertEqual("refused", entry["state"])
+        self.assertEqual("worker died", entry["reason"])
+        self.assertEqual("re-run with guard's files reverted: exit 1",
+                         entry["dependency_check"])
+
+    def test_a_receipt_built_from_older_receipts_reads_no_data(self):
+        """The boundary: a receipt dict from before this field existed. The
+        key is still written, carrying NO-DATA, because an absent key is the
+        exact failure this row closed and a fabricated sentence would be
+        worse than both."""
+        record = self._record()
+        receipts = RD.receipts_for(record, self._claims(), [])
+        receipts[0].pop("dependency_note")
+        rec = RD.receipt_record(record, receipts)
+        entry = rec["evidence"][0]
+        self.assertIn("dependency_check", entry)
+        self.assertEqual(RD.NODATA, entry["dependency_check"])
+
+    def test_the_record_names_the_engine_that_ran_it(self):
+        """Question 10. Both facts at the top level, and both equal to
+        brother_run's own two measurements, which are the same calls
+        build_cost_block is handed, so the field and the report prose the
+        receipt also carries cannot disagree."""
+        _rec, _entry = self._entry(self._record())
+        rec = _rec
+        self.assertIn("harness_version", rec)
+        self.assertIn("harness_revision", rec)
+        self.assertEqual(_br._harness_version(), rec["harness_version"])
+        self.assertEqual(_br._harness_revision(), rec["harness_revision"])
+
+    def test_the_engine_identity_is_a_real_string_or_says_why_not(self):
+        """Never empty, never None, never a fabricated sha: either a real
+        value or a NO-DATA sentence naming what could not be read."""
+        _rec, _entry = self._entry(self._record())
+        for field in ("harness_version", "harness_revision"):
+            value = _rec[field]
+            self.assertIsInstance(value, str)
+            self.assertTrue(value.strip(), "%s is empty" % field)
+
+    def test_the_identity_survives_an_engine_that_cannot_be_measured(self):
+        """Driven backwards: with both measurements refusing, the record
+        still carries both keys and says why, rather than dropping them or
+        inventing a value."""
+        record = self._record()
+        receipts = RD.receipts_for(record, self._claims(), [])
+        gap = "%s: not a git checkout" % RD.NODATA
+        with mock.patch.object(_br, "_harness_version", return_value=gap), \
+                mock.patch.object(_br, "_harness_revision", return_value=gap):
+            rec = RD.receipt_record(record, receipts)
+        self.assertEqual(gap, rec["harness_version"])
+        self.assertEqual(gap, rec["harness_revision"])
+
+
 class TheHumanViewIsRenderedFromTheSameRecord(unittest.TestCase):
     """E72.2 (docs/plan/READINESS-ROADMAP-2026-08-29.json row E72): the page
     a person opens is built from receipt_record() and from nothing else, so

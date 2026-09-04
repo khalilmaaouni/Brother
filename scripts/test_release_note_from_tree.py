@@ -46,6 +46,67 @@ def make_note(dirpath, name, body):
     return p
 
 
+# E116. build() runs all six cited suites and then one more full suite per
+# candidate file. This file called build() eight times, so a plain run of it
+# executed real suites over and over: measured 2026-09-04, still inside
+# E80TheNoteIsCheckableFromAPublicClone.setUpClass after 1h26m, and two
+# concurrent copies raced on the source files the perturbation rewrites and
+# left products/brothermode/tools/bm_vault_audit.py dirty. scripts/
+# check_all.sh registers this file as release-note-self, so every battery
+# round carried that.
+#
+# Nothing below asserts that a cited suite is green, or that a measured row
+# is the right one. What they assert is the note's PROSE, assembled from the
+# real tree. So the two steps that spawn subprocesses are fed canned results
+# and everything else stays real: the real git revision, the real export
+# manifest, the real marketplace metadata, the real cut script, the real
+# notes on disk. The perturbation's own rules are proven on a fixture tree
+# in scripts/test_release_note_perturb.py, and the real perturbation over
+# the real tree stays a deliberate release cut step
+# (python3 scripts/release_note_perturb.py).
+#
+# The seam is also what makes the two refusal rules below testable at all:
+# "a red cited suite refuses the note" and "an unmeasurable files table
+# refuses the note" could not be driven backwards before, because reaching
+# either cost a full measurement run.
+GREEN_SUITE = {"ok": True, "n": 12, "ran": 12, "skipped": 0,
+               "nodata_skip": None, "tail": "OK"}
+
+#: What measured_file_rows would return, in its own (claim, file, suite or
+#: None) shape. Two measured rows and one NO-DATA row, so the rendered table
+#: exercises both branches of render_files_table without measuring anything.
+CANNED_ROWS = [
+    ("receipt door", "scripts/receipt_door.py",
+     "scripts/test_receipt_door.py"),
+    ("brother_run", "scripts/brother_run.py",
+     "scripts/test_brother_run.py"),
+    ("brother_run", "scripts/loom.py", None),
+]
+
+
+@contextlib.contextmanager
+def stubbed_measurement(rows=None, problem=None, suite_result=None):
+    """R.build() with only its two subprocess-running steps canned.
+
+    `suite_result` replaces every run_suite() result (default: a green one);
+    `problem` makes measured_file_rows refuse instead of returning `rows`.
+    Both are patched as attributes of R, which is how build() looks them up,
+    so nothing binds at import time and the patch lifts on the way out."""
+    result = GREEN_SUITE if suite_result is None else suite_result
+    table = CANNED_ROWS if rows is None else rows
+
+    def fake_run_suite(rel_path):
+        return dict(result)
+
+    def fake_measured_file_rows(claim_suites, perturb=None):
+        return ([] if problem else list(table)), problem
+
+    with mock.patch.object(R, "run_suite", fake_run_suite), \
+            mock.patch.object(R, "measured_file_rows",
+                              fake_measured_file_rows):
+        yield
+
+
 class GapOneASkipReadsAsAPass(unittest.TestCase):
     """"Ran 44 tests ... OK" must read 44 of 44; "OK (skipped=1)" must read
     43 of 44, never 44, and a NO-DATA skip reason must refuse rather than
@@ -144,7 +205,8 @@ class GapFourCitationsNameOnlyTheSuiteThatGuardsTheClaim(unittest.TestCase):
     every claim."""
 
     def test_the_real_note_splits_the_two_claims_into_two_paragraphs(self):
-        body, problems = R.build()
+        with stubbed_measurement():
+            body, problems = R.build()
         self.assertEqual(problems, [], problems)
         self.assertIsNotNone(body)
         scoping_para = [p for p in body.split("\n\n") if "scoping sentence" in p]
@@ -220,7 +282,8 @@ class GapFiveThePreviousReleaseLineNeverInventsAHash(unittest.TestCase):
                   "# Brother 0.9.11\n\n## Source revision\n\n"
                   "Something about a hub commit, but not in the shape "
                   "this generator parses.\n\n## What this release carries\n")
-        with mock.patch.object(R, "RELEASES_DIR", self.d):
+        with stubbed_measurement(), \
+                mock.patch.object(R, "RELEASES_DIR", self.d):
             body, problems = R.build()
         self.assertEqual(problems, [], problems)
         self.assertIsNotNone(body)
@@ -236,12 +299,15 @@ class E80TheNoteIsCheckableFromAPublicClone(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        # setUpClass, not setUp: build() runs all six cited suites, so a
-        # per-test build would run them six times over for one note.
+        # setUpClass, not setUp: build() assembles the whole note from the
+        # real tree, so a per-test build would reassemble it six times over.
+        # E116: the two subprocess steps inside it are canned, so this now
+        # costs a read of the tree rather than a run of eleven suites.
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         import reproduce_export as RE
         cls.RE = RE
-        cls.body, cls.problems = R.build()
+        with stubbed_measurement():
+            cls.body, cls.problems = R.build()
 
     def setUp(self):
         self.assertEqual(self.problems, [], self.problems)
@@ -308,7 +374,8 @@ class GapSixParsingIsPureAndTested(unittest.TestCase):
 
 class GapSevenTheScopingSentenceIsReadNeverRetyped(unittest.TestCase):
     def test_the_generated_note_carries_the_exact_constant(self):
-        body, problems = R.build()
+        with stubbed_measurement():
+            body, problems = R.build()
         self.assertEqual(problems, [], problems)
         self.assertIsNotNone(body)
         self.assertIn(RD.SCOPING_SENTENCE, body)
@@ -335,7 +402,8 @@ class Finding1TheNoteNamesThePublicTagTheHubHashCannotResolveTo(unittest.TestCas
         is built from R.default_version() (the version build() actually
         used), never read back off that line. PUBLIC_REMOTE is unaffected
         by versioning and is still read from the script."""
-        body, problems = R.build()
+        with stubbed_measurement():
+            body, problems = R.build()
         self.assertEqual(problems, [], problems)
         self.assertIsNotNone(body)
         _, remote = R.cut_script_tag_and_remote()
@@ -472,7 +540,8 @@ class TheVersionParameterCutsAnyRelease(unittest.TestCase):
     docs/releases/<version>.md rather than a fixed filename."""
 
     def test_a_non_default_version_names_itself_throughout_the_note(self):
-        body, problems = R.build("1.0.1")
+        with stubbed_measurement():
+            body, problems = R.build("1.0.1")
         self.assertEqual(problems, [], problems)
         self.assertIsNotNone(body)
         self.assertIn("# Brother 1.0.1", body)
@@ -485,7 +554,8 @@ class TheVersionParameterCutsAnyRelease(unittest.TestCase):
         # deleted the real release note in its cleanup.
         tmp = tempfile.mkdtemp(prefix="release-note-test-")
         try:
-            with mock.patch.object(R, "RELEASES_DIR", tmp):
+            with stubbed_measurement(), \
+                    mock.patch.object(R, "RELEASES_DIR", tmp):
                 target = R.notes_path_for("1.0.1")
                 self.assertEqual(os.path.dirname(target), tmp)
                 code = R.main(["--write", "--version", "1.0.1"])
@@ -646,7 +716,8 @@ class TheHandWrittenParagraphIsReadFromAFileNeverTypedIntoTheNote(
         self.assertIsNotNone(text, "the notes file exists but is unreadable")
         if not text:
             self.skipTest("this version ships no %s.notes.txt" % version)
-        body, problems = R.build(version)
+        with stubbed_measurement():
+            body, problems = R.build(version)
         self.assertEqual(problems, [])
         self.assertIn(text, body)
 
@@ -834,6 +905,95 @@ class TheFilesTableIsMeasuredNotInferred(unittest.TestCase):
             [p for p in fake.driven if p == ("test_thing.py", "subject.py")],
             [("test_thing.py", "subject.py")],
             "the same suite was driven twice for one file: %s" % fake.driven)
+
+
+class E116TheExpensiveStepsAreStillWhatRefusesTheNote(unittest.TestCase):
+    """The refusals only build()'s two subprocess steps can raise. All new
+    here: before E116 gave those steps a seam, reaching any of them cost a
+    full eleven suite measurement, so none of them was ever driven."""
+
+    def test_a_red_cited_suite_refuses_the_note_and_names_it(self):
+        red = {"ok": False, "n": 3, "ran": 3, "skipped": 0,
+               "nodata_skip": None, "tail": "FAILED (failures=1)"}
+        with stubbed_measurement(suite_result=red):
+            body, problems = R.build()
+        self.assertIsNone(body, "a red cited suite still produced a note")
+        self.assertTrue(problems)
+        self.assertTrue(all(p.startswith(R.NODATA) for p in problems),
+                        problems)
+        self.assertTrue(
+            any("scripts/test_receipt_door.py" in p for p in problems),
+            problems)
+
+    def test_a_suite_that_skipped_for_a_no_data_reason_refuses_the_note(self):
+        skipped = {"ok": False, "n": 3, "ran": 3, "skipped": 1,
+                   "nodata_skip": "NO-DATA: no simulator on this machine",
+                   "tail": "OK (skipped=1)"}
+        with stubbed_measurement(suite_result=skipped):
+            body, problems = R.build()
+        self.assertIsNone(body)
+        self.assertTrue(any("no simulator on this machine" in p
+                            for p in problems), problems)
+
+    def test_a_suite_that_ran_zero_tests_refuses_the_note(self):
+        empty = {"ok": False, "n": 0, "ran": 0, "skipped": 0,
+                 "nodata_skip": None, "tail": "OK"}
+        with stubbed_measurement(suite_result=empty):
+            body, problems = R.build()
+        self.assertIsNone(body)
+        self.assertTrue(any("reported 0 tests" in p for p in problems),
+                        problems)
+
+    def test_an_unmeasurable_files_table_refuses_the_whole_note(self):
+        with stubbed_measurement(
+                problem="NO-DATA: no source file could be measured"):
+            body, problems = R.build()
+        self.assertIsNone(body, "an unmeasured table still produced a note")
+        self.assertEqual(problems,
+                         ["NO-DATA: no source file could be measured"])
+
+    def test_a_measured_table_reaches_the_note_it_was_measured_for(self):
+        with stubbed_measurement():
+            body, problems = R.build()
+        self.assertEqual(problems, [], problems)
+        self.assertIn(R.FILES_TABLE_HEADING, body)
+        self.assertIn("scripts/receipt_door.py", body)
+        # The row no suite caught reads NO-DATA in the suite column, never a
+        # suite name.
+        table = body.split(R.FILES_TABLE_HEADING, 1)[1]
+        loom = [ln for ln in table.splitlines() if "scripts/loom.py" in ln]
+        self.assertEqual(len(loom), 1, table)
+        self.assertIn(R.NODATA, loom[0])
+
+    def test_no_test_in_this_file_runs_a_real_cited_suite(self):
+        """The regression guard for E116 itself. run_suite() and
+        measured_file_rows() are the only two things here that spawn a
+        subprocess per cited suite, and a build() or main() call that reaches
+        either unstubbed is what took 1h26m. Every call site is checked by
+        reading this file's own source: a wall clock assertion would be a
+        flake on a loaded machine, and this one cannot be."""
+        with open(os.path.abspath(__file__), encoding="utf-8") as fh:
+            lines = fh.read().splitlines()
+        calls = ("body, problems = R.build",
+                 "cls.body, cls.problems = R.build",
+                 "code = R.main(")
+        offenders = []
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if not stripped.startswith(calls):
+                continue
+            # Walk back to the enclosing def and require the stub to be
+            # opened somewhere between it and the call.
+            j = i - 1
+            while j >= 0 and not lines[j].lstrip().startswith("def "):
+                j -= 1
+            between = "\n".join(lines[j + 1:i])
+            if "stubbed_measurement(" not in between:
+                offenders.append("line %d: %s" % (i + 1, stripped))
+        self.assertEqual(
+            offenders, [],
+            "a build()/main() call runs the real cited suites: %s" % offenders)
+
 
 
 if __name__ == "__main__":

@@ -89,6 +89,11 @@ LIFECYCLE_PY = os.path.join(ROOT, "scripts", "bench_e2e_lifecycle.py")
 BM_PROJECT_PY = os.path.join(ROOT, "tools", "bm_project.py")
 IDENTITY_CONTRACT = os.path.join(ROOT, "docs", "brand", "IDENTITY-CONTRACT.md")
 
+_seam_spec = importlib.util.spec_from_file_location(
+    "bm_export_seam", os.path.join(HERE, "bm_export_seam.py"))
+_seam = importlib.util.module_from_spec(_seam_spec)
+_seam_spec.loader.exec_module(_seam)
+
 EXPECTED_STEP_COUNT = 18
 
 _LIFECYCLE_MODULE = None
@@ -315,7 +320,21 @@ class TestUpgradeLegTagIsPinned(unittest.TestCase):
         return subprocess.run(["git"] + list(args), cwd=ROOT,
                              capture_output=True, text=True, timeout=30)
 
+    def _no_data_when_the_hub_history_is_withheld(self):
+        """scripts/export_public.py copies FILES into a fresh tree, so a
+        published export carries none of the hub's history and the hub's own
+        release tag cannot resolve there. That is withheld history, the same
+        class as a withheld file, and it is NO-DATA rather than a failed pin.
+        Inside the hub the tag is supposed to resolve and its absence still
+        fails. See tools/bm_export_seam.py."""
+        mod = _lifecycle_module()
+        ref = "refs/tags/%s" % mod.V2_TAG
+        resolved = self._git("rev-parse", "--verify", "--quiet", ref)
+        _seam.no_data_for_absent_names(
+            [] if resolved.returncode == 0 else [ref])
+
     def test_v2_tag_exists_and_resolves(self):
+        self._no_data_when_the_hub_history_is_withheld()
         mod = _lifecycle_module()
         r = self._git("rev-parse", "--verify", "refs/tags/%s" % mod.V2_TAG)
         self.assertEqual(
@@ -324,6 +343,7 @@ class TestUpgradeLegTagIsPinned(unittest.TestCase):
             % (mod.V2_TAG, r.stdout + r.stderr))
 
     def test_v2_tags_own_manifest_matches_the_pinned_identity(self):
+        self._no_data_when_the_hub_history_is_withheld()
         mod = _lifecycle_module()
         r = self._git("show",
                       "%s:.claude-plugin/plugin.json" % mod.V2_TAG)

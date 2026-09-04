@@ -102,7 +102,7 @@ class TheDocumentAgreesWithTheHarnessItClaimsToSummarize(unittest.TestCase):
     def test_the_declared_per_class_table_matches_a_fresh_harness_run(self):
         harness = run_harness()
         declared = declared_table(
-            result_doc_text(), "## Per-class, blind corpus (2026-09-04 run)")
+            result_doc_text(), "## Per-class, blind corpus (2026-09-05 run)")
         self.assertTrue(declared, "found no per-class table under the "
                          "2026-09-04 heading")
         mismatches = []

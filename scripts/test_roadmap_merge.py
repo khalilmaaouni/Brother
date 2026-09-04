@@ -376,5 +376,108 @@ class GitMode(unittest.TestCase):
         self.assertIn(b'NO-DATA', proc.stdout)
 
 
+class CrissCrossBase(unittest.TestCase):
+    """A criss-cross merge (two merge bases, neither an ancestor of the
+    other) makes git synthesize a VIRTUAL base for the conflicted file at
+    index stage 1: it merges the two real bases itself, and where that
+    inner merge cannot resolve, stage 1 carries git's OWN conflict markers
+    instead of the roadmap's JSON. PR 251 hit exactly this and stopped with
+    NO-DATA even though `git merge-base HEAD MERGE_HEAD` names a real,
+    parseable base one hop away."""
+
+    def setUp(self):
+        if not shutil.which('git'):
+            self.skipTest('NO-DATA: no git binary on this machine')
+        self.dir = tempfile.mkdtemp(prefix='roadmap-merge-crisscross-')
+        self.addCleanup(shutil.rmtree, self.dir, True)
+        self.git('init', '-q', '-b', 'main')
+        self.git('config', 'user.email', 'test@example.invalid')
+        self.git('config', 'user.name', 'test')
+
+    def git(self, *args):
+        return subprocess.run(('git',) + args, cwd=self.dir,
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+    def commit(self, rows, message):
+        with open(os.path.join(self.dir, 'board.json'), 'w',
+                  encoding='utf-8') as fh:
+            fh.write(json.dumps(doc(rows), indent=1) + '\n')
+        self.git('add', 'board.json')
+        self.git('commit', '-q', '-m', message)
+
+    def build(self):
+        """Two branches (b1, b2) that each merge the other's pre-merge tip
+        once, then diverge again on distinct rows. Ends with a conflicted
+        merge of b2 into b1 on the roadmap's own row A, the shape that
+        forces git to compute a criss-cross virtual base for board.json.
+        Leaves the repository checked out on b1, merge NOT yet attempted.
+        """
+        self.commit([row('A', 'OPEN')], 'base')
+        self.git('checkout', '-q', '-b', 'lane2')
+        self.commit([row('A', 'IN-FLIGHT', evidence='lane2 evidence')],
+                    'lane2change')
+        lane2 = self.git('rev-parse', 'HEAD').stdout.decode().strip()
+        self.git('checkout', '-q', 'main')
+        self.commit([row('A', 'DONE', evidence='lane1 evidence')],
+                    'lane1change')
+        lane1 = self.git('rev-parse', 'HEAD').stdout.decode().strip()
+
+        # M1: b1 merges lane2's tip (by sha, not by branch) and resolves
+        # toward DONE. M2 mirrors it the other way. Neither merge commit is
+        # an ancestor of the other, which is what makes the final merge see
+        # two merge bases instead of one.
+        self.git('checkout', '-q', '-b', 'b1', lane1)
+        self.git('merge', lane2, '-q', '-m', 'M1')
+        self.commit([row('A', 'DONE',
+                        evidence='lane1 evidence, M1 resolution')], 'M1resolved')
+
+        self.git('checkout', '-q', '-b', 'b2', lane2)
+        self.git('merge', lane1, '-q', '-m', 'M2')
+        self.commit([row('A', 'IN-FLIGHT',
+                        evidence='lane2 evidence, M2 resolution')], 'M2resolved')
+
+        self.git('checkout', '-q', 'b1')
+        self.commit([row('A', 'DONE', evidence='lane1 evidence, M1 resolution'),
+                    row('Z1')], 'addZ1')
+        self.git('checkout', '-q', 'b2')
+        self.commit([row('A', 'IN-FLIGHT', evidence='lane2 evidence, M2 resolution'),
+                    row('Z2')], 'addZ2')
+        self.git('checkout', '-q', 'b1')
+
+    def drive(self):
+        return subprocess.run([sys.executable, DRIVER, '--git', 'board.json'],
+                              cwd=self.dir, stdout=subprocess.PIPE,
+                              stderr=subprocess.STDOUT)
+
+    def test_stage_1_is_the_virtual_base_git_produces_on_its_own(self):
+        """Drive backwards first: without the driver at all, prove the
+        fixture actually reproduces the old failure shape."""
+        self.build()
+        bases = self.git('merge-base', '--all', 'b1', 'b2')
+        self.assertEqual(len(bases.stdout.decode().strip().splitlines()), 2,
+                         'the fixture must have two merge bases')
+        conflict = self.git('merge', 'b2', '-q', '-m', 'final')
+        self.assertNotEqual(conflict.returncode, 0, 'must actually conflict')
+        stage1 = self.git('show', ':1:board.json').stdout.decode()
+        self.assertIn('Temporary merge branch', stage1)
+        with self.assertRaises(ValueError):
+            json.loads(stage1)
+
+    def test_the_driver_falls_back_to_the_real_merge_base_and_resolves(self):
+        self.build()
+        conflict = self.git('merge', 'b2', '-q', '-m', 'final')
+        self.assertNotEqual(conflict.returncode, 0, 'must actually conflict')
+        proc = self.drive()
+        out = proc.stdout.decode()
+        self.assertEqual(proc.returncode, 0, out)
+        self.assertIn('virtual criss-cross base', out)
+        self.assertIn('using merge-base', out)
+        with open(os.path.join(self.dir, 'board.json'), encoding='utf-8') as fh:
+            rows = {r['id']: r for r in json.load(fh)['rows']}
+        self.assertEqual(set(rows), {'A', 'Z1', 'Z2'})
+        self.assertEqual(self.git('add', 'board.json').returncode, 0)
+        self.assertEqual(self.git('commit', '-q', '-m', 'merged').returncode, 0)
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

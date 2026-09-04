@@ -18,6 +18,7 @@ WHAT THIS SUITE IS ACTUALLY DEFENDING
 
 Standard library only. Run: python3 tools/test_bm_release_invariant.py
 """
+import importlib.util
 import io
 import os
 import shutil
@@ -43,6 +44,11 @@ except ImportError:
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
+
+_seam_spec = importlib.util.spec_from_file_location(
+    "bm_export_seam", os.path.join(HERE, "bm_export_seam.py"))
+_seam = importlib.util.module_from_spec(_seam_spec)
+_seam_spec.loader.exec_module(_seam)
 TOOL_PATH = os.path.join(HERE, "bm_release_invariant.py")
 
 # The real, already-landed range this project's own history names by pull
@@ -274,6 +280,19 @@ class TestDistributableScope(unittest.TestCase):
         self.bri = bri
 
     def test_every_declared_path_exists_in_this_repository(self):
+        # Three of the declared directories are HUB records the export
+        # withholds (evidence, benchmark, .github), so in a clone of the
+        # published release this check reports scope drift that does not
+        # exist. Outside the hub an absent declared path is NO-DATA naming
+        # every one of them; inside the hub it still fails, because there
+        # the path is supposed to be on disk and its disappearance IS the
+        # drift this test exists to catch. See tools/bm_export_seam.py.
+        _seam.no_data_outside_the_hub(
+            list(self.bri.DISTRIBUTABLE_DIRS)
+            + list(self.bri.NON_DISTRIBUTABLE_DIRS)
+            + list(self.bri.DISTRIBUTABLE_FILES)
+            + list(self.bri.NON_DISTRIBUTABLE_FILES),
+            root=ROOT)
         missing_dirs = [d for d in self.bri.DISTRIBUTABLE_DIRS + self.bri.NON_DISTRIBUTABLE_DIRS
                         if not os.path.isdir(os.path.join(ROOT, d))]
         missing_files = [f for f in self.bri.DISTRIBUTABLE_FILES + self.bri.NON_DISTRIBUTABLE_FILES

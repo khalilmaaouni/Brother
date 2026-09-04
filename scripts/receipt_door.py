@@ -1008,6 +1008,176 @@ def path_risk(path):
     return ""
 
 
+#: S32 (docs/plan/REVIEW-DEPTH-DESIGN-2026-09-05.md section 3.2): the THIRD
+#: reading of a run's risk, over the lines a unit actually ADDED. The other
+#: two read what a unit SAID about itself (RISK_TRIGGERS) and where it wrote
+#: (RISK_PATHS), and the design's section 2.2 traces one real change set (a
+#: JSONL to CSV converter with a plain UTF-8 decode) through both of them and
+#: through `sbe review-route`, and none of the three would have looked. The
+#: defect lived in a decode boundary nobody declared, which only the diff
+#: shows.
+#:
+#: ONE class today, `encoding`, and it is deliberately not a new vocabulary:
+#: the name is already in RISK_TRIGGERS. The other eight classes below are
+#: reached by the two existing readings, so a second row here would fire on a
+#: boundary something already sees. Line bounded and word bounded for the
+#: reason both siblings give in their own comments: a screen that cries wolf
+#: on every commit is a screen nobody opens twice.
+#:
+#: A pointer for the next reader: products/brothersbe/src/brothersbe/
+#: reviewroute.py names risk classes too, for a DOSSIER review rather than a
+#: run. The two already overlap on auth, money and migration and already
+#: disagree; this makes the run's reading the sharper of the two rather than
+#: adding a third. FLIP CONDITION: the first time anything else puts
+#: brothersbe inside bundle/runtime/, collapse unit_tier onto
+#: `sbe review-route --base --head --json` and delete REVIEWER_OF_CLASS.
+DIFF_RISK = (
+    ("encoding",
+     r"(\bopen\s*\(|\.decode\s*\(|\.encode\s*\(|\bencoding\s*=|\bbytes\s*\("
+     r"|\bcodecs\.|\bio\.TextIOWrapper\b|\bunicode_escape\b|\berrors\s*=)"),
+)
+
+#: S32: which of the seven read-only reviewer agents
+#: (products/brothersbe/agents/) looks at a unit of each class, and, read as
+#: an ordered table, which class wins when several fire. Named agents only:
+#: this row ships no eighth reviewer. The first six ids are RISK_TRIGGERS'
+#: own, the last three are RISK_PATHS' own that RISK_TRIGGERS does not carry.
+REVIEWER_OF_CLASS = (
+    ("auth", "security-reviewer"),
+    ("money", "security-reviewer"),
+    ("migration", "migration-reviewer"),
+    ("irreversibility", "migration-reviewer"),
+    ("dependency manifest", "security-reviewer"),
+    ("public API", "backend-reviewer"),
+    ("encoding", "backend-reviewer"),
+    ("parsing", "backend-reviewer"),
+    ("concurrency", "backend-reviewer"),
+)
+
+#: The row field brother_run._stamp_review_findings writes and the reader
+#: below reads back, spelled here so this module reads a record without
+#: importing the engine (the same shape CHECK_WITHOUT_FIELD already uses).
+REVIEW_FIELD = "review_findings"
+
+#: The three states a finding can reach, and only one of them is a
+#: measurement. `confirmed` means the finding's own check re-ran at the
+#: delivered revision and FAILED; `not_reproduced` means it ran and passed,
+#: so it discriminates nothing; `no-data` means nothing ran at all. NO-DATA
+#: is never a pass here either: an unproven finding on a risky file still
+#: goes to the top of the reading order.
+FINDING_CONFIRMED = "confirmed"
+FINDING_NOT_REPRODUCED = "not_reproduced"
+FINDING_NO_DATA = "no-data"
+
+
+def diff_risk(diff_text):
+    """The name of the first DIFF_RISK class the ADDED lines of `diff_text`
+    hit, or "". Only lines starting with a single '+' are read, and the
+    '+++' header is skipped, so a line a diff merely shows as context can
+    never arm a reviewer."""
+    added = []
+    for line in str(diff_text or "").splitlines():
+        if line.startswith("+") and not line.startswith("+++"):
+            added.append(line[1:])
+    if not added:
+        return ""
+    body = "\n".join(added)
+    for name, pattern in DIFF_RISK:
+        if re.search(pattern, body):
+            return name
+    return ""
+
+
+def unit_classes(row, changed_files=None, diff_text=""):
+    """[class, ...] every risk class this unit's THREE readings hit, in
+    REVIEWER_OF_CLASS's own order (highest priority first) and deduped. An
+    empty list is a low-tier unit: docs and tests land there because none of
+    the three fires on them, which is a consequence of the existing patterns
+    rather than a special case written for them."""
+    hit = {name for name, _uid, _words in risk_triggers([row])}
+    for path in changed_files or []:
+        name = path_risk(path)
+        if name:
+            hit.add(name)
+    name = diff_risk(diff_text)
+    if name:
+        hit.add(name)
+    return [cls for cls, _agent in REVIEWER_OF_CLASS if cls in hit]
+
+
+def unit_tier(row, changed_files=None, diff_text=""):
+    """("high", class, reviewer) when any of the three readings hits,
+    ("low", "", "") otherwise. The reviewer is the ONE agent
+    REVIEWER_OF_CLASS names for the winning class, never the router's two:
+    the ceremony has to stay proportional, which is a separately measured
+    capability on the same board."""
+    classes = unit_classes(row, changed_files, diff_text)
+    if not classes:
+        return ("low", "", "")
+    reviewer = dict(REVIEWER_OF_CLASS)[classes[0]]
+    return ("high", classes[0], reviewer)
+
+
+def review_findings(record):
+    """S32: the `attention.review` block, read off the rows
+    brother_run._stamp_review_findings stamped and off NOTHING ELSE, so this
+    module never dispatches anything and never asks a model.
+
+    {"pass_state", "units_reviewed": [...], "findings": [...]}. `pass_state`
+    is "ran" only when at least one high-tier unit was really reviewed;
+    every other case is a NO-DATA sentence naming why, because a run that
+    reviewed nothing must not read like a run that reviewed everything and
+    found nothing."""
+    rows = (record or {}).get("rows") or (record or {}).get("units") or []
+    stamped = [(r, r.get(REVIEW_FIELD)) for r in rows
+               if isinstance(r.get(REVIEW_FIELD), dict)]
+    units, findings, ran = [], [], []
+    for row, stamp in stamped:
+        units.append({
+            "unit": row.get("id"),
+            "tier": stamp.get("tier") or "",
+            "class": stamp.get("class") or "",
+            "reviewer": stamp.get("reviewer") or "",
+            "unmeasured_classes": list(stamp.get("unmeasured_classes") or []),
+        })
+        for finding in stamp.get("findings") or []:
+            findings.append(dict(finding))
+        if stamp.get("state") == "ran":
+            ran.append(row.get("id"))
+    if not stamped:
+        state = ("%s: no review pass ran on this delivery, so no unit was "
+                 "read by an independent reviewer" % NODATA)
+    elif ran:
+        state = "ran"
+    elif not any(u["tier"] == "high" for u in units):
+        state = ("%s: no unit of this run crossed a risk boundary, so no "
+                 "reviewer was dispatched" % NODATA)
+    else:
+        state = next((s.get("state") for _r, s in stamped
+                      if s.get("state") and s.get("state") != "ran"),
+                     "%s: no reviewer was reachable" % NODATA)
+    return {"pass_state": state, "units_reviewed": units,
+            "findings": findings}
+
+
+def finding_note(finding):
+    """The one sentence reading_order puts beside a path a reviewer named,
+    or "" when this finding does not belong at the top of the list (a
+    not_reproduced finding proved nothing about the delivered tree, so it
+    moves no file up)."""
+    state = (finding or {}).get("state")
+    who = (finding or {}).get("reviewer") or "a reviewer"
+    if state == FINDING_CONFIRMED:
+        return ("%s named it and the check %r re-ran at the delivered "
+                "revision and exited %s"
+                % (who, finding.get("check_command"),
+                   finding.get("check_exit_code")))
+    if state == FINDING_NO_DATA:
+        return ("%s named it and nothing proved it: %s"
+                % (who, finding.get("check_command") or NODATA))
+    return ""
+
+
 def declared_untouched(record, receipts):
     """[{"unit", "path"}] for every path a unit declared it owns that no
     file it actually changed lands under: the files a reviewer does not have
@@ -1038,8 +1208,10 @@ def reading_order(record, receipts):
     The precedence, top of the list downwards, and why it runs that way:
 
       REVIEW FIRST         a path outside the unit's declared scope (or a
-                           unit that declared none), or a path naming one of
-                           the risk classes. Risk wins over proof: an
+                           unit that declared none), a path an independent
+                           reviewer named in a finding that is confirmed or
+                           unproven (S32), or a path naming one of the risk
+                           classes. Risk wins over proof: an
                            unproven risky file belongs at the top of the
                            list rather than in its own quieter section, and
                            its reason says the check proved nothing.
@@ -1050,6 +1222,13 @@ def reading_order(record, receipts):
     order = {name: [] for name in READING_SECTIONS}
     rows = record.get("rows") or record.get("units") or []
     row_by_id = {row.get("id"): row for row in rows}
+    # S32: what an independent reviewer named, keyed by (unit, path), read
+    # off the stamp and never recomputed here.
+    noted = {}
+    for finding in review_findings(record)["findings"]:
+        note = finding_note(finding)
+        if note:
+            noted.setdefault((finding.get("unit"), finding.get("file")), note)
     for entry in per_file_checks(record, receipts):
         path, unit = entry["file"], entry["unit"]
         row = row_by_id.get(unit) or {}
@@ -1057,6 +1236,7 @@ def reading_order(record, receipts):
                                      or [])]
         proven = entry.get("state") == "verified"
         risk = path_risk(path)
+        note = noted.get((unit, path))
         if not declared:
             section = REVIEW_FIRST
             why = "the unit that changed it declared no scope at all"
@@ -1064,6 +1244,9 @@ def reading_order(record, receipts):
             section = REVIEW_FIRST
             why = ("outside the scope unit %s declared (%s)"
                    % (unit, ", ".join(declared)))
+        elif note:
+            section = REVIEW_FIRST
+            why = note
         elif risk:
             section = REVIEW_FIRST
             why = "the path names %s" % risk
@@ -1499,7 +1682,19 @@ def receipt_record(run_dir_or_record, receipts, log_path=None):
     A unit whose evidence proves nothing (receipts_for's own "no-data"
     state, the zero-change and check-discrimination cases included) lands
     in `unproven` with mark_for() reading None: this receipt never reports a
-    mark for a unit that has none, whatever its exit code was."""
+    mark for a unit that has none, whatever its exit code was.
+
+    THREE FIELDS BEYOND THE EIGHT (E115, contract 1.1, docs/plan/
+    DELIVERY-RECEIPT-V1.md). The frozen receipt contract asks eleven
+    questions, not eight, and two of them had no field on the file: question
+    6, did a dependency revert or counterfactual check run, and question 10,
+    which engine revision ran it. Both were computed by the engine and both
+    were spent on prose. They are answered here by
+    `evidence[]/unproven[].dependency_check` (dependency_note()'s own
+    sentence, copied), and by the top level `harness_version` and
+    `harness_revision` (brother_run's own two measurements, the same calls
+    that feed the cost block the report prints). All three are additions
+    under v1's own rule: nothing above was removed or renamed."""
     # Local imports: continuity imports brother_run, and brother_run imports
     # THIS module at its own load time (line ~120), so importing continuity
     # at module load here would cycle back on itself. Importing at call
@@ -1553,6 +1748,19 @@ def receipt_record(run_dir_or_record, receipts, log_path=None):
                  "independence": r.get("independence") or NODATA,
                  "output_location": r.get("output_location") or log_path
                  or NODATA,
+                 # Q6 (E115, contract 1.1): did a dependency revert or
+                 # counterfactual check run. dependency_note() already
+                 # computes that state and receipts_for() already stamps it
+                 # on the in-memory receipt; it stopped here, so a revert
+                 # that RAN and correctly failed left nothing on the file
+                 # and read exactly like a revert nobody ever made. Copied
+                 # verbatim, never re-judged here: the note's own words are
+                 # the answer, its "no dependency declared" case included,
+                 # so a unit with nothing to revert says so rather than
+                 # going absent. NODATA only for a receipt built from
+                 # receipts that predate the field, never a made-up
+                 # sentence.
+                 "dependency_check": r.get("dependency_note") or NODATA,
                  "why": why}
         if r["state"] == "verified":
             evidence.append(entry)
@@ -1593,6 +1801,10 @@ def receipt_record(run_dir_or_record, receipts, log_path=None):
         # order, and the internal debt count that never becomes a mode.
         "reading_order": reading_order(record, receipts),
         "cognitive_debt": cognitive_debt(record, receipts),
+        # S32, contract 1.2: what an independent reviewer found on the
+        # high-tier units of this run, and the exit code of the check that
+        # proved it. Present on every receipt, empty or not.
+        "review": review_findings(record),
     }
 
     # Q7: was the run contained. Every changed file (the claim store's own
@@ -1635,6 +1847,27 @@ def receipt_record(run_dir_or_record, receipts, log_path=None):
         "env_lock": identity.get("env_lock", NODATA),
     }
 
+    # Q10 (E115, contract 1.1): which engine revision ran this. Both facts
+    # were measured already, for the cost block build_report prints, and
+    # both reached the file only as prose inside that `report` string, which
+    # no reader can query and no check can assert on. Read from
+    # brother_run's own two measurements rather than re-derived here, so the
+    # field and the report prose cannot disagree: build_cost_block is handed
+    # exactly these two calls' results. Imported at call time for the same
+    # cycle reason the two imports at the top of this function are, and by
+    # now brother_run is certainly loaded, since `import continuity` above
+    # imports it. Neither function raises (each catches its own git failure
+    # and returns a NO-DATA sentence naming the repository), so the only
+    # boundary left is the import itself.
+    try:
+        import brother_run
+        harness_version = brother_run._harness_version()
+        harness_revision = brother_run._harness_revision()
+    except (ImportError, AttributeError) as exc:
+        harness_version = harness_revision = (
+            "%s: the engine's own harness identity could not be read: %s"
+            % (NODATA, exc))
+
     return {
         "scope": scope,
         "intent": intent,
@@ -1644,6 +1877,8 @@ def receipt_record(run_dir_or_record, receipts, log_path=None):
         "attention": attention,
         "containment": containment,
         "continuity": continuity_state,
+        "harness_version": harness_version,
+        "harness_revision": harness_revision,
     }
 
 
@@ -1663,6 +1898,14 @@ RECEIPT_QUESTIONS = (
     ("attention", "What should I inspect first?"),
     ("containment", "Was the run contained?"),
     ("continuity", "Can I reproduce this, or continue it?"),
+    # E115: not one of the steering doc's eight. The frozen receipt contract
+    # (docs/plan/DELIVERY-RECEIPT-V1.md, question 10) asks which engine
+    # revision ran the delivery, and receipt_record() now answers it on the
+    # record, so the coupling this table exists for pulls it onto the page
+    # too: a field on the machine view that no reader here words would be
+    # invisible to every person who never opens the JSON.
+    ("harness_version", "Which engine version ran this?"),
+    ("harness_revision", "Which exact engine commit ran this?"),
 )
 
 
@@ -1775,6 +2018,21 @@ def _answer(field, view, log_path, record_path):
                 % (con["target_revision"], con["env_lock"],
                    ", ".join(buckets.get("integrated") or []) or "none"),
                 where, True)
+    if field in ("harness_version", "harness_revision"):
+        # E115, contract question 10. Both are already either a real
+        # measurement or a NO-DATA sentence naming what could not be read
+        # (brother_run's own two functions produce both cases), so this
+        # words the answer and re-judges nothing: `answered` is simply
+        # whether the value the engine measured is a real one.
+        value = str(view.get(field) or "")
+        if not value or value.startswith(NODATA):
+            return ("%s: %s" % (NODATA, value or
+                                "the engine recorded no %s" % field),
+                    where, False)
+        return ("%s%s" % ("git describe of the engine's own checkout: "
+                          if field == "harness_version"
+                          else "the exact commit of the engine that ran "
+                               "this: ", value), where, True)
     return ("%s: no reader is written for field %r" % (NODATA, field),
             where, False)
 

@@ -1020,6 +1020,47 @@ class TheAllowlistNamesSbeLeavesNotTheBareDirectory(unittest.TestCase):
                 dest, ".sbe", "new-untracked-by-the-allowlist.json")))
 
 
+class E120TheAllowlistNamesEveryPathExactlyOnce(unittest.TestCase):
+    """Row E120, measured by lane MERGE-4 on hub/main: nine paths appeared
+    twice in docs/plan/EXPORT-ALLOWLIST.txt, eight of them because the
+    2026-09-04 link-closure round added the same eight guide pages a second
+    time under a second comment block. A duplicate exports no extra file
+    (build_export_tree copies each entry's tracked files over the same
+    destination), which is exactly why nobody noticed: the only visible
+    effect was the dry run's own 'file/path entries' count, which counts
+    contributing ENTRIES and so read nine too high. The cost is to the
+    reader, who cannot tell which of two comment blocks is the reason a
+    path ships, and to the next person narrowing the list, who deletes one
+    copy and believes the path is gone."""
+
+    def _entries_with_line_numbers(self):
+        with open(EP.DEFAULT_ALLOWLIST, encoding="utf-8") as fh:
+            lines = fh.readlines()
+        seen = {}
+        for number, line in enumerate(lines, 1):
+            text = line.strip()
+            if text and not text.startswith("#"):
+                seen.setdefault(text, []).append(number)
+        return seen
+
+    def test_no_path_is_listed_twice(self):
+        seen = self._entries_with_line_numbers()
+        duplicates = {path: at for path, at in seen.items() if len(at) > 1}
+        self.assertEqual(
+            duplicates, {},
+            "docs/plan/EXPORT-ALLOWLIST.txt lists %d path(s) more than "
+            "once: %s" % (len(duplicates), "; ".join(
+                "%s at lines %s" % (path, ", ".join(str(n) for n in at))
+                for path, at in sorted(duplicates.items()))))
+
+    def test_the_loaded_allowlist_has_no_repeated_entry(self):
+        # load_allowlist is what the exporter actually walks, so the rule is
+        # asserted on its output too, not only on the file's text.
+        entries = EP.load_allowlist()
+        self.assertIsNotNone(entries)
+        self.assertEqual(len(entries), len(set(entries)))
+
+
 class TheExportedProductManifestDescribesTheExportedBytes(unittest.TestCase):
     """readiness row E29: a product's CHECKSUMS.sha256 is generated
     (docs/RELEASE.md step 4) over the FULL hub tree for that product,
@@ -1458,9 +1499,11 @@ class TheCommitIsExactlyTheGatedTree(unittest.TestCase):
     def test_a_tracked_file_the_denylist_names_still_does_not_ship(self):
         """The denylist still withholds a file even though the hub tracks
         it: THE ALLOWLIST AND DENYLIST ARE THE ONLY FILTERS, and this is
-        the denylist half. load_denylist() reads a fixed, real path in
-        this repository (DEFAULT_DENYLIST), never the fixture root, so it
-        is patched here rather than pointed at a temp file."""
+        the denylist half. The withheld path is injected by patching
+        load_denylist rather than by writing a denylist into the fixture
+        root, so this test stays about the withholding itself; WHERE the
+        denylist is read from is row E118's subject and is driven in
+        E118TheDenylistComesFromTheTreeBeingExported below."""
         with tempfile.TemporaryDirectory() as remote_dir, \
              tempfile.TemporaryDirectory() as root, \
              tempfile.TemporaryDirectory() as clone_dir:
@@ -1486,6 +1529,80 @@ class TheCommitIsExactlyTheGatedTree(unittest.TestCase):
             # tracked and never denylisted: still ships alongside it
             self.assertTrue(os.path.isfile(os.path.join(
                 clone_dir, "products", "myproduct", "tracked.csv")))
+
+
+class E118TheDenylistComesFromTheTreeBeingExported(unittest.TestCase):
+    """Row E118, measured by lane X7-FIX: build_export_tree read the
+    allowlist from the tree it was handed and the denylist from whatever
+    checkout the module happened to be imported from. The two filters are
+    the same kind of input, so a rebuild of an older revision
+    (reproduce_export.py --source-rev) applied yesterday's file list with
+    today's withholdings: a path denied since the cut was withheld from a
+    rebuild of a release that shipped it, and the reproduction read a
+    mismatch that was never in the release. Both directions are driven
+    here, because only one of them is about the fixture and the other is
+    about this repository leaking into a foreign root."""
+
+    ALLOWLIST = ["products/myproduct"]
+
+    def _seed(self, root, denylist_lines=None):
+        files = {
+            "products/myproduct/tracked.md": "ships\n",
+            "products/myproduct/withheld.md": "the fixture withholds this\n",
+        }
+        if denylist_lines is not None:
+            files["docs/plan/EXPORT-DENYLIST.txt"] = (
+                "# the fixture's own withholdings\n"
+                + "".join(line + "\n" for line in denylist_lines))
+        _make_fake_root(root, files)
+
+    def test_the_roots_own_denylist_is_the_one_that_is_applied(self):
+        with tempfile.TemporaryDirectory() as root, \
+             tempfile.TemporaryDirectory() as dest:
+            self._seed(root, ["products/myproduct/withheld.md"])
+            EP.build_export_tree(dest, self.ALLOWLIST, root=root)
+            self.assertTrue(os.path.isfile(os.path.join(
+                dest, "products", "myproduct", "tracked.md")))
+            self.assertFalse(
+                os.path.exists(os.path.join(
+                    dest, "products", "myproduct", "withheld.md")),
+                "the fixture root's own EXPORT-DENYLIST.txt named this "
+                "path and it shipped anyway, so the denylist came from "
+                "somewhere other than the tree being exported")
+
+    def test_a_root_with_no_denylist_withholds_nothing(self):
+        with tempfile.TemporaryDirectory() as root, \
+             tempfile.TemporaryDirectory() as dest:
+            self._seed(root, denylist_lines=None)
+            EP.build_export_tree(dest, self.ALLOWLIST, root=root)
+            for rel in ("tracked.md", "withheld.md"):
+                self.assertTrue(os.path.isfile(os.path.join(
+                    dest, "products", "myproduct", rel)), rel)
+
+    def test_this_checkouts_denylist_does_not_reach_a_foreign_root(self):
+        """The other direction: a path THIS repository withholds still
+        ships out of a root that does not withhold it. Read from the real
+        denylist rather than typed here, so the test keeps meaning when
+        that file changes."""
+        candidates = [rel for rel in EP.load_denylist()
+                      if rel.split("/")[0] not in EP.HARD_EXCLUDE
+                      and not rel.startswith("editions/")]
+        if not candidates:
+            self.skipTest(
+                "NO-DATA: this checkout's docs/plan/EXPORT-DENYLIST.txt "
+                "names no exportable path, so there is nothing that could "
+                "leak into a foreign root. NO-DATA is not a pass.")
+        rel = candidates[0]
+        top = rel.split("/")[0]
+        with tempfile.TemporaryDirectory() as root, \
+             tempfile.TemporaryDirectory() as dest:
+            _make_fake_root(root, {rel: "the fixture never withheld this\n"})
+            copied = EP.build_export_tree(dest, [top], root=root)
+            self.assertIn(top, copied)
+            self.assertTrue(
+                os.path.isfile(os.path.join(dest, rel)),
+                "%s is withheld by THIS checkout's denylist and the export "
+                "of a root that withholds nothing dropped it too" % rel)
 
 
 class APushTowardThePublicRemoteFromAnEditionIsRefused(unittest.TestCase):

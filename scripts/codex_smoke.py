@@ -8,8 +8,16 @@ Ship gate 7 of the Codex workstream (board row C7). It drives, in order:
   3. codex plugin list --available --json    (pluginId brother@brother)
   4. python3 scripts/codex_hooks_install.py --codex-home <isolated> --trust
   5. a REAL codex exec turn against a throwaway git repository holding the
-     README's toy (mathlib.py, test_mathlib.py), whose tool call runs
+     toy (mathlib.py, test_mathlib.py), whose tool call runs
      scripts/brother_run.py, which produces a receipt.
+
+THE COMMAND IS DEFINED ONCE, in TASK_SENTENCE, sandbox_flags and
+documented_argv below, and docs/codex/SMOKE-RUNBOOK.md prints exactly what
+they render; scripts/test_codex_smoke.py fails when the page and the code
+drift apart. Both sandbox flags are a failure this gate already had, on
+2026-09-04 and 2026-09-05: Codex defaults to the read-only sandbox, which
+refuses every patch a model writes, and plain workspace-write still refuses
+the .git write Brother's unit isolation needs.
 
 WHAT IS REAL AND WHAT IS STUBBED, stated here rather than left to a reader.
 The Codex binary, its plugin install, its hooks machinery, Brother's hooks,
@@ -47,6 +55,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -61,8 +70,86 @@ DEFAULT_WORK = os.path.expanduser("~/.claude/evidence/codex-smoke")
 FOUNDER_CODEX_HOME = os.path.expanduser("~/.codex")
 
 TOY_MATHLIB = "def add(a, b):\n    return a + b\n"
-TOY_TEST = ("from mathlib import add\n\n\ndef test_add():\n"
-            "    assert add(1, 2) == 3\n")
+
+#: The toy's test file is a unittest.TestCase on purpose, and that is the
+#: SECOND half of a defect the founder's own signed-in run found on
+#: 2026-09-04: the model read a bare-assert test file, reached for pytest,
+#: and got "pytest: command not found". unittest is in the standard library,
+#: so this toy needs nothing installed. TASK_SENTENCE names the command too,
+#: because a file shape is a hint and a sentence is an instruction.
+TOY_TEST = ('import unittest\n\nfrom mathlib import add\n\n\n'
+            'class AddTest(unittest.TestCase):\n'
+            '    def test_add(self):\n'
+            '        self.assertEqual(add(1, 2), 3)\n\n\n'
+            'if __name__ == "__main__":\n'
+            '    unittest.main()\n')
+
+#: THE DOCUMENTED COMMAND, DEFINED ONCE. docs/codex/SMOKE-RUNBOOK.md step 6,
+#: this script's steps 5a and 5b, and release_closeout.py's C7 leg all read
+#: these names, and scripts/test_codex_smoke.py fails when the runbook's own
+#: text and these values drift apart. Before this existed the runbook and the
+#: automation were two independent copies of one command, which is how the
+#: runbook could document a turn nobody had ever run.
+#:
+#: `-s workspace-write` is not decoration. `codex exec --help` on this machine
+#: prints "-s, --sandbox <SANDBOX_MODE>" with possible values "read-only,
+#: workspace-write, danger-full-access", and the DEFAULT is read-only, so a
+#: turn without this flag refuses every patch the model writes. Measured
+#: 2026-09-04 in the founder's own signed-in run: "patch rejected: writing is
+#: blocked by read-only sandbox", and that turn ended with no receipt.
+SANDBOX_MODE = "workspace-write"
+TASK_SENTENCE = ("use the Brother plugin to make add() refuse non-numeric "
+                 "input and cover it with a test, tests run with "
+                 "python3 -m unittest")
+
+#: THE ONE EXTRA GRANT, and it is the difference between a turn that reaches
+#: the engine and a turn that reaches a receipt. MEASURED 2026-09-05 against
+#: codex-cli 0.153.0-alpha.5: `workspace-write` announces its own roots as
+#: "[workdir, /tmp, $TMPDIR]" but still refuses `<workdir>/.git`, so Brother's
+#: unit isolation dies at "git worktree add failed: fatal: could not create
+#: leading directories of '.git/worktrees/U1': Operation not permitted" and
+#: every unit is refused with "isolation could not be established". Driven
+#: both ways: the same turn with this grant creates the worktree at exit 0.
+#: The grant is the SMALLEST one that works, the target repository's own
+#: .git and nothing else; on a real project it also lets the model rewrite
+#: that repository's history, so it is a deliberate act, not a default.
+GIT_GRANT = 'sandbox_workspace_write.writable_roots=["%s/.git"]'
+
+
+def sandbox_flags(workspace):
+    """The sandbox half of the documented command, for a workspace given as
+    a real path (the automation) or as the literal `$PWD` (the runbook)."""
+    return ["-s", SANDBOX_MODE, "-c", GIT_GRANT % workspace]
+
+
+def documented_argv(codex_bin, toy):
+    """The exact command docs/codex/SMOKE-RUNBOOK.md step 6 tells the founder
+    to run, with his `$PWD` resolved to `toy`. Nothing here is spelled a
+    second time anywhere: a documented command the acceptance does not run is
+    a documented command nobody has proven."""
+    return [codex_bin, "exec"] + sandbox_flags(toy) + ["-C", toy,
+                                                       TASK_SENTENCE]
+
+
+def documented_shell_command():
+    """The same command as the founder reads it, with his own `$PWD` left for
+    the shell to expand. Double quotes around the -c value, never single: a
+    single-quoted value would hand Codex the four literal characters $PWD."""
+    return ('codex exec -s %s -c "%s" -C "$PWD" "%s"'
+            % (SANDBOX_MODE,
+               (GIT_GRANT % "$PWD").replace('"', '\\"'),
+               TASK_SENTENCE))
+
+
+def printf_line(body, path):
+    """The `printf ... > path` line the runbook uses to lay one toy file
+    down, rendered from the constant above so the page and the code cannot
+    say different things. Refuses a body carrying a single quote, which the
+    single-quoted shell word could not hold."""
+    if "'" in body:
+        raise ValueError("a single quote cannot go in this printf: %r" % body)
+    return "printf '%s' > %s" % (body.replace("\n", "\\n"), path)
+
 
 #: Brother's decomposer stub: one unit over mathlib.py whose done_check is a
 #: command a stranger can re-run, which is what makes the receipt mean
@@ -278,8 +365,22 @@ def codex_env(base, codex_home, home):
     return env
 
 
-def stub_turn(codex_bin, env, toy, command):
-    """One real `codex exec` turn whose model is this file's local provider."""
+def stub_turn(codex_bin, env, toy, command, sandbox=None):
+    """One real `codex exec` turn whose model is this file's local provider.
+
+    Every flag below either mirrors `documented_argv` or exists because the
+    model is stubbed. `sandbox` defaults to the documented `workspace-write`
+    and is a parameter ONLY so a regression test can drive the same turn at
+    Codex's own default, `read-only`, and watch it produce no receipt. Until
+    2026-09-05 this turn passed `sandbox_mode="danger-full-access"` instead,
+    which is WHY the automation stayed green while the documented command was
+    broken: the leg that could write had the sandbox switched off, and the
+    leg carrying Codex's real default (step 5a) never reached a write, being
+    refused at the login first.
+
+    `approval_policy="never"` is not extra power: `codex exec` is
+    non-interactive and reports `approval: never` on its own, as the
+    founder's 2026-09-04 transcript shows."""
     _Handler.brother_command = command
     _Handler.turn = [0]
     server = HTTPServer(("127.0.0.1", 0), _Handler)
@@ -296,11 +397,15 @@ def stub_turn(codex_bin, env, toy, command):
             "-c", 'model_providers.c7stub.wire_api="responses"',
             "-c", 'model_providers.c7stub.env_key="C7_STUB_KEY"',
             "-c", 'approval_policy="never"',
-            "-c", 'sandbox_mode="danger-full-access"',
-            "-C", toy,
-            "use the Brother plugin to make add() refuse non-numeric input"]
+            "-s", sandbox or SANDBOX_MODE,
+            "-c", GIT_GRANT % toy,
+            "-C", toy, TASK_SENTENCE]
     try:
-        return sh(args, env=run_env, timeout=900)
+        # cwd is the toy, because that is where the founder stands when he
+        # runs the documented command (-C "$PWD"). NOT a fix for anything:
+        # the turn's own working directory was tried as an explanation for
+        # the cut-off runs below and did not explain them.
+        return sh(args, env=run_env, cwd=toy, timeout=900)
     finally:
         server.shutdown()
 
@@ -367,12 +472,24 @@ def main(argv=None):
     fake_home = os.path.join(work, "home")
     toy = os.path.join(work, "toy")
     stubs = os.path.join(work, "stubs")
-    runs_root = os.path.join(work, "runs")
+    # NOT under --work, and the reason is measured rather than assumed. A
+    # workspace-write turn prints its own writable roots: "sandbox:
+    # workspace-write [workdir, /tmp, $TMPDIR]". The engine keeps its
+    # bookkeeping OUTSIDE the tree it integrates into (brother_run.run_dir_for
+    # says why), so with --work under ~/.claude/evidence the engine's writes
+    # land outside all three roots and Codex drops the tool call silently, at
+    # exit 0, with no receipt. $TMPDIR is a granted root, so the run directory
+    # goes there.
+    runs_root = os.path.join(tempfile.gettempdir(), "codex-smoke-runs")
     logs = os.path.join(work, "logs")
+    if not args.keep and os.path.isdir(runs_root):
+        shutil.rmtree(runs_root)
     for path in (codex_home, fake_home, stubs, runs_root, logs):
         os.makedirs(path, exist_ok=True)
     LOG_DIR[0] = logs
     print("full output of every step below: %s" % logs)
+    print("the engine's run directory (a workspace-write writable root): %s"
+          % runs_root)
 
     before, witness_desc = founder_witness()
     print("founder ~/.codex witness before: %s" % (before or "NO-DATA"))
@@ -413,9 +530,7 @@ def main(argv=None):
 
     # Step 5, first half: the real thing, with no stub, so the credential
     # refusal is CAPTURED rather than predicted.
-    real = sh([args.codex_bin, "exec", "-C", toy,
-               "use the Brother plugin to make add() refuse non-numeric "
-               "input and cover it with a test"], env=env, timeout=300)
+    real = sh(documented_argv(args.codex_bin, toy), env=env, timeout=300)
     report("5a real codex task (no credentials in the isolated home)", real,
            tail=2)
     refusal = [ln for ln in ((real.stdout or "") + (real.stderr or "")

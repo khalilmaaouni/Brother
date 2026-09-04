@@ -2600,6 +2600,74 @@ def _stamp_dependency_mutations(record_path, claims, cwd, log=None,
     return stamped
 
 
+def _stamp_review_findings(record_path, claims, cwd, log=None, cmd=None):
+    """S32 (docs/plan/REVIEW-DEPTH-DESIGN-2026-09-05.md): every DONE unit
+    whose OWN DIFF crosses a risk boundary is read by one of the seven
+    existing read-only reviewer agents, and every finding that reviewer
+    returns has its own verification command RE-EXECUTED here, so the
+    receipt records a finding beside a real exit code.
+
+    THE SAME SHAPE AS _stamp_dependency_mutations ABOVE, deliberately: load
+    the document on disk, stamp a field onto the rows, write it back, and
+    let receipt_door read that field and nothing else. That precedent is why
+    this needs no new screen, no new command and no change to the merge:
+    the pass runs after the drain, on work that has already landed, and
+    NOTHING here can change an exit code. A finding cannot block a merge,
+    which is a weakness against a competitor that reviews before it commits,
+    named plainly in the design's section 6 with the evidence that would
+    flip it.
+
+    Idempotent, for the same reason its sibling is: a row already carrying
+    the field is left alone, so a resumed run does not pay a second reviewer
+    for work it already read.
+
+    The whole pass is NO-DATA rather than an exception on every boundary it
+    crosses (no reviewer configured, an unreadable diff, a reviewer that
+    cannot run, an answer that does not parse), because a delivery that
+    could not be reviewed must never read like one that was reviewed and
+    came back clean."""
+    try:
+        import review_pass
+    except ImportError as exc:
+        if log is not None:
+            log.note("brother_run: %s: the review pass is not importable, so "
+                     "no unit was read by an independent reviewer: %s"
+                     % (NODATA, exc))
+        return {}
+    with open(record_path, "r", encoding="utf-8") as fh:
+        doc = json.load(fh)
+    rows = doc.get("rows") or doc.get("units") or []
+    try:
+        stamps = review_pass.review_rows(rows, claims, cwd, cmd=cmd)
+    except (OSError, ValueError) as exc:
+        if log is not None:
+            log.note("brother_run: %s: the review pass could not run: %s"
+                     % (NODATA, exc))
+        return {}
+    if not stamps:
+        return {}
+    for row in rows:
+        stamp = stamps.get(row.get("id"))
+        if stamp is None:
+            continue
+        row[receipt_door.REVIEW_FIELD] = stamp
+        if log is None:
+            continue
+        if stamp.get("state") != "ran":
+            log.note("brother_run: %s was not reviewed: %s"
+                     % (row.get("id"), stamp.get("state")))
+            continue
+        log.note("brother_run: %s (%s, class %s) was reviewed by %s: "
+                 "%d finding(s), %d confirmed by a check this run re-ran"
+                 % (row.get("id"), stamp.get("tier"), stamp.get("class"),
+                    stamp.get("reviewer"), len(stamp.get("findings") or []),
+                    len([f for f in stamp.get("findings") or []
+                         if f.get("state")
+                         == receipt_door.FINDING_CONFIRMED])))
+    work_record.write_record(record_path, doc)
+    return stamps
+
+
 #: How many times a unit whose check _stamp_prechecks marked
 #: check_looks_broken is asked about again, once, before falling through to
 #: _refuse_broken_precheck_units unchanged. ONE: a check the planner cannot
@@ -4273,6 +4341,11 @@ def main(argv=None):
     # _stamp_dependency_mutations for the design and the two rejected
     # alternatives.
     _stamp_dependency_mutations(doc_path, _read_claims(claims_path), cwd, log)
+    # S32: and then the review pass, on the same document, immediately after
+    # its sibling and before the reload below, so what an independent
+    # reviewer found rides on the same receipt as everything else. It
+    # changes no exit code: see _stamp_review_findings.
+    _stamp_review_findings(doc_path, _read_claims(claims_path), cwd, log)
     with open(doc_path, "r", encoding="utf-8") as fh:
         record = json.load(fh)
     record["path"] = doc_path

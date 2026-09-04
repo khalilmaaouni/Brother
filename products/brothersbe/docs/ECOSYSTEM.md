@@ -1,15 +1,18 @@
 # BrotherSBE and the tools around it: an honest map
 
-Last reviewed: 2026-08-28
+Last reviewed: 2026-09-05
 
 Scope of this review: claims naming a version, path, or capability on this
-machine were re-checked against the installed plugin cache and this repo's
-own files and history. This pass verified: the reviewer agent count (8,
-matching `ls agents/`), that every external URL on this page has a citation
-entry in docs/CITATIONS.md (5 of 5), and that docs/RUNTIMES.md still names
-Claude Code as the only runtime with verified enforcement. Claims about
-external projects (their behavior, adoption, or figures this machine cannot
-query) were left untouched and are carried forward unverified.
+machine were re-checked against this repo's own files. This pass verified:
+the reviewer agent count (8, matching `ls agents/`), that every external URL
+on this page has a citation entry in docs/CITATIONS.md (5 of 5, checked by
+extracting each URL from this file and looking it up verbatim in
+docs/CITATIONS.md), that docs/RUNTIMES.md still marks Claude Code ENFORCED on
+every hook-backed control and no other runtime on any of them, and that the
+two self-scores quoted below (5 against 9 on onboarding friction, 1 against 10
+on adoption) still match the rows in docs/BENCHMARK-vs-superpowers.md. Claims
+about external projects (their behavior, adoption, or figures this machine
+cannot query) were left untouched and are carried forward unverified.
 
 **Short answer for someone in a hurry.** BrotherSBE is an assurance layer for
 backend and data engineering work done with AI assistants. It does not

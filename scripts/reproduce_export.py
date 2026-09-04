@@ -51,6 +51,20 @@ The digest cannot cover docs/releases/: the note that carries a digest cannot
 also be hashed by it. That exclusion is stated in the note and here, never
 left for a reader to discover.
 
+THE TWO SELF-NAMING FILES. docs/releases/<version>.md and
+docs/releases/<version>.export-manifest.txt each NAME the revision they were
+generated at, so neither can ever rebuild byte for byte from the revision the
+note itself names: refresh_cut.py stamps the note with the HEAD it ran at and
+regenerates the manifest over that tree, and committing the pair makes a new
+commit whose tree the note cannot name. Comparing them raw made this check
+structurally red for every honest cut (measured on v1.0.3: 1312 of 1314 files
+reproduced, and the only two that did not were exactly these). They are
+compared for what they CAN prove instead: the manifest by content against the
+manifest recomputed over the tag's own files, the note with its source
+revision stamp and its manifest digest masked on both sides. Every other
+allowlisted file is still byte for byte, and every other byte of the note is
+too.
+
 Python 3, standard library only.
 """
 import argparse
@@ -238,6 +252,92 @@ def verify_tree(tag, public, expect=None):
     return 0, lines
 
 
+#: The stamp line the note generator writes, and the two values on it that
+#: name the revision the note was generated AT. Masked line-locally: the
+#: prose around them still has to match, and a rev printed anywhere else in
+#: the note (the older stamp block repeats it inside its reproduce command)
+#: is deliberately left compared, so a note stamped with the wrong revision
+#: still surfaces.
+NOTE_STAMP_LINE_RE = re.compile(r"^Cut from hub commit `.*$", re.M)
+NOTE_STAMP_VALUE_RE = re.compile(r"`[0-9a-f]{7,40}`|`[^`]*-g[0-9a-f]{7,40}`")
+
+#: The digest the note states over the manifest beside it. Masked because the
+#: manifest is regenerated over the tree the cut commit carries, which is not
+#: the tree the note can name. Only the 64 hex characters go: the file count
+#: and every other word of the sentence stay compared.
+NOTE_DIGEST_MASK_RE = re.compile(r"(Export manifest digest `)[0-9a-f]{64}(`)")
+
+
+def self_naming_paths(version):
+    """The two files inside an export that NAME the revision they were
+    generated at: the release note (which states the hub commit and the
+    manifest digest) and the manifest (regenerated over the tree that commit
+    produces). A commit cannot contain its own hash, so refresh_cut.py stamps
+    the note with the HEAD it ran at and regenerates the manifest over that
+    tree, and committing the pair makes a NEW commit whose tree the note
+    cannot name. Rebuilding from the revision the note DOES name therefore
+    regenerates both with a different stamp, every time, for every honest
+    cut. Comparing them byte for byte against the tag is structurally red, so
+    they are compared for what they can actually prove instead."""
+    return (manifest_path_for(version), "docs/releases/%s.md" % version)
+
+
+def mask_self_naming_note(text):
+    """The release note with its source revision stamp and its manifest
+    digest replaced by fixed placeholders. Every other byte survives."""
+    def _mask_line(match):
+        return NOTE_STAMP_VALUE_RE.sub("`<stamped revision>`", match.group(0))
+    text = NOTE_STAMP_LINE_RE.sub(_mask_line, text)
+    return NOTE_DIGEST_MASK_RE.sub(r"\1<manifest digest>\2", text)
+
+
+def compare_release_note(generated, shipped):
+    """(ok, detail) for docs/releases/<version>.md. Compared with the two
+    self-naming fields masked on both sides, so every OTHER byte of the note
+    still has to match the tag exactly."""
+    try:
+        gen_text = generated.decode("utf-8")
+        tag_text = shipped.decode("utf-8")
+    except UnicodeDecodeError:
+        return False, ("one side is not UTF-8 text, so the note cannot be "
+                       "compared field by field")
+    if mask_self_naming_note(gen_text) == mask_self_naming_note(tag_text):
+        return True, ("compared with its source revision stamp and its "
+                      "manifest digest masked on both sides: every other "
+                      "byte matches the tag")
+    return False, ("it differs beyond its source revision stamp and its "
+                   "manifest digest, which are the only two fields a note "
+                   "cannot state about the commit that carries it")
+
+
+def compare_export_manifest(shipped, tag_entries):
+    """(ok, detail) for docs/releases/<version>.export-manifest.txt. Compared
+    by CONTENT against the manifest recomputed over the TAG's own bytes,
+    which is the rule verify_tree already applies from a clone: every line's
+    hash matches the file the tag ships, nothing the tag carries is missing
+    from it, nothing it names is absent. Recomputing rather than re-reading
+    verify_tree's verdict keeps this side independent of the note, whose
+    stated digest is one of the two things being masked."""
+    try:
+        shipped_text = shipped.decode("utf-8")
+    except UnicodeDecodeError:
+        return False, ("the manifest the tag ships is not UTF-8 text, so its "
+                       "lines cannot be recomputed and compared")
+    fresh = manifest_text(tag_entries)
+    if shipped_text == fresh:
+        return True, ("compared by content against the manifest recomputed "
+                      "over the tag's own %d exported file(s): every line's "
+                      "hash matches the file the tag ships, nothing missing, "
+                      "nothing extra" % len(fresh.splitlines()))
+    shipped_rows = set(shipped_text.splitlines())
+    fresh_rows = set(fresh.splitlines())
+    return False, ("recomputing it over the tag's own files gives %d line(s) "
+                   "the tag's manifest does not carry and leaves %d line(s) "
+                   "it carries unaccounted for"
+                   % (len(fresh_rows - shipped_rows),
+                      len(shipped_rows - fresh_rows)))
+
+
 def apply_release_stamp(export_dir, tag, source_rev):
     """A commit cannot contain its own hash: export_public.py stamps
     docs/releases/<version>.md with the hub HEAD taken AFTER --source-rev
@@ -285,14 +385,30 @@ def main(argv=None):
         return code
 
     public = args.public or PUBLIC_CHECKOUT
-    allowlist = EP.load_allowlist(args.allowlist)
-    if allowlist is None:
-        print("NO-DATA: no allowlist; nothing to reproduce")
-        return 2
 
     src = source_tree(args.source_rev)
     if src is None:
         print("NO-DATA: could not materialise source revision %s"
+              % args.source_rev)
+        return 2
+
+    # The allowlist is one of the exporter's INPUTS, so it is read from the
+    # revision being rebuilt, never from whatever this checkout carries
+    # today. Measured on v1.0.3: hub/main had since dropped one path from the
+    # list, so rebuilding with today's copy exported 1313 files where the
+    # release exported 1314, and the tag's own manifest named a file the
+    # rebuild never generated. The path comes off EP's own constant rather
+    # than being typed again, so the two can never disagree.
+    # The DENYLIST was the other half of the same defect (row E118): it was
+    # read from the current checkout while the allowlist came from the
+    # revision. EP.build_export_tree now resolves it from the `root` it is
+    # handed, which is `src` below, so both filters come off the revision
+    # being rebuilt.
+    allowlist = EP.load_allowlist(
+        args.allowlist
+        or os.path.join(src, os.path.relpath(EP.DEFAULT_ALLOWLIST, EP.ROOT)))
+    if allowlist is None:
+        print("NO-DATA: no allowlist at revision %s; nothing to reproduce"
               % args.source_rev)
         return 2
 
@@ -309,11 +425,14 @@ def main(argv=None):
         return 2
     apply_release_stamp(export_dir, args.tag, args.source_rev)
 
+    rel_manifest, rel_note = self_naming_paths(args.tag.lstrip("v"))
     reproduced, mismatched, out_of_scope_missing = [], [], []
+    tag_entries = []  # (relpath, tag bytes) for every exported path the tag has
+    deferred = {}     # the self-naming files, compared once the walk is done
     for base, _dirs, files in os.walk(export_dir):
         for fn in files:
             full = os.path.join(base, fn)
-            rel = os.path.relpath(full, export_dir)
+            rel = os.path.relpath(full, export_dir).replace(os.sep, "/")
             with open(full, "rb") as fh:
                 gen = fh.read()
             want = tag_file_bytes(args.tag, rel, public)
@@ -322,16 +441,36 @@ def main(argv=None):
                 # was added to the hub after the tag was cut. Not a mismatch,
                 # named so the count is honest.
                 out_of_scope_missing.append(rel)
+                continue
+            tag_entries.append((rel, want))
+            if rel in (rel_manifest, rel_note):
+                # cannot be compared raw: see self_naming_paths.
+                deferred[rel] = (gen, want)
             elif _sha(gen) == _sha(want):
                 reproduced.append(rel)
             else:
                 mismatched.append(rel)
 
+    self_naming = []
+    for rel in sorted(deferred):
+        gen, want = deferred[rel]
+        if rel == rel_manifest:
+            ok, detail = compare_export_manifest(want, tag_entries)
+        else:
+            ok, detail = compare_release_note(gen, want)
+        self_naming.append((rel, ok, detail))
+        if not ok:
+            mismatched.append(rel)
+
     print("reproduce-export: %d allowlisted file(s) regenerated from %s"
-          % (len(reproduced) + len(mismatched) + len(out_of_scope_missing),
+          % (len(reproduced) + len(mismatched) + len(out_of_scope_missing)
+             + len([1 for _, ok, _ in self_naming if ok]),
              args.source_rev))
     print("  reproduced byte-for-byte against %s: %d" % (args.tag,
                                                          len(reproduced)))
+    for rel, ok, detail in self_naming:
+        print("  self-naming %s: %s: %s"
+              % (rel, detail, "MATCH" if ok else "DIFFERS"))
     if out_of_scope_missing:
         print("  generated but absent from %s (added after the tag, out of "
               "scope): %d" % (args.tag, len(out_of_scope_missing)))
@@ -342,12 +481,14 @@ def main(argv=None):
         print("reproduce-export: the export is NOT reproducible; %d file(s) "
               "differ" % len(mismatched))
         return 1
-    if not reproduced:
+    if not reproduced and not self_naming:
         print("NO-DATA: no allowlisted file could be compared against %s "
               "(is the tag on this checkout?)" % args.tag)
         return 2
     print("reproduce-export: every comparable allowlisted file rebuilds "
-          "byte-for-byte from %s into %s" % (args.source_rev, args.tag))
+          "byte-for-byte from %s into %s; reproduced byte-for-byte %d, "
+          "self-naming files %d compared by content"
+          % (args.source_rev, args.tag, len(reproduced), len(self_naming)))
     return 0
 
 

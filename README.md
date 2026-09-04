@@ -92,11 +92,13 @@ python3 scripts/brother_run.py "<outcome>" --cwd <repo>
 
 That command needs a configured model worker on the machine: the engine asks a planning model to decompose the outcome, and it refuses the run and exits non-zero when no worker answers with a plan it can read.
 
-To upgrade, add the marketplace again at the new ref and add the plugin again, joined so the second step does not run over a failed first one:
+To upgrade, remove the configured marketplace first, then add it again at the new ref and add the plugin again, joined so no step runs over a failed one:
 
 ```bash
-codex plugin marketplace add https://github.com/khalilmaaouni/Brother --ref <new ref> && codex plugin add brother@brother --json
+codex plugin marketplace remove brother && codex plugin marketplace add https://github.com/khalilmaaouni/Brother --ref <new ref> && codex plugin add brother@brother --json
 ```
+
+The removal is not optional: Codex refuses a second `marketplace add` of a name it already carries from another ref, with `Error: marketplace 'brother' is already added from a different source; remove it before adding this source`, and `codex plugin marketplace upgrade brother` exits 0 while leaving the version where it was, because it refreshes the snapshot at the ref already configured rather than moving to a new one. Your Codex home survives the removal: it drops the marketplace source and its checkout, not `config.toml`, `hooks.json` or anything else you keep there. On a machine with nothing installed yet the first command answers `Error: marketplace 'brother' is not configured or installed` and exits 1, which stops the rest: use the install block above instead, because there is nothing to upgrade from.
 
 To uninstall:
 

@@ -1408,7 +1408,7 @@ class TestInstalledManifestGap(unittest.TestCase):
         for path in self.restore:
             try:
                 os.chmod(path, 0o644)
-            except OSError:
+            except OSError:  # sbe: allow-silent cleanup only, tearDown restoring permissions before removal; the next line's shutil.rmtree(ignore_errors=True) removes self.tmp regardless of whether this chmod ran
                 pass
         shutil.rmtree(self.tmp, ignore_errors=True)
 

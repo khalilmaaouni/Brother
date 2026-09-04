@@ -1277,23 +1277,39 @@ def _cjk_hits(con, text, analyzer_mod, limit=60):
     a term segment() would otherwise slice into several generic bigrams collapses into
     one specific token once it is in the user or company dictionary, so a decoy that
     only coincidentally shares those bigrams stops matching at all (see
-    test_bm_vault_analyzer.py's dictionary-flip case)."""
-    tokens = [t for t in analyzer_mod.analyze(text, vault_dir=_default_vault()) if len(t) >= 2]
+    test_bm_vault_analyzer.py's dictionary-flip case).
+
+    JA78 (2026-09-05): THE NOTE SIDE IS FOLDED WITH THE SAME NORMALIZER THE QUERY SIDE
+    ALREADY GETS. analyze() runs the query through analyzer.normalize() and this scan
+    used to compare the result against RAW note text, so the width fold was applied on
+    one side only: a full-width query reached a half-width note (the direction that
+    happened to be tested) and a half-width query could never reach a full-width note.
+    Measured on the frozen blind corpus, case wv05: a company whose note declares its
+    own English designation full-width was unreachable by its own name, while an
+    unrelated company that writes CO., LTD. half-width matched the query's legal-form
+    words and outranked it. One normal form on both sides is the fix, and it is why
+    this is now a SINGLE pass over the notes (folding each note once) instead of one
+    full table scan per token: fewer scans than before, and the fold cannot be paid
+    per token. LIKE's own ASCII case folding is reproduced by lower()ing both sides,
+    and LIKE's % and _ wildcards stop existing at all under a literal `in` test, so a
+    dictionary term carrying either now matches itself rather than a defanged
+    approximation of itself."""
+    tokens = [t.lower() for t in analyzer_mod.analyze(text, vault_dir=_default_vault())
+              if len(t) >= 2]
     if not tokens:
         return []
     counts = {}
-    for tok in tokens:
-        # % and _ are LIKE wildcards; a token carrying either (never expected from
-        # segment()'s own output, but not proven impossible for a dictionary term
-        # someone typed by hand) is defanged rather than silently widening the match.
-        safe = tok.replace("%", "").replace("_", "")
-        if not safe:
+    for r in con.execute("SELECT id, title, descr, body FROM notes"):
+        hay = " ".join(f for f in (r["title"], r["descr"], r["body"]) if f)
+        if not hay:
             continue
-        like = "%" + safe + "%"
-        for r in con.execute(
-                "SELECT id FROM notes WHERE title LIKE ? OR descr LIKE ? OR body LIKE ?",
-                (like, like, like)).fetchall():
-            counts[r["id"]] = counts.get(r["id"], 0) + 1
+        hay = analyzer_mod.normalize(hay).lower()
+        n = 0
+        for tok in tokens:
+            if tok in hay:
+                n += 1
+        if n:
+            counts[r["id"]] = n
     return [nid for nid, _c in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:limit]]
 
 
@@ -1317,6 +1333,40 @@ _JA_GENERIC = frozenset(
 _JA_SEP_RE = re.compile(u"[\\s・･　]+")
 _JA_NAME_IDF = 1.0    #: a shared name token this rare marks two notes as one confusable family.
 _JA_ATTR_IDF = 1.5    #: a query content word this rare counts as a distinguishing attribute.
+#: JA13: the full-spelling legal forms used as a NAME ANCHOR when reading the company the
+#: query names. bm_vault_analyzer._LEGAL_FORMS owns the complete list (this is a subset on
+#: purpose): the bracketed spellings there, (株) and the circled glyphs, are stripped as
+#: noise wherever they appear and are not a reliable boundary for the name beside them.
+_JA_NAME_ANCHORS = ("株式会社", "有限会社", "合同会社")
+#: the run that can carry a company name beside one of the anchors above: kanji, katakana,
+#: the iteration mark and the long vowel mark, and NO hiragana. Excluding hiragana is what
+#: keeps the particles in その会社は肥後物産株式会社 out of the captured name; it also declines
+#: the rare all-hiragana trade name, which only makes this rule fire less often.
+_JA_NAME_RUN_RE = re.compile(
+    u"([゠-ヿ一-鿿々ｦ-ﾟ]{2,12})$")
+
+
+def _ja_query_named(qnorm):
+    """The company names the query writes with a legal form attached, e.g. the
+    肥後物産 of 肥後物産株式会社. Empty when the query names no company that way.
+
+    Why the anchor and not just any token: a Japanese company is written with its
+    legal form glued to the name, so the run immediately before 株式会社 is a name
+    the ASKER asserted, as opposed to a word the ranker merely matched. That
+    distinction is what _ja_disambiguate needs in order to tell 'this candidate is
+    the company you named' from 'this candidate happens to fit your description'."""
+    out = []
+    for anchor in _JA_NAME_ANCHORS:
+        start = 0
+        while True:
+            at = qnorm.find(anchor, start)
+            if at < 0:
+                break
+            m = _JA_NAME_RUN_RE.search(qnorm[:at])
+            if m:
+                out.append(m.group(1))
+            start = at + len(anchor)
+    return out
 
 
 def _ja_content_tok(t):
@@ -1438,6 +1488,19 @@ def _ja_disambiguate(con, text, analyzer_mod, fused, why, note):
             excl[nid] = "confusable name"
 
     # R2: confusable-entity attribute domination / conflict.
+    # R2's domination arm elects a family SURVIVOR from the query's attributes. That is
+    # sound only while the attributes are evidence about a company the vault actually
+    # holds. JA13: when the query NAMES a company with a legal form attached and no
+    # candidate carries that name (`subjects` empty), the attributes are unverified claims
+    # about an ABSENT entity, and electing a survivor by them hands rank 1 to whichever
+    # same-family company happens to fit the description. Measured on the frozen blind
+    # corpus: 肥後物産株式会社は東京都中央区日本橋に本社を置く繊維商社ですか dropped every 物産
+    # peer and served 桜田物産, a different company that owns that address and that trade,
+    # at rank 1. So in exactly that state the arm INVERTS: the dominator is the one being
+    # mistaken for the entity nobody holds, and it is what this arm drops. What becomes of
+    # the rest of the family is R1's and R3's business, unchanged here: a peer can still
+    # go for a name collision, and on the corpus case above one does.
+    named_absent = bool(_ja_query_named(qnorm)) and not subjects
     ents = [n for n, i in info.items() if i["entity"]]
     for s in ents:
         for m in ents:
@@ -1445,7 +1508,10 @@ def _ja_disambiguate(con, text, analyzer_mod, fused, why, note):
                 continue
             a_s, a_m = info[s]["attr"], info[m]["attr"]
             if a_m and a_m > a_s:
-                excl.setdefault(s, "attribute mismatch")
+                if named_absent:
+                    excl.setdefault(m, "described but not named")
+                else:
+                    excl.setdefault(s, "attribute mismatch")
             elif (a_m - a_s) and (a_s - a_m):
                 excl.setdefault(s, "attribute conflict")
 

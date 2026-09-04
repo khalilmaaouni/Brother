@@ -338,6 +338,164 @@ class VerifyTreeFromAPublicClone(unittest.TestCase):
         self.assertIn("FAIL:", out.getvalue())
 
 
+#: A note in the shape release_note_from_tree.py writes: a stamp line naming
+#: the hub commit and the describe string, prose, and the manifest digest
+#: sentence. The two %s-bearing fields are the only ones a cut cannot state
+#: about the commit that carries it.
+_NOTE = ("# Brother %s\n\n## Source revision\n\n"
+         "Cut from hub commit `%%s` (hub, private; "
+         "`git describe --tags --always`: `v0.9-1-g%%s`).\n"
+         "Prose a reader checks, which has to match exactly.\n\n"
+         "Export manifest digest `%%s` over 1 exported file(s).\n" % VERSION)
+
+
+class SelfNamingFiles(unittest.TestCase):
+    """The release note and the export manifest each NAME the revision they
+    were generated at, so neither can rebuild byte for byte from the revision
+    the note itself names: that made this check structurally red for every
+    honest cut (v1.0.3: 1312 of 1314, and the two that differed were exactly
+    these). They are compared for what they can prove, and these three cases
+    fix the boundary of that rule in both directions."""
+
+    REL_MANIFEST = R.manifest_path_for(VERSION)
+    REL_NOTE = "docs/releases/%s.md" % VERSION
+
+    def _fixture(self, tag_file=b"one", gen_file=b"one",
+                 tag_manifest=None, tag_note_rev="b" * 40):
+        tag_manifest = (tag_manifest if tag_manifest is not None
+                        else R.manifest_text([("scripts/a.py", tag_file)]))
+        gen = {"scripts/a.py": gen_file,
+               # a STALE manifest, the one the source revision's tree carries:
+               # never compared against the tag, which is the whole point.
+               self.REL_MANIFEST: R.manifest_text(
+                   [("scripts/a.py", b"the tree before the cut")]).encode(),
+               self.REL_NOTE: (_NOTE % ("a" * 40, "a" * 8,
+                                        "1" * 64)).encode()}
+        tag = {"scripts/a.py": tag_file,
+               self.REL_MANIFEST: tag_manifest.encode(),
+               self.REL_NOTE: (_NOTE % (tag_note_rev, tag_note_rev[:8],
+                                        R.manifest_digest(tag_manifest))
+                               ).encode()}
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = ReproduceExport._run(self, gen, tag, allowlist=("scripts",))
+        return code, out.getvalue()
+
+    def test_only_the_self_naming_stamps_differ_so_it_reproduces(self):
+        code, out = self._fixture()
+        self.assertEqual(code, 0, out)
+        self.assertIn("reproduced byte-for-byte 1, self-naming files 2 "
+                      "compared by content", out)
+
+    def test_a_real_allowlisted_file_differing_is_not_reproducible(self):
+        # the note and the manifest are both fine; scripts/a.py is not.
+        code, out = self._fixture(tag_file=b"TAMPERED", gen_file=b"one")
+        self.assertEqual(code, 1, out)
+        self.assertIn("MISMATCH: scripts/a.py", out)
+
+    def test_a_manifest_naming_a_wrong_hash_is_not_reproducible(self):
+        # the tag's manifest names a hash that is not the shipped file's, so
+        # recomputing it over the tag's own bytes cannot agree with it.
+        wrong = "%s  scripts/a.py\n" % ("0" * 64)
+        code, out = self._fixture(tag_manifest=wrong)
+        self.assertEqual(code, 1, out)
+        self.assertIn("MISMATCH: %s" % self.REL_MANIFEST, out)
+
+    def test_the_allowlist_is_read_from_the_source_revision_not_this_tree(self):
+        # Found on the real v1.0.3 proof: hub/main had dropped one path from
+        # the allowlist since the cut, so rebuilding with THIS checkout's
+        # copy exported one file fewer than the release did and the tag's own
+        # manifest named a file the rebuild never generated.
+        seen = []
+        saved = (R.source_tree, R.EP.load_allowlist)
+        src = tempfile.mkdtemp(prefix="allowlist-src-")
+        try:
+            R.source_tree = lambda rev, root=None: src
+            R.EP.load_allowlist = lambda p=None: seen.append(p) or None
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(R.main(["--tag", TAG, "--public", "/x"]), 2)
+        finally:
+            (R.source_tree, R.EP.load_allowlist) = saved
+        self.assertEqual(seen, [os.path.join(
+            src, os.path.relpath(R.EP.DEFAULT_ALLOWLIST, R.EP.ROOT))])
+
+    def test_the_note_still_has_to_match_outside_the_two_masked_fields(self):
+        # masking the stamp is not masking the note: change one word of the
+        # prose and the note is a mismatch again.
+        gen_note = _NOTE % ("a" * 40, "a" * 8, "1" * 64)
+        tag_note = gen_note.replace("a reader checks", "nobody checks")
+        ok, why = R.compare_release_note(gen_note.encode(), tag_note.encode())
+        self.assertFalse(ok, why)
+
+
+class E118TheDenylistIsReadFromTheSourceRevision(unittest.TestCase):
+    """The sibling of test_the_allowlist_is_read_from_the_source_revision_
+    not_this_tree above, for the other filter, driven through real git
+    rather than a stub: a rebuild reads the DENYLIST of the revision it is
+    rebuilding, not the one the current checkout carries.
+
+    Measured by lane X7-FIX: build_export_tree called load_denylist() with
+    no argument, so the file it read was always this checkout's, whatever
+    root it had been handed. A path withheld today was therefore stripped
+    out of a rebuild of a release that shipped it, and reproduce_export
+    reported a mismatch the release never had."""
+
+    def _fixture_hub(self, tmp):
+        """A hub with two revisions: the older one withholds withheld.md by
+        its own denylist, the newer one withholds nothing. Returns the
+        older revision's sha."""
+        for rel, text in (
+                ("products/myproduct/tracked.md", "ships\n"),
+                ("products/myproduct/withheld.md", "withheld at the cut\n"),
+                ("docs/plan/EXPORT-DENYLIST.txt",
+                 "products/myproduct/withheld.md\n")):
+            full = os.path.join(tmp, rel)
+            os.makedirs(os.path.dirname(full), exist_ok=True)
+            with open(full, "w", encoding="utf-8") as fh:
+                fh.write(text)
+        for cmd in (["git", "init", "-q"],
+                    ["git", "config", "user.email", "t@example.com"],
+                    ["git", "config", "user.name", "T"],
+                    ["git", "add", "-A", "-f"],
+                    ["git", "commit", "-q", "-m", "the cut"]):
+            proc = subprocess.run(cmd, cwd=tmp, capture_output=True,
+                                  text=True)
+            if proc.returncode != 0:
+                raise AssertionError("fixture git failed: %s: %s"
+                                     % (cmd, proc.stderr))
+        rev = subprocess.run(["git", "-C", tmp, "rev-parse", "HEAD"],
+                             capture_output=True, text=True).stdout.strip()
+        # The newer revision drops the withholding, so the two disagree.
+        with open(os.path.join(tmp, "docs", "plan", "EXPORT-DENYLIST.txt"),
+                  "w", encoding="utf-8") as fh:
+            fh.write("# nothing withheld any more\n")
+        for cmd in (["git", "-C", tmp, "add", "-A", "-f"],
+                    ["git", "-C", tmp, "commit", "-q", "-m", "since"]):
+            proc = subprocess.run(cmd, capture_output=True, text=True)
+            if proc.returncode != 0:
+                raise AssertionError("fixture git failed: %s: %s"
+                                     % (cmd, proc.stderr))
+        return rev
+
+    def test_the_older_revision_rebuilds_with_its_own_withholdings(self):
+        tmp = tempfile.mkdtemp(prefix="denylist-hub-")
+        dest = tempfile.mkdtemp(prefix="denylist-dest-")
+        rev = self._fixture_hub(tmp)
+        src = R.source_tree(rev, root=tmp)
+        self.assertIsNotNone(src, "could not materialise the fixture rev")
+        with contextlib.redirect_stdout(io.StringIO()):
+            copied = R.EP.build_export_tree(dest, ["products/myproduct"],
+                                            root=src)
+        self.assertEqual(copied, ["products/myproduct"])
+        self.assertTrue(os.path.isfile(os.path.join(
+            dest, "products", "myproduct", "tracked.md")))
+        self.assertFalse(
+            os.path.exists(os.path.join(
+                dest, "products", "myproduct", "withheld.md")),
+            "the rebuilt revision's own denylist named this path and it "
+            "was rebuilt anyway, so the denylist came from some other tree")
+
+
 def _copy_into(src_dir, dest_dir):
     # shutil.copytree makes each directory level as it descends, so it
     # never needs a single deep os.makedirs() call. That matters here: the

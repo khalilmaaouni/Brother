@@ -43,6 +43,13 @@ lane used) and Brother's model worker (the documented `DOOR_MODEL_CMD` and
 `MODEL_WORKER_CMD` seam in `scripts/model_worker.py`, the same seam
 `scripts/product_acceptance.py` uses).
 
+NOT stubbed, since 2026-09-05: the sandbox. The stub turn runs at the same
+`-s workspace-write` the runbook documents, rather than switching sandboxing
+off with `danger-full-access`. That earlier shape is why this automation
+stayed green while the documented command was broken: the leg that could
+write had no sandbox at all, and the leg carrying Codex's real default never
+reached a write, being refused at the login first.
+
 So this proves the PLUMBING end to end. It does not prove a real model's
 behaviour. That is the half the runbook closes.
 
@@ -94,11 +101,16 @@ Codex user the fence:
 ## Step 5a: the real task, and the refusal that blocks it
 
 The smoke attempts the real thing FIRST, with no stub, so the blocker is
-captured rather than predicted. The toy repository is the README's own: a git
-repository holding `mathlib.py` (a bare `add`) and `test_mathlib.py`.
+captured rather than predicted. The toy repository is the README example's
+shape: a git repository holding `mathlib.py` (a bare `add`) and a
+`test_mathlib.py` written as a `unittest.TestCase`, so nothing has to be
+installed for its tests to run. Step 5 below lays down the same two files,
+from the same constants this script uses.
 
-    $ /Applications/ChatGPT.app/Contents/Resources/codex exec -C <toy repo> \
-        "use the Brother plugin to make add() refuse non-numeric input and cover it with a test"
+    $ /Applications/ChatGPT.app/Contents/Resources/codex exec \
+        -s workspace-write -c 'sandbox_workspace_write.writable_roots=["<toy repo>/.git"]' \
+        -C <toy repo> \
+        "use the Brother plugin to make add() refuse non-numeric input and cover it with a test, tests run with python3 -m unittest"
       ERROR: unexpected status 401 Unauthorized: Missing bearer or basic
         authentication in header, url: https://api.openai.com/v1/responses
       exit 1
@@ -113,8 +125,10 @@ missing thing is a credential, and a credential is the founder's to supply.
 The identical `codex exec` turn, with the model pointed at the local stub, so
 the plugin, the hooks, the engine and the receipt path all run for real:
 
-    $ ... codex exec --skip-git-repo-check -c model_provider="c7stub" ... -C <toy repo> \
-        "use the Brother plugin to make add() refuse non-numeric input"
+    $ ... codex exec --skip-git-repo-check -c model_provider="c7stub" \
+        -s workspace-write -c 'sandbox_workspace_write.writable_roots=["<toy repo>/.git"]' ... \
+        -C <toy repo> \
+        "use the Brother plugin to make add() refuse non-numeric input and cover it with a test, tests run with python3 -m unittest"
       hook: SessionStart ... hook: PreToolUse ... hook: PostToolUse ... hook: Stop
       exit 0
 
@@ -205,6 +219,15 @@ a tag yet:
 
   PASS: "Added marketplace `brother`", exit 0.
 
+  Running this a second time in the same home at a different ref, which is
+  what an upgrade looks like, is refused: "Error: marketplace 'brother' is
+  already added from a different source; remove it before adding this
+  source", exit 1. Remove the configured marketplace first, then add it at
+  the new ref and add the plugin again, as README.md's upgrade block spells
+  out. `codex plugin marketplace upgrade brother` is not that route: it
+  exits 0 and leaves the installed version where it was, because it only
+  refreshes the snapshot at the ref already configured.
+
 Step 2, the plugin:
 
     codex plugin add brother@brother --json
@@ -233,12 +256,45 @@ Step 5, the toy. In a throwaway directory, not a real project:
 
     mkdir toy && cd toy && git init -q .
     printf 'def add(a, b):\n    return a + b\n' > mathlib.py
-    printf 'from mathlib import add\n\n\ndef test_add():\n    assert add(1, 2) == 3\n' > test_mathlib.py
+    printf 'import unittest\n\nfrom mathlib import add\n\n\nclass AddTest(unittest.TestCase):\n    def test_add(self):\n        self.assertEqual(add(1, 2), 3)\n\n\nif __name__ == "__main__":\n    unittest.main()\n' > test_mathlib.py
     git add -A && git commit -q -m toy
+
+  The test file is a `unittest.TestCase`, not a bare assert, and the task
+  sentence in step 6 names `python3 -m unittest` for the same reason: on
+  2026-09-04 the model read the old bare-assert file, wrote `import pytest`,
+  ran `pytest -q` and got "pytest: command not found". `unittest` is in the
+  standard library, so this toy needs nothing installed.
 
 Step 6, the task:
 
-    codex exec -C "$PWD" "use the Brother plugin to make add() refuse non-numeric input and cover it with a test"
+    codex exec -s workspace-write -c "sandbox_workspace_write.writable_roots=[\"$PWD/.git\"]" -C "$PWD" "use the Brother plugin to make add() refuse non-numeric input and cover it with a test, tests run with python3 -m unittest"
+
+  Both flags are load bearing, and each one is a failure this step already
+  had.
+
+  `-s workspace-write` is the first. Codex's default sandbox is `read-only`,
+  so a turn without the flag refuses every patch the model writes, verbatim:
+  "patch rejected: writing is blocked by read-only sandbox". A turn that ends
+  by telling you "the repository is mounted read-only" is this missing flag,
+  not a Brother failure. `codex exec --help` prints it as "-s, --sandbox
+  <SANDBOX_MODE>" with possible values "read-only, workspace-write,
+  danger-full-access"; `workspace-write` lets the model write inside the
+  workspace it was given and nothing wider.
+
+  The `-c` grant is the second, and it is the difference between reaching the
+  engine and reaching a receipt. A workspace-write turn prints its own roots
+  in its header, "sandbox: workspace-write [workdir, /tmp, $TMPDIR]", and
+  still refuses `<workdir>/.git`. Brother isolates each unit with `git
+  worktree add`, which writes `.git/worktrees/`, so without the grant every
+  unit is refused with "isolation could not be established" and the receipt
+  records a FAIL. Measured both ways on 2026-09-05: the same turn with the
+  grant creates the worktree at exit 0. Keep the grant to the toy's own
+  `.git` and nothing wider: on a real project it also lets the model rewrite
+  that repository's history, which is a deliberate act rather than a default.
+
+  A write outside every granted root is dropped SILENTLY, with no error line
+  and exit 0. So if condition 3 below fails while conditions 1 and 2 pass,
+  the thing to look for is a path the sandbox never granted.
 
   PASS, and this is the whole point of the gate, is FOUR things together:
   1. the turn ends at exit 0 with no 401,
@@ -247,6 +303,11 @@ Step 6, the task:
   3. the engine prints `brother_run: receipt: <path>`, and that file exists,
   4. that receipt's per-file lines name `mathlib.py`, the exact check command
      that decided it, and an exit code, in the shape shown above.
+
+  A turn's exit 0 proves NOTHING about writes, so it is never on that list:
+  a write outside a granted root is dropped silently and the turn still ends
+  green, which means only the receipt this gate reads and the toy's own `git
+  status --porcelain` say whether anything landed.
 
   A run that changes the files but leaves no receipt is a FAIL of this gate,
   not a partial pass: the receipt is the deliverable.

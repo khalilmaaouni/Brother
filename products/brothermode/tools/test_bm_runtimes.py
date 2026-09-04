@@ -47,6 +47,27 @@ _spec = importlib.util.spec_from_file_location("bm_runtimes_under_test", RT_PATH
 rt_mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(rt_mod)
 
+_seam_spec = importlib.util.spec_from_file_location(
+    "bm_export_seam", os.path.join(HERE, "bm_export_seam.py"))
+_seam = importlib.util.module_from_spec(_seam_spec)
+_seam_spec.loader.exec_module(_seam)
+
+
+def _no_data_if_the_committed_adapters_are_withheld():
+    """The four checks below run `check` against the REAL repository, which
+    compares the committed docs/runtimes adapters against what the generator
+    would produce now. docs/plan/EXPORT-ALLOWLIST.txt withholds those eight
+    files, so in a clone of the published release `check` reports all eight
+    MISSING and four tests fail over an absence that is deliberate. Outside
+    the hub that is NO-DATA naming every withheld adapter; inside the hub a
+    missing adapter still fails, which is the drift this guard exists for.
+    See tools/bm_export_seam.py."""
+    _seam.no_data_outside_the_hub(
+        [os.path.join("docs", "RUNTIMES.md")]
+        + [os.path.join("docs", "runtimes", r["staging_name"])
+           for r in rt_mod.RUNTIMES],
+        root=ROOT)
+
 # Written as escapes on purpose: the no-dash rule applies to this file too, so
 # the detector must not be the one place in the repository where a literal em or
 # en dash lives. A grep for the character itself should find nothing, including
@@ -179,6 +200,7 @@ class TestCommittedOutputMatchesTheRegistry(unittest.TestCase):
     safe while they are what the generator would produce right now."""
 
     def test_check_passes_against_the_real_repository(self):
+        _no_data_if_the_committed_adapters_are_withheld()
         r = _run(["check", "--root", ROOT], ROOT)
         self.assertEqual(r.returncode, 0,
                          "committed adapters or docs/RUNTIMES.md have drifted "
@@ -187,6 +209,7 @@ class TestCommittedOutputMatchesTheRegistry(unittest.TestCase):
         self.assertIn("check OK", r.stdout)
 
     def test_calibrated_a_hand_edited_capability_table_is_reported_stale(self):
+        _no_data_if_the_committed_adapters_are_withheld()
         # CALIBRATION: reinject the exact defect (a capability table that no
         # longer matches the registry) by making the REAL renderer produce
         # different bytes, and prove `check` names the file and exits nonzero.
@@ -202,6 +225,7 @@ class TestCommittedOutputMatchesTheRegistry(unittest.TestCase):
         self.assertEqual(rt_mod.cmd_check(["--root", ROOT]), 0)
 
     def test_calibrated_a_missing_adapter_file_is_reported(self):
+        _no_data_if_the_committed_adapters_are_withheld()
         original = rt_mod.RUNTIMES
         ghost = dict(original[0])
         ghost["key"] = "ghost"
@@ -674,6 +698,7 @@ class TestCommandListsComeFromTheToolsThemselves(unittest.TestCase):
         self.assertIn("relevant (deprecated)", text)
 
     def test_calibrated_a_tool_that_grows_a_command_makes_the_adapters_stale(self):
+        _no_data_if_the_committed_adapters_are_withheld()
         # CALIBRATION: this is the whole point of generating. Grow the surface
         # the way a new subcommand would, and prove the committed adapters are
         # reported stale instead of quietly omitting it.
