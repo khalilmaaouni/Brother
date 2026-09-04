@@ -58,6 +58,13 @@ import json
 import os
 import sys
 
+HERE = os.path.dirname(os.path.abspath(__file__))
+# C3: the intake sentinel lands in the running client's own config
+# directory (docs/codex/HOOKS-MAPPING.md). Under Claude that is the same
+# ~/.claude it always was.
+sys.path.insert(0, HERE)
+import brother_paths  # noqa: E402
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 #: How close two totals may sit before the ranking is declared not to separate
@@ -201,6 +208,24 @@ def render(spec):
         A('<p class="question"><strong>The question:</strong> %s</p>'
           % E(spec["question"]))
     A('</section>')
+
+    # OPTIONAL PLAIN SECTIONS (E75). A spec may carry `sections`: a heading,
+    # a list of already-rendered lines, and the sentence an empty one prints
+    # instead of disappearing. A screen with no `sections` key renders
+    # exactly as it did before, so this adds a shape rather than a rule.
+    for section in spec.get("sections") or []:
+        A('<section class="listing"><h2>%s</h2>'
+          % E(section.get("heading", "")))
+        items = section.get("items") or []
+        if items:
+            A('<ul>')
+            for item in items:
+                A('<li>%s</li>' % E(item))
+            A('</ul>')
+        else:
+            A('<p class="note">%s</p>'
+              % E(section.get("empty", "Nothing in this run.")))
+        A('</section>')
 
     decided = spec.get("decided") or {}
     if decided:
@@ -522,7 +547,7 @@ def main(argv=None):
     # how the hook knows one was. Founder order 2026-08-30: "it should be
     # enforced", after the eighth screen-less decision popup.
     try:
-        sentinel = os.path.expanduser("~/.claude/last-decision-screen.json")
+        sentinel = brother_paths.config_path("last-decision-screen.json")
         with open(sentinel, "w", encoding="utf-8") as fh:
             json.dump({"path": os.path.abspath(out),
                        "title": spec.get("title", ""),

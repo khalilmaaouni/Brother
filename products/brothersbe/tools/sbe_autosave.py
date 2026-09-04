@@ -718,24 +718,54 @@ def recover(repo):
         print("  rejected a file yet, or the record was removed.")
 
 
-def hook_cwd():
-    """The cwd the hook was invoked for, from its JSON stdin payload; falls
-    back to the process cwd."""
+def _load_sbe_repo_scope():
+    """Load sbe_repo_scope.py by path, works from any cwd and never
+    raises. E76 per-repository hook scoping."""
     try:
-        payload = sys.stdin.read()
+        import importlib.util
+        here = os.path.dirname(os.path.abspath(__file__))
+        spec = importlib.util.spec_from_file_location(
+            "sbe_repo_scope_for_autosave", os.path.join(here, "sbe_repo_scope.py"))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception:  # sbe: allow-silent optional gate module load; hooks_off degrades to active when this returns None
+        return None
+
+
+def _read_hook_payload():
+    """The hook's JSON stdin payload, parsed once, {} on any failure. Split
+    out of hook_cwd() (E76) so a caller that also needs session_id, or the
+    repo-scope gate, can read stdin exactly once rather than racing
+    hook_cwd()'s own read."""
+    try:
+        raw = sys.stdin.read()
     except OSError:
-        payload = ""
+        raw = ""
     try:
-        cwd = (json.loads(payload) or {}).get("cwd", "")
-    except (ValueError, AttributeError):
-        cwd = ""
+        payload = json.loads(raw) if raw.strip() else {}
+    except ValueError:
+        payload = {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def hook_cwd(payload=None):
+    """The cwd the hook was invoked for, from its JSON stdin payload (read
+    now if not already handed in); falls back to the process cwd."""
+    if payload is None:
+        payload = _read_hook_payload()
+    cwd = payload.get("cwd", "") if isinstance(payload, dict) else ""
     return cwd or os.getcwd()
 
 
 def main(argv):
     mode = argv[1] if len(argv) > 1 else ""
     if mode == "precompact":
-        snapshot(hook_cwd(), "precompact")
+        payload = _read_hook_payload()
+        _rs = _load_sbe_repo_scope()
+        if _rs is not None and _rs.hooks_off(payload=payload):
+            return
+        snapshot(hook_cwd(payload), "precompact")
     elif mode == "tick":
         tick(hook_cwd(), argv[2] if len(argv) > 2 else "session")
     elif mode == "recover":

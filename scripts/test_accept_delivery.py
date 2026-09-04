@@ -315,5 +315,128 @@ class PatternSideEffectOfAPersonRecordedAcceptance(unittest.TestCase):
         self.assertIn("brother-77", hits[0][1])
 
 
+class ChecksDerivedFromARunDirectory(unittest.TestCase):
+    """BO2, closing the delivery-proof skeptic's first defect: the shipped
+    record named no changed file and no check because building that list
+    meant hand-writing JSON. --run-dir reads the two files a completed run
+    already wrote and derives the list from them."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="accept-delivery-rundir-")
+        self.run = os.path.join(self.tmp, "run")
+        os.makedirs(self.run)
+        self.write_run()
+
+    def write_run(self, work=True, claims=True):
+        if work:
+            with open(os.path.join(self.run, "W-toy.json"), "w",
+                      encoding="utf-8") as fh:
+                json.dump({
+                    "work_id": "W-toy",
+                    "outcome": "guard non-numeric input",
+                    "rows": [{
+                        "id": "guard",
+                        "title": "raise TypeError on non-numeric input",
+                        "done_check": "python3 -m pytest test_mathlib.py -q",
+                        "owns": ["mathlib.py"],
+                        "depends_on": [],
+                        "status": "DONE",
+                        "check_passed_before": False,
+                        "files_changed_by_unit": ["mathlib.py"],
+                    }],
+                }, fh)
+        if claims:
+            with open(os.path.join(self.run, "claims.json"), "w",
+                      encoding="utf-8") as fh:
+                json.dump({"guard": {
+                    "state": "done", "unit_id": "guard",
+                    "evidence": {
+                        "canonical_rev": "da88480d731ddfa3cb2862066d56a43e",
+                        "check_command": "python3 -m pytest test_mathlib.py -q",
+                        "exit_code": 0, "output": "1 passed",
+                        "output_truncated": False,
+                    }}}, fh)
+
+    def test_the_derived_list_names_the_changed_file_and_its_check(self):
+        checks, reason = ad.checks_from_run_dir(self.run)
+        self.assertEqual(reason, "")
+        self.assertEqual([c["file"] for c in checks], ["mathlib.py"])
+        self.assertEqual(checks[0]["check_command"],
+                         "python3 -m pytest test_mathlib.py -q")
+        self.assertEqual(checks[0]["exit_code"], 0)
+
+    def test_a_run_directory_with_no_work_document_is_refused(self):
+        os.remove(os.path.join(self.run, "W-toy.json"))
+        checks, reason = ad.checks_from_run_dir(self.run)
+        self.assertIsNone(checks)
+        self.assertIn("W-*.json", reason)
+
+    def test_a_run_directory_with_no_claims_is_refused(self):
+        os.remove(os.path.join(self.run, "claims.json"))
+        checks, reason = ad.checks_from_run_dir(self.run)
+        self.assertIsNone(checks)
+        self.assertIn("claims.json", reason)
+
+    def test_a_directory_that_is_not_there_is_refused(self):
+        checks, reason = ad.checks_from_run_dir(
+            os.path.join(self.tmp, "nowhere"))
+        self.assertIsNone(checks)
+        self.assertIn("not a directory", reason)
+
+    def test_the_cli_writes_the_derived_checks_into_the_record(self):
+        out = os.path.join(self.tmp, "deliveries")
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            code = ad.main([
+                "--name", "toy delivery", "--ref", "toy-1",
+                "--accepted-by", "Khalil Maaouni",
+                "--accepted-at", "2026-09-04", "--recorded-by", "person",
+                "--run-dir", self.run, "--dir", out,
+                "--pattern-root", os.path.join(self.tmp, "vault")])
+        self.assertEqual(code, 0, buf.getvalue())
+        with open(ad.record_path("toy-1", out), encoding="utf-8") as fh:
+            entry = json.load(fh)
+        self.assertEqual([c["file"] for c in entry["checks"]], ["mathlib.py"])
+
+    def test_both_sources_of_checks_at_once_is_refused(self):
+        buf = io.StringIO()
+        with redirect_stderr(buf), self.assertRaises(SystemExit):
+            ad.main([
+                "--name", "toy", "--ref", "toy-2",
+                "--accepted-by", "Khalil Maaouni",
+                "--accepted-at", "2026-09-04", "--recorded-by", "person",
+                "--run-dir", self.run, "--checks-file", "whatever.json",
+                "--dir", self.tmp])
+        self.assertIn("pass one, never both", buf.getvalue())
+
+
+class EveryShippedDeliveryRecordCarriesItsPerFileChecks(unittest.TestCase):
+    """The record the 2026-09-04 delivery-proof skeptic opened in a fresh
+    clone of v1.0.1 named no file and no command, so its chain of proof
+    could not be followed one step. This reads the records this repository
+    really ships, not a fixture, so it goes red the moment one is written
+    without them again."""
+
+    def test_each_record_under_docs_deliveries_passes_the_per_file_gate(self):
+        entries = ad.load_all()
+        self.assertTrue(entries, "docs/deliveries carries no record at all")
+        for entry in entries:
+            checks = entry.get("checks")
+            self.assertIsNotNone(
+                checks,
+                "the shipped delivery record %r carries no 'checks': a "
+                "reader cannot re-run anything it claims. Record it with "
+                "--run-dir or --checks-file." % entry.get("ref"))
+            ok, reason = ad.receipt_door.require_per_file_checks(checks)
+            self.assertTrue(ok, "%s: %s" % (entry.get("ref"), reason))
+
+    def test_each_check_names_a_file_and_a_command_a_stranger_could_run(self):
+        for entry in ad.load_all():
+            for check in entry.get("checks") or []:
+                self.assertTrue(str(check.get("file") or "").strip(), check)
+                self.assertTrue(
+                    str(check.get("check_command") or "").strip(), check)
+
+
 if __name__ == "__main__":
     unittest.main()

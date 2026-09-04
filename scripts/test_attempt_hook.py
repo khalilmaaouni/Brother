@@ -275,5 +275,154 @@ class ThirdFailureRunsFindOutItself(unittest.TestCase):
         self.assertIn("find_out: NO-DATA", r3.stdout)
 
 
+class AlternatingClassesAreALoop(unittest.TestCase):
+    """E57 mechanism 3, borrowed from GSD's sliding-window dispatch-loop
+    detector (https://www.opengsd.net/docs/v1/features).
+
+    THE GAP THIS CLOSES, and it is the whole point of the row: attempt_ledger
+    counts failures OF ONE CLASS, so two approaches alternating each sit at one
+    failure under the two-strike limit and the breaker stays silent while the
+    session goes in a circle. The fourth call below (B's SECOND failure, with
+    A, B, A already behind it) is refused by nothing in the tree before this
+    change: attempt_ledger.check() returns ALLOW for it, which the calibration
+    test at the bottom of this class pins directly."""
+
+    def setUp(self):
+        fd, self.store = tempfile.mkstemp(prefix="attempt-hook-loop-")
+        os.close(fd)
+        os.remove(self.store)
+        fd, self.outcomes = tempfile.mkstemp(prefix="attempt-hook-outcomes-")
+        os.close(fd)
+        os.remove(self.outcomes)
+
+    def tearDown(self):
+        for path in (self.store, self.outcomes):
+            if os.path.exists(path):
+                os.remove(path)
+
+    def _env(self):
+        env = dict(os.environ)
+        env["ATTEMPT_LEDGER"] = self.store
+        env["BM_HOOK_OUTCOMES"] = self.outcomes
+        # No vault, no patterns, no memory: the find_out branch must not make
+        # these tests depend on this machine's real notes.
+        env["FIND_OUT_VAULT"] = "/no/such/vault"
+        env["FIND_OUT_PATTERNS"] = "/no/such/patterns"
+        env["FIND_OUT_MEMORY"] = "/no/such/memory.md"
+        return env
+
+    def _fail(self, command):
+        return subprocess.run(
+            [sys.executable, HOOK],
+            input=json.dumps(_payload(command, exit_code=1, stderr="fatal: nope")),
+            capture_output=True, text=True, env=self._env())
+
+    def _outcome_rows(self):
+        if not os.path.exists(self.outcomes):
+            return []
+        with open(self.outcomes, encoding="utf-8") as fh:
+            return [json.loads(line) for line in fh if line.strip()]
+
+    # Two techniques, deliberately different first tokens so fingerprint()
+    # cannot collapse them into one class.
+    CMD_A = "widget-alpha.sh --retry"
+    CMD_B = "widget-beta.sh --retry"
+
+    def test_a_b_a_b_is_refused_although_neither_class_reached_the_limit(self):
+        self._fail(self.CMD_A)
+        self._fail(self.CMD_B)
+        r3 = self._fail(self.CMD_A)
+        self.assertNotIn("ATTEMPT LEDGER", r3.stdout,
+                         "A, B, A is one approach tried twice with one thing "
+                         "in between; that is work, not a circle")
+        r4 = self._fail(self.CMD_B)
+        self.assertEqual(r4.returncode, 0, "the detector must never block a call")
+        self.assertIn("loop detected across 4 attempts", r4.stdout,
+                      "A, B, A, B went unrefused: %r" % r4.stdout)
+        self.assertIn("widget-alpha.sh", r4.stdout, "the refusal names neither class")
+        self.assertIn("widget-beta.sh", r4.stdout, "the refusal names neither class")
+
+    def test_the_single_class_counter_would_have_allowed_that_fourth_call(self):
+        """The calibration that makes the test above mean something: without
+        the sliding window, the ledger's own verdict on the fourth call is
+        ALLOW, so nothing anywhere would have said a word."""
+        self._fail(self.CMD_A)
+        self._fail(self.CMD_B)
+        self._fail(self.CMD_A)
+        rows = A.read(self.store)
+        klass_b = H.fingerprint(self.CMD_B)
+        verdict, _reason = A.check(rows, klass_b, klass_b)
+        self.assertEqual(verdict, A.ALLOW,
+                         "the per-class counter already refuses this, so the "
+                         "sliding window is not catching anything new")
+
+    def test_four_failures_of_one_class_are_not_reported_as_a_loop(self):
+        """The negative half: one class failing four times is the case the
+        per-class counter already owns, and it must keep owning it. Exactly one
+        refusal prints, and it is the counter's, never the window's."""
+        for _ in range(4):
+            r = self._fail(self.CMD_A)
+        self.assertIn("ATTEMPT LEDGER", r.stdout)
+        self.assertNotIn("loop detected", r.stdout,
+                         "one class repeated is not an alternation: %r" % r.stdout)
+
+    def test_a_refusal_writes_one_outcome_row_naming_its_kind(self):
+        """E57 mechanism 1 on the breaker's side, borrowed from MemOS
+        (https://github.com/MemTensor/MemOS): the outcome number, refusals,
+        beside the mechanism. Fails before the change because no hook-outcome
+        file is written at all."""
+        self._fail(self.CMD_A)
+        self._fail(self.CMD_B)
+        self._fail(self.CMD_A)
+        self.assertEqual(self._outcome_rows(), [],
+                         "nothing was refused yet, so nothing may be counted")
+        self._fail(self.CMD_B)
+        rows = self._outcome_rows()
+        self.assertEqual(len(rows), 1, "one refusal, one row: %r" % rows)
+        self.assertEqual(rows[0]["hook"], "attempt_breaker")
+        self.assertEqual(rows[0]["refusals"], 1)
+        self.assertEqual(rows[0]["kind"], "alternating_classes")
+        self.assertEqual(rows[0]["session"], "test-session")
+
+
+class AlternationIsAPureFunction(unittest.TestCase):
+    """alternating_classes() decided without a store, so every branch is
+    readable. Rows are passed in the ledger's own file order, which is its only
+    clock."""
+
+    @staticmethod
+    def _rows(*pairs):
+        return [{"problem": k, "class": k, "outcome": o} for k, o in pairs]
+
+    def test_exactly_a_b_a_b_reports_the_pair(self):
+        rows = self._rows(("a", "failed"), ("b", "failed"),
+                          ("a", "failed"), ("b", "failed"))
+        self.assertEqual(H.alternating_classes(rows), ("a", "b"))
+
+    def test_a_shorter_run_reports_nothing(self):
+        rows = self._rows(("a", "failed"), ("b", "failed"), ("a", "failed"))
+        self.assertIsNone(H.alternating_classes(rows))
+
+    def test_three_distinct_classes_are_not_this_shape(self):
+        rows = self._rows(("a", "failed"), ("b", "failed"),
+                          ("c", "failed"), ("a", "failed"))
+        self.assertIsNone(H.alternating_classes(rows))
+
+    def test_passed_rows_are_not_failures_and_do_not_close_a_window(self):
+        """A passing attempt between two failures is progress, and counting it
+        as part of a loop would refuse the run that just worked."""
+        rows = self._rows(("a", "failed"), ("b", "failed"), ("a", "failed"),
+                          ("c", "passed"), ("b", "failed"))
+        # The passed row is skipped, so the last four FAILURES are a, b, a, b.
+        self.assertEqual(H.alternating_classes(rows), ("a", "b"))
+
+    def test_only_the_last_window_counts(self):
+        """Sliding, not cumulative: an old alternation followed by two failures
+        of one class is no longer a live loop."""
+        rows = self._rows(("a", "failed"), ("b", "failed"), ("a", "failed"),
+                          ("b", "failed"), ("c", "failed"), ("c", "failed"))
+        self.assertIsNone(H.alternating_classes(rows))
+
+
 if __name__ == "__main__":
     unittest.main()

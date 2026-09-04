@@ -14,10 +14,26 @@ gate ever sees the drift.
   fix --vault V [--apply]      normalizes ONLY whitelisted mechanical shapes:
                                 field ordering to the house order, trailing
                                 whitespace inside frontmatter lines, and
-                                quoting style for verified-by. Dry by default;
-                                --apply writes atomically (temp file, then
-                                os.replace). Never invents a missing value,
+                                quoting style for verified-by. It also DERIVES
+                                the two required fields it cannot normalize
+                                into existence, created and id, each only when
+                                absent and each named in the output as derived.
+                                Dry by default; --apply writes atomically
+                                (temp file, then os.replace). Never invents a
+                                value it cannot read off the vault itself,
                                 never touches body text.
+
+DERIVED IS NOT INVENTED. created comes from the date the note was ADDED in the
+vault's own git history, and a note git cannot date reads NO-DATA and keeps its
+missing field: stamping today's date would be a fabrication every later reader
+would trust. id comes from a sha256 of the note's vault relative path, so the
+same note derives the same id on any machine and a rerun is a no-op; a
+collision with an id already in use falls back to bm_vault_ids.mint. An
+existing value of either field is NEVER overwritten, and a created holding the
+field's own format spec (YYYY-MM-DD) is an unfilled template by content rather
+than a missing date, so it is kept and check still reports it. No note is
+exempted by its path: this vault has no template value in its type vocabulary,
+so a template is recognised by what it says, never by where it sits.
 
 VOCABULARIES ARE NEVER DUPLICATED. authority's three levels come from
 bm_vault_authority.LEVELS, the lifecycle states from bm_vault_lifecycle.STATES,
@@ -38,10 +54,12 @@ Python 3.9, standard library only, no network.
 """
 import argparse
 import datetime
+import hashlib
 import importlib.util
 import json
 import os
 import re
+import subprocess
 import sys
 
 DEFAULT_VAULT = os.environ.get("BROTHERMODE_VAULT") or os.path.expanduser("~/Documents/Kay Vault")
@@ -50,9 +68,20 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 FRONT_KEY = re.compile(r"^([A-Za-z_][A-Za-z0-9_-]*):(.*)$")
 BASE_REQUIRED = ("id", "type", "status", "created")
-# The one per-type extra the plugin survey named. Every other type adds
-# nothing beyond BASE_REQUIRED; inventing more here is a rule nobody asked for.
-EXTRA_REQUIRED_BY_TYPE = {"failure": ("symptom",)}
+# The one per-type extra the plugin survey named, plus P11's two: a note of
+# type data_semantic (a team-agreed metric definition) or test_oracle (an
+# approved expected-result source) must name the receipt that produced it and
+# say whether a human has approved it, so vault_recall_hook.py's lesson_states
+# has something to check before either kind is shown as advice. Both types are
+# brand new here, so this rule can only ever bind a note written from now on;
+# it never re-lints any of the vault's existing notes, which by construction
+# carry neither type. Every other type adds nothing beyond BASE_REQUIRED;
+# inventing more here is a rule nobody asked for.
+EXTRA_REQUIRED_BY_TYPE = {
+    "failure": ("symptom",),
+    "data_semantic": ("source_receipt", "human_approved"),
+    "test_oracle": ("source_receipt", "human_approved"),
+}
 # The house order fix normalizes toward: id first, then type, authority,
 # project, created, status, the five temporal fields (bm_vault_temporal's own
 # order), tags, then everything else in its original relative order.
@@ -61,6 +90,10 @@ HOUSE_ORDER_TAIL = ("tags",)
 _FALLBACK_TEMPORAL_FIELDS = ("valid_from", "valid_to", "observed_at",
                               "ingested_at", "verified_at")
 _FALLBACK_ID_RE = re.compile(r"^n-[0-9a-f]{16}$")
+# The literal a template writes where a date goes. A note carrying it is
+# telling a reader the format, not claiming a date, so derivation leaves it
+# alone. Matched by content, never by file name or directory.
+DATE_PLACEHOLDER = "YYYY-MM-DD"
 
 
 def _load_sibling(name):
@@ -420,6 +453,130 @@ def normalize_frontmatter(text, temporal_fields):
     return text[:3] + new_block + text[end:], True
 
 
+def _git_first_commit_date(vault, rel):
+    """The date of the commit that ADDED this note, or None.
+
+    Read from the vault's own history, oldest line last, with --follow so a
+    note that was renamed keeps the date it entered the vault rather than the
+    date of its rename. None covers every honest unknown: no git on PATH, the
+    vault is not a repository, the note is untracked, or the recorded date is
+    not ISO. The caller turns None into a named NO-DATA line and leaves the
+    field absent. Nothing here falls back to today, which would stamp hundreds
+    of notes with the date of the fix and call it history.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "log", "--diff-filter=A", "--follow", "--format=%ad",
+             "--date=short", "--", rel],
+            cwd=vault, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except OSError as exc:
+        sys.stderr.write("bm_vault_lint: cannot run git for %s: %s\n" % (rel, exc))
+        return None
+    if proc.returncode != 0:
+        return None
+    out = proc.stdout.decode("utf-8", errors="replace")
+    lines = [ln.strip() for ln in out.splitlines() if ln.strip()]
+    if not lines:
+        return None
+    oldest = lines[-1]
+    return oldest if _parse_date(oldest) is not None else None
+
+
+def set_frontmatter_field(text, key, value):
+    """(new_text, changed) with `key: value` written into the frontmatter.
+
+    An existing single line declaration of key has its value replaced; an
+    absent key is inserted as the first field, where _reorder then moves it to
+    its house position in the same fix pass. A note with no frontmatter block
+    is returned unchanged: there is nowhere to write, and opening a block
+    around unknown text would rewrite a document nobody asked to rewrite.
+    """
+    block, end = frontmatter_span(text)
+    if block is None:
+        return text, False
+    lines = block.split("\n")
+    for i, line in enumerate(lines):
+        m = FRONT_KEY.match(line)
+        if m and m.group(1) == key:
+            new_line = "%s: %s" % (key, value)
+            if new_line == line:
+                return text, False
+            lines[i] = new_line
+            return text[:3] + "\n".join(lines) + text[end:], True
+    # The block of a `---id: ...` note does not open with a newline, so the
+    # inserted field supplies the separator itself rather than glueing onto it.
+    sep = "" if block.startswith("\n") else "\n"
+    return text[:3] + "\n" + key + ": " + value + sep + block + text[end:], True
+
+
+def _collect_ids(notes):
+    """Every id already declared anywhere in the vault, malformed ones
+    included: a derived id must not collide with a value some other note is
+    already resolved by, whatever shape that value happens to be in."""
+    taken = set()
+    for _rel, text in notes:
+        block, _end = frontmatter_span(text)
+        if block is None:
+            continue
+        raw = _field_map(_iter_fields(block)).get("id", "")
+        value = raw.strip().strip('"').strip("'")
+        if value:
+            taken.add(value)
+    return taken
+
+
+def derive_path_id(rel):
+    """n- plus the first 16 hex of sha256 over the vault relative path, the id
+    shape bm_vault_ids.ID_VALUE_RE already enforces. Deterministic on purpose:
+    the same note derives the same id on any machine, so a second fix run is a
+    no-op instead of a second identity for one note."""
+    digest = hashlib.sha256(rel.encode("utf-8")).hexdigest()
+    return "n-" + digest[:16]
+
+
+def derive_missing(text, rel, vault, taken_ids, ids_mod=None):
+    """(new_text, messages). Writes created and id only where they are absent.
+
+    A created that is present and ISO is left alone. A created holding the
+    format spec itself is an unfilled template and is left alone. Anything
+    else (absent, empty, or a non date such as unset) counts as absent for
+    derivation, and is filled from git history or not at all.
+    """
+    messages = []
+    block, _end = frontmatter_span(text)
+    if block is None:
+        return text, messages
+    fmap = _field_map(_iter_fields(block))
+
+    raw_created = fmap.get("created", "")
+    created = raw_created.strip().strip('"').strip("'")
+    if created == DATE_PLACEHOLDER:
+        messages.append("kept template placeholder created=%s: %s"
+                        % (DATE_PLACEHOLDER, rel))
+    elif _parse_date(created) is None:
+        date = _git_first_commit_date(vault, rel)
+        if date is None:
+            messages.append("NO-DATA: created for %s: no git first-commit date" % rel)
+        else:
+            text, _ch = set_frontmatter_field(text, "created", date)
+            messages.append("derived created=%s from git first commit: %s" % (date, rel))
+
+    if not fmap.get("id", "").strip():
+        new_id = derive_path_id(rel)
+        how = "from the note path"
+        if new_id in taken_ids:
+            new_id = ids_mod.mint(taken_ids) if ids_mod is not None else None
+            how = "minted, the path derived id was already in use"
+        if new_id is None:
+            messages.append("NO-DATA: id for %s: the path derived id is taken "
+                            "and bm_vault_ids is not importable" % rel)
+        else:
+            taken_ids.add(new_id)
+            text, _ch = set_frontmatter_field(text, "id", new_id)
+            messages.append("derived id=%s %s: %s" % (new_id, how, rel))
+    return text, messages
+
+
 def cmd_fix(vault, apply_changes):
     notes = _load_notes(vault)
     if notes is None:
@@ -428,10 +585,24 @@ def cmd_fix(vault, apply_changes):
     temporal_mod = _load_sibling("bm_vault_temporal")
     temporal_fields = (tuple(temporal_mod.FIELDS) if temporal_mod is not None
                         else _FALLBACK_TEMPORAL_FIELDS)
+    ids_mod = _load_sibling("bm_vault_ids")
+    taken_ids = _collect_ids(notes)
     changed = 0
+    derived_created = 0
+    derived_id = 0
+    no_data = 0
     for rel, text in notes:
-        new_text, did_change = normalize_frontmatter(text, temporal_fields)
-        if not did_change:
+        new_text, messages = derive_missing(text, rel, vault, taken_ids, ids_mod)
+        for msg in messages:
+            print(msg if apply_changes else "would: " + msg)
+            if msg.startswith("derived created="):
+                derived_created += 1
+            elif msg.startswith("derived id="):
+                derived_id += 1
+            elif msg.startswith("NO-DATA"):
+                no_data += 1
+        new_text, _did_normalize = normalize_frontmatter(new_text, temporal_fields)
+        if new_text == text:
             continue
         changed += 1
         print("%s %s" % ("normalized" if apply_changes else "would normalize", rel))
@@ -442,6 +613,8 @@ def cmd_fix(vault, apply_changes):
                 fh.write(new_text)
             os.replace(tmp, path)
     print("%s %d note(s)" % ("normalized" if apply_changes else "would normalize", changed))
+    print("derived created for %d note(s), derived id for %d note(s), "
+          "%d NO-DATA" % (derived_created, derived_id, no_data))
     if not apply_changes:
         print("dry run: nothing was written. Re-run with --apply to write.")
     return 0

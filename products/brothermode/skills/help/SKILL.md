@@ -21,6 +21,8 @@ Do not print the command list unless they ask for it. That is the whole change t
 - `/brothermode:status` for where things stand.
 - `/brothermode:next` for the best next step.
 
+Those three names are how a client with slash commands, such as Claude Code, reaches them. A client without them reaches the same three by asking in plain words, or by running the command underneath: `python3 "${BROTHER_PLUGIN_ROOT}/tools/brothermode_cli.py" start`, `... status --project-id <id>`, `... next --project-id <id>` (the packaged console script is `brothermode start`, and `${CLAUDE_PLUGIN_ROOT}` names the same directory under Claude Code). Give the plain-words route first: the command is for someone who asks for it.
+
 Each of the others introduces itself when it becomes useful: the one for decisions and the one for taking a decision back appear the first time a decision is waiting on them; the one that writes the page appears once there is a page; the catch-up, the review, the delivery and the handover pages appear when there is something to catch up on, review, deliver or hand over.
 
 ## The reference answer, when they ask to see everything

@@ -6205,8 +6205,10 @@ class TestFinding11NestedRepoBoundary(unittest.TestCase):
             self.assertEqual(source, "marker")
 
     def test_finding11_explicit_env_root_is_exempt(self):
-        """BROTHERMODE_ROOT is the answer the refusal asks for, so it
-        cannot itself be refused, or the remedy is another dead end."""
+        """BROTHERMODE_ROOT is the answer the refusal asks for, so an env
+        root that CONTAINS the start path cannot itself be refused, or the
+        remedy is another dead end. An env root that does not contain it is
+        a different case, covered by TestEnvRootContainment below."""
         with tempfile.TemporaryDirectory() as d:
             os.makedirs(os.path.join(d, ".brothermode"))
             nested = os.path.join(d, "vendor", "sub")
@@ -6228,6 +6230,65 @@ class TestFinding11NestedRepoBoundary(unittest.TestCase):
             with self.assertRaises(bs.OwnershipRefused) as ctx:
                 bs.require_root(start=nested, refuse_past_git_boundary=True)
             self.assertEqual(ctx.exception.reason, "root-ambiguous")
+
+
+class TestEnvRootContainment(unittest.TestCase):
+    """Security review 2026-09-04, Major: the containment flag skipped the
+    env source entirely, so BROTHERMODE_ROOT, which every child process
+    inherits, could send a caller that ASKED for containment to read and
+    write its SQLite store at any absolute path outside the tree it was
+    called about, with nothing said. The refusal names both paths."""
+
+    def test_an_env_root_outside_the_start_tree_is_refused_by_name(self):
+        with tempfile.TemporaryDirectory() as elsewhere:
+            with tempfile.TemporaryDirectory() as here:
+                os.makedirs(os.path.join(here, ".git"))
+                with mock.patch.dict(os.environ,
+                                     {"BROTHERMODE_ROOT": elsewhere}):
+                    with self.assertRaises(bs.OwnershipRefused) as ctx:
+                        bs.resolve_root(start=here,
+                                        refuse_past_git_boundary=True)
+                self.assertEqual(ctx.exception.reason, "root-outside-start")
+                msg = str(ctx.exception)
+                self.assertIn(os.path.realpath(elsewhere), msg)
+                self.assertIn(os.path.realpath(here), msg)
+
+    def test_the_default_still_honours_an_env_root_from_anywhere(self):
+        """CLI and test callers point at a project from anywhere on
+        purpose; the flag is opt-in and nothing changes without it."""
+        with tempfile.TemporaryDirectory() as elsewhere:
+            with tempfile.TemporaryDirectory() as here:
+                os.makedirs(os.path.join(here, ".git"))
+                with mock.patch.dict(os.environ,
+                                     {"BROTHERMODE_ROOT": elsewhere}):
+                    root, source = bs.resolve_root(start=here)
+                self.assertEqual(os.path.realpath(root),
+                                 os.path.realpath(elsewhere))
+                self.assertEqual(source, "env")
+
+    def test_an_env_root_that_contains_the_start_tree_is_still_the_remedy(self):
+        """The other side: containment does not close the documented escape
+        hatch. An env root ABOVE the start path, with a nearer .git in
+        between, is exactly 'attach to the parent on purpose'."""
+        with tempfile.TemporaryDirectory() as d:
+            inner = os.path.join(d, "vendor", "sub")
+            os.makedirs(os.path.join(inner, ".git"))
+            with mock.patch.dict(os.environ, {"BROTHERMODE_ROOT": d}):
+                root, source = bs.resolve_root(start=inner,
+                                               refuse_past_git_boundary=True)
+            self.assertEqual(os.path.realpath(root), os.path.realpath(d))
+            self.assertEqual(source, "env")
+
+    def test_require_root_passes_the_containment_through(self):
+        with tempfile.TemporaryDirectory() as elsewhere:
+            with tempfile.TemporaryDirectory() as here:
+                os.makedirs(os.path.join(here, ".git"))
+                with mock.patch.dict(os.environ,
+                                     {"BROTHERMODE_ROOT": elsewhere}):
+                    with self.assertRaises(bs.OwnershipRefused) as ctx:
+                        bs.require_root(start=here,
+                                        refuse_past_git_boundary=True)
+                self.assertEqual(ctx.exception.reason, "root-outside-start")
 
 
 class TestIdentityByName(unittest.TestCase):

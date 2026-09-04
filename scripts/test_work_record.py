@@ -6,6 +6,8 @@ downstream breaks without it, usually invisibly and usually at run time.
 """
 import json
 import os
+import re
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -86,6 +88,31 @@ class EveryClauseExistsBecauseSomethingBreaksWithoutIt(unittest.TestCase):
         rec, problems = W.create("", [unit()])
         self.assertIsNone(rec)
         self.assertIn("nothing says what this Work is for", problems[0])
+
+    def test_an_evidence_family_outside_the_library_is_refused(self):
+        """The persona document's universal evidence library is E1 to E18.
+        A code outside it is a typo or an invention, and a unit carrying one
+        would be scheduled with an evidence plan nothing downstream can read."""
+        rec, problems = W.create("o", [unit(evidence_family="E99")])
+        self.assertIsNone(rec)
+        self.assertIn("not one of E1 to E18", problems[0])
+
+    def test_an_oracle_source_outside_the_vocabulary_is_refused(self):
+        """independence_for() reads oracle_source to decide whether a PASS
+        was independent or circular. An unrecognized value reads
+        "independent" by falling through, which is the wrong answer stated
+        confidently, so it is refused at declaration instead."""
+        rec, problems = W.create("o", [unit(oracle_source="guesswork")])
+        self.assertIsNone(rec)
+        self.assertIn("recognized oracle sources", problems[0])
+
+    def test_the_declared_vocabulary_itself_is_accepted(self):
+        """The positive control: the two refusals above must be about the
+        VALUE, not about declaring these fields at all."""
+        rec, problems = W.create(
+            "o", [unit(evidence_family="E7", oracle_source="requirement")])
+        self.assertEqual(problems, [])
+        self.assertIsNotNone(rec)
 
 
 class ItReportsEVERYProblemNotTheFirst(unittest.TestCase):
@@ -171,6 +198,83 @@ class ItDoesNotPretendToDecomposeEnglish(unittest.TestCase):
     def test_the_module_exposes_no_decomposer(self):
         for name in ("decompose", "split", "infer_units", "plan_from_outcome"):
             self.assertFalse(hasattr(W, name), name)
+
+
+#: A child that starts writing a Work document and is SIGKILLed part way
+#: through the JSON, which is the run-interrupted-mid-stamp case E61 exists
+#: for. `mode` picks the writer: "helper" is work_record.write_record,
+#: "plain" is the open(path, "w") plus json.dump every stamp used to be, and
+#: is the POSITIVE CONTROL: it must tear the file, or this test proves
+#: nothing about the helper that does not.
+KILLED_WRITER = '''
+import json, os, signal, sys
+sys.path.insert(0, %r)
+import work_record as W
+
+path, mode = sys.argv[1], sys.argv[2]
+real_dump = json.dump
+
+
+def dump_then_die(obj, fh, **kw):
+    # Half a document, flushed to the file the writer chose, then gone. No
+    # finally block runs after SIGKILL, which is the point.
+    fh.write('{"outcome": "half a doc')
+    fh.flush()
+    os.kill(os.getpid(), signal.SIGKILL)
+
+
+json.dump = dump_then_die
+if mode == "helper":
+    W.write_record(path, {"outcome": "the new one"})
+else:
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump({"outcome": "the new one"}, fh, indent=1)
+'''
+
+
+class AKilledStampLeavesAWholeDocument(unittest.TestCase):
+    """E61. The claim store in the same run directory already survived a kill
+    mid-write; the Work document beside it did not, because every one of its
+    writers truncated the real file first."""
+
+    def _kill_mid_write(self, mode):
+        here = os.path.dirname(os.path.abspath(__file__))
+        d = tempfile.mkdtemp()
+        path = os.path.join(d, "W-kill.json")
+        before = {"outcome": "the one already on disk", "rows": [{"id": "U1"}]}
+        W.write_record(path, before)
+        child = os.path.join(d, "child.py")
+        with open(child, "w", encoding="utf-8") as fh:
+            fh.write(KILLED_WRITER % here)
+        proc = subprocess.run([sys.executable, child, path, mode],
+                              capture_output=True, timeout=60)
+        self.assertEqual(proc.returncode, -9,
+                         "the child was meant to die on SIGKILL, got %r: %s"
+                         % (proc.returncode, proc.stderr.decode()[-400:]))
+        with open(path, encoding="utf-8") as fh:
+            return before, fh.read()
+
+    def test_the_helper_leaves_the_whole_previous_document(self):
+        before, raw = self._kill_mid_write("helper")
+        self.assertEqual(json.loads(raw), before)
+
+    def test_the_plain_rewrite_it_replaced_tears_the_file(self):
+        """The control. Without this the test above would pass on a machine
+        where nothing was ever at risk."""
+        _, raw = self._kill_mid_write("plain")
+        with self.assertRaises(ValueError):
+            json.loads(raw)
+
+
+class NoStampBypassesTheHelper(unittest.TestCase):
+    """The done-check clause, kept runnable rather than run once by hand."""
+
+    def test_brother_run_never_opens_the_record_path_for_writing(self):
+        here = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(here, "brother_run.py"), encoding="utf-8") as fh:
+            src = fh.read()
+        self.assertEqual(re.findall(r'open\(record_path,\s*"w"', src), [])
+        self.assertGreaterEqual(src.count("work_record.write_record("), 10)
 
 
 if __name__ == "__main__":

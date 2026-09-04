@@ -1,0 +1,566 @@
+{
+  "lens": "infrastructure-senior",
+  "version": "1.0.0",
+  "detection_signals": {
+    "paths": [
+      "*.tf",
+      "*.tfvars",
+      ".terraform.lock.hcl",
+      "terragrunt.hcl",
+      "Pulumi.yaml",
+      "Pulumi.yml",
+      "Chart.yaml",
+      "helmfile.yaml",
+      "kustomization.yaml",
+      "kustomization.yml",
+      "Dockerfile",
+      "Dockerfile.*",
+      "ansible.cfg",
+      ".gitlab-ci.yml",
+      "Jenkinsfile",
+      "azure-pipelines.yml",
+      ".circleci/",
+      "k8s/",
+      "kubernetes/"
+    ],
+    "manifest_strings": [
+      "pulumi",
+      "cdktf",
+      "aws-cdk",
+      "checkov",
+      "ansible"
+    ],
+    "note": "infrastructure as code, not application code: a file that only exists because somebody declares desired state or a pipeline (persona doc 9.2 'desired-state source of truth', 9.5 tool adapters). Two exclusions are deliberate. '.github/workflows/' is NOT a signal even though it is a CI pipeline definition, because almost every repository on this estate carries one and a signal every repository matches makes this lens win everywhere; the narrower CI files above (GitLab, Jenkins, Azure Pipelines, CircleCI) are only present where somebody is actually maintaining a pipeline. 'docker-compose.yml' is NOT a signal because it is as often a local development convenience as an infrastructure artifact. Estate reach measured 2026-09-04 with git ls-files and find over the working trees: the hub matches on exactly one path, products/brothermode/azure-pipelines.yml; the other two local repositories checked (a token-economy tooling repository and a client analysis workspace) match nothing. No signal here collides with core (core has none) or with data-science (*.ipynb, mlruns/, dvc.yaml, dbt_project.yml, mlflow, dvc, dbt_project), and infer_lens tries packs in sorted lens-name order, so data-science is tried before infrastructure-senior and keeps its own fixture."
+  },
+  "challenge_question": "Is a replace/destroy operation acceptable in this environment, and what is the maximum blast radius?",
+  "question_budget": {
+    "min": 2,
+    "max": 6,
+    "work_shape": "Production infra change (persona doc 4.2, 'Production infra change' 2 to 6). The same table sets no fixed cap for a high-risk irreversible, security or spend change: when a forcing class below fires, max is advisory and the necessary decisions are still asked (4.2, 'no fixed cap; require necessary decisions')."
+  },
+  "required_evidence_families": [
+    "E11",
+    "E10",
+    "E14",
+    "E16",
+    "E13",
+    "E15"
+  ],
+  "receipt_fields": [
+    "environment_scope",
+    "plan_summary",
+    "iam_security_delta",
+    "network_delta",
+    "estimated_cost_delta",
+    "blast_radius",
+    "slo_availability_risk",
+    "canary_staging_result",
+    "rollback_path_and_exercised",
+    "backup_restore_status",
+    "production_action_requiring_human_authorization"
+  ],
+  "forcing_classes": [
+    {
+      "id": "destroy_or_replace",
+      "label": "Destroy or replace",
+      "why": "the saved plan JSON has a resource_changes entry whose change.actions is [\"delete\"] or contains both \"create\" and \"delete\" (a replace), or the diff removes a resource block from a .tf file, or it edits an attribute the provider marks ForceNew. Persona doc 9.3 INF-01 and 25.2 ('Infrastructure: planned destroy/replace of stateful production resource')."
+    },
+    {
+      "id": "privilege_widening",
+      "label": "Privilege widening",
+      "why": "the diff adds or edits an IAM policy, role, role binding or trust policy (aws_iam_*, google_project_iam_*, azurerm_role_assignment, a Kubernetes Role, ClusterRole, RoleBinding or ClusterRoleBinding), or a policy document gains \"*\" in an Action or Resource field, or a service account gains a new binding. Persona doc 9.3 INF-02, 9.4 point 5 ('widen permissions'), 25.1 ('widening production privilege')."
+    },
+    {
+      "id": "network_exposure",
+      "label": "Network exposure",
+      "why": "a security group, firewall rule or network policy in the diff gains 0.0.0.0/0 or ::/0, or a Kubernetes Service type changes to LoadBalancer or NodePort, or an Ingress gains a host, or an attribute named publicly_accessible, public_network_access_enabled or public_ip_address is set true. Persona doc 9.3 INF-05, 9.4 point 5 ('expose network paths')."
+    },
+    {
+      "id": "secret_in_configuration",
+      "label": "Secret in configuration",
+      "why": "the diff assigns a literal value (not a reference to a secret manager, a variable or a sealed reference) to a key whose name contains password, secret, token, api_key, private_key or credential, in a .tf, .tfvars, values.yaml, .env or Kubernetes manifest, or adds a Secret object with stringData written inline. Persona doc 9.2 (secrets), 9.3 INF-07, 9.4 point 5 ('rotate')."
+    },
+    {
+      "id": "cost_change",
+      "label": "Cost change",
+      "why": "the diff changes a priced dimension: instance_type, machine_type, node_count, replicas, min_size, max_size, desired_capacity, disk or volume size, a provisioned throughput or capacity unit, or an autoscaling bound. Persona doc 3.2 (money includes cloud spend), 9.3 INF-09 and INF-13, 9.4 point 5 ('spend materially')."
+    },
+    {
+      "id": "rollback_path_absent",
+      "label": "Rollback path absent",
+      "why": "the unit's receipt carries rollback_path_and_exercised as NO-DATA while plan_summary counts a destroy or a replace above zero, or a stateful resource (a database instance, a persistent volume claim, a StatefulSet, a bucket with a lifecycle rule) is in the diff and backup_restore_status is NO-DATA. Persona doc 9.3 INF-17 and INF-22, 9.6 ('whether actually exercised')."
+    },
+    {
+      "id": "production_mutation",
+      "label": "Production mutation",
+      "why": "the changed path or the resolved workspace names a production environment (a path segment prod, production or live; a file production.tfvars or values-prod.yaml; a terraform workspace or kube context whose name matches those words) AND the action the unit intends is apply, upgrade, rollout or delete rather than plan, template, diff or dry-run. Persona doc 9.4 point 4 ('production mutation requires an explicit human decision for high-impact actions')."
+    }
+  ],
+  "work_classes": [
+    {
+      "id": "7",
+      "label": "infrastructure/configuration change",
+      "why": "the pack's home class: desired state, pipelines and platform configuration (persona doc 3.1 item 7)."
+    },
+    {
+      "id": "13",
+      "label": "release / deployment",
+      "why": "rollout strategy, maintenance window and rollback are this persona's own intake dimensions (9.2), and INF-03 and INF-08 are rollout and pipeline units."
+    },
+    {
+      "id": "14",
+      "label": "incident investigation",
+      "why": "INF-14, whose critical failure is destructive remediation, and whose default evidence is a read-only evidence graph first (9.3, 9.4 point 1)."
+    },
+    {
+      "id": "15",
+      "label": "performance/cost optimization",
+      "why": "INF-09 and INF-13: capacity and cost work whose failure mode is a reliability regression bought with a saving."
+    },
+    {
+      "id": "16",
+      "label": "security/privacy hardening",
+      "why": "INF-02, INF-05, INF-07 and INF-19: IAM, network boundary, secret rotation and image vulnerability work."
+    },
+    {
+      "id": "17",
+      "label": "dependency/platform migration",
+      "why": "INF-11 (cluster or node upgrade) and INF-19 (base image upgrade), where the risk is workload incompatibility rather than a defect in the change itself."
+    },
+    {
+      "id": "2",
+      "label": "defect / incident correction",
+      "why": "INF-15, incident remediation, whose critical failure is a symptom patch that lets the incident recur."
+    },
+    {
+      "id": "19",
+      "label": "documentation/runbook change",
+      "why": "INF-12 treats a runbook as an artifact to validate, not prose: an alert with no runbook is a blind incident."
+    },
+    {
+      "id": "20",
+      "label": "spike/research with no production mutation",
+      "why": "9.4 points 1 and 2: discover, read, plan and dry-run freely, which is exactly the class where this pack asks the fewest questions."
+    }
+  ],
+  "risk_classes": [
+    {
+      "id": "irreversibility",
+      "how_this_lens_scores_it": "high whenever plan_summary counts a destroy or a replace, because a replaced managed resource comes back with a new identity, not the old one."
+    },
+    {
+      "id": "production_write",
+      "how_this_lens_scores_it": "the production_mutation forcing class is exactly this axis made visible: read and plan are free, apply against a production workspace is not."
+    },
+    {
+      "id": "data_loss_corruption",
+      "how_this_lens_scores_it": "scored from stateful resources in the diff (databases, volumes, buckets, StatefulSets) and closed only by backup_restore_status with an actual restore, never by a backup that merely exists (INF-17)."
+    },
+    {
+      "id": "security_permission",
+      "how_this_lens_scores_it": "scored from the IAM and network deltas; privilege_widening and network_exposure both force a human rather than adjusting tone."
+    },
+    {
+      "id": "money",
+      "how_this_lens_scores_it": "cloud spend is money here (3.2). Scored from the cost_change forcing class and reported as estimated_cost_delta, with the estimator named."
+    },
+    {
+      "id": "customer_blast_radius",
+      "how_this_lens_scores_it": "scored from the affected-environment inventory (INF-18): how many environments or tenants consume the changed module, not how large the diff is."
+    },
+    {
+      "id": "compatibility",
+      "how_this_lens_scores_it": "scored from rolling-deployment and dual-version questions: INF-07 (a rotation both old and new consumers must survive) and INF-11 (workloads that must run on the new node version)."
+    },
+    {
+      "id": "compliance_privacy",
+      "how_this_lens_scores_it": "an intake dimension of this persona (9.2, compliance and audit requirement); scored from whether the environment carries a stated audit obligation, and recorded rather than assumed away."
+    },
+    {
+      "id": "operational_recoverability",
+      "how_this_lens_scores_it": "the E16 family plus rollback_path_and_exercised: a written rollback with no run is NO-DATA, and rollback_path_absent fires when a destroy or replace sits beside that NO-DATA."
+    },
+    {
+      "id": "evidence_uncertainty",
+      "how_this_lens_scores_it": "highest where the provider will not say what it will do without applying (a managed service migration, a DNS cutover): those units carry more NO-DATA lines, stated, rather than a plan presented as certainty."
+    }
+  ],
+  "dangerous_actions": [
+    "applying, upgrading or rolling out anything into a production account, subscription, project or cluster (9.4 point 4)",
+    "destroying, deleting, tainting or replacing any resource, in any environment, when the resource holds state (9.4 point 5, 25.2)",
+    "widening any permission: adding an IAM policy or binding, granting a role, editing a trust policy, or relaxing a network policy (9.4 point 5, 25.1)",
+    "opening a network path to the public internet, or removing one other systems depend on (9.4 point 5)",
+    "creating, rotating, revoking or printing any secret, credential, key or certificate private half (9.4 point 5)",
+    "committing anything that increases spend materially, including raising an autoscaling ceiling (9.4 point 5)",
+    "running a remediation during an incident before the read-only evidence graph exists (INF-14)",
+    "reconciling drift by overwriting a change somebody made deliberately during an incident (INF-16)",
+    "disabling, silencing or deleting an alert, dashboard or log pipeline (INF-12)",
+    "changing a backup, retention or lifecycle policy in a way that shortens what can be recovered (INF-17, INF-21)"
+  ],
+  "know_how": [
+    {
+      "id": "INF-01",
+      "situation": "A Terraform or OpenTofu resource change.",
+      "brother_asks": "Which environment does this resolve against, and is a replace or destroy acceptable there?",
+      "proof_that_closes_it": "a saved plan parsed for add, change, destroy and replace, with the destructive-operation gate run over it; the critical failure is an unexpected destroy or replace.",
+      "source": "9.3"
+    },
+    {
+      "id": "INF-02",
+      "situation": "An IAM change.",
+      "brother_asks": "What exactly does this principal gain, and who decided it needs it?",
+      "proof_that_closes_it": "a policy diff plus a least-privilege check; the critical failure is privilege escalation.",
+      "source": "9.3"
+    },
+    {
+      "id": "INF-03",
+      "situation": "A Kubernetes deployment change.",
+      "brother_asks": "How does this roll out, and what does the rollback look like if the new pods never become ready?",
+      "proof_that_closes_it": "manifest validation plus a rollout and rollback drill; the critical failure is an outage or a failed rollout.",
+      "source": "9.3"
+    },
+    {
+      "id": "INF-04",
+      "situation": "A Helm chart change.",
+      "brother_asks": "What do the rendered manifests actually differ by, once values are applied?",
+      "proof_that_closes_it": "a rendered manifest diff plus schema checks; the critical failure is a hidden rendered diff nobody read because only the values file was reviewed.",
+      "source": "9.3"
+    },
+    {
+      "id": "INF-05",
+      "situation": "A networking or security group change.",
+      "brother_asks": "What should be able to reach what after this, stated as intent before the rule is read?",
+      "proof_that_closes_it": "the reachability intent written down, then the policy diff checked against it; the critical failure is lost connectivity or new exposure.",
+      "source": "9.3"
+    },
+    {
+      "id": "INF-06",
+      "situation": "A DNS or certificate change.",
+      "brother_asks": "What is the TTL, and how long is the window where both the old and the new value must work?",
+      "proof_that_closes_it": "staged validation plus a rollback plan that accounts for the TTL; the critical failure is an outage or a failed cutover.",
+      "source": "9.3"
+    },
+    {
+      "id": "INF-07",
+      "situation": "A secret or configuration rotation.",
+      "brother_asks": "Can both the old and the new value be valid at once, and for how long?",
+      "proof_that_closes_it": "redaction proven over logs and output, plus a dual-version compatibility check; the critical failure is a leak or an incompatible rollout.",
+      "source": "9.3"
+    },
+    {
+      "id": "INF-08",
+      "situation": "A CI/CD pipeline change.",
+      "brother_asks": "Which gate does this change the reachability of, and can any path now skip it?",
+      "proof_that_closes_it": "the pipeline graph plus tests that a protected boundary still refuses; the critical failure is a bypassed gate.",
+      "source": "9.3"
+    },
+    {
+      "id": "INF-09",
+      "situation": "An autoscaling or capacity change.",
+      "brother_asks": "What load model says this bound is right, and what does the ceiling cost if it is reached?",
+      "proof_that_closes_it": "a load or capacity model plus the declared limits; the critical failure is a cost blowout or throttling.",
+      "source": "9.3"
+    },
+    {
+      "id": "INF-10",
+      "situation": "A database or managed service change.",
+      "brother_asks": "Does the provider replace rather than modify this, and where is the restore point?",
+      "proof_that_closes_it": "the provider plan plus backup and recovery proof; the critical failure is data or service loss.",
+      "source": "9.3"
+    },
+    {
+      "id": "INF-11",
+      "situation": "A cluster or node upgrade.",
+      "brother_asks": "Which workloads use an API or a feature this version removes?",
+      "proof_that_closes_it": "preflight checks plus representative workload checks on the new version; the critical failure is workload incompatibility.",
+      "source": "9.3"
+    },
+    {
+      "id": "INF-12",
+      "situation": "An observability change.",
+      "brother_asks": "Which incident would this alert have caught, and what does the runbook tell the person paged to do?",
+      "proof_that_closes_it": "alert, query and runbook validation; the critical failure is a blind incident.",
+      "source": "9.3"
+    },
+    {
+      "id": "INF-13",
+      "situation": "A cost optimization.",
+      "brother_asks": "What reliability property is being spent to buy this saving?",
+      "proof_that_closes_it": "the cost delta beside an SLO guard; the critical failure is a reliability regression.",
+      "source": "9.3"
+    },
+    {
+      "id": "INF-14",
+      "situation": "An incident investigation.",
+      "brother_asks": "Nothing that mutates: what does the read-only evidence say first?",
+      "proof_that_closes_it": "a read-only evidence graph built before any remediation is proposed; the critical failure is destructive remediation.",
+      "source": "9.3, 9.4 point 1"
+    },
+    {
+      "id": "INF-15",
+      "situation": "An incident remediation.",
+      "brother_asks": "What made the bad state possible, and what invariant stops it recurring?",
+      "proof_that_closes_it": "an incident replay through the new behaviour plus a follow-up invariant; the critical failure is a symptom patch and recurrence.",
+      "source": "9.3"
+    },
+    {
+      "id": "INF-16",
+      "situation": "Drift reconciliation.",
+      "brother_asks": "Was this drift an accident, or a deliberate emergency change somebody made?",
+      "proof_that_closes_it": "drift classified per resource, then a human decision on the deliberate ones; the critical failure is overwriting an intentional emergency change.",
+      "source": "9.3"
+    },
+    {
+      "id": "INF-17",
+      "situation": "A backup policy change.",
+      "brother_asks": "When was a restore from this policy last actually performed?",
+      "proof_that_closes_it": "an actual restore drill, not the existence of backups; the critical failure is a false sense of safety.",
+      "source": "9.3"
+    },
+    {
+      "id": "INF-18",
+      "situation": "A multi-account or shared module change.",
+      "brother_asks": "Every environment that consumes this module: which are they, and which goes first?",
+      "proof_that_closes_it": "an affected-environment inventory plus a canary in one of them; the critical failure is broad propagation.",
+      "source": "9.3"
+    },
+    {
+      "id": "INF-19",
+      "situation": "A container or base image upgrade.",
+      "brother_asks": "What changed in the image beyond the version string, and does the workload still run on it?",
+      "proof_that_closes_it": "an SBOM or vulnerability diff plus smoke and integration runs; the critical failure is a runtime or security regression.",
+      "source": "9.3"
+    },
+    {
+      "id": "INF-20",
+      "situation": "A platform self-service module or feature exposed to developers.",
+      "brother_asks": "Which knob does this hand to somebody who will not read the plan?",
+      "proof_that_closes_it": "a constrained interface plus policy tests over what the module refuses; the critical failure is an unsafe developer knob.",
+      "source": "9.3"
+    },
+    {
+      "id": "INF-21",
+      "situation": "A queue or storage policy change.",
+      "brother_asks": "What becomes unrecoverable after this retention or lifecycle rule takes effect?",
+      "proof_that_closes_it": "the policy diff plus a lifecycle simulation over representative objects; the critical failure is retention loss or data loss.",
+      "source": "9.3"
+    },
+    {
+      "id": "INF-22",
+      "situation": "A disaster recovery change.",
+      "brother_asks": "What recovery time and data loss does this assume, and has anybody measured them?",
+      "proof_that_closes_it": "a recovery-time and data-loss exercise, run; the critical failure is unrecoverable assumptions.",
+      "source": "9.3"
+    },
+    {
+      "id": "INF-POLICY-01",
+      "situation": "Brother needs to understand the environment before proposing anything.",
+      "brother_asks": "Nothing. Discover and read freely within the granted local or tool scope.",
+      "proof_that_closes_it": "the orientation record: what was read, each statement marked FACT, INFERENCE, UNKNOWN, HUMAN_DECISION or VAULT_CONTEXT.",
+      "source": "9.4 point 1, 4.1 stage 0"
+    },
+    {
+      "id": "INF-POLICY-02",
+      "situation": "A plan, diff, render or dry-run would answer the question.",
+      "brother_asks": "Nothing, when the operation is non-destructive: run it rather than ask.",
+      "proof_that_closes_it": "the E11 artifact itself (plan JSON, rendered manifests, kubectl diff, GitOps diff), attached to the unit.",
+      "source": "9.4 point 2, 4.1 stage 2"
+    },
+    {
+      "id": "INF-POLICY-03",
+      "situation": "The target is an isolated, local or test environment.",
+      "brother_asks": "Nothing beyond the declared autonomy for that environment: write there.",
+      "proof_that_closes_it": "the run record naming the environment, so the receipt's environment_scope cannot later be read as production.",
+      "source": "9.4 point 3"
+    },
+    {
+      "id": "INF-POLICY-04",
+      "situation": "The action would mutate production and the impact is high.",
+      "brother_asks": "The explicit decision, with the plan summary, the blast radius and the rollback path in front of the human.",
+      "proof_that_closes_it": "a recorded human decision; the unit stops at prepared, and production_action_requiring_human_authorization names exactly what was withheld.",
+      "source": "9.4 point 4, 25.1"
+    },
+    {
+      "id": "INF-POLICY-05",
+      "situation": "The action destroys, deletes, rotates, spends materially, widens permission or exposes a network path.",
+      "brother_asks": "The decision, always: these are forcing conditions and are never inferred approvals, in any environment.",
+      "proof_that_closes_it": "the fired forcing class recorded with the concrete condition seen in the diff or plan, and the human answer.",
+      "source": "9.4 point 5, 25.2"
+    },
+    {
+      "id": "INF-POLICY-06",
+      "situation": "Deciding how many of the above to ask at once.",
+      "brother_asks": "Only at the few boundaries where a human actually owns the risk.",
+      "proof_that_closes_it": "the question budget honoured (2 to 6 for a production infra change), each question passing the stage 2 value test: the answer could change scope, architecture, risk, route, evidence, rollout or acceptance.",
+      "source": "9.4 closing note, 4.1 stage 2, 4.2"
+    }
+  ],
+  "tool_adapters": [
+    {
+      "id": "terraform_plan_json",
+      "what_it_gives": "the E11 spine: add, change, destroy and replace per resource, machine readable.",
+      "detect": "command -v terraform || command -v tofu",
+      "when_absent": "NO-DATA for plan_summary; the unit says the plan was not produced and why, and never infers the counts from the diff."
+    },
+    {
+      "id": "tflint",
+      "what_it_gives": "provider-aware lint over the IaC itself (E10).",
+      "detect": "command -v tflint",
+      "when_absent": "NO-DATA for the lint line; other E10 evidence may still close the unit."
+    },
+    {
+      "id": "policy_scanner",
+      "what_it_gives": "IaC policy findings: Checkov, tfsec or an equivalent (E10, E14).",
+      "detect": "command -v checkov || command -v tfsec || command -v trivy",
+      "when_absent": "NO-DATA for the policy line, stated with the scanner names tried."
+    },
+    {
+      "id": "cost_estimator",
+      "what_it_gives": "estimated_cost_delta (E13).",
+      "detect": "command -v infracost",
+      "when_absent": "NO-DATA for estimated_cost_delta; a provider native estimate may substitute when it is named."
+    },
+    {
+      "id": "helm",
+      "what_it_gives": "rendered manifests and chart lint, which is what INF-04 compares.",
+      "detect": "command -v helm",
+      "when_absent": "NO-DATA for the rendered diff; a values-file diff is not a substitute and is not offered as one."
+    },
+    {
+      "id": "manifest_schema_validator",
+      "what_it_gives": "schema validation of Kubernetes manifests (E10): kubeconform or kubeval.",
+      "detect": "command -v kubeconform || command -v kubeval",
+      "when_absent": "NO-DATA for manifest validation."
+    },
+    {
+      "id": "kubectl_readonly",
+      "what_it_gives": "kubectl diff and read-only status, the cluster's own view of the change (E11, E15).",
+      "detect": "command -v kubectl",
+      "when_absent": "NO-DATA for the live diff; the unit stays at the rendered-manifest level."
+    },
+    {
+      "id": "opa_conftest",
+      "what_it_gives": "policy as code over plans and manifests (E10).",
+      "detect": "command -v conftest || command -v opa",
+      "when_absent": "NO-DATA for the policy-as-code line."
+    },
+    {
+      "id": "container_scanner",
+      "what_it_gives": "image vulnerability and SBOM evidence for INF-19 (E14).",
+      "detect": "command -v trivy || command -v grype || command -v syft",
+      "when_absent": "NO-DATA for the image line; a version bump alone never closes INF-19."
+    },
+    {
+      "id": "gitops_diff",
+      "what_it_gives": "what the cluster's reconciler would actually apply (E11): Argo CD or Flux output.",
+      "detect": "command -v argocd || command -v flux",
+      "when_absent": "NO-DATA for the GitOps diff; in a GitOps estate this absence is itself worth reporting, because the repository diff is not the applied diff."
+    },
+    {
+      "id": "cloud_cli_readonly",
+      "what_it_gives": "environment_scope and read-only inventory (9.4 point 1).",
+      "detect": "command -v aws || command -v gcloud || command -v az",
+      "when_absent": "NO-DATA for environment_scope resolved from the provider; the workspace name alone is stated as an inference, not a fact."
+    },
+    {
+      "id": "telemetry_connector",
+      "what_it_gives": "E15 evidence: OpenTelemetry, Prometheus or Grafana style queries showing the behaviour is visible.",
+      "detect": "command -v promtool",
+      "when_absent": "NO-DATA for observability evidence; INF-12 cannot be closed without it."
+    },
+    {
+      "id": "incident_tooling",
+      "what_it_gives": "incident timelines and logs for INF-14 and INF-15 replay.",
+      "detect": "the project's own documented incident CLI or export path, read from its runbook rather than guessed",
+      "when_absent": "NO-DATA for incident replay; the unit says the remediation was not replayed against a real case."
+    }
+  ],
+  "provenance": [
+    "3.1 (work classes)",
+    "3.2 (risk classes)",
+    "3.3 (the lens id infrastructure-senior, and inference from repository rather than configuration)",
+    "4.1 stages 0, 2 and 3 (orientation, the question value test, the infrastructure challenge question)",
+    "4.2 (question budget: production infra change 2 to 6, no fixed cap for high-risk irreversible work)",
+    "5.1 (what a pack manifest declares)",
+    "5.2 (selection is compositional: this pack always loads beside core)",
+    "6.1 (evidence families E10, E11, E13, E14, E15, E16)",
+    "9.1 (what this persona is buying)",
+    "9.2 (intake dimensions)",
+    "9.3 (use-case library INF-01 to INF-22)",
+    "9.4 (permission policy, the five default behaviours and the closing note)",
+    "9.5 (tool adapters)",
+    "9.6 (receipt additions)",
+    "25.1 (always-human categories)",
+    "25.2 (the infrastructure forcing example: planned destroy or replace of a stateful production resource)"
+  ],
+  "fixture": {
+    "must_infer": [
+      "infra/main.tf",
+      "infra/variables.tf",
+      "deploy/chart/Chart.yaml",
+      "ops/Dockerfile"
+    ],
+    "manifest_string": "pulumi",
+    "manifest_file": "package.json",
+    "must_not_infer": [
+      "README.md",
+      "src/main.py",
+      "docs/plan.md"
+    ],
+    "note": "must_infer_paths carries no data-science signal (no *.ipynb, mlruns/, dvc.yaml or dbt_project.yml), so sorted lens-name order cannot hand this fixture to data-science; must_not_infer_paths is a plain tree that infers no lens at all, which is what scripts/test_door.py's own test_a_plain_tree_infers_no_lens already asserts."
+  },
+  "required_evidence_families_why": {
+    "E11": "Dry-run / plan evidence: the lens exists because a plausible looking diff is not a statement about the account it will run in (persona doc 9.1). A terraform or tofu plan JSON, a helm template render, a kubectl diff, a GitOps diff or a provider dry-run is the only artifact that names add, change, destroy and replace before anything mutates, and it is the default evidence of INF-01, INF-04, INF-05, INF-08, INF-10, INF-16 and INF-21. Without it every other family below is reasoning about a change nobody has seen resolved.",
+    "E10": "Static structural checks: IaC policy is the cheapest independent oracle this lens has: tflint, Checkov or tfsec, kubeconform schema validation, OPA or Conftest. It is what turns 'the plan looks fine' into 'no rule the team wrote was broken', and it catches the INF-02 and INF-20 failures (privilege escalation, an unsafe self-service knob) that a plan renders without judging.",
+    "E14": "Security / privacy tests: the persona's intake dimensions name IAM and permissions, network boundary and secrets (9.2), and three of its forcing conditions are privilege widening, network exposure and secret handling (9.4 point 5). A least-privilege check on the IAM diff, a reachability check on the network diff and a redaction check on rotated material are what make those receipt lines real rather than asserted (INF-02, INF-05, INF-07, INF-19).",
+    "E16": "Rollback / restore proof: 9.6 asks for the rollback command AND whether it was actually exercised, and INF-17's critical failure is a backup policy that gives a false sense of safety, closed only by an actual restore drill. A documented rollback path with no run behind it is NO-DATA in this pack, never a pass, and the rollback_path_absent forcing class fires on it.",
+    "E13": "Performance / resource tests: cloud spend is money under the doc's own risk axis (3.2, 'money: payments, billing, cloud spend'), and 9.6 asks for an estimated cost delta. INF-09 (autoscaling and capacity) and INF-13 (cost optimization) both fail as cost blowouts or as reliability regressions bought with a saving, so the capacity or cost model is evidence, not a footnote.",
+    "E15": "Observability evidence: INF-12's critical failure is a blind incident, and 9.2 lists observability as an intake dimension. A change that cannot be seen succeeding or failing in production has not been proven safe to roll out, whatever the plan said; alert, query and runbook validation is what closes it."
+  },
+  "receipt_fields_details": {
+    "environment_scope": {
+      "meaning": "which account, subscription, project, cluster or workspace this unit actually touched, named exactly as the provider names it, not as prose.",
+      "filled_by": "command: terraform workspace show, or kubectl config view --minify -o jsonpath='{.contexts[0].context.cluster}', or the cloud CLI's own account read (aws sts get-caller-identity, gcloud config get-value project, az account show); NO-DATA when no environment was resolved."
+    },
+    "plan_summary": {
+      "meaning": "the four counts a human reads first: add, change, destroy, replace. Replace is counted separately from destroy because a replace of a stateful resource is the failure INF-01 exists for.",
+      "filled_by": "file: the saved plan JSON (terraform show -json <planfile>), counted from resource_changes[].change.actions; NO-DATA when no plan was produced."
+    },
+    "iam_security_delta": {
+      "meaning": "every permission, role, policy, binding or trust relationship this unit widens, narrows or creates, in plain words plus the resource ids.",
+      "filled_by": "file: the policy diff (the plan JSON's iam and role resource_changes, or the rendered manifest's ClusterRole and RoleBinding objects) plus the least-privilege check output; NO-DATA when the change touches no permission surface."
+    },
+    "network_delta": {
+      "meaning": "what becomes reachable from where that was not reachable before, and what stops being reachable: security group rules, firewall rules, ingress hosts, service types, peering, DNS records.",
+      "filled_by": "file: the plan JSON or rendered manifest diff filtered to network resources, beside the stated reachability intent; NO-DATA when no network boundary moved."
+    },
+    "estimated_cost_delta": {
+      "meaning": "the expected monthly spend difference, with the estimator named and its assumptions stated, because an estimate whose assumptions are hidden is not evidence.",
+      "filled_by": "command: infracost diff, or the provider native estimate; NO-DATA when no estimator is installed or the change has no priced resource (the tool_adapters entry says how absence is reported)."
+    },
+    "blast_radius": {
+      "meaning": "how far a failure of this unit reaches: which environments, which services, how many tenants or users, and whether the effect is contained to one account or propagates across modules.",
+      "filled_by": "file: the affected-environment inventory (INF-18) listing every environment or module instance that consumes the changed module, plus the plan for each; NO-DATA when the inventory was not built."
+    },
+    "slo_availability_risk": {
+      "meaning": "which service level objective or availability commitment this unit could move, and in which direction, stated before the rollout rather than measured after the incident.",
+      "filled_by": "file: the named SLO or error budget document plus the guard the rollout runs against it; NO-DATA when the service carries no declared SLO."
+    },
+    "canary_staging_result": {
+      "meaning": "what happened when this change ran somewhere that is not production first, including the environment name and the observation window.",
+      "filled_by": "command: the rollout or apply run in the non-production environment, with its exit code and output location; NO-DATA when no staging or canary environment exists for this resource, which is itself a finding."
+    },
+    "rollback_path_and_exercised": {
+      "meaning": "the exact command or procedure that puts the system back, and the separate fact of whether anybody ran it. Two answers, never one.",
+      "filled_by": "command: the rollback command itself (helm rollback, kubectl rollout undo, terraform apply of the prior state, the DNS TTL cutover reversal), plus its run record when exercised; NO-DATA for the exercised half when the path is only written down."
+    },
+    "backup_restore_status": {
+      "meaning": "for any stateful resource touched: when the last backup was taken, and when a restore from it was last proven to work.",
+      "filled_by": "command: the provider's backup listing plus the restore drill run (INF-17, INF-22); NO-DATA when the unit touches no stateful resource."
+    },
+    "production_action_requiring_human_authorization": {
+      "meaning": "the specific action, if any, that this unit prepared but did not take because a human owns it, named so the human can authorize exactly that and nothing wider.",
+      "filled_by": "file: the forcing-class record naming the fired class, the condition seen, and the decision asked; NO-DATA when no forcing class fired and nothing was withheld."
+    }
+  }
+}

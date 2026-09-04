@@ -2,8 +2,14 @@
 """Drive reproduce_export backwards: a matching file reproduces, a tampered
 one is caught as a mismatch, and unreadable inputs are NO-DATA, never a pass.
 The git and export internals are stubbed so the test is deterministic and
-touches no real repository."""
+touches no real repository, EXCEPT the --verify-tree cases (E80), which build
+a throwaway git repository in a temp directory on purpose: that mode's whole
+claim is that a stranger with only a clone can run it, so its reading path is
+driven against real git, never a stub."""
+import contextlib
+import io
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -118,6 +124,18 @@ class ReproduceExport(unittest.TestCase):
         self.assertIn("MISMATCH: %s differs between the regenerated "
                        "export and v9.9.9" % rel, out.getvalue())
 
+    def test_source_tree_is_a_git_checkout_the_exporter_can_ask(self):
+        # The exporter selects files with `git ls-files`; an extracted
+        # archive has no index, so the reproduction copied nothing and read
+        # NO-DATA on the real v1.0.1 proof. A detached worktree answers.
+        src = R.source_tree("HEAD")
+        self.assertIsNotNone(src)
+        self.assertTrue(os.path.exists(os.path.join(src, ".git")))
+        proc = subprocess.run(["git", "-C", src, "ls-files", "scripts"],
+                              capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("scripts/reproduce_export.py", proc.stdout)
+
     def test_no_allowlist_is_no_data(self):
         saved = R.EP.load_allowlist
         try:
@@ -125,6 +143,184 @@ class ReproduceExport(unittest.TestCase):
             self.assertEqual(R.main(["--tag", "v1", "--public", "/x"]), 2)
         finally:
             R.EP.load_allowlist = saved
+
+
+class ManifestShape(unittest.TestCase):
+    """The manifest is pure: same files in, same bytes out, and the one
+    prefix it must not cover really is not covered."""
+
+    def test_lines_are_sha_two_spaces_path_sorted_by_path(self):
+        text = R.manifest_text([("b.txt", b"two"), ("a.txt", b"one")])
+        paths = [l.split("  ", 1)[1] for l in text.splitlines()]
+        self.assertEqual(paths, ["a.txt", "b.txt"])
+        self.assertEqual(text.splitlines()[0].split("  ", 1)[0],
+                          R._sha(b"one"))
+
+    def test_the_release_notes_directory_is_excluded(self):
+        # The note carries the digest, so a digest over the note would have
+        # to contain its own hash.
+        text = R.manifest_text([("docs/releases/9.9.9.md", b"note"),
+                                 ("scripts/a.py", b"one")])
+        self.assertEqual([l.split("  ", 1)[1] for l in text.splitlines()],
+                          ["scripts/a.py"])
+
+    def test_one_changed_byte_changes_the_digest(self):
+        a = R.manifest_digest(R.manifest_text([("a.txt", b"one")]))
+        b = R.manifest_digest(R.manifest_text([("a.txt", b"onf")]))
+        self.assertNotEqual(a, b)
+
+    def test_a_malformed_manifest_parses_to_none_never_an_empty_pass(self):
+        self.assertIsNone(R.parse_manifest("not a manifest line\n"))
+        self.assertIsNone(R.parse_manifest("deadbeef  short-sha.txt\n"))
+        self.assertIsNone(R.parse_manifest(""))
+
+    def test_a_well_formed_manifest_parses(self):
+        text = R.manifest_text([("a.txt", b"one")])
+        self.assertEqual(R.parse_manifest(text), [(R._sha(b"one"), "a.txt")])
+
+
+VERSION = "9.9.9"
+TAG = "v9.9.9"
+
+
+def _make_public_repo(tmp, files, tamper=None, manifest_override=None,
+                      note_digest=None, drop_manifest=False):
+    """A real git repository carrying an export, its manifest and its note,
+    tagged. Real git on purpose: --verify-tree's whole claim is that a
+    STRANGER can run it against a clone, so the reading path (git show at a
+    tag) is exercised, not stubbed.
+
+    tamper: {path: bytes} written AFTER the manifest is computed, which is
+    exactly what a tampered release looks like from the outside."""
+    for rel, data in files.items():
+        full = os.path.join(tmp, rel)
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        with open(full, "wb") as fh:
+            fh.write(data)
+    manifest = (manifest_override if manifest_override is not None
+                else R.manifest_text(files.items()))
+    digest = note_digest or R.manifest_digest(manifest)
+    os.makedirs(os.path.join(tmp, "docs", "releases"), exist_ok=True)
+    if not drop_manifest:
+        with open(os.path.join(tmp, R.manifest_path_for(VERSION)), "w",
+                  encoding="utf-8") as fh:
+            fh.write(manifest)
+    with open(os.path.join(tmp, "docs", "releases", "%s.md" % VERSION), "w",
+              encoding="utf-8") as fh:
+        fh.write("# Brother %s\n\nExport manifest digest `%s` over %d "
+                 "exported file(s).\n" % (VERSION, digest,
+                                          len(manifest.splitlines())))
+    for rel, data in (tamper or {}).items():
+        with open(os.path.join(tmp, rel), "wb") as fh:
+            fh.write(data)
+    for cmd in (["git", "init", "-q"],
+                ["git", "config", "user.email", "t@example.com"],
+                ["git", "config", "user.name", "T"],
+                ["git", "add", "-A"],
+                ["git", "commit", "-q", "-m", "export"],
+                ["git", "tag", TAG]):
+        proc = subprocess.run(cmd, cwd=tmp, capture_output=True, text=True)
+        if proc.returncode != 0:
+            raise AssertionError("fixture git failed: %s: %s"
+                                 % (cmd, proc.stderr))
+    return tmp
+
+
+class VerifyTreeFromAPublicClone(unittest.TestCase):
+    """E80's done check, driven both ways: a clone at the tag reproduces the
+    release with no hub access, and every way of breaking it is caught."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="verify-tree-")
+        self.files = {"scripts/a.py": b"print('one')\n",
+                       "bundle/runtime/brother_run.py": b"# runtime\n",
+                       "products/x/CHECKSUMS.sha256": b"abc  y\n"}
+
+    def _verify(self, **kw):
+        _make_public_repo(self.tmp, self.files, **kw)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = R.main(["--verify-tree", "--tag", TAG,
+                            "--public", self.tmp])
+        return code, out.getvalue()
+
+    def test_an_untouched_tag_passes(self):
+        code, out = self._verify()
+        self.assertEqual(code, 0, out)
+        self.assertIn("PASS:", out)
+        self.assertIn("3 exported file(s)", out)
+
+    def test_a_one_byte_tamper_in_a_shipped_file_is_caught(self):
+        code, out = self._verify(
+            tamper={"bundle/runtime/brother_run.py": b"# runtimf\n"})
+        self.assertEqual(code, 1, out)
+        self.assertIn("MISMATCH: bundle/runtime/brother_run.py", out)
+        self.assertIn("FAIL:", out)
+
+    def test_a_file_the_manifest_names_but_the_tag_drops_is_caught(self):
+        # The manifest is computed over all three files, then one is never
+        # committed: a release that ships less than it claims.
+        for rel, data in self.files.items():
+            full = os.path.join(self.tmp, rel)
+            os.makedirs(os.path.dirname(full), exist_ok=True)
+            with open(full, "wb") as fh:
+                fh.write(data)
+        manifest = R.manifest_text(self.files.items())
+        os.unlink(os.path.join(self.tmp, "scripts/a.py"))
+        smaller = {k: v for k, v in self.files.items() if k != "scripts/a.py"}
+        _make_public_repo(self.tmp, smaller, manifest_override=manifest)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = R.main(["--verify-tree", "--tag", TAG, "--public", self.tmp])
+        self.assertEqual(code, 1, out.getvalue())
+        self.assertIn("MISSING: scripts/a.py", out.getvalue())
+
+    def test_a_manifest_rewritten_to_match_a_tampered_file_is_still_caught(self):
+        # The attacker's obvious next move: tamper the file AND rewrite the
+        # manifest. The note's stated digest no longer matches the manifest.
+        tampered = dict(self.files)
+        tampered["bundle/runtime/brother_run.py"] = b"# tampered\n"
+        honest_digest = R.manifest_digest(R.manifest_text(self.files.items()))
+        _make_public_repo(self.tmp, tampered, note_digest=honest_digest)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = R.main(["--verify-tree", "--tag", TAG, "--public", self.tmp])
+        self.assertEqual(code, 1, out.getvalue())
+        self.assertIn("the release note claims", out.getvalue())
+
+    def test_no_manifest_in_the_tag_is_no_data_never_a_pass(self):
+        code, out = self._verify(drop_manifest=True)
+        self.assertEqual(code, 2, out)
+        self.assertIn("NO-DATA", out)
+
+    def test_a_note_with_no_stated_digest_is_no_data(self):
+        _make_public_repo(self.tmp, self.files)
+        note = os.path.join(self.tmp, "docs", "releases", "%s.md" % VERSION)
+        with open(note, "w", encoding="utf-8") as fh:
+            fh.write("# Brother 9.9.9\n\nNo digest here.\n")
+        # check=True on all three: these build the fixture the assertion below
+        # reads, so a git that failed here would leave the previous tag in
+        # place and the test would measure the wrong tree while still passing.
+        subprocess.run(["git", "add", "-A"], cwd=self.tmp, capture_output=True,
+                       check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "strip"], cwd=self.tmp,
+                       capture_output=True, check=True)
+        subprocess.run(["git", "tag", "-f", TAG], cwd=self.tmp,
+                       capture_output=True, check=True)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = R.main(["--verify-tree", "--tag", TAG, "--public", self.tmp])
+        self.assertEqual(code, 2, out.getvalue())
+        self.assertIn("states no export manifest digest", out.getvalue())
+
+    def test_an_explicit_expect_that_disagrees_fails(self):
+        _make_public_repo(self.tmp, self.files)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = R.main(["--verify-tree", "--tag", TAG, "--public", self.tmp,
+                            "--expect", "0" * 64])
+        self.assertEqual(code, 1, out.getvalue())
+        self.assertIn("FAIL:", out.getvalue())
 
 
 def _copy_into(src_dir, dest_dir):

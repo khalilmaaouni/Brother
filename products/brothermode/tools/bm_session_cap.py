@@ -303,6 +303,24 @@ def decide(envelope, projects_root=None, env=None, now=None):
            cap_file_path(env), cap_file_path(env), CAP_ENV))
 
 
+def _load_bm_repo_scope():
+    """Load bm_repo_scope.py by path, same load-by-path shape every hook
+    in this directory uses to load a sibling module (bm_fence_hook.py's
+    _load_store_module is the template). E76 per-repository hook scoping,
+    checked right before the cap's own decision, once the envelope is
+    already parsed."""
+    try:
+        import importlib.util
+        here = os.path.dirname(os.path.abspath(__file__))
+        spec = importlib.util.spec_from_file_location(
+            "bm_repo_scope_for_session_cap", os.path.join(here, "bm_repo_scope.py"))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception:  # sbe: allow-silent optional gate module load; hooks_off degrades to active when this returns None
+        return None
+
+
 def main(argv=None):
     """The hook invocation: one JSON envelope on stdin, one JSON object on
     stdout when refusing, nothing at all when allowing. Exit 0 either way,
@@ -321,6 +339,9 @@ def main(argv=None):
         _warn("bm_session_cap: the hook envelope was not JSON (%s); "
               "allowing, because a cap that guesses at a malformed "
               "envelope refuses the wrong calls." % exc)
+        return 0
+    _rs = _load_bm_repo_scope()
+    if _rs is not None and _rs.hooks_off(payload=envelope):
         return 0
     decision = decide(envelope)
     if decision is not None:

@@ -4,9 +4,11 @@ description: Show the decisions waiting on you, highest stakes first, each with 
 user-invocable: false
 ---
 
+Plugin root: a Claude Code install exports `${CLAUDE_PLUGIN_ROOT}` and a Codex install exports `${BROTHER_PLUGIN_ROOT}`; both name this plugin's own directory, so read whichever variable appears below as the one your client set. On a clone install neither is set: run the same commands from the checkout root instead.
+
 Outcome to produce: the open decisions this project is waiting on, one card each, highest stakes first, in plain language the user can answer without reading any machinery.
 
-Enter the decision flow of the brotherme skill. Run the mechanical command `python3 "${CLAUDE_PLUGIN_ROOT}/tools/bm_lead.py" decisions --project-id <id>` (the packaged console script is `bm-lead decisions`) and read its output; never assemble a decision from memory of this conversation, and never invent an option the records do not hold. A plugin install exports `${CLAUDE_PLUGIN_ROOT}` for skill and command content, so that path resolves on its own; on a clone install, where the variable is unset, run `python3 tools/bm_lead.py decisions --project-id <id>` instead, from the BrotherMode root (`~/.claude/skills/brothermode`). Either way, run it from the user's project folder so it reads that project's own records.
+Enter the decision flow of the brotherme skill. Run the mechanical command `python3 "${CLAUDE_PLUGIN_ROOT}/tools/bm_lead.py" decisions --project-id <id>` (the packaged console script is `bm-lead decisions`) and read its output; never assemble a decision from memory of this conversation, and never invent an option the records do not hold. A plugin install exports `${CLAUDE_PLUGIN_ROOT}` for skill and command content, so that path resolves on its own; on a clone install, where the variable is unset, run `python3 tools/bm_lead.py decisions --project-id <id>` instead, from the BrotherMode root (the directory that holds `tools/`). Either way, run it from the user's project folder so it reads that project's own records.
 
 Present each decision exactly as the decision card format in references/kickoff.md defines it: the recommended option first with its Why, each alternative with its Tradeoff on one line, two to four options in all. In Claude Code the card travels through the AskUserQuestion window, recommended option first; chat text carries the evidence and the context, never the option list. One card per decision, and only the highest-stakes one if the user asked for the single thing waiting on them.
 

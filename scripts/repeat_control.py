@@ -88,14 +88,31 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+# C3: the config directory is resolved by brother_paths, the one seam
+# that knows which coding client is running (docs/codex/HOOKS-MAPPING.md).
+import brother_paths  # noqa: E402
 import attempt_ledger  # noqa: E402
 
+# NOT routed through brother_paths on purpose: this directory is written
+# by ~/.claude/hooks/repeat_guard.py, a MACHINE-LEVEL hook this product
+# does not ship and cannot move. Reading it anywhere else would read an
+# empty directory and report a real guard as absent.
 DEFAULT_GUARD_DIR = os.path.join(os.path.expanduser("~"), ".claude", "repeat-guard")
-DEFAULT_RECALL_LOG = os.path.join(os.path.expanduser("~"), ".claude", ".vault_recall_seen")
+DEFAULT_RECALL_LOG = brother_paths.config_path(".vault_recall_seen")
 DEFAULT_LEDGER = str(attempt_ledger.STORE)
 DEFAULT_MIN_SESSIONS = 5
 
 UNCONFIGURED_SENTINEL = "__unconfigured__"
+
+#: E57 mechanism 1, the outcome number beside the mechanism (borrowed from
+#: MemOS, https://github.com/MemTensor/MemOS, whose repository publishes a
+#: numeric outcome rather than only reporting that the mechanism fires). The
+#: two hooks write one JSON line each per event: the recall hook writes
+#: {"hook": "vault_recall", "session", "lessons_shown", "recall_chars",
+#: "recall_tokens_est"} and the breaker writes {"hook": "attempt_breaker",
+#: "session", "refusals", "kind"}. Read-only here, like every other source
+#: this script reads.
+DEFAULT_OUTCOMES = brother_paths.config_path("hook-outcomes.jsonl")
 
 
 def read_guard_sessions(guard_dir):
@@ -165,6 +182,69 @@ def read_shown_sessions(recall_log):
     return shown
 
 
+def read_hook_outcomes(path):
+    """(rows, skipped) from the shared hook-outcome log, or (None, 0) when the
+    file does not exist. A malformed line is skipped and counted rather than
+    crashing the whole report, the same posture read_guard_sessions already
+    takes for one bad guard file."""
+    if not os.path.exists(path):
+        return None, 0
+    rows, skipped = [], 0
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    skipped += 1
+                    continue
+                if isinstance(row, dict):
+                    rows.append(row)
+                else:
+                    skipped += 1
+    except OSError as e:
+        sys.stderr.write("repeat_control: %s could not be read (%s)\n" % (path, e))
+        return None, skipped
+    return rows, skipped
+
+
+def outcome_lines(rows, path):
+    """One line per hook naming its own outcome number, plus the sessions it
+    covers. NEVER a zero when the log is absent: an absent log is NO-DATA and
+    says so, naming the path it looked for."""
+    if rows is None:
+        return ["NO-DATA: no hook-outcome log at %s, so neither hook has "
+                "reported its own outcome number" % path]
+    if not rows:
+        return ["NO-DATA: the hook-outcome log at %s is empty" % path]
+    recall = [r for r in rows if r.get("hook") == "vault_recall"]
+    breaker = [r for r in rows if r.get("hook") == "attempt_breaker"]
+    lines = []
+    if recall:
+        lines.append(
+            "hook outcome: vault_recall shown %d lesson(s) over %d session(s), "
+            "costing about %d token(s) of context (estimate, four characters "
+            "per token)"
+            % (sum(int(r.get("lessons_shown") or 0) for r in recall),
+               len({r.get("session") for r in recall}),
+               sum(int(r.get("recall_tokens_est") or 0) for r in recall)))
+    else:
+        lines.append("NO-DATA: no vault_recall row in %s" % path)
+    if breaker:
+        lines.append(
+            "hook outcome: attempt_breaker refused %d time(s) over %d "
+            "session(s), %d of them an alternating-class loop"
+            % (sum(int(r.get("refusals") or 0) for r in breaker),
+               len({r.get("session") for r in breaker}),
+               sum(1 for r in breaker if r.get("kind") == "alternating_classes")))
+    else:
+        lines.append("NO-DATA: no attempt_breaker row in %s" % path)
+    return lines
+
+
 def classify_session(session_id, mtime, shown_map, start_date):
     """('on'|'off'). shown_map may be None (recall log absent -> every
     session classifies 'off' by presence, honestly reflecting that nothing
@@ -213,7 +293,7 @@ def arm_report(label, session_ids, sessions, shown_map, repeats_by_session, min_
 
 def run(guard_dir=DEFAULT_GUARD_DIR, recall_log=DEFAULT_RECALL_LOG,
         ledger=DEFAULT_LEDGER, min_sessions=DEFAULT_MIN_SESSIONS, start=None,
-        out=sys.stdout):
+        out=sys.stdout, outcomes=None):
     """Returns the process exit code: 0 when both arms report, 2 otherwise."""
     start_date = None
     if start:
@@ -238,6 +318,14 @@ def run(guard_dir=DEFAULT_GUARD_DIR, recall_log=DEFAULT_RECALL_LOG,
                   % (len(rows), ledger), file=out)
     else:
         print("NO-DATA: no attempt ledger at %s" % ledger, file=out)
+
+    outcomes_path = DEFAULT_OUTCOMES if outcomes is None else outcomes
+    outcome_rows, skipped = read_hook_outcomes(outcomes_path)
+    if skipped:
+        print("hook outcome: %d malformed line(s) skipped in %s"
+              % (skipped, outcomes_path), file=out)
+    for line in outcome_lines(outcome_rows, outcomes_path):
+        print(line, file=out)
 
     repeats_by_session = compute_repeats(sessions)
 
@@ -272,9 +360,13 @@ def main(argv=None):
     ap.add_argument("--guard-log", dest="guard_log", default=DEFAULT_GUARD_DIR)
     ap.add_argument("--min-sessions", dest="min_sessions", type=int,
                      default=DEFAULT_MIN_SESSIONS)
+    ap.add_argument("--outcomes", default=DEFAULT_OUTCOMES,
+                     help="the shared hook-outcome log both hooks append to "
+                          "(lessons shown, recall cost, refusals)")
     args = ap.parse_args(list(sys.argv[1:] if argv is None else argv))
     return run(guard_dir=args.guard_log, recall_log=args.recall_log,
-               ledger=args.ledger, min_sessions=args.min_sessions, start=args.start)
+               ledger=args.ledger, min_sessions=args.min_sessions, start=args.start,
+               outcomes=args.outcomes)
 
 
 if __name__ == "__main__":

@@ -30,9 +30,17 @@ exporter sets and prints") on the one subprocess call that pushes. Nothing
 else may claim it: this is a fixed string in this file, not a value a
 session can type into its own environment for one push and forget, because
 that would be indistinguishable from a session inventing the escape hatch.
-The real control is architectural (only export_public.py's own code path
-sets it), and this comment says so plainly rather than pretending an env
-var is a secret.
+
+THE ACTUAL CONTROL, stated plainly rather than overclaimed (security
+review 2026-09-03): the marker is an ordinary environment variable, and
+any session with shell access could set BROTHER_EXPORT_INVOCATION by hand
+before this file ever runs, so the marker alone is not a security
+boundary. What actually stops an unauthorized public push is that a
+normal working checkout has no public remote configured at all, per this
+file's own THE MARKER paragraph and docs/plan/HUB-MIGRATION-PLAN-2026-08-30.md
+step 5: there is no remote pointed at the public repository to push to,
+and no credential that could push it. This check exists to fail SAFE the
+day that ever changes, never as the control it sits behind.
 
 NO-DATA IS NEVER A PASS, the same discipline every guard in this estate
 follows: a directory with no .brother-edition above it has not been shown

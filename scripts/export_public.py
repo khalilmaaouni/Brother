@@ -67,11 +67,17 @@ WHAT IT DOES, in order:
      SEPARATE temp directory, rebuilds the identical allowlisted content
      as a new commit ON TOP of that tip (an honest append, not the orphan
      used for gating), sets BROTHER_EXPORT_INVOCATION=export_public.py (and
-     prints that it did) for the one subprocess call that pushes, and
-     pushes with a plain (non-force) push, which the remote itself refuses
-     if it would not fast-forward. NEVER --force: an append that is not a
-     fast-forward is a design assumption that broke, not a reason to
-     overwrite history. The gates are NOT re-run on this second tree: its
+     prints that it did) for every subprocess call that pushes, and pushes
+     that commit to its OWN branch (release/<version> for a tagged
+     release, export/<commit> otherwise) with a plain (non-force) push,
+     then opens a pull request against <branch> with gh and merges it.
+     THE PULL REQUEST IS NOT CEREMONY: since the ruleset of row E64 the
+     public repository requires a pull request on main, refuses non
+     fast-forward and deletion, and grants no bypass, so the direct push
+     this exporter used to make is refused with GH013 and the honest route
+     is the one a contributor takes. NEVER --force at any step: an append
+     that is not a fast-forward is a design assumption that broke, not a
+     reason to overwrite history. The gates are NOT re-run on this second tree: its
      file content is byte-identical to the orphan already gated in step 3,
      only its git parent differs. --bootstrap (with --push only) is the
      one exception to the append rule: when the remote has no branch at
@@ -80,15 +86,23 @@ WHAT IT DOES, in order:
      outright, so the flag only ever opens the empty-repository case the
      2026-09-03 clean-extraction decision created, never a route to start
      unrelated history over a populated one. --tag (with --push only)
-     adds one annotated tag, and before anything is pushed the export
-     tree must clear tag_time_checks: the release note it carries is
-     really stamped (no placeholder Source revision block), and every
-     product's own scripts/verify-install.sh passes on it, which is what
-     proves the regenerated manifests describe the shipped bytes.
+     adds one annotated tag on the MERGED tip of <branch>, and before
+     anything is pushed the export tree must clear tag_time_checks: the
+     release note it carries is really stamped (no placeholder Source
+     revision block), every product's own scripts/verify-install.sh passes
+     on it (which is what proves the regenerated manifests describe the
+     shipped bytes), its own scripts/readiness_gate.py reads READY there
+     (row E67: a fresh clone of v1.0.1 read NOT READY while the hub read
+     ready), every relative markdown link in it resolves to a file it
+     really carries, and every command the README names as its own proof
+     runs there (row E70: `python3 scripts/test_battery_verdict.py`, the
+     README's own proof, died on a docs/plan file the allowlist never
+     carried).
 
 Python 3, standard library only. No network beyond git's own fetch/push.
 """
 import argparse
+import difflib
 import os
 import re
 import shutil
@@ -102,6 +116,10 @@ import edition_guard  # noqa: E402
 
 ROOT = os.path.dirname(HERE)
 DEFAULT_ALLOWLIST = os.path.join(ROOT, "docs", "plan", "EXPORT-ALLOWLIST.txt")
+#: The value allowlist for the secret gate lives in pre_push_gate.py (one
+#: source, so the hub's own pre-push scan and this export gate never drift
+#: apart); it is re-exported here for readers and tests of this module.
+from pre_push_gate import KNOWN_PUBLIC_EXAMPLE_VALUES, strip_public_examples  # noqa: E402
 #: M6: exact paths withheld from an otherwise-allowlisted products/
 #: directory (docs/plan/EXPORT-DENYLIST.txt explains each one by name).
 #: Optional: a repository with nothing to withhold need not carry this
@@ -150,6 +168,31 @@ HARD_EXCLUDE = {"editions", edition_guard.MARKER_FILE}
 EXPORT_OVERRIDES = {
     "PROJECT.md": os.path.join("docs", "plan", "PROJECT.public.md"),
 }
+
+#: Every markdown inline link, `[text](target)`. Reference style links and
+#: bare URLs are out of scope on purpose: the dead links row E70 names
+#: (three README pages absent from the public tag) are all inline links.
+MD_LINK_RE = re.compile(r"\[[^\]\n]*\]\(([^)\s]+)\)")
+
+#: The shape of a README "prove it" command: python3 scripts/test_*.py,
+#: whether it sits in a fenced block or inline in a sentence.
+README_PROVE_RE = re.compile(r"python3 scripts/test_[A-Za-z0-9_]+\.py")
+
+#: The export tree's own readiness gate, run at tag time from the export
+#: tree's root exactly as a fresh clone would run it.
+READINESS_GATE_REL = os.path.join("scripts", "readiness_gate.py")
+
+#: The GitHub CLI. Since the ruleset of row E64 (pull request required on
+#: main, non fast-forward and deletion refused, no bypass) a direct push to
+#: main is refused with GH013, so the release route runs through a pull
+#: request and this is the tool that opens and merges it. Named here so a
+#: test can point an injected runner at a stand-in.
+GH_BIN = "gh"
+
+#: The branch a release is pushed to before its pull request. The tag is
+#: cut from the MERGED tip of the protected branch, never from this one.
+RELEASE_BRANCH_PREFIX = "release/"
+EXPORT_BRANCH_PREFIX = "export/"
 
 
 def load_allowlist(path=None):
@@ -487,20 +530,207 @@ def build_identity_check_dir(identity_dir, allowlist, remote, branch, root=ROOT)
               COMMIT_MESSAGE], identity_dir)
 
 
-def run_gates(export_dir, identity_dir):
+def build_baseline_dir(baseline_dir, remote, branch):
+    """The PUBLIC BASELINE TREE, checked out from `remote`'s current
+    `branch` tip: what check_secrets diffs the candidate export against,
+    so its scan covers only the lines THIS export would newly add, never
+    the long-standing fixture values the public tree already carries
+    (credential-detection tests, a changelog reproducing a documented
+    example, docs that teach the scanner). A separate throwaway repo from
+    both export_dir and identity_dir, for the same reason identity_dir is
+    separate from export_dir (see build_identity_check_dir): fetching a
+    real remote history into the orphan gating tree would put it inside
+    cleanse.sh's `git log --all` scope.
+
+    Returns True when the baseline tree was actually checked out onto
+    disk; False when there is nothing to compare against (no remote, or
+    the remote has no `branch` at all -- the bootstrap case of the
+    2026-09-03 clean-extraction decision, where the whole candidate really
+    is outgoing). check_secrets treats False the same as no baseline_dir
+    at all: every candidate file is scanned whole, exactly as before this
+    parameter existed."""
+    if not remote:
+        return False
+    _run(["git", "init", "-q"], baseline_dir)
+    _run(["git", "remote", "add", "origin", remote], baseline_dir)
+    fetch = _run(["git", "fetch", "-q", "origin", branch], baseline_dir)
+    if fetch.returncode != 0:
+        return False
+    checkout = _run(["git", "checkout", "-q", "-b", branch,
+                      "origin/%s" % branch], baseline_dir)
+    return checkout.returncode == 0
+
+
+def _read_baseline_text(baseline_dir, rel):
+    """`baseline_dir`/`rel` as UTF-8 text, or None when there is no
+    baseline at all, the file does not exist there (a brand new file), or
+    it cannot be decoded as UTF-8 (a binary or unreadable baseline is
+    treated exactly like "no baseline": the safe fallback for a secret
+    scan is to scan MORE, never less)."""
+    if not baseline_dir:
+        return None
+    baseline_path = os.path.join(baseline_dir, rel)
+    if not os.path.isfile(baseline_path):
+        return None
+    try:
+        with open(baseline_path, "rb") as fh:
+            return fh.read().decode("utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def _added_lines(candidate_text, baseline_text):
+    """The lines of `candidate_text` that are NOT present in
+    `baseline_text` (a line-level diff, difflib, standard library, no new
+    dependency): only inserted or replaced lines count as added, so a
+    line the export merely carried forward unchanged never re-enters the
+    scan just because it sits at a different line number. Returns
+    `candidate_text` WHOLE when `baseline_text` is None (no baseline at
+    all, or a brand new file: nothing to diff against)."""
+    if baseline_text is None:
+        return candidate_text
+    candidate_lines = candidate_text.splitlines()
+    baseline_lines = baseline_text.splitlines()
+    matcher = difflib.SequenceMatcher(a=baseline_lines, b=candidate_lines,
+                                       autojunk=False)
+    added = []
+    for tag, _i1, _i2, j1, j2 in matcher.get_opcodes():
+        if tag in ("insert", "replace"):
+            added.extend(candidate_lines[j1:j2])
+    return "\n".join(added)
+
+
+def _first_new_secret(scan_text, shapes, baseline_text):
+    """The first SECRET_SHAPES pattern in `shapes` that matches
+    `scan_text` with a VALUE not already sitting, verbatim, anywhere in
+    `baseline_text`. Line-level diffing (_added_lines, above) is coarse
+    by design: a line changed for ONE reason (an unrelated value on it
+    was edited) still carries its OTHER values whole, so the changed
+    line's full text counts as "added" even though most of it is not new.
+    Measured 2026-09-04: products/brothermode/tools/test_bm.py has both a
+    known-public AWS example key and an unrelated sk-live-shaped test
+    fixture on the SAME source line; the AKIA value being deliberately
+    moved onto the public example (a prior commit on this branch) made
+    the whole line read as changed, and the untouched sk- fixture rode
+    along into the added text. That fixture was already public, verbatim,
+    in the baseline; refusing on it would be exactly the false refusal
+    this whole feature exists to stop. Checking each MATCHED VALUE against
+    the baseline (never the surrounding text) keeps this narrow: a value
+    that never appeared in the baseline still refuses, whatever else
+    changed on its line. With no baseline_text (no baseline at all, or a
+    brand new file) every match counts, matching the pre-baseline
+    behaviour: there is nothing yet to compare a value against. Returns
+    the matching pattern, or None."""
+    for pattern in shapes:
+        for m in pattern.finditer(scan_text):
+            if baseline_text is not None and m.group(0) in baseline_text:
+                continue
+            return pattern
+    return None
+
+
+def check_secrets(export_dir, baseline_dir=None):
+    """A fourth gate beside cleanse.sh, identity_guard.py and
+    private_terms_scan.py. The security gap this closes: push_appended
+    pushes through a plain temp `git init` (see that function) with no
+    pre-push hook installed there, so scripts/pre_push_gate.py's own
+    SECRET_SHAPES check never runs anywhere on this route; a key of the
+    shapes pre_push_gate.py already knows (ghp_, sk-, AKIA, a PEM private
+    key header) could leave through the export and no gate here would ever
+    look. This runs that SAME check, over the SAME shapes
+    (pre_push_gate.SECRET_SHAPES, imported rather than duplicated so the
+    two never drift apart), against every file the CANDIDATE EXPORT TREE
+    actually carries.
+
+    `baseline_dir`, when given (build_baseline_dir's checkout of the public
+    remote's current tip; None at bootstrap, when there is nothing to
+    compare against), narrows each file's scan to the lines ADDED since
+    that baseline (_added_lines, above) -- the same "outgoing range, not
+    the whole tree" reasoning pre_push_gate.py already applies to the
+    hub's own push, so the twenty-odd long-standing secret-shaped fixture
+    values already public in this tree (credential-detection tests, a
+    changelog reproducing a documented example, docs that teach the
+    scanner) never refuse an export that merely carries them forward
+    unchanged; a value newly added anywhere, in an old file or a brand new
+    one, still refuses. A line changed for an unrelated reason still counts
+    as added whole (line-level diffing is coarse by design), so
+    _first_new_secret (below) checks each MATCHED VALUE against the
+    baseline text too: a value already sitting, verbatim, anywhere in the
+    baseline file is not newly disclosed and does not refuse merely for
+    sharing a line with something that did change. With no baseline_dir
+    the whole file is scanned, the original behaviour, and the value
+    allowlist below still applies: the shape search runs AFTER
+    strip_public_examples strips the one documented AWS example value, so
+    that value never refuses on its own.
+
+    Refuses on the FIRST file that matches, the file named and the matched
+    VALUE never printed, same as pre_push_gate.py's own reasoning for
+    silence ("printing it puts it in a terminal and a transcript"). A
+    binary file that fails to decode as UTF-8 is skipped: a secret shape is
+    a text pattern, and False positives from decoding binary noise as text
+    would refuse exports that carry nothing wrong. NO-DATA (a refusal, per
+    this module's own law that a check which could not run has not
+    certified anything) when pre_push_gate.py cannot even be imported.
+    Returns (ok, [line])."""
+    try:
+        import pre_push_gate
+    except Exception as exc:  # noqa: BLE001
+        return False, ["secrets: NO-DATA, could not import "
+                       "scripts/pre_push_gate.py for its secret shapes "
+                       "(%s); the export tree was never scanned for "
+                       "secrets" % exc]
+    count = 0
+    for base, dirs, files in os.walk(export_dir):
+        if ".git" in dirs:
+            dirs.remove(".git")
+        for name in files:
+            path = os.path.join(base, name)
+            count += 1
+            try:
+                with open(path, "rb") as fh:
+                    data = fh.read()
+            except OSError as exc:
+                # An unreadable file was never scanned for a secret shape, so
+                # a silent skip here would let that file leave through the
+                # export unchecked; refuse instead and name it.
+                rel = os.path.relpath(path, export_dir)
+                return False, ["secrets: NO-DATA, could not read %s (%s); "
+                               "the export tree was not fully scanned for "
+                               "secrets" % (rel, exc)]
+            try:
+                text = data.decode("utf-8")
+            except UnicodeDecodeError:
+                continue  # sbe: allow-silent a secret shape is a text pattern; a file that fails UTF-8 decoding is binary noise, so the observable consequence is a scan this gate cannot perform on non-text bytes, never a text secret let through unscanned
+            rel = os.path.relpath(path, export_dir)
+            baseline_text = _read_baseline_text(baseline_dir, rel)
+            scan_text = strip_public_examples(_added_lines(text, baseline_text))
+            if _first_new_secret(scan_text, pre_push_gate.SECRET_SHAPES,
+                                  baseline_text) is not None:
+                return False, ["REFUSED: a secret-shaped value was found "
+                               "in %s; the value is never printed" % rel]
+    return True, ["secrets: 0 hit(s) over %d file(s)" % count]
+
+
+def run_gates(export_dir, identity_dir, baseline_dir=None):
     """cleanse.sh and private_terms_scan.py against the CANDIDATE EXPORT
     TREE (the orphan commit in `export_dir`); identity_guard.py against its
     OWN separate tree (`identity_dir`, see build_identity_check_dir) that
     carries a real origin/HEAD without exposing it to cleanse's `--all`
-    history scan. cleanse.sh resolves its own root from argv[0]'s
-    directory, so it runs from its COPY inside export_dir (present whenever
-    scripts/ is allowlisted, which it is by default); the other two take a
-    `cwd` argument instead and run from the hub's own copy. Every gate
-    receives the SAME term list through BROTHER_PRIVATE_TERMS in its
-    environment (cleanse.sh and identity_guard.py read that variable,
-    private_terms_scan.py also gets it as --terms), so the three can never
-    disagree about which file they checked. Returns (all_ok, [verdict
-    lines])."""
+    history scan; check_secrets (above) against the same candidate tree as
+    cleanse.sh, the fourth gate that catches what pre_push_gate.py's own
+    SECRET_SHAPES check would have caught had this route run through a
+    pre-push hook, which it does not. `baseline_dir` (build_baseline_dir's
+    checkout of the public remote's current tip, or None) is passed
+    through to check_secrets unchanged, so its scan covers only the lines
+    THIS export would newly add. cleanse.sh resolves its own root from
+    argv[0]'s directory, so it runs from its COPY inside export_dir (present
+    whenever scripts/ is allowlisted, which it is by default); the other two
+    subprocess checks take a `cwd` argument instead and run from the hub's
+    own copy. Every subprocess gate receives the SAME term list through
+    BROTHER_PRIVATE_TERMS in its environment (cleanse.sh and
+    identity_guard.py read that variable, private_terms_scan.py also gets
+    it as --terms), so the three can never disagree about which file they
+    checked. Returns (all_ok, [verdict lines])."""
     terms_file = (os.environ.get("BROTHER_PRIVATE_TERMS")
                   or DEFAULT_TERMS_FILE)
     gate_env = dict(os.environ)
@@ -531,31 +761,67 @@ def run_gates(export_dir, identity_dir):
         ok, verdict = run_gate(cmd, cwd, name, env=gate_env)
         lines.append(verdict)
         all_ok = all_ok and ok
+
+    secrets_ok, secrets_lines = check_secrets(export_dir, baseline_dir)
+    lines.extend(secrets_lines)
+    all_ok = all_ok and secrets_ok
+
     return all_ok, lines
 
 
+def release_branch_name(tag, export_rev):
+    """The branch this export is pushed to before its pull request.
+    `release/<version>` for a tagged release, so the branch reads as the
+    release it carries; `export/<12 characters of the export commit>` for
+    an ordinary content export, which names the exact commit rather than
+    inventing a version nobody cut."""
+    if tag:
+        return RELEASE_BRANCH_PREFIX + tag.lstrip("v")
+    return EXPORT_BRANCH_PREFIX + (export_rev or "unknown")[:12]
+
+
 def push_appended(allowlist, remote, branch, root=ROOT, tag=None,
-                   bootstrap=False):
+                   bootstrap=False, run=None):
     """The real push path, kept separate from gating (see module docstring:
     ORPHAN ON PURPOSE). Fetches `remote`'s current tip, rebuilds the same
     allowlisted content as a new commit ON TOP of it (an honest append),
-    and pushes it with no --force. `bootstrap=True` is the one exception:
-    when the remote has no branch at all, this export becomes its first
-    commit instead of refusing; a remote with any branch, `branch` itself
-    included, still refuses. With `tag`, tag_time_checks runs over the
-    built export tree before the commit, and any finding refuses the whole
-    push: nothing pushed, nothing tagged. Returns (exit_code, [lines])."""
+    then opens and merges a PULL REQUEST for it rather than pushing
+    `branch` directly: since the ruleset of row E64 the public repository
+    requires a pull request on main, refuses non fast-forward and deletion,
+    and grants no bypass, so a direct push is refused with GH013 and the
+    only honest route is the one a human contributor takes. Nothing is
+    forced, at any step.
+
+    `bootstrap=True` is the one exception: when the remote has no branch at
+    all there is no protected branch to open a pull request against, so
+    this export becomes the repository's first commit directly; a remote
+    with any branch, `branch` itself included, still refuses bootstrap and
+    takes the pull request route like everything else.
+
+    With `tag`, tag_time_checks runs over the built export tree before the
+    commit, and any finding refuses the whole push: nothing pushed, nothing
+    opened, nothing merged, nothing tagged. The tag is cut from the MERGED
+    tip of `branch`, fetched back after the merge, never from the local
+    commit: what a merge produces on the far side is what a reader clones.
+
+    `run` is the seam every external command goes through (git push, gh pr
+    create, gh pr merge, git tag push): it defaults to this module's own
+    _run and takes (cmd, cwd, env=None, timeout=...) returning an object
+    with returncode, stdout and stderr, so a test can drive the whole
+    release route against a local bare repository and a stand-in gh
+    without a network. Returns (exit_code, [lines])."""
+    run = run or _run
     lines = []
     with tempfile.TemporaryDirectory(prefix="brother-export-push-") as d:
-        _run(["git", "init", "-q"], d)
-        _run(["git", "config", "user.name", AUTHOR_NAME], d)
-        _run(["git", "config", "user.email", AUTHOR_EMAIL], d)
-        _run(["git", "remote", "add", "origin", remote], d)
+        run(["git", "init", "-q"], d)
+        run(["git", "config", "user.name", AUTHOR_NAME], d)
+        run(["git", "config", "user.email", AUTHOR_EMAIL], d)
+        run(["git", "remote", "add", "origin", remote], d)
         if bootstrap:
             # The remote's whole branch list decides, not whether `branch`
             # itself could be fetched: a populated repository refuses
             # --bootstrap whatever its branches are called.
-            ls_remote = _run(["git", "ls-remote", "--heads", remote], d)
+            ls_remote = run(["git", "ls-remote", "--heads", remote], d)
             if ls_remote.returncode != 0:
                 lines.append("REFUSED: could not check %s for existing "
                               "branches (%s); this exporter never starts "
@@ -571,7 +837,7 @@ def push_appended(allowlist, remote, branch, root=ROOT, tag=None,
                               "already has: %s"
                               % (remote, ", ".join(existing)))
                 return EXIT_REFUSED, lines
-            orphan = _run(["git", "checkout", "-q", "--orphan", branch], d)
+            orphan = run(["git", "checkout", "-q", "--orphan", branch], d)
             if orphan.returncode != 0:
                 lines.append("REFUSED: could not create the orphan "
                               "branch %s (%s)"
@@ -581,7 +847,7 @@ def push_appended(allowlist, remote, branch, root=ROOT, tag=None,
                           "becomes the first commit of %s"
                           % (remote, branch))
         else:
-            fetch = _run(["git", "fetch", "-q", "origin", branch], d)
+            fetch = run(["git", "fetch", "-q", "origin", branch], d)
             if fetch.returncode != 0:
                 lines.append("REFUSED: could not fetch %s from %s (%s); "
                               "an append needs the real current tip, and "
@@ -590,7 +856,7 @@ def push_appended(allowlist, remote, branch, root=ROOT, tag=None,
                               % (branch, remote,
                                  (fetch.stderr or "").strip()))
                 return EXIT_REFUSED, lines
-            checkout = _run(["git", "checkout", "-q", "-b", branch,
+            checkout = run(["git", "checkout", "-q", "-b", branch,
                               "origin/%s" % branch], d)
             if checkout.returncode != 0:
                 lines.append("REFUSED: could not check out the fetched "
@@ -622,7 +888,7 @@ def push_appended(allowlist, remote, branch, root=ROOT, tag=None,
         # module docstring, THE ALLOWLIST AND DENYLIST ARE THE ONLY
         # FILTERS); staged BEFORE tag_time_checks below so that check reads
         # the exact bytes this add just staged, never the working copy.
-        _run(["git", "add", "-A", "-f"], d)
+        run(["git", "add", "-A", "-f"], d)
         if tag:
             with tempfile.TemporaryDirectory(
                     prefix="brother-export-staged-") as staged:
@@ -631,7 +897,7 @@ def push_appended(allowlist, remote, branch, root=ROOT, tag=None,
                 # in `d`: checkout-index reads the just-staged INDEX, so the
                 # manifest this check proves against is the manifest that
                 # will actually ship, not a working-tree proxy for it.
-                _run(["git", "checkout-index", "-a", "-f",
+                run(["git", "checkout-index", "-a", "-f",
                       "--prefix=%s/" % staged], d)
                 checks_ok, check_lines = tag_time_checks(staged, version)
             lines.extend(check_lines)
@@ -640,13 +906,13 @@ def push_appended(allowlist, remote, branch, root=ROOT, tag=None,
                               "tag-time checks above; nothing was pushed "
                               "and nothing was tagged")
                 return EXIT_REFUSED, lines
-        status = _run(["git", "status", "--porcelain"], d)
+        status = run(["git", "status", "--porcelain"], d)
         if not (status.stdout or "").strip():
             lines.append("nothing to push: the export tree already "
                           "matches %s's current tip" % branch)
             return EXIT_OK, lines
         author = "%s <%s>" % (AUTHOR_NAME, AUTHOR_EMAIL)
-        _run(["git", "commit", "-q", "--author", author, "-m",
+        run(["git", "commit", "-q", "--author", author, "-m",
               COMMIT_MESSAGE], d)
 
         env = dict(os.environ)
@@ -654,9 +920,14 @@ def push_appended(allowlist, remote, branch, root=ROOT, tag=None,
         lines.append("%s=%s set for this push, the exporter's own marked "
                       "invocation" % (edition_guard.EXPORT_ENV,
                                        edition_guard.EXPORT_MARK))
-        push = subprocess.run(
-            ["git", "push", remote, "%s:%s" % (branch, branch)],
-            cwd=d, capture_output=True, text=True, env=env, timeout=120)
+        head = run(["git", "rev-parse", "HEAD"], d)
+        export_rev = (head.stdout or "").strip()
+        # bootstrap writes the branch itself, because an empty repository
+        # has no protected branch to open a pull request against; every
+        # other export writes its own branch and asks for a merge.
+        target = branch if bootstrap else release_branch_name(tag, export_rev)
+        push = run(["git", "push", remote, "HEAD:refs/heads/%s" % target],
+                    d, env=env)
         if (push.stdout or "").strip():
             lines.append((push.stdout or "").strip())
         if (push.stderr or "").strip():
@@ -667,24 +938,81 @@ def push_appended(allowlist, remote, branch, root=ROOT, tag=None,
                           "connectivity problem). This exporter never "
                           "--force pushes.")
             return EXIT_REFUSED, lines
-        lines.append("PUSHED: one commit appended to %s %s" % (remote, branch))
+        lines.append("PUSHED: one commit appended to %s %s" % (remote, target))
+
+        if not bootstrap:
+            # THE ONLY ROUTE TO MAIN (row E67, ruleset of row E64): the
+            # public repository requires a pull request on main and grants
+            # no bypass, so a direct push is refused with GH013. gh opens
+            # the request from the branch just pushed and merges it; both
+            # run from `d`, whose origin is the remote, so gh resolves the
+            # repository the same way it does for a person standing in a
+            # clone. A failure at either step refuses: the branch stays on
+            # the remote, unmerged and untagged, for a human to look at.
+            title = ("export: Brother %s" % tag.lstrip("v") if tag
+                     else COMMIT_MESSAGE)
+            body = ("Opened by scripts/export_public.py, the single route "
+                    "from the private hub to this repository. The commit "
+                    "on %s is the allowlisted export tree, already cleared "
+                    "by every gate the exporter runs." % target)
+            pr = run([GH_BIN, "pr", "create", "--base", branch, "--head",
+                      target, "--title", title, "--body", body], d, env=env)
+            pr_out = ((pr.stdout or "") + (pr.stderr or "")).strip()
+            if pr.returncode != 0:
+                lines.append("REFUSED: could not open a pull request for %s "
+                              "(gh exit %s, %s); the branch is pushed and "
+                              "nothing was merged or tagged"
+                              % (target, pr.returncode,
+                                 pr_out.splitlines()[-1] if pr_out
+                                 else "(no output)"))
+                return EXIT_REFUSED, lines
+            urls = [l.strip() for l in pr_out.splitlines()
+                    if l.strip().startswith("http")]
+            pr_ref = urls[-1] if urls else target
+            lines.append("PULL-REQUEST: %s" % pr_ref)
+            merge = run([GH_BIN, "pr", "merge", pr_ref, "--merge",
+                          "--delete-branch"], d, env=env)
+            merge_out = ((merge.stdout or "") + (merge.stderr or "")).strip()
+            if merge.returncode != 0:
+                lines.append("REFUSED: the pull request %s was opened but "
+                              "not merged (gh exit %s, %s); nothing was "
+                              "tagged"
+                              % (pr_ref, merge.returncode,
+                                 merge_out.splitlines()[-1] if merge_out
+                                 else "(no output)"))
+                return EXIT_REFUSED, lines
+            lines.append("MERGED: %s into %s" % (pr_ref, branch))
+
         if tag:
             # Release identity (productization directive A4, founder-ordered
             # 2026-08-31): a release needs a tag on the public repository,
             # the edition guard correctly refuses every direct session push
             # there, so the ONE allowed invocation grows the ONE extra ref a
-            # release needs. Annotated, points at the export commit pushed
-            # just above, same marked env, never forced: an existing tag of
-            # the same name refuses rather than moves.
-            tagged = _run(["git", "tag", "-a", tag, "-m",
-                           "Brother %s" % tag.lstrip("v"), branch], d)
+            # release needs. Annotated, never forced: an existing tag of the
+            # same name refuses rather than moves. It points at what the
+            # MERGE produced on the far side, fetched back here, never at
+            # the local commit: a merge commit is what a reader clones, and
+            # a tag on anything else names a tree nobody can check out.
+            if bootstrap:
+                target_rev = branch
+            else:
+                fetch_merged = run(["git", "fetch", "-q", "origin", branch], d)
+                if fetch_merged.returncode != 0:
+                    lines.append("REFUSED: the pull request merged but the "
+                                  "merged tip of %s could not be fetched "
+                                  "back to tag it (%s); no tag was pushed"
+                                  % (branch,
+                                     (fetch_merged.stderr or "").strip()))
+                    return EXIT_REFUSED, lines
+                target_rev = "FETCH_HEAD"
+            tagged = run(["git", "tag", "-a", tag, "-m",
+                           "Brother %s" % tag.lstrip("v"), target_rev], d)
             if tagged.returncode != 0:
                 lines.append("REFUSED: could not create tag %s locally (%s)"
                              % (tag, (tagged.stderr or "").strip()))
                 return EXIT_REFUSED, lines
-            tag_push = subprocess.run(
-                ["git", "push", remote, "refs/tags/%s" % tag],
-                cwd=d, capture_output=True, text=True, env=env, timeout=120)
+            tag_push = run(["git", "push", remote, "refs/tags/%s" % tag],
+                            d, env=env)
             if (tag_push.stderr or "").strip():
                 lines.append((tag_push.stderr or "").strip())
             if tag_push.returncode != 0:
@@ -692,8 +1020,9 @@ def push_appended(allowlist, remote, branch, root=ROOT, tag=None,
                              "existing %s is never moved, this exporter "
                              "never --force pushes" % tag)
                 return EXIT_REFUSED, lines
-            lines.append("TAGGED: %s points at the export commit just "
-                         "appended" % tag)
+            lines.append("TAGGED: %s points at %s on %s"
+                         % (tag, "the first commit" if bootstrap
+                            else "the merged tip", branch))
         return EXIT_OK, lines
 
 
@@ -709,6 +1038,203 @@ def clear_working_tree(export_dir):
             shutil.rmtree(path)
         else:
             os.remove(path)
+
+
+def _ensure_git_tree(export_dir):
+    """Make the export tree a git repository holding exactly its own bytes,
+    when it is not one already. tag_time_checks runs against a `git
+    checkout-index` copy (push_appended stages first on purpose, so the
+    checks read the bytes that will really ship), and that copy carries no
+    .git. The three checks below answer "does this work in a FRESH CLONE",
+    and part of the README's own proof reads the tree's git revision
+    (scripts/test_brother_run.py asserts a receipt's harness_revision is
+    the repository's HEAD, and reports NO-DATA on a plain directory), so a
+    directory with no history would refuse every tag for a reason no clone
+    will ever have. Every product's own verify-install.sh runs no git at
+    all and skips ./.git/* in its walk, so this repository is invisible to
+    the checks that already ran above it. Returns (ok, lines): a tree that
+    cannot be initialised is NO-DATA, never a silent pass."""
+    if os.path.isdir(os.path.join(export_dir, ".git")):
+        return True, []
+    steps = [
+        ["git", "init", "-q"],
+        ["git", "config", "user.name", AUTHOR_NAME],
+        ["git", "config", "user.email", AUTHOR_EMAIL],
+        ["git", "add", "-A", "-f"],
+        ["git", "commit", "-q", "--author",
+         "%s <%s>" % (AUTHOR_NAME, AUTHOR_EMAIL), "-m", COMMIT_MESSAGE],
+    ]
+    for cmd in steps:
+        proc = _run(cmd, export_dir, timeout=300)
+        if proc.returncode != 0:
+            text = ((proc.stdout or "") + (proc.stderr or "")).strip()
+            return False, ["NO-DATA: could not make the export tree a git "
+                           "repository for the fresh-clone checks (%s exit "
+                           "%s, %s)" % (" ".join(cmd), proc.returncode,
+                                        text.splitlines()[-1] if text
+                                        else "(no output)")]
+    return True, []
+
+
+def check_readiness_gate(export_dir):
+    """The export tree's own readiness gate must read READY before a tag.
+    E67, measured in a fresh clone of the public tag v1.0.1: `python3
+    scripts/readiness_gate.py` printed "GATE: NOT READY. 1 critical item(s)
+    unproven: Restore drill (NO-DATA)" while the same command in the hub
+    printed ready, because docs/plan/RESTORE-DRILL-ENTERPRISE-RESULT.json
+    was never on the allowlist and the exporter's tag-time checks ran the
+    product verifiers but never the gate. READY is exit 0 AND a GATE: line
+    that does not say NOT READY. Every other outcome refuses with the
+    gate's own line quoted, a missing gate script included: NO-DATA is
+    never a pass. Returns (ok, lines)."""
+    gate_path = os.path.join(export_dir, READINESS_GATE_REL)
+    if not os.path.isfile(gate_path):
+        return False, ["NO-DATA: the export tree carries no %s, so its own "
+                       "readiness could not be read" % READINESS_GATE_REL]
+    proc = _run(["python3", READINESS_GATE_REL], export_dir, timeout=1800)
+    text = ((proc.stdout or "") + (proc.stderr or "")).strip()
+    verdicts = [l.strip() for l in text.splitlines()
+                if l.strip().startswith("GATE:")]
+    if not verdicts:
+        last = text.splitlines()[-1] if text else "(no output)"
+        return False, ["NO-DATA: %s printed no GATE: line on the export "
+                       "tree (exit %s, %s)"
+                       % (READINESS_GATE_REL, proc.returncode, last)]
+    verdict = verdicts[-1]
+    if proc.returncode != 0 or "NOT READY" in verdict:
+        return False, (["REFUSED: the export tree's own readiness gate does "
+                        "not read READY (exit %s): %s"
+                        % (proc.returncode, verdict)]
+                       + _readiness_failing_items(text))
+    return True, ["readiness: %s" % verdict]
+
+
+def _readiness_failing_items(text):
+    """The gate's own item lines under its NOT READY summary, quoted.
+
+    WHY: measured 2026-09-04 on the 1.0.2 cut, the refusal above printed only
+    "GATE: NOT READY." and the operator had to rebuild the export tree by
+    hand to learn WHICH item was unproven. The gate already names them, one
+    "  - Title (VERDICT)" line per item under each "N ... item(s)" heading,
+    so the refusal quotes them rather than hiding them behind a re-run.
+    Returns [] when the gate printed no such lines (an older gate, or a
+    refusal with no items), never a fabricated line."""
+    items = []
+    after_verdict = False
+    for line in text.splitlines():
+        if line.strip().startswith("GATE:"):
+            after_verdict = "NOT READY" in line
+            continue
+        if after_verdict and line.strip().startswith("- "):
+            items.append("  gate item: %s" % line.strip()[2:].strip())
+    return items
+
+
+def check_markdown_links(export_dir):
+    """Every relative `[text](target)` link in every .md file of the export
+    tree must resolve to a file the export tree actually carries. E70,
+    measured on the public tag v1.0.1: three of README.md's six relative
+    links (docs/for-engineers/00-START-HERE.md, docs/for-engineers/
+    STARTUP-WEEK.md, docs/for-analysts/00-START-HERE.md) pointed at pages
+    the 2026-09-01 narrowing had dropped from the allowlist, and no
+    tag-time check looked. http, https and mailto targets are counted and
+    skipped (this exporter reaches no network); a bare `#anchor` points
+    inside its own page, not at a file; a `path#anchor` is resolved by its
+    path half. A target that resolves OUTSIDE the export tree is dead too:
+    it would not exist in a clone. Returns (ok, lines): one line per dead
+    link naming the file and the target, then the summary line."""
+    root_abs = os.path.abspath(export_dir)
+    resolved = 0
+    external = 0
+    dead = []
+    for base, dirs, files in os.walk(export_dir):
+        if ".git" in dirs:
+            dirs.remove(".git")
+        for name in sorted(files):
+            if not name.endswith(".md"):
+                continue
+            path = os.path.join(base, name)
+            rel = os.path.relpath(path, export_dir)
+            try:
+                with open(path, encoding="utf-8") as fh:
+                    text = fh.read()
+            except (OSError, UnicodeDecodeError) as exc:
+                dead.append("dead link: %s could not be read (%s)"
+                            % (rel, exc))
+                continue
+            for target in MD_LINK_RE.findall(text):
+                if target.startswith(("http://", "https://", "mailto:")):
+                    external += 1
+                    continue
+                if target.startswith("#"):
+                    continue
+                target_path = target.split("#", 1)[0]
+                if not target_path:
+                    continue
+                full = os.path.abspath(os.path.join(base, target_path))
+                inside = (full == root_abs
+                          or full.startswith(root_abs + os.sep))
+                if inside and os.path.exists(full):
+                    resolved += 1
+                else:
+                    dead.append("dead link: %s points at %s, which the "
+                                "export tree does not carry" % (rel, target))
+    lines = list(dead)
+    lines.append("links: %d resolved, %d external skipped, %d dead"
+                 % (resolved, external, len(dead)))
+    return not dead, lines
+
+
+def readme_prove_commands(text):
+    """Every `python3 scripts/test_*.py` the README names, in the order it
+    names them, each once. The README calls these its own proof ("Prove the
+    rule with...", "Run the check that holds this rule in place"), so they
+    are the commands a reader runs first in a fresh clone."""
+    seen = []
+    for match in README_PROVE_RE.findall(text):
+        if match not in seen:
+            seen.append(match)
+    return seen
+
+
+def check_readme_prove_commands(export_dir):
+    """Every command the README names as its own proof must really run in
+    the export tree. E70, measured in a fresh clone of v1.0.1: `python3
+    scripts/test_battery_verdict.py`, named in the README as the proof that
+    a battery cannot hide its red lines, died with FileNotFoundError on
+    docs/plan/BATTERY-EXPECTATIONS.json, a file the allowlist never
+    carried. Refuses on the FIRST failing command so the output names the
+    one that broke rather than a wall of them. An absent README, or a
+    README naming no such command, is NO-DATA and refuses too: a public tag
+    whose own front page proves nothing has not been checked, and this
+    exporter never reads NO-DATA as a pass. Returns (ok, lines)."""
+    readme = os.path.join(export_dir, "README.md")
+    if not os.path.isfile(readme):
+        return False, ["NO-DATA: the export tree carries no README.md, so "
+                       "no prove command could be run on it"]
+    try:
+        with open(readme, encoding="utf-8") as fh:
+            text = fh.read()
+    except (OSError, UnicodeDecodeError) as exc:
+        return False, ["NO-DATA: the export tree's README.md could not be "
+                       "read (%s)" % exc]
+    commands = readme_prove_commands(text)
+    if not commands:
+        return False, ["NO-DATA: the export tree's README.md names no "
+                       "command of the shape python3 scripts/test_*.py, so "
+                       "nothing it claims was proven on the export tree"]
+    lines = []
+    for command in commands:
+        proc = _run(command.split(), export_dir, timeout=1800)
+        lines.append("prove: %s exit %s" % (command, proc.returncode))
+        if proc.returncode != 0:
+            text = ((proc.stdout or "") + (proc.stderr or "")).strip()
+            lines.append("REFUSED: the README names %s as its own proof and "
+                         "it fails on the export tree: %s"
+                         % (command, text.splitlines()[-1] if text
+                            else "(no output)"))
+            return False, lines
+    return True, lines
 
 
 def tag_time_checks(export_dir, version):
@@ -771,6 +1297,24 @@ def tag_time_checks(export_dir, version):
                       "export tree, %s"
                       % (name, "%s file(s)" % match.group(1) if match
                          else "count line not printed"))
+    # (3) to (5), rows E67 and E70: the export tree must be READY by its
+    # own gate, every relative link in it must resolve inside it, and every
+    # command the README calls its own proof must really run there. All
+    # three are run on a git-initialised copy, which is the state a fresh
+    # clone is in, and each refuses rather than reporting and continuing.
+    git_ok, git_lines = _ensure_git_tree(export_dir)
+    lines.extend(git_lines)
+    if not git_ok:
+        return False, lines
+    for check in (check_readiness_gate, check_markdown_links,
+                  check_readme_prove_commands):
+        check_ok, check_lines = check(export_dir)
+        lines.extend(check_lines)
+        if not check_ok:
+            # Fail fast on purpose: the prove commands run the export
+            # tree's own test suites, minutes of work that prove nothing
+            # once an earlier check has already refused the tag.
+            return False, lines
     return ok, lines
 
 
@@ -804,9 +1348,11 @@ def main(argv=None):
                           "repository, so the single allowed invocation "
                           "carries the single extra ref a release needs. "
                           "Before the push, the export tree must clear "
-                          "tag_time_checks: its release note is stamped "
-                          "and every product's own verify-install.sh "
-                          "passes on it.")
+                          "tag_time_checks: its release note is stamped, "
+                          "every product's own verify-install.sh passes "
+                          "on it, its own readiness_gate.py reads READY "
+                          "there, every relative markdown link resolves, "
+                          "and every README prove command runs.")
     ap.add_argument("--bootstrap", action="store_true",
                      help="with --push only: when the remote has no "
                           "branch at all, start it with this export as "
@@ -823,7 +1369,8 @@ def main(argv=None):
         return EXIT_NODATA
 
     with tempfile.TemporaryDirectory(prefix="brother-export-") as export_dir, \
-         tempfile.TemporaryDirectory(prefix="brother-export-identity-") as identity_dir:
+         tempfile.TemporaryDirectory(prefix="brother-export-identity-") as identity_dir, \
+         tempfile.TemporaryDirectory(prefix="brother-export-baseline-") as baseline_tmp:
         copied, committed = build_orphan_commit(export_dir, allowlist,
                                                  args.root)
         print("candidate export tree: %d root path(s) copied (%s)"
@@ -835,7 +1382,17 @@ def main(argv=None):
 
         build_identity_check_dir(identity_dir, allowlist, args.remote,
                                   args.branch, args.root)
-        gates_ok, gate_lines = run_gates(export_dir, identity_dir)
+        has_baseline = build_baseline_dir(baseline_tmp, args.remote,
+                                           args.branch)
+        baseline_dir = baseline_tmp if has_baseline else None
+        print("secrets baseline: %s"
+              % ("%s %s checked out; the secret scan covers only lines "
+                 "this export would newly add"
+                 % (args.remote, args.branch) if has_baseline
+                 else "none (no remote branch to compare against); every "
+                      "candidate file is scanned whole"))
+        gates_ok, gate_lines = run_gates(export_dir, identity_dir,
+                                          baseline_dir)
         for line in gate_lines:
             print(line)
 

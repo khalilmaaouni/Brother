@@ -3,6 +3,8 @@ name: design
 description: "Use when someone is deciding or reviewing the shape of a system before it gets built: what it is for, how the process runs, what the architecture and the data model look like, and how it will be verified. Runs the six design phases in order, each gating the next, and checks the dossier for the artifacts the tier requires. Fires on the work itself: start already routes into it once kickoff has scored the intake, so nothing needs to be typed to reach it."
 ---
 
+Plugin root: a Claude Code install exports `${CLAUDE_PLUGIN_ROOT}` and a Codex install exports `${BROTHER_PLUGIN_ROOT}`; both name this plugin's own directory, so read whichever variable appears below as the one your client set. On a clone install neither is set: run the same commands from the checkout root instead.
+
 # Design
 
 Design comes before verification. The expensive mistakes are made while deciding what to

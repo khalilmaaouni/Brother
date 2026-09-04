@@ -1,7 +1,7 @@
 # BrotherMode roadmap
 
-Status: CURRENT as of 2026-08-04. Product authority since 2026-08-11:
-[PRODUCT-DIRECTION.md](../PRODUCT-DIRECTION.md) at the repository root. No
+Status: CURRENT as of 2026-08-04. Product authority since 2026-08-11: the
+product direction record this project keeps outside the published tree. No
 item enters active development without passing its entry test (section 13.1
 there), and it supersedes conflicting product-scope guidance in this page.
 
@@ -29,8 +29,8 @@ true.
 3. **Verified locally.** The evidence names a file or a test in this tree, and
    no continuous integration job covers it yet. It passes on the machine it was
    written on.
-4. **Verified in CI.** The evidence names a job under
-   [`.github/workflows`](../.github/workflows), so the check runs somewhere
+4. **Verified in CI.** The evidence names a job in the repository's own
+   workflow definitions, so the check runs somewhere
    other than the author's own machine, on a schedule nobody controls by hand.
 5. **Verified externally.** Checked by someone outside this project, or on a
    machine this project does not own.
@@ -45,9 +45,8 @@ Certified sits at the top as the strongest claim this project can make about
 its own tree, and it does not include an outside opinion. Rung 5 is about who
 did the checking; rung 6 is about how strong the proof inside the tree is.
 Nothing is at rung 5 today, and section 3 prints that empty rung rather than
-hiding it. What filling it would take is written down in
-[`docs/closure/CLOSURE_REGISTER.md`](closure/CLOSURE_REGISTER.md), items X-01
-to X-06: a second runtime with credits, participants who did not build this, a
+hiding it. What filling it would take is written down in this project's own closure
+register, items X-01 to X-06: a second runtime with credits, participants who did not build this, a
 benchmark corpus, measured dogfood, ecosystem thresholds, and fault injection.
 All six are open, and none of them close by writing code.
 
@@ -160,7 +159,7 @@ Nothing stands at this rung today.
 
 <!-- END GENERATED ROADMAP STATUS -->
 
-A note on the newest wave, added 2026-08-28, kept here rather than in the waves section below, where this page's own rule is that waves name outcomes and never dates. It is listed last because the ordering rule on this page is about unproven claims, and it is the only wave whose cost has already been PAID rather than estimated: on 2026-08-27 a founder-facing build scored 0 of 5 on a defect this estate had root-caused twice in writing, weeks earlier, and neither note was read before shipping. The founder's own words that day: the tool's memory usage to avoid past mistakes is very weak, even when he warns of them. The evidence, with every command to reproduce it, is in [FEEDBACK-MEMORY-2026-08-28.md](FEEDBACK-MEMORY-2026-08-28.md).
+A note on the newest wave, added 2026-08-28, kept here rather than in the waves section below, where this page's own rule is that waves name outcomes and never dates. It is listed last because the ordering rule on this page is about unproven claims, and it is the only wave whose cost has already been PAID rather than estimated: on 2026-08-27 a founder-facing build scored 0 of 5 on a defect this estate had root-caused twice in writing, weeks earlier, and neither note was read before shipping. The founder's own words that day: the tool's memory usage to avoid past mistakes is very weak, even when he warns of them. The evidence, with every command to reproduce it, is kept with this project's own feedback records.
 
 ## 4. Waves, and the order they are taken in
 
@@ -217,5 +216,5 @@ recorded rather than tidied over: this page is not the register's editor, and
 adding a row is a register change with its own review.
 
 Nothing on this list is a judgement about the tools that do those jobs well.
-[`docs/market/CATEGORY.md`](market/CATEGORY.md) names peers that are better at
-several of them, in their own words rather than this project's.
+This project's own category survey names peers that are better at several of
+them, in their own words rather than this project's.

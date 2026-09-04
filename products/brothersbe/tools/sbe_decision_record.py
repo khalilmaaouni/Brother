@@ -216,7 +216,7 @@ def main(argv=None):
 
     root = os.path.abspath(args.cwd)
     if not os.path.isdir(root):
-        print("NO-DATA: %r is not a directory; nothing was recorded" % root)
+        say("NO-DATA: %r is not a directory; nothing was recorded" % root)
         return 3
     if not args.alternative:
         print("NO-DATA: at least one --alternative is required; a decision with no "
@@ -226,7 +226,7 @@ def main(argv=None):
     try:
         built = build_documents(args, root)
     except ValueError as exc:
-        print("NO-DATA: %s" % exc)
+        say("NO-DATA: %s" % exc)
         return 3
 
     out_dir = args.out_dir or os.path.join(
@@ -237,7 +237,7 @@ def main(argv=None):
         _write_json(packet_path, built["packet"])
         _write_json(decision_path, built["decision"])
     except OSError as exc:
-        print("NO-DATA: %s could not be written (%s); nothing was recorded" % (out_dir, exc))
+        say("NO-DATA: %s could not be written (%s); nothing was recorded" % (out_dir, exc))
         return 3
 
     try:

@@ -56,7 +56,14 @@ import json
 import os
 import sys
 
-LEDGER_PATH = os.path.join(os.path.expanduser("~/.claude"), "bm_vault_answers.jsonl")
+HERE = os.path.dirname(os.path.abspath(__file__))
+# C3: the config directory is resolved by brother_paths, the one seam
+# that knows which coding client is running (docs/codex/HOOKS-MAPPING.md).
+# Loaded from beside this file because tools/ is not a package.
+sys.path.insert(0, HERE)
+import brother_paths  # noqa: E402
+
+LEDGER_PATH = brother_paths.config_path("bm_vault_answers.jsonl")
 # VB6-03: the telemetry outcome file, sitting beside the ledger it references by
 # event_id. A separate file, same as the access audit is separate from the ledger: an
 # outcome ("the founder rejected this answer") is a different kind of record from what

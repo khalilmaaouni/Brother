@@ -1,0 +1,593 @@
+{
+  "lens": "data-analyst",
+  "version": "1.0.0",
+  "detection_signals": {
+    "paths": [
+      "*.lkml",
+      "*.cube.js",
+      "*.twb",
+      "*.twbx",
+      "*.pbix",
+      "semantic_models.yml",
+      "semantic_models.yaml",
+      "metrics.yml",
+      "metrics.yaml",
+      "exposures.yml",
+      "dashboards/",
+      "analysis/"
+    ],
+    "manifest_strings": [
+      "sqlfluff",
+      "metricflow",
+      "tableauserverclient",
+      "lkml"
+    ],
+    "note": "Dashboard-as-code, metric and semantic-layer files, plus the two directories the persona document's own tool adapters name (11.5: 'metric layers/semantic models', 'Git-tracked SQL and dashboard-as-code'). Deliberately NOT '*.ipynb': a notebook alone is a data-science signal (scripts/packs/data-science.json) and must never infer this lens, so only a notebook (or anything else) under an 'analysis/' directory counts. Deliberately NOT a bare 'reports/': this hub carries 15 files under products/brothermode/docs/closure/reports/ and a bare directory signal would infer data-analyst for the whole estate. door._path_matches_signal cannot AND a directory with an extension (a signal ending in '/' matches a directory name at any depth, anything else is fnmatch against the basename), so 'sql under reports' from this lane's brief is carried by the metric and dashboard file signals plus 'analysis/', not by a 'reports/' signal that would fire on every repository. Also NOT 'dbt_project': that string belongs to data-science's manifest signals and to the data-engineer lens."
+  },
+  "challenge_question": "What is the metric grain, denominator, timezone and authoritative source?",
+  "promotion_eval_words": [
+    "metric",
+    "kpi",
+    "dashboard",
+    "report",
+    "denominator",
+    "numerator",
+    "grain",
+    "cohort",
+    "funnel",
+    "retention",
+    "churn",
+    "revenue",
+    "segment",
+    "restate",
+    "baseline"
+  ],
+  "question_budget": {
+    "min": 2,
+    "max": 5,
+    "work_shape": "Analytics metric change (persona doc 4.2)"
+  },
+  "intake_dimensions": [
+    "business question / decision supported",
+    "metric definition",
+    "numerator/denominator",
+    "grain",
+    "entity identity/key",
+    "date/timezone/fiscal calendar",
+    "cohort/window/filter",
+    "source of truth",
+    "join cardinality",
+    "null/unknown treatment",
+    "exclusions/cancellations/returns",
+    "historical consistency/restatement",
+    "refresh/freshness",
+    "comparison/baseline",
+    "stakeholder interpretation",
+    "output/dashboard destination",
+    "materiality/tolerance"
+  ],
+  "required_evidence_families": [
+    "E2",
+    "E8",
+    "E5"
+  ],
+  "receipt_fields": [
+    "business_question",
+    "metric_definition_version",
+    "source_of_truth",
+    "query_model_path",
+    "grain",
+    "filters_timezone",
+    "reconciliation_result",
+    "known_caveats",
+    "stakeholder_acceptance",
+    "reproducibility_pointer"
+  ],
+  "forcing_classes": [
+    {
+      "id": "published_figure",
+      "label": "Published figure reaching a decision",
+      "why": "a number appears in a report, slide, README or dashboard file in the diff and no receipt in the same unit carries query_model_path and reproducibility_pointer for it (persona doc 11.3 AN-12, 11.6 'reproducibility pointer')"
+    },
+    {
+      "id": "metric_definition_change",
+      "label": "Metric definition change",
+      "why": "a numerator, denominator, filter, exclusion or grain line changed inside a tracked metric or semantic-layer file (metrics.yml, semantic_models.yml, *.lkml, *.cube.js) (11.3 AN-01, AN-02, AN-16)"
+    },
+    {
+      "id": "dashboard_source_change",
+      "label": "Dashboard whose source changed",
+      "why": "a dashboard, exposure or workbook file in the diff has a changed model, table or datasource reference while its visual definition is unchanged, so the same chart now reads a different source (11.3 AN-04, AN-15)"
+    },
+    {
+      "id": "historical_discontinuity",
+      "label": "Historical discontinuity",
+      "why": "a metric or model file changed in a way that alters values for periods already reported (a changed filter, exclusion or date basis) and the unit carries no old-against-new differential over that window (11.3 AN-02, AN-18; 6.1 E5)"
+    },
+    {
+      "id": "reconciliation_absent",
+      "label": "Manual reconciliation absent",
+      "why": "a revenue, ledger, count or balance figure changed and no receipt field reconciliation_result carries command output at the declared grain, only NO-DATA (11.3 AN-08; 6.1 E8)"
+    }
+  ],
+  "work_classes": [
+    {
+      "id": "analysis_metric_dashboard_change",
+      "label": "analysis / metric / dashboard change",
+      "why": "3.1 class 9, this lens's home class: AN-01 to AN-08, AN-10, AN-11, AN-12, AN-15, AN-16"
+    },
+    {
+      "id": "defect_incident_correction",
+      "label": "defect / incident correction",
+      "why": "3.1 class 2: a dashboard discrepancy is reported as a defect and closed with lineage plus reconciliation (AN-04)"
+    },
+    {
+      "id": "incident_investigation",
+      "label": "incident investigation",
+      "why": "3.1 class 14: an anomaly investigation where the failure is presenting correlation as cause (AN-17)"
+    },
+    {
+      "id": "dependency_platform_migration",
+      "label": "dependency/platform migration",
+      "why": "3.1 class 17: spreadsheet-to-SQL and dashboard-to-dashboard migrations, where the hidden manual rule and the semantic drift are the risk (AN-14, AN-15)"
+    },
+    {
+      "id": "ml_statistical_experiment",
+      "label": "ML/statistical experiment",
+      "why": "3.1 class 10, shared with the data-scientist lens by 5.2's compositional rule: the analyst owns the readout population and denominator, not the model (AN-09)"
+    },
+    {
+      "id": "spike_research_no_production_mutation",
+      "label": "spike/research with no production mutation",
+      "why": "3.1 class 20: the ad-hoc stakeholder request, where the work is clarifying the decision before any query is written (AN-13)"
+    },
+    {
+      "id": "data_pipeline_model_change",
+      "label": "data pipeline/model change",
+      "why": "3.1 class 6, assisted not owned: the analyst supplies the metric contract and the reconciliation grain while the data-engineer lens owns the pipeline (5.2's dbt revenue metric example loads both)"
+    }
+  ],
+  "risk_classes": [
+    {
+      "id": "irreversibility",
+      "label": "irreversibility",
+      "why": "a figure sent to a stakeholder cannot be unsent: the correction is a second communication, never a rollback (3.2; 11.3 AN-12)"
+    },
+    {
+      "id": "production_write",
+      "label": "production write",
+      "why": "a materialized table, a scheduled extract or a published dashboard refresh mutates what the business reads (3.2)"
+    },
+    {
+      "id": "data_loss_corruption",
+      "label": "data loss/corruption",
+      "why": "a restatement overwrites history, and a fan-out join silently duplicates rows into a total nobody re-counts (3.2; AN-03, AN-18)"
+    },
+    {
+      "id": "security_permission",
+      "label": "security/permission",
+      "why": "row-level security, workspace folders and dataset grants decide who sees which rows of the same dashboard (3.2)"
+    },
+    {
+      "id": "money",
+      "label": "money",
+      "why": "revenue, refunds, cancellations and tax are the figures most often published and least often reconciled (3.2; AN-08)"
+    },
+    {
+      "id": "customer_blast_radius",
+      "label": "customer blast radius",
+      "why": "an executive report and a self-service semantic model reach every downstream reader of the metric at once (3.2; AN-12, AN-16)"
+    },
+    {
+      "id": "compatibility",
+      "label": "compatibility",
+      "why": "a renamed column, changed grain or redefined metric breaks every dashboard, extract and saved query consuming it (3.2; AN-15, AN-16)"
+    },
+    {
+      "id": "compliance_privacy",
+      "label": "compliance/privacy",
+      "why": "row-level extracts, cohort lists and CSV exports carry personal data out of the warehouse and into a file nobody governs (3.2)"
+    },
+    {
+      "id": "operational_recoverability",
+      "label": "operational recoverability",
+      "why": "a dashboard edited in a BI tool has no history unless it is dashboard-as-code, so recovery means rebuilding it (3.2; 11.5)"
+    },
+    {
+      "id": "evidence_uncertainty",
+      "label": "evidence uncertainty",
+      "why": "the hardest analyst outcome to prove is that the number means what the definition says, which is why E2 and E8 are required here (3.2; 6.1)"
+    }
+  ],
+  "dangerous_actions": [
+    "writing to the warehouse (CREATE, REPLACE, INSERT, UPDATE, DELETE, TRUNCATE, MERGE) outside an explicitly named sandbox schema",
+    "publishing, refreshing or overwriting a dashboard, saved query or scheduled report that stakeholders read",
+    "restating a metric for periods already reported, without stakeholder_acceptance and an old-against-new differential",
+    "changing a metric definition in a shared semantic layer, which changes every consumer at once",
+    "exporting a row-level extract containing personal data, or any extract, out of the warehouse",
+    "granting, widening or copying access to a dataset, row-level security rule, BI folder or workspace",
+    "deleting or renaming a column, model, saved query or dashboard that another asset references",
+    "presenting a figure to a stakeholder as final while any required receipt field is NO-DATA",
+    "stating a causal claim from observational data (11.4 causal-language discipline)"
+  ],
+  "know_how": [
+    {
+      "id": "AN-01",
+      "situation": "Define a new KPI",
+      "brother_asks": "What is the numerator, the denominator, the grain and the time basis, and which existing metric does this one NOT duplicate?",
+      "proof": "a metric contract file plus worked examples: two or three hand-computed rows an approved business rule produces, matched against the query (E2)",
+      "failure_caught": "ambiguous semantic meaning",
+      "source": "11.3"
+    },
+    {
+      "id": "AN-02",
+      "situation": "Change KPI logic",
+      "brother_asks": "Which already-reported periods change value under the new logic, and who accepts the restatement?",
+      "proof": "an old-against-new differential over the restated window plus recorded stakeholder acceptance (E5)",
+      "failure_caught": "silent historical discontinuity",
+      "source": "11.3"
+    },
+    {
+      "id": "AN-03",
+      "situation": "Build SQL analysis",
+      "brother_asks": "What is one row after every join, and which join can multiply rows?",
+      "proof": "row-count and cardinality checks before and after each join (COUNT(*) against COUNT(DISTINCT key)) plus an independent spot check of a handful of entities (E2, E3)",
+      "failure_caught": "grain or join error",
+      "source": "11.3"
+    },
+    {
+      "id": "AN-04",
+      "situation": "Dashboard discrepancy",
+      "brother_asks": "Which of the two numbers is authoritative, and at what point in the lineage do they diverge?",
+      "proof": "source-to-visual lineage for both figures plus a reconciliation at the declared grain naming the divergence row set (E8)",
+      "failure_caught": "competing sources of truth",
+      "source": "11.3"
+    },
+    {
+      "id": "AN-05",
+      "situation": "Cohort analysis",
+      "brother_asks": "What event puts an entity in a cohort, what is the window, and can a later event leak backwards into it?",
+      "proof": "a cohort fixture with explicit date boundaries, including one entity on each boundary, run through the query (E2, E9)",
+      "failure_caught": "leakage or misaligned windows",
+      "source": "11.3"
+    },
+    {
+      "id": "AN-06",
+      "situation": "Funnel analysis",
+      "brother_asks": "Is every stage measured against the same denominator, and what identity links a visitor at stage 1 to a customer at stage 4?",
+      "proof": "a stage contract naming each stage's population plus the identity resolution rule, checked against a curated fixture (E2)",
+      "failure_caught": "inconsistent denominator",
+      "source": "11.3"
+    },
+    {
+      "id": "AN-07",
+      "situation": "Retention or churn",
+      "brother_asks": "What exact event and window make an account retained, and what makes it churned rather than dormant?",
+      "proof": "explicit event and window examples, one per definitional edge (reactivation, pause, downgrade), agreed before the query runs (E2)",
+      "failure_caught": "definition drift",
+      "source": "11.3"
+    },
+    {
+      "id": "AN-08",
+      "situation": "Revenue analysis",
+      "brother_asks": "Are cancellations, refunds, discounts and tax in or out, and which ledger is the number tied to?",
+      "proof": "a ledger reconciliation at the declared grain: the analytic total against the finance system total, with the difference explained line by line (E8)",
+      "failure_caught": "cancellation, refund or tax mismatch",
+      "source": "11.3"
+    },
+    {
+      "id": "AN-09",
+      "situation": "Experiment readout",
+      "brother_asks": "Which population is in the readout, was the metric fixed before the results were seen, and what does the interval actually say?",
+      "proof": "an experiment contract (population, metric, window, fixed before analysis) plus the statistical checks: interval, sample size and the assumptions behind them (E18, E2)",
+      "failure_caught": "wrong population or statistical misinterpretation",
+      "source": "11.3"
+    },
+    {
+      "id": "AN-10",
+      "situation": "Time-series comparison",
+      "brother_asks": "Which timezone and which calendar, and what happens at a DST change, a month boundary and a fiscal year boundary?",
+      "proof": "calendar boundary fixtures: one row on each boundary, expected value computed from the calendar rule rather than from the query (E2, E4)",
+      "failure_caught": "timezone, DST or fiscal issue",
+      "source": "11.3"
+    },
+    {
+      "id": "AN-11",
+      "situation": "Segmentation",
+      "brother_asks": "Do the segments cover every entity exactly once, and where does an entity with no segment go?",
+      "proof": "coverage and exclusivity invariants: the sum of segment counts equals the total, and no entity appears twice (E3)",
+      "failure_caught": "overlapping or missing segments",
+      "source": "11.3"
+    },
+    {
+      "id": "AN-12",
+      "situation": "Executive report",
+      "brother_asks": "Can a second person reproduce every number on this page tomorrow, from the tracked query and a data snapshot?",
+      "proof": "a provenance receipt per figure: query path, data snapshot or as-of timestamp, and the run that produced it (E2, receipt field reproducibility_pointer)",
+      "failure_caught": "the number cannot be reproduced",
+      "source": "11.3"
+    },
+    {
+      "id": "AN-13",
+      "situation": "Ad-hoc stakeholder request",
+      "brother_asks": "What decision does this answer change, and would a different cut of the data change that decision?",
+      "proof": "an outcome clarification recorded with the assumptions made in the requester's absence, before any query is written (core intake, 4.1 stage 1)",
+      "failure_caught": "the question asked is not the decision needed",
+      "source": "11.3"
+    },
+    {
+      "id": "AN-14",
+      "situation": "Spreadsheet-to-SQL migration",
+      "brother_asks": "Which manual rules live only in the spreadsheet: the hardcoded exclusion, the hand-typed override, the hidden row?",
+      "proof": "a sample differential of the spreadsheet against the query over the same period, every difference explained as an extracted rule or a defect (E5)",
+      "failure_caught": "a hidden manual rule is lost",
+      "source": "11.3"
+    },
+    {
+      "id": "AN-15",
+      "situation": "Dashboard migration",
+      "brother_asks": "Does each visual on the new tool read the same source, the same filter and the same rounding as the old one?",
+      "proof": "a visual-by-visual metric reconciliation, old tool against new, at the same grain and window (E8, E5)",
+      "failure_caught": "semantic or format drift",
+      "source": "11.3"
+    },
+    {
+      "id": "AN-16",
+      "situation": "Self-service semantic model",
+      "brother_asks": "Does this metric already exist under another name, and which definition wins when two disagree?",
+      "proof": "a contract registry listing every metric with its owner, plus a duplicate-definition detection run over the semantic layer (E10, E2)",
+      "failure_caught": "conflicting metric definitions",
+      "source": "11.3"
+    },
+    {
+      "id": "AN-17",
+      "situation": "Anomaly investigation",
+      "brother_asks": "What else changed at the same time, and what would have to be true for the obvious explanation to be wrong?",
+      "proof": "an evidence ladder: the observation, the candidate explanations, what each one predicts, and what was checked to eliminate the alternatives (E2, 11.4 causal-language discipline)",
+      "failure_caught": "correlation presented as cause",
+      "source": "11.3"
+    },
+    {
+      "id": "AN-18",
+      "situation": "Forecast input preparation",
+      "brother_asks": "What is the as-of cutoff, and does any input row carry information that did not exist at that moment?",
+      "proof": "a cutoff declaration plus historical version proof: the input rebuilt as of the cutoff matches the version recorded then (E5, E8)",
+      "failure_caught": "leakage or a silent restatement of history",
+      "source": "11.3"
+    },
+    {
+      "id": "KH-01",
+      "situation": "Metric contracts",
+      "brother_asks": "Is this metric written down as numerator, denominator, grain, filters, time basis and owner, in a file, or does it live in a query?",
+      "proof": "the metric contract file exists, is tracked, and is the file the query reads or is named by receipt field metric_definition_version",
+      "failure_caught": "a definition that changes without anybody deciding it changed",
+      "source": "11.4"
+    },
+    {
+      "id": "KH-02",
+      "situation": "Grain before joins",
+      "brother_asks": "What does one row of each input mean, before we join anything?",
+      "proof": "a stated grain per input plus a row-count check after each join showing no unintended fan-out",
+      "failure_caught": "a total that double counts because one side had many rows per key",
+      "source": "11.4"
+    },
+    {
+      "id": "KH-03",
+      "situation": "Dimensional-model navigation",
+      "brother_asks": "Which table is the fact, which are conformed dimensions, and is this a snapshot or an event stream?",
+      "proof": "the join path named against the model's own documentation, with the fact table's grain quoted from it",
+      "failure_caught": "joining two facts and multiplying them together",
+      "source": "11.4"
+    },
+    {
+      "id": "KH-04",
+      "situation": "Reconciliation",
+      "brother_asks": "Against which independent total does this figure tie out, and at what grain?",
+      "proof": "the reconciliation output: both totals, the difference, and the explanation of every difference above the declared materiality (E8)",
+      "failure_caught": "a number that is internally consistent and wrong",
+      "source": "11.4"
+    },
+    {
+      "id": "KH-05",
+      "situation": "Cohort and window semantics",
+      "brother_asks": "Is the window anchored to the entity's own first event or to the calendar, and are both ends inclusive?",
+      "proof": "boundary examples for each end of the window, computed by hand and matched against the query",
+      "failure_caught": "an off-by-one day that moves an entire cohort",
+      "source": "11.4"
+    },
+    {
+      "id": "KH-06",
+      "situation": "Funnel and retention definitions",
+      "brother_asks": "Is the funnel ordered or unordered, and does a user who skips a stage count in the later one?",
+      "proof": "the stage and retention rules written as fixtures including the skip, the repeat and the out-of-order case",
+      "failure_caught": "two dashboards with the same funnel name and different rules",
+      "source": "11.4"
+    },
+    {
+      "id": "KH-07",
+      "situation": "Fiscal and timezone handling",
+      "brother_asks": "Which timezone is the date column in, which one is the report in, and does the fiscal year start where the calendar does?",
+      "proof": "the timezone and fiscal calendar recorded in receipt field filters_timezone, plus a boundary fixture per rule",
+      "failure_caught": "a day of revenue landing in the wrong month",
+      "source": "11.4"
+    },
+    {
+      "id": "KH-08",
+      "situation": "Simpson's paradox and aggregation traps",
+      "brother_asks": "Does the direction of this result reverse inside any major segment?",
+      "proof": "the same metric computed per segment beside the aggregate, with any reversal named in known_caveats",
+      "failure_caught": "an aggregate that says the opposite of every segment it contains",
+      "source": "11.4"
+    },
+    {
+      "id": "KH-09",
+      "situation": "Missing-data semantics",
+      "brother_asks": "Does a NULL here mean zero, unknown, not applicable, or not yet arrived?",
+      "proof": "a null and unmapped-category count per input column, with the chosen treatment stated per column",
+      "failure_caught": "a COALESCE to zero that turns unknown into a real value in an average",
+      "source": "11.4"
+    },
+    {
+      "id": "KH-10",
+      "situation": "Causal-language discipline",
+      "brother_asks": "Is this an association or a cause, and what would have to hold for the causal reading to be safe?",
+      "proof": "the claim written at the strength the design supports, with alternatives named (an experiment for a causal claim, otherwise association language)",
+      "failure_caught": "a correlation read as a cause and acted on",
+      "source": "11.4"
+    },
+    {
+      "id": "KH-11",
+      "situation": "Materiality and tolerances",
+      "brother_asks": "Below which difference do we stop investigating, and who set that threshold?",
+      "proof": "the tolerance recorded before the reconciliation runs, with any difference above it explained rather than rounded away",
+      "failure_caught": "a small unexplained difference that is actually a systematic rule error",
+      "source": "11.4"
+    },
+    {
+      "id": "KH-12",
+      "situation": "Reproducible executive reporting",
+      "brother_asks": "What does a second person need to reproduce this page: which query, which snapshot, which as-of?",
+      "proof": "every figure on the page carries a reproducibility pointer, and one figure is actually re-run from it before delivery",
+      "failure_caught": "a report nobody can rebuild once the underlying table moves",
+      "source": "11.4"
+    },
+    {
+      "id": "KH-13",
+      "situation": "Communicating uncertainty",
+      "brother_asks": "What is the range around this number, and what is not covered by it at all?",
+      "proof": "the uncertainty stated beside the figure (interval, sample size, or the plain sentence naming what is unknown) and the caveats in known_caveats, with NO-DATA said rather than implied",
+      "failure_caught": "a point estimate read as exact by a decision maker",
+      "source": "11.4"
+    }
+  ],
+  "tool_adapters": [
+    {
+      "id": "sql_lint",
+      "purpose": "parse and lint tracked SQL before it runs, and read its structure for the grain and join checks (11.5 'SQL parsers/linters')",
+      "detect": "sqlfluff --version",
+      "when_absent": "NO-DATA: SQL was not parsed or linted; grain and join claims rest on reading the query by eye"
+    },
+    {
+      "id": "dbt_metadata",
+      "purpose": "read model, metric and exposure metadata, including which dashboard consumes which model (11.5 'dbt model/semantic metadata')",
+      "detect": "dbt --version",
+      "when_absent": "NO-DATA: model lineage and exposures were not read from the project; the source of truth rests on human statement"
+    },
+    {
+      "id": "warehouse_dry_run",
+      "purpose": "cost and validate a query without running it, and read its plan (11.5 'warehouse dry-run/query plans'; 6.1 E11)",
+      "detect": "bq version",
+      "when_absent": "NO-DATA: no dry run or query plan was obtained; bytes scanned and plan shape are unknown"
+    },
+    {
+      "id": "local_reconciliation",
+      "purpose": "reconcile a CSV or spreadsheet extract against a query result locally, for the spreadsheet-to-SQL differential (11.5 'notebooks/CSV/Excel as read-only sources for rule discovery')",
+      "detect": "duckdb --version",
+      "when_absent": "NO-DATA: the spreadsheet side of the differential was not computed here; AN-14 stays open"
+    },
+    {
+      "id": "bi_metadata_looker",
+      "purpose": "read LookML semantic model and dashboard definitions as code (11.5 'Power BI/Tableau/Looker metadata when accessible')",
+      "detect": "python3 -c \"import lkml\"",
+      "when_absent": "NO-DATA: LookML was not parsed; metric definitions in the BI layer were not compared against the warehouse"
+    },
+    {
+      "id": "bi_metadata_tableau",
+      "purpose": "read Tableau workbook and datasource metadata (11.5, same line)",
+      "detect": "python3 -c \"import tableauserverclient\"",
+      "when_absent": "NO-DATA: Tableau metadata was not read; a workbook's datasource and calculated fields were not inspected"
+    },
+    {
+      "id": "tracked_analytics_assets",
+      "purpose": "list the SQL, metric and dashboard-as-code files actually under version control, which is what makes a definition change reviewable at all (11.5 'Git-tracked SQL and dashboard-as-code')",
+      "detect": "git ls-files",
+      "when_absent": "NO-DATA: the analytics assets are not in version control, so no definition change can be diffed or attributed"
+    }
+  ],
+  "provenance": {
+    "document": "BROTHER-PERSONA-USE-CASE-LIBRARY-STRATEGY-2026-09-03.md",
+    "sections": [
+      "3.1 work classes",
+      "3.2 risk classes",
+      "3.3 practitioner lens (the lens id data-analyst is this section's own)",
+      "4.1 intake sequence, stage 3 (the challenge question, verbatim)",
+      "4.2 intake question budgets (Analytics metric change, 2 to 5)",
+      "5.1 pack manifest (what a pack must declare)",
+      "5.2 compositional selection (this pack is loaded beside core, and beside data-engineering and business-analysis on a metric change)",
+      "6.1 evidence families E2, E5, E8, E18",
+      "6.3 evidence selection, not test-count maximization",
+      "11.1 what this persona is buying",
+      "11.2 analyst intake dimensions",
+      "11.3 analytics use-case library, AN-01 to AN-18",
+      "11.4 analyst know-how modules, KH-01 to KH-13",
+      "11.5 analyst tool adapters",
+      "11.6 analytics receipt additions"
+    ]
+  },
+  "fixture": {
+    "must_infer": [
+      "models/semantic_models.yml",
+      "dashboards/revenue_overview.json",
+      "looker/revenue.lkml",
+      "analysis/cohort_retention.ipynb"
+    ],
+    "manifest_string": "sqlfluff",
+    "must_not_infer": [
+      "a.ipynb",
+      "b.ipynb",
+      "mlruns/0/meta.yaml",
+      "README.md",
+      "src/main.py",
+      "reports/2026-01-close.md",
+      "migrations/0007_add_index.sql"
+    ],
+    "note": "must_infer_paths: each one alone must infer data-analyst. must_infer_manifest_string: written into a requirements.txt it must infer data-analyst with no path signal. must_not_infer_paths: the whole list together must infer no lens from this pack; the first four are scripts/test_door.py's own data-science fixture, which this pack must never steal (data-analyst sorts before data-science, so infer_lens tries this pack first), and the last three are the generic trees a bare 'reports/', '*.ipynb' or '*.sql' signal would have stolen."
+  },
+  "required_evidence_families_why": {
+    "E2": "the analyst's expected number must come from an approved business rule, ledger or curated fixture, never from the same query that produced it: 6.1 E2 names analytics first, and 11.3 makes it the default evidence for AN-01, AN-06, AN-07 and AN-09",
+    "E8": "the published figure has to tie out at a declared grain from source to transform to visual, which is the only thing that closes AN-04 (competing sources of truth) and AN-08 (cancellations, refunds and tax): 6.1 E8",
+    "E5": "a metric whose logic changed must be run old against new over the same window, or a historical discontinuity ships silently: 11.3 AN-02, AN-14, AN-15, and 6.1 E5's warning that the second implementation must not share the first one's oracle"
+  },
+  "receipt_fields_details": {
+    "business_question": {
+      "meaning": "the decision this number is meant to support, in the stakeholder's own words, not the query's",
+      "filled_by": "human, quoted from the intake (persona doc 11.2 'business question / decision supported'); NO-DATA when nobody named a decision, which is itself the AN-13 finding"
+    },
+    "metric_definition_version": {
+      "meaning": "the metric contract this run used: numerator, denominator, filters, and the version or commit of the definition",
+      "filled_by": "file, the metric or semantic-layer path plus the commit that last touched it (a one line log of that path); NO-DATA when the definition lives only in a query"
+    },
+    "source_of_truth": {
+      "meaning": "the table, ledger or system declared authoritative for this figure, and who declared it",
+      "filled_by": "human confirmation recorded against a file path or table name; NO-DATA when two candidate sources exist and neither was declared, which forces AN-04"
+    },
+    "query_model_path": {
+      "meaning": "the exact tracked query or model file that produced the number, so the run can be repeated",
+      "filled_by": "file, a repository-relative path; NO-DATA for an ad-hoc query never committed, which fails the AN-12 reproducibility bar"
+    },
+    "grain": {
+      "meaning": "one row means what: per order, per order line, per customer per day",
+      "filled_by": "command, a row-count and distinct-key count at the declared grain (a COUNT(*) against a COUNT(DISTINCT key)); NO-DATA when the grain was never stated"
+    },
+    "filters_timezone": {
+      "meaning": "the window, the filters, the exclusions, the timezone and the fiscal calendar the figure was computed under",
+      "filled_by": "file, the WHERE clause and date basis extracted from query_model_path; NO-DATA when the query carries no explicit date basis"
+    },
+    "reconciliation_result": {
+      "meaning": "what tied out and what did not, at the declared grain, against the source of truth",
+      "filled_by": "command, the reconciliation query's own output (totals or hashes per side plus the difference); NO-DATA when no reconciliation was run, never a pass"
+    },
+    "known_caveats": {
+      "meaning": "what this number does not cover: late-arriving rows, unmapped categories, restated history, sampling",
+      "filled_by": "human plus command output (a null and unmapped-category count); NO-DATA is not acceptable here, an empty list must be an explicit 'none found by <check>'"
+    },
+    "stakeholder_acceptance": {
+      "meaning": "who accepted the definition and the number, and when",
+      "filled_by": "human, name and timestamp recorded at the intake screen; NO-DATA until a person actually accepted, which blocks the metric_definition_change forcing class"
+    },
+    "reproducibility_pointer": {
+      "meaning": "what a second person needs to reproduce the figure: query path, data snapshot or as-of timestamp, and the warehouse or file it ran against",
+      "filled_by": "command, the query path plus the snapshot identifier or as-of timestamp captured at run time; NO-DATA when the source changes under the query and no as-of exists"
+    }
+  }
+}

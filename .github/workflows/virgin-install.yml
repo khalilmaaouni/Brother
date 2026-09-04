@@ -21,7 +21,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install Claude Code CLI
-        run: npm install -g @anthropic-ai/claude-code
+        run: npm install -g @anthropic-ai/claude-code@2.1.251
       - name: Bundle install smoke, the repository's own documented proof
         run: |
           sh scripts/bundle-install-smoke.sh --github 2>&1 | tail -30

@@ -5,6 +5,8 @@ argument-hint: <what you want to build or achieve>
 disable-model-invocation: true
 ---
 
+Plugin root: a Claude Code install exports `${CLAUDE_PLUGIN_ROOT}` and a Codex install exports `${BROTHER_PLUGIN_ROOT}`; both name this plugin's own directory, so read whichever variable appears below as the one your client set. On a clone install neither is set: run the same commands from the checkout root instead.
+
 The user wants to start a project. Their goal, in their own words: $ARGUMENTS
 
 Outcome to produce: one clear project brief (the Project Canvas) and one recommended first decision, in plain language, with a realistic time and cost range.
@@ -60,7 +62,7 @@ The first time a decision is put to them, the last option on the card is their o
 
 ## The mechanical command that records the brief
 
-Once the goal, scope, and first decision are settled, run the mechanical command `python3 "${CLAUDE_PLUGIN_ROOT}/tools/brothermode_cli.py" start` (the packaged console script is `brothermode start`) with the gathered details: it creates the project record in that project's own records and regenerates CANVAS.md from those rows. A plugin install exports `${CLAUDE_PLUGIN_ROOT}` for skill and command content, so that path resolves on its own; on a clone install, where the variable is unset, run `python3 tools/brothermode_cli.py start` instead, from the BrotherMode root (`~/.claude/skills/brothermode`). Either way, run it from the user's project folder so it reads and writes that project's own records. Never fill CANVAS.md by hand and never answer from memory of this conversation about what the project record holds; the command's own output is the only source of truth. If the goal above is empty, ask for it in one sentence before anything else.
+Once the goal, scope, and first decision are settled, run the mechanical command `python3 "${CLAUDE_PLUGIN_ROOT}/tools/brothermode_cli.py" start` (the packaged console script is `brothermode start`) with the gathered details: it creates the project record in that project's own records and regenerates CANVAS.md from those rows. A plugin install exports `${CLAUDE_PLUGIN_ROOT}` for skill and command content, so that path resolves on its own; on a clone install, where the variable is unset, run `python3 tools/brothermode_cli.py start` instead, from the BrotherMode root (the directory that holds `tools/`). Either way, run it from the user's project folder so it reads and writes that project's own records. Never fill CANVAS.md by hand and never answer from memory of this conversation about what the project record holds; the command's own output is the only source of truth. If the goal above is empty, ask for it in one sentence before anything else.
 
 ## The task that keeps the walkthrough from dead-ending
 

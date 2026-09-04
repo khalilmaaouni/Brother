@@ -134,6 +134,104 @@ class ModelWorkerDefensiveFields(unittest.TestCase):
         self.assertIn("Objective:", prompt)
 
 
+def _mw():
+    """model_worker, imported lazily: sys.path gains HERE only when this
+    file runs as __main__ (see the bottom of the file), which is how
+    ModelWorkerDefensiveFields above already reaches it."""
+    import model_worker  # noqa: PLC0415
+    return model_worker
+
+
+class TestVendorAdapterSelection(unittest.TestCase):
+    """C3: two clients, one worker. The argv and the stdout parser are chosen
+    by the running client, and each is driven with a stub so neither the
+    claude CLI nor codex needs to be installed for this to mean anything."""
+
+    def test_claude_argv_is_unchanged(self):
+        """The hard requirement of the whole row: the Claude invocation is
+        byte for byte what it was before the adapter existed."""
+        self.assertEqual(_mw()._default_argv({"BROTHER_MODEL_CLIENT": "claude"}),
+                         ["claude", "-p", "--output-format", "json",
+                          "--permission-mode", "acceptEdits"])
+
+    def test_codex_argv_uses_only_flags_quoted_from_its_own_help(self):
+        self.assertEqual(_mw()._default_argv({"BROTHER_MODEL_CLIENT": "codex"}),
+                         ["codex", "exec", "--json", "--sandbox",
+                          "workspace-write"])
+
+    def test_an_unidentified_host_still_runs_the_claude_cli(self):
+        """NO-DATA on the client is reported by brother_paths, never turned
+        into a refusal here: this function has to return an argv, and the
+        pre-C3 answer for an unknown host was the claude CLI."""
+        self.assertEqual(_mw().model_client({}), "claude")
+
+    def test_the_explicit_override_beats_a_detected_client(self):
+        env = {"BROTHER_MODEL_CLIENT": "codex", "CLAUDECODE": "1"}
+        self.assertEqual(_mw().model_client(env), "codex")
+
+    def test_an_unrecognised_override_is_ignored_not_trusted(self):
+        self.assertEqual(_mw().model_client({"BROTHER_MODEL_CLIENT": "cursor",
+                                          "CLAUDECODE": "1"}), "claude")
+
+
+class TestCodexOutputParser(unittest.TestCase):
+    """The Codex stdout shape is JSONL, not one object. Every case here is
+    about the parser refusing to invent a number it did not read."""
+
+    def _line(self, obj):
+        return json.dumps(obj)
+
+    def test_last_agent_message_and_token_counts_are_read(self):
+        raw = "\n".join([
+            self._line({"type": "thread.started", "thread_id": "t1"}),
+            self._line({"type": "item.completed.agent_message",
+                        "text": "first pass"}),
+            self._line({"type": "item.completed.agent_message",
+                        "text": "the real answer"}),
+            self._line({"type": "token_count",
+                        "info": {"input_tokens": 120, "output_tokens": 34,
+                                 "cached_input_tokens": 90}}),
+        ])
+        claim, usage = _mw()._parse_codex_output(raw)
+        self.assertEqual(claim, "the real answer")
+        self.assertEqual(usage, {"tokens_in": 120, "tokens_out": 34,
+                                 "tokens_cached": 90})
+
+    def test_events_without_token_counts_report_no_usage_not_zero(self):
+        raw = self._line({"type": "agent_message", "text": "done"})
+        claim, usage = _mw()._parse_codex_output(raw)
+        self.assertEqual(claim, "done")
+        self.assertIsNone(usage,
+                          "a worker that did not read a token count must "
+                          "report NO usage, never a fabricated zero")
+
+    def test_plain_text_from_a_stub_falls_back_to_the_raw_claim(self):
+        claim, usage = _mw()._parse_codex_output("ok\n")
+        self.assertEqual(claim, "ok")
+        self.assertIsNone(usage)
+
+    def test_empty_stdout_is_named_not_blank(self):
+        claim, usage = _mw()._parse_codex_output("")
+        self.assertEqual(claim, "(model produced no stdout)")
+        self.assertIsNone(usage)
+
+    def test_a_malformed_line_between_good_ones_is_skipped(self):
+        raw = "\n".join(["{not json", self._line({"type": "agent_message",
+                                                  "text": "survived"})])
+        claim, usage = _mw()._parse_codex_output(raw)
+        self.assertEqual(claim, "survived")
+        self.assertIsNone(usage)
+
+    def test_the_claude_parser_is_untouched_by_any_of_this(self):
+        claim, usage = _mw()._parse_model_output(json.dumps(
+            {"result": "hello", "usage": {"input_tokens": 5,
+                                          "output_tokens": 6,
+                                          "cache_read_input_tokens": 7}}))
+        self.assertEqual(claim, "hello")
+        self.assertEqual(usage, {"tokens_in": 5, "tokens_out": 6,
+                                 "tokens_cached": 7})
+
+
 if __name__ == "__main__":
     sys.path.insert(0, HERE)
     unittest.main()

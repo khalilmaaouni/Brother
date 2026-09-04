@@ -82,6 +82,9 @@ import tempfile
 import threading
 import time
 
+import claim_store
+import journal
+
 NODATA = "NO-DATA"
 
 #: git worktree add and remove mutate shared repository state, so they are taken
@@ -145,6 +148,15 @@ def acquire(repo, unit_id, root=None, runner=None):
         if made.returncode != 0:
             branch = None  # a lane without its own branch is still isolated
     _write_breadcrumb(path, str(unit_id), branch, runner)
+    # E59: the private tree this unit's worker is about to write in. No run
+    # directory reaches this module (it takes a repository and a unit id), so
+    # it reads the one brother_run exports; a lane taken outside a run
+    # journals nothing.
+    run_dir = journal.run_dir_from_env()
+    journal.append(run_dir, "lane.acquired",
+                   parent_ids=journal.previous(run_dir), unit_id=unit_id,
+                   payload={"branch": branch,
+                            "own_branch": branch is not None})
     return path, branch, ""
 
 
@@ -321,7 +333,10 @@ def _clear_stale_lane(repo, branch, runner=None):
 def _read_claims(path):
     """The claim store's raw contents: {} absent, None unreadable. Deliberately
     independent of claim_store's own (private) reader, so this file never
-    depends on another module's internals to do its own reporting."""
+    depends on another module's internals to do its own reporting. Note the
+    LIVENESS question is not part of that independence: it comes from
+    claim_store.dead_reason(), because two subsystems answering dead-or-alive
+    differently is the defect, not the coupling."""
     if not path or not os.path.exists(path):
         return {}
     try:
@@ -344,8 +359,10 @@ def orphan_report(repo, claims_path, clock=None):
 
       OWNED     the claim naming this lane's unit is live: somebody is still
                 working it, and this is not an orphan at all.
-      ABANDONED the lane is still on disk but its claim expired while still
-                claimed, or was released, and nobody has cleared the lane.
+      ABANDONED the lane is still on disk but its claim is no longer live
+                (the lease expired, or the owning pid died on this host,
+                exactly as claim_store.live() decides it), or was released,
+                and nobody has cleared the lane.
       UNKNOWN   NO-DATA. no claim in the store names this lane's unit, so no
                 owner can be established. Never silently skipped: an unmatched
                 lane is exactly the case a quiet skip would hide.
@@ -380,12 +397,17 @@ def orphan_report(repo, claims_path, clock=None):
             continue
 
         owner, state = claim.get("owner"), claim.get("state")
-        leased = float(claim.get("expires_at", 0)) > now
-        if state == "claimed" and leased:
+        # ONE DEFINITION OF LIVENESS. This used to be its own
+        # `expires_at > now` arithmetic, which called a claim still leased
+        # while claim_store.reconcile(), which also treats a dead owning pid
+        # as not live, called the SAME claim abandoned two log lines earlier.
+        # Asking claim_store makes the two reads incapable of disagreeing.
+        dead = claim_store.dead_reason(claim, now)
+        if state == "claimed" and dead is None:
             findings.append(dict(base, classification=OWNED, owner=owner,
                 detail="claimed by %s, still leased" % owner))
         else:
-            why = ("the lease expired while still claimed" if state == "claimed"
+            why = ("%s while still claimed" % dead if state == "claimed"
                    else "the claim was released (state %r)" % state)
             findings.append(dict(base, classification=ABANDONED, owner=owner,
                 detail=("the lane is still on disk but %s for unit %s. It is "

@@ -62,7 +62,9 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import brother_paths  # noqa: E402
 import graph_loop  # noqa: E402
+import run_heartbeat  # noqa: E402
 
 #: WHERE THE LOOP'S THREE MOVING PARTS ARE FOUND, in order, and the order is the
 #: whole point. The first version of this file hardcoded one developer's home
@@ -77,13 +79,10 @@ import graph_loop  # noqa: E402
 #: home directory.
 RUNTIME_ENV_VAR = "BROTHER_RUNTIME_ROOT"
 
-#: Where an installed bundle puts them. Checked before any development path, so
-#: the ordinary case is the one that works without configuration.
-INSTALLED_CANDIDATES = (
-    os.path.join(HERE, "..", "bundle", "tools"),
-    os.path.expanduser("~/.claude/skills/brothermode/tools"),
-    os.path.expanduser("~/.claude/plugins/cache/brother/brothermode/tools"),
-)
+#: Where an installed bundle puts them, relative to HERE (this file's own
+#: install location), never HOME: not config-dir-relative, so this one
+#: candidate stays a plain module constant.
+BUNDLED_CANDIDATE = os.path.join(HERE, "..", "bundle", "tools")
 
 #: The development fallback, kept LAST and named as such. It is this estate's own
 #: layout and it is not a contract anybody else inherits.
@@ -92,10 +91,44 @@ DEV_CANDIDATE = os.path.expanduser("~/Documents/BrotherModeUp/tools")
 #: The plugin cache is VERSIONED: cache/brother/brothermode/<version>/tools,
 #: measured on a real install (3.4.2 on this machine). The unversioned cache
 #: candidate above never matches a real install, which is EVAD run 5 trial 2's
-#: finding; these segments are joined against the env's own HOME at call time
-#: so a test can drive the resolution without touching this machine.
-INSTALLED_VERSIONED_SEGMENTS = (
-    ".claude", "plugins", "cache", "brother", "brothermode")
+#: finding; these segments are joined against the resolved config root at
+#: call time so a test can drive the resolution without touching this
+#: machine.
+INSTALLED_VERSIONED_SEGMENTS = ("plugins", "cache", "brother", "brothermode")
+
+#: The claude CLI's own env var for relocating its whole config directory
+#: (used by bundle-install-smoke.sh, clean_install_e2e.sh and fault_lab.py to
+#: sandbox an install). When it is set, THAT is where the CLI actually puts
+#: an installed plugin's cache, not $HOME/.claude, so the versioned-install
+#: candidate below must be built from it. Root cause of a real failure: a
+#: virgin Linux CI run (and a HOME-isolated local repro) reported "no worker
+#: adapter could be loaded" because the brothermode plugin installed under
+#: CLAUDE_CONFIG_DIR while this file only ever looked under HOME; it only
+#: ever looked right on this developer's own machine because a real
+#: brothermode install already sat under the real $HOME/.claude from
+#: ordinary daily use, never because the resolution was correct.
+CLI_CONFIG_ENV_VAR = "CLAUDE_CONFIG_DIR"
+
+
+def _config_root(env):
+    """The coding client's actual config directory: BROTHER_CONFIG_DIR or
+    CLAUDE_CONFIG_DIR when set (an install sandboxed or relocated on
+    purpose), else $HOME/.claude under Claude and $HOME/.codex under Codex.
+
+    C3: the client comes from brother_paths.client(env), and the Claude
+    answer is byte for byte what this function returned before that seam
+    existed. HOME is still read from `env` rather than from the process,
+    because this file's own tests move the home directory that way and a
+    resolver that ignored them would be resolving a different machine."""
+    override = ((env.get(brother_paths.CONFIG_DIR_ENV) or "").strip()
+                or (env.get(CLI_CONFIG_ENV_VAR) or "").strip())
+    if override:
+        return override
+    home = (env.get("HOME") or "").strip() or os.path.expanduser("~")
+    if brother_paths.client(env) == brother_paths.CODEX:
+        codex_home = (env.get("CODEX_HOME") or "").strip()
+        return codex_home or os.path.join(home, ".codex")
+    return os.path.join(home, ".claude")
 
 
 def _version_key(tools_path):
@@ -120,10 +153,22 @@ def runtime_candidates(env=None):
     if override:
         out.append(os.path.join(override, "tools") if not override.endswith("tools")
                    else override)
-    out.extend(os.path.normpath(c) for c in INSTALLED_CANDIDATES)
-    home = (env.get("HOME") or "").strip() or os.path.expanduser("~")
+    out.append(os.path.normpath(BUNDLED_CANDIDATE))
+    # config_root is CLAUDE_CONFIG_DIR when set, else $HOME/.claude: the
+    # claude CLI's ACTUAL config directory, which is where it places an
+    # installed plugin's cache. Building these from bare HOME (the previous
+    # shape) matched only when CLAUDE_CONFIG_DIR was unset or happened to
+    # equal $HOME/.claude, which is every session on this developer's own
+    # machine and no session anywhere else: a sandboxed or relocated
+    # install (this repo's own smoke and e2e scripts, any CI runner, any
+    # user who sets CLAUDE_CONFIG_DIR) was invisible to this resolution.
+    config_root = _config_root(env)
+    out.append(os.path.normpath(
+        os.path.join(config_root, "skills", "brothermode", "tools")))
+    out.append(os.path.normpath(
+        os.path.join(config_root, *INSTALLED_VERSIONED_SEGMENTS, "tools")))
     versioned = glob.glob(os.path.join(
-        home, *INSTALLED_VERSIONED_SEGMENTS, "*", "tools"))
+        config_root, *INSTALLED_VERSIONED_SEGMENTS, "*", "tools"))
     out.extend(os.path.normpath(c) for c in
                sorted(versioned, key=_version_key, reverse=True))
     out.append(DEV_CANDIDATE)
@@ -300,6 +345,19 @@ def run_node(node, parts, worker, cwd=None, max_attempts=3):
     # baseline and taking it afterwards would compare the tree to itself.
     before = _head(cwd)
 
+    # E46, THE ONLY PLACE THAT KNOWS WHAT A UNIT IS DOING. Every phase below
+    # is a real blocking call (a spawned worker, a git range, a done_check
+    # subprocess, a repair loop), and until now a person watching a run saw
+    # none of them: run() returns only when the whole batch is finished, so
+    # the entire wait was one silent gap. The heartbeat is a module-level
+    # seam (run_heartbeat.current()) rather than a parameter because this
+    # function is called from a thread pool three layers under the caller
+    # that starts it, and because a run that is not narrating gets a silent
+    # heartbeat, so there is nothing to branch on here.
+    beat = run_heartbeat.current()
+    beat.phase(node["id"], "the worker is running",
+               worker=run_heartbeat.worker_name(worker))
+
     # THE WORKER RUNS IN THE LANE, not beside it. Found 2026-08-29 while
     # proving the spine end to end: the spawning worker takes ONE cwd at
     # construction, so every worker wrote wherever that pointed and the lanes
@@ -313,8 +371,10 @@ def run_node(node, parts, worker, cwd=None, max_attempts=3):
 
     # WHAT ACTUALLY CHANGED, from git, not from what the worker says it changed.
     # A worker reporting "I only touched X" is a claim; the diff is evidence.
+    beat.phase(node["id"], "reading what actually changed")
     scope = _audit_scope(unit, before, cwd)
 
+    beat.phase(node["id"], "running the done check")
     verdict = verify.verify(unit, cwd=cwd)
     record = {"id": node["id"], "worker_status": worker_result.get("status"),
               "verdict": verdict.get("verdict"), "reason": verdict.get("reason"),
@@ -347,13 +407,16 @@ def run_node(node, parts, worker, cwd=None, max_attempts=3):
         record["integrable"] = True
 
     if verify.is_pass(verdict):
+        beat.done(node["id"], "done, its check passed")
         return record
+    beat.phase(node["id"], "the check was red, repairing")
     fixed = repair.repair(unit, verdict, worker, cwd=cwd,
                           max_attempts=max_attempts)
     record["repair"] = {"outcome": fixed["outcome"],
                         "attempts": len(fixed["attempts"]),
                         "reason": fixed["reason"]}
     record["verdict"] = fixed["final_verdict"].get("verdict")
+    beat.done(node["id"], "done after repair: %s" % (record["verdict"] or "?"))
     return record
 
 

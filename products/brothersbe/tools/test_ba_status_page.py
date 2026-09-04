@@ -77,8 +77,8 @@ def main():
     intake_json = (FIXTURE_DOSSIER / "00-intake.json").read_text()
     behaviour_md = (FIXTURE_DOSSIER / "08-behaviour.md").read_text()
     result = run_node_check(logic_js, intake_json, behaviour_md)
-    print(result.stdout, end="")
-    print(result.stderr, file=sys.stderr, end="")
+    sys.stdout.write(result.stdout)
+    sys.stderr.write(result.stderr)
     if result.returncode != 0 or "OK" not in result.stdout:
         print("FAIL: ba-status.html logic check did not pass")
         return 1

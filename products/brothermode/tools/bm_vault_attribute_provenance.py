@@ -97,11 +97,16 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+# C3: the config directory is resolved by brother_paths, the one seam
+# that knows which coding client is running (docs/codex/HOOKS-MAPPING.md).
+# Loaded from beside this file because tools/ is not a package.
+import brother_paths  # noqa: E402
 import bm_vault_promotions as promo   # noqa: E402
 import bm_vault_intake as intake      # noqa: E402
 
 DEFAULT_VAULT = os.environ.get("BROTHERMODE_VAULT") or os.path.expanduser("~/Documents/Kay Vault")
-DEFAULT_STORE = os.path.expanduser("~/.claude/bm_vault_attribute_provenance.json")
+DEFAULT_STORE = brother_paths.config_path(
+    "bm_vault_attribute_provenance.json")
 
 STATUSES = ("unverified", "machine-checked", "human-verified")
 

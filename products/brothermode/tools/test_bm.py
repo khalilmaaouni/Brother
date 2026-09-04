@@ -1273,6 +1273,15 @@ class TestProjectSecurityClaims(unittest.TestCase):
                    # must gate: a local index read, no remote, no push,
                    # the same posture as bm_reconcile_worktrees.py above.
                    "bm_vault_contract.py": {"subprocess"},
+                   # bm_vault_lint.py (2026-09-04) derives a note's missing
+                   # created field from ONE local git question, `git log
+                   # --diff-filter=A --follow --format=%ad --date=short --
+                   # <rel>` run inside the vault, to find the commit that
+                   # added the note: the same local index read as
+                   # bm_vault_contract.py above, no remote, no push, no
+                   # socket. id is a sha256 of the note's own path and never
+                   # touches subprocess at all.
+                   "bm_vault_lint.py": {"subprocess"},
                    # bm_vault_exchange.py (VB8-02) orchestrates the `age`
                    # binary as a local subprocess because rolling age's
                    # crypto in Python would be homemade crypto, which the
@@ -3071,6 +3080,113 @@ class TestFinding4InstallVerifierSeesEveryEntryType(unittest.TestCase):
                                 "FINDING 4B regression: checksums.sh manifested a "
                                 "symlink:\n%s\n%s" % (r.stdout, r.stderr))
             self.assertIn("tools/sneaky.py", r.stderr)
+
+    def _strip_git(self, root):
+        """A copy of `root` with no .git, which is what a released install
+        actually is: a plain directory. Both scripts take a different branch
+        there (checksums.sh walks with find instead of asking git; the
+        verifier keeps its full EXTRA alarm instead of consulting
+        .gitignore), and that is the branch E80 was found on."""
+        plain = os.path.join(os.path.dirname(root), "plain-" + os.path.basename(root))
+        shutil.copytree(root, plain,
+                        ignore=shutil.ignore_patterns(".git", "CHECKSUMS.sha256"))
+        return plain
+
+    def _add_templates(self, root):
+        os.makedirs(os.path.join(root, "project-template"), exist_ok=True)
+        for name in ("CANVAS.md", "DELIVERY-PACKET.md"):
+            with io.open(os.path.join(root, "project-template", name),
+                         "w", encoding="utf-8") as f:
+                f.write("shipped template, not project state\n")
+
+    def test_a_shipped_template_named_like_project_state_is_manifested(self):
+        """E80 (2026-09-04, external release integrity trial on the public
+        v1.0.1 clone). checksums.sh excluded CANVAS.md and
+        DELIVERY-PACKET.md by BARE NAME, which matches at ANY depth, and the
+        product ships project-template/CANVAS.md and
+        project-template/DELIVERY-PACKET.md as tracked template files. On a
+        tree with no .git (a released install, an export) the find branch
+        therefore dropped two shipped files out of the manifest entirely:
+        nothing attested them, so nothing could ever detect them being
+        changed.
+
+        Driven against the pre-fix script and observed failing: the manifest
+        came back without either path."""
+        with tempfile.TemporaryDirectory() as d:
+            root = os.path.realpath(d)
+            self._make_install(root)
+            self._add_templates(root)
+            plain = self._strip_git(root)
+            r = self._checksums(plain)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            with io.open(os.path.join(plain, "CHECKSUMS.sha256"),
+                         encoding="utf-8") as fh:
+                manifest = fh.read()
+            for rel in ("project-template/CANVAS.md",
+                        "project-template/DELIVERY-PACKET.md"):
+                self.assertIn(rel, manifest,
+                              "checksums.sh dropped the shipped template %r "
+                              "from the manifest (E80)" % rel)
+            r = self._verify(plain)
+            self.assertEqual(r.returncode, 0,
+                             "a shipped template named like project state "
+                             "must verify:\n%s\n%s" % (r.stdout, r.stderr))
+            self.assertIn("PASSED", r.stdout)
+
+    def test_an_unmanifested_file_named_like_project_state_is_still_an_extra(self):
+        """The verifier's half of E80, which is the security-relevant one:
+        its EXTRA scan skipped ANY entry named CANVAS.md, so a planted file
+        at tools/CANVAS.md sat in an installed copy and the verifier printed
+        PASSED. The exclusion is now anchored at the install root, where the
+        founder's own project state actually lands, so a plant one directory
+        down is named and fails the run.
+
+        Driven against the pre-fix script and observed failing: exit 0 and
+        PASSED with the plant in place."""
+        with tempfile.TemporaryDirectory() as d:
+            root = os.path.realpath(d)
+            self._make_install(root)
+            plain = self._strip_git(root)
+            r = self._checksums(plain)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            with io.open(os.path.join(plain, "tools", "CANVAS.md"), "w",
+                         encoding="utf-8") as f:
+                f.write("planted, never manifested\n")
+            r = self._verify(plain)
+            self.assertNotEqual(r.returncode, 0,
+                                "an unmanifested tools/CANVAS.md must not "
+                                "pass:\n%s\n%s" % (r.stdout, r.stderr))
+            self.assertIn("tools/CANVAS.md", r.stdout)
+
+    def test_project_state_at_the_install_root_is_still_excluded(self):
+        """The other half of E80, so the fix cannot be 'stop excluding
+        anything'. A CANVAS.md the founder's own project wrote at the
+        install ROOT is state, never payload: it stays out of the manifest
+        and out of the verifier's listing, so no EXTRA alarm fires for it
+        on a machine where anyone has ever started a project."""
+        with tempfile.TemporaryDirectory() as d:
+            root = os.path.realpath(d)
+            self._make_install(root)
+            plain = self._strip_git(root)
+            r = self._checksums(plain)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            with io.open(os.path.join(plain, "CHECKSUMS.sha256"),
+                         encoding="utf-8") as fh:
+                manifest = fh.read()
+            for name in ("CANVAS.md", "CANVAS-p1.md", "DELIVERY-PACKET.md",
+                         "DELIVERY-PACKET-p1.md", "PROJECT-VIEW.html",
+                         "STATE.md"):
+                with io.open(os.path.join(plain, name), "w",
+                             encoding="utf-8") as f:
+                    f.write("machine state written by a running project\n")
+                self.assertNotIn(
+                    "  %s\n" % name, manifest,
+                    "root-level project state %r must not be manifested" % name)
+            r = self._verify(plain)
+            self.assertEqual(r.returncode, 0,
+                             "project state at the install root must not "
+                             "raise EXTRA:\n%s\n%s" % (r.stdout, r.stderr))
+            self.assertIn("PASSED", r.stdout)
 
 
 def _identity_rows(root, name):
@@ -8534,19 +8650,41 @@ class TestGitignoreCoversGeneratedProjectViews(unittest.TestCase):
         # through this same class once already (the dated comment inside
         # scripts/checksums.sh tells that story), so this pin holds the
         # WHOLE gitignore family in both scripts rather than one name.
+        #
+        # E80 (2026-09-04) narrowed the FORM, never the family: the same
+        # five names are excluded, but ROOT-ANCHORED rather than bare,
+        # because a bare name also matched the two tracked template files
+        # project-template/CANVAS.md and project-template/DELIVERY-PACKET.md
+        # and dropped them out of the release. This pin now holds the
+        # root-anchored form, so a revert to the bare name fails here.
+        anchors = {"scripts/checksums.sh": "! -path './%s'",
+                   "scripts/verify-install.sh": '! -path "$TARGET/%s"'}
         for script in ("scripts/checksums.sh", "scripts/verify-install.sh"):
             with io.open(os.path.join(self.ROOT, script),
                          encoding="utf-8") as fh:
                 src = fh.read()
+            # The negative below reads OPERAND lines only, never comments: a
+            # comment explaining why the bare form was wrong necessarily
+            # quotes the bare form, and matching that would fail on the very
+            # file that documents the fix.
+            operands = "\n".join(
+                line for line in src.splitlines()
+                if not line.lstrip().startswith("#"))
             for name in ("CANVAS.md", "CANVAS-*.md",
                          "DELIVERY-PACKET.md", "DELIVERY-PACKET-*.md",
                          "PROJECT-VIEW.html"):
                 self.assertIn(
-                    "! -name '%s'" % name, src,
-                    "%s no longer excludes the generated view %r; any "
-                    "machine with a generated project view at the root "
-                    "fails its own integrity check with an EXTRA "
-                    "warning" % (script, name))
+                    anchors[script] % name, src,
+                    "%s no longer excludes the generated view %r at the "
+                    "install root; any machine with a generated project "
+                    "view at the root fails its own integrity check with "
+                    "an EXTRA warning" % (script, name))
+                self.assertNotIn(
+                    "! -name '%s'" % name, operands,
+                    "%s excludes %r by BARE NAME again; that also matches "
+                    "the tracked template project-template/%s and drops a "
+                    "shipped file out of the release (E80)"
+                    % (script, name, name))
             # The L05 brief pages land in a Handover/ directory, pruned by
             # path rather than by name; both scripts must prune it or a
             # generated brief page fails verify-install the same way.
@@ -9421,6 +9559,632 @@ class TestUserFacingFilesNeverTeachPathInference(unittest.TestCase):
             "anywhere on the line: %r (if this is a deliberate new bare spot "
             "outside the scope of the 2026-08-07 fix, add its (path, matched "
             "text) pair to known_bare with a reason)" % new_offenders)
+
+
+class TestBmRepoScope(unittest.TestCase):
+    """E76: per-repository hook scoping. tools/bm_repo_scope.py is the
+    shared reader every hook calls at entry; this proves its own logic
+    (find_repo_root, the config parse, the once-per-session notice) and
+    then drives EVERY hook command hooks/hooks.json actually registers, as
+    real subprocesses, so a hook added later is covered automatically
+    rather than by a hand-picked sample."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self._scratch = []
+        subprocess.run(["git", "init", "-q", self.tmp], check=True)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+        for path in self._scratch:
+            shutil.rmtree(path, ignore_errors=True)
+
+    def _tools_farm(self, gate_module_text=None):
+        """A symlink farm of the whole product root whose tools/ holds every
+        real sibling except bm_repo_scope.py, which is written from
+        `gate_module_text` (None means: symlink the real one too).
+
+        A farm rather than a copy because the hooks resolve siblings from
+        their own directory and the product root above it, so a hook run out
+        of here behaves exactly as it does in place while reading OUR gate
+        module. Returns the farm's tools/ directory."""
+        product = os.path.dirname(HERE)
+        base = tempfile.mkdtemp(prefix="bm-repo-scope-farm-")
+        self._scratch.append(base)
+        for name in os.listdir(product):
+            if name != "tools":
+                os.symlink(os.path.join(product, name),
+                           os.path.join(base, name))
+        tools = os.path.join(base, "tools")
+        os.makedirs(tools)
+        for name in os.listdir(HERE):
+            if gate_module_text is not None and name == "bm_repo_scope.py":
+                continue
+            os.symlink(os.path.join(HERE, name), os.path.join(tools, name))
+        if gate_module_text is not None:
+            with io.open(os.path.join(tools, "bm_repo_scope.py"), "w",
+                         encoding="utf-8") as f:
+                f.write(gate_module_text)
+        return tools
+
+    def _write_config(self, text):
+        d = os.path.join(self.tmp, ".brother")
+        os.makedirs(d, exist_ok=True)
+        with io.open(os.path.join(d, "config"), "w", encoding="utf-8") as f:
+            f.write(text)
+
+    def _load(self):
+        spec = importlib.util.spec_from_file_location(
+            "bm_repo_scope_under_test", os.path.join(HERE, "bm_repo_scope.py"))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_absent_config_is_active(self):
+        mod = self._load()
+        self.assertFalse(mod.hooks_off(cwd=self.tmp))
+
+    def test_off_line_turns_hooks_off(self):
+        self._write_config("hooks: off\n")
+        mod = self._load()
+        self.assertTrue(mod.hooks_off(payload={"session_id": "s1"}, cwd=self.tmp))
+
+    def test_off_line_is_case_insensitive_past_comments_and_blanks(self):
+        self._write_config("# a comment\n\nHOOKS: OFF\n")
+        mod = self._load()
+        self.assertTrue(mod.hooks_off(cwd=self.tmp))
+
+    def test_readable_text_that_is_not_the_off_line_stays_active(self):
+        self._write_config("this is not the magic line\n")
+        mod = self._load()
+        with contextlib.redirect_stderr(io.StringIO()):
+            off = mod.hooks_off(cwd=self.tmp)
+        self.assertFalse(off)
+
+    def test_undecodable_bytes_default_active_with_one_diagnostic_line(self):
+        d = os.path.join(self.tmp, ".brother")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "config"), "wb") as f:
+            f.write(b"\xff\xfe\x00garbage")
+        mod = self._load()
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            off = mod.hooks_off(cwd=self.tmp)
+        self.assertFalse(off)
+        self.assertIn("could not be read", err.getvalue())
+
+    def test_notice_prints_once_per_session_across_two_calls(self):
+        self._write_config("hooks: off\n")
+        mod = self._load()
+        first = io.StringIO()
+        with contextlib.redirect_stderr(first):
+            self.assertTrue(
+                mod.hooks_off(payload={"session_id": "sX"}, cwd=self.tmp))
+        second = io.StringIO()
+        with contextlib.redirect_stderr(second):
+            self.assertTrue(
+                mod.hooks_off(payload={"session_id": "sX"}, cwd=self.tmp))
+        self.assertIn("hooks are off", first.getvalue())
+        self.assertEqual(second.getvalue(), "")
+
+    def test_a_different_session_gets_its_own_notice(self):
+        self._write_config("hooks: off\n")
+        mod = self._load()
+        with contextlib.redirect_stderr(io.StringIO()):
+            mod.hooks_off(payload={"session_id": "sA"}, cwd=self.tmp)
+        second = io.StringIO()
+        with contextlib.redirect_stderr(second):
+            mod.hooks_off(payload={"session_id": "sB"}, cwd=self.tmp)
+        self.assertIn("hooks are off", second.getvalue())
+
+    def test_find_repo_root_walks_up_from_a_subdirectory(self):
+        sub = os.path.join(self.tmp, "a", "b", "c")
+        os.makedirs(sub, exist_ok=True)
+        mod = self._load()
+        self.assertEqual(os.path.realpath(mod.find_repo_root(sub)),
+                         os.path.realpath(self.tmp))
+
+    def _registered_hook_commands(self):
+        """Every (event, script_filename, extra_argv) hooks/hooks.json
+        actually registers, read from the file itself rather than
+        retyped, the same expand-the-registry technique
+        test_bm_consent.py uses for bm_hookchain.py's CHAINS table."""
+        hooks_json = os.path.join(os.path.dirname(HERE), "hooks", "hooks.json")
+        with io.open(hooks_json, encoding="utf-8") as f:
+            spec = json.load(f)
+        pat = re.compile(r'tools/([\w.]+\.py)"?\s*(.*)')
+        out = []
+        for event, entries in spec["hooks"].items():
+            for entry in entries:
+                for h in entry.get("hooks", []):
+                    m = pat.search(h.get("command", ""))
+                    if not m:
+                        continue
+                    script = m.group(1)
+                    tail = m.group(2).strip()
+                    argv = [a.strip('"') for a in tail.split()] if tail else []
+                    out.append((event, script, argv))
+        return out
+
+    def _hook_payload(self, event, session_id):
+        """The one payload shape the inert-when-off test and its positive
+        control both send, written once so the two states provably differ
+        only in whether .brother/config exists."""
+        return json.dumps({
+            "cwd": self.tmp, "session_id": session_id,
+            "hook_event_name": event, "tool_name": "Write",
+            "tool_input": {"file_path": os.path.join(self.tmp, "x.py")},
+            "transcript_path": os.path.join(self.tmp, "nonexistent.jsonl"),
+            "reason": "test",
+        })
+
+    def _run_registered_hook(self, script, argv, payload):
+        return subprocess.run(
+            [sys.executable, os.path.join(HERE, script)] + argv,
+            input=payload, capture_output=True, text=True, cwd=self.tmp)
+
+    def test_every_registered_hook_exits_zero_and_stays_inert_when_off(self):
+        """The done_check's behavioral proof: every hook hooks/hooks.json
+        wires up, run as a real subprocess against a repository with
+        hooks turned off, exits 0 and prints nothing to stdout (no
+        decision, no digest, no output at all), which means it stopped at
+        the gate instead of doing its normal work.
+
+        This assertion is only worth anything alongside
+        test_at_least_one_registered_hook_is_loud_when_hooks_are_on below,
+        which is its positive control: on a set of hooks that printed
+        nothing in EITHER state, this test would stay green with the E76
+        gate deleted outright.
+
+        Narrowed 2026-09-04 (security review, Major): the WRITE GUARDS are
+        exempt from the inertness claim on purpose, because a repository
+        may not switch off the check standing between it and the person's
+        disk. They are driven the other way, as guards, by
+        test_the_write_guard_is_not_switched_off_by_the_repo_config below.
+        The exemption is read from bm_repo_scope's own tuple rather than
+        retyped, so a fourth guard added there is exempt here too."""
+        self._write_config("hooks: off\n")
+        guards = self._load().WRITE_GUARD_HOOKS
+        commands = self._registered_hook_commands()
+        self.assertGreater(
+            len(commands), 0,
+            "hooks.json parsed to zero commands; the regex or the fixture drifted")
+        for i, (event, script, argv) in enumerate(commands):
+            if script in guards:
+                continue
+            r = self._run_registered_hook(
+                script, argv, self._hook_payload(event, "sess-%d" % i))
+            self.assertEqual(
+                r.returncode, 0,
+                "%s %s (%s) did not exit 0 with hooks off: stderr=%r"
+                % (script, argv, event, r.stderr))
+            self.assertEqual(
+                r.stdout, "",
+                "%s %s (%s) printed to stdout with hooks off, so it did its "
+                "normal work instead of stopping at the gate: %r"
+                % (script, argv, event, r.stdout))
+
+    def test_the_write_guard_is_not_switched_off_by_the_repo_config(self):
+        """Security review 2026-09-04, Major. .brother/config is content
+        that arrives WITH a repository, and "hooks: off" used to make every
+        registered hook of both products exit at once, the write guards
+        included, with one stderr line as the only trace. So a clone could
+        switch off the check standing between it and the person's disk.
+        Driven as a real subprocess, in enforced mode against a tree with
+        no store, which is the fence's plainest refusal: with hooks off it
+        must STILL deny, and it must say why it stayed on."""
+        self._write_config("hooks: off\n")
+        payload = json.dumps({
+            "cwd": self.tmp, "session_id": "sess-guard",
+            "hook_event_name": "PreToolUse", "tool_name": "Write",
+            "tool_input": {"file_path": os.path.join(self.tmp, "x.py")},
+        })
+        r = subprocess.run(
+            [sys.executable, os.path.join(HERE, "bm_fence_hook.py")],
+            input=payload, capture_output=True, text=True, cwd=self.tmp,
+            env=dict(os.environ, BM_FENCE_MODE="enforced"))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(
+            r.stdout.strip(),
+            "bm_fence_hook printed nothing with hooks off, so the "
+            "repository's own config switched the write guard off: %r"
+            % r.stderr)
+        decision = json.loads(r.stdout)["hookSpecificOutput"]
+        self.assertEqual(decision["permissionDecision"], "deny")
+        self.assertIn("does not switch off the write guards", r.stderr)
+
+    def test_the_flag_refuses_to_report_off_and_the_other_hooks_still_stop(self):
+        """The unit-level pair, so the mechanism is pinned and not only its
+        one observed consequence: the SAME config, read twice, answers True
+        for an ordinary hook and False for a write guard."""
+        self._write_config("hooks: off\n")
+        mod = self._load()
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertTrue(
+                mod.hooks_off(payload={"session_id": "g1"}, cwd=self.tmp))
+            self.assertFalse(
+                mod.hooks_off(payload={"session_id": "g1"}, cwd=self.tmp,
+                              write_guard=True))
+
+    def test_this_products_named_write_guard_really_passes_the_flag(self):
+        """WRITE_GUARD_HOOKS is documentation unless something reads the
+        call site: a hook renamed there, or a call site edited back to the
+        plain call, fails here rather than silently reopening the hole.
+        Only this product's own guard is checked from this file; the two
+        BrotherSBE guards are checked in that product's own suite."""
+        mod = self._load()
+        self.assertIn("bm_fence_hook.py", mod.WRITE_GUARD_HOOKS)
+        with io.open(os.path.join(HERE, "bm_fence_hook.py"),
+                     encoding="utf-8") as f:
+            source = f.read()
+        self.assertIn("write_guard=True", source,
+                      "bm_fence_hook.py is named a write guard but does not "
+                      "pass write_guard=True, so .brother/config can switch "
+                      "it off again")
+    def test_at_least_one_registered_hook_is_loud_when_hooks_are_on(self):
+        """THE POSITIVE CONTROL for the inert-when-off test above, and the
+        only thing that makes its assertion mean anything.
+
+        That test asserts stdout == "" for every registered hook with
+        hooks off. Nothing in it distinguishes "the gate stopped the hook"
+        from "this hook prints nothing anyway": the same file's
+        test_absent_config_leaves_bm_session_cap_unaffected asserts an
+        EMPTY stdout for bm_session_cap.py in the ON state too, so for at
+        least that hook the off assertion is satisfied by silence that was
+        never the gate's doing.
+
+        So this runs the SAME payloads against the SAME repository with no
+        .brother/config at all, then again with it, and refuses unless at
+        least one hook's stdout actually differs between the two states.
+        Delete the E76 gate and this fails, which is what the off test on
+        its own could not do."""
+        commands = self._registered_hook_commands()
+        self.assertGreater(
+            len(commands), 0,
+            "hooks.json parsed to zero commands; the regex or the fixture drifted")
+        # ON first: setUp leaves the repository with no .brother/config,
+        # and writing one is what moves it to the off state below.
+        on = [self._run_registered_hook(
+                  script, argv, self._hook_payload(event, "on-%d" % i)).stdout
+              for i, (event, script, argv) in enumerate(commands)]
+        self._write_config("hooks: off\n")
+        differed = []
+        for i, (event, script, argv) in enumerate(commands):
+            off = self._run_registered_hook(
+                script, argv, self._hook_payload(event, "off-%d" % i)).stdout
+            if on[i] != "" and off == "":
+                differed.append("%s %s (%s)" % (script, argv, event))
+        self.assertTrue(
+            differed,
+            "no registered hook printed anything to stdout with hooks ON "
+            "that it stopped printing with hooks off, so the "
+            "inert-when-off assertion above is vacuous: it would pass with "
+            "the E76 gate deleted. Hooks tried: %r"
+            % [(e, s, a) for (e, s, a) in commands])
+
+    def test_an_unparseable_gate_module_degrades_to_active_and_exits_zero(self):
+        """_load_bm_repo_scope's `except Exception: return None`, named by no
+        test until now. It is a SILENT degrade to "hooks active", so the only
+        way to see it is differentially: the SAME repository, with hooks
+        turned off, run once against the real gate module and once against an
+        unparseable one.
+
+        Both halves matter. Exit 0 says a broken optional gate never takes
+        the hook down with it; the non-empty stdout says what the fallback
+        actually chose, which is the pre-E76 behaviour (do the normal work),
+        never "stay inert because something went wrong"."""
+        self._write_config("hooks: off\n")
+        broken = "def hooks_off(  # deliberately unparseable\n"
+
+        def run(tools):
+            return subprocess.run(
+                [sys.executable, os.path.join(tools, "bm_sessionstart.py")],
+                input=json.dumps({"cwd": self.tmp,
+                                  "session_id": "degrade-probe"}),
+                capture_output=True, text=True, cwd=self.tmp)
+
+        good = run(self._tools_farm())
+        bad = run(self._tools_farm(gate_module_text=broken))
+        self.assertEqual(good.returncode, 0, good.stderr)
+        self.assertEqual(
+            good.stdout, "",
+            "the control: with a working gate module this hook is inert, so "
+            "the farm itself is not what changes the outcome below")
+        self.assertEqual(
+            bad.returncode, 0,
+            "an unparseable gate module must never take the hook down with "
+            "it: stderr=%r" % bad.stderr)
+        self.assertNotEqual(
+            bad.stdout, "",
+            "an unreadable gate module degrades to hooks ACTIVE, so this "
+            "hook must do its normal work rather than stay silent")
+
+    def test_absent_config_leaves_bm_session_cap_unaffected(self):
+        """No .brother/config at all: bm_session_cap.py behaves exactly as
+        it did before E76 (silent allow, exit 0, nothing on either
+        stream)."""
+        payload = json.dumps({"cwd": self.tmp, "session_id": "sess-plain"})
+        r = subprocess.run(
+            [sys.executable, os.path.join(HERE, "bm_session_cap.py")],
+            input=payload, capture_output=True, text=True, cwd=self.tmp)
+        self.assertEqual(r.returncode, 0)
+        self.assertEqual(r.stdout, "")
+        self.assertEqual(r.stderr, "")
+
+    def test_absent_config_leaves_bm_fence_hook_unaffected(self):
+        """Same proof, second hook: whatever bm_fence_hook.py decides for a
+        repository with no store (deny, in enforced mode, exit 0 either
+        way), an ABSENT .brother/config must not change it. Compared
+        against a baseline run rather than a fixed string, so this stays
+        true regardless of BM_FENCE_MODE or the store-init message
+        wording."""
+        def run():
+            return subprocess.run(
+                [sys.executable, os.path.join(HERE, "bm_fence_hook.py")],
+                input=json.dumps({
+                    "cwd": self.tmp, "session_id": "sess-plain2",
+                    "tool_name": "Write",
+                    "tool_input": {"file_path": os.path.join(self.tmp, "y.py")},
+                }),
+                capture_output=True, text=True, cwd=self.tmp)
+        baseline = run()
+        after = run()
+        self.assertEqual(baseline.returncode, after.returncode)
+        self.assertEqual(baseline.stdout, after.stdout)
+        self.assertNotIn("hooks are off", after.stdout)
+
+    # --- E50: the INSTALL-side default. The marker scripts/install.py writes
+    # beside the settings file turns the absent-config case from ACTIVE into
+    # INACTIVE, so a machine that installed Brother to try it on one
+    # repository runs nothing anywhere else.
+
+    def _scoped_config_dir(self, text=None):
+        """A throwaway CLAUDE_CONFIG_DIR carrying the E50 scope marker."""
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        if text is None:
+            text = self._load().SCOPE_MARKER_TEXT
+        with io.open(os.path.join(d, "brother-hook-scope"), "w",
+                     encoding="utf-8") as f:
+            f.write(text)
+        return d
+
+    def _with_config_dir(self, d):
+        old = os.environ.get("CLAUDE_CONFIG_DIR")
+        os.environ["CLAUDE_CONFIG_DIR"] = d
+
+        def restore():
+            if old is None:
+                os.environ.pop("CLAUDE_CONFIG_DIR", None)
+            else:
+                os.environ["CLAUDE_CONFIG_DIR"] = old
+        self.addCleanup(restore)
+
+    def test_scoped_install_makes_an_unopted_repository_inactive(self):
+        self._with_config_dir(self._scoped_config_dir())
+        mod = self._load()
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            off = mod.hooks_off(payload={"session_id": "s50"}, cwd=self.tmp)
+        self.assertTrue(off)
+        self.assertEqual(err.getvalue(), "",
+                         "a repository nobody opted in must cost nothing, "
+                         "not even a line of stderr")
+
+    def test_opting_a_repository_in_makes_it_active_again(self):
+        self._with_config_dir(self._scoped_config_dir())
+        mod = self._load()
+        self._write_config(mod.ON_LINE + "\n")
+        self.assertFalse(mod.hooks_off(payload={"session_id": "s51"},
+                                       cwd=self.tmp))
+
+    def test_off_still_wins_inside_an_opted_in_repository(self):
+        """A scoped machine does not take the repository's own opt-out
+        away: presence opts in, and the off line still turns it off."""
+        self._with_config_dir(self._scoped_config_dir())
+        mod = self._load()
+        self._write_config("hooks: off\n")
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertTrue(mod.hooks_off(payload={"session_id": "s52"},
+                                          cwd=self.tmp))
+
+    def test_no_marker_keeps_the_e76_default_so_a_clone_is_unchanged(self):
+        """The marker is written by an installer only. A clone, a developer
+        tree and this repository's own tests have none, so an absent
+        .brother/config still means ACTIVE and nothing about E76 moved."""
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        self._with_config_dir(d)
+        mod = self._load()
+        self.assertFalse(mod.hooks_off(cwd=self.tmp))
+
+    def test_a_marker_without_the_scope_line_scopes_nothing(self):
+        self._with_config_dir(self._scoped_config_dir("scope: everything\n"))
+        mod = self._load()
+        self.assertFalse(mod.hooks_off(cwd=self.tmp))
+
+    def test_an_unreadable_marker_stays_active_with_one_diagnostic(self):
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        with open(os.path.join(d, "brother-hook-scope"), "wb") as f:
+            f.write(b"\xff\xfe\x00garbage")
+        self._with_config_dir(d)
+        mod = self._load()
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            off = mod.hooks_off(cwd=self.tmp)
+        self.assertFalse(off, "a broken marker must never be the reason a "
+                              "hook stops working")
+        self.assertIn("could not be read", err.getvalue())
+
+    def test_the_inert_path_costs_one_stat_and_finishes_well_under_50_ms(self):
+        """The row's own done_check: a hook invoked in a repository without
+        the marker exits having read nothing, in under 50 ms. Timed in
+        process on purpose, because that measures BROTHER's work; the
+        subprocess figure the test below reports is dominated by a CPython
+        interpreter start, which this row did not add and cannot remove.
+
+        "Having read nothing" is asserted, not narrated: the repository's
+        own .brother directory is never opened (there is none), and the
+        gate leaves the repository tree byte for byte as it found it."""
+        self._with_config_dir(self._scoped_config_dir())
+        mod = self._load()
+        before = self._tree(self.tmp)
+        started = time.time()
+        for i in range(20):
+            self.assertTrue(mod.hooks_off(payload={"session_id": "t%d" % i},
+                                          cwd=self.tmp))
+        each_ms = (time.time() - started) * 1000.0 / 20
+        self.assertEqual(self._tree(self.tmp), before,
+                         "the inert path wrote into the repository")
+        self.assertLess(each_ms, 50.0,
+                        "the inert gate took %.3f ms per call; the row "
+                        "promises under 50" % each_ms)
+        sys.stderr.write("\n[E50] inert gate: %.3f ms per call\n" % each_ms)
+
+    @staticmethod
+    def _tree(root):
+        found = set()
+        for dirpath, dirnames, filenames in os.walk(root):
+            for name in dirnames + filenames:
+                found.add(os.path.relpath(os.path.join(dirpath, name), root))
+        return found
+
+    def test_every_registered_hook_is_inert_in_an_unopted_repository(self):
+        """E50's own proof, and the shape the row's done_check names: with a
+        scoped install and NO .brother/config, every hook hooks/hooks.json
+        registers, run as a real subprocess with its cwd inside an unrelated
+        git repository, exits 0, prints nothing on either stream, and leaves
+        the repository exactly as it found it."""
+        env = dict(os.environ)
+        env["CLAUDE_CONFIG_DIR"] = self._scoped_config_dir()
+        commands = self._registered_hook_commands()
+        self.assertGreater(
+            len(commands), 0,
+            "hooks.json parsed to zero commands; the regex or the fixture drifted")
+        before = self._tree(self.tmp)
+        slowest = 0.0
+        for i, (event, script, argv) in enumerate(commands):
+            payload = json.dumps({
+                "cwd": self.tmp, "session_id": "scoped-%d" % i,
+                "hook_event_name": event, "tool_name": "Write",
+                "tool_input": {"file_path": os.path.join(self.tmp, "x.py")},
+                "transcript_path": os.path.join(self.tmp, "nonexistent.jsonl"),
+                "reason": "test",
+            })
+            started = time.time()
+            r = subprocess.run(
+                [sys.executable, os.path.join(HERE, script)] + argv,
+                input=payload, capture_output=True, text=True, cwd=self.tmp,
+                env=env)
+            slowest = max(slowest, time.time() - started)
+            self.assertEqual(
+                r.returncode, 0,
+                "%s %s (%s) did not exit 0 in an unopted repository: stderr=%r"
+                % (script, argv, event, r.stderr))
+            self.assertEqual(
+                r.stdout, "",
+                "%s %s (%s) printed to stdout in an unopted repository: %r"
+                % (script, argv, event, r.stdout))
+            self.assertEqual(
+                r.stderr, "",
+                "%s %s (%s) printed to stderr in an unopted repository: %r"
+                % (script, argv, event, r.stderr))
+        self.assertEqual(
+            self._tree(self.tmp), before,
+            "a hook wrote into an unopted repository; E50 promises it costs "
+            "nothing at all")
+        # Reported, never asserted. The row's done_check quotes a timed run
+        # under 50 ms, and that budget is for the hook's own work, while this
+        # measurement includes a whole CPython interpreter start on a shared
+        # machine, so asserting on it would fail this suite for reasons that
+        # have nothing to do with scoping.
+        sys.stderr.write(
+            "\n[E50] slowest inert hook invocation, interpreter startup "
+            "included: %.1f ms over %d registered commands\n"
+            % (slowest * 1000.0, len(commands)))
+
+
+class TestBmInstallHookScope(unittest.TestCase):
+    """E50, the install side: scripts/install.py's DEFAULT is a scoped
+    install, and it says where hooks are active in one line."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.source = os.path.dirname(HERE)
+        self.config_dir = os.path.join(self.tmp, "claude")
+        os.makedirs(self.config_dir)
+        self.settings = os.path.join(self.config_dir, "settings.json")
+        self.target = os.path.join(self.tmp, "installed")
+
+    def _install(self, *extra):
+        return subprocess.run(
+            [sys.executable, os.path.join(self.source, "scripts", "install.py"),
+             "--target", self.target, "--settings", self.settings] + list(extra),
+            capture_output=True, text=True)
+
+    def test_the_default_install_scopes_itself_and_says_so_in_one_line(self):
+        r = self._install()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        marker = os.path.join(self.config_dir, "brother-hook-scope")
+        self.assertTrue(os.path.exists(marker),
+                        "the default install left no scope marker, so its "
+                        "hooks would run in every repository on the machine")
+        with io.open(marker, encoding="utf-8") as f:
+            self.assertIn("scope: repositories", f.read())
+        lines = [l for l in r.stdout.splitlines() if l.startswith("hooks: act")]
+        self.assertEqual(len(lines), 1,
+                         "expected exactly one line naming where hooks are "
+                         "active; got %r" % lines)
+        self.assertIn("every other repository", lines[0])
+        self.assertIn(".brother/config", lines[0],
+                      "the line has to say how to add a repository")
+
+    def test_repo_opts_one_repository_in_and_the_line_names_it(self):
+        repo = os.path.join(self.tmp, "myproject")
+        os.makedirs(repo)
+        r = self._install("--repo", repo)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        cfg = os.path.join(repo, ".brother", "config")
+        self.assertTrue(os.path.exists(cfg))
+        with io.open(cfg, encoding="utf-8") as f:
+            self.assertEqual(f.read().strip(), "hooks: on")
+        line = [l for l in r.stdout.splitlines() if l.startswith("hooks: act")]
+        self.assertEqual(len(line), 1)
+        self.assertIn(repo, line[0])
+        self.assertIn("1 repository", line[0])
+
+    def test_hooks_everywhere_writes_no_marker_and_removes_one(self):
+        marker = os.path.join(self.config_dir, "brother-hook-scope")
+        with io.open(marker, "w", encoding="utf-8") as f:
+            f.write("scope: repositories\n")
+        r = self._install("--hooks-everywhere")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertFalse(os.path.exists(marker),
+                         "--hooks-everywhere left a marker behind, so the "
+                         "install it printed is not the install it made")
+        self.assertIn("EVERY repository", r.stdout)
+
+    def test_a_dry_run_writes_nothing(self):
+        r = self._install("--dry-run")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertFalse(os.path.exists(
+            os.path.join(self.config_dir, "brother-hook-scope")))
+
+    def test_uninstall_removes_the_marker_it_installed(self):
+        self.assertEqual(self._install().returncode, 0)
+        marker = os.path.join(self.config_dir, "brother-hook-scope")
+        self.assertTrue(os.path.exists(marker))
+        r = subprocess.run(
+            [sys.executable,
+             os.path.join(self.source, "scripts", "uninstall.py"),
+             "--target", self.target, "--settings", self.settings],
+            capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertFalse(os.path.exists(marker),
+                         "a marker outliving its install would scope a later, "
+                         "unrelated Brother installation nobody asked to scope")
 
 
 if __name__ == "__main__":

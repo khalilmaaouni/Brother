@@ -23,6 +23,7 @@ of inventing fifteen questions nobody wrote.
 Python 3, standard library only. No network.
 """
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -33,6 +34,17 @@ WBS_SOURCE = os.path.join("docs", "plan", "VAULT-WBS-V2-2026-08-29.json")
 NODATA = "NO-DATA"
 PASS = "PASS"
 FAIL = "FAIL"
+
+#: The restore-drill record's freshness bar, chosen from this estate's own
+#: release cadence (docs/releases/, read 2026-09-04): cuts have landed
+#: roughly daily to every two days (0.9.6 2026-08-30; 0.9.7 through 0.9.10
+#: all 2026-08-31; 0.9.11, 1.0.0 and 1.0.1 all 2026-09-02). Seven days is a
+#: full week past the fastest observed gap between cuts -- long enough that
+#: a drill run yesterday, or spanning one weekend, still reads PASS, short
+#: enough that a drill several release cycles stale reads NO-DATA instead of
+#: certifying a tag its own evidence never ran against (evidence auditor,
+#: 2026-09-03: "the tag it certifies is three days younger than the drill").
+RESTORE_DRILL_MAX_AGE_DAYS = 7
 
 #: Each item mirrors parity_gate's cells: a verdict is granted by the named
 #: evidence at `path`, relative to --root, never by assertion.
@@ -67,7 +79,7 @@ ITEMS = [
                 "245 cases, six classes, per-class floors); this Brother-side wrapper runs "
                 "that tool as a black box to prove it from this repository"},
     {"id": "restore-drill", "title": "Restore drill",
-     "critical": True, "kind": "record",
+     "critical": True, "kind": "record", "bind_commit": True,
      "path": os.path.join("docs", "plan", "RESTORE-DRILL-ENTERPRISE-RESULT.json"),
      "blocker": "no enterprise restore drill has proven the governed stores "
                 "(populated multi-tenant backup, destroy, restore, validate)"},
@@ -122,12 +134,139 @@ def _check_record(root, relpath, key="passed"):
     return NODATA, "%s carries no boolean %r field" % (relpath, key)
 
 
-def evaluate(root=ROOT):
+def _commit_is_ancestor(root, commit):
+    """True if commit is an ancestor of (or equal to) root's current HEAD,
+    False if git can positively say it is not, None if git could not answer
+    at all (missing git binary, root is not a git checkout, commit unknown
+    to this history -- e.g. rev-parse exit 128). None is always treated as
+    unproven, never as a silent pass: a gate that cannot verify ancestry
+    must say NO-DATA, not assume it (a known failure class on this estate:
+    a gate can be written against a commit that does not exist and nothing
+    says so)."""
+    try:
+        proc = subprocess.run(["git", "merge-base", "--is-ancestor", commit, "HEAD"],
+                               cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                               text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode == 0:
+        return True
+    if proc.returncode == 1:
+        return False
+    return None
+
+
+def _covered_matches(root, doc):
+    """(ok, detail) for the drill record's CONTENT binding, the second half of
+    the ancestry binding below.
+
+    WHY A SECOND BINDING EXISTS. `scripts/export_public.py` builds the public
+    tree as an ORPHAN commit (build_orphan_commit), so no hub commit is ever
+    an ancestor of a public clone's HEAD and the ancestry test cannot pass
+    there by construction. Measured 2026-09-04 on the 1.0.2 cut: the export
+    tree read "GATE: NOT READY ... Restore drill NO-DATA ... foreign commit"
+    while the hub read READY, and E67's tag-time readiness check turned that
+    into a refused tag. Ancestry is a proxy for the real property, which is
+    that the drill ran against THIS code. In a foreign history that property
+    is still checkable directly: hash the files the drill exercised.
+
+    ok True: every covered file is byte-identical to the sha256 the drill
+    recorded. ok False: one is not, named. ok None: the record carries no
+    usable covered list, so nothing was measured (NO-DATA, never a pass).
+    """
+    covered = doc.get("covered")
+    if not isinstance(covered, list) or not covered:
+        return None, "the record carries no covered list"
+    for entry in covered:
+        if not isinstance(entry, dict):
+            return None, "the covered list holds a non-object entry"
+        rel = entry.get("path")
+        want = entry.get("sha256")
+        if not isinstance(rel, str) or not isinstance(want, str) or not rel or not want:
+            return None, "a covered entry names no path or no sha256"
+        full = os.path.join(root, *rel.split("/"))
+        try:
+            with open(full, "rb") as fh:
+                got = hashlib.sha256(fh.read()).hexdigest()
+        except OSError as exc:
+            return False, "covered file %s is unreadable in this tree (%s)" % (rel, exc)
+        if got != want:
+            return False, "covered file %s has changed since the drill ran" % rel
+    return True, "%d covered file(s)" % len(covered)
+
+
+def _check_restore_drill(root, relpath, key="passed", today=None):
+    """(verdict, evidence). Same shape as _check_record, but the restore
+    drill's PASS is bound to the code it actually ran on (evidence auditor,
+    2026-09-03: _check_record reads only passed=true, so a three-day-old
+    drill certified a tag it never ran against, and would keep certifying
+    every later commit forever). A record with no commit field, or one older
+    than RESTORE_DRILL_MAX_AGE_DAYS, reads NO-DATA naming the specific gap --
+    never a silent pass and never a FAIL, because neither state is a proven
+    break, only an unproven claim.
+
+    A commit that is NOT an ancestor falls through to the content binding
+    (_covered_matches), which is the same property measured a second way for
+    a history where ancestry cannot exist: the public export tree is an
+    orphan commit. All covered files identical reads PASS with the binding
+    named; any difference, or a record with no covered list, reads NO-DATA."""
+    path = os.path.join(root, relpath)
+    if not os.path.isfile(path):
+        return NODATA, "%s does not exist" % relpath
+    try:
+        with open(path, encoding="utf-8") as fh:
+            doc = json.load(fh)
+    except (OSError, ValueError) as exc:
+        return NODATA, "%s unreadable: %s" % (relpath, exc)
+
+    commit = doc.get("commit")
+    if not commit:
+        return NODATA, "%s carries no commit field" % relpath
+
+    content_note = ""
+    is_ancestor = _commit_is_ancestor(root, commit)
+    if is_ancestor is not True:
+        covered_ok, covered_detail = _covered_matches(root, doc)
+        if covered_ok is not True:
+            return NODATA, ("%s: commit %s is not an ancestor of this tree's HEAD, "
+                             "or could not be verified -- foreign commit, and %s"
+                             % (relpath, commit[:12], covered_detail))
+        content_note = ("; bound by content: %s unchanged since %s"
+                         % (covered_detail, commit[:12]))
+
+    drill_date = doc.get("drill_date")
+    if not drill_date:
+        return NODATA, "%s carries no drill_date field" % relpath
+    from datetime import date
+    try:
+        ran = date.fromisoformat(drill_date)
+    except ValueError:
+        return NODATA, "%s: drill_date %r is not an ISO date" % (relpath, drill_date)
+    today_date = date.fromisoformat(today) if today else date.today()
+    age_days = (today_date - ran).days
+    if age_days > RESTORE_DRILL_MAX_AGE_DAYS:
+        return NODATA, ("%s: drill_date %s is %d day(s) old, over the %d day "
+                         "freshness bar" % (relpath, drill_date, age_days,
+                                             RESTORE_DRILL_MAX_AGE_DAYS))
+
+    val = doc.get(key)
+    if val is True:
+        return PASS, ("%s: %s=true commit %s age %d days%s"
+                       % (relpath, key, commit[:12], age_days, content_note))
+    if val is False:
+        return FAIL, ("%s: %s=false commit %s age %d days%s"
+                       % (relpath, key, commit[:12], age_days, content_note))
+    return NODATA, "%s carries no boolean %r field" % (relpath, key)
+
+
+def evaluate(root=ROOT, today=None):
     """List of row dicts, one per gate item, each verdict backed by named evidence."""
     rows = []
     for spec in ITEMS:
         if spec["kind"] == "suite":
             verdict, evidence = _check_suite(root, spec["path"])
+        elif spec.get("bind_commit"):
+            verdict, evidence = _check_restore_drill(root, spec["path"], today=today)
         else:
             verdict, evidence = _check_record(root, spec["path"])
         if verdict == NODATA and spec["blocker"]:
@@ -222,7 +361,7 @@ def main(argv=None):
                          "against (default: today); mirrors battery_verdict")
     args = ap.parse_args(list(sys.argv[1:] if argv is None else argv))
 
-    rows = apply_valid_exceptions(evaluate(args.root), args.root, args.today)
+    rows = apply_valid_exceptions(evaluate(args.root, args.today), args.root, args.today)
     block = blocking(rows)
     nc_fails = noncritical_fails(rows)
     expired = expired_exceptions(args.root, args.today)

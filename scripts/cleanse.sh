@@ -194,8 +194,16 @@ TERMS="${BROTHER_PRIVATE_TERMS:-$HOME/.brothersbe-private-names}"
 # process-list leak), and the ASCII lookarounds are the same bound
 # bm_private_scan.py compiles. Output shape is grep -n's (file:line:text)
 # so the SELF filter after each call keeps working.
+# NUL-DELIMITED, E78 2026-09-03: xargs without -0 splits its stdin on
+# WHITESPACE as well as newlines, so a tracked path holding a space (SCAN_FILES
+# itself is built newline-safe, one path per line, $0 in the awk above) was
+# handed to xargs as two or more separate, non-existent paths, neither of
+# which perl could open; the error went to /dev/null at the call site and the
+# path went unscanned with no visible failure. -0 here, paired with every
+# caller feeding it a NUL-delimited list (tr '\n' '\0'), keeps a path with a
+# space as the one argument it is.
 term_grep_files() {
-  NEEDLE="$1" xargs perl -ne 'print "$ARGV:$.:$_" if /(?<![A-Za-z0-9])\Q$ENV{NEEDLE}\E(?![A-Za-z0-9])/i; close ARGV if eof'
+  NEEDLE="$1" xargs -0 perl -ne 'print "$ARGV:$.:$_" if /(?<![A-Za-z0-9])\Q$ENV{NEEDLE}\E(?![A-Za-z0-9])/i; close ARGV if eof'
 }
 term_grep_stream() {
   NEEDLE="$1" perl -ne 'print if /(?<![A-Za-z0-9])\Q$ENV{NEEDLE}\E(?![A-Za-z0-9])/i'
@@ -244,7 +252,7 @@ while IFS= read -r needle; do
   # it. `grep -E '^\+|^    '` keeps both: an added diff line, or a message
   # line, while `grep -vE '^\+\+\+ '` still drops the file-header line.
   if [ "${#needle}" -le 5 ]; then
-    hits="$(printf '%s\n' "$SCAN_FILES" | term_grep_files "$needle" 2>/dev/null | grep -v "^$SELF:" || true)"
+    hits="$(printf '%s\n' "$SCAN_FILES" | tr '\n' '\0' | term_grep_files "$needle" 2>/dev/null | grep -v "^$SELF:" || true)"
     [ "$commits" -gt 0 ] && hits="$hits$(git log -p --all $HIST_NOT -- $HIST_SCOPE 2>/dev/null | grep -E '^\+|^    ' | grep -vE '^\+\+\+ ' | term_grep_stream "$needle" || true)"
   else
     # CORRECTED 2026-08-30. This branch used substring matching, and a longer
@@ -258,7 +266,7 @@ while IFS= read -r needle; do
     # matches here. A hyphenated or space-separated compound still hits,
     # because those are word boundaries. Since E37 (2026-09-03) so is the
     # underscore: see term_grep_files above.
-    hits="$(printf '%s\n' "$SCAN_FILES" | term_grep_files "$needle" 2>/dev/null | grep -v "^$SELF:" || true)"
+    hits="$(printf '%s\n' "$SCAN_FILES" | tr '\n' '\0' | term_grep_files "$needle" 2>/dev/null | grep -v "^$SELF:" || true)"
     [ "$commits" -gt 0 ] && hits="$hits$(git log -p --all $HIST_NOT -- $HIST_SCOPE 2>/dev/null | grep -E '^\+|^    ' | grep -vE '^\+\+\+ ' | term_grep_stream "$needle" || true)"
   fi
   if [ -n "$(printf '%s' "$hits" | tr -d '[:space:]')" ]; then
@@ -293,7 +301,7 @@ A3="Generated with \[Claude"" Code\]"
 # attribution forms still CAUGHT, 4 technical references now ALLOWED.
 A4="(generated|built|created|made|written|authored|powered) +(with|by) +\[?Claude"" Code\]?"
 for pat in "$A1" "$A2" "$A3" "$A4"; do
-  hits="$(printf '%s\n' "$SCAN_FILES" | xargs grep -niE -- "$pat" 2>/dev/null | grep -v "^$SELF:" || true)"
+  hits="$(printf '%s\n' "$SCAN_FILES" | tr '\n' '\0' | xargs -0 grep -niE -- "$pat" 2>/dev/null | grep -v "^$SELF:" || true)"
   [ "$commits" -gt 0 ] && hits="$hits$(git log -p --all $HIST_NOT -- $ATTR_HIST_SCOPE 2>/dev/null | grep -E '^\+|^    ' | grep -vE '^\+\+\+ ' | grep -niE -- "$pat" | grep -v "$SELF" || true)"
   if [ -n "$(printf '%s' "$hits" | tr -d '[:space:]')" ]; then
     echo "FAIL: attribution or watermark pattern found"
@@ -312,7 +320,7 @@ done
 # the export allowlist are the shippable halves, cleaned deliberately as
 # part of this cutover, so they are scanned here like any other file.
 # products/ paths NOT on the allowlist stay excluded (not yet curated).
-dash="$(printf '%s\n' "$SCAN_FILES" | grep -v "^$SELF$" | xargs perl -CSD -ne 'print "$ARGV:$.\n" if /\x{2014}|\x{2013}/; close ARGV if eof' 2>/dev/null || true)"
+dash="$(printf '%s\n' "$SCAN_FILES" | grep -v "^$SELF$" | tr '\n' '\0' | xargs -0 perl -CSD -ne 'print "$ARGV:$.\n" if /\x{2014}|\x{2013}/; close ARGV if eof' 2>/dev/null || true)"
 if [ -n "$dash" ]; then
   echo "FAIL: em or en dash"
   printf '%s\n' "$dash" | head -5

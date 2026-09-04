@@ -4,9 +4,11 @@ description: Check the installed version against the newest release and explain 
 disable-model-invocation: true
 ---
 
+Plugin root: a Claude Code install exports `${CLAUDE_PLUGIN_ROOT}` and a Codex install exports `${BROTHER_PLUGIN_ROOT}`; both name this plugin's own directory, so read whichever variable appears below as the one your client set. On a clone install neither is set: run the same commands from the checkout root instead.
+
 Outcome to produce: tell the user their installed version, the newest available version, whether they match, and the exact update steps for their install path.
 
-Run the mechanical command `python3 "${CLAUDE_PLUGIN_ROOT}/tools/brothermode_cli.py" update` (the packaged console script is `brothermode update`) and read its output; it is a read-only report and issues no command that writes anything itself. A plugin install exports `${CLAUDE_PLUGIN_ROOT}` for skill and command content, so that path resolves on its own; on a clone install, where the variable is unset, run `python3 tools/brothermode_cli.py update` instead, from the BrotherMode root (`~/.claude/skills/brothermode`). If the network refuses, the command says plainly the check could not run; never guess a version yourself.
+Run the mechanical command `python3 "${CLAUDE_PLUGIN_ROOT}/tools/brothermode_cli.py" update` (the packaged console script is `brothermode update`) and read its output; it is a read-only report and issues no command that writes anything itself. A plugin install exports `${CLAUDE_PLUGIN_ROOT}` for skill and command content, so that path resolves on its own; on a clone install, where the variable is unset, run `python3 tools/brothermode_cli.py update` instead, from the BrotherMode root (the directory that holds `tools/`). If the network refuses, the command says plainly the check could not run; never guess a version yourself.
 
 The command already applies the safety rules that matter: it never sends a development copy (a version ending `.dev1`, or anything newer than the newest release) toward a checkout, because that would be a downgrade wearing the word "update"; and it reports "up to date" or "development copy" and stops, with nothing further to do, before ever reaching the steps below.
 

@@ -21,6 +21,45 @@ import io
 import json
 import os
 import re
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+# C3: this whole check is a question about the CLAUDE plugin loader, so it
+# needs to know which client is running. brother_paths is loaded from beside
+# this file (tools/ is not a package) and its absence degrades to "unknown",
+# which keeps the pre-C3 behaviour rather than turning a broken install into
+# a spurious NO-DATA.
+sys.path.insert(0, HERE)
+try:
+    import brother_paths  # noqa: E402
+except ImportError:  # pragma: no cover, exercised only by a broken install
+    brother_paths = None
+
+#: The verdict this check returns under Codex, and the reason, quoted from the
+#: measurement rather than reasoned about. Codex 0.153.0-alpha.5 DOES have a
+#: hooks mechanism (`codex features list` prints "hooks stable true") but
+#: hooks delivered BY A PLUGIN were removed from it (the same listing prints
+#: "plugin_hooks removed false"), and the canonical plugin validator refuses a
+#: manifest that declares them ("plugin.json field `hooks` is not accepted by
+#: plugin validation", exit 1). So under Codex there is no installed plugin
+#: copy of hooks.json to compare the shipped file against, and a PASS here
+#: would be a statement about a Claude install dressed up as a statement about
+#: this environment. See docs/codex/HOOKS-MAPPING.md.
+CODEX_NO_DATA_DETAIL = (
+    "the running client is Codex, where plugin-delivered hooks do not exist "
+    "(codex features list: 'plugin_hooks removed', and the canonical plugin "
+    "validator refuses a manifest carrying `hooks`), so there is no installed "
+    "hooks.json for this check to compare the shipped file against; "
+    "unexamined is never reported as clean. Wire them with "
+    "`python3 scripts/codex_hooks_install.py --codex-home <dir> --trust`. "
+    "See docs/codex/HOOKS-MAPPING.md")
+
+
+def running_client():
+    """"claude", "codex", or "" when nothing identifies the host."""
+    if brother_paths is None:
+        return ""
+    return brother_paths.client()
 
 #: The same citation shape `tools/test_sbe.py`'s
 #: `test_every_hook_command_points_at_a_file_that_exists` checks the shipped
@@ -167,6 +206,83 @@ def _installed_hooks_json_path(current_version):
     return {"path": None, "source": None, "record": record_path}
 
 
+def _command_signature(command):
+    """The part of a hook command that survives plugin-root expansion.
+
+    A shipped command cites `${CLAUDE_PLUGIN_ROOT}/tools/x.py`; the same
+    command inside a Codex hooks file carries the expanded absolute path,
+    because a user-scope hooks file is not inside a plugin and nothing would
+    substitute the placeholder. Everything from `tools/` onward is identical
+    on both sides, so that is what the two are compared on. A command with no
+    `tools/` segment compares whole, which is the conservative reading.
+    """
+    match = re.search(r"tools/.*$", command or "")
+    return match.group(0) if match else (command or "").strip()
+
+
+def _codex_hooks_json_path():
+    """Codex's own user-scope hooks file for this run, or None when this
+    build cannot resolve a config directory at all."""
+    if brother_paths is None:
+        return None
+    return brother_paths.config_path("hooks.json")
+
+
+def _codex_wiring_verdict(shipped_path):
+    """The hooks-wiring verdict under a Codex client.
+
+    NO-DATA when Codex's own hooks file is absent (nothing is wired, and
+    unexamined is never clean), FAIL when it is unreadable or is missing a
+    control the shipped file declares, PASS when every shipped event, matcher
+    and command signature is present in it. Extra hooks in the Codex file are
+    not a failure: that file is shared, and BrotherMode's own hooks live in
+    it beside these.
+    """
+    codex_path = _codex_hooks_json_path()
+    if codex_path is None:
+        return ("hooks-wiring", "NO-DATA", CODEX_NO_DATA_DETAIL)
+    if not os.path.exists(codex_path):
+        return ("hooks-wiring", "NO-DATA",
+                "%s; looked for a wired Codex hooks file at %s and found none"
+                % (CODEX_NO_DATA_DETAIL, codex_path))
+
+    loaded_shipped = _load_hooks_json(shipped_path)
+    if loaded_shipped["problem"]:
+        return ("hooks-wiring", "FAIL",
+                "shipped hooks.json: %s" % loaded_shipped["problem"])
+    loaded_codex = _load_hooks_json(codex_path)
+    if loaded_codex["problem"]:
+        return ("hooks-wiring", "FAIL",
+                "Codex hooks file: %s" % loaded_codex["problem"])
+
+    shipped_events = _hooks_json_wiring(loaded_shipped["data"])["events"]
+    codex_events = _hooks_json_wiring(loaded_codex["data"])["events"]
+    problems = []
+    wired = 0
+    for event, matchers in shipped_events.items():
+        codex_matchers = codex_events.get(event)
+        if codex_matchers is None:
+            problems.append("%s lacks the %s event entirely, which the shipped "
+                            "file declares" % (codex_path, event))
+            continue
+        for matcher, commands in matchers.items():
+            label = ("matcher '%s'" % matcher) if matcher else "hook block"
+            present = [_command_signature(c)
+                       for c in codex_matchers.get(matcher, ())]
+            for command in commands:
+                if _command_signature(command) in present:
+                    wired += 1
+                else:
+                    problems.append("%s's %s %s does not carry %s"
+                                    % (codex_path, event, label, command))
+    if problems:
+        return ("hooks-wiring", "FAIL", "; ".join(problems))
+    return ("hooks-wiring", "PASS",
+            "the running client is Codex and its own hooks file at %s carries "
+            "all %d command(s) the shipped wiring at %s declares"
+            % (codex_path, wired, shipped_path))
+
+
 def hooks_wiring_check(root, current_version):
     """B-10/C7: `doctor` never inspected hooks/hooks.json at all, so a
     tampered or stripped hook (autosave and SessionStart silently not firing)
@@ -183,6 +299,15 @@ def hooks_wiring_check(root, current_version):
     this file never imports `brothersbe`.
     """
     shipped_path = os.path.join(root, "hooks", "hooks.json")
+
+    # C3: the guard, ahead of every other rung. Codex delivers no hooks with a
+    # plugin install, so the Claude comparison below has nothing to compare;
+    # but Codex DOES read a user-scope hooks file, and when one is wired this
+    # check has a real subject again. Presence of that file decides which:
+    # wired reads PASS or FAIL on its contents, absent reads NO-DATA. See
+    # CODEX_NO_DATA_DETAIL above and docs/codex/HOOKS-MAPPING.md.
+    if running_client() == "codex":
+        return _codex_wiring_verdict(shipped_path)
     loaded_shipped = _load_hooks_json(shipped_path)
     shipped, shipped_problem = loaded_shipped["data"], loaded_shipped["problem"]
     if shipped_problem:

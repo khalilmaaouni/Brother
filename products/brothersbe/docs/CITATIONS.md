@@ -138,10 +138,10 @@ captured.
 - date: current repository, recorded July 2026
 - limit: self-reference carrying no evidence weight, and an availability target rather than a factual claim; the checklist re-checks it at publish time and this inventory does not
 
-## https://github.com/khalilmaaouni/BrotherSBE.git
-- claim: the clone URL install.sh uses and the book's install chapter shows, the git suffix form of the entry above
+## https://github.com/khalilmaaouni/Brother.git
+- claim: the clone URL install.sh uses and the book's install chapter shows, the git suffix form of the entry above; it names the umbrella repository this product now ships from, which is what install.sh prints today
 - population: one URL, a repository link rather than a measurement; install.sh reaches it with git rather than curl
-- date: current repository, recorded July 2026
+- date: current repository, recorded July 2026, re-pointed 2026-09-04 when the shipped install line moved from the product's own repository to the umbrella
 - limit: self-reference carrying no evidence weight; whether a clone succeeds depends on the reader's network and credentials, which nothing here checks
 
 ## https://github.com/oasdiff/oasdiff

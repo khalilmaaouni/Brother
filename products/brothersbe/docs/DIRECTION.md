@@ -2,8 +2,8 @@
 
 Ratified 2026-08-11 with the founder. This page is the distilled, public form
 of the product direction; roles only, no client or person named. The release
-plan that executes it is
-[the V3 refocus and release plan](specs/2026-08-11-v3-refocus-and-release-plan.md).
+plan that executes it is kept with this project's own specifications and does
+not ship here.
 
 **This page is not the top of the chain.** [The north star](../NORTH-STAR.md),
 founder direction of 2026-08-15, is canonical for both this product and the
@@ -14,8 +14,8 @@ describes only the assurance stretch of it that BrotherSBE owns. Where the two
 disagree, the north star wins and this page is the thing to correct.
 
 The single crossing between the two products is the change passport. Its
-contract, and which half of it exists today, is
-[the change passport seam](specs/2026-08-15-change-passport-seam.md).
+contract, and which half of it exists today, is the change passport seam,
+specified with this project's own specifications rather than here.
 
 ## Identity
 

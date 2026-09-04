@@ -1059,6 +1059,103 @@ def run_selftest():
 
 
 # ---------------------------------------------------------------------- #
+# DATA OVERLAY (row P15, 2026-09-04).
+#
+# Doc 23.2 "DS overlay" names four diagnostics a data-science intake record
+# should carry: data cutoff/split, leakage, primary metric/baseline,
+# reproducibility. These are a DIAGNOSTIC OVERLAY, never a persona bucket
+# (per the views-replace-personas fix above): --overlay data adds four rows
+# scored straight from the record text and prints them UNDER the universal
+# total, and never changes that total, its floor_rule, or the exit code. A
+# row scores PASS when the topic is stated positively, FAIL when the record
+# itself flags the topic as an unresolved gap, and NO-DATA when the topic is
+# never mentioned at all -- never guessed, exactly like every NO-DATA
+# elsewhere in this file.
+#
+# KNOWN CEILING, the safe direction: this is a keyword scan, not language
+# understanding. A bare word like "cutoff" or "baseline" used in an unrelated
+# sentence can register as PASS; the scan does not verify the DETAIL is
+# correct, only that the topic was addressed. Good enough to tell "never
+# mentioned" from "mentioned", which is the same bar the rest of this file's
+# mechanical criteria hold to.
+# ---------------------------------------------------------------------- #
+
+OverlayResult = namedtuple("OverlayResult", ["name", "status", "evidence"])
+
+CUTOFF_SPLIT_RE = re.compile(
+    r'\bcut-?off\b|\btrain(?:ing)?[\s/-]*test\s+split\b|\btemporal\s+split\b|'
+    r'\bholdout\s+split\b|\bhold-out\s+split\b|\bdata\s+split\b', re.IGNORECASE)
+LEAKAGE_RE = re.compile(r'\bleakage\b|\bleaky\b|\bdata\s+leak\b', re.IGNORECASE)
+METRIC_BASELINE_RE = re.compile(r'\bprimary\s+metric\b|\bbaseline\b', re.IGNORECASE)
+REPRODUCIBILITY_RE = re.compile(
+    r'\breproducib\w*\b|\brandom\s+seed\b|\bpinned\s+(?:data|version)\b|\bseed\s*=', re.IGNORECASE)
+
+# Rows 1, 3 and 4: a plain negation word on the SAME line as the topic keyword
+# means the record is flagging that topic as unresolved ("no cutoff defined",
+# "baseline not chosen", "not reproducible"). Leakage is the one topic where a
+# bare "no" is the GOOD outcome ("no target leakage"), so it gets its own,
+# narrower gap pattern below instead of this generic one.
+GENERIC_GAP_RE = re.compile(
+    r'\b(?:no|not|never|none|missing|undefined|unclear|unknown|tbd|n/a)\b', re.IGNORECASE)
+LEAKAGE_GAP_RE = re.compile(
+    r'\bleaky\b|\bleakage\s+(?:risk|found|detected|present)\b|\bpotential\s+leakage\b|'
+    r'\bleakage\s+(?:not|never)\s+(?:checked|addressed|considered|ruled\s+out)\b|'
+    r'\bno\s+leakage\s+check\b', re.IGNORECASE)
+
+# (row name, positive keyword pattern, gap pattern, description used in NO-DATA evidence)
+DATA_OVERLAY_ROW_SPECS = (
+    ('cutoff_and_split', CUTOFF_SPLIT_RE, GENERIC_GAP_RE,
+     'a stated data cutoff and how the train/test split was made'),
+    ('leakage', LEAKAGE_RE, LEAKAGE_GAP_RE,
+     'a leakage check: no feature or target leakage between train and test'),
+    ('primary_metric_and_baseline', METRIC_BASELINE_RE, GENERIC_GAP_RE,
+     'the primary evaluation metric and the baseline it must beat'),
+    ('reproducibility', REPRODUCIBILITY_RE, GENERIC_GAP_RE,
+     'how the result can be reproduced: seed, pinned data/model version, a runnable script'),
+)
+
+
+def score_overlay_row(text, keyword_re, gap_re, description):
+    """PASS/FAIL/NO-DATA for one overlay row, evidence quoted from the
+    record. A line counts as a gap only when it names THIS row's own topic
+    (keyword_re) AND carries this row's gap language (gap_re) on the SAME
+    line -- checking gap_re alone would let a negation word anywhere in the
+    record (about a different topic entirely) fail every row. Otherwise a
+    line matching the positive keyword pattern is a PASS; otherwise the
+    topic was never mentioned, and that is NO-DATA, never a guessed FAIL."""
+    lines = text.splitlines()
+    gap_hits = [ln.strip() for ln in lines if keyword_re.search(ln) and gap_re.search(ln)]
+    if gap_hits:
+        return 'FAIL', "flagged as an unresolved gap in the record: %r" % gap_hits[0]
+    pos_hits = [ln.strip() for ln in lines if keyword_re.search(ln)]
+    if pos_hits:
+        return 'PASS', "stated in the record: %r" % pos_hits[0]
+    return 'NO-DATA', "%s: not mentioned anywhere in the record" % description
+
+
+def score_data_overlay(text):
+    return [OverlayResult(name, *score_overlay_row(text, keyword_re, gap_re, description))
+            for name, keyword_re, gap_re, description in DATA_OVERLAY_ROW_SPECS]
+
+
+# The registry an unknown --overlay name is refused against (argparse
+# 'choices' below reads its keys, so a typo is refused BY NAME at exit 2
+# before the record is even opened). Only 'data' exists today; a future
+# overlay (backend, infra, analytics, BA, QA, founder -- doc 23.2) adds a key
+# here and nothing else in the CLI wiring.
+OVERLAY_SCORERS = {'data': score_data_overlay}
+
+
+def print_overlay(overlay_name, rows):
+    """Printed strictly UNDER the universal total: this never recomputes or
+    touches total_weight_scored, weighted_score or floor_rule, and the
+    caller's exit code is decided before this ever runs."""
+    print("intake-overlay: overlay=%s" % overlay_name)
+    for r in rows:
+        print("- %s: %s ; %s" % (r.name, r.status, r.evidence))
+
+
+# ---------------------------------------------------------------------- #
 # CLI
 # ---------------------------------------------------------------------- #
 
@@ -1241,6 +1338,11 @@ def build_parser():
                          help='questions repeated across sessions for the same person and project')
     parser.add_argument('--receipt-verified', action='store_true', dest='receipt_verified',
                          help='the close produced a receipt whose check ran after the last edit')
+    parser.add_argument('--overlay', choices=sorted(OVERLAY_SCORERS), default=None,
+                         help='diagnostic overlay (doc 23.2): adds rows scored from the record text, '
+                              'printed under the universal total; never changes that total, its '
+                              'floor_rule or the exit code. data: cutoff_and_split, leakage, '
+                              'primary_metric_and_baseline, reproducibility.')
     parser.add_argument('--root', default=None,
                          help='repository root a backticked citation path is resolved against '
                               '(CHECK 1). Default: the nearest directory containing .git above the '
@@ -1320,6 +1422,8 @@ def main(argv=None):
     )
     total_weight_scored = print_report(
         results, effective_persona, view=view, persona_explicit=bool(args.persona))
+    if args.overlay:
+        print_overlay(args.overlay, OVERLAY_SCORERS[args.overlay](text))
     return 0 if total_weight_scored > 0 else 2
 
 

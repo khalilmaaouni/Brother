@@ -212,6 +212,34 @@ class TestCoordinationIsCurrent(unittest.TestCase):
             "so no stream has to guess which plan is current",
         )
 
+    def test_the_record_is_in_the_tree_and_names_the_decision(self):
+        """E47: naming a record is not the same as shipping one.
+
+        The assertion above matches a STRING in COORDINATION.md, and stayed
+        green the whole time the file it names was absent from the tree: a
+        reader following docs/CHARTER.md from a fresh clone got "no such
+        file". This one opens the record and reads the decision out of it.
+        """
+        record = _p("docs", "plan", "ADR-2026-08-23-one-brother-repository.md")
+        self.assertTrue(
+            os.path.isfile(record),
+            "docs/CHARTER.md names this file as the architecture of record, "
+            "so a clone must be able to open it",
+        )
+        with open(record) as fh:
+            text = fh.read()
+        self.assertIn(
+            "Option B",
+            text,
+            "the record must state the decision it is the record of, not "
+            "merely carry the decision's name in its filename",
+        )
+        self.assertIn(
+            "one repository, three plugins under one marketplace",
+            text,
+            "the decision, in the words the deciding record states it in",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

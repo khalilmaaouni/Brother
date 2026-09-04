@@ -47,6 +47,7 @@ No em or en dashes anywhere in this file, its comments, or its output.
 
 import argparse
 import errno
+import importlib.util
 import io
 import json
 import os
@@ -156,6 +157,70 @@ RECORD_NAME = "brothermode-install.json"
 # was at when this install/upgrade ran (or the literal word "unknown"), then
 # the ISO date, so the stamp is self-describing without a schema.
 INSTALLED_FROM_NAME = "INSTALLED-FROM"
+
+# E50 (2026-09-04): the install's OWN scoping decision, distinct from E76's
+# per-repository opt-out. Until this row the install wired hooks into every
+# session on the machine, so a person who installed BrotherMode to try it on
+# one repository paid for it on every repository they opened. The default is
+# now the other way round: the installer writes one marker file beside the
+# settings file it edited, and while that marker is there every hook of both
+# products returns at entry in a repository that carries no .brother/config.
+# tools/bm_repo_scope.py is the reader and owns the file name and the line;
+# this module imports them from there rather than repeating the strings, so
+# the writer and the reader cannot drift apart.
+SCOPE_MARKER_MODULE = os.path.join("tools", "bm_repo_scope.py")
+
+
+def load_repo_scope(source):
+    """The reader module, loaded by path the same way the hooks load their
+    own siblings. Returns None (never raises) when it cannot be loaded, and
+    the caller turns that into a refusal rather than a silent unscoped
+    install: writing a marker whose exact text this module guessed would be
+    worse than not writing one."""
+    path = os.path.join(source, SCOPE_MARKER_MODULE)
+    try:
+        spec = importlib.util.spec_from_file_location(
+            "bm_repo_scope_for_install", path)
+        if spec is None or spec.loader is None:
+            return None
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    except (OSError, ImportError, SyntaxError, ValueError):
+        return None
+    return mod
+
+
+def scope_marker_for_settings(settings_path, marker_name):
+    """The marker sits beside the settings file this installer edited, which
+    is the same place bm_repo_scope.scope_marker_path() reads: both resolve
+    to <claude config dir>/<marker_name>."""
+    return os.path.join(os.path.dirname(os.path.abspath(settings_path)),
+                        marker_name)
+
+
+def opt_in_repository(repo, on_line, dry):
+    """Write <repo>/.brother/config, the one file that makes a scoped
+    installation active in a repository. Returns (path, problem); problem is
+    None on success and otherwise names what stopped it, because an install
+    that silently failed to opt a repository in leaves a person with hooks
+    that do nothing and no line saying why."""
+    repo = os.path.abspath(os.path.expanduser(repo))
+    if not os.path.isdir(repo):
+        return repo, "not a directory"
+    path = os.path.join(repo, ".brother", "config")
+    if dry:
+        return path, None
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        if os.path.exists(path):
+            # Never rewrite a file the repository already carries: it may
+            # hold the "hooks: off" line somebody put there on purpose.
+            return path, None
+        with io.open(path, "w", encoding="utf-8") as fh:
+            fh.write(on_line + "\n")
+    except (IOError, OSError) as exc:
+        return path, str(exc)
+    return path, None
 
 
 def _out(text):
@@ -760,6 +825,15 @@ def build_parser():
                    help="print every change that would be made and write nothing")
     p.add_argument("--no-hooks", action="store_true",
                    help="install files only, leave settings.json untouched")
+    p.add_argument("--repo", action="append", default=None, metavar="PATH",
+                   help="opt this repository in to the hooks (repeatable). "
+                        "Writes PATH/.brother/config; an existing one is left "
+                        "alone. Without this the install is scoped and no "
+                        "repository is active yet.")
+    p.add_argument("--hooks-everywhere", action="store_true",
+                   help="the pre-E50 behaviour: hooks run in every repository "
+                        "on the machine. Writes no scope marker, and removes "
+                        "one a previous install left.")
     return p
 
 
@@ -891,6 +965,60 @@ def main(argv):
         _out("%shooks: every hook entry not owned by BrotherMode was left in "
              "place, in order." % prefix)
 
+    # --- scope (E50). One marker file beside the settings file, plus one
+    # line saying where hooks are active and how to add a repository. It runs
+    # even under --no-hooks, because a person who wired the hooks by hand from
+    # docs/HOOKS.md still gets the scoping default this row promises.
+    scope = load_repo_scope(source)
+    if scope is None:
+        _err("install.py: could not load %s, so the hook scope marker cannot "
+             "be written with the exact text the hooks read. Refusing rather "
+             "than guessing it; check that file and re-run, or pass "
+             "--hooks-everywhere to install with hooks in every repository."
+             % os.path.join(source, SCOPE_MARKER_MODULE))
+        return EXIT_REFUSED
+    marker = scope_marker_for_settings(settings_path, scope.SCOPE_MARKER_NAME)
+    opted = []
+    for repo in (args.repo or []):
+        path, problem = opt_in_repository(repo, scope.ON_LINE, dry)
+        if problem:
+            _err("install.py: could not opt %s in (%s). Nothing else was "
+                 "undone; write that file by hand and the hooks will pick it "
+                 "up." % (path, problem))
+            return EXIT_FAILED
+        opted.append(os.path.dirname(os.path.dirname(path)))
+    if args.hooks_everywhere:
+        removed_marker = os.path.exists(marker)
+        if removed_marker and not dry:
+            try:
+                os.remove(marker)
+            except OSError as exc:
+                _err("install.py: could not remove %s: %s" % (marker, exc))
+                return EXIT_FAILED
+        _out("%shooks: active in EVERY repository on this machine "
+             "(--hooks-everywhere%s). Turn one off with: mkdir -p "
+             ".brother && printf 'hooks: off\\n' > .brother/config"
+             % (prefix, "; scope marker removed" if removed_marker else ""))
+    else:
+        if not dry:
+            try:
+                os.makedirs(os.path.dirname(marker), exist_ok=True)
+                with io.open(marker, "w", encoding="utf-8") as fh:
+                    fh.write(scope.SCOPE_MARKER_TEXT)
+            except (IOError, OSError) as exc:
+                _err("install.py: could not write the hook scope marker %s: "
+                     "%s. Without it the hooks would run in every repository "
+                     "on this machine, which is not what this install "
+                     "promised, so this is a failure and not a warning."
+                     % (marker, exc))
+                return EXIT_FAILED
+        _out("%shooks: active in %d repositor%s (%s); every other repository "
+             "on this machine runs nothing. Add one with: mkdir -p "
+             ".brother && printf 'hooks: on\\n' > .brother/config (marker: "
+             "%s)"
+             % (prefix, len(opted), "y" if len(opted) == 1 else "ies",
+                ", ".join(opted) if opted else "none yet", marker))
+
     # --- record
     record = {
         "version": version,
@@ -900,6 +1028,9 @@ def main(argv):
         "installed_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "hooks": [] if args.no_hooks else list(HOOK_EVENTS),
         "installer": "scripts/install.py",
+        "hook_scope": "everywhere" if args.hooks_everywhere else "repositories",
+        "hook_scope_marker": None if args.hooks_everywhere else marker,
+        "opted_in_repositories": opted,
     }
     try:
         write_record(record_path, record, dry)

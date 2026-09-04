@@ -10,6 +10,8 @@ SIGKILL, so whatever these tests find on disk is what a power cut would leave.
 A proof that lets the dying process tidy up first proves the tidy-up, not the
 crash.
 """
+import contextlib
+import io
 import json
 import os
 import signal
@@ -21,7 +23,10 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import brother_run as BR  # noqa: E402
 import claim_store as C  # noqa: E402
+import continuity  # noqa: E402
+import journal  # noqa: E402
 import work_record as WR  # noqa: E402
 
 
@@ -173,6 +178,74 @@ class TheControllerDiesAndTheStateSurvives(unittest.TestCase):
         self.assertIsNotNone(taken)
         self.assertEqual(taken["reclaimed_from"], "crash-A",
                          "a takeover must name whose work it inherits")
+
+
+class ACapsuleSurvivesAKillAfterIntegration(unittest.TestCase):
+    """E73.2's own done-check, in the fast local form this file's other
+    fixtures already use (claim_store.acquire/release against a bare tempdir,
+    no subprocess): a unit integrates, its capsule is written, and the
+    process dies right there -- nothing more is ever written to run_dir,
+    exactly what a SIGKILL leaves. --continue's own resume screen
+    (brother_run._print_resume_screen, E73.2) then reads that capsule
+    straight off disk and prints it, never guessing.
+
+    A REAL brother_run.py subprocess, killed mid-drain and resumed through
+    its own --continue flag end to end, is NOT reproduced here: that is
+    test_brother_run.py's TheRunsJournalChainsFromOpenToAcceptance's
+    territory (the real door, the real loop_bridge, a stub model) and
+    E73.3's own fourteen-point hostile resume matrix. This proves the
+    narrower, fast claim that belongs beside this file's other crash
+    fixtures: the capsule that a real kill would leave behind is readable
+    and prints correctly."""
+
+    def test_a_run_killed_after_integration_resumes_and_prints_the_capsule(self):
+        run_dir = tempfile.mkdtemp(prefix="capsule-crash-")
+        claims_path = os.path.join(run_dir, "claims.json")
+        claim, problem = C.acquire(claims_path, "CR1", "crash-B")
+        self.assertTrue(claim, problem)
+        C.release(claims_path, "CR1", "crash-B", state="done",
+                  evidence={"exit_code": 0})
+        with open(os.path.join(run_dir, "W-w1.json"), "w",
+                 encoding="utf-8") as fh:
+            json.dump({"outcome": "capsule survives a kill after integration",
+                      "work_id": "w1",
+                      "rows": [{"id": "CR1", "title": "first",
+                               "status": "DONE"}]}, fh)
+        journal.append(run_dir, "run.opened",
+                       payload={"cwd": "/some/target/repo", "resumed": False})
+        journal.append(run_dir, "unit.done", unit_id="CR1", payload={})
+        ok, problem = continuity.write_capsule(run_dir)
+        self.assertTrue(ok, problem)
+
+        # THE KILL: nothing more is ever written to run_dir after this
+        # point -- exactly what a SIGKILL leaves behind: the capsule from
+        # the last checkpoint before the process died, claims.json still
+        # marked done, no process, no in-memory state anywhere.
+
+        # THE RESUME: brother_run.py's own --continue hook reads the
+        # capsule straight off disk and prints it, never rebuilding or
+        # guessing.
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            BR._print_resume_screen(
+                run_dir, "capsule survives a kill after integration")
+        printed = out.getvalue()
+        self.assertIn("capsule survives a kill after integration", printed)
+        self.assertIn("CR1", printed)
+        self.assertIn("integrated", printed)
+        self.assertNotIn("NO-DATA: 'capsule survives a kill", printed)
+
+    def test_a_run_with_no_capsule_reads_no_data_naming_the_outcome(self):
+        """A run from before E73.1/E73.2, or one whose only capsule write
+        ever attempted failed: --continue must say so by name, never guess
+        or stay silent."""
+        run_dir = tempfile.mkdtemp(prefix="capsule-crash-nodata-")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            BR._print_resume_screen(run_dir, "an outcome with no capsule")
+        printed = out.getvalue()
+        self.assertIn("NO-DATA", printed)
+        self.assertIn("an outcome with no capsule", printed)
 
 
 if __name__ == "__main__":

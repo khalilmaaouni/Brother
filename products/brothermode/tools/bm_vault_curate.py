@@ -59,9 +59,16 @@ from collections import Counter
 from datetime import datetime, timezone
 from itertools import combinations
 
+HERE = os.path.dirname(os.path.abspath(__file__))
+# C3: the config directory is resolved by brother_paths, the one seam
+# that knows which coding client is running (docs/codex/HOOKS-MAPPING.md).
+# Loaded from beside this file because tools/ is not a package.
+sys.path.insert(0, HERE)
+import brother_paths  # noqa: E402
+
 TOOLS_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_VAULT = os.environ.get("BROTHERMODE_VAULT") or os.path.expanduser("~/Documents/Kay Vault")
-DEFAULT_QUEUE = os.path.expanduser("~/.claude/bm_vault_curation.json")
+DEFAULT_QUEUE = brother_paths.config_path("bm_vault_curation.json")
 
 DUP_THRESHOLD = 0.5          # scan-duplicates' own default
 JACCARD_THRESHOLD = 0.25

@@ -252,6 +252,53 @@ class VerdictWordsAreMatchedInORDINARY_PROSE(unittest.TestCase):
         self.assertTrue(drift)
 
 
+class ACommitOnlyASecondKnownRepositoryHoldsStillResolves(unittest.TestCase):
+    """E55's evidence named commits of the founder's Kay Vault repository, which
+    KNOWN_REPOS did not list, so a real pushed commit read as drifted in none of
+    the repositories this checker could see (the same shape ItRefusesTo
+    ManufactureAViolation.test_a_commit_in_a_SIBLING_repository_is_not_missing
+    guards for the estate's own repos, here for an ARBITRARY second entry, since
+    KNOWN_REPOS is a fixed tuple this test must not depend on the real vault
+    existing on the machine that runs it)."""
+
+    def test_a_commit_in_the_second_of_two_known_repos_is_not_missing(self):
+        first = tempfile.mkdtemp(prefix="rd-known1-")
+        second = tempfile.mkdtemp(prefix="rd-known2-")
+        run = lambda repo, *a: subprocess.run(
+            ["git"] + list(a), capture_output=True, text=True, cwd=repo)
+        for repo in (first, second):
+            run(repo, "init", "-q", "-b", "main")
+            run(repo, "config", "user.email", "a@b.c")
+            run(repo, "config", "user.name", "t")
+        run(first, "commit", "-q", "--allow-empty", "-m", "seed-first")
+        run(second, "commit", "-q", "--allow-empty", "-m", "seed-second")
+        sha = run(second, "rev-parse", "HEAD").stdout.strip()
+        # first holds no commit matching sha; only the second one does. If the
+        # resolver stopped at the first repository this would read False.
+        old = D.KNOWN_REPOS
+        D.KNOWN_REPOS = (first, second)
+        try:
+            self.assertTrue(D._commit_exists(sha))
+        finally:
+            D.KNOWN_REPOS = old
+
+    def test_the_vault_is_a_known_repo_or_absent_is_no_data_not_fail(self):
+        """The vault path itself may not exist on this machine. _commit_exists
+        must skip it (no .git found) rather than treat its absence as a FAIL;
+        a bogus sha resolved against only the vault entry (when present) or an
+        empty repo set (when absent) is NO-DATA (None), never a manufactured
+        drift."""
+        vault = os.path.expanduser("~/Documents/Kay Vault")
+        self.assertIn(vault, D.KNOWN_REPOS)
+        old = D.KNOWN_REPOS
+        D.KNOWN_REPOS = (vault,)
+        try:
+            result = D._commit_exists("0" * 40)
+            self.assertIn(result, (None, False))
+        finally:
+            D.KNOWN_REPOS = old
+
+
 class TheResolverSeesLinkedWorktrees(unittest.TestCase):
     """In a linked worktree .git is a FILE, and the resolver's isdir guard
     skipped that repository entirely, so every commit made there read as

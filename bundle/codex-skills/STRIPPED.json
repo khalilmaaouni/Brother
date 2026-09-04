@@ -1,0 +1,9 @@
+{
+  "accepted_frontmatter_keys": [
+    "name",
+    "description"
+  ],
+  "generated_by": "scripts/codex_skills.py",
+  "skills": {},
+  "source": "bundle/skills"
+}

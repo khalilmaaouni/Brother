@@ -11,7 +11,9 @@ generator demands of every other claim in the note.
 """
 import contextlib
 import io
+import json
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -212,6 +214,63 @@ class GapFiveThePreviousReleaseLineNeverInventsAHash(unittest.TestCase):
         self.assertNotIn("0.9.11.md", body)
 
 
+class E80TheNoteIsCheckableFromAPublicClone(unittest.TestCase):
+    """The note's headline claim used to be a hub commit a clone cannot
+    resolve, so the reproduction could not start. These drive what replaced
+    it: a manifest digest, a tag, and a command that runs from the tag."""
+
+    @classmethod
+    def setUpClass(cls):
+        # setUpClass, not setUp: build() runs all six cited suites, so a
+        # per-test build would run them six times over for one note.
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import reproduce_export as RE
+        cls.RE = RE
+        cls.body, cls.problems = R.build()
+
+    def setUp(self):
+        self.assertEqual(self.problems, [], self.problems)
+        self.assertIsNotNone(self.body)
+
+    def test_the_note_states_a_digest_the_reproduction_reads_back(self):
+        m = self.RE.NOTE_DIGEST_RE.search(self.body)
+        self.assertIsNotNone(
+            m, "the note states no digest in the shape reproduce_export reads")
+        self.assertEqual(len(m.group(1)), 64)
+
+    def test_the_stated_digest_is_the_real_manifest_digest_not_a_placeholder(self):
+        text, digest, count, problem = R.export_manifest()
+        self.assertIsNone(problem, problem)
+        self.assertIn("`%s`" % digest, self.body)
+        self.assertGreater(count, 0)
+        self.assertEqual(digest, self.RE.manifest_digest(text))
+
+    def test_the_note_names_the_manifest_file_that_ships_with_the_tag(self):
+        self.assertIn(self.RE.manifest_path_for(R.default_version()),
+                       self.body)
+
+    def test_the_note_gives_a_command_that_needs_no_hub_access(self):
+        self.assertIn("scripts/reproduce_export.py --verify-tree --tag v%s"
+                       % R.default_version(), self.body)
+
+    def test_the_hub_commit_is_labelled_private_and_not_the_claim(self):
+        # It stays in the note (the private audit trail needs it) but a
+        # reader must be told plainly that a clone cannot resolve it.
+        self.assertIn("(hub, private", self.body)
+        self.assertIn("cannot resolve that revision", self.body)
+
+    def test_the_manifest_never_covers_the_release_notes_it_is_quoted_in(self):
+        text, _digest, _count, problem = R.export_manifest()
+        self.assertIsNone(problem, problem)
+        covered = [l.split("  ", 1)[1] for l in text.splitlines()]
+        self.assertEqual(
+            [p for p in covered
+             if p.startswith(self.RE.MANIFEST_EXCLUDED_PREFIX)], [])
+        # and it does cover the real shipped runtime, so the exclusion is a
+        # narrow one, not an empty manifest wearing a digest.
+        self.assertIn("bundle/runtime/brother_run.py", covered)
+
+
 class GapSixParsingIsPureAndTested(unittest.TestCase):
     """The parser is exercised directly with canned unittest output; nothing
     here spawns a subprocess."""
@@ -405,22 +464,176 @@ class TheVersionParameterCutsAnyRelease(unittest.TestCase):
         self.assertIn("Published as tag v1.0.1 on", body)
 
     def test_main_write_version_1_0_1_writes_docs_releases_1_0_1_md(self):
-        target = R.notes_path_for("1.0.1")
-        self.assertFalse(os.path.exists(target),
-                          "leftover fixture from a previous run of this test")
+        # Into a temp releases dir, never the real one: once 1.0.1 was cut
+        # for real (2026-09-03) the old form of this test found the real
+        # note "left over" and, had that assertion been relaxed, would have
+        # deleted the real release note in its cleanup.
+        tmp = tempfile.mkdtemp(prefix="release-note-test-")
         try:
-            code = R.main(["--write", "--version", "1.0.1"])
-            self.assertEqual(code, 0)
-            self.assertTrue(os.path.isfile(target))
-            with open(target, encoding="utf-8") as fh:
-                text = fh.read()
-            self.assertIn("# Brother 1.0.1", text)
+            with mock.patch.object(R, "RELEASES_DIR", tmp):
+                target = R.notes_path_for("1.0.1")
+                self.assertEqual(os.path.dirname(target), tmp)
+                code = R.main(["--write", "--version", "1.0.1"])
+                self.assertEqual(code, 0)
+                self.assertTrue(os.path.isfile(target))
+                # E80: the export manifest must land beside the note, in the
+                # SAME redirected directory. It used to be built from ROOT,
+                # so this test wrote a manifest for an already-cut version
+                # into the real docs/releases/ every time it ran.
+                manifest = R.manifest_write_path_for("1.0.1")
+                self.assertEqual(os.path.dirname(manifest), tmp)
+                self.assertTrue(os.path.isfile(manifest), manifest)
+                self.assertFalse(
+                    os.path.exists(os.path.join(
+                        R.ROOT, "docs", "releases",
+                        "1.0.1.export-manifest.txt")),
+                    "--write leaked an export manifest into the real "
+                    "docs/releases/ while RELEASES_DIR was redirected")
+                with open(target, encoding="utf-8") as fh:
+                    text = fh.read()
+                self.assertIn("# Brother 1.0.1", text)
         finally:
-            if os.path.exists(target):
-                os.remove(target)
+            shutil.rmtree(tmp, ignore_errors=True)
 
     def test_default_version_reads_the_real_marketplace_metadata(self):
-        self.assertEqual(R.default_version(), "1.0.0")
+        # Compared against the file itself, never a typed version: the
+        # typed form went red at the first bump after it was written.
+        with open(R.MARKETPLACE_JSON, encoding="utf-8") as fh:
+            declared = json.load(fh)["metadata"]["version"]
+        self.assertRegex(declared, r"^\d+\.\d+\.\d+$")
+        self.assertEqual(R.default_version(), declared)
+
+
+class TheFilesTableIsTheSuitesOwnImports(unittest.TestCase):
+    """BO2, closing the 2026-09-04 delivery-proof skeptic's defect 8: the
+    table's own sentence says the files were read from each suite's
+    imports, and for scripts/test_brother_run.py it listed scripts/loom.py
+    (never imported, and the suite stays green with loom.py's behaviour
+    disabled) while omitting scripts/claim_store.py and scripts/decide.py
+    (both imported). The reader is now the parsed syntax tree, so the
+    sentence and the column cannot disagree."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="subject-files-")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_every_import_shape_is_read_and_nothing_else_is(self):
+        names = R.imported_module_names(
+            "import claim_store\n"
+            "import receipt_door as RD\n"
+            "import os, sys\n"
+            "from decide import render\n"
+            "from a.b import c\n"
+            "from . import sibling\n"
+            "HOOK = 'loom.py'\n"
+            "fake = os.path.join(tmp, \"bm_vault.py\")\n")
+        self.assertEqual(names, ["a", "claim_store", "decide", "os",
+                                 "receipt_door", "sys"])
+
+    def test_a_file_that_does_not_parse_yields_nothing_rather_than_a_guess(
+            self):
+        self.assertEqual(R.imported_module_names("import ((("), [])
+
+    def test_a_name_only_mentioned_in_a_string_is_not_a_subject_file(self):
+        """The exact v1.0.1 mechanism, driven backwards: a suite that
+        writes a fake `loom.py` beside itself, and never imports it, must
+        not appear to be testing loom.py."""
+        for name in ("loom.py", "receipt_door.py", "test_thing.py"):
+            with open(os.path.join(self.tmp, name), "w",
+                      encoding="utf-8") as fh:
+                fh.write("x = 1\n")
+        with open(os.path.join(self.tmp, "test_thing.py"), "w",
+                  encoding="utf-8") as fh:
+            fh.write("import receipt_door\n"
+                     "FAKE = os.path.join(tmp, 'loom.py')\n")
+        with mock.patch.object(R, "ROOT", self.tmp):
+            subjects = R.subject_files("test_thing.py")
+        self.assertEqual(subjects, ["receipt_door.py"])
+
+    def test_a_suite_is_never_listed_as_its_own_subject(self):
+        with open(os.path.join(self.tmp, "test_thing.py"), "w",
+                  encoding="utf-8") as fh:
+            fh.write("import test_thing\n")
+        with mock.patch.object(R, "ROOT", self.tmp):
+            self.assertEqual(R.subject_files("test_thing.py"), [])
+
+    def test_the_brother_run_row_names_what_that_suite_really_imports(self):
+        """Read against the real suite in this tree, not a fixture: this is
+        the row the skeptic disproved."""
+        rel = "scripts/test_brother_run.py"
+        subjects = R.subject_files(rel)
+        self.assertNotIn("scripts/loom.py", subjects,
+                         "the table still names a file the suite does not "
+                         "import: %s" % subjects)
+        self.assertIn("scripts/claim_store.py", subjects, subjects)
+        self.assertIn("scripts/decide.py", subjects, subjects)
+
+    def test_every_row_equals_that_suites_own_imports(self):
+        """The table and the sentence above it, held together for every
+        suite the note cuts, in this tree as it stands."""
+        for _label, rel in R.SUITES:
+            path = os.path.join(R.ROOT, rel)
+            with open(path, encoding="utf-8") as fh:
+                imported = set(R.imported_module_names(fh.read()))
+            dirn = os.path.dirname(path)
+            expected = sorted(
+                os.path.relpath(os.path.join(dirn, n + ".py"),
+                                R.ROOT).replace(os.sep, "/")
+                for n in imported
+                if n + ".py" != os.path.basename(rel)
+                and os.path.isfile(os.path.join(dirn, n + ".py")))
+            self.assertEqual(R.subject_files(rel), expected, rel)
+
+
+class TheHandWrittenParagraphIsReadFromAFileNeverTypedIntoTheNote(
+        unittest.TestCase):
+    """The 1.0.2 cut has to say one thing no command in the tree can
+    measure: that the Codex package ships while the credentialled Codex
+    task (row C7) is still pending the founder's run, so the release makes
+    no compatibility claim. Editing that sentence into the generated note
+    by hand would break the note's own rule that it is generator output,
+    so the generator reads it from docs/releases/<version>.notes.txt. Driven
+    both ways: present is carried through, absent changes nothing."""
+
+    def setUp(self):
+        self.d = tempfile.mkdtemp(prefix="extra-notes-")
+
+    def tearDown(self):
+        shutil.rmtree(self.d, ignore_errors=True)
+
+    def test_no_file_is_empty_string_not_a_refusal(self):
+        self.assertEqual(R.extra_notes("9.9.9", self.d), "")
+
+    def test_a_present_file_is_read_and_stripped(self):
+        with open(os.path.join(self.d, "9.9.9.notes.txt"), "w",
+                  encoding="utf-8") as fh:
+            fh.write("\n  Codex ships; C7 is pending.  \n\n")
+        self.assertEqual(R.extra_notes("9.9.9", self.d),
+                         "Codex ships; C7 is pending.")
+
+    def test_an_unreadable_present_file_is_None_so_build_can_refuse(self):
+        path = os.path.join(self.d, "9.9.9.notes.txt")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("x")
+        os.chmod(path, 0)
+        try:
+            if os.access(path, os.R_OK):  # running as root: the mode is not enforced
+                self.skipTest("this user can read a mode 000 file")
+            self.assertIsNone(R.extra_notes("9.9.9", self.d))
+        finally:
+            os.chmod(path, 0o644)
+
+    def test_the_real_note_carries_the_real_file_when_one_exists(self):
+        version = R.default_version()
+        text = R.extra_notes(version)
+        self.assertIsNotNone(text, "the notes file exists but is unreadable")
+        if not text:
+            self.skipTest("this version ships no %s.notes.txt" % version)
+        body, problems = R.build(version)
+        self.assertEqual(problems, [])
+        self.assertIn(text, body)
 
 
 if __name__ == "__main__":

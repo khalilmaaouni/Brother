@@ -1,9 +1,31 @@
 {
   "accepted_at": "2026-09-03T04:37:58Z",
   "accepted_by": "Khalil Maaouni",
-  "recorded_by": "agent",
+  "checks": [
+    {
+      "check_command": "python3 -c \"import mathlib; assert mathlib.add(1,2)==3 and mathlib.add(1.5,2)==3.5\" && python3 -c \"import mathlib; mathlib.add('a','b')\" 2>&1 | grep -q '^TypeError: .'",
+      "check_passed_before": false,
+      "exit_code": 0,
+      "file": "mathlib.py",
+      "output_location": "~/.claude/brother-run/docs/plan/runs/20260903T071356-make-add-refuse-non-numeric-input-with-a/run.log",
+      "reason": "",
+      "state": "verified",
+      "unit": "guard"
+    },
+    {
+      "check_command": "python3 -m pytest test_mathlib.py -q -k 'type or numeric or error or raise'",
+      "check_passed_before": false,
+      "exit_code": 0,
+      "file": "test_mathlib.py",
+      "output_location": "~/.claude/brother-run/docs/plan/runs/20260903T071356-make-add-refuse-non-numeric-input-with-a/run.log",
+      "reason": "this unit depends on guard, and its check was never re-run with that change reverted, so nothing shows the check exercises it",
+      "state": "no-data",
+      "unit": "test"
+    }
+  ],
   "delegation": "fable, go ahead and take all actions on my behalf",
   "name": "make add() refuse non-numeric input with a clear error, on the toy repository",
+  "recorded_by": "agent",
   "ref": "toy-63855a8-run-20260903T071356",
   "words": "Accepted by delegation: on 2026-09-03 at about 13:25 the founder wrote, fable, go ahead and take all actions on my behalf. What is accepted is the guard: its check fails at the revision before and passes after, reproduced from clean clones by the evidence auditor. The test unit's own line reads NO-DATA under the engine's rule of the same day (its check still passes with the guard reverted), and the README says so beside the run."
 }

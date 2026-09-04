@@ -2871,9 +2871,17 @@ def _clarify_rows(t):
 def _clarify_open(rows):
     """Every row still unanswered. A row is answered only when BOTH its Answer
     and its Answered cells carry something: an answer with no date is a claim
-    nobody stood behind, and a date with no answer is worse."""
+    nobody stood behind, and a date with no answer is worse.
+
+    Both cells go through answered(), not a bare .strip() truthiness test: a
+    plain strip only catches blank and whitespace-only cells, and let "TBD",
+    "N/A", a bare dash, a commented-out cell, or a zero-width/soft-hyphen/
+    full-width/small-caps stand-in for one of those, PASS as if the question
+    had really been answered. answered() is the one vacuity test check_behaviour
+    already runs on its own evidence fields (Required outcome, Proof); this
+    check owes its two evidence fields the same test."""
     return [r for r in rows
-            if not (r.get("answer", "").strip() and r.get("answered", "").strip())]
+            if answered(r.get("answer")) is None or answered(r.get("answered")) is None]
 
 
 def check_behaviour(root):
@@ -3214,16 +3222,15 @@ def check_clarify(root):
       FAIL     the file exists and cannot be read, or a row cannot be parsed,
                or a row is still open. A broken claim is not an absent one, and
                an open question is not a finished design.
-      NO-DATA  no file at all, or the file is still the shipped template. Nobody
-               checked, which is a different sentence from nobody had a
-               question, and it is never a pass.
+      NO-DATA  no file at all, the file is still the shipped template, or the
+               file holds no row under the table at all. Nobody checked, which
+               is a different sentence from nobody had a question, and it is
+               never a pass; this mirrors check_behaviour's own empty-table
+               reading exactly, on purpose (empty_expect can never be PASS for
+               any check registered here, and a zero-row 09-clarify.md is
+               exactly the same "nothing was examined" state as a zero-row
+               08-behaviour.md).
       PASS     every row carries both an Answer and an Answered.
-
-    An EMPTY table passes. That is deliberate and it is the one place this
-    differs from the behaviour check, which reads an empty table as NO-DATA. A
-    design with nothing open is a real state and a common one; a design that
-    must invent a question to be certified would teach people to invent
-    questions.
     """
     problem = read_problem(root, ARTIFACT_FILES["09"])
     if problem:
@@ -3246,6 +3253,10 @@ def check_clarify(root):
                         "absent one"
                         % (len(malformed), " | ".join(_CLARIFY_COLUMNS),
                            len(_CLARIFY_COLUMNS), "; ".join(m[:60] for m in malformed[:4])))
+    if not rows:
+        return "NO-DATA", ("no row found under the %s table in %s; nothing here states whether "
+                           "a question was ever asked, so there is nothing to check"
+                           % (" | ".join(_CLARIFY_COLUMNS), ARTIFACT_FILES["09"]))
     still_open = _clarify_open(rows)
     if still_open:
         return "FAIL", ("%d question(s) in %s are still open: %s. A design cannot be certified "
@@ -3253,9 +3264,7 @@ def check_clarify(root):
                         "of recording it here rather than in somebody's head"
                         % (len(still_open), ARTIFACT_FILES["09"],
                            ", ".join(r.get("id") or "(no id)" for r in still_open[:6])))
-    return "PASS", ("%d question(s) recorded, all answered and dated%s"
-                    % (len(rows), "" if rows else
-                       " (an empty table is a real state: nothing was open)"))
+    return "PASS", "%d question(s) recorded, all answered and dated" % len(rows)
 
 
 #: The worked example for the clarify check. It must be able to PASS, which the

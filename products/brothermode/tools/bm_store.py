@@ -365,12 +365,28 @@ def resolve_root(start=None, refuse_past_git_boundary=False,
     twice already. The refusal names BROTHERMODE_ROOT, which is the
     explicit answer.
 
-    Source "env" is exempt on purpose: BROTHERMODE_ROOT IS the explicit
-    root the refusal asks for, so checking it against the filesystem would
-    turn the only remedy into another dead end. A caller that also needs to
-    validate an explicitly-set root against its own expectations (as
-    bm_autosave does, comparing against its snapshot's toplevel) still has
-    to do that itself; this parameter does not cover it.
+    Source "env" used to be wholly exempt, on the reasoning that
+    BROTHERMODE_ROOT IS the explicit root the refusal asks for. Half of that
+    still holds and is kept: an env root that CONTAINS the caller's start
+    path is the documented remedy, and it is honored even when a nearer .git
+    sits between the two, which is exactly the "attach to the parent on
+    purpose" answer the refusal above suggests.
+
+    The other half was a hole (security review 2026-09-04, Major). An env
+    root that does not contain the start path at all is not a remedy, it is
+    a redirection: BROTHERMODE_ROOT is inherited by every child process, so
+    a value set for some other tree sent a caller that asked for containment
+    to read and write its SQLite store at an arbitrary absolute path outside
+    the tree it was called about, and nothing said so. Under this flag that
+    is now an OwnershipRefused naming both paths, on the same principle as
+    the marker case above: refuse rather than pick a side. The default is
+    unchanged, so CLI and test callers pointing at a project from anywhere
+    keep the old trust.
+
+    A caller that needs to validate an explicitly-set root against its own
+    expectations beyond containment (as bm_autosave does, comparing against
+    its snapshot's toplevel) still has to do that itself; this parameter
+    does not cover it.
 
     env_must_contain_start (H3, cross-family review 2026-08-08, finding 2)
     is likewise OPT-IN and defaults OFF. The hooks pass it: an inherited
@@ -388,9 +404,24 @@ def resolve_root(start=None, refuse_past_git_boundary=False,
     if env:
         p = os.path.realpath(env)
         if os.path.isdir(p):
+            probe = os.path.realpath(start or os.getcwd())
+            contains_start = probe == p or probe.startswith(p + os.sep)
+            if refuse_past_git_boundary and not contains_start:
+                raise OwnershipRefused(
+                    "root-outside-start",
+                    "BROTHERMODE_ROOT names %s, which does not contain %s, "
+                    "the tree this was called about. That variable is "
+                    "inherited by every child process, so a value set for "
+                    "some other project would put this work in that "
+                    "project's ledger, and its store would be read and "
+                    "written at a path outside this tree without saying "
+                    "so. Say which you mean: unset BROTHERMODE_ROOT to "
+                    "resolve from %s, or set it to a directory that "
+                    "contains %s."
+                    % (p, probe, probe, probe),
+                    details={"env_root": p, "start": probe})
             if env_must_contain_start:
-                probe = os.path.realpath(start or os.getcwd())
-                if probe == p or probe.startswith(p + os.sep):
+                if contains_start:
                     return p, "env"
             else:
                 return p, "env"

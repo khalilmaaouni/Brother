@@ -190,7 +190,19 @@ VOLATILE_PATH = re.compile(
 #    either outcome is safe: the text is identical on every machine sharing
 #    one $HOME regardless of where the repository itself lives, so no
 #    genuine difference is ever hidden by it.
-_REPO_TOP_LEVEL = sorted(e for e in os.listdir(REPO) if e != ".claude")
+#    ONE ENTRY IS ADDED THAT DISK CANNOT SUPPLY, and leaving it out was a
+#    live disagreement between the two branches above rather than a
+#    theoretical gap. `.brother/config` is the repository opt-in file the
+#    installer WRITES (E50), so it is absent from a checkout nobody opted in
+#    and therefore absent from os.listdir here. Without it a live line reading
+#    "<REPO>/.brother/config" kept its suffix (the exact replace folds only
+#    REPO itself) while the book's own root swallowed the whole token including
+#    the suffix, and the two sides differed on a line that says the same thing.
+#    Any root-relative path the tools create rather than ship belongs in this
+#    list for the same reason.
+_CREATED_AT_REPO_ROOT = (".brother",)
+_REPO_TOP_LEVEL = sorted(
+    set(e for e in os.listdir(REPO) if e != ".claude") | set(_CREATED_AT_REPO_ROOT))
 VOLATILE_REPO_ROOT = re.compile(
     r"/(?:%s)/(?:[^\s:;,)'\"]*?(?=/(?:%s)\b)|[^\s:;,)'\"]+)"
     % ("|".join(_HOME_ROOTS),

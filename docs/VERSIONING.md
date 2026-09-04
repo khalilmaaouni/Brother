@@ -35,7 +35,7 @@ This repository (`brother`, the router plugin under `bundle/`) versions
 separately from the three products it fronts, because it is a marketplace and
 a facade, not a merge of their code. Its own version lives in
 `.claude-plugin/marketplace.json` and `bundle/.claude-plugin/plugin.json`.
-Current version: 1.0.1.
+Current version: 1.0.2.
 
 ## Stage 0, Stage 1, Stage 2
 
@@ -69,3 +69,20 @@ A change to any figure in this file should be a copy from an updated
 `.claude-plugin/marketplace.json`, in the same commit that updated the
 manifest, never the other way around. `.claude-plugin/marketplace.json` is
 the source of truth for these version numbers.
+
+## Before every merge into main
+
+Every merge into `main` runs `sh scripts/required_fast.sh` locally first,
+and passes it (exit 0). It is the cheap mandatory pre-merge contract: a
+fixed slice of the full battery (`scripts/check_all.sh`, 35 minutes) picked
+for signal per dollar of wall clock, deterministic, about 90 seconds on this
+machine. It is not a substitute for the full battery at a release candidate,
+only the floor nobody merges under. A GitHub Actions workflow
+(`.github/workflows/required-fast.yml`, `workflow_dispatch` only, per the
+dispatch-only law) runs the identical script on a clean `ubuntu-latest`
+runner for anyone who wants the same proof off this machine.
+
+The version cut itself (`scripts/cut_v1.0.0.sh`) is a separate, later, and
+still founder-only act: it bumps both manifests, points every ref at the
+tag, and stops before the push. required-fast is the gate before the merge
+that precedes a cut, not part of the cut script itself.

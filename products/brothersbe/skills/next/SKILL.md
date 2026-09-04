@@ -3,6 +3,8 @@ name: next
 description: "Use when someone asks what to do next in their work. Evaluates a fixed priority ladder against observable state and returns exactly one recommended action with a one sentence reason, never a menu of options. Invoke as /brothersbe:next."
 ---
 
+Plugin root: a Claude Code install exports `${CLAUDE_PLUGIN_ROOT}` and a Codex install exports `${BROTHER_PLUGIN_ROOT}`; both name this plugin's own directory, so read whichever variable appears below as the one your client set. On a clone install neither is set: run the same commands from the checkout root instead.
+
 # Next
 
 One question, one answer. This skill exists so the user never has to hold the lifecycle in

@@ -250,10 +250,18 @@ class TestVerifyRunsConvergeAtT2(VerifyConvergeScenario):
         """
         head = self._build(T2_ANSWERS, "T2")
         code, text, _err = self._verify()
-        self.assertIn("  artifacts  PASS", text,
-                      "the design gate must PASS on its own so the exit code below can "
-                      "only be coming from the converge wiring under test, not from a "
-                      "dossier the gate would have FAILed anyway: %s" % text)
+        # N2 (2026-08-29) made a T2 dossier's 00-intake.json binding block
+        # required in a real git repo: absent one, `artifacts` now reads
+        # NO-DATA rather than the PASS this fixture (which carries no
+        # binding) got before N2 landed. NO-DATA still proves the isolation
+        # this assertion exists for, exactly as PASS did: neither is a FAIL,
+        # so the exit-1 the two assertions after it check still can only be
+        # coming from converge, never from the design gate rejecting this
+        # dossier outright.
+        self.assertNotIn("  artifacts  FAIL", text,
+                         "the design gate must not FAIL on its own so the exit code below "
+                         "can only be coming from the converge wiring under test, not from "
+                         "a dossier the gate would have FAILed anyway: %s" % text)
         self.assertEqual(code, 1, "a T2 dossier with an unrun verification command "
                                   "must FAIL: %s" % text)
         self.assertIn("converge-verification", text)
@@ -301,11 +309,15 @@ class TestVerifyGatesOverriddenUpTier(VerifyConvergeScenario):
         head = self._build(T1_ANSWERS, "T2", override="T2",
                            override_reason=OVERRIDE_REASON)
         code, text, _err = self._verify()
-        self.assertIn("  artifacts  PASS", text,
-                      "the design gate must PASS on its own (same isolation as fixture "
-                      "1 above), so the FAIL below is the converge wiring reading the "
-                      "override, not a dossier the gate would have FAILed anyway: %s"
-                      % text)
+        # Same N2 note as TestVerifyRunsConvergeAtT2 above: this fixture
+        # carries no 00-intake.json binding, so `artifacts` now reads
+        # NO-DATA rather than PASS. NO-DATA is not a FAIL, so it proves the
+        # same isolation PASS used to.
+        self.assertNotIn("  artifacts  FAIL", text,
+                         "the design gate must not FAIL on its own (same isolation as "
+                         "fixture 1 above), so the FAIL below is the converge wiring "
+                         "reading the override, not a dossier the gate would have FAILed "
+                         "anyway: %s" % text)
         self.assertEqual(code, 1, "a dossier computed T1 but validly overridden to T2 "
                                   "owes the same converge gate a plain T2 dossier owes, "
                                   "and it has no receipt: %s" % text)

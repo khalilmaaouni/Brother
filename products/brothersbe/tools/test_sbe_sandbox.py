@@ -90,6 +90,13 @@ def _clean_env():
     env = dict(os.environ)
     for key in _STRIP_ENV:
         env.pop(key, None)
+    # Same fixed date build_sandbox.py's git() pins (GIT_AUTHOR_DATE /
+    # GIT_COMMITTER_DATE), and for the identical reason: sbe_intake.py's
+    # openedAt used to stamp the real clock on a fresh dossier, which
+    # varied every run and moved the commit hash docs/guides/00-sandbox.md
+    # pins along with it. See sbe_intake.py's own comment beside
+    # SBE_INTAKE_OPENED_AT.
+    env["SBE_INTAKE_OPENED_AT"] = "2026-08-01T00:00:00Z"
     return env
 
 
@@ -140,7 +147,7 @@ class TestSandboxJourneyMatchesGuide(unittest.TestCase):
 
         # Step 2: describe an outcome.
         code, text, _err = run([os.path.join(ROOT, "tools", "sbe_intake.py")],
-                               cwd=cls.dossier, stdin="n\nn\ny\nn\nnone\n")
+                               cwd=cls.dossier, stdin="n\nn\ny\nn\nnone\nfeature\n")
         out["intake_code"], out["intake"] = code, text
 
         # Step 3: see the risk level. Run from the REPO ROOT, not the

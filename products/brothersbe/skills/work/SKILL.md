@@ -3,6 +3,8 @@ name: work
 description: "Use when a plan already exists and its tasks are ready to be built, not just recommended or designed. Reads the engine's JSON state, briefs and starts one to three independent ready tasks, dispatches each to an implementation-worker subagent inside the worktree already opened, verifies the result and finishes, and hands a claimed task to a human on request. Fires on the work itself: start already routes into it once a plan is ready, so nothing needs to be typed to reach it."
 ---
 
+Plugin root: a Claude Code install exports `${CLAUDE_PLUGIN_ROOT}` and a Codex install exports `${BROTHER_PLUGIN_ROOT}`; both name this plugin's own directory, so read whichever variable appears below as the one your client set. On a clone install neither is set: run the same commands from the checkout root instead.
+
 # Work
 
 The one team execution entry point. Everything below reads a named JSON field or a command's

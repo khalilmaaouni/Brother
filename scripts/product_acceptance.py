@@ -66,6 +66,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 BROTHER_RUN = os.path.join(HERE, "brother_run.py")
 sys.path.insert(0, HERE)
+import brother_run  # noqa: E402  # ENGINE_JSON_FILES, the one list of the engine's own bookkeeping json names; see _work_doc_path below
 import test_brother_run as tbr  # noqa: E402  # reuse make_repo/write_stub, the exact stub seam brother_run's own suite already uses
 
 NODATA = "NO-DATA"
@@ -332,11 +333,17 @@ def _find_run_dir(runs_root, deadline):
 
 
 def _work_doc_path(run_dir):
-    # target.json is brother_run.py's own record of which repository the
-    # run is FOR (added for --continue discovery); never the Work document
-    # itself.
+    # ENGINE_JSON_FILES (claims.json, target.json, capsule.json, the usage
+    # sidecar) are brother_run.py's own bookkeeping files, never the Work
+    # document itself. THIS DUPLICATED A HARDCODED TUPLE UNTIL E73.2: the
+    # same bug TheUsageSidecarDoesNotHideTheWorkDocument (test_brother_run.py)
+    # already names once, for claims_usage.json -- a run directory holding a
+    # THIRD bookkeeping json this list did not know about made this function
+    # mistake it for the Work document and every status read below silently
+    # returned None forever. Reading the one real list rather than a second,
+    # hand-copied one is what stops a FOURTH recurrence of the same defect.
     for f in os.listdir(run_dir):
-        if f.endswith(".json") and f not in ("claims.json", "target.json"):
+        if f.endswith(".json") and f not in brother_run.ENGINE_JSON_FILES:
             return os.path.join(run_dir, f)
     return None
 

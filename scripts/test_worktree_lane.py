@@ -8,6 +8,7 @@ replaced.
 """
 import contextlib
 import io
+import json
 import os
 import shutil
 import subprocess
@@ -18,6 +19,7 @@ import time
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import claim_store as C  # noqa: E402
 import worktree_lane as W  # noqa: E402
 
 
@@ -277,6 +279,50 @@ class StaleLaneRefusal(unittest.TestCase):
         self.assertIsNone(path)
         self.assertIn(W.NODATA, problem)
         self.assertIn("lane/A", problem)
+
+
+class OneDefinitionOfLiveness(unittest.TestCase):
+    """E86. orphan_report() decided liveness by time alone
+    (expires_at > now), while claim_store.live() also treats a dead owning pid
+    on this host as not live. The same claim therefore read abandoned in
+    reconcile() and OWNED here, two lines apart in one run.log. Both must call
+    the same rule."""
+
+    def test_a_dead_pid_claim_reads_abandoned_in_both_places(self):
+        repo = a_repo()
+        store = os.path.join(tempfile.mkdtemp(), "claims.json")
+        path, _branch, problem = W.acquire(repo, "U1")
+        self.assertFalse(problem, problem)
+
+        claim, problem = C.acquire(store, "U1", "brother-run-59377", ttl=3600)
+        self.assertEqual(problem, "")
+        self.assertIsNotNone(claim)
+
+        dead = subprocess.Popen([sys.executable, "-c", "pass"])
+        dead.wait()  # reaped, so genuinely gone rather than a zombie
+        with open(store, encoding="utf-8") as fh:
+            data = json.load(fh)
+        data["U1"]["pid"] = dead.pid
+        data["U1"]["hostname"] = C._hostname()
+        with open(store, "w", encoding="utf-8") as fh:
+            json.dump(data, fh)
+
+        now = time.time()
+        # The lease itself still has time on it: only the dead pid may decide.
+        self.assertGreater(float(data["U1"]["expires_at"]), now)
+
+        reconciled, problem = C.reconcile(store)
+        self.assertEqual(problem, "")
+        self.assertEqual(reconciled[0]["status"], "abandoned")
+
+        findings, problem = W.orphan_report(repo, store)
+        self.assertEqual(problem, "")
+        self.assertEqual(len(findings), 1, findings)
+        self.assertEqual(findings[0]["classification"], W.ABANDONED,
+                         "reconcile() called this abandoned; the lane report "
+                         "must not call the same claim still leased")
+        self.assertIn("pid %d" % dead.pid, findings[0]["detail"])
+        self.assertTrue(os.path.isdir(path))  # reports, never deletes
 
 
 if __name__ == "__main__":

@@ -3,6 +3,8 @@ name: learn
 description: Use when a lesson from an incident, a repeated correction, a review finding or a measured outcome should become a shared rule, or when a session wants to propose an amendment to the laws. Proposes; it never lands a change to shared behavior. Invoke as /brothersbe:learn.
 ---
 
+Plugin root: a Claude Code install exports `${CLAUDE_PLUGIN_ROOT}` and a Codex install exports `${BROTHER_PLUGIN_ROOT}`; both name this plugin's own directory, so read whichever variable appears below as the one your client set. On a clone install neither is set: run the same commands from the checkout root instead.
+
 # Learn
 
 No colleague's tool changes behavior silently. This skill exists so a lesson can travel

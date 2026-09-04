@@ -13,10 +13,10 @@ to run the battery.
 
 | | |
 |---|---:|
-| Parts | 108 |
-| Parts with a purpose written in the file | 108 |
-| Parts with a suite wired into the battery | 88 |
-| Checks in the battery | 132 |
+| Parts | 124 |
+| Parts with a purpose written in the file | 124 |
+| Parts with a suite wired into the battery | 105 |
+| Checks in the battery | 174 |
 
 ## Every part, what it is for, and what proves it
 
@@ -37,26 +37,34 @@ to run the battery.
 | `acceptance_9` | Acceptance test for capability area 9: crash recovery and resumable | `acceptance`, `acceptance-self`, `system-doc-current`, `system-doc-self` |
 | `attempt_hook` | a PostToolUse hook on Bash that writes to scripts/attempt_ledger.py | `attempt-hook-tests` |
 | `attempt_ledger` | stop the third attempt at a technique that failed twice. | `attempt-ledger-self` |
-| `authority_path_coverage` | R1: does one event receive two independent enforcing decisions? | **NO-DATA**, nothing in the battery runs it |
-| `autonomy_dial` | The A0 to A3 autonomy dial, wired: docs/plan/AUTONOMY-POLICY-V1.md made | **NO-DATA**, nothing in the battery runs it |
+| `authority_path_coverage` | R1: does one event receive two independent enforcing decisions? | `authority-path-coverage-self` |
+| `autonomy_dial` | The A0 to A3 autonomy dial, wired: docs/plan/AUTONOMY-POLICY-V1.md made | `autonomy-dial-self` |
 | `battery_verdict` | A6, one canonical machine-readable answer to "is current | `battery-verdict-self` |
-| `benchmark_atomic` | Atomic benchmark harness: this estate against the host harness's main | **NO-DATA**, nothing in the battery runs it |
+| `benchmark_atomic` | Atomic benchmark harness: this estate against the host harness's main | `benchmark-atomic-self` |
 | `blocker_freshness` | Re-measure every release blocker's own done-check, cheaply, on demand. | `blocker-fresh` |
 | `board_status` | what is ACTUALLY done, counted from evidence. | `board-status-self` |
-| `brother_run` | a plain outcome in, a verified delivery report out. | `brother-run-self`, `bundle-runtime-self`, `fault-lab-self`, `limit-watch-self`, `product-acceptance-self`, `release-invariant`, `release-invariant-self` |
+| `brother_paths` | C3: the one place Brother resolves its plugin root, its config directory, | **NO-DATA**, nothing in the battery runs it |
+| `brother_run` | a plain outcome in, a verified delivery report out. | `brother-run-self`, `bundle-runtime-self`, `codex-smoke`, `codex-smoke-self`, `fault-lab-self`, `limit-watch-self`, `product-acceptance-self`, `release-invariant`, `release-invariant-self` |
 | `bundle_runtime` | package brother_run.py's own execution engine into | `bundle-runtime-self` |
 | `capability_probe` | what this machine can actually do, measured not remembered. | **NO-DATA**, nothing in the battery runs it |
+| `charter_paths` | every repository path docs/CHARTER.md names must exist here. | `charter-paths`, `charter-paths-self` |
 | `check_filtering_spec` | Does docs/plan/PRIVACY-FILTERING-SPEC.md still classify every content | `filtering-spec`, `filtering-spec-self` |
 | `check_installed_surface` | does a clean install really deliver the manifest? | `installed-surface` |
 | `check_l5_commands` | the plan's L5 commands must be real commands. | `l5-commands`, `l5-self` |
 | `claim_store` | no worker starts before its claim exists, and two never own one unit. | `claim-store-self`, `fault-lab-self`, `mutation-gate`, `mutation-gate-self` |
 | `close_ceremony_check` | The closing ceremony law's enforcer (founder order 2026-08-30 at close). | `close-ceremony`, `close-ceremony-tests` |
+| `codex_hooks_install` | C3: wire Brother's hooks into Codex's OWN hooks configuration. | `codex-hooks-self`, `codex-smoke`, `codex-smoke-self` |
+| `codex_skills` | generate bundle/codex-skills/ from bundle/skills/, with the | **NO-DATA**, nothing in the battery runs it |
+| `codex_smoke` | the clean-install Codex smoke test, run in an isolated home. | `codex-smoke`, `codex-smoke-self` |
+| `continuity` | the resume screen. E73.1 of the productization directive. | `continuity-self` |
 | `coverage_check` | Coverage checker for the unified WBS (docs/plan/UNIFIED-WBS.md), task 0. | `coverage`, `coverage-self` |
 | `daybook` | The Daybook: one calm decision feed swept from three repositories. | `daybook`, `daybook-self` |
 | `decide` | never hand a human a wall, hand them a screen. | `decide-self` |
 | `door` | a plain English outcome becomes a canonical Work document. | `brother-run-self`, `bundle-runtime-self`, `door-self`, `mutation-gate`, `mutation-gate-self` |
+| `e53_lesson_ab` | does a lesson SHOWN at the moment of action change the action. | **NO-DATA**, nothing in the battery runs it |
+| `e80_release_reproduction_drive` | E80's done check, run end to end against a fixture release. | **NO-DATA**, nothing in the battery runs it |
 | `edition_guard` | bind a directory to its nearest .brother-edition, and | `edition-guard-self` |
-| `evad_score` | the EVAD gauntlet becomes an instrument with a trend, not a one-off review. | `evad-score`, `evad-score-self` |
+| `evad_score` | the EVAD gauntlet becomes an instrument with a trend, not a one-off review. | `evad-score`, `evad-score-personas`, `evad-score-self` |
 | `export_public` | the single route from the private hub to the public | `edition-guard-self`, `export-public-self` |
 | `fable_authority` | W3 of the readiness board: who decides when the founder is away, and how. | `fable-authority`, `fable-authority-self` |
 | `fault_lab` | R27.1, the installed-artifact lifecycle fault lab. | `fault-lab-self` |
@@ -70,9 +78,11 @@ to run the battery.
 | `graph_value_experiment` | VB-15 / D15: is multi-hop graph retrieval worth anything here, measured. | **NO-DATA**, nothing in the battery runs it |
 | `handover_ceremony` | Handover ceremony: collects a session's closing state and emits it as | `handover-ceremony` |
 | `handover_pack_scan` | the dry run the founder reads before any pack is rewritten. | **NO-DATA**, nothing in the battery runs it |
-| `identity_guard` | refuse NEW commits whose author or committer email domain | `export-public-self`, `identity-guard` |
+| `identity_guard` | refuse NEW commits whose author or committer email domain | `export-public-self`, `identity-guard`, `identity-guard-self` |
 | `intake_score` | Scoring harness for the Intake 9.5 rubric (docs/plan/INTAKE-9.5-DESIGN.md | `intake-record-diagrams`, `intake-score-self` |
 | `integrate` | workers parallel, truth serial. | `integrate-self` |
+| `journal` | one append-only causal log per run, fed by the writers that | `journal-self` |
+| `journal_projection` | the delivery report, receipts-bound and a live | `journal-projection-self` |
 | `laws_audit` | R28.1, the law auditor (docs/plan/READINESS-ROADMAP-2026-08-29.json). | `laws-audit`, `laws-audit-self` |
 | `leaf_pin_check` | Does the umbrella promise the release tag the leaf actually published? | `leaf-pins`, `leaf-pins-self` |
 | `lesson_severity` | how bad was it, decided by criteria rather than by feeling. | **NO-DATA**, nothing in the battery runs it |
@@ -94,17 +104,18 @@ to run the battery.
 | `pattern_note` | write down what WORKED, and make it findable by the problem. | `pattern-note-self` |
 | `portable_pack` | Portable pack: R25.2's weekly half (docs/plan/READINESS-ROADMAP-2026-08-29.json, | `portable-pack-self` |
 | `pre_push_gate` | catch it at the boundary, not after somebody asks. | `pre-push-gate`, `pre-push-gate-self` |
-| `prevented_word_gate` | the word "prevented" stays off every surface until a real | **NO-DATA**, nothing in the battery runs it |
+| `prevented_word_gate` | the word "prevented" stays off every surface until a real | `prevented-word-gate`, `prevented-word-gate-self` |
 | `priority` | order the board by what a real person actually asked for. | `priority`, `priority-self` |
 | `private_terms_scan` | refuse a push that would publish a private term. | `export-public-self`, `private-terms-self` |
 | `probe_repeat_guard_classification` | Probe: does the repeat guard count a SUCCESSFUL tool call as a failure? | **NO-DATA**, nothing in the battery runs it |
 | `product_acceptance` | P0.4 of docs/plan/P0-COMPOSITION-WAVE-2026-08-30.md. | `product-acceptance-self` |
 | `progress_deadline` | alive is not advancing, and output is not progress. | `progress-deadline-self` |
-| `readiness_gate` | the review's enterprise readiness gate as a checkable surface. | `readiness-gate-self` |
+| `readiness_gate` | the review's enterprise readiness gate as a checkable surface. | `export-public-self`, `readiness-gate`, `readiness-gate-self` |
+| `readme_receipt_sample` | the README's per-file receipt sample, rendered by | **NO-DATA**, nothing in the battery runs it |
 | `recall_coverage` | R28.3, learnings at the point of need, measured | **NO-DATA**, nothing in the battery runs it |
 | `receipt_door` | the facts a delivery can prove, and the screens showing them. | `receipt-door-self` |
 | `record_drift` | does the record still match reality after the work landed? | `pre-push-gate`, `pre-push-gate-self`, `record-drift`, `record-drift-self` |
-| `release_invariant` | one release identity, or say exactly which link broke. | `readiness-gate-self`, `release-invariant`, `release-invariant-self` |
+| `release_invariant` | one release identity, or say exactly which link broke. | `readiness-gate`, `readiness-gate-self`, `release-invariant`, `release-invariant-self` |
 | `release_note_from_tree` | .py: the release note's checkable claims, measured, never typed. | `release-note-self` |
 | `release_notes_stamped` | .py: refuses while any shipped release note still | **NO-DATA**, nothing in the battery runs it |
 | `repeat_control` | does a shown lesson actually stop the same failure happening again. | `repeat-control-tests` |
@@ -112,18 +123,23 @@ to run the battery.
 | `resource_gate` | refuse admission when the MACHINE is short, not the code. | `resource-gate-self` |
 | `restart_schedule` | R25.3: the dynamic restart scheduler. Generalizes the existing launchd | **NO-DATA**, nothing in the battery runs it |
 | `restore_drill_enterprise` | a real, populated, multi-tenant restore drill | **NO-DATA**, nothing in the battery runs it |
-| `reviewer_brief` | Generate a one-page reviewer brief from a git ref range. SR-09. | **NO-DATA**, nothing in the battery runs it |
+| `reviewer_brief` | Generate a one-page reviewer brief from a git ref range. SR-09. | `reviewer-brief-self` |
 | `run_evidence` | never destroy the evidence you are about to need. | `run-evidence-self` |
+| `run_heartbeat` | E46: the wait is never silent again. | **NO-DATA**, nothing in the battery runs it |
 | `scope_audit` | what a run actually changed, against what it said it would. | `scope-audit-self` |
+| `split_check` | Does a train/test split leak: the same entity in both sides, or a row | `evad-score`, `evad-score-personas`, `evad-score-self`, `fault-lab-self`, `split-check-self` |
 | `surface_budget` | ROW R10: a ceiling on the estate's whole user-invocable surface. | `surface-budget`, `surface-budget-self` |
 | `system_doc` | a description of this system that cannot drift, because it is generated. | `system-doc-current`, `system-doc-self` |
 | `task_watchdog` | Task watchdog: per-task drift and block detection with the unlock printed. | `task-watchdog-self` |
 | `tool_bypass_test` | Measure what tool containment ACTUALLY holds, and refuse a claim that exceeds it. | `tool-bypass` |
 | `track_delivery` | Delivery tracking for the readiness roadmap, and the blocker learning behind it. | `delivery-tracker-self`, `delivery-tracking` |
-| `v3_receipts` | records V3 pre-action-memory receipts for real work units, honestly. | **NO-DATA**, nothing in the battery runs it |
+| `v3_judge` | decide, mechanically, whether one work unit's diff applied a recorded lesson. | `v3-judge-self` |
+| `v3_night_receipts` | the five real work units of the night of 2026-09-03/04, with their | `v3-night-receipts-self` |
+| `v3_receipts` | records V3 pre-action-memory receipts for real work units, honestly. | `v3-receipts-self` |
+| `v3_surfacing` | replay the machine's PreToolUse repeat guard to find which recorded lessons it | `v3-surfacing-self` |
 | `vault_benchmark_v2` | Atomic Enterprise Benchmark V2, dimension D: Vault institutional memory. | `benchmark-bundle-self`, `vault-benchmark-v2-self` |
 | `vault_clock_backfill` | VB4-03: backfill verified_at on vault notes that have never declared it. | **NO-DATA**, nothing in the battery runs it |
-| `verify_advisor` | a local page for checking work before a commit. | **NO-DATA**, nothing in the battery runs it |
+| `verify_advisor` | a local page for checking work before a commit. | `verify-advisor-self` |
 | `verify_task_estate` | Run every task's OWN verifyCommand and produce real verdicts. | **NO-DATA**, nothing in the battery runs it |
 | `wbs` | The decomposition standard: no node may be dispatched that nobody broke down. | `wbs-granularity`, `wbs-self` |
 | `wisdom_capture` | Turn a session's recorded lessons into vault notes the archive can search. | `wisdom-capture` |
@@ -135,6 +151,8 @@ to run the battery.
 
 - `surface`: `/usr/bin/python3 -m unittest -v tests/test_surface.py`
 - `contracts-root`: `python3 scripts/test_contracts_root.py -v`
+- `charter-paths`: `python3 scripts/charter_paths.py`
+- `charter-paths-self`: `python3 scripts/test_charter_paths.py -v`
 - `context-budget`: `/usr/bin/python3 -m unittest -v tests/test_context_budget.py`
 - `truth-claims`: `/usr/bin/python3 -m unittest -v tests/test_truth_claims.py`
 - `foreign-method`: `/usr/bin/python3 -m unittest -v tests/test_foreign_method_compat.py`
@@ -163,6 +181,7 @@ to run the battery.
 - `wbs-self`: `python3 scripts/test_wbs.py -v`
 - `private-terms-self`: `python3 scripts/test_private_terms_scan.py -v`
 - `loop-bridge-self`: `python3 scripts/test_loop_bridge.py -v`
+- `codex-hooks-self`: `python3 scripts/test_codex_hooks_install.py -v`
 - `installed-surface`: `python3 scripts/test_check_installed_surface.py -v`
 - `l5-self`: `python3 scripts/test_check_l5_commands.py -v`
 - `l5-commands`: `python3 scripts/check_l5_commands.py`
@@ -190,6 +209,7 @@ to run the battery.
 - `forecast-self`: `python3 scripts/test_forecast.py -v`
 - `work-record-self`: `python3 scripts/test_work_record.py -v`
 - `door-self`: `python3 scripts/test_door.py -v`
+- `packs-self`: `python3 scripts/test_packs.py -v`
 - `door-adversarial-self`: `python3 scripts/test_door_adversarial.py -v`
 - `integrate-self`: `python3 scripts/test_integrate.py -v`
 - `crash-resume-proof`: `python3 scripts/test_crash_resume.py -v`
@@ -213,7 +233,9 @@ to run the battery.
 - `acceptance-self`: `python3 scripts/test_acceptance.py -v`
 - `acceptance`: `python3 scripts/acceptance.py`
 - `brother-run-self`: `python3 scripts/test_brother_run.py -v`
+- `journal-self`: `python3 scripts/test_journal.py -v`
 - `receipt-door-self`: `python3 scripts/test_receipt_door.py -v`
+- `acceptance-compression`: `python3 scripts/test_acceptance_compression.py -v`
 - `bundle-runtime-self`: `python3 scripts/test_bundle_runtime.py -v`
 - `product-acceptance-self`: `python3 scripts/test_product_acceptance.py -v`
 - `clean-install-e2e-self`: `python3 scripts/test_clean_install_e2e.py -v`
@@ -224,11 +246,14 @@ to run the battery.
 - `mutation-gate`: `python3 scripts/mutation_gate.py`
 - `portable-pack-self`: `python3 scripts/test_portable_pack.py -v`
 - `door-routing-prose-self`: `python3 scripts/test_door_routing_prose.py -v`
+- `shipped-surface-portable`: `python3 scripts/test_shipped_surface_portable.py -v`
 - `filtering-spec`: `python3 scripts/check_filtering_spec.py`
 - `filtering-spec-self`: `python3 scripts/test_check_filtering_spec.py -v`
 - `accept-delivery-self`: `python3 scripts/test_accept_delivery.py -v`
+- `readme-honesty`: `python3 scripts/test_readme_honesty.py -v`
 - `edition-guard-self`: `python3 scripts/test_edition_guard.py -v`
 - `export-public-self`: `python3 scripts/test_export_public.py -v`
+- `export-links`: `python3 scripts/test_export_links.py -v`
 - `laws-audit-self`: `python3 scripts/test_laws_audit.py -v`
 - `laws-audit`: `python3 scripts/laws_audit.py`
 - `fable-authority-self`: `python3 scripts/test_fable_authority.py -v`
@@ -243,6 +268,7 @@ to run the battery.
 - `wire-dual-principal`: `python3 scripts/test_wire_dual_principal.py`
 - `clean-env-restore`: `python3 scripts/test_clean_env_restore.py`
 - `readiness-gate-self`: `python3 -m unittest -v scripts/test_readiness_gate.py`
+- `readiness-gate`: `python3 scripts/readiness_gate.py`
 - `release-invariant-self`: `python3 scripts/test_release_invariant.py -v`
 - `release-invariant`: `python3 scripts/release_invariant.py`
 - `reproduce-export-self`: `python3 scripts/test_reproduce_export.py -v`
@@ -256,13 +282,45 @@ to run the battery.
 - `repeat-control-tests`: `python3 scripts/test_repeat_control.py`
 - `product-brothersbe`: `sh -c 'cd products/brothersbe && python3 evals/run_evals.py'`
 - `product-brothersbe-tests`: `sh -c 'cd products/brothersbe && python3 tools/test_sbe.py'`
+- `product-brothersbe-battery`: `sh -c 'cd products/brothersbe && d=$(mktemp -d) && sh release-control/baseline/run-battery.sh "$d" >/dev/null 2>&1; if [ ! -f "$d/summary.txt" ]; then echo "no summary.txt at $d, battery did not run to completion"; exit 1; fi; bad=$(grep -E "exit=[1-9][0-9]*$" "$d/summary.txt"); if [ -n "$bad" ]; then printf "%s\n" "$bad"; echo "battery output: $d"; exit 1; fi; echo "battery clean: $d"'`
 - `product-brothermode`: `sh -c 'cd products/brothermode && python3 tools/test_all.py'`
 - `evad-score-self`: `python3 scripts/evad_score.py --selftest`
 - `evad-score`: `python3 scripts/evad_score.py`
+- `evad-score-personas`: `python3 scripts/test_evad_score.py -v`
 - `loom-self`: `python3 scripts/test_loom.py`
 - `version-truth`: `python3 scripts/test_version_truth.py`
 - `tool-bypass`: `python3 scripts/tool_bypass_test.py`
 - `limit-drill`: `python3 scripts/limit_drill.py`
 - `write-ledger-self`: `python3 scripts/test_write_ledger.py -v`
 - `fence-enforced`: `python3 scripts/fence_enforced_drill.py`
+- `required-fast-self`: `python3 scripts/test_required_fast.py -v`
+- `authority-path-coverage-self`: `python3 scripts/test_authority_path_coverage.py -v`
+- `autonomy-dial-self`: `python3 scripts/test_autonomy_dial.py -v`
+- `benchmark-atomic-self`: `python3 scripts/test_benchmark_atomic.py -v`
+- `brother-run-bare-resume-self`: `python3 scripts/test_brother_run_bare_resume.py -v`
+- `brother-run-continue-self`: `python3 scripts/test_brother_run_continue.py -v`
+- `bundle-install-smoke-self`: `python3 scripts/test_bundle_install_smoke.py -v`
+- `check_all_run_check-self`: `python3 scripts/test_check_all_run_check.py -v`
+- `journal-projection-self`: `python3 scripts/test_journal_projection.py -v`
+- `continuity-self`: `python3 scripts/test_continuity.py -v`
+- `continuity-matrix-self`: `python3 scripts/test_continuity_matrix.py -v`
+- `cleanse-self`: `python3 scripts/test_cleanse.py -v`
+- `gen-command-center-md-self`: `python3 scripts/test_gen_command_center_md.py -v`
+- `identity-guard-self`: `python3 scripts/test_identity_guard.py -v`
+- `prevented-word-gate-self`: `python3 scripts/test_prevented_word_gate.py -v`
+- `r25-end-to-end-self`: `python3 scripts/test_r25_end_to_end.py -v`
+- `reviewer-brief-self`: `python3 scripts/test_reviewer_brief.py -v`
+- `v3-receipts-self`: `python3 scripts/test_v3_receipts.py -v`
+- `v3-judge-self`: `python3 scripts/test_v3_judge.py -v`
+- `v3-night-receipts-self`: `python3 scripts/test_v3_night_receipts.py -v`
+- `v3-surfacing-self`: `python3 scripts/test_v3_surfacing.py -v`
+- `verify-advisor-self`: `python3 scripts/test_verify_advisor.py -v`
+- `repair-drain-self`: `python3 scripts/test_repair_drain.py -v`
+- `prevented-word-gate`: `python3 scripts/prevented_word_gate.py README.md --strict`
+- `sbe-proof-gate`: `python3 products/brothersbe/tools/sbe_gate.py . --strict`
+- `split-check-self`: `python3 scripts/test_split_check.py -v`
+- `skills-portable`: `python3 scripts/test_skills_portable.py`
+- `codex-package-self`: `python3 scripts/test_codex_package.py -v`
+- `codex-smoke`: `python3 scripts/codex_smoke.py`
+- `codex-smoke-self`: `python3 scripts/test_codex_smoke.py -v`
 

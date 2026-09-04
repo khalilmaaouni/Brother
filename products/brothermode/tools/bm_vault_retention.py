@@ -145,6 +145,11 @@ import sys
 import uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+# C3: the config directory is resolved by brother_paths, the one seam
+# that knows which coding client is running (docs/codex/HOOKS-MAPPING.md).
+# Loaded from beside this file because tools/ is not a package.
+sys.path.insert(0, HERE)
+import brother_paths  # noqa: E402
 CORRECTION_RULE_PATH_PREFIX = "correction-rule:"  # bm_vault.py's own prefix
 # The six per-note tables cmd_propagate already knew how to count and erase;
 # named once here so forget-plan/forget-execute reuse the exact same list
@@ -162,7 +167,7 @@ DIGEST_DIR_RELPATH = "40-Failures"
 def _index_path():
     # Resolved at call time so a test subprocess with HOME moved gets its own
     # scratch index, exactly as bm_vault.py's tests already rely on.
-    return os.path.expanduser("~/.claude/bm_vault_index.sqlite3")
+    return brother_paths.config_path("bm_vault_index.sqlite3")
 
 
 def _vault_root(cli_vault):
@@ -176,7 +181,7 @@ def _vault_root(cli_vault):
     # second, and NO guessed home path when neither is set. Absence is an audible
     # refusal downstream, never a wrong vault silently censused.
     try:
-        with open(os.path.join(os.path.expanduser("~"), ".claude", "bm_vault.json"),
+        with open(brother_paths.config_path("bm_vault.json"),
                   encoding="utf-8") as fh:
             cfg = json.load(fh)
         v = cfg.get("vault")
@@ -400,7 +405,7 @@ def cmd_propagate(args):
     # printed once, so it can keep answering as though the note still existed.
     print("  MANUAL follow-up, this tool cannot reach it: the recall SEEN cache at %s may "
           "still remember this note; a human decides whether to prune it."
-          % os.path.join(os.path.expanduser("~"), ".claude", ".vault_recall_seen"))
+          % brother_paths.config_path(".vault_recall_seen"))
 
     # REPORT-ONLY, NEVER EDITED (VB2-05). The answer ledger is append-only history: a
     # record of what a past recall actually read AT THE TIME. Rewriting a past row to

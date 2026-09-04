@@ -66,11 +66,15 @@ Python 3, standard library only. No network. Run from anywhere; ROOT is derived 
 this file's own location, the same pattern scripts/system_doc.py uses.
 """
 import argparse
+import ast
+import contextlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -197,13 +201,48 @@ def confirm_test_names(rel_path, names):
     return [n for n in names if re.search(r"def %s\(" % re.escape(n), text)]
 
 
+def imported_module_names(text):
+    """Every top-level module name a suite really imports, from its own
+    parsed syntax tree: `import x`, `import x as y`, `import a, b`, and
+    `from x import y` (the module half). Dotted names contribute their
+    first segment, and a relative `from . import x` contributes nothing,
+    because neither names a sibling file this repository ships. Returns a
+    sorted list, or [] when the text does not parse.
+
+    AST, never a regular expression, because that is the whole defect this
+    replaced: the old reader matched `^import X as Y` (missing the plain
+    `import claim_store` and `import decide` that scripts/test_brother_run.
+    py really does) and then ALSO swept in every `"<name>.py"` string
+    literal anywhere in the file, which is not an import at all. On
+    scripts/test_brother_run.py that literal sweep put `scripts/loom.py` in
+    a table whose own sentence says the files were read from the suite's
+    imports, and the 2026-09-04 delivery-proof skeptic showed the named
+    suite stays green with loom.py's behaviour disabled. A table that says
+    "imports" must be imports."""
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return []
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                names.add(alias.name.split(".")[0])
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:  # a relative import names no sibling file
+                continue
+            if node.module:
+                names.add(node.module.split(".")[0])
+    return sorted(names)
+
+
 def subject_files(rel_path):
-    """The source file(s) a suite actually exercises, read from its own
-    imports ("import X as Y") and path constants ("...os.path.join(HERE,
-    'x.py')...", "HOOK = os.path.join(..., 'x.py')"), the same
-    read-the-file's-own-evidence method scripts/system_doc.py uses for its
-    module map. A candidate only counts if the file really exists next to
-    the suite; nothing here is asserted from a name."""
+    """The source file(s) a suite actually exercises, read from the modules
+    it really imports (imported_module_names) and kept only when a file of
+    that name exists next to the suite. Nothing here is asserted from a
+    name: a module imported from the standard library or from anywhere
+    other than the suite's own directory contributes no row, and the suite
+    itself is never listed as its own subject."""
     path = os.path.join(ROOT, rel_path)
     dirn = os.path.dirname(path)
     try:
@@ -211,20 +250,16 @@ def subject_files(rel_path):
             text = fh.read()
     except OSError:
         return []
-    candidates = set()
-    for m in re.finditer(r"^import\s+([a-zA-Z_]\w*)\s+as\s+\w+", text, re.M):
-        candidates.add(m.group(1) + ".py")
-    for m in re.finditer(r"[\"']([a-zA-Z_]\w*\.py)[\"']", text):
-        candidates.add(m.group(1))
     base = os.path.basename(rel_path)
     found = []
-    for c in sorted(candidates):
-        if c == base:
+    for name in imported_module_names(text):
+        candidate = name + ".py"
+        if candidate == base:
             continue
-        full = os.path.join(dirn, c)
+        full = os.path.join(dirn, candidate)
         if os.path.isfile(full):
             found.append(os.path.relpath(full, ROOT).replace(os.sep, "/"))
-    return found
+    return sorted(found)
 
 
 def recall_repro_command():
@@ -285,6 +320,43 @@ def notes_path_for(version):
     return os.path.join(RELEASES_DIR, "%s.md" % version)
 
 
+def manifest_write_path_for(version):
+    """Where --write puts the export manifest ON DISK. Derived from
+    RELEASES_DIR, exactly like notes_path_for, so a test that redirects
+    RELEASES_DIR redirects BOTH files. Building it from ROOT instead put a
+    manifest for an already-cut version into the real docs/releases/ during
+    the test suite, which is the very accident the --write test's own
+    comment says must never happen. The in-EXPORT relative path stays
+    reproduce_export.manifest_path_for(); this is only the local
+    destination."""
+    return os.path.join(RELEASES_DIR, "%s.export-manifest.txt" % version)
+
+
+def notes_extra_path_for(version, releases_dir=None):
+    """docs/releases/<version>.notes.txt: the one hand written paragraph slot
+    this generator reads instead of anyone editing the generated note. The
+    note itself stays generator output; a release fact that no command in the
+    tree can measure (what a founder-gated row still owes) lives in this file
+    and is read from it, never typed into the note by hand."""
+    d = releases_dir if releases_dir is not None else RELEASES_DIR
+    return os.path.join(d, "%s.notes.txt" % version)
+
+
+def extra_notes(version, releases_dir=None):
+    """The text of that file, stripped: "" when no such file exists (the
+    common case, and not a problem), None when the file IS there and cannot
+    be read, which build() turns into a NO-DATA refusal rather than printing
+    a note that silently dropped a paragraph the cut meant to carry."""
+    path = notes_extra_path_for(version, releases_dir)
+    if not os.path.isfile(path):
+        return ""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return fh.read().strip()
+    except OSError:
+        return None
+
+
 def cut_script_tag_and_remote(path=None):
     """The (tag, remote) pair scripts/cut_v1.0.0.sh names its own public cut
     as, read from that script's own `TAG=` and `PUBLIC_REMOTE=` shell
@@ -332,6 +404,63 @@ def published_as_line(path=None, version=None):
     return ("Published as tag %s on %s; that tag is the public hash of "
             "this cut, the hub commit above is for the private record."
             % (tag, host))
+
+
+#: Memo for export_manifest(). Building the real export tree costs about
+#: twenty seconds (1129 files, plus each product's own checksums.sh), and
+#: build() is called more than once per process by its own test suite. The
+#: manifest is a pure function of the tree, so computing it once is not a
+#: staleness risk inside one run.
+_MANIFEST_MEMO = {}
+
+
+def export_manifest():
+    """(text, digest, count, problem) for what this tree would export.
+
+    E80: the note's old headline claim was a HUB COMMIT, which a public clone
+    cannot resolve at all, so the reproduction could not start from the tag.
+    This is the claim a clone CAN check: a manifest of every exported file's
+    sha256, its own digest, and the count. Built by running the exporter's
+    OWN build_export_tree, never a second implementation of the same file
+    selection, so the manifest describes exactly the bytes export_public.py
+    ships. `problem` is a named NO-DATA string on any failure and the other
+    three are None; build() refuses the whole note on it rather than printing
+    a note whose central claim is missing."""
+    if "v" in _MANIFEST_MEMO:
+        return _MANIFEST_MEMO["v"]
+    sys.path.insert(0, HERE)
+    import export_public as EP  # noqa: E402
+    import reproduce_export as RE  # noqa: E402
+
+    allowlist = EP.load_allowlist()
+    if allowlist is None:
+        result = (None, None, None,
+                  "%s: no export allowlist at %s, so the exported file set "
+                  "cannot be listed" % (NODATA, EP.DEFAULT_ALLOWLIST))
+    else:
+        dest = tempfile.mkdtemp(prefix="release-note-export-")
+        try:
+            # build_export_tree narrates its manifest regeneration on stdout;
+            # this function's caller may be printing the note to stdout, so
+            # that narration goes to stderr where it cannot land in a note.
+            with contextlib.redirect_stdout(sys.stderr):
+                copied = EP.build_export_tree(dest, allowlist)
+            if not copied:
+                result = (None, None, None,
+                          "%s: the allowlist copied nothing from %s"
+                          % (NODATA, ROOT))
+            else:
+                text = RE.manifest_from_dir(dest)
+                result = (text, RE.manifest_digest(text),
+                          len(text.splitlines()), None)
+        except OSError as exc:
+            result = (None, None, None,
+                      "%s: the export tree could not be read: %s"
+                      % (NODATA, exc))
+        finally:
+            shutil.rmtree(dest, ignore_errors=True)
+    _MANIFEST_MEMO["v"] = result
+    return result
 
 
 def shims_count(commands_dir=None):
@@ -434,6 +563,9 @@ def build(version=None):
         version = default_version()
     sys.path.insert(0, os.path.join(ROOT, "scripts"))
     import receipt_door as RD  # noqa: E402
+    import reproduce_export as RE_MOD  # noqa: E402
+
+    manifest_rel = RE_MOD.manifest_path_for(version)
 
     results = {}
     problems = []
@@ -467,6 +599,16 @@ def build(version=None):
     if shims is None:
         problems.append("%s: %s unreadable" % (NODATA, SHIMS_DIR))
 
+    manifest_text_, manifest_hex, manifest_count, manifest_problem = \
+        export_manifest()
+    if manifest_problem:
+        problems.append(manifest_problem)
+
+    extra = extra_notes(version)
+    if extra is None:
+        problems.append("%s: %s exists but could not be read" %
+                         (NODATA, notes_extra_path_for(version)))
+
     published = published_as_line(version=version)
     if published is None:
         problems.append("%s: %s does not declare TAG= and PUBLIC_REMOTE= "
@@ -488,8 +630,13 @@ def build(version=None):
     A("")
     A("## Source revision")
     A("")
-    A("Cut from hub commit `%s`" % rev
-      + (" (`git describe --tags --always`: `%s`)." % describe if describe else "."))
+    A("Cut from hub commit `%s` (hub, private" % rev
+      + ("; `git describe --tags --always`: `%s`)." % describe
+         if describe else ")."))
+    A("A clone of this repository cannot resolve that revision: it names a "
+      "commit in the private hub, and `git cat-file` on it exits 128 here. "
+      "It is the private audit trail. Nothing a reader has to check depends "
+      "on it: the tag and the manifest digest below are the checkable claims.")
     if manifest_ver == version:
         A("The manifests at this commit read `%s`: this is the cut, "
           "regenerated by `scripts/cut_v1.0.0.sh` from the tree itself."
@@ -501,12 +648,34 @@ def build(version=None):
     A("")
     A(published)
     A("")
+    A("Export manifest digest `%s` over %d exported file(s), named one per "
+      "line with its own sha256 in `%s`. That manifest ships inside this tag, "
+      "and so does every file it names, so the whole claim is checkable from "
+      "a clone with no access to the hub. Files under `%s` are outside the "
+      "digest: the note that carries a digest cannot also be hashed by it."
+      % (manifest_hex, manifest_count, manifest_rel,
+         RE_MOD.MANIFEST_EXCLUDED_PREFIX))
+    A("")
+    A("Reproduce it from a fresh clone of this repository, at the tag, with "
+      "nothing private and no network:")
+    A("")
+    A("    git checkout v%s" % version)
+    A("    python3 scripts/reproduce_export.py --verify-tree --tag v%s"
+      % version)
+    A("")
+    A("That prints PASS when every file the manifest names hashes to the "
+      "value it names, FAIL naming each file that does not, and NO-DATA when "
+      "the manifest or this digest is not there to read.")
+    A("")
     prev_line = previous_release_line(version)
     if prev_line:  # "" when the previous note's shape is unrecognized: the
         A(prev_line)  # note gets nothing there, never a diagnostic about
         A("")         # this generator's own parser (the reason is on stderr)
     A("## What this release carries")
     A("")
+    if extra:
+        A(extra)
+        A("")
     A("Every delivery report ends with one receipt sentence per unit, the "
       "acceptance screen line and, where a risk class was named, the "
       "release screen line, and the scoping sentence `%s` Proven by "
@@ -543,9 +712,12 @@ def build(version=None):
     A("")
     A("## Files behind these claims")
     A("")
-    A("Named by reading each suite's own imports, not typed: a claim above "
-      "with no file listed here would be a suite that tests nothing on "
-      "disk, which this script would rather show than hide.")
+    A("Named by parsing each suite's own imports, not typed: every file in "
+      "this column is a module the named suite really imports and that "
+      "really sits beside it on disk. A row reading %s is a suite that "
+      "imports none, usually because it drives its subject as a "
+      "subprocess, and this script would rather show that than name a "
+      "file the suite never loads." % NODATA)
     A("")
     A("| Claim | Suite | Source file(s) |")
     A("|---|---|---|")
@@ -577,9 +749,23 @@ def main(argv=None):
         return 2
 
     if args.write:
+        # The manifest is written FIRST and with the same body: the note
+        # states its digest, so a note on disk without its manifest beside it
+        # would be a claim with nothing behind it. build() already succeeded,
+        # so the memo holds a real manifest here.
+        manifest_body = export_manifest()[0]
+        manifest_path = manifest_write_path_for(version)
+        try:
+            with open(manifest_path, "w", encoding="utf-8") as fh:
+                fh.write(manifest_body)
+        except OSError as exc:
+            print("%s: could not write %s: %s" % (NODATA, manifest_path, exc),
+                  file=sys.stderr)
+            return 2
         notes_path = notes_path_for(version)
         with open(notes_path, "w", encoding="utf-8") as fh:
             fh.write(body)
+        print("wrote %s" % manifest_path)
         print("wrote %s" % notes_path)
         return 0
 

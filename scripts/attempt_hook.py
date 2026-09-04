@@ -103,6 +103,34 @@ so a test can point every source at a temp fixture instead of the real
 vault, pattern store, and memory index. Unset, they default to find_out.py's
 own VAULT and MEMORY constants.
 
+THE SLIDING WINDOW, borrowed (readiness row E57, mechanism 3). Source page:
+https://www.opengsd.net/docs/v1/features, GSD's own loop-detection and
+circuit-breaker description, corroborated by its repository at
+https://github.com/open-gsd/gsd-core. GSD stops a stuck A-to-B-to-A dispatch
+pattern with a sliding-window detector that is SEPARATE from its per-approach
+retry cap, and that is a different failure shape from the one
+scripts/attempt_ledger.py counts. attempt_ledger.py counts failures OF ONE
+CLASS, so two approaches alternating (A fails, B fails, A fails, B fails) each
+sit at one failure under the two-strike limit and the breaker stays silent
+while the session goes in a circle. alternating_classes() below reads the last
+_LOOP_WINDOW failures in the ledger's own order and refuses an exact A, B, A, B
+alternation of two distinct classes exactly the way a third attempt at one
+class is refused. Only ever one refusal prints: the single-class counter is
+checked first and wins, because it is the narrower, older statement about the
+same run.
+
+THE OUTCOME NUMBER, borrowed (readiness row E57, mechanism 1). Source page:
+https://github.com/MemTensor/MemOS, whose repository reports a numeric outcome
+(35.24 percent token savings) BESIDE the mechanism rather than only reporting
+that the mechanism fires. This file's outcome number is REFUSALS: one JSON line
+per refusal into the shared hook-outcome log (BM_HOOK_OUTCOMES, default
+~/.claude/hook-outcomes.jsonl), the same log and the same row shape
+products/brothermode/tools/vault_recall_hook.py writes its own lessons-shown
+and recall-cost numbers into, so scripts/repeat_control.py can read both halves
+of the loop's cost from one place. Best effort by design: a log that cannot be
+written must never change what this hook does, exactly like every other side
+effect here.
+
 Python 3, standard library only. No network. No em or en dashes anywhere in this
 file, its comments, or its output.
 """
@@ -113,6 +141,10 @@ import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+# C3: the config directory is resolved by brother_paths, the one seam
+# that knows which coding client is running (docs/codex/HOOKS-MAPPING.md).
+sys.path.insert(0, HERE)
+import brother_paths  # noqa: E402
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 import attempt_ledger as ledger  # noqa: E402
@@ -132,6 +164,19 @@ _FIND_OUT_MEMORY = os.environ.get("FIND_OUT_MEMORY", find_out.MEMORY if find_out
 #: See the module docstring's BOUNDED section.
 _FIND_OUT_BUDGET_SECONDS = 2.0
 _FIND_OUT_TOP = 2
+
+#: See the module docstring's THE OUTCOME NUMBER section. Read once at import
+#: time so a subprocess test gets an isolated log, exactly like ATTEMPT_LEDGER
+#: and the FIND_OUT_* paths above.
+OUTCOMES = os.environ.get(
+    "BM_HOOK_OUTCOMES",
+    brother_paths.config_path("hook-outcomes.jsonl"))
+
+#: See the module docstring's THE SLIDING WINDOW section. Four is the row's own
+#: shape (A, B, A, B) rather than a tuned number: three would fire on A, B, A,
+#: which is one approach tried twice with one thing tried in between, and that
+#: is ordinary work rather than a circle.
+_LOOP_WINDOW = 4
 
 _HOME = os.path.expanduser("~")
 # Hex-looking runs (shas, pids in hex logs) and plain numbers (pids, ports,
@@ -165,6 +210,57 @@ def fingerprint(command):
     norm = _NUM_HASH_RE.sub("<N>", norm)
     norm = _WS_RE.sub(" ", norm).strip()
     return "%s|%s" % (first, norm)
+
+
+def _append_outcome(session, fields):
+    """One JSON line into the shared hook-outcome log: {"hook", "session",
+    then the caller's own numbers}. Never raises and never reports: this is a
+    measurement of the mechanism, and a measurement that can break the
+    mechanism is worse than no measurement (the same posture every other side
+    effect in this file already takes)."""
+    row = {"hook": "attempt_breaker", "session": str(session or "nosession")}
+    row.update(fields)
+    try:
+        with open(OUTCOMES, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except (IOError, OSError):
+        pass
+
+
+def alternating_classes(rows, window=_LOOP_WINDOW):
+    """(first_class, second_class) when the LAST `window` failures in `rows`
+    are an exact alternation of two distinct classes, else None.
+
+    See the module docstring's THE SLIDING WINDOW section for the source page
+    and for why this is not the same statement attempt_ledger.check() makes.
+    Pure, so every branch is testable without a store. Passed rows in the
+    ledger's own file order, which is chronological: attempt_ledger.record()
+    appends one line per attempt and never rewrites, so position is the only
+    clock either file has.
+
+    ponytail: exactly two classes, exactly `window` long. A three-way rotation
+    (A, B, C, A, B, C) is a real loop this misses; widen the set test when one
+    is actually measured, rather than guessing at the shape now."""
+    seq = [r.get("class") for r in rows
+           if str(r.get("outcome", "")).lower().startswith("fail")]
+    seq = seq[-window:]
+    if len(seq) < window:
+        return None
+    if len(set(seq)) != 2:
+        return None
+    for i in range(1, len(seq)):
+        if seq[i] == seq[i - 1]:
+            return None
+    return (seq[0], seq[1])
+
+
+LOOP_REFUSAL = (
+    "loop detected across %d attempts: classes %r and %r are alternating, and "
+    "neither one has reached the per-class limit on its own, so the counter "
+    "would have stayed silent. Alternating between two approaches is not "
+    "progress, it is the same decision made twice. Do not try either class "
+    "again: name what both have in common, and run one experiment that cannot "
+    "fail if the mechanism works.")
 
 
 def _last_line(resp):
@@ -315,15 +411,52 @@ def _run(payload):
     # example (third run refused, not second).
     verdict, reason = ledger.check(rows_before, klass, klass)
     ledger.record(klass, klass, "failed", note)
+    session = payload.get("session_id")
     if verdict == ledger.REFUSE:
         # klass plus the just-recorded note: see the module docstring's THE
         # RESEARCH BRANCH NOW RUNS ITSELF section for why this pairing was
         # chosen over klass alone.
         problem_text = ("%s %s" % (klass, note)).strip()
         _emit_refusal("%s: %s" % (verdict, reason), _find_out_hits(problem_text))
+        _append_outcome(session, {"refusals": 1, "kind": "single_class"})
+        return
+    # The sliding window, checked ONLY once the single-class counter has
+    # allowed this attempt: two refusals for one run would be two JSON objects
+    # on stdout, and the envelope carries exactly one. Rows include the
+    # failure just recorded, because the alternation is only complete with it.
+    seen = list(rows_before or [])
+    seen.append({"problem": klass, "class": klass, "outcome": "failed", "note": note})
+    pair = alternating_classes(seen)
+    if pair is not None:
+        problem_text = ("%s %s" % (klass, note)).strip()
+        _emit_refusal(LOOP_REFUSAL % (_LOOP_WINDOW, pair[0], pair[1]),
+                      _find_out_hits(problem_text))
+        _append_outcome(session, {"refusals": 1, "kind": "alternating_classes"})
+
+
+#: Short on purpose: this hook is invoked by Claude Code with a payload on
+#: stdin, never by hand. The two lines under it are here because a mechanism
+#: whose output nobody can discover is a mechanism nobody reads.
+HELP = """attempt_hook: PostToolUse breaker on Bash. Reads one hook payload on
+stdin, writes to the attempt ledger, always exits 0.
+
+  loop detector   refuses an exact A, B, A, B alternation of two technique
+                  classes over the last %d failures, which the per-class
+                  counter cannot see (borrowed from GSD, opengsd.net)
+
+  outcome metric  one JSON line per refusal (refusals, kind) into
+                  BM_HOOK_OUTCOMES, default ~/.claude/hook-outcomes.jsonl,
+                  read by scripts/repeat_control.py
+""" % _LOOP_WINDOW
 
 
 def main():
+    argv = sys.argv[1:]
+    if argv and argv[0] in ("-h", "--help"):
+        # Answered BEFORE stdin is read: a hook asked for help is being run by
+        # a person, and a person has nothing to pipe in.
+        print(HELP)
+        return 0
     payload, err = _read_stdin_json()
     if err is not None:
         sys.stderr.write("attempt_hook: %s\n" % err)

@@ -992,5 +992,50 @@ class TestTheWireContract(GuardCase):
         self.assertIn("CLAUDE.md", proc.stderr)
 
 
+class TheRepoConfigCannotSwitchOffThisGuard(GuardCase):
+    """Security review 2026-09-04, Major. .brother/config is content that
+    arrives WITH the repository, and a "hooks: off" line in it used to make
+    every registered hook of both products exit at once, this guard
+    included. A clone could therefore switch off the check standing between
+    it and the person's disk, with one stderr line as the only trace.
+
+    Driven both ways here, end to end as a subprocess: the refused write
+    must still be refused in a tree that says off, and an ordinary command
+    must still be allowed, so the fix does not turn the opt-out into a
+    blanket refusal."""
+
+    def _say_hooks_off(self):
+        # find_repo_root walks to the nearest .git, so the fixture needs one
+        # before .brother/config is read at all. GuardCase's own root has
+        # none: nothing else in this file depends on the repository-scoping
+        # gate, which is exactly why the hole survived here.
+        os.makedirs(os.path.join(self.root, ".git"), exist_ok=True)
+        os.makedirs(os.path.join(self.root, ".brother"), exist_ok=True)
+        write(os.path.join(self.root, ".brother", "config"), "hooks: off\n")
+
+    def test_a_protected_write_is_still_refused_in_a_tree_that_says_off(self):
+        self._say_hooks_off()
+        run = self.run_guard("printf '%s\\n' 'replacement' > CLAUDE.md")
+        self.assertTrue(
+            run.denied,
+            "the repository's own .brother/config switched the write guard "
+            "off and the protected write was allowed; stderr: %s" % run.stderr)
+        self.assertIn("CLAUDE.md", run.reason)
+        self.assertEqual(run.code, 0,
+                         "the guard must exit 0 and deny through stdout")
+
+    def test_the_person_is_told_the_guard_stayed_on(self):
+        self._say_hooks_off()
+        run = self.run_guard("printf '%s\\n' 'replacement' > CLAUDE.md")
+        self.assertIn("does not switch off the write guards", run.stderr)
+
+    def test_an_ordinary_command_is_still_allowed_in_a_tree_that_says_off(self):
+        self._say_hooks_off()
+        run = self.run_guard("ls -la")
+        self.assertFalse(run.denied,
+                         "an ordinary read-only command was refused: %s"
+                         % run.stdout)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

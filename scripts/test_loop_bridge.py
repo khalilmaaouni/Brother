@@ -373,6 +373,45 @@ class TheRuntimeIsResolvedNotHardcoded(unittest.TestCase):
                         "lexicographically")
         self.assertLess(order.index(newest), order.index(B.DEV_CANDIDATE))
 
+    def test_a_relocated_CLAUDE_CONFIG_DIR_install_is_matched(self):
+        """Root cause of run 33770056113 (virgin-install.yml, ubuntu-latest,
+        v1.0.1): bundle-install-smoke.sh installs into a throwaway
+        CLAUDE_CONFIG_DIR, which is where the claude CLI actually places an
+        installed plugin's cache. This resolver used to build every
+        installed candidate from bare HOME, so a plugin cache under a
+        CLAUDE_CONFIG_DIR that differs from $HOME/.claude (a sandboxed
+        install, a CI runner, clean_install_e2e.sh's own throwaway HOME
+        beside a throwaway config dir) was invisible: 'no worker adapter
+        could be loaded, so no worker ran'. It only ever looked right on a
+        developer's own machine because a real brothermode install already
+        sat under the real $HOME/.claude from ordinary daily use, which
+        masked the bug rather than proving the resolution correct (measured:
+        an isolated HOME with no CLAUDE_CONFIG_DIR override reproduced the
+        exact CI failure locally)."""
+        home_td = tempfile.TemporaryDirectory(prefix="lb-home-")
+        self.addCleanup(home_td.cleanup)
+        config_td = tempfile.TemporaryDirectory(prefix="lb-config-")
+        self.addCleanup(config_td.cleanup)
+        home = home_td.name
+        config_dir = config_td.name
+        # HOME's own .claude carries nothing: a virgin machine, or any
+        # install where CLAUDE_CONFIG_DIR relocates the config root away
+        # from the default.
+        tools = os.path.join(config_dir, "plugins", "cache", "brother",
+                             "brothermode", "3.4.4", "tools")
+        os.makedirs(tools)
+        order = B.runtime_candidates({"HOME": home,
+                                      "CLAUDE_CONFIG_DIR": config_dir})
+        self.assertIn(tools, order, order)
+        self.assertLess(order.index(tools), order.index(B.DEV_CANDIDATE),
+                        "the relocated install must outrank the dev checkout")
+        # And the same fixture under bare HOME must NOT be found: proves this
+        # candidate is really reading CLAUDE_CONFIG_DIR, not silently
+        # matching by coincidence.
+        home_tools = os.path.join(home, ".claude", "plugins", "cache",
+                                  "brother", "brothermode", "3.4.4", "tools")
+        self.assertNotIn(home_tools, order, order)
+
     def test_no_developer_home_path_is_the_only_way_to_find_the_runtime(self):
         """The regression that matters: if every installed candidate vanished
         and only the development path remained, this file would be back to

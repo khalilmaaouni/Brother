@@ -559,6 +559,10 @@ SUITES = (
     # and that exact hole (test_bm_vault_lock.py, unregistered since PR 63) hid
     # two real defects until PR 68 tripped over it.
     "test_vault_recall_hook.py",
+    # E54 (2026-09-04): the automatic index refresh the recall hook above depends on.
+    # Registered in the same change that creates the suite, same lesson as every vault
+    # entry here: the inventory gate refuses a test_*.py on disk that SUITES does not name.
+    "test_vault_index_refresh.py",
     # tools/brothermode_cli.py, the one deterministic public runtime boundary
     # named in V3-FREEZE-2026-08-07.md answer 4: a thin dispatch layer over
     # tools/bm_project.py, tools/bm_lead.py, tools/bm_view.py,

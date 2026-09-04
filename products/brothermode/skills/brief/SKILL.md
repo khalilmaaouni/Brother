@@ -4,9 +4,11 @@ description: Ask for the short catch-up on where the work stands, what it cost, 
 user-invocable: false
 ---
 
+Plugin root: a Claude Code install exports `${CLAUDE_PLUGIN_ROOT}` and a Codex install exports `${BROTHER_PLUGIN_ROOT}`; both name this plugin's own directory, so read whichever variable appears below as the one your client set. On a clone install neither is set: run the same commands from the checkout root instead.
+
 Outcome to produce: one short catch-up the user can read in under a minute, built from that project's own records, or an honest line saying that the last one still stands.
 
-Enter the catch-up flow of the brotherme skill. Run the mechanical command `python3 "${CLAUDE_PLUGIN_ROOT}/tools/bm_lead.py" brief --project-id <id>` (the packaged console script is `bm-lead brief`) and read its output; never write a catch-up from memory of this conversation. A plugin install exports `${CLAUDE_PLUGIN_ROOT}` for skill and command content, so that path resolves on its own; on a clone install, where the variable is unset, run `python3 tools/bm_lead.py brief --project-id <id>` instead, from the BrotherMode root (`~/.claude/skills/brothermode`). Either way, run it from the user's project folder so it reads and writes that project's own records.
+Enter the catch-up flow of the brotherme skill. Run the mechanical command `python3 "${CLAUDE_PLUGIN_ROOT}/tools/bm_lead.py" brief --project-id <id>` (the packaged console script is `bm-lead brief`) and read its output; never write a catch-up from memory of this conversation. A plugin install exports `${CLAUDE_PLUGIN_ROOT}` for skill and command content, so that path resolves on its own; on a clone install, where the variable is unset, run `python3 tools/bm_lead.py brief --project-id <id>` instead, from the BrotherMode root (the directory that holds `tools/`). Either way, run it from the user's project folder so it reads and writes that project's own records.
 
 The catch-up is at most six lines and the command prints them: where we are, what changed, what it cost, what was decided, what is still uncertain, and the options open to the user. The last line is always there and always last, and it always includes handing the work back. Read them out as printed. Costs already spent are facts and print as numbers; anything still to come is a range with a confidence level, never a single number, per references/forecasting.md.
 

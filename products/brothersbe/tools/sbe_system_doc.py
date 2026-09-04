@@ -43,6 +43,8 @@ NODATA = "NO-DATA"
 sys.path.insert(0, TOOLS)
 sys.path.insert(0, SRC)
 
+from sbe_checks import one_line, say  # noqa: E402  (path setup has to come first)
+
 
 def cli_commands():
     """(name, description) for every command `sbe_design.py`'s sibling CLI
@@ -207,8 +209,8 @@ def main(argv=None):
 
     if args.check:
         if not os.path.isfile(args.out):
-            print("%s does not exist. Run this without --check to write it." % args.out,
-                  file=sys.stderr)
+            sys.stderr.write(one_line(
+                "%s does not exist. Run this without --check to write it." % args.out) + "\n")
             return 1
         with open(args.out, encoding="utf-8") as fh:
             current = fh.read()
@@ -219,16 +221,17 @@ def main(argv=None):
             current.splitlines(), body.splitlines(),
             fromfile="SYSTEM.md (on disk)", tofile="SYSTEM.md (regenerated)",
             lineterm=""))
-        print("SYSTEM.md NO LONGER DESCRIBES THE CODE. Something was added, removed or renamed "
-              "and the record did not follow. Regenerate it with: "
-              "python3 tools/sbe_system_doc.py", file=sys.stderr)
+        sys.stderr.write(
+            "SYSTEM.md NO LONGER DESCRIBES THE CODE. Something was added, removed or renamed "
+            "and the record did not follow. Regenerate it with: "
+            "python3 tools/sbe_system_doc.py\n")
         for line in diff[:40]:
-            print(line, file=sys.stderr)
+            sys.stderr.write(one_line(line) + "\n")
         return 1
 
     with open(args.out, "w", encoding="utf-8") as fh:
         fh.write(body)
-    print("wrote %s" % args.out)
+    say("wrote %s" % args.out)
     return 0
 
 

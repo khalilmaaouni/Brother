@@ -323,6 +323,28 @@ def main(argv):
         _out("hooks: %d entry(ies) removed; every other hook left in place, in "
              "order." % removed)
 
+    # E50: the hook scope marker install.py wrote beside the settings file.
+    # Removed here rather than left behind, because a marker outliving the
+    # install would scope a LATER, unrelated Brother installation (the plugin
+    # path, say) without anybody asking for it. Its absence is the default and
+    # harms nothing, so a failure to remove it is reported and not fatal.
+    _scope = _install.load_repo_scope(target)
+    if _scope is not None:
+        marker = _install.scope_marker_for_settings(
+            settings_path, _scope.SCOPE_MARKER_NAME)
+        if os.path.exists(marker):
+            _out("%sscope: removing the hook scope marker %s" % (prefix, marker))
+            if not dry:
+                try:
+                    os.unlink(marker)
+                except OSError as exc:
+                    _err("uninstall.py: could not remove %s: %s; delete it by "
+                         "hand or hooks stay scoped." % (marker, exc))
+    else:
+        _out("%sscope: could not load %s from %s, so the hook scope marker "
+             "was not looked for; delete it by hand if one is there."
+             % (prefix, _install.SCOPE_MARKER_MODULE, target))
+
     if os.path.exists(record_path):
         _out("%srecord: removing %s" % (prefix, record_path))
         if not dry:

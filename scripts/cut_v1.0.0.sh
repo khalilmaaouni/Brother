@@ -39,6 +39,15 @@ d = json.load(open(p))
 d['version'] = VERSION
 json.dump(d, open(p, 'w'), indent=2); open(p, 'a').write('\n')
 print('bundle/.claude-plugin/plugin.json -> %s' % VERSION)
+# bundle/.codex-plugin/plugin.json: the Codex half of the same package, which
+# ships the same bytes under a second manifest, so a cut that moved only the
+# Claude manifest would publish a package declaring two different versions of
+# itself. Bumped here rather than by hand for the same reason as the one above.
+p = 'bundle/.codex-plugin/plugin.json'
+d = json.load(open(p))
+d['version'] = VERSION
+json.dump(d, open(p, 'w'), indent=2); open(p, 'a').write('\n')
+print('bundle/.codex-plugin/plugin.json -> %s' % VERSION)
 # marketplace.json: the brother entry version, and every ref pinned to the tag
 p = '.claude-plugin/marketplace.json'
 s = open(p).read()
@@ -57,7 +66,10 @@ p = 'docs/VERSIONING.md'
 with open(p) as fh:
     s = fh.read()
 s2 = re.sub(r'Current version: [0-9.]+\.', 'Current version: %s.' % VERSION, s)
-if s2 == s:
+# A re-run of the same cut (after merging main, say, so the note describes the
+# merged tree) leaves this file byte-identical, which is agreement, not a
+# missing line. Only an absent line refuses.
+if s2 == s and ('Current version: %s.' % VERSION) not in s:
     raise SystemExit('docs/VERSIONING.md: "Current version: X." line not found, refusing to bump silently')
 with open(p, 'w') as fh:
     fh.write(s2)

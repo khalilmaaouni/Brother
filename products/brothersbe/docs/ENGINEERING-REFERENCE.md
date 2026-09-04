@@ -45,8 +45,8 @@ with no network call to do it.
 
 </details>
 
-**Handing this to a team?** Give them
-[the Field Book](fieldbook/BrotherSBE-Booklet.html). Two pages tell
+**Handing this to a team?** Give them the Field Book, this project's own
+team-facing booklet. Two pages tell
 anyone what this is, what it actually enforces and one honest limit; the
 chapters after that carry the personas, the adoption path, and worked scenarios
 for warehouse and BI work (Snowflake, Databricks, Power BI, Azure), backend
@@ -55,7 +55,7 @@ check and limit tables are generated from this repository, and
 `sbe book --check` fails in CI when a source moves without a regenerate, so it
 cannot quietly describe a version that no longer ships.
 
-That command looks at where you are and takes it from there: a new project or one already in progress, it finds the right next step. Along the way, three guided companions in [`skills/`](../skills) keep you oriented: `/brothersbe:next` recommends exactly one next action, `/brothersbe:status` explains where you are in plain language, and `/brothersbe:help` lays out the whole map when you ask for it. New to any of this? [The beginner explainer](explainer/index.html) covers the same ground in plain language.
+That command looks at where you are and takes it from there: a new project or one already in progress, it finds the right next step. Along the way, three guided companions in [`skills/`](../skills) keep you oriented: `/brothersbe:next` recommends exactly one next action, `/brothersbe:status` explains where you are in plain language, and `/brothersbe:help` lays out the whole map when you ask for it. New to any of this? [The ten minute sandbox](guides/00-sandbox.md) covers the same ground in plain language.
 
 ---
 
@@ -227,7 +227,7 @@ An organization rolling this out across many repositories at once, with a tag pi
 
 ### Wire the checks into CI (every install path)
 
-This is what turns the gates from advisory into blocking, whichever path above you installed with. Copy [`.github/workflows/brothersbe-gates.yml`](../.github/workflows/brothersbe-gates.yml) into the repo you want guarded, or add its steps to an existing job:
+This is what turns the gates from advisory into blocking, whichever path above you installed with. Wire the ten steps [CI-ORDER.md](CI-ORDER.md) names into the repo you want guarded, as their own job or as steps on an existing one:
 
 ```yaml
       - name: Line endings stay bytes (autocrlf off before any file exists)
@@ -494,8 +494,9 @@ python3 tools/sbe_gate.py --strict design    # enforcing: exits nonzero on any F
 - [docs/guides/05-a-worked-engagement.md](guides/05-a-worked-engagement.md): one system designed end to end, real commands, real output. The best place to start.
 - [docs/DESIGN.md](DESIGN.md): the why and what, in the real order.
 - [docs/HOW-IT-WORKS.md](HOW-IT-WORKS.md): the mechanical half, tool by tool.
-- [docs/for-engineers/](for-engineers): onboarding for backend, data, infrastructure and ETL engineers who have never seen this tool. Start at [00-READ-ME-FIRST.md](for-engineers/00-READ-ME-FIRST.md); four complete worked dossiers are in [docs/for-engineers/examples/](for-engineers/examples).
-- [docs/SETUP.md](SETUP.md) to install, and the rest of [docs/guides/](guides) for the gates, the doctrines, and teams.
+- [docs/guides/03-work-doctrines.md](guides/03-work-doctrines.md): the practical field guide to the doctrines the gates enforce.
+- [docs/guides/00-sandbox.md](guides/00-sandbox.md): ten minutes end to end before you touch a real repository.
+- [docs/SETUP.md](SETUP.md) to install.
 - [SKILL.md](../SKILL.md) plus the [`references/`](../references) files its routing table names are the law itself; [SECURITY.md](../SECURITY.md) is the data and network posture (no network calls, no analytics, no account, no server).
 
 ## License

@@ -65,6 +65,7 @@ import re
 import sys
 
 import pattern_note
+import receipt_door
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DELIVERIES_DIR = os.path.join(ROOT, "docs", "deliveries")
@@ -92,7 +93,7 @@ def parse_iso(value):
 
 
 def record(name, ref, accepted_by, accepted_at, recorded_by, delegation=None,
-           words=None, directory=None):
+           words=None, directory=None, checks=None):
     """Write one acceptance. Returns (True, path) on success or
     (False, reason) on refusal. Pure enough to test without a subprocess.
 
@@ -100,7 +101,16 @@ def record(name, ref, accepted_by, accepted_at, recorded_by, delegation=None,
     (row E49): 'person' for a human at a terminal, or 'agent' for an agent
     acting under a named delegation, which then requires that delegation
     sentence verbatim. Neither shape is inferred; a call giving neither is
-    refused before anything is written."""
+    refused before anything is written.
+
+    checks (E79, the delivery-proof skeptic finding) is optional here, so a
+    plain human acceptance of a PR or commit (this tool's original shape,
+    which names nothing about how the work was checked) keeps working
+    unchanged. When a caller DOES pass checks, it must be a real per-file
+    check list (scripts/receipt_door.per_file_checks builds exactly this
+    from a run's own receipts): an empty or malformed list is refused
+    rather than silently written, because a record that CLAIMS per-file
+    evidence and carries none is worse than one that never claimed it."""
     directory = directory or DELIVERIES_DIR
     if recorded_by not in ("person", "agent"):
         return False, "recorded_by must be 'person' or 'agent', not %r" % recorded_by
@@ -111,6 +121,10 @@ def record(name, ref, accepted_by, accepted_at, recorded_by, delegation=None,
         parse_iso(accepted_at)
     except ValueError:
         return False, "accepted_at %r is not a valid ISO date" % accepted_at
+    if checks is not None:
+        ok, reason = receipt_door.require_per_file_checks(checks)
+        if not ok:
+            return False, reason
 
     path = record_path(ref, directory)
     entry = {
@@ -124,6 +138,8 @@ def record(name, ref, accepted_by, accepted_at, recorded_by, delegation=None,
         entry["delegation"] = str(delegation).strip()
     if words and words.strip():
         entry["words"] = words.strip()
+    if checks is not None:
+        entry["checks"] = checks
 
     os.makedirs(directory, exist_ok=True)
     try:
@@ -211,6 +227,50 @@ def per_week(entries):
     return counts
 
 
+def checks_from_run_dir(run_dir):
+    """(checks, "") for the per-file check list a completed run's own
+    directory already holds, or (None, reason) naming what stopped it.
+
+    E79 / BO2 (the delivery-proof skeptic finding): the only record this
+    repository shipped named no changed file and no check, because building
+    that list meant hand-writing JSON and nobody did. A run directory
+    already carries both halves receipt_door needs, the Work document
+    (W-*.json, the units with their done_checks and files_changed_by_unit)
+    and claims.json (what each worker released, with the command it ran and
+    the exit code it captured), so this reads them and hands
+    receipt_door.per_file_checks the same two arguments brother_run.py does
+    at the end of a run. It runs no check and invents nothing: a run that
+    recorded no changed file yields an empty list, which record() then
+    refuses, exactly as it refuses a hand-written empty one."""
+    if not os.path.isdir(run_dir):
+        return None, "--run-dir %r is not a directory" % run_dir
+    work = sorted(n for n in os.listdir(run_dir)
+                  if n.startswith("W-") and n.endswith(".json"))
+    if not work:
+        return None, ("--run-dir %r holds no W-*.json Work document, so the "
+                      "units it delivered cannot be read" % run_dir)
+    if len(work) > 1:
+        return None, ("--run-dir %r holds %d W-*.json Work documents (%s); "
+                      "a run directory carries exactly one"
+                      % (run_dir, len(work), ", ".join(work)))
+    claims_path = os.path.join(run_dir, "claims.json")
+    if not os.path.isfile(claims_path):
+        return None, ("--run-dir %r holds no claims.json, so no check "
+                      "command or exit code can be read from it" % run_dir)
+    try:
+        with open(os.path.join(run_dir, work[0]), encoding="utf-8") as fh:
+            record_doc = json.load(fh)
+        with open(claims_path, encoding="utf-8") as fh:
+            claims = json.load(fh)
+    except (OSError, ValueError) as exc:
+        return None, ("--run-dir %r could not be read (%s)" % (run_dir, exc))
+    log_path = os.path.join(run_dir, "run.log")
+    receipts = receipt_door.receipts_for(
+        record_doc, claims, [],
+        log_path=log_path if os.path.isfile(log_path) else None)
+    return receipt_door.per_file_checks(record_doc, receipts), ""
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -233,6 +293,19 @@ def main(argv=None):
     ap.add_argument("--pattern-root", default=None,
                     help="override the pattern store's vault root "
                          "(pattern_note.VAULT by default), for tests")
+    ap.add_argument("--checks-file", default=None,
+                    help="path to a JSON list of per-file check entries "
+                         "(E79; scripts/receipt_door.per_file_checks builds "
+                         "this from a run's own receipts), attached to the "
+                         "record as 'checks' and refused if empty or "
+                         "malformed")
+    ap.add_argument("--run-dir", default=None,
+                    help="a completed run's own directory (holding its "
+                         "W-*.json Work document and claims.json): the "
+                         "per-file check list is DERIVED from it, so a "
+                         "record never has to be hand-written to carry the "
+                         "changed files and the command that verified each "
+                         "one. Mutually exclusive with --checks-file")
     args = ap.parse_args(argv)
 
     if args.list:
@@ -280,8 +353,27 @@ def main(argv=None):
         ap.error("--recorded-by agent requires --delegation \"<the exact "
                  "sentence the founder said>\"")
 
+    checks = None
+    if args.checks_file and args.run_dir:
+        ap.error("--checks-file and --run-dir both name where the per-file "
+                 "checks come from; pass one, never both")
+    if args.run_dir:
+        checks, reason = checks_from_run_dir(args.run_dir)
+        if checks is None:
+            print("accept-delivery: refused: %s" % reason, file=sys.stderr)
+            return 2
+    if args.checks_file:
+        try:
+            with open(args.checks_file, "r", encoding="utf-8") as fh:
+                checks = json.load(fh)
+        except (OSError, ValueError) as exc:
+            print("accept-delivery: refused: --checks-file %r could not be "
+                 "read as JSON (%s)" % (args.checks_file, exc), file=sys.stderr)
+            return 2
+
     ok, result = record(args.name, args.ref, args.accepted_by, args.accepted_at,
-                        args.recorded_by, args.delegation, args.words, args.dir)
+                        args.recorded_by, args.delegation, args.words, args.dir,
+                        checks)
     if not ok:
         print("accept-delivery: refused: %s" % result, file=sys.stderr)
         return 2

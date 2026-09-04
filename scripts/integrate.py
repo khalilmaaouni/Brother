@@ -72,6 +72,8 @@ import subprocess
 import sys
 import time
 
+import journal
+
 NODATA = "NO-DATA"
 INTEGRATED = "INTEGRATED"
 CONFLICT = "CONFLICT"
@@ -472,6 +474,20 @@ def integrate_one(repo, lane_branch, unit, runner=None, check_runner=None,
                    "files_changed": files_changed}
 
         if passed:
+            # E59: the ONE place canonical actually advanced for this unit.
+            # This module holds no run directory (it takes a repository and a
+            # lane branch), so it reads the one brother_run exports, exactly
+            # as it already reads RUN_ID_ENV_VAR for the merge trailers; run
+            # it outside a run and nothing is written.
+            run_dir = journal.run_dir_from_env()
+            journal.append(run_dir, "integrate.merged",
+                           parent_ids=journal.previous(run_dir),
+                           unit_id=unit_id,
+                           payload={"canonical": (after or "")[:12],
+                                    "onto": (before or "")[:12],
+                                    "files_changed": (len(files_changed)
+                                                      if files_changed
+                                                      is not None else None)})
             return {"verdict": INTEGRATED, "unit": unit_id, "canonical": after,
                     "reason": "applied to %s and its own check passed ON "
                               "canonical at %s" % (before[:9], (after or "")[:9]),
@@ -552,6 +568,10 @@ def cleanup_lane(repo, branch, unit_id, runner=None):
               % (branch, path or "(no worktree)", "; ".join(problems)))
     print("  lane-cleanup %-10s %-7s %s"
           % (unit_id, "removed" if removed else "kept", detail))
+    run_dir = journal.run_dir_from_env()
+    journal.append(run_dir, "lane.cleaned",
+                   parent_ids=journal.previous(run_dir), unit_id=unit_id,
+                   payload={"branch": branch, "removed": removed})
     return removed, detail
 
 
@@ -610,4 +630,28 @@ def integrate(repo, results, lanes, units, runner=None, check_runner=None,
                                  runner, check_runner, run_id,
                                  harness_revision))
         cleanup_lane(repo, branch, uid, runner)
+    # E59: one event per verdict this round recorded that is NOT a merge, in
+    # one place rather than at each of the four points above, because every
+    # one of them ends in this same list and a reader wants the verdict word
+    # and the unit, not the branch of the code that produced it. The merge
+    # itself is journalled by integrate_one, where the two tips are known.
+    # The reason is cut short here: it is already whole in the verdict this
+    # returns, in the delivery report and in the unit's own receipt.
+    run_dir = journal.run_dir_from_env()
+    for row in out:
+        if row.get("verdict") == INTEGRATED:
+            continue
+        # ALREADY_INTEGRATED IS NOT A REFUSAL: the recovery resolver found
+        # this lane's content already in canonical, which is a fact about a
+        # resumed run, not a verdict against the unit. It gets its own type
+        # rather than being filed under a word that would misread.
+        journal.append(run_dir,
+                       "integrate.already_integrated"
+                       if row.get("verdict") == ALREADY_INTEGRATED
+                       else "integrate.refused",
+                       parent_ids=journal.previous(run_dir),
+                       unit_id=row.get("unit"),
+                       payload={"verdict": row.get("verdict"),
+                                "canonical": (row.get("canonical") or "")[:12],
+                                "reason": str(row.get("reason") or "")[:100]})
     return out

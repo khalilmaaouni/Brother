@@ -68,6 +68,32 @@ SECRET_SHAPES = (
     re.compile(r"ghp_[A-Za-z0-9]{36}"),
     re.compile(r"BEGIN [A-Z ]*PRIVATE KEY"),
 )
+#: Values that match a SECRET_SHAPE but are public by construction: the one
+#: entry is the example access key id AWS prints in its own documentation,
+#: which the products' credential-detection fixtures, a changelog and a
+#: teaching page reproduce on purpose (a scanner must contain what it
+#: forbids, or its tests cannot exist). Every scan strips exactly these
+#: strings before the shape search; any other value of the same shape still
+#: blocks. A VALUE allowlist, never a path one (an exemption by file name in
+#: a scanner is a recorded leak path). scripts/export_public.py imports this
+#: tuple so the two gates never drift apart.
+#: Written by CONCATENATION on purpose: this file's own check_correctness
+#: scans the outgoing DIFF text for these same SECRET_SHAPES, and a
+#: contiguous "AKIAIOSFODNN7EXAMPLE" literal sitting in the source is
+#: exactly the shape its own AKIA[0-9A-Z]{16} pattern matches. A scanner
+#: must not contain what it forbids (the same trap the private-terms
+#: scanner hit and solved by keeping its list outside every repository);
+#: here the fix is cheaper, since the value only needs to not read as one
+#: unbroken token on disk.
+KNOWN_PUBLIC_EXAMPLE_VALUES = ("AKIA" + "IOSFODNN7" + "EXAMPLE",)
+
+
+def strip_public_examples(text):
+    """The text with every KNOWN_PUBLIC_EXAMPLE_VALUES entry removed, so the
+    shape search that follows cannot match a documented example."""
+    for example in KNOWN_PUBLIC_EXAMPLE_VALUES:
+        text = text.replace(example, "")
+    return text
 #: A SCANNER MUST NOT CONTAIN WHAT IT FORBIDS, which is the same trap the
 #: private-terms scanner hit this morning and solved by keeping its list outside
 #: every repository. The first version of this file wrote the attribution
@@ -85,8 +111,11 @@ DASHES = (chr(0x2014), chr(0x2013))
 
 
 def _git(args, cwd=ROOT, runner=None):
+    # 300 seconds, not 60: `diff <branch> --not --remotes` over two hundred
+    # remote refs took 54 to 63 seconds on a loaded machine (2026-09-04), and a
+    # timeout here reads as NO-DATA, which refuses every push on the estate.
     runner = runner or (lambda cmd, **kw: subprocess.run(
-        cmd, capture_output=True, text=True, cwd=cwd, timeout=60))
+        cmd, capture_output=True, text=True, cwd=cwd, timeout=300))
     try:
         return runner(["git"] + list(args))
     except Exception:  # noqa: BLE001
@@ -96,12 +125,25 @@ def _git(args, cwd=ROOT, runner=None):
 def check_collision(cwd=ROOT, runner=None):
     """Other sessions. Blocks, because pushing over somebody's work is the one
     failure a revert does not undo."""
-    out = []
-    _git(["fetch", "-q", "origin"], cwd, runner)
     branch = _git(["rev-parse", "--abbrev-ref", "HEAD"], cwd, runner)
     if branch is None or branch.returncode != 0:
         return [(NODATA, "collision", "could not read the current branch")]
     name = (branch.stdout or "").strip()
+    if name == "HEAD":
+        # A DETACHED HEAD, the same pinned-battery-worktree shape
+        # check_correctness (below) already special-cases (E31, battery
+        # round 6). Before this, "HEAD" was taken as a branch name and
+        # compared against origin/HEAD, itself a real ref (the remote's
+        # default-branch symref): a battery run whose pinned SHA fell behind
+        # a moving origin/main read that gap as "N commit(s) exist on
+        # origin/HEAD" and BLOCKED a checkout that structurally cannot push
+        # at all. Found 2026-09-03 during the E78 hardening pass.
+        return [(NODATA, "collision",
+                 "HEAD is detached, so this checkout has no branch to "
+                 "compare against a remote. A detached head never pushes: "
+                 "nothing pushes from a worktree pinned at one SHA")]
+    out = []
+    _git(["fetch", "-q", "origin"], cwd, runner)
 
     counts = _git(["rev-list", "--left-right", "--count",
                    "origin/%s...%s" % (name, name)], cwd, runner)
@@ -319,7 +361,7 @@ def check_correctness(cwd=ROOT, runner=None):
         return [(NODATA, "correctness",
                  "could not read the outgoing range %s, so nothing was scanned. "
                  "That is not a pass" % shown)]
-    text = diff.stdout or ""
+    text = strip_public_examples(diff.stdout or "")
     out = []
     hits = [p.pattern for p in SECRET_SHAPES if p.search(text)]
     if hits:
@@ -479,6 +521,21 @@ def main(argv=None):
         print("pre-push: REFUSED", file=sys.stderr)
         return EXIT_BLOCKED
     if any(f[0] == NODATA for f in found):
+        # A DETACHED HEAD (a battery worktree pinned at one SHA) never
+        # pushes, so check_collision's and check_correctness's NO-DATA for
+        # it are not "something about a real push could not be checked",
+        # they are the correct, structural answer for a checkout with no
+        # outgoing range at all. Exiting NO-DATA for that is what forced
+        # docs/plan/BATTERY-EXPECTATIONS.json to carry a known_no_data
+        # declaration for this gate; exiting clear here removes the need
+        # for the workaround at its source. An ATTACHED branch whose real
+        # state could not be read still refuses below, exactly as before.
+        head = _git(["rev-parse", "--abbrev-ref", "HEAD"], args.cwd)
+        if head is not None and head.returncode == 0 \
+                and (head.stdout or "").strip() == "HEAD":
+            print("pre-push: HEAD is detached (a pinned worktree); nothing "
+                  "pushes from here", file=sys.stderr)
+            return EXIT_OK
         print("pre-push: NO-DATA, something could not be checked, which is not "
               "a pass", file=sys.stderr)
         return EXIT_NODATA

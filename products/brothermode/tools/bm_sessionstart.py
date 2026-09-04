@@ -120,6 +120,21 @@ def _is_first_run():
         return False
 
 
+def _load_bm_repo_scope():
+    """Load bm_repo_scope.py by path, same shape as bm_telemetry.py's
+    _load_bm_learning: works from any cwd and never raises."""
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "bm_repo_scope_for_sessionstart",
+            os.path.join(HERE, "bm_repo_scope.py"))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception:  # sbe: allow-silent optional gate module load; hooks_off degrades to active when this returns None
+        return None
+
+
 def _run(args, stdin_text=None, capture=False, keep_stderr=False):
     """One sibling tool, with the shell version's exact degrade semantics:
     OSError (interpreter or file missing) reads as a silent non-run, the
@@ -153,6 +168,13 @@ def main():
     except (IOError, OSError, ValueError):
         payload = ""
     payload = payload.rstrip("\n")
+
+    # E76: per-repository hook scoping, checked before anything else this
+    # hook does (before even the consent probe), so an inactive repository
+    # gets zero work and zero I/O from this hook, not just a shorter run.
+    _rs = _load_bm_repo_scope()
+    if _rs is not None and _rs.hooks_off(payload=payload):
+        return 0
 
     # The shell spelled this >/dev/null 2>&1: the probe is an exit code, and
     # nothing it might print belongs in session context.

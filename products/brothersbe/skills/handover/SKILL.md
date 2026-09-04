@@ -3,6 +3,8 @@ name: handover
 description: Use when someone wants to hand this change's ownership to another named human, or when a receiver wants to inspect and accept or reject a handover already prepared for them. Runs the status and worktree checks first, then prepares (or reads) 12-handover.json through the sbe handover engine and renders the concise handover summary a receiver needs, never the project's whole history. Invoke as /brothersbe:handover.
 ---
 
+Plugin root: a Claude Code install exports `${CLAUDE_PLUGIN_ROOT}` and a Codex install exports `${BROTHER_PLUGIN_ROOT}`; both name this plugin's own directory, so read whichever variable appears below as the one your client set. On a clone install neither is set: run the same commands from the checkout root instead.
+
 # Handover
 
 Ownership transfer between two named humans is complete only after the receiver explicitly

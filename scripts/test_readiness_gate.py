@@ -6,13 +6,16 @@ the gate's own exit code is nonzero while any critical item is unproven and
 zero only once every critical item passes.
 """
 import contextlib
+import hashlib
 import io
 import json
 import os
 import stat
+import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import date, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import readiness_gate as RG  # noqa: E402
@@ -34,6 +37,67 @@ def _write_script(path, exit_code=0):
     with open(path, "w", encoding="utf-8") as fh:
         fh.write("import sys\nsys.exit(%d)\n" % exit_code)
     os.chmod(path, os.stat(path).st_mode | stat.S_IXUSR)
+
+
+_GIT_ENV = dict(os.environ, GIT_AUTHOR_NAME="test", GIT_AUTHOR_EMAIL="test@example.com",
+                GIT_COMMITTER_NAME="test", GIT_COMMITTER_EMAIL="test@example.com")
+
+
+def _init_git_repo(d):
+    """Turns tempdir d into a minimal one-commit git repo and returns HEAD's
+    full SHA. The restore-drill record's commit binding runs a real `git
+    merge-base --is-ancestor` against the checkout it is read from, so any
+    fixture root that wants that row to bind (rather than read NO-DATA for
+    an unverifiable commit) must actually be a git checkout."""
+    subprocess.run(["git", "init", "-q"], cwd=d, check=True, env=_GIT_ENV)
+    with open(os.path.join(d, ".marker"), "w", encoding="utf-8") as fh:
+        fh.write("x")
+    subprocess.run(["git", "add", "."], cwd=d, check=True, env=_GIT_ENV)
+    subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=d, check=True, env=_GIT_ENV)
+    sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=d, check=True, env=_GIT_ENV,
+                          stdout=subprocess.PIPE, text=True).stdout.strip()
+    return sha
+
+
+def _write_restore_drill(d, commit=None, drill_date=None, passed=True,
+                          covered=None):
+    rel = os.path.join("docs", "plan", "RESTORE-DRILL-ENTERPRISE-RESULT.json")
+    os.makedirs(os.path.join(d, "docs", "plan"), exist_ok=True)
+    doc = {"passed": passed}
+    if commit is not None:
+        doc["commit"] = commit
+    if drill_date is not None:
+        doc["drill_date"] = drill_date
+    if covered is not None:
+        doc["covered"] = covered
+    with open(os.path.join(d, rel), "w", encoding="utf-8") as fh:
+        json.dump(doc, fh)
+    return rel
+
+
+def _write_covered_file(d, rel, text):
+    """Writes a file the drill would have exercised and returns the covered
+    entry naming it, so a fixture's record and its tree agree by
+    construction rather than by a hand-copied hash."""
+    full = os.path.join(d, *rel.split("/"))
+    os.makedirs(os.path.dirname(full), exist_ok=True)
+    with open(full, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    return {"path": rel,
+            "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest()}
+
+
+def _make_orphan_head(d):
+    """Replaces d's HEAD with an ORPHAN commit carrying the same working
+    tree, the exact shape scripts/export_public.py's build_orphan_commit
+    produces for the public tree. Every commit made before this call stops
+    being an ancestor of HEAD, which is the state that refused the 1.0.2
+    tag."""
+    subprocess.run(["git", "checkout", "-q", "--orphan", "export"],
+                   cwd=d, check=True, env=_GIT_ENV)
+    subprocess.run(["git", "add", "-A"], cwd=d, check=True, env=_GIT_ENV)
+    subprocess.run(["git", "commit", "-q", "-m", "export"],
+                   cwd=d, check=True, env=_GIT_ENV)
 
 
 class AnItemIsGrantedByEvidenceNeverByAssertion(unittest.TestCase):
@@ -103,6 +167,210 @@ class AnItemIsGrantedByEvidenceNeverByAssertion(unittest.TestCase):
         self.assertIn("VB3-03", tenancy["evidence"])
 
 
+class TheRestoreDrillReadsNoDataForAnUnboundRecord(unittest.TestCase):
+    """Evidence auditor, 2026-09-03: _check_record read only passed=true, so
+    a stale drill certified any later tree forever. Driven backwards over a
+    real one-commit git repository, same discipline as the suite/record
+    tests above: a record naming HEAD's own commit and today's date PASSes
+    (and prints the commit and age), a foreign commit, a missing commit
+    field, and an over-the-bar date all read NO-DATA instead."""
+
+    def test_head_commit_and_todays_date_is_pass_with_commit_and_age_printed(self):
+        d = tempfile.mkdtemp()
+        sha = _init_git_repo(d)
+        rel = _write_restore_drill(d, commit=sha, drill_date=date.today().isoformat())
+        verdict, evidence = RG._check_restore_drill(d, rel)
+        self.assertEqual(verdict, RG.PASS)
+        self.assertIn(sha[:12], evidence)
+        self.assertIn("age 0 days", evidence)
+
+    def test_a_foreign_commit_is_no_data_naming_it(self):
+        d = tempfile.mkdtemp()
+        _init_git_repo(d)
+        foreign = "abc123def456abc123def456abc123def456abc"
+        rel = _write_restore_drill(d, commit=foreign, drill_date=date.today().isoformat())
+        verdict, evidence = RG._check_restore_drill(d, rel)
+        self.assertEqual(verdict, RG.NODATA)
+        self.assertIn(foreign[:12], evidence)
+
+    def test_no_commit_field_is_no_data_naming_the_missing_field(self):
+        d = tempfile.mkdtemp()
+        _init_git_repo(d)
+        rel = _write_restore_drill(d, commit=None, drill_date=date.today().isoformat())
+        verdict, evidence = RG._check_restore_drill(d, rel)
+        self.assertEqual(verdict, RG.NODATA)
+        self.assertIn("no commit field", evidence)
+
+    def test_a_record_older_than_the_freshness_bar_is_no_data_naming_its_age(self):
+        d = tempfile.mkdtemp()
+        sha = _init_git_repo(d)
+        stale = (date.today() - timedelta(days=RG.RESTORE_DRILL_MAX_AGE_DAYS + 1)).isoformat()
+        rel = _write_restore_drill(d, commit=sha, drill_date=stale)
+        verdict, evidence = RG._check_restore_drill(d, rel)
+        self.assertEqual(verdict, RG.NODATA)
+        self.assertIn("day(s) old", evidence)
+
+    def test_a_record_exactly_on_the_freshness_bar_still_passes(self):
+        d = tempfile.mkdtemp()
+        sha = _init_git_repo(d)
+        edge = (date.today() - timedelta(days=RG.RESTORE_DRILL_MAX_AGE_DAYS)).isoformat()
+        rel = _write_restore_drill(d, commit=sha, drill_date=edge)
+        verdict, _evidence = RG._check_restore_drill(d, rel)
+        self.assertEqual(verdict, RG.PASS)
+
+    def test_no_drill_date_field_is_no_data(self):
+        d = tempfile.mkdtemp()
+        sha = _init_git_repo(d)
+        rel = _write_restore_drill(d, commit=sha, drill_date=None)
+        verdict, evidence = RG._check_restore_drill(d, rel)
+        self.assertEqual(verdict, RG.NODATA)
+        self.assertIn("no drill_date field", evidence)
+
+    def test_a_commit_is_not_an_ancestor_when_root_is_not_a_git_checkout(self):
+        d = tempfile.mkdtemp()  # never git-init'd
+        self.assertIsNone(RG._commit_is_ancestor(d, "deadbeef"))
+
+    def test_evaluate_on_a_bound_pass_reads_ready_end_to_end(self):
+        """Same shape as TheGateExitsNonzeroWhileACriticalItemIsUnproven below,
+        but proves the binding through the real evaluate()/main() path, not
+        just the helper function."""
+        d = _bound_all_critical_pass_root()
+        self.assertEqual(_silent_main(["--root", d]), 0)
+
+    def test_evaluate_flips_to_not_ready_when_the_bound_commit_is_foreign(self):
+        d = _bound_all_critical_pass_root()
+        _write_restore_drill(d, commit="abc123def456abc123def456abc123def456abc",
+                              drill_date=date.today().isoformat())
+        self.assertEqual(_silent_main(["--root", d]), 1)
+
+
+class TheRestoreDrillBindsByContentWhereAncestryCannotExist(unittest.TestCase):
+    """Measured 2026-09-04 on the 1.0.2 cut: `python3 scripts/export_public.py
+    --push --tag v1.0.2` refused because the export tree's own gate read
+    "Restore drill NO-DATA ... foreign commit". scripts/export_public.py
+    builds that tree as an ORPHAN commit, so NO hub commit is ever an
+    ancestor of it and the ancestry binding above cannot pass there by
+    construction, for any drill, ever. Ancestry was a proxy for "the drill
+    ran against this code"; these cases prove the same property measured
+    directly, and prove it still refuses when the code has moved."""
+
+    #: A file the drill exercised, and one line of it.
+    COVERED_REL = "products/brothermode/tools/bm_vault.py"
+    COVERED_TEXT = "print('vault')\n"
+
+    def _foreign_root(self, covered_text=None, second=False):
+        """A git checkout whose HEAD does not contain the commit the record
+        names, carrying the covered file(s). Returns (dir, record rel,
+        foreign sha)."""
+        d = tempfile.mkdtemp()
+        _init_git_repo(d)
+        entries = [_write_covered_file(
+            d, self.COVERED_REL,
+            self.COVERED_TEXT if covered_text is None else covered_text)]
+        if second:
+            entries.append(_write_covered_file(
+                d, "scripts/restore_drill_enterprise.py", "print('drill')\n"))
+        foreign = "abc123def456abc123def456abc123def456abc"
+        rel = _write_restore_drill(d, commit=foreign,
+                                    drill_date=date.today().isoformat(),
+                                    covered=entries)
+        return d, rel, foreign
+
+    def test_unchanged_covered_files_pass_a_foreign_commit_naming_the_binding(self):
+        d, rel, foreign = self._foreign_root(second=True)
+        verdict, evidence = RG._check_restore_drill(d, rel)
+        self.assertEqual(verdict, RG.PASS, evidence)
+        self.assertIn("bound by content: 2 covered file(s) unchanged since %s"
+                      % foreign[:12], evidence)
+
+    def test_a_changed_covered_file_is_no_data_naming_that_file(self):
+        d, rel, _foreign = self._foreign_root()
+        with open(os.path.join(d, *self.COVERED_REL.split("/")), "a",
+                  encoding="utf-8") as fh:
+            fh.write("# one byte of drift\n")
+        verdict, evidence = RG._check_restore_drill(d, rel)
+        self.assertEqual(verdict, RG.NODATA)
+        self.assertIn(self.COVERED_REL, evidence)
+        self.assertIn("has changed since the drill ran", evidence)
+
+    def test_a_missing_covered_file_is_no_data_naming_that_file(self):
+        d, rel, _foreign = self._foreign_root()
+        os.remove(os.path.join(d, *self.COVERED_REL.split("/")))
+        verdict, evidence = RG._check_restore_drill(d, rel)
+        self.assertEqual(verdict, RG.NODATA)
+        self.assertIn(self.COVERED_REL, evidence)
+        self.assertIn("unreadable", evidence)
+
+    def test_a_foreign_commit_with_no_covered_list_is_no_data_as_before(self):
+        d = tempfile.mkdtemp()
+        _init_git_repo(d)
+        rel = _write_restore_drill(d, commit="abc123def456abc123def456abc123def456abc",
+                                    drill_date=date.today().isoformat())
+        verdict, evidence = RG._check_restore_drill(d, rel)
+        self.assertEqual(verdict, RG.NODATA)
+        self.assertIn("foreign commit", evidence)
+        self.assertIn("carries no covered list", evidence)
+
+    def test_an_empty_covered_list_is_no_data_not_a_vacuous_pass(self):
+        """Every covered file matched, over zero files, is exactly the shape
+        a population of nothing composes into a PASS."""
+        d = tempfile.mkdtemp()
+        _init_git_repo(d)
+        rel = _write_restore_drill(d, commit="abc123def456abc123def456abc123def456abc",
+                                    drill_date=date.today().isoformat(), covered=[])
+        self.assertEqual(RG._check_restore_drill(d, rel)[0], RG.NODATA)
+
+    def test_a_covered_entry_missing_its_hash_is_no_data(self):
+        d = tempfile.mkdtemp()
+        _init_git_repo(d)
+        _write_covered_file(d, self.COVERED_REL, self.COVERED_TEXT)
+        rel = _write_restore_drill(d, commit="abc123def456abc123def456abc123def456abc",
+                                    drill_date=date.today().isoformat(),
+                                    covered=[{"path": self.COVERED_REL}])
+        verdict, evidence = RG._check_restore_drill(d, rel)
+        self.assertEqual(verdict, RG.NODATA)
+        self.assertIn("no path or no sha256", evidence)
+
+    def test_an_ancestor_commit_still_passes_without_claiming_a_content_binding(self):
+        """The two bindings stay distinguishable in the evidence: a reader
+        must be able to tell which one granted the PASS."""
+        d = tempfile.mkdtemp()
+        sha = _init_git_repo(d)
+        rel = _write_restore_drill(d, commit=sha, drill_date=date.today().isoformat())
+        verdict, evidence = RG._check_restore_drill(d, rel)
+        self.assertEqual(verdict, RG.PASS)
+        self.assertNotIn("bound by content", evidence)
+
+    def test_a_real_orphan_tree_passes_by_content_and_fails_on_drift(self):
+        """The 1.0.2 export tree's own shape, built rather than described:
+        a real orphan commit, so the recorded commit is positively NOT an
+        ancestor, driven both ways on the same tree."""
+        d = tempfile.mkdtemp()
+        sha = _init_git_repo(d)
+        entries = [_write_covered_file(d, self.COVERED_REL, self.COVERED_TEXT)]
+        rel = _write_restore_drill(d, commit=sha,
+                                    drill_date=date.today().isoformat(),
+                                    covered=entries)
+        _make_orphan_head(d)
+        self.assertIs(RG._commit_is_ancestor(d, sha), False)
+        verdict, evidence = RG._check_restore_drill(d, rel)
+        self.assertEqual(verdict, RG.PASS, evidence)
+        self.assertIn("bound by content: 1 covered file(s) unchanged since %s"
+                      % sha[:12], evidence)
+        with open(os.path.join(d, *self.COVERED_REL.split("/")), "a",
+                  encoding="utf-8") as fh:
+            fh.write("# drift\n")
+        self.assertEqual(RG._check_restore_drill(d, rel)[0], RG.NODATA)
+
+    def test_evaluate_reads_ready_end_to_end_on_a_foreign_commit_bound_by_content(self):
+        """Through the real evaluate()/main() path, not the helper alone."""
+        d = _bound_all_critical_pass_root()
+        entries = [_write_covered_file(d, self.COVERED_REL, self.COVERED_TEXT)]
+        _write_restore_drill(d, commit="abc123def456abc123def456abc123def456abc",
+                              drill_date=date.today().isoformat(), covered=entries)
+        self.assertEqual(_silent_main(["--root", d]), 0)
+
+
 class NoDataIsNeverAPass(unittest.TestCase):
     def test_no_data_blocks_a_critical_item_exactly_like_fail(self):
         rows = [{"id": "x", "title": "X", "critical": True, "verdict": RG.NODATA,
@@ -128,6 +396,25 @@ class NoDataIsNeverAPass(unittest.TestCase):
         self.assertEqual([r["id"] for r in caught], ["f"])
 
 
+def _bound_all_critical_pass_root():
+    """Same fixture as _all_critical_pass_root below, module-level so both
+    that class and TheRestoreDrillReadsNoDataForAnUnboundRecord can share it:
+    a real one-commit git checkout whose restore-drill record names HEAD's
+    own commit and today's date, so the record binds and every critical item
+    reads PASS."""
+    d = tempfile.mkdtemp()
+    _write_script(os.path.join(d, "scripts", "test_make_benchmark_bundle.py"), 0)
+    _write_script(os.path.join(d, "scripts", "test_tenancy_isolation.py"), 0)
+    _write_script(os.path.join(d, "scripts", "test_policy_fail_closed.py"), 0)
+    # V6/M4: japanese-threshold is now critical (see readiness_gate.py's
+    # ITEMS comment), so a fixture claiming every critical item passes
+    # must give it passing evidence too, not leave it absent.
+    _write_script(os.path.join(d, "scripts", "test_japanese_threshold.py"), 0)
+    sha = _init_git_repo(d)
+    _write_restore_drill(d, commit=sha, drill_date=date.today().isoformat())
+    return d
+
+
 class TheGateExitsNonzeroWhileACriticalItemIsUnproven(unittest.TestCase):
     """Driven backwards on a full fixture root, same shape as production:
     every critical item's evidence path present and passing gives exit 0;
@@ -135,19 +422,7 @@ class TheGateExitsNonzeroWhileACriticalItemIsUnproven(unittest.TestCase):
     left absent (NO-DATA) throughout, and must never affect the exit code."""
 
     def _all_critical_pass_root(self):
-        d = tempfile.mkdtemp()
-        _write_script(os.path.join(d, "scripts", "test_make_benchmark_bundle.py"), 0)
-        _write_script(os.path.join(d, "scripts", "test_tenancy_isolation.py"), 0)
-        _write_script(os.path.join(d, "scripts", "test_policy_fail_closed.py"), 0)
-        # V6/M4: japanese-threshold is now critical (see readiness_gate.py's
-        # ITEMS comment), so a fixture claiming every critical item passes
-        # must give it passing evidence too, not leave it absent.
-        _write_script(os.path.join(d, "scripts", "test_japanese_threshold.py"), 0)
-        os.makedirs(os.path.join(d, "docs", "plan"), exist_ok=True)
-        with open(os.path.join(d, "docs", "plan", "RESTORE-DRILL-ENTERPRISE-RESULT.json"),
-                  "w", encoding="utf-8") as fh:
-            json.dump({"passed": True}, fh)
-        return d
+        return _bound_all_critical_pass_root()
 
     def test_exit_zero_once_every_critical_item_passes(self):
         d = self._all_critical_pass_root()

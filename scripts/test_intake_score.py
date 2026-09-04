@@ -1148,5 +1148,124 @@ class ViewsReplacePersonas(unittest.TestCase):
         self.assertEqual(proc.returncode, 2)
 
 
+class DataOverlayTests(unittest.TestCase):
+    """Calibrates --overlay data (row P15, doc 23.2 DS overlay): four rows
+    (cutoff_and_split, leakage, primary_metric_and_baseline, reproducibility)
+    scored PASS/FAIL/NO-DATA straight from the record text, printed under the
+    universal total, and proven never to move that total or the exit code."""
+
+    ALL_FOUR = (
+        "# Intake Record\n\n"
+        "## Data Considerations\n"
+        "Data cutoff: 2026-06-30. The train/test split is temporal, train before cutoff, test after.\n"
+        "Leakage check: features available only at prediction time were used, confirmed no target leakage.\n"
+        "The primary metric is F1; the baseline is the existing rule-based classifier at F1 0.62.\n"
+        "Reproducibility: random seed=42, pinned data version v3, rerun via `scripts/train.py`.\n"
+    )
+
+    # The shipped-shape record from this file's own template: names none of
+    # the four DS topics, so every row must abstain rather than guess.
+    NONE_NAMED = ALL_CITED_RECORD
+
+    GAPS_NAMED = (
+        "# Intake Record\n\n"
+        "## Data Considerations\n"
+        "No cutoff defined for this dataset; the split has not been specified.\n"
+        "Leakage risk not checked before training.\n"
+        "No baseline chosen for the primary metric.\n"
+        "This result is not reproducible: no seed was set.\n"
+    )
+
+    def test_all_four_topics_score_pass(self):
+        rows = intake_score.score_data_overlay(self.ALL_FOUR)
+        by = {r.name: r for r in rows}
+        self.assertEqual(len(rows), 4)
+        for name in ('cutoff_and_split', 'leakage', 'primary_metric_and_baseline', 'reproducibility'):
+            self.assertEqual(by[name].status, 'PASS', "%s: %s" % (name, by[name].evidence))
+            self.assertTrue(by[name].evidence)
+
+    def test_no_topic_named_scores_no_data_not_fail(self):
+        rows = intake_score.score_data_overlay(self.NONE_NAMED)
+        self.assertEqual(len(rows), 4)
+        for r in rows:
+            self.assertEqual(r.status, 'NO-DATA', "%s: %s" % (r.name, r.evidence))
+
+    def test_a_stated_gap_scores_fail(self):
+        """The direction that matters: without this the row can never fail
+        and verifies nothing, per this estate's own standing rule that a
+        check which cannot fail proves nothing."""
+        rows = intake_score.score_data_overlay(self.GAPS_NAMED)
+        for r in rows:
+            self.assertEqual(r.status, 'FAIL', "%s: %s" % (r.name, r.evidence))
+
+    def test_no_leakage_found_is_a_pass_not_a_fail(self):
+        """The one row where a bare negation word is the GOOD outcome ('no
+        target leakage'). A generic 'contains a no/not word' rule would fail
+        this; the leakage row uses its own narrower gap language instead."""
+        text = "# Plan\n\nLeakage: checked and confirmed no target leakage between train and test.\n"
+        row = {r.name: r for r in intake_score.score_data_overlay(text)}['leakage']
+        self.assertEqual(row.status, 'PASS', row.evidence)
+
+    def test_cli_overlay_prints_four_rows_under_the_total(self):
+        path = write_record(self.ALL_FOUR)
+        try:
+            code, out, err = run_cli(path, 'dev', extra_args=['--overlay', 'data'])
+        finally:
+            os.unlink(path)
+        self.assertEqual(code, 0, err)
+        self.assertIn('intake-overlay: overlay=data', out)
+        for name in ('cutoff_and_split', 'leakage', 'primary_metric_and_baseline', 'reproducibility'):
+            self.assertIn('- %s: PASS' % name, out)
+        total_idx = out.index('intake-score: persona=dev')
+        overlay_idx = out.index('intake-overlay: overlay=data')
+        self.assertLess(total_idx, overlay_idx, 'the overlay must print under the universal total')
+
+    def test_overlay_never_changes_the_universal_total_or_exit_code(self):
+        path = write_record(self.ALL_FOUR)
+        try:
+            code_with, out_with, _ = run_cli(path, 'dev', extra_args=['--overlay', 'data'])
+            code_without, out_without, _ = run_cli(path, 'dev')
+        finally:
+            os.unlink(path)
+        self.assertEqual(code_with, code_without)
+        total_with = [ln for ln in out_with.splitlines() if ln.startswith('intake-score:')][0]
+        total_without = [ln for ln in out_without.splitlines() if ln.startswith('intake-score:')][0]
+        self.assertEqual(total_with, total_without)
+
+    def test_no_topic_record_keeps_total_unchanged_too(self):
+        path = write_record(self.NONE_NAMED)
+        try:
+            code_with, out_with, _ = run_cli(path, 'dev', extra_args=['--overlay', 'data'])
+            code_without, out_without, _ = run_cli(path, 'dev')
+        finally:
+            os.unlink(path)
+        self.assertEqual(code_with, code_without)
+        total_with = [ln for ln in out_with.splitlines() if ln.startswith('intake-score:')][0]
+        total_without = [ln for ln in out_without.splitlines() if ln.startswith('intake-score:')][0]
+        self.assertEqual(total_with, total_without)
+        for name in ('cutoff_and_split', 'leakage', 'primary_metric_and_baseline', 'reproducibility'):
+            self.assertIn('- %s: NO-DATA' % name, out_with)
+
+    def test_unknown_overlay_name_refused_at_exit_2(self):
+        path = write_record(self.ALL_FOUR)
+        try:
+            proc = subprocess.run(
+                [sys.executable, SCORER, path, '--persona', 'dev', '--overlay', 'bogus'],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+        finally:
+            os.unlink(path)
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn('bogus', proc.stderr, 'the unknown overlay must be refused BY NAME')
+
+    def test_without_overlay_flag_no_overlay_output_at_all(self):
+        path = write_record(self.ALL_FOUR)
+        try:
+            code, out, err = run_cli(path, 'dev')
+        finally:
+            os.unlink(path)
+        self.assertEqual(code, 0, err)
+        self.assertNotIn('intake-overlay', out)
+
+
 if __name__ == '__main__':
     unittest.main()

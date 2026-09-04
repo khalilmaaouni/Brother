@@ -27,7 +27,15 @@ the question. Three signals compensate, and the missing half is stated rather th
 fused by Reciprocal Rank Fusion, which combines ranks rather than scores and so needs no
 calibration between signals that are not on the same scale.
 
+The fused score is then scaled by TIME DECAY AND REINFORCEMENT (bm_vault_decay.py, borrowed
+from MemoryBank, https://arxiv.org/abs/2305.10250): an old note nobody has confirmed fades in
+RANK on an Ebbinghaus curve while a confirmed one strengthens. Ranking only, bounded by a
+floor: a decayed note is reordered, never removed, and nothing here ever writes to a note.
+
   index    build or refresh the index from the vault and every project memory directory
+  refresh  the SessionStart step: index ONLY when the index is behind the notes, only the
+           notes that changed, never for longer than REFRESH_BUDGET_S, and always exit 0
+  status-line  the one line naming the index age, read-only, for the point-of-need hook
   recall   a symptom, in words: what has this estate already learned about this
   check    a set of file paths: what has already gone wrong in these files
   status   what is indexed, how fresh, and what is missing
@@ -45,9 +53,11 @@ Python 3.9, standard library only, no network, no embedding model, no subprocess
 """
 import array
 import calendar
+import contextlib
 import datetime
 import hashlib
 import importlib.util
+import io
 import json
 import math
 import os
@@ -58,11 +68,35 @@ import sys
 import time
 import uuid
 
+HERE = os.path.dirname(os.path.abspath(__file__))
+# C3: the config directory is resolved by brother_paths, the one seam
+# that knows which coding client is running (docs/codex/HOOKS-MAPPING.md).
+# Loaded from beside this file because tools/ is not a package. GUARDED, the
+# same way vault_recall_hook.py guards it: a deployed snapshot directory holds
+# bm_vault.py without every sibling, and an unguarded import turned that into
+# a traceback at import time, so recall died instead of degrading.
+sys.path.insert(0, HERE)
+try:
+    import brother_paths  # noqa: E402
+except ImportError:  # pragma: no cover, exercised only by a partial deployment
+    brother_paths = None
+
+
+def _config_dir():
+    """brother_paths' answer, or the pre-C3 literal when the helper is absent."""
+    if brother_paths is None:
+        return os.path.join(os.path.expanduser("~"), ".claude")
+    return brother_paths.config_dir()
+
+
+def _config_path(*parts):
+    return os.path.join(_config_dir(), *parts)
+
 #: The installer-written config, shared with vault_recall_hook.py: the D01 contract
 #: (2026-08-30) is environment first, config file second, and NO guessed home path
 #: when neither is set. The old home-guess default was portable in
 #: spelling and machine-bound in fact: a second machine indexed an empty guess.
-CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".claude", "bm_vault.json")
+CONFIG_PATH = _config_path("bm_vault.json")
 
 
 def _config():
@@ -91,8 +125,58 @@ def _default_vault():
     return cfg_vault if isinstance(cfg_vault, str) and cfg_vault else None
 
 
-PROJECTS_ROOT = os.path.expanduser("~/.claude/projects")
-INDEX_PATH = os.path.expanduser("~/.claude/bm_vault_index.sqlite3")
+# ---------------------------------------------------------------------------
+# Consent gate for cmd_refresh (row E54, 2026-09-04). refresh is wired
+# directly at SessionStart (hooks/hooks.json) and, unlike status-line and
+# recall (which vault_recall_hook.py gates before ever shelling out to this
+# file), it can WRITE the index at ~/.claude/bm_vault_index.sqlite3 before
+# anyone has consented to BrotherMode touching a stranger's machine. Same
+# technique, same schema, same fail-CLOSED-on-any-error direction as every
+# other write-capable entry point in this project (tools/bm_bash_audit.py,
+# tools/vault_recall_hook.py): a private, duplicated load of scripts/
+# setup.py, never a shared import, because each write-capable entry point
+# owns its own gate rather than trusting a shared import to still be
+# gating tomorrow.
+# ---------------------------------------------------------------------------
+_bm_setup_cache = []
+
+
+def _load_bm_setup():
+    try:
+        root = os.path.dirname(_TOOLS_DIR)
+        spec = importlib.util.spec_from_file_location(
+            "bm_setup_for_vault", os.path.join(root, "scripts", "setup.py"))
+        if spec is None or spec.loader is None:
+            return None
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception:  # sbe: allow-silent optional consent module load; _consented() fails closed on None
+        return None
+
+
+def _get_bm_setup():
+    if not _bm_setup_cache:
+        _bm_setup_cache.append(_load_bm_setup())
+    return _bm_setup_cache[0]
+
+
+def _consented():
+    """True only when scripts/setup.py's own is_consented() says so. Fails
+    CLOSED (not consented) on any load error, missing config, or a corrupt
+    one."""
+    mod = _get_bm_setup()
+    if mod is None:
+        return False
+    try:
+        cfg, _err = mod.read_config()
+        return bool(mod.is_consented(cfg))
+    except Exception:
+        return False
+
+
+PROJECTS_ROOT = _config_path("projects")
+INDEX_PATH = _config_path("bm_vault_index.sqlite3")
 # VB2-05: the answer ledger. One JSON line per recall, sitting beside the index it reads,
 # so the retention tool (bm_vault_retention.py) can find and report on it with the same
 # path arithmetic it already uses for INDEX_PATH.
@@ -102,6 +186,19 @@ LEDGER_PATH = os.path.join(os.path.dirname(INDEX_PATH), "bm_vault_answers.jsonl"
 # answer) and stays only as the zero-dependency fallback, better than nothing and said so.
 _TOOLS_DIR = os.path.dirname(os.path.abspath(__file__))
 EMBED_BINS = [os.path.join(_TOOLS_DIR, "bm-embed-bge"), os.path.join(_TOOLS_DIR, "bm-embed")]
+
+#: THE WALL CLOCK A SessionStart REFRESH GETS (cmd_refresh), before it stops and leaves the
+#: rest for the next start. Small on purpose: a session start that waits on the index is a
+#: session start someone turns off, and the whole point of E54 is a refresh nobody has to
+#: remember. The work is RESUMABLE because an unfinished pass deliberately does not stamp
+#: indexed_at, so the next start still sees the index as behind and carries on.
+REFRESH_BUDGET_S = 5.0
+
+#: What the dense embedder needs before it is worth starting at all: tools/bm-embed-bge pays
+#: a 7 to 9 second cold model load on every call (SECURITY.md's own measurement of it), so a
+#: pass holding less than this skips embedding and SAYS SO, rather than blowing the budget it
+#: was handed. A hand-run `index` passes no budget and is unaffected.
+EMBED_MIN_S = 10.0
 
 WIKILINK = re.compile(r"\[\[([^\]|]+)")
 # An anchor is a thing you can grep for: a source file, or a CamelCase / dotted symbol. These are
@@ -142,6 +239,20 @@ def _connect():
     con = sqlite3.connect(INDEX_PATH)
     con.row_factory = sqlite3.Row
     return con
+
+
+def _load_bm_repo_scope():
+    """Dynamic import by path, the same defensive pattern as
+    _load_bm_freshness right below: E76 per-repository hook scoping,
+    checked at the top of cmd_refresh before anything is touched."""
+    try:
+        spec = importlib.util.spec_from_file_location(
+            "bm_repo_scope_for_vault", os.path.join(_TOOLS_DIR, "bm_repo_scope.py"))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception:  # sbe: allow-silent optional gate module load; hooks_off degrades to active when this returns None
+        return None
 
 
 def _load_bm_freshness():
@@ -222,6 +333,20 @@ def _load_bm_vault_staleness():
     is_stale, so the demotion seam can never drift into a second reading of verified_at."""
     spec = importlib.util.spec_from_file_location(
         "bm_vault_staleness", os.path.join(_TOOLS_DIR, "bm_vault_staleness.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _load_bm_vault_decay():
+    """Dynamic import by path, the same pattern _load_bm_vault_staleness uses right
+    above. (E57 mechanism 2, borrowed from MemoryBank, https://arxiv.org/abs/2305.10250.)
+    The contract module (bm_vault_decay.py) is the ONE owner of the curve, the floor
+    and the sidecar store, so retrieval can never grow a second opinion about how fast
+    a note fades. Guarded at the caller exactly like staleness: an ABSENT module means
+    no decay at all, stated on stderr, never a crash."""
+    spec = importlib.util.spec_from_file_location(
+        "bm_vault_decay", os.path.join(_TOOLS_DIR, "bm_vault_decay.py"))
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
@@ -314,6 +439,14 @@ def _schema(con):
 # lessons: asking the night's real symptom returned four session logs and neither of the two
 # notes that actually root-caused it. Separating the two and ranking lessons first is the whole
 # fix, and it is why this tool answers where a single undifferentiated index did not.
+#
+# P11: type: data_semantic (a team-agreed metric definition) and type: test_oracle (an approved
+# expected-result source) are accepted here the same way every type this function does not name
+# explicitly already is: neither is a log-shaped type above, so both fall through to "lesson" and
+# index, retrieve and rank exactly like any other lesson. Their two extra frontmatter fields,
+# source_receipt (which run produced the note) and human_approved (whether a person signed off on
+# it), are body text as far as this indexer is concerned; vault_recall_hook.py's lesson_states is
+# the reader that acts on human_approved before a drafted note is ever shown as advice.
 def _classify(path, body):
     low = path.replace("\\", "/").lower()
     m = FRONT_TYPE.search(body[:1200])
@@ -468,6 +601,188 @@ def _index_correction_rules(con, seen):
     return added, updated, touched
 
 
+def _index_roots(vault):
+    """The roots the index walks: the vault, plus every project memory directory. ONE
+    definition, shared by cmd_index and the staleness check below, so the check can never
+    measure a different set of notes than the index actually reads."""
+    roots = [(vault, "vault")]
+    if os.path.isdir(PROJECTS_ROOT):
+        for entry in sorted(os.listdir(PROJECTS_ROOT)):
+            mem = os.path.join(PROJECTS_ROOT, entry, "memory")
+            if os.path.isdir(mem):
+                roots.append((mem, "project-memory"))
+    return roots
+
+
+def _budget_seconds(args):
+    """The --budget in seconds, or None for an unbudgeted (hand-run) pass. A malformed
+    budget is unbudgeted rather than a crash mid-index: this value arrives from a hook."""
+    budget = args.get("budget")
+    if budget is None or budget is True:
+        return None
+    try:
+        return float(budget)
+    except (TypeError, ValueError):
+        return None
+
+
+def _deadline(args):
+    """Absolute wall-clock stop time for this pass, or None when it is unbudgeted. Takes the
+    args dict (never a bare number) so the string a CLI --budget hands over is coerced in one
+    place instead of reaching arithmetic as text."""
+    seconds = _budget_seconds(args)
+    return None if seconds is None else time.time() + seconds
+
+
+def _unindexed(con, roots):
+    """How many notes on disk the index does not hold at their CURRENT mtime, which is the
+    whole staleness question. One walk and one query: it pays a stat per note and skips the
+    file read, the front-matter parse and every write, which is what makes it cheap enough
+    to run at every session start whether or not anything changed.
+
+    None (never 0) when the index cannot be read, so the caller says NO-DATA rather than
+    reporting a clean index it never actually measured."""
+    known = {}
+    try:
+        for row in con.execute("SELECT path, mtime FROM notes"):
+            known[row["path"]] = row["mtime"]
+    except sqlite3.Error:
+        return None  # sbe: allow-silent unreadable notes table; both callers already turn this
+        # exact None into a printed NO-DATA line (cmd_status_line, cmd_refresh), never a clean count
+    behind = 0
+    for path, _source in _walk(roots):
+        try:
+            mtime = os.path.getmtime(path)
+        except OSError:  # sbe: allow-silent file raced-deleted between walk and stat; the next pass counts it
+            continue
+        was = known.get(path)
+        # The same 0.001s tolerance cmd_index uses to decide a note is unchanged, so the
+        # staleness check and the indexer can never disagree about one note.
+        if was is None or abs(was - mtime) >= 0.001:
+            behind += 1
+    return behind
+
+
+def _status_line(con, roots, behind=None):
+    """The one line the session-start refresh and the point-of-need hook both print, so a
+    stale index is visible where the work happens instead of only when somebody remembers to
+    run `status`. `behind` is passed in when the caller already measured it, so a refresh
+    never walks the vault twice for one line."""
+    try:
+        total = con.execute("SELECT COUNT(*) c FROM notes").fetchone()["c"]
+        at = con.execute("SELECT v FROM meta WHERE k='indexed_at'").fetchone()
+    except sqlite3.Error as exc:
+        return "vault-index: NO-DATA: the index could not be read (%s)" % exc
+    if at is None:
+        age = "NEVER"
+    else:
+        try:
+            age = "%d minutes ago" % int((time.time() - float(at["v"])) / 60.0)
+        except (TypeError, ValueError):
+            age = "NEVER"
+    if behind is None:
+        behind = _unindexed(con, roots)
+    return "vault-index: last indexed %s, %d notes, %s unindexed" % (
+        age, total, "NO-DATA" if behind is None else behind)
+
+
+def cmd_status_line(args):
+    """READ-ONLY: print the status line and touch nothing. vault_recall_hook.py runs this
+    once per session, inside a PreToolUse hook, so it must never index and never be slow.
+    Always exits 0: an unreadable index is a NO-DATA line, never a blocked edit."""
+    vault = args.get("vault") or _default_vault()
+    if not vault:
+        print("vault-index: NO-DATA: no vault root configured (%s), so nothing is indexed "
+              "and point-of-need recall is empty" % CONFIG_PATH)
+        return 0
+    try:
+        con = _connect()
+        _schema(con)
+        print(_status_line(con, _index_roots(vault)))
+        con.close()
+    except (sqlite3.Error, OSError) as exc:
+        print("vault-index: NO-DATA: the index could not be read (%s)" % exc)
+    return 0
+
+
+def cmd_refresh(args):
+    """THE SessionStart STEP (readiness row E54). The index the point-of-need recall hook
+    serves from had nothing refreshing it: measured 2026-09-03, 79 hours stale with 61 notes
+    unindexed, so every lesson written that week was invisible at the moment of need.
+
+    Three properties, in this order, because a session start is not a place to be clever:
+    a CHEAP staleness check first (stat per note, no reads, no writes); a refresh only when
+    the index is actually behind, and only of the notes that changed; and a hard wall-clock
+    budget after which it stops and leaves the rest for the next start. It FAILS OPEN on
+    everything: every path prints one `vault-index:` line and returns 0, because a session
+    that will not start is worse than an index a few notes behind.
+
+    GATED ON CONSENT (row E54, tools/test_bm_consent.py): this is wired directly at
+    SessionStart, and unlike status-line and recall (which vault_recall_hook.py gates
+    before ever shelling out to this file), it can write the index at
+    ~/.claude/bm_vault_index.sqlite3 on a stranger's machine before anyone has consented.
+    Checked first, before the index is even touched, and printed as a NO-DATA line rather
+    than silence, so an unconsented install still says why nothing was refreshed."""
+    # E76: per-repository hook scoping, checked before consent (a repository
+    # that turned hooks off should not even see the consent NO-DATA line).
+    _rs = _load_bm_repo_scope()
+    if _rs is not None:
+        try:
+            _payload = sys.stdin.read()
+        except (OSError, ValueError):
+            _payload = None
+        if _rs.hooks_off(payload=_payload):
+            return 0
+    if not _consented():
+        print("vault-index: NO-DATA: setup is not complete yet; run: "
+              "python3 scripts/setup.py")
+        return 0
+    vault = args.get("vault") or _default_vault()
+    if not vault:
+        print("vault-index: NO-DATA: no vault root configured. Set BM_VAULT_ROOT or write "
+              "{\"vault\": \"...\"} to %s; point-of-need recall stays empty until then."
+              % CONFIG_PATH)
+        return 0
+    budget = _budget_seconds(args)
+    if budget is None:
+        budget = REFRESH_BUDGET_S
+    try:
+        roots = _index_roots(vault)
+        con = _connect()
+        _schema(con)
+        behind = _unindexed(con, roots)
+    except (sqlite3.Error, OSError) as exc:
+        print("vault-index: NO-DATA: the index could not be read (%s); recall serves whatever "
+              "it already holds" % exc)
+        return 0
+    if behind == 0:
+        # The common case, and the reason the check comes first: nothing to do, nothing
+        # written, one line printed.
+        print(_status_line(con, roots, behind))
+        con.close()
+        return 0
+    con.close()
+    captured = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(captured):
+            cmd_index({"vault": vault, "budget": budget, "paths": []})
+    except (sqlite3.Error, OSError, ValueError) as exc:
+        print("vault-index: NO-DATA: the refresh failed (%s); recall serves whatever it "
+              "already holds" % exc)
+        return 0
+    finally:
+        for line in captured.getvalue().splitlines():
+            if line.strip():
+                print("vault-index: %s" % line.strip())
+    try:
+        con = _connect()
+        print(_status_line(con, roots))
+        con.close()
+    except (sqlite3.Error, OSError) as exc:
+        print("vault-index: NO-DATA: the index could not be read after the refresh (%s)" % exc)
+    return 0
+
+
 def cmd_index(args):
     vault = args.get("vault") or _default_vault()
     if not vault:
@@ -475,16 +790,17 @@ def cmd_index(args):
               "BROTHERMODE_VAULT, or write {\"vault\": \"...\"} to %s. Refusing to index a "
               "guessed path (D01)." % CONFIG_PATH)
         return 2
-    roots = [(vault, "vault")]
-    if os.path.isdir(PROJECTS_ROOT):
-        for entry in os.listdir(PROJECTS_ROOT):
-            mem = os.path.join(PROJECTS_ROOT, entry, "memory")
-            if os.path.isdir(mem):
-                roots.append((mem, "project-memory"))
+    roots = _index_roots(vault)
     con = _connect()
     _schema(con)
-    seen, added, updated, touched = set(), 0, 0, 0
+    # A budget arrives only from cmd_refresh (the SessionStart step). A hand-run index passes
+    # none and runs to completion, exactly as it always has.
+    deadline = _deadline(args)
+    seen, added, updated, touched, stopped = set(), 0, 0, 0, False
     for path, source in _walk(roots):
+        if deadline is not None and time.time() >= deadline:
+            stopped = True
+            break
         seen.add(path)
         try:
             mtime = os.path.getmtime(path)
@@ -514,6 +830,18 @@ def cmd_index(args):
             updated += 1
         elif fresh == "touched":
             touched += 1
+    if stopped:
+        # EVERYTHING BELOW THIS POINT ASSUMES A COMPLETE WALK, and two steps would do real
+        # damage without one: the removal pass deletes every note missing from `seen` (which
+        # after a break is most of them), and the indexed_at stamp would tell the next pass
+        # the index is current when it is not. So an interrupted pass commits the rows it
+        # did write, keeps the OLD stamp, and stops.
+        con.commit()
+        done = added + updated + touched
+        print("stopped at the %.1fs budget after %d note(s) this pass (%d new, %d refreshed, "
+              "%d unchanged); the last-indexed stamp is unchanged so the next pass resumes"
+              % (_budget_seconds(args) or 0.0, done, added, updated, touched))
+        return 0
     rule_added, rule_updated, rule_touched = _index_correction_rules(con, seen)
     added += rule_added
     updated += rule_updated
@@ -536,7 +864,16 @@ def cmd_index(args):
     pending = con.execute(
         "SELECT n.id, n.title, n.descr, n.body FROM notes n "
         "LEFT JOIN vectors v ON v.note_id = n.id WHERE v.note_id IS NULL").fetchall()
-    if pending:
+    if pending and deadline is not None and (deadline - time.time()) < EMBED_MIN_S:
+        # The honest half of E54's third ask: the embedder is local and already wired here,
+        # but its cold load alone is longer than a session-start budget, so under a budget it
+        # is not started and the count is reported instead of a silent skip. Nothing is
+        # invented and no network is called: `bm_vault.py index` by hand embeds these.
+        print("NO-DATA: %d note(s) without a dense embedding, reason: the embedder needs "
+              "about %.0f seconds to load and this pass has %.1f left; run "
+              "`bm_vault.py index` by hand to embed them"
+              % (len(pending), EMBED_MIN_S, max(0.0, deadline - time.time())))
+    elif pending:
         vecs = _embed_texts([(r["id"], "%s. %s. %s" % (r["title"], r["descr"], r["body"][:900]))
                              for r in pending])
         if vecs is None:
@@ -1308,6 +1645,37 @@ def _search(con, text=None, paths=None, limit=6, fast=False, explain=None, deny=
         except Exception as e:
             print("disambiguation unavailable (%s); results keep fused order" % e,
                   file=sys.stderr)
+    # E57 mechanism 2: time decay and reinforcement, applied HERE on purpose. AFTER the
+    # policy trim (a denied note's body is never read, not even to age it) and BEFORE the
+    # authority sort, because decay is a SIMILARITY signal, not an authority one: it scales
+    # the fused score that the authority comparator uses as its second key, so a decayed
+    # note falls WITHIN its own authority tier and a decayed source of record still outranks
+    # every casual note. Bounded by bm_vault_decay.FLOOR, so this reorders and never removes.
+    # Guarded like every other optional signal: an absent or broken module degrades to the
+    # fused order on stderr rather than killing the recall.
+    if fused:
+        try:
+            decay_mod = _load_bm_vault_decay()
+        except Exception as e:
+            decay_mod = None
+            print("decay ranking unavailable (%s); results keep fused order" % e,
+                  file=sys.stderr)
+        if decay_mod is not None:
+            # One store read for the whole result set, never one per note.
+            dstore = decay_mod.read_store()
+            rescored = []
+            for nid, score in fused:
+                row = con.execute("SELECT path, body FROM notes WHERE id=?",
+                                  (nid,)).fetchone()
+                path_ = row["path"] if row else ""
+                slug = os.path.splitext(os.path.basename(path_))[0] if path_ else ""
+                factor = decay_mod.scale(slug, row["body"] if row else "", dstore)
+                if factor < 1.0:
+                    msg = "decayed: rank scaled %.2f" % factor
+                    note("decay: note %s %s" % (nid, msg))
+                    why.setdefault(nid, []).append(msg)
+                rescored.append((nid, score * factor))
+            fused = sorted(rescored, key=lambda kv: kv[1], reverse=True)
     # D08 part B: authority outranks similarity, LEXICOGRAPHICALLY, per bm_vault_authority's
     # contract: a source_of_record note with lower fused score beats a casual note with a higher
     # one, always, because blending them into one weighted score is how similarity smuggles
@@ -2113,7 +2481,7 @@ def cmd_status(args):
 # collects a run of bare positional file arguments, and a real flag must still be able to
 # end that run.
 _VALUE_FLAGS = {"vault", "root", "as", "policy", "identity", "query", "limit", "event-id",
-                "registry", "agent-identity", "purpose"}
+                "registry", "agent-identity", "purpose", "budget"}
 
 
 def _parse(argv):
@@ -2138,7 +2506,8 @@ def main(argv=None):
     if not argv or argv[0] in ("-h", "--help", "help"):
         print(__doc__)
         return 0
-    fns = {"index": cmd_index, "recall": cmd_recall, "check": cmd_check, "status": cmd_status}
+    fns = {"index": cmd_index, "refresh": cmd_refresh, "status-line": cmd_status_line,
+           "recall": cmd_recall, "check": cmd_check, "status": cmd_status}
     if argv[0] not in fns:
         sys.stderr.write("bm_vault: unknown command %r; known: %s\n"
                          % (argv[0], ", ".join(sorted(fns))))
