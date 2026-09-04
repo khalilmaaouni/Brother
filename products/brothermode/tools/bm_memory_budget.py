@@ -25,7 +25,14 @@ import glob
 import os
 import sys
 
-DEFAULT_ROOT = os.path.expanduser("~/.claude/projects")
+HERE = os.path.dirname(os.path.abspath(__file__))
+# C3: the config directory is resolved by brother_paths, the one seam
+# that knows which coding client is running (docs/codex/HOOKS-MAPPING.md).
+# Loaded from beside this file because tools/ is not a package.
+sys.path.insert(0, HERE)
+import brother_paths  # noqa: E402
+
+DEFAULT_ROOT = brother_paths.config_path("projects")
 DEFAULT_BUDGET = 24000
 DEFAULT_MAX_LINES = 200
 

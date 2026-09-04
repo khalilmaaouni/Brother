@@ -31,6 +31,22 @@ CAP = 10000
 MARKER_ROOM = 220
 
 
+def _load_sbe_repo_scope():
+    """Load sbe_repo_scope.py by path, works from any cwd and never
+    raises. E76 per-repository hook scoping."""
+    try:
+        import importlib.util
+        here = os.path.dirname(os.path.abspath(__file__))
+        spec = importlib.util.spec_from_file_location(
+            "sbe_repo_scope_for_sessionstart",
+            os.path.join(here, "sbe_repo_scope.py"))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception:  # sbe: allow-silent optional gate module load; hooks_off degrades to active when this returns None
+        return None
+
+
 def _tool(script, *args, data=None, keep_stderr=False):
     """stdout of one repo python tool, empty on any failure: a SessionStart
     that cannot run a helper injects less context, never a traceback."""
@@ -52,6 +68,12 @@ def main():
         payload = sys.stdin.read()
     except OSError:
         payload = ""
+
+    # E76: per-repository hook scoping, checked before anything else this
+    # hook does.
+    _rs = _load_sbe_repo_scope()
+    if _rs is not None and _rs.hooks_off(payload=payload):
+        return
 
     # The session baseline (release blocker 1 item 1.2): what the working
     # tree held BEFORE this session touched it. Its stdout is discarded (a

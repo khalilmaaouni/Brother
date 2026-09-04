@@ -1,0 +1,538 @@
+{
+  "lens": "architect",
+  "version": "1.0.0",
+  "detection_signals": {
+    "paths": [
+      "adr/",
+      "decisions/",
+      "architecture-decisions/",
+      "*.adr.md",
+      "openapi.yaml",
+      "openapi.yml",
+      "openapi.json",
+      "asyncapi.yaml",
+      "structurizr.dsl",
+      ".dependency-cruiser.js",
+      ".dependency-cruiser.json",
+      "*.puml"
+    ],
+    "manifest_strings": [
+      "dependency-cruiser",
+      "archunit"
+    ],
+    "note": "narrow on purpose: an architecture lens that matched every repository would win every inference, because door.infer_lens tries packs in sorted lens-name order and 'architect' sorts before 'core' and 'data-science'. Only two shapes are accepted here: a decision-record directory (persona doc 4.1 stage 0, 'architecture/ADR files'), and a declared architecture artifact (an API or event contract, a C4 or PlantUML text model, a dependency-rule config) from persona doc 10.5. The directory signals are single-segment because door._path_matches_signal tests one path part at a time, so 'docs/adr/' would never fire while 'adr/' matches docs/adr at any depth. A plain service tree, a Dockerfile, a src/api directory and a compose file are deliberately NOT signals: every backend repository has them, so they would steal the backend lens."
+  },
+  "challenge_question": "Which decision is an invariant versus a current implementation preference?",
+  "question_budget": {
+    "min": 2,
+    "max": 6,
+    "work_shape": "Architecture decision (persona doc 4.2, 'Architecture decision' 2-6); the ceiling sits above the plain code-change lens because persona doc 10.4 needs the human to classify each accepted decision as principle, invariant, preference, temporary or migration constraint, and only that classification decides what may be enforced."
+  },
+  "required_evidence_families": [
+    "E7",
+    "E10",
+    "E11"
+  ],
+  "receipt_fields": [
+    "decision_driver",
+    "decision_record",
+    "options_rejected",
+    "criteria_weights",
+    "assumptions",
+    "invariants_created_changed",
+    "enforcement_status",
+    "migration_sequence",
+    "reversibility",
+    "ownership_boundary",
+    "operational_consequences",
+    "revisit_trigger"
+  ],
+  "forcing_classes": [
+    {
+      "id": "system_boundary",
+      "label": "New system boundary",
+      "why": "the diff adds a deployable unit that did not exist: a new Dockerfile, a new service block in a compose or Kubernetes manifest, or a new top-level module with its own entry point and manifest. A boundary is where ownership, failure and latency change, so the human names it (persona doc 10.3 ARC-02; 21.4 ARC-G05 premature-microservices)."
+    },
+    {
+      "id": "technology_choice",
+      "label": "Technology choice",
+      "why": "a dependency manifest gains a datastore, broker, queue, cloud SDK or vendor client that no manifest in the tree carried before. The engine sees a new top-level dependency name in package.json, pyproject.toml, requirements.txt or go.mod; the exit cost of that name is not something a diff can tell you (persona doc 10.3 ARC-06 build versus buy, ARC-17 technology selection; 21.4 ARC-G04 lock-in)."
+    },
+    {
+      "id": "data_ownership",
+      "label": "Data ownership or write authority change",
+      "why": "the diff moves the write path for an entity: a migration that drops or renames a table or column, or a component that begins writing a table whose migrations live in a different component. Irreversible in the data sense whatever the code says (persona doc 10.3 ARC-05; 3.2 irreversibility and data loss)."
+    },
+    {
+      "id": "contract_change",
+      "label": "Cross-service contract change",
+      "why": "a schema file other systems read is edited: openapi, asyncapi, a .proto, a published event schema, or a GraphQL SDL. Any removal or type change there is a consumer's breakage, and the consumer list is not in this repository (persona doc 10.3 ARC-13; 6.1 E7)."
+    },
+    {
+      "id": "decision_record",
+      "label": "Decision record absent for a change of this size",
+      "why": "any of the four classes above fired and the same diff adds or changes no file under adr/, decisions/ or architecture-decisions/. The condition is mechanical: a forcing class hit, and git diff --name-only shows no decision-record path (persona doc 10.3 ARC-01; 21.4 ARC-G07 architecture-doc-drift)."
+    },
+    {
+      "id": "invariant_weakening",
+      "label": "Invariant weakened or exempted",
+      "why": "a structural rule file loses a rule or gains an exemption: a removed or newly skipped rule in a dependency-cruiser config, an import-rule config, a Semgrep policy, or an architecture test whose assertion is deleted or marked skip. Weakening the check that proves an invariant is a decision about the invariant (persona doc 10.4; 21.4 ARC-G01 boundary-import-drift)."
+    }
+  ],
+  "work_classes": [
+    {
+      "id": 8,
+      "label": "architecture decision / design",
+      "note": "the lens's home class (persona doc 3.1)."
+    },
+    {
+      "id": 4,
+      "label": "API or contract change",
+      "note": "boundary contracts are where an architecture decision becomes visible to other teams."
+    },
+    {
+      "id": 7,
+      "label": "infrastructure/configuration change",
+      "note": "topology and failure domains are architecture even when the diff is YAML."
+    },
+    {
+      "id": 17,
+      "label": "dependency/platform migration",
+      "note": "ARC-07 vendor and platform migration, ARC-17 technology selection."
+    },
+    {
+      "id": 3,
+      "label": "refactor / internal improvement",
+      "note": "ARC-03 modular-monolith boundaries and ARC-18 simplification land here."
+    },
+    {
+      "id": 5,
+      "label": "database/schema migration",
+      "note": "only where the migration moves ownership or write authority (ARC-05); the routine case belongs to the data lenses."
+    },
+    {
+      "id": 15,
+      "label": "performance/cost optimization",
+      "note": "ARC-12 scalability change, and the cost half of ARC-06."
+    },
+    {
+      "id": 20,
+      "label": "spike/research with no production mutation",
+      "note": "the evaluation that precedes ARC-06 and ARC-17, which mutates nothing."
+    }
+  ],
+  "risk_classes": [
+    {
+      "id": "irreversibility",
+      "why": "the architect lens exists because some decisions cannot be walked back cheaply; reversibility is a receipt field here, not a footnote (persona doc 3.2, 10.2)."
+    },
+    {
+      "id": "compatibility",
+      "why": "boundary and contract changes break consumers that are not in this repository (ARC-13, evidence family E7)."
+    },
+    {
+      "id": "customer_blast_radius",
+      "why": "a topology change moves how many users one failure reaches (ARC-10 failure domains)."
+    },
+    {
+      "id": "operational_recoverability",
+      "why": "a decision that adds a failure domain adds a recovery path that has to exist before it is needed (ARC-10, evidence family E16)."
+    },
+    {
+      "id": "security_permission",
+      "why": "trust zones and privilege paths are an architecture output, not a later hardening step (ARC-11, ARC-08 multi-tenancy)."
+    },
+    {
+      "id": "money",
+      "why": "lock-in, licence and run cost are decision criteria here, and a cheap short-term option with no exit is the ARC-G04 failure (ARC-06)."
+    },
+    {
+      "id": "evidence_uncertainty",
+      "why": "an architecture claim is the hardest kind to prove, which is why enforcement_status exists: DISCIPLINE is never reported as ENFORCED (10.6)."
+    }
+  ],
+  "dangerous_actions": [
+    "Selecting between options when the stated criteria do not uniquely decide: the human selects, Brother lays out the comparison (persona doc 25.1; 25.2 'Architect: one option selected when criteria do not uniquely decide').",
+    "Promoting a sentence from a decision record into an enforced gate: only the subset classified as invariant may become a check, and the human does the classifying (persona doc 10.4, 30.9 no architecture bureaucracy).",
+    "Executing a service extraction, decommission or vendor migration: the pack plans it, sequences it and proves consumers, it does not run the cutover (ARC-02, ARC-07, ARC-16).",
+    "Changing write authority or data ownership for an entity (ARC-05).",
+    "Accepting a build-versus-buy or technology choice whose exit cost was never stated (ARC-06, ARC-17).",
+    "Widening a trust boundary, a privilege path or a tenancy isolation rule (ARC-08, ARC-11; persona doc 25.1 'widening production privilege').",
+    "Deleting, skipping or exempting an existing architecture check so that a change passes.",
+    "Retiring an invariant recorded in a decision record without a new record superseding it."
+  ],
+  "know_how": [
+    {
+      "id": "ARC-01",
+      "situation": "An architecture decision has to be made and recorded.",
+      "brother_asks": "What is the driver, what options exist, which criteria and weights decide between them, and what are the consequences of the one chosen?",
+      "proof_that_closes_it": "A decision record holding options, weighted criteria, the decision and its consequences, with each accepted rule classified per 10.4; the human selects whenever the criteria do not uniquely decide.",
+      "source_section": "10.3, 10.4, 25.2"
+    },
+    {
+      "id": "ARC-02",
+      "situation": "A service is to be extracted from an existing system.",
+      "brother_asks": "Which data does the extracted service own, who writes it after the split, and what step order keeps the system working at every step?",
+      "proof_that_closes_it": "A dependency and ownership map plus a migration sequence where every step names what is true after it; ambiguous ownership is a stop, not a detail (21.4 ARC-G02).",
+      "source_section": "10.3, 21.4"
+    },
+    {
+      "id": "ARC-03",
+      "situation": "A boundary inside a modular monolith is being drawn or moved.",
+      "brother_asks": "Which import directions are forbidden, and which existing violations are being accepted for now?",
+      "proof_that_closes_it": "Import and dependency invariants expressed as a static structural check (E10) that fails on a violation, with the current violation count recorded as the baseline.",
+      "source_section": "10.3, 6.1 E3, 6.1 E10"
+    },
+    {
+      "id": "ARC-04",
+      "situation": "A change moves work onto events or messaging.",
+      "brother_asks": "What is the delivery semantic (at-least-once, at-most-once, exactly-once claimed by whom), and what happens to a duplicate or a poison message?",
+      "proof_that_closes_it": "Event contracts plus stated and tested delivery and failure semantics: a duplicate with the same idempotency key changes state once (E4), and a poison message has a declared destination (E12). 21.4 ARC-G03 is exactly this gap.",
+      "source_section": "10.3, 21.4, 6.1 E4"
+    },
+    {
+      "id": "ARC-05",
+      "situation": "Data ownership is being redesigned.",
+      "brother_asks": "For each entity, which component is the system of record, and which components may write it after this change?",
+      "proof_that_closes_it": "A source-of-truth and write-authority map, one row per entity, plus a check or query showing no second writer remains.",
+      "source_section": "10.3"
+    },
+    {
+      "id": "ARC-06",
+      "situation": "A build-versus-buy decision is open.",
+      "brother_asks": "What does each option cost to run, what does it cost to leave, and what does it do to operability and to the security surface?",
+      "proof_that_closes_it": "A comparison across cost, lock-in, operability and security, with the exit route for the bought option written down; no exit route is the ARC-G04 failure.",
+      "source_section": "10.3, 21.4"
+    },
+    {
+      "id": "ARC-07",
+      "situation": "A vendor or platform migration is proposed.",
+      "brother_asks": "What is compatible today, what breaks, and what is the exit or rollback plan if the new platform does not hold?",
+      "proof_that_closes_it": "A compatibility matrix plus an exit and reversibility plan: contract tests (E7) against the old and the new platform, and plan evidence (E11) for the cutover.",
+      "source_section": "10.3, 6.1 E7, 6.1 E11"
+    },
+    {
+      "id": "ARC-08",
+      "situation": "A multi-tenancy model is being chosen or changed.",
+      "brother_asks": "Where is the isolation boundary, who owns tenant data, and which authorization check enforces the boundary?",
+      "proof_that_closes_it": "An isolation, data-ownership and auth-boundary statement, plus a cross-tenant authorization test that fails when the isolation is removed (E14).",
+      "source_section": "10.3, 6.1 E14"
+    },
+    {
+      "id": "ARC-09",
+      "situation": "A cache is being introduced, or its policy changed.",
+      "brother_asks": "What staleness is tolerable, what invalidates an entry, and what happens when the cache is unavailable or wrong?",
+      "proof_that_closes_it": "A consistency, invalidation and failure model, a stated tolerance for stale reads, and a behaviour check with the cache down (E12). No stated tolerance is 21.4 ARC-G06.",
+      "source_section": "10.3, 21.4"
+    },
+    {
+      "id": "ARC-10",
+      "situation": "A reliability design decision is on the table.",
+      "brother_asks": "What are the failure domains, what SLO and error budget does this assume, and what degrades first?",
+      "proof_that_closes_it": "Failure domains named, SLO and error-budget assumptions written down, and a recovery path proven rather than assumed (E16).",
+      "source_section": "10.3, 6.1 E16"
+    },
+    {
+      "id": "ARC-11",
+      "situation": "A security boundary is being designed or moved.",
+      "brother_asks": "Which trust zones exist, which privilege paths cross them, and what is the least privilege that still works?",
+      "proof_that_closes_it": "A trust-zone and privilege-path map plus an authorization boundary test (E14); widening a privilege stays a human decision.",
+      "source_section": "10.3, 25.1"
+    },
+    {
+      "id": "ARC-12",
+      "situation": "A scalability change is proposed.",
+      "brother_asks": "What workload does this assume, and what measurement supports that assumption?",
+      "proof_that_closes_it": "Stated workload assumptions plus a capacity experiment or measurement (E13), never a projection from a single observation.",
+      "source_section": "10.3, 6.1 E13"
+    },
+    {
+      "id": "ARC-13",
+      "situation": "API governance rules are being set or changed.",
+      "brother_asks": "Which compatibility and versioning rules apply, and which of them can be checked mechanically?",
+      "proof_that_closes_it": "Compatibility and versioning rules expressed as contract checks (E7) that fail on a breaking schema change, with the non-mechanical rules recorded as DISCIPLINE.",
+      "source_section": "10.3, 10.6, 6.1 E7"
+    },
+    {
+      "id": "ARC-14",
+      "situation": "A data architecture decision is being made.",
+      "brother_asks": "What is the lineage, which contracts hold between producers and consumers, and who owns the quality of each dataset?",
+      "proof_that_closes_it": "Lineage, data contracts and quality ownership recorded per dataset, with a contract check (E7) or a reconciliation (E8) wherever a consumer depends on the grain.",
+      "source_section": "10.3, 6.1 E8"
+    },
+    {
+      "id": "ARC-15",
+      "situation": "An architecture drift audit is wanted.",
+      "brother_asks": "Where does the current dependency graph disagree with the declared invariants?",
+      "proof_that_closes_it": "The current graph extracted mechanically and compared against the declared rules (E10), each divergence listed as accepted, to fix, or a stale rule. 21.4 ARC-G07 is the drift this catches.",
+      "source_section": "10.3, 21.4"
+    },
+    {
+      "id": "ARC-16",
+      "situation": "A component is to be decommissioned.",
+      "brother_asks": "Who still calls it, including batch jobs and scheduled work nobody remembers, and what happens to its data?",
+      "proof_that_closes_it": "Consumer proof from logs, traffic, or a code and job search, plus a data archive or deletion plan; 21.4 ARC-G08 is the hidden batch consumer this exists to find.",
+      "source_section": "10.3, 21.4"
+    },
+    {
+      "id": "ARC-17",
+      "situation": "A technology has to be selected.",
+      "brother_asks": "What is the smallest sufficient option here, and what does leaving it cost?",
+      "proof_that_closes_it": "The smallest sufficient choice named with its exit cost, and the rejected options recorded with reasons rather than dropped.",
+      "source_section": "10.3"
+    },
+    {
+      "id": "ARC-18",
+      "situation": "Someone asks to simplify the system.",
+      "brother_asks": "Which measurable complexity is being removed, and which capability must survive untouched?",
+      "proof_that_closes_it": "A before and after measurement of the named complexity (components, dependencies, call paths, cost) plus characterization evidence that the surviving capability did not change (E1, E9).",
+      "source_section": "10.3, 6.1 E9"
+    },
+    {
+      "id": "ARC-CLASS-principle",
+      "situation": "An accepted decision is durable guidance that no check can express.",
+      "brother_asks": "Is this guidance rather than a rule, and who applies judgment when it is ambiguous?",
+      "proof_that_closes_it": "Recorded in the decision record with enforcement_status DISCIPLINE, and never turned into a gate.",
+      "source_section": "10.4, 10.6"
+    },
+    {
+      "id": "ARC-CLASS-invariant",
+      "situation": "An accepted decision should hold mechanically, every time.",
+      "brother_asks": "What check fails when this is broken, and does that check exist today?",
+      "proof_that_closes_it": "A static, runtime or test rule that fails on a violation, quoted with its command; enforcement_status is ENFORCED only after that run, otherwise DISCIPLINE.",
+      "source_section": "10.4, 10.6, 6.1 E10"
+    },
+    {
+      "id": "ARC-CLASS-preference",
+      "situation": "An accepted decision is a default that a local context may override.",
+      "brother_asks": "Where may this be overridden, and what does the override have to say for itself?",
+      "proof_that_closes_it": "Recorded as a preference with its override condition; a violation is a note, never a gate failure.",
+      "source_section": "10.4"
+    },
+    {
+      "id": "ARC-CLASS-temporary",
+      "situation": "An accepted decision is only right for now.",
+      "brother_asks": "What date or observable condition makes this due for review?",
+      "proof_that_closes_it": "A revisit_trigger recorded on the decision; a temporary decision without one is incomplete.",
+      "source_section": "10.4, 10.6"
+    },
+    {
+      "id": "ARC-CLASS-migration",
+      "situation": "An accepted decision holds only while a transition runs.",
+      "brother_asks": "When does this constraint stop applying, and what removes it?",
+      "proof_that_closes_it": "Recorded as a migration constraint bound to a migration step, with the step that retires it named.",
+      "source_section": "10.4"
+    },
+    {
+      "id": "ARC-G01",
+      "situation": "New code violates an accepted dependency direction.",
+      "brother_asks": "Was this direction accepted, and is the violation a deliberate exception or drift?",
+      "proof_that_closes_it": "A structural check (E10) that fails on the violating import; a deliberate exception is a recorded decision, not a config edit.",
+      "source_section": "21.4"
+    },
+    {
+      "id": "ARC-G02",
+      "situation": "A technical split leaves data ownership ambiguous.",
+      "brother_asks": "After the split, which side writes this data?",
+      "proof_that_closes_it": "A write-authority map with exactly one writer per entity; two writers is a stop.",
+      "source_section": "21.4"
+    },
+    {
+      "id": "ARC-G03",
+      "situation": "An event-driven design ignores delivery semantics.",
+      "brother_asks": "What happens when the same event arrives twice, or out of order?",
+      "proof_that_closes_it": "An idempotency test showing a replayed event with the same key changes state once (E4).",
+      "source_section": "21.4, 6.1 E4"
+    },
+    {
+      "id": "ARC-G04",
+      "situation": "The cheapest short-term option has no feasible exit.",
+      "brother_asks": "What would it take to leave this in two years, and who could do it?",
+      "proof_that_closes_it": "An exit cost stated in the decision record beside the run cost; an absent exit cost is NO-DATA, never an implied cheap exit.",
+      "source_section": "21.4"
+    },
+    {
+      "id": "ARC-G05",
+      "situation": "Services are being split with no measured driver.",
+      "brother_asks": "Which measurement says the current shape is the problem?",
+      "proof_that_closes_it": "The driver measured before the split (load, deploy coupling, team contention), or the decision recorded as a preference rather than a necessity.",
+      "source_section": "21.4"
+    },
+    {
+      "id": "ARC-G06",
+      "situation": "An architecture does not state its stale-read tolerance.",
+      "brother_asks": "How stale may this read be before it is wrong?",
+      "proof_that_closes_it": "A stated tolerance in the decision record, and a check or monitor that observes the actual staleness.",
+      "source_section": "21.4"
+    },
+    {
+      "id": "ARC-G07",
+      "situation": "The decision record says one thing and the graph shows another.",
+      "brother_asks": "Which of the two is now the intended design?",
+      "proof_that_closes_it": "The extracted graph compared against the record (E10), and either the code or the record changed; leaving both is drift.",
+      "source_section": "21.4"
+    },
+    {
+      "id": "ARC-G08",
+      "situation": "A component looks unused but a batch job depends on it.",
+      "brother_asks": "What calls this outside the request path: cron, schedulers, other repositories, manual runbooks?",
+      "proof_that_closes_it": "Consumer proof covering scheduled and out-of-repository callers before any removal.",
+      "source_section": "21.4"
+    }
+  ],
+  "intake_dimensions": [
+    "business quality attribute being optimized",
+    "current topology and domain boundaries",
+    "existing decision records and invariants",
+    "change drivers",
+    "options considered",
+    "weighted criteria",
+    "coupling and cohesion impact",
+    "data ownership",
+    "consistency and availability tradeoffs",
+    "security and trust boundaries",
+    "scale and capacity assumptions",
+    "operability",
+    "migration path",
+    "reversibility",
+    "team ownership and cognitive load",
+    "cost",
+    "decision expiration or revisit trigger"
+  ],
+  "tool_adapters": [
+    {
+      "id": "dependency-cruiser",
+      "purpose": "module graph and dependency-direction rules (E10).",
+      "detect": "command -v depcruise",
+      "no_data": "NO-DATA: dependency-cruiser is not installed, so import-direction invariants are DISCIPLINE here, not ENFORCED."
+    },
+    {
+      "id": "semgrep",
+      "purpose": "custom static rules for forbidden calls and policy (E10).",
+      "detect": "command -v semgrep",
+      "no_data": "NO-DATA: semgrep is not installed, so custom structural rules were not run."
+    },
+    {
+      "id": "plantuml",
+      "purpose": "renders the C4 or PlantUML text model the repository already keeps (persona doc 10.5).",
+      "detect": "command -v plantuml",
+      "no_data": "NO-DATA: plantuml is not installed; the .puml sources are still read as text."
+    },
+    {
+      "id": "mermaid-cli",
+      "purpose": "renders Mermaid diagrams already in the tree.",
+      "detect": "command -v mmdc",
+      "no_data": "NO-DATA: mermaid-cli (mmdc) is not installed; Mermaid sources are still read as text."
+    },
+    {
+      "id": "terraform-plan",
+      "purpose": "dry-run and plan evidence for a topology change (E11).",
+      "detect": "command -v terraform || command -v tofu",
+      "no_data": "NO-DATA: neither terraform nor tofu is on PATH, so no plan evidence was gathered."
+    },
+    {
+      "id": "decision-record-index",
+      "purpose": "finds the decision records the repository already has, with no tool to install.",
+      "detect": "git ls-files | grep -E '(^|/)(adr|decisions|architecture-decisions)/'",
+      "no_data": "NO-DATA: this repository keeps no decision-record directory, so decision_record is NO-DATA for every unit until one exists."
+    }
+  ],
+  "provenance": {
+    "document": "BROTHER-PERSONA-USE-CASE-LIBRARY-STRATEGY-2026-09-03 (private to this hub, never quoted outside it)",
+    "sections": [
+      "3.1",
+      "3.2",
+      "3.3",
+      "4.1",
+      "4.2",
+      "5.1",
+      "5.2",
+      "6.1",
+      "10.1",
+      "10.2",
+      "10.3",
+      "10.4",
+      "10.5",
+      "10.6",
+      "21.4",
+      "25.1",
+      "25.2"
+    ],
+    "note": "know_how ids ARC-01 to ARC-18 are section 10.3's use-case library, one entry each with nothing merged away; ARC-CLASS-* are section 10.4's five decision classifications; ARC-G01 to ARC-G08 are section 21.4's architecture golden fixtures. Nothing from another persona's section is copied here."
+  },
+  "fixture": {
+    "must_infer": [
+      "docs/adr/0001-record-architecture-decisions.md",
+      "src/app.py",
+      "README.md",
+      "package.json"
+    ],
+    "manifest_string": "{'file': 'package.json', 'contains': 'dependency-cruiser'}",
+    "must_not_infer": [
+      "README.md",
+      "src/main.py",
+      "a.ipynb",
+      "mlruns/0/meta.yaml",
+      "requirements.txt",
+      "src/api/routes.py",
+      "Dockerfile",
+      "docker-compose.yml"
+    ],
+    "must_not_infer_why": "the second list holds the data-science fixture's own paths on purpose: 'architect' sorts before 'data-science' in door.infer_lens, so a signal of this pack that matched a notebook tree would silently steal that lens. src/api, Dockerfile and docker-compose are listed for the same reason against a plain backend tree."
+  },
+  "required_evidence_families_why": {
+    "E7": "contract and compatibility tests: an architecture change that moves a boundary changes who may call what, so the API, event, database-consumer or CLI contract is the thing that must still hold (persona doc 6.1 E7; 10.3 ARC-04 event contracts, ARC-13 API governance).",
+    "E10": "static structural checks are the only evidence that an accepted invariant is enforced rather than merely written down: forbidden imports, dependency direction, layer boundaries, IaC policy (persona doc 6.1 E10; 10.3 ARC-03 import and dependency invariants, ARC-15 drift audit; 10.6 enforcement_status ENFORCED versus DISCIPLINE).",
+    "E11": "dry-run and plan evidence shows the shape of the change before it mutates anything, which is the architect position itself: a terraform or opentofu plan, a migration plan, a deployment diff, a lock-file diff (persona doc 6.1 E11; 10.2 migration path and reversibility)."
+  },
+  "receipt_fields_details": {
+    "decision_driver": {
+      "meaning": "the business quality attribute or change driver this decision optimizes, in one sentence.",
+      "filled_by": "the human, at the intake screen; NO-DATA when the driver was never stated (persona doc 10.2, 10.6)."
+    },
+    "decision_record": {
+      "meaning": "the path of the decision record this change is bound to, and its title.",
+      "filled_by": "a file: the decision record added or changed in the same diff, found with git diff --name-only filtered to adr/, decisions/ or architecture-decisions/; NO-DATA when no record exists, which is itself a forcing condition below."
+    },
+    "options_rejected": {
+      "meaning": "the options considered and turned down, each with the reason.",
+      "filled_by": "the human, from the decision record's own options section; NO-DATA when only one option was ever written down."
+    },
+    "criteria_weights": {
+      "meaning": "the criteria the options were scored against, and their relative weight.",
+      "filled_by": "the human; NO-DATA when the choice was made without stated criteria (persona doc 10.3 ARC-01; 25.2: one option selected when criteria do not uniquely decide is a human decision, never Brother's)."
+    },
+    "assumptions": {
+      "meaning": "the scale, capacity, workload and consistency assumptions the decision rests on.",
+      "filled_by": "the human, plus the orientation record's INFERENCE lines (persona doc 4.1 stage 0); NO-DATA when none were stated."
+    },
+    "invariants_created_changed": {
+      "meaning": "which rules this decision creates, changes or retires, each classified principle, invariant, preference, temporary decision or migration constraint.",
+      "filled_by": "the human, per persona doc 10.4; Brother may propose the classification but never promotes a sentence to a gate on its own."
+    },
+    "enforcement_status": {
+      "meaning": "for each invariant: ENFORCED (a check fails when it is broken), DISCIPLINE (written down, nothing runs), or NO-DATA.",
+      "filled_by": "a command: the structural check named beside the invariant, run after the last edit, with its exit code and decisive line quoted. An absent check means DISCIPLINE, never ENFORCED (persona doc 10.6)."
+    },
+    "migration_sequence": {
+      "meaning": "the ordered steps from today's topology to the decided one, and what is true after each step.",
+      "filled_by": "the human for the order, a file for the steps (the plan or runbook path); NO-DATA when the decision is not a migration."
+    },
+    "reversibility": {
+      "meaning": "whether this can be walked back, by what route, and what it costs after each migration step.",
+      "filled_by": "the human, evidenced by E11 plan output or a documented exit route; NO-DATA blocks any irreversible forcing class below (persona doc 10.2; 10.3 ARC-07 exit and reversibility plan)."
+    },
+    "ownership_boundary": {
+      "meaning": "which team or service owns each affected component, and which one holds write authority over each data entity after the change.",
+      "filled_by": "the human; NO-DATA when ownership is ambiguous, which persona doc 21.4 ARC-G02 names as the service-extraction failure."
+    },
+    "operational_consequences": {
+      "meaning": "what this decision makes harder to run: new failure domains, new dependencies to page on, new cost.",
+      "filled_by": "the human, plus E13 or cost evidence where it exists; NO-DATA when not assessed."
+    },
+    "revisit_trigger": {
+      "meaning": "the observable condition or date that makes this decision due for review.",
+      "filled_by": "the human; required for any decision classified temporary in persona doc 10.4, NO-DATA otherwise."
+    }
+  }
+}

@@ -4,7 +4,7 @@ BrotherSBE should normally be introduced to CI/CD in stages.
 
 Do not make every check blocking on the first day.
 
-The exact step order the shipped workflow runs, and why gates come first, is documented in [CI-ORDER.md](CI-ORDER.md). The workflow itself is [.github/workflows/brothersbe-gates.yml](../.github/workflows/brothersbe-gates.yml); it guards nothing until you copy it into your own repository.
+The exact step order the shipped workflow runs, and why gates come first, is documented in [CI-ORDER.md](CI-ORDER.md). The workflow that runs them lives with this project's own CI wiring and is not part of the published tree; it guards nothing until the same steps run in your own repository.
 
 ## Stage 1: Advisory
 
@@ -176,8 +176,8 @@ BrotherSBE exists to make that distinction visible.
 
 ## Running the consumer controls on Bitbucket
 
-[ci/bitbucket-pipelines.yml](../ci/bitbucket-pipelines.yml) is not a copy of
-this repository's own test suite. It runs the ten steps documented in
+This project's own Bitbucket pipeline definition is not a copy of this
+repository's test suite. It runs the ten steps documented in
 [CI-ORDER.md](CI-ORDER.md), "The consumer CI order", against an adopting
 team's own repository and their own change: install verification, dossier
 checks, impact reconciliation, plan validation, task-scope validation, hard

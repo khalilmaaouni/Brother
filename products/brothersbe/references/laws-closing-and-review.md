@@ -23,4 +23,4 @@ WHEN: any review, refutation, or audit verdict is about to be recorded.
 INPUTS: the verdict, and the actions its author actually ran.
 RULE: a verdict counts only when it names the falsification actually executed: re-ran the command, reproduced the defect, re-derived the number. Reasoning alone, however plausible, is NO-DATA rather than a finding.
 OUTPUT: proceed with the named falsification, or record NO-DATA.
-ENFORCED BY: human review. [RUBRIC.md](RUBRIC.md) metric 6 grades it at the weekly review and the review prompt reads for it; no tool parses a verdict for its falsification, so between reviews this is a stated discipline.
+ENFORCED BY: human review. [RUBRIC.md](../RUBRIC.md) metric 6 grades it at the weekly review and the review prompt reads for it; no tool parses a verdict for its falsification, so between reviews this is a stated discipline.

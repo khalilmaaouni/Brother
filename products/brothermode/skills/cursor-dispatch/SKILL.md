@@ -13,7 +13,7 @@ Use when mechanical implementation should run inside Cursor (Agent or Cloud Agen
 
 ## Mechanical commands
 
-Resolve the BrotherMode checkout first (`BROTHERMODE_ROOT`, or `~/.cursor/brothermode`, or `~/.claude/skills/brothermode`, or this repository). Then, from the user's project:
+Resolve the BrotherMode checkout first (`BROTHERMODE_ROOT`, else your client's plugin install directory for BrotherMode, else this repository). Then, from the user's project:
 
 ```
 python3 <checkout>/tools/bm_cursor.py dispatch \

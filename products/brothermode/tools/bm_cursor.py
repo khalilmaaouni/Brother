@@ -55,6 +55,13 @@ import uuid
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
 
+# C3: the plugin root and the config directory are resolved by
+# brother_paths, the one seam that knows which coding client is running
+# (docs/codex/HOOKS-MAPPING.md). Loaded from beside this file because
+# tools/ is not a package.
+sys.path.insert(0, HERE)
+import brother_paths  # noqa: E402
+
 EXIT_OK = 0
 EXIT_FAILED = 1
 EXIT_USAGE = 2
@@ -119,10 +126,13 @@ def find_checkout():
     """Prefer a Cursor install, then the Claude clone path, then this repo."""
     candidates = [
         os.environ.get("BROTHERMODE_ROOT"),
-        os.environ.get("CLAUDE_PLUGIN_ROOT"),
+        # C3: BROTHER_PLUGIN_ROOT, CLAUDE_PLUGIN_ROOT, then Codex's own
+        # PLUGIN_ROOT, then this package. Every candidate is still
+        # validated below, so a rung that answers the wrong directory
+        # is skipped rather than trusted.
+        brother_paths.plugin_root(),
         default_install_target(),
-        os.path.join(os.path.expanduser("~"), ".claude", "skills",
-                     "brothermode"),
+        os.path.join(brother_paths.config_dir(), "skills", "brothermode"),
         REPO_ROOT,
     ]
     for raw in candidates:

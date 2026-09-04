@@ -124,9 +124,18 @@ class ExitCodes(unittest.TestCase):
         self.assertEqual(code, 0, out)
 
     def test_a_late_row_with_no_blocker_EXITS_ONE(self):
-        """The direction that matters. Without it this is a report, not a gate."""
-        code, out = self.run_at('2026-09-05T12:00:00+09:00')
-        self.assertEqual(code, 1, out)
+        """The direction that matters. Without it this is a report, not a gate.
+
+        It reads a FIXTURE, not the live board. Until 2026-09-04 it ran the real
+        roadmap and asserted exit 1, which held only while some row on that board
+        happened to be late with no blocker recorded. Rows recorded their blockers,
+        the board went honest, and the unit test went red for the one reason a
+        gate must never go red: the estate got better. The live board is not left
+        unwatched, it is the delivery-tracking check's own job in check_all.sh;
+        this suite's job is the direction, and the fixture is what proves it."""
+        doc = {'rows': [row('R1', promised='2026-08-01T00:00:00+09:00')]}
+        code, _ = self.run_at('2026-09-05T12:00:00+09:00', doc)
+        self.assertEqual(code, 1)
 
     def test_a_late_row_WITH_its_blocker_recorded_does_not_fail_the_gate(self):
         doc = {'rows': [row('R1', promised='2026-08-01T00:00:00+09:00',

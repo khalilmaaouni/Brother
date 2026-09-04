@@ -3,9 +3,11 @@ name: view
 description: Write the page that shows where this project stands, and offer it to the user
 ---
 
+Plugin root: a Claude Code install exports `${CLAUDE_PLUGIN_ROOT}` and a Codex install exports `${BROTHER_PLUGIN_ROOT}`; both name this plugin's own directory, so read whichever variable appears below as the one your client set. On a clone install neither is set: run the same commands from the checkout root instead.
+
 Outcome to produce: one page the user can open, showing where the project stands right now, plus one line in the chat saying what it is a picture of and what it is waiting on.
 
-Run the mechanical command `python3 "${CLAUDE_PLUGIN_ROOT}/tools/brothermode_cli.py" view --project-id <id>` (the packaged console script is `brothermode view`) and read its output; never describe the page from memory of this conversation and never write any part of it by hand. A plugin install exports `${CLAUDE_PLUGIN_ROOT}` for skill and command content, so that path resolves on its own; on a clone install, where the variable is unset, run `python3 tools/brothermode_cli.py view --project-id <id>` instead, from the BrotherMode root (`~/.claude/skills/brothermode`). Either way, run it from the user's project folder so it reads that project's own records.
+Run the mechanical command `python3 "${CLAUDE_PLUGIN_ROOT}/tools/brothermode_cli.py" view --project-id <id>` (the packaged console script is `brothermode view`) and read its output; never describe the page from memory of this conversation and never write any part of it by hand. A plugin install exports `${CLAUDE_PLUGIN_ROOT}` for skill and command content, so that path resolves on its own; on a clone install, where the variable is unset, run `python3 tools/brothermode_cli.py view --project-id <id>` instead, from the BrotherMode root (the directory that holds `tools/`). Either way, run it from the user's project folder so it reads that project's own records.
 
 The command writes one file, `PROJECT-VIEW.html`, at the top of the user's project folder, beside `CANVAS.md`. It is one self contained file: no fonts, no images and nothing fetched from anywhere when it opens, so it opens with no internet connection and it can be kept, copied, or attached to an email.
 

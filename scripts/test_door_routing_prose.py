@@ -29,6 +29,9 @@ REPO_ROOT = os.path.dirname(HERE)
 BUNDLE_DIR = os.path.join(REPO_ROOT, "bundle")
 SKILL_PATH = os.path.join(BUNDLE_DIR, "skills", "using-brother", "SKILL.md")
 COMMAND_PATH = os.path.join(BUNDLE_DIR, "commands", "brother.md")
+#: Hub-only: the maintainer half of the door, split out under E44.
+MAINTAINER_REFERENCE = os.path.join(
+    REPO_ROOT, "docs", "maintainer", "BROTHER-MAINTAINER-VERBS.md")
 
 # The exact sentence the old "No argument" section used to open with: it told
 # the assistant to ask a question whenever $ARGUMENTS was empty, with no
@@ -48,6 +51,25 @@ AUTHORITATIVE_HEADING = re.compile(
 def _read(path):
     with open(path, encoding="utf-8") as fh:
         return fh.read()
+
+
+def _body(text):
+    """`text` with any leading YAML frontmatter removed.
+
+    bundle/codex-skills/ is GENERATED from bundle/skills/ by
+    scripts/codex_skills.py, which strips the frontmatter keys the Codex
+    validator refuses and copies the body verbatim. So the Codex mirror of
+    the authority restates the SAME claim for another client rather than
+    making a second one, and comparing bodies is what proves that, where an
+    exemption by file name would just be a hole. A mirror whose body has
+    drifted from the source still fails."""
+    if text.startswith("---\n"):
+        end = text.find("\n---", 4)
+        if end != -1:
+            after = text[end + 1:]
+            newline = after.find("\n")
+            return "" if newline == -1 else after[newline + 1:]
+    return text
 
 
 def _iter_bundle_text_files():
@@ -93,11 +115,16 @@ class OneAuthoritativeSection(unittest.TestCase):
                           "heading in %s, found %r" % (SKILL_PATH, headings))
 
     def test_no_other_bundle_file_claims_the_authority(self):
+        skill_body = _body(_read(SKILL_PATH))
         for path, text in _iter_bundle_text_files():
             if path == SKILL_PATH:
                 continue
             headings = [ln for ln in text.splitlines()
                         if AUTHORITATIVE_HEADING.match(ln)]
+            if headings and _body(text) == skill_body:
+                # A generated restatement of the authority itself, byte for
+                # byte below the frontmatter. See _body.
+                continue
             self.assertEqual(
                 headings, [],
                 "%s claims a second authoritative decision order: %r"
@@ -128,6 +155,62 @@ class NoContradictingProse(unittest.TestCase):
         self.assertLess(check_pos, ask_pos,
                          "the unfinished-work check must be written before "
                          "the ask-a-question step, not after")
+
+
+class ShippedCommandStaysSmall(unittest.TestCase):
+    """E44. The shipped command is what EVERY user pays for on invocation,
+    so its size is a product property, not a formatting preference. It once
+    carried 394 lines, of which lines 115 to 365 were maintainer verbs that
+    only run inside a checkout of this repository: an intervention ladder, a
+    row contract, an integrator policy, a handover ceremony. That detail now
+    lives in MAINTAINER_REFERENCE, which the command names by path and which
+    is read only when `handover` or `board` actually fires.
+
+    The ceiling is a ratchet, not a target: it is set just above today's
+    measured size so this is green on arrival and turns red the moment the
+    maintainer prose starts creeping back in."""
+
+    CEILING = 80
+
+    def test_command_file_is_under_the_line_ceiling(self):
+        with open(COMMAND_PATH, encoding="utf-8") as fh:
+            lines = fh.read().splitlines()
+        self.assertLess(
+            len(lines), self.CEILING,
+            "%s is %d lines, at or over the %d-line ceiling; maintainer "
+            "detail belongs in %s, not in every user's context"
+            % (COMMAND_PATH, len(lines), self.CEILING, MAINTAINER_REFERENCE))
+
+    def test_maintainer_reference_exists_and_is_named_by_the_command(self):
+        self.assertTrue(
+            os.path.isfile(MAINTAINER_REFERENCE),
+            "the maintainer reference %s is missing, so the command's "
+            "pointer for `handover` and `board` resolves to nothing"
+            % MAINTAINER_REFERENCE)
+        rel = os.path.relpath(MAINTAINER_REFERENCE, REPO_ROOT)
+        self.assertIn(rel, _read(COMMAND_PATH),
+                      "the command file must name %s by path so the "
+                      "maintainer detail is reachable when a verb fires"
+                      % rel)
+
+    def test_maintainer_reference_stays_out_of_the_bundle(self):
+        # It is hub-only on purpose: docs/maintainer/ is not an entry in
+        # docs/plan/EXPORT-ALLOWLIST.txt, and export_public.py copies only
+        # tracked files under a named entry.
+        self.assertFalse(
+            MAINTAINER_REFERENCE.startswith(BUNDLE_DIR + os.sep),
+            "the maintainer reference must not ship inside bundle/")
+        allowlist_path = os.path.join(
+            REPO_ROOT, "docs", "plan", "EXPORT-ALLOWLIST.txt")
+        entries = [ln.strip() for ln in _read(allowlist_path).splitlines()
+                   if ln.strip() and not ln.strip().startswith("#")]
+        rel = os.path.relpath(MAINTAINER_REFERENCE, REPO_ROOT)
+        covering = [e for e in entries
+                    if rel == e or rel.startswith(e.rstrip("/") + "/")]
+        self.assertEqual(
+            covering, [],
+            "%s is covered by export allowlist entries %r, so it would "
+            "leave the hub" % (rel, covering))
 
 
 class NeverNamesTheStorage(unittest.TestCase):

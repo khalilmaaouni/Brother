@@ -651,6 +651,83 @@ NOT_A_VERDICT = {
         "is the doctor's and the helper neither forms nor alters one; the same shape as "
         "test_sbe_design_fingerprint.py's run_check, which reads its verdict word out of "
         "captured text",
+
+    # ---------------------------------------------------------------------
+    # Added 2026-09-04 (row E82). The hub ran this product's own battery for
+    # the first time and 05-honesty-meta read one residual failure: fifteen
+    # functions across eight tools/ files "can return the verdict PASS but sit
+    # in no registry". Each of the fifteen was READ, one at a time, and none
+    # of them forms, alters or forwards a verdict: the population is exactly
+    # three shapes, the same three every entry above already belongs to.
+    #
+    #   (1) a parser or reader returning (value, problems), where the head is
+    #       rows, text, counts or a flag and the tail names what could not be
+    #       read;
+    #   (2) a subprocess or captured-output wrapper returning (exit code,
+    #       combined output), where any verdict word in that text is the
+    #       TOOL'S, printed by the process under test, never this helper's;
+    #   (3) a test fixture builder returning (path, path).
+    #
+    # This is a widening of a reviewed allowlist, so it is worth saying what
+    # was NOT done: no lint rule was loosened, no head was made "provable" by
+    # rewriting a helper to satisfy the scanner, and nothing was added because
+    # it happened to be red. A function that genuinely emitted a verdict from
+    # outside a registry would have been fixed in its own file instead, which
+    # is the whole reason this lint is inverted (see pass_returning_functions'
+    # docstring: proving the negative is the only way out of whack-a-mole).
+    # Each entry below names its return shape, so a reviewer can disprove it
+    # by opening one function.
+    ("sbe_approval_concentration.py", "git_log_records"):
+        "returns (raw `git log` stdout, a short reason string when git could not be read at "
+        "all), so the head is commit text and the tail is a read problem, never a verdict",
+    ("sbe_approval_concentration.py", "parse_records"):
+        "returns (approver identity -> signed commit count, one warning per record the walk "
+        "could not use), a tally and its skipped rows, never a verdict",
+    ("sbe_design.py", "_rows_under"):
+        "the shared markdown table engine; returns (one dict per readable data row, the raw "
+        "text of every row whose cell count did not match the header), never a verdict",
+    ("sbe_design.py", "_clarify_rows"):
+        "the open-questions table through _rows_under, forwarding its (rows, malformed) pair "
+        "unchanged; a parser with a second caller, never a verdict",
+    ("sbe_design.py", "_revision_log_rows"):
+        "the revision-log table through the same _rows_under engine, forwarding (rows, "
+        "malformed) unchanged; never a verdict",
+    ("sbe_repo_scope.py", "_read_config"):
+        "returns (whether the opt-out line is present, a diagnostic naming why an existing "
+        "config file could not be read), a configuration flag and its read problem, never a "
+        "verdict; the False head on the failure path is the safe direction (hooks stay "
+        "active), not a PASS",
+    ("sbe_repo_scope.py", "_extract"):
+        "returns (cwd, session id) best-effort out of a hook payload that may be a dict, a "
+        "raw JSON string, or None; two payload fields, never a verdict",
+    ("sbe_session_reconcile.py", "repeat_verdict"):
+        "named for the verdict it SUPPRESSES, not one it forms: returns (whether this exact "
+        "finding set was already reported in full this session and is still inside the "
+        "cooldown, the note explaining that suppression), a boolean and its note. The verdict "
+        "itself is formed by the caller from the violations, and is unchanged by this",
+    ("sbe_tier_outcome.py", "defect_fix_texts"):
+        "returns (every non-placeholder origin.fixes text found under design/, one warning "
+        "per dossier whose 00-intake.json could not be parsed), evidence and its read "
+        "problems, never a verdict",
+    ("test_sbe_bash_guard.py", "_make_product"):
+        "this suite's fixture builder; creates a product tree on disk and returns (the "
+        "product directory, the tool file inside it), two paths and never a verdict",
+    ("test_sbe_behaviour_revision_log.py", "run_check"):
+        "runs sbe_design behaviour in a subprocess and returns (the interpreter exit code, "
+        "stdout plus stderr), process output; any verdict word in that text is the tool's",
+    ("test_sbe_behaviour_revision_log.py", "run_accept"):
+        "the same helper for behaviour-accept; returns (exit code, stdout plus stderr) from "
+        "the subprocess, not a verdict",
+    ("test_sbe_decision_record.py", "record"):
+        "runs the decision-record tool in a subprocess and returns (exit code, stdout plus "
+        "stderr), process output and never a verdict",
+    ("test_sbe_decision_record.py", "load"):
+        "reads the two JSON files the tool wrote and returns (the packet, the decision), two "
+        "parsed documents, never a verdict",
+    ("test_sbe_intake.py", "run_report"):
+        "captures stdout around run_budget_report and returns (its return code, the captured "
+        "text), process-shaped output; the report's own verdict lines live inside that text "
+        "and this helper neither forms nor alters one",
 }
 
 

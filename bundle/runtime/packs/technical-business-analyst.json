@@ -1,0 +1,488 @@
+{
+  "lens": "technical-business-analyst",
+  "version": "1.0.0",
+  "detection_signals": {
+    "paths": [
+      "*.mapping.sql",
+      "*.mapping.yaml",
+      "*.mapping.yml",
+      "*.mapping.csv",
+      "*.mapping.json",
+      "source-to-target*",
+      "data-dictionary*",
+      "traceability-matrix*",
+      "interface-contract*",
+      "mappings/"
+    ],
+    "manifest_strings": [
+      "openapi-spec-validator",
+      "datacontract-cli",
+      "@stoplight/spectral-cli"
+    ],
+    "note": "This lens is the join of a requirement artifact with the sql or configuration that implements it (persona doc 14.1: 'preserve the chain from business outcome through process/data/interface behavior into an implementation'). door._path_matches_signal fnmatches a BASENAME for any signal not ending in '/', and matches a DIRECTORY NAME for one that does, so a single signal cannot express 'sql under a specs directory': the AND across two signals is the compositional-selection row (persona doc 5.2), not this pack's. The combination is therefore pushed inside each basename instead: '*.mapping.sql' is sql that is also a mapping rule, 'source-to-target*' is the mapping artifact by its own canonical name (14.3 TBA-02), 'data-dictionary*' is the field-level definition of 14.2, 'traceability-matrix*' is the requirement-to-test link of 14.4. REJECTED on measurement, not on taste: 'specs/' (70 tracked paths in this hub sit under a specs directory, so it would make every hub work item infer this lens) and 'requirements*' (it matches a Python requirements.txt, which is a dependency manifest and not a business requirement artifact; the fixture's must_not_infer_paths pins that). Manifest strings are three real published packages a technical BA repository carries when it lints its own contracts: openapi-spec-validator (PyPI), datacontract-cli (PyPI), @stoplight/spectral-cli (npm)."
+  },
+  "challenge_question": "Which interface/data contract and downstream consumer must remain compatible?",
+  "question_budget": {
+    "min": 2,
+    "max": 5,
+    "work_shape": "Data/schema migration (persona doc 4.2, 2-5): the dominant shape of TBA-02 integration mapping, TBA-04 data migration requirement and TBA-05 master-data change. A TBA-01 API requirement on a brownfield service sits at the doc's 'Brownfield feature' 1-4 instead, so 2 is the floor and 5 the ceiling; a change carrying a forcing class below has no fixed cap (4.2 last row)."
+  },
+  "required_evidence_families": [
+    "E2",
+    "E7",
+    "E8",
+    "E9"
+  ],
+  "required_evidence_families_why": {
+    "E2": "Independent business oracle (6.1 E2). The expected value of a mapped field comes from the approved mapping rule or the source system's own record, never from the transformation being reviewed: a mapping proved against its own output is the circular oracle 6.2 names.",
+    "E7": "Contract / compatibility tests (6.1 E7). The challenge question of this lens is compatibility of an interface/data contract with a downstream consumer, so the answer is a contract test, not prose (14.3 TBA-01, TBA-03, TBA-11).",
+    "E8": "Reconciliation tests (6.1 E8, 'totals/counts/hashes at a declared grain across source to transform to sink'). This is the one figure that separates a mapping that was written from a mapping that works (14.3 TBA-04, 14.5 'reconciliation result').",
+    "E9": "Golden/replay tests (6.1 E9). A legacy replacement or a cutover is proved by replaying captured non-sensitive cases and reading the parity matrix (14.3 TBA-10, TBA-16)."
+  },
+  "receipt_fields": [
+    "spec_reference",
+    "business_requirement_ids",
+    "interface_schema_ids",
+    "mapping_rule",
+    "source_system_of_record",
+    "mappings_changed",
+    "error_exception_behavior",
+    "reconciliation_figure",
+    "reconciliation_result",
+    "compatibility_status",
+    "technical_acceptance_evidence",
+    "business_acceptance_evidence",
+    "unresolved_contract_gaps"
+  ],
+  "forcing_classes": [
+    {
+      "id": "mapping_rule_without_source_system",
+      "label": "Mapping rule without a source system",
+      "why": "the diff changes a file matched by this pack's mapping path signals and the changed row carries no source system or owning application in its source column, or the mapping artifact has no such column at all (14.2 'source/target mappings', 'identity/key rules'; 14.3 TBA-02). A target value with no named owner cannot be reconciled against anything, so no E2 oracle exists."
+    },
+    {
+      "id": "business_rule_in_configuration",
+      "label": "Business rule moved into configuration",
+      "why": "the diff alters a value in a configuration or mapping file (yaml, yml, json, sql CASE or WHEN branch, feature flag default) that decides a business outcome: a threshold, a rate, an eligibility condition, a routing or status code, a rounding or currency rule. The condition is visible: a changed literal inside a file matched by this pack's signals that no requirement id in business_requirement_ids cites (14.3 TBA-08, 14.4 'error taxonomy'). Configuration changes route around requirement review precisely because they do not look like code."
+    },
+    {
+      "id": "missing_reconciliation",
+      "label": "Reconciliation absent between spec and data",
+      "why": "the change touches a mapping, migration or interface path and no reconciliation_figure exists for it: no query at the declared grain was run against both source and sink, or the spec never declares the grain to count at (6.1 E8; 14.3 TBA-04 'mapping + reconciliation + rejected-record policy'; 14.4 'data reconciliation'). Visible in the receipt as reconciliation_figure NO-DATA on a diff that touches those paths."
+    },
+    {
+      "id": "reference_data_change",
+      "label": "Customer master or reference data change",
+      "why": "the diff adds, alters or removes a row in a master or reference dataset: customer, product, account, chart of accounts, country, currency, tax code, status enumeration or code list, in a seed file, a fixture, a migration insert or a mapping lookup table. The condition is visible as an INSERT, UPDATE, DELETE or a changed row in a lookup file under this pack's signal paths (14.3 TBA-05 'ownership/identity/downstream impact'). Reference data has no single consumer: every downstream report and interface reads it, so the blast radius cannot be inferred from the diff's own size."
+    }
+  ],
+  "work_classes": [
+    {
+      "id": "04",
+      "label": "API or contract change",
+      "why": "persona doc 3.1 item 4; the home class of TBA-01, TBA-03 and TBA-11."
+    },
+    {
+      "id": "05",
+      "label": "Database/schema migration",
+      "why": "persona doc 3.1 item 5; TBA-04 data migration requirement and TBA-16 cutover planning."
+    },
+    {
+      "id": "06",
+      "label": "Data pipeline/model change",
+      "why": "persona doc 3.1 item 6; TBA-02 integration mapping and TBA-07 batch/interface schedule."
+    },
+    {
+      "id": "09",
+      "label": "Analysis / metric / dashboard change",
+      "why": "persona doc 3.1 item 9; TBA-12 data-report requirement, where the lens contributes the field lineage half and the data-analyst lens the metric half (5.2, compositional)."
+    },
+    {
+      "id": "16",
+      "label": "Security/privacy hardening",
+      "why": "persona doc 3.1 item 16; TBA-06 authentication/role requirement, its role matrix and negative access tests."
+    },
+    {
+      "id": "17",
+      "label": "Dependency/platform migration",
+      "why": "persona doc 3.1 item 17; TBA-10 legacy replacement and its parity versus intentional change matrix."
+    },
+    {
+      "id": "18",
+      "label": "Requirements/process change",
+      "why": "persona doc 3.1 item 18; TBA-13 change-impact analysis and TBA-14 UAT defect triage, where the question is whether the requirement or the implementation is wrong."
+    },
+    {
+      "id": "20",
+      "label": "Spike/research with no production mutation",
+      "why": "persona doc 3.1 item 20; TBA-15 technical spike, whose output is a decision question with evidence and explicitly not a delivery."
+    }
+  ],
+  "risk_classes": [
+    {
+      "id": "compatibility",
+      "label": "Compatibility",
+      "why": "persona doc 3.2; the lens challenge question is compatibility of a contract with a downstream consumer, so this axis is scored on every unit this pack loads for."
+    },
+    {
+      "id": "data_loss_corruption",
+      "label": "Data loss/corruption",
+      "why": "persona doc 3.2; a mapping rule that silently alters or duplicates records is the failure mode of TBA-02 and TBA-04, and it does not raise an error while doing it."
+    },
+    {
+      "id": "customer_blast_radius",
+      "label": "Customer blast radius",
+      "why": "persona doc 3.2; a reference or master data change (forcing class reference_data_change) reaches every consumer of the code list, not the one the ticket named."
+    },
+    {
+      "id": "irreversibility",
+      "label": "Irreversibility",
+      "why": "persona doc 3.2; a conversion or cutover writes over the source it converted, so TBA-16 must state the rollback before the run, not after."
+    },
+    {
+      "id": "operational_recoverability",
+      "label": "Operational recoverability",
+      "why": "persona doc 3.2; TBA-07 timing/freshness/retry semantics and TBA-16 rollback decide whether a failed interface run can be repeated without double-counting."
+    },
+    {
+      "id": "security_permission",
+      "label": "Security/permission",
+      "why": "persona doc 3.2; TBA-06 role matrix, where the evidence that matters is the negative access test, not the positive one."
+    },
+    {
+      "id": "compliance_privacy",
+      "label": "Compliance/privacy",
+      "why": "persona doc 3.2; customer master and test-data needs (14.2) put personal data into fixtures unless the requirement says otherwise."
+    },
+    {
+      "id": "evidence_uncertainty",
+      "label": "Evidence uncertainty",
+      "why": "persona doc 3.2 and 6.2; a mapping proved by re-running the transformation is circular_risk, and this pack's E2 requirement exists to force an independent oracle instead."
+    }
+  ],
+  "dangerous_actions": [
+    "Running a data migration, conversion or backfill against a production or shared environment. The pack writes the mapping and the reconciliation query; a human runs the load (persona doc 5.1, 'dangerous actions the pack never authorizes by itself').",
+    "Inserting, updating or deleting customer master or reference data rows in any live system, including a code list or lookup table.",
+    "Deleting, editing or re-classifying rejected records produced by a load, which destroys the evidence the reconciliation figure is read from.",
+    "Publishing or releasing a changed interface, event or schema contract when compatibility_status is NO-DATA or FAIL.",
+    "Recording business acceptance on behalf of a stakeholder. business_acceptance_evidence is filled from a named human's record or it stays NO-DATA (14.5; 13.3 BA-16).",
+    "Executing a cutover or a rollback step. TBA-16 produces the plan, the dependencies and the reconciliation checkpoints; the run is a human decision.",
+    "Copying production customer data into a test fixture to satisfy a test-data need (14.2 'test-data needs')."
+  ],
+  "know_how": [
+    {
+      "id": "TBA-01",
+      "situation": "An API requirement: a business need must become an interface contract that engineering can build and QA can test.",
+      "brother_asks": "Which business outcome does this endpoint serve, which consumer calls it, and what does the caller see when it fails?",
+      "proof_that_closes_it": "The chain business need to API contract to acceptance criteria, with an E7 contract test that fails when the contract is broken.",
+      "source_section": "14.3"
+    },
+    {
+      "id": "TBA-02",
+      "situation": "An integration mapping: fields move from a source system into a target system with transformations in between.",
+      "brother_asks": "For each target field, which source field, which transformation, and which system owns the source value?",
+      "proof_that_closes_it": "Source and target field list with the transformation stated per row, plus an E2 check of the transformed value against the approved rule rather than against the transformation's own output.",
+      "source_section": "14.3"
+    },
+    {
+      "id": "TBA-03",
+      "situation": "An event requirement: a producer emits an event a consumer acts on.",
+      "brother_asks": "What does the event mean to the consumer, what is the ordering and delivery guarantee, and what happens on a duplicate or a missing event?",
+      "proof_that_closes_it": "Producer and consumer semantics written down, an E7 event schema test, and the failure paths exercised (duplicate, out of order, absent).",
+      "source_section": "14.3"
+    },
+    {
+      "id": "TBA-04",
+      "situation": "A data migration requirement: records move from a legacy store into a new one.",
+      "brother_asks": "What is the reconciliation grain, what tolerance is acceptable, and what happens to a record the mapping rejects?",
+      "proof_that_closes_it": "The mapping, the E8 reconciliation figure at the declared grain with source count, target count and difference, and a written rejected-record policy.",
+      "source_section": "14.3"
+    },
+    {
+      "id": "TBA-05",
+      "situation": "A master-data change: a customer, product or account definition changes.",
+      "brother_asks": "Who owns this master record, what is the identity rule that decides two records are the same entity, and which downstream systems read it?",
+      "proof_that_closes_it": "Ownership named, the identity and key rule stated, and the downstream impact list with each consumer either checked or recorded NO-DATA.",
+      "source_section": "14.3"
+    },
+    {
+      "id": "TBA-06",
+      "situation": "An authentication or role requirement: who may do what.",
+      "brother_asks": "Which role may perform each action, and what does a user without that role see when they try?",
+      "proof_that_closes_it": "A role matrix covering every action, and negative access tests: the denial is proved, not only the permission.",
+      "source_section": "14.3"
+    },
+    {
+      "id": "TBA-07",
+      "situation": "A batch or interface schedule: a job runs on a timetable and downstream work depends on its freshness.",
+      "brother_asks": "By when must the data be there, what happens if the run is late or fails, and is a retry safe to run twice?",
+      "proof_that_closes_it": "Timing and freshness stated as a measurable threshold, the retry semantics written, and an idempotency check showing a repeated run does not double-count.",
+      "source_section": "14.3"
+    },
+    {
+      "id": "TBA-08",
+      "situation": "Error handling: a technical failure has to have a business meaning.",
+      "brother_asks": "For each technical failure, what is the business outcome and who is told about it?",
+      "proof_that_closes_it": "An error taxonomy mapping each technical failure to a user or business outcome, with the exception paths tested, not only the happy path.",
+      "source_section": "14.3"
+    },
+    {
+      "id": "TBA-09",
+      "situation": "A non-functional requirement stated in business words: fast enough, reliable enough, big enough.",
+      "brother_asks": "What number would make this pass, measured how, under what load?",
+      "proof_that_closes_it": "A measurable test threshold and a run against it. 'Responsive' is not a requirement; a stated limit with a measurement is.",
+      "source_section": "14.3"
+    },
+    {
+      "id": "TBA-10",
+      "situation": "A legacy replacement: a new system takes over from an old one.",
+      "brother_asks": "Which behaviors must be identical, and which differences are intentional decisions rather than defects?",
+      "proof_that_closes_it": "A parity versus intentional change matrix, plus E9 replay of captured non-sensitive cases through both, with every difference classified as parity break or intended.",
+      "source_section": "14.3"
+    },
+    {
+      "id": "TBA-11",
+      "situation": "A vendor integration: a third party supplies or receives data on their terms.",
+      "brother_asks": "What does their contract guarantee, what are the rate and volume limits, and who operates the integration when it breaks at 2am?",
+      "proof_that_closes_it": "The contract, the limits and the operational ownership written down, with an E7 test against the vendor contract and the limit behavior exercised.",
+      "source_section": "14.3"
+    },
+    {
+      "id": "TBA-12",
+      "situation": "A data-report requirement: a number on a dashboard must be defensible.",
+      "brother_asks": "Which fields feed this metric, through which transformations, and which source is authoritative when two disagree?",
+      "proof_that_closes_it": "Metric to field lineage to dashboard, traced end to end, with an E2 independent recomputation of the number from the authoritative source.",
+      "source_section": "14.3"
+    },
+    {
+      "id": "TBA-13",
+      "situation": "A change-impact analysis: something changes and nobody yet knows what it reaches.",
+      "brother_asks": "Which requirements does this touch, which components implement those, which tests cover them, and which release carries it?",
+      "proof_that_closes_it": "The chain requirement to component to test to release, complete, with any link that could not be traced recorded as NO-DATA rather than assumed empty.",
+      "source_section": "14.3"
+    },
+    {
+      "id": "TBA-14",
+      "situation": "UAT defect triage: a tester says the system is wrong.",
+      "brother_asks": "Does the written requirement actually say what the tester expected, or is it ambiguous?",
+      "proof_that_closes_it": "Each defect classified as requirement ambiguity or implementation defect, with the requirement sentence quoted for the ambiguity cases. An ambiguity fixed in code and not in the requirement returns as the same defect later.",
+      "source_section": "14.3"
+    },
+    {
+      "id": "TBA-15",
+      "situation": "A technical spike: something is unknown and a decision waits on it.",
+      "brother_asks": "What is the decision question, and what evidence would settle it?",
+      "proof_that_closes_it": "The decision question, the evidence gathered, and an explicit statement that no production behavior was delivered. A spike that quietly ships is the failure this playbook exists to prevent.",
+      "source_section": "14.3"
+    },
+    {
+      "id": "TBA-16",
+      "situation": "Cutover planning: the switch from old to new happens on a date, in front of people.",
+      "brother_asks": "What must be true before the switch, what is reconciled during it, and how long does the rollback take?",
+      "proof_that_closes_it": "Dependency order, reconciliation checkpoints with their figures, and a rollback path proved by E16-style restore evidence rather than asserted.",
+      "source_section": "14.3"
+    },
+    {
+      "id": "TBA-KH-01",
+      "situation": "Interface contracts: the written agreement between two systems.",
+      "brother_asks": "Where is this contract written, which version is deployed, and who else reads it?",
+      "proof_that_closes_it": "A machine-readable contract file under version control, linted, with a diff against the previously released version.",
+      "source_section": "14.4"
+    },
+    {
+      "id": "TBA-KH-02",
+      "situation": "Source-to-target mapping: the row-by-row statement of where each target value comes from.",
+      "brother_asks": "Is every target field accounted for, including the ones filled with a constant or left null, and why?",
+      "proof_that_closes_it": "A mapping artifact with no unexplained target field, each row naming source, transformation, condition and owning system.",
+      "source_section": "14.4"
+    },
+    {
+      "id": "TBA-KH-03",
+      "situation": "Sequence diagrams: the order in which systems talk during an integration.",
+      "brother_asks": "What is the call order, what is synchronous, and where can the sequence stop halfway?",
+      "proof_that_closes_it": "A sequence with every partial-failure point marked, and the compensating behavior stated for each.",
+      "source_section": "14.4"
+    },
+    {
+      "id": "TBA-KH-04",
+      "situation": "CRUD and event matrices: which actor or system may create, read, update, delete, or emit and consume each entity.",
+      "brother_asks": "For each entity, which system is allowed to write it, and which only read it?",
+      "proof_that_closes_it": "A matrix with exactly one writer per entity, or an explicit decision recorded where more than one writer is intended.",
+      "source_section": "14.4"
+    },
+    {
+      "id": "TBA-KH-05",
+      "situation": "Identity and key semantics: deciding when two records are the same thing.",
+      "brother_asks": "What is the business key, is it stable over time, and what happens when it changes or collides?",
+      "proof_that_closes_it": "The key rule written, with the duplicate and the key-change cases both tested, not only the clean insert.",
+      "source_section": "14.4"
+    },
+    {
+      "id": "TBA-KH-06",
+      "situation": "Error taxonomy: naming the ways this can fail before it fails.",
+      "brother_asks": "Which failures are transient and retryable, which are permanent rejections, and which need a human?",
+      "proof_that_closes_it": "Each failure class named with its handling and its business outcome, and no class left as an unhandled default.",
+      "source_section": "14.4"
+    },
+    {
+      "id": "TBA-KH-07",
+      "situation": "Integration retries and idempotency: the same message arrives twice.",
+      "brother_asks": "What is the idempotency key, and does replaying the same key change state once or twice?",
+      "proof_that_closes_it": "A replay test (E9) with a state-count assertion showing one effect from N deliveries.",
+      "source_section": "14.4"
+    },
+    {
+      "id": "TBA-KH-08",
+      "situation": "Data reconciliation: proving the data that left is the data that arrived.",
+      "brother_asks": "At what grain do we count, and what difference is acceptable?",
+      "proof_that_closes_it": "An E8 reconciliation with the grain declared before the run, both counts quoted verbatim, and the difference explained line by line rather than waved as rounding.",
+      "source_section": "14.4"
+    },
+    {
+      "id": "TBA-KH-09",
+      "situation": "Technical non-functional requirements: turning a business quality word into a number.",
+      "brother_asks": "What is the threshold, the measurement method and the conditions it holds under?",
+      "proof_that_closes_it": "A measured figure against a stated threshold, with the load and environment named beside it.",
+      "source_section": "14.4"
+    },
+    {
+      "id": "TBA-KH-10",
+      "situation": "Migration and cutover: moving from the old shape to the new one without a gap.",
+      "brother_asks": "Can the old and new run at once, and if not, how long is the window and what is the rollback?",
+      "proof_that_closes_it": "An expand-and-contract sequence where possible, otherwise a stated window with a rehearsed rollback, its duration measured rather than estimated.",
+      "source_section": "14.4"
+    },
+    {
+      "id": "TBA-KH-11",
+      "situation": "Traceability to tests: the requirement and the test that proves it must find each other.",
+      "brother_asks": "For each acceptance criterion, which executable test fails when it is violated?",
+      "proof_that_closes_it": "A requirement-to-test map where every criterion names a test, and an E6 mutation check on at least the criteria carrying a forcing class: break the behavior and confirm the named test goes red.",
+      "source_section": "14.4"
+    }
+  ],
+  "tool_adapters": [
+    {
+      "id": "openapi_spec_validator",
+      "tool": "openapi-spec-validator (PyPI)",
+      "detect_command": "python3 -m openapi_spec_validator --help",
+      "what_it_gives": "Validates an OpenAPI 2.0, 3.0 or 3.1 document against the specification schema, which is the cheapest half of an E7 contract check.",
+      "when_absent": "NO-DATA: interface_schema_ids and compatibility_status are not filled from this tool; say which contract files were read by eye instead, and do not report a contract as valid."
+    },
+    {
+      "id": "spectral",
+      "tool": "@stoplight/spectral-cli (npm)",
+      "detect_command": "npx --no-install spectral --version",
+      "what_it_gives": "Lints OpenAPI and AsyncAPI documents against a ruleset, catching contract conventions a schema validator passes.",
+      "when_absent": "NO-DATA: no ruleset lint was run; contract conventions are unverified."
+    },
+    {
+      "id": "datacontract_cli",
+      "tool": "datacontract-cli (PyPI)",
+      "detect_command": "datacontract --version",
+      "what_it_gives": "Lints a data contract, runs schema and quality tests against a source, and detects breaking changes between two contract versions, which fills compatibility_status directly.",
+      "when_absent": "NO-DATA: compatibility_status has no tool-produced breaking-change verdict; state which consumers were checked by hand and which were not."
+    },
+    {
+      "id": "sqlite3",
+      "tool": "sqlite3 (system)",
+      "detect_command": "sqlite3 -version",
+      "what_it_gives": "Runs a reconciliation count at a declared grain over an extracted fixture without needing access to the live warehouse, which is often the only way to produce reconciliation_figure locally.",
+      "when_absent": "NO-DATA: reconciliation_figure could not be produced locally; name the environment that would hold both sides."
+    },
+    {
+      "id": "csvkit",
+      "tool": "csvkit (PyPI, csvstat and csvsql)",
+      "detect_command": "csvstat --version",
+      "what_it_gives": "Profiles a mapping or data-dictionary CSV: column list, null counts, distinct values, which is how a mapping artifact is checked for unexplained target fields (TBA-KH-02).",
+      "when_absent": "NO-DATA: the mapping artifact was read but not profiled; unexplained target fields may remain."
+    }
+  ],
+  "provenance": {
+    "document": "Brother Persona Use-Case, Test, Know-How, Tooling and Intake Library Strategy, 2026-09-03",
+    "sections": [
+      "3.1 (work classes)",
+      "3.2 (risk classes)",
+      "3.3 (practitioner lens list, including the technical-business-analyst lens id used here)",
+      "4.1 (intake sequence; stage 3 supplies this pack's challenge question verbatim)",
+      "4.2 (question budgets)",
+      "5.1 (pack manifest fields: work classes, detection signals, optional tools, dangerous actions, receipt fields, fixture suite, provenance)",
+      "5.2 (pack selection is compositional: this lens loads beside core, and beside business-analyst or data-analyst on a TBA-12 report requirement)",
+      "6.1 (evidence families E2, E7, E8, E9, and E6 and E16 cited inside know_how)",
+      "6.2 (evidence independence rule, which is why E2 is required rather than E1)",
+      "6.3 (evidence selection: NO-DATA is reported, not omitted)",
+      "13.2 and 13.3 (BA intake dimensions and use-case library, which 14.2 inherits in full)",
+      "14.1 to 14.5 (this persona: promise, intake dimensions, use-case library TBA-01 to TBA-16, know-how modules, receipt additions)"
+    ],
+    "note": "Nothing in this pack is copied from a client estate: the document holds no client name, no person and no machine path, and this file was scanned with scripts/private_terms_scan.py before it was pushed."
+  },
+  "fixture": {
+    "must_infer": [
+      "specs/orders/order-import.mapping.sql",
+      "docs/source-to-target-orders.csv",
+      "mappings/customer-master.yml",
+      "docs/data-dictionary-orders.md"
+    ],
+    "manifest_string": "openapi-spec-validator",
+    "must_not_infer": [
+      "README.md",
+      "src/main.py",
+      "requirements.txt",
+      "products/brothermode/docs/superpowers/specs/2026-08-01-loop1-state-mapping.md"
+    ],
+    "note": "must_not_infer_paths pins the two signals this pack refused on measurement: 'requirements.txt' is a Python dependency manifest and not a business requirement artifact, and the last path is a real tracked file in this hub whose directory is named specs and whose basename ends in mapping.md, so it proves neither 'specs/' nor a bare '*mapping*' is a signal here. Note for whoever writes the generic pack test: listing requirements.txt without creating it makes door._manifest_string_hit print its designed 'could not be read, skipped' line to stderr once per manifest string tried, which is correct behaviour and not a failure; assert on the returned lens, not on empty stderr."
+  },
+  "receipt_fields_details": {
+    "spec_reference": {
+      "meaning": "Which written specification this unit implements, by its file path and its heading or section id, so a reader can open the sentence the work claims to satisfy.",
+      "filled_by": "file: the requirement or spec document path plus its anchor, resolved at intake stage 0 (persona doc 4.1); NO-DATA when the work arrived with no written spec, which is itself the finding."
+    },
+    "business_requirement_ids": {
+      "meaning": "The business requirement identifiers this change traces back to (14.5 'business requirement IDs').",
+      "filled_by": "file: the requirement register or issue tracker export; NO-DATA when no register exists."
+    },
+    "interface_schema_ids": {
+      "meaning": "The interface, event or schema identifiers touched: the OpenAPI operationId, the event name and version, or the table and column list (14.5 'interface/schema IDs').",
+      "filled_by": "command: the contract linter over the changed spec files, for example `spectral lint <spec>` or `openapi-spec-validator <spec>`; NO-DATA when neither tool is installed (see tool_adapters)."
+    },
+    "mapping_rule": {
+      "meaning": "The mapping rule in words: source field, target field, transformation, and the condition under which it applies. One line per rule changed.",
+      "filled_by": "file: the mapping artifact matched by this pack's detection signals, at the revision under review."
+    },
+    "source_system_of_record": {
+      "meaning": "Which system owns each source field named in mapping_rule. A mapping rule with no owner named is the first forcing class below.",
+      "filled_by": "file: the data dictionary or the mapping artifact's own source column; NO-DATA when the artifact does not carry an owner column."
+    },
+    "mappings_changed": {
+      "meaning": "Count and list of mapping rules added, altered or removed by this change (14.5 'mappings changed').",
+      "filled_by": "command: `git diff --stat <base>..HEAD -- <mapping paths>` plus the per-rule diff of those files."
+    },
+    "error_exception_behavior": {
+      "meaning": "What the business sees when the technical path fails: the rejected-record policy, the retry rule, and who is told (14.3 TBA-08, 14.5 'error/exception behavior').",
+      "filled_by": "file: the error taxonomy section of the spec; NO-DATA when the spec is silent on the exception path, which blocks acceptance under 14.3 TBA-08."
+    },
+    "reconciliation_figure": {
+      "meaning": "The actual number: source count, target count, difference, and the declared grain the two were counted at. Not 'reconciled', the figure.",
+      "filled_by": "command: the reconciliation query at the declared grain run against source and sink, both counts quoted verbatim; NO-DATA when no environment holds both sides."
+    },
+    "reconciliation_result": {
+      "meaning": "PASS, FAIL or NO-DATA on reconciliation_figure against the tolerance the specification states, plus the rejected-record disposition (14.5 'reconciliation result').",
+      "filled_by": "command: the same reconciliation run, its verdict read in its own call, never inferred from the exit code of the command that also performed the load."
+    },
+    "compatibility_status": {
+      "meaning": "Whether every downstream consumer named at intake still reads this contract, and which ones were checked (14.5 'compatibility status'; the challenge question of this lens).",
+      "filled_by": "command: the contract or schema diff against the previous released version, for example `datacontract breaking <old> <new>`; NO-DATA when the previous version is not retrievable."
+    },
+    "technical_acceptance_evidence": {
+      "meaning": "The E7, E8 and E9 runs that close the technical half: contract test, reconciliation, replay (14.5 'technical + business acceptance evidence').",
+      "filled_by": "command: each test command with its own quoted decisive line; NO-DATA per family not run."
+    },
+    "business_acceptance_evidence": {
+      "meaning": "The named business decision owner's acceptance of the outcome, against the acceptance criteria written before the work (14.5, and 13.3 BA-16 'evidence mapped to requirement').",
+      "filled_by": "file: the UAT or acceptance record naming the decision owner and date; NO-DATA when nobody has accepted yet. Brother never fills this on the business's behalf (see dangerous_actions)."
+    },
+    "unresolved_contract_gaps": {
+      "meaning": "Every consumer, field, error path or reconciliation grain still unproved at the moment the receipt is written, stated as NO-DATA rather than omitted (6.3: 'NO-DATA: cross-tenant authorization was not independently tested').",
+      "filled_by": "file: the receipt's own NO-DATA lines, collected; the empty list is a claim that nothing is unproved and is itself reviewable."
+    }
+  }
+}

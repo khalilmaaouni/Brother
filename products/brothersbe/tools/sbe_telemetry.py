@@ -89,6 +89,14 @@ except ImportError:          # every POSIX platform (fcntl above covers it inste
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from sbe_checks import (derivation_fold, evidence_problem, without_comments,
                         answered, glob_with_denials)
+try:
+    import sbe_repo_scope  # E76 per-repository hook scoping
+except ImportError:
+    sbe_repo_scope = None
+
+
+def _load_sbe_repo_scope():
+    return sbe_repo_scope
 
 # ---------------------------------------------------------------------------
 # Configuration. The vault is the durable memory folder every ledger lives in.
@@ -622,6 +630,9 @@ def cmd_outcomes_append():
     tp = payload.get("transcript_path") or ""
     sid = payload.get("session_id") or "unknown"
     cwd = payload.get("cwd") or ""
+    _rs = _load_sbe_repo_scope()
+    if _rs is not None and _rs.hooks_off(payload=payload):
+        return
     if not tp or not os.path.isfile(tp):
         print("sbe_telemetry: transcript not found; nothing recorded")
         return
@@ -1657,6 +1668,9 @@ def cmd_precompact_brief():
         return
     tp = payload.get("transcript_path") or ""
     cwd = payload.get("cwd") or os.getcwd()
+    _rs = _load_sbe_repo_scope()
+    if _rs is not None and _rs.hooks_off(payload=payload, cwd=cwd):
+        return
     if not tp or not os.path.isfile(tp):
         return
     # OPT-IN, MATCHING WAVE 6. This used to write a brief either way: real

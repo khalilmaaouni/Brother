@@ -3,6 +3,8 @@ name: help
 description: "Use when someone asks how this system works or which command or skill to use. Explains in plain language how a change earns its evidence and its approval, points to the three entry skills, and only then offers the full map of specialist skills and commands. Invoke as /brothersbe:help."
 ---
 
+Plugin root: a Claude Code install exports `${CLAUDE_PLUGIN_ROOT}` and a Codex install exports `${BROTHER_PLUGIN_ROOT}`; both name this plugin's own directory, so read whichever variable appears below as the one your client set. On a clone install neither is set: run the same commands from the checkout root instead.
+
 # Help
 
 Orient the person first, list the machinery last. A flat command list is never the primary

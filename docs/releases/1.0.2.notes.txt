@@ -1,0 +1,14 @@
+This release carries the Codex package: `bundle/.codex-plugin/plugin.json` beside the
+Claude manifest, the generated `bundle/codex-skills/` tree, the hooks adapter
+`scripts/codex_hooks_install.py`, and the operator runbook `docs/codex/SMOKE-RUNBOOK.md`
+with `docs/codex/HOOKS-MAPPING.md` and `docs/codex/PACKAGE-SHAPE.md` beside it. The
+credential free half of the smoke test is recorded under row C7 of the readiness roadmap:
+`python3 scripts/codex_smoke.py` exited 0 against a real `codex` binary in an isolated home,
+installing the marketplace and the plugin and reporting all 18 hooks trusted and enabled.
+
+This release does NOT claim Codex compatibility. The credentialled half, one real Codex task
+run end to end on an authenticated account, is row C7 of the readiness roadmap and is still
+pending the founder's own run: the last attempt ended at `ERROR: unexpected status 401
+Unauthorized: Missing bearer or basic authentication in header`. Until that run is recorded,
+what ships here is the package and its shape, not a proven compatibility claim, and a reader
+should treat Codex support as untested on their machine until they run the runbook themselves.

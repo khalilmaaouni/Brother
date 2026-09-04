@@ -142,8 +142,9 @@ MUTANTS = {
         "guards": "the lease-boundary family: an expired claim that never "
                   "reads dead because the expiry comparison itself is gone",
         "target": "claim_store.py",
-        "anchor_old": '    if float(claim.get("expires_at", 0)) <= now:\n'
-                      "        return False\n",
+        "anchor_old": "    if expires <= now:\n"
+                      '        return "the lease expired %.0fs ago" '
+                      "% (now - expires)\n",
         "anchor_new": "",
         "killer": "test_claim_store.py",
     },

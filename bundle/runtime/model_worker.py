@@ -68,6 +68,10 @@ import shlex
 import subprocess
 import sys
 
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import brother_paths  # noqa: E402
+
 DEFAULT_TIMEOUT_S = 1200
 DEFAULT_DONE_CHECK_TIMEOUT_S = 300
 
@@ -160,9 +164,56 @@ def build_prompt(brief):
     return "\n".join(lines)
 
 
-def _default_argv():
-    return ["claude", "-p", "--output-format", "json", "--permission-mode",
-            "acceptEdits"]
+#: C3, the vendor adapters. Each entry is (argv, parser). The argv is the
+#: headless invocation of that client, and the parser turns its stdout into
+#: (claim_text, usage_or_None).
+#:
+#: CLAUDE: `claude -p --output-format json --permission-mode acceptEdits`,
+#: unchanged, flags already verified against `claude --help` (see the module
+#: docstring).
+#:
+#: CODEX: `codex exec --json --sandbox workspace-write`. Every flag is quoted
+#: from this machine's own help output, run 2026-09-04 against
+#: /Applications/ChatGPT.app/Contents/Resources/codex, codex-cli
+#: 0.153.0-alpha.5:
+#:   exec        "Run Codex non-interactively"
+#:   --json      "Print events to stdout as JSONL"
+#:   -s, --sandbox <SANDBOX_MODE>  "[possible values: read-only,
+#:               workspace-write, danger-full-access]"
+#: workspace-write is the nearest verified analogue of Claude's acceptEdits:
+#: the model may write inside the workspace it was given without a human
+#: approving each edit. It is NOT --dangerously-bypass-approvals-and-sandbox,
+#: which drops sandboxing entirely and is never what a lane worker needs.
+CLAUDE_ARGV = ["claude", "-p", "--output-format", "json", "--permission-mode",
+               "acceptEdits"]
+CODEX_ARGV = ["codex", "exec", "--json", "--sandbox", "workspace-write"]
+
+#: The explicit override for which adapter runs, ahead of brother_paths'
+#: client detection. A lane on a Claude machine can still drive the Codex
+#: adapter with BROTHER_MODEL_CLIENT=codex, which is how the stub tests below
+#: exercise both without either client installed.
+MODEL_CLIENT_ENV = "BROTHER_MODEL_CLIENT"
+
+
+def model_client(env=None):
+    """Which vendor adapter to use: "claude" or "codex".
+
+    BROTHER_MODEL_CLIENT when it names one of the two, else the client
+    brother_paths identifies, else "claude". The final fallback is Claude and
+    not NO-DATA on purpose: this function has to return an argv, and the
+    pre-C3 behaviour of an unidentified host was the claude CLI. The NO-DATA
+    that matters (which client is running) is reported by brother_paths and by
+    the gates that read it, never invented here."""
+    env = os.environ if env is None else env
+    named = (env.get(MODEL_CLIENT_ENV) or "").strip().lower()
+    if named in (brother_paths.CLAUDE, brother_paths.CODEX):
+        return named
+    return brother_paths.client(env) or brother_paths.CLAUDE
+
+
+def _default_argv(env=None):
+    return list(CODEX_ARGV if model_client(env) == brother_paths.CODEX
+                else CLAUDE_ARGV)
 
 
 #: usage's own keys (Anthropic's CLI JSON result), renamed to what
@@ -171,6 +222,112 @@ def _default_argv():
 #: reused from cache, which is what a cache HIT rate means.
 USAGE_FIELD_MAP = {"tokens_in": "input_tokens", "tokens_out": "output_tokens",
                     "tokens_cached": "cache_read_input_tokens"}
+
+
+#: Codex's JSONL event names and token fields, read on 2026-09-04 from the
+#: shipped binary's own embedded wire schema (the same blob that carries
+#: "hooks.jsonevent_namePreToolUse..."): the agent's text arrives on an event
+#: whose type carries "agent_message", and token counts on one carrying
+#: "token_count" with the fields input_tokens, cached_input_tokens and
+#: output_tokens.
+#:
+#: HONEST LIMIT, stated here because it is the difference between a measured
+#: fact and a hopeful one: no live `codex exec` run has been made from this
+#: repository, so the ENVELOPE around those names is inferred, not observed.
+#: The parser is therefore written to fail into NO-DATA rather than into a
+#: wrong number: an event it cannot recognise contributes nothing, an output
+#: it cannot read at all comes back as the raw text with usage None, and a
+#: token count is only ever reported when the fields were actually found.
+CODEX_AGENT_MESSAGE = "agent_message"
+CODEX_TOKEN_COUNT = "token_count"
+CODEX_USAGE_FIELD_MAP = {"tokens_in": "input_tokens",
+                         "tokens_out": "output_tokens",
+                         "tokens_cached": "cached_input_tokens"}
+
+
+def _codex_event_kind(event):
+    """The event's own type string, wherever this version put it. Codex has
+    moved this field before, so three known spellings are tried and an event
+    with none of them is simply not recognised."""
+    for key in ("type", "event", "msg_type"):
+        val = event.get(key)
+        if isinstance(val, str):
+            return val
+    inner = event.get("msg")
+    if isinstance(inner, dict):
+        return _codex_event_kind(inner)
+    return ""
+
+
+def _codex_text(event):
+    """The human-readable text an agent_message event carries."""
+    for key in ("text", "message", "content", "last_agent_message"):
+        val = event.get(key)
+        if isinstance(val, str) and val.strip():
+            return val
+    inner = event.get("msg")
+    if isinstance(inner, dict):
+        return _codex_text(inner)
+    return ""
+
+
+def _codex_usage(event):
+    """Renamed token counts from anywhere inside this event, or {}."""
+    found = {}
+
+    def walk(node):
+        if not isinstance(node, dict):
+            return
+        for field, key in CODEX_USAGE_FIELD_MAP.items():
+            val = node.get(key)
+            if isinstance(val, (int, float)) and not isinstance(val, bool):
+                found[field] = val
+        for val in node.values():
+            walk(val)
+
+    walk(event)
+    return found
+
+
+def _parse_codex_output(raw):
+    """(claim_text, usage_or_None) from `codex exec --json` stdout.
+
+    That stdout is JSONL, one event per line, not the single object the claude
+    CLI's --output-format json returns, so this is a separate parser rather
+    than a branch inside the other one. The LAST agent_message wins (an
+    interrupted run can emit several); token counts come from the last event
+    that carried any, since Codex reports a running total. Nothing
+    recognisable at all means the raw text as the claim and usage None:
+    NO-DATA, never an invented count."""
+    text = (raw or "").strip()
+    if not text:
+        return "(model produced no stdout)", None
+    claim = ""
+    usage = {}
+    saw_event = False
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except ValueError:  # sbe: allow-silent reader-only: a stream line that is not JSON is not an event, and the docstring above makes an unrecognisable stream NO-DATA rather than an invented count
+            continue
+        if not isinstance(event, dict):
+            continue
+        saw_event = True
+        kind = _codex_event_kind(event)
+        if CODEX_AGENT_MESSAGE in kind:
+            found = _codex_text(event)
+            if found:
+                claim = found
+        if CODEX_TOKEN_COUNT in kind:
+            found_usage = _codex_usage(event)
+            if found_usage:
+                usage = found_usage
+    if not saw_event:
+        return text, None
+    return (claim or text), (usage or None)
 
 
 def _parse_model_output(raw):
@@ -243,7 +400,13 @@ def run_model(prompt, cwd=None, runner=None):
         return False, ("model command exited %s: %s"
                         % (completed.returncode,
                            (completed.stderr or completed.stdout or "").strip()[:400])), None
-    claim, usage = _parse_model_output(completed.stdout)
+    # C3: each vendor's own stdout shape gets its own parser. A stub
+    # driven through MODEL_WORKER_CMD falls back to the raw text with no
+    # usage under both, which is the pre-C3 behaviour.
+    if model_client() == brother_paths.CODEX:
+        claim, usage = _parse_codex_output(completed.stdout)
+    else:
+        claim, usage = _parse_model_output(completed.stdout)
     return True, claim, usage
 
 

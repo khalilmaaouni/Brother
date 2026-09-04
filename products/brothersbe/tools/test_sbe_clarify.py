@@ -8,9 +8,18 @@ check_clarify refuses a verdict while any row is open.
 
 This file drives the seven verdict paths the introducing commit described by
 hand (absent NO-DATA, template NO-DATA, open row FAIL, answer without a date
-FAIL, malformed row FAIL, all answered PASS, empty table PASS) as repeatable
-assertions, because a claim made only in a commit message is a claim nobody
-re-checks the next time the parser changes.
+FAIL, malformed row FAIL, all answered PASS, empty table NO-DATA) as
+repeatable assertions, because a claim made only in a commit message is a
+claim nobody re-checks the next time the parser changes.
+
+The empty-table path used to PASS ("a design with nothing open is a real
+state"), on purpose, by design. `evals/test_no_data_class.py`'s honesty
+meta-test (row E82, hub battery, 2026-09-04) caught this as exactly the
+class-wide defect the project exists to prevent: a zero-row table declares
+nothing, and `sbe_checks.Check`'s own constructor refuses any check that
+declares `empty_expect="PASS"`, so no check may special-case its way past
+that rule either. check_clarify now reads NO-DATA on zero rows, the same
+answer check_behaviour already gives for its own empty table.
 """
 import os
 import sys
@@ -90,12 +99,14 @@ class ClarifyVerdicts(unittest.TestCase):
         self.assertEqual(verdict, "PASS")
         self.assertIn("1 question", note)
 
-    def test_an_empty_table_PASSes(self):
-        """Deliberately different from check_behaviour: a design with nothing
-        open is a real and common state, not an absence."""
+    def test_an_empty_table_is_NO_DATA(self):
+        """Same reading as check_behaviour's own empty table: a zero-row
+        09-clarify.md declares nothing, and empty_expect can never be PASS
+        for a check registered here (sbe_checks.Check's own constructor
+        refuses it), so an empty table cannot be a special case."""
         verdict, note = D.check_clarify(self._root(_HEADER))
-        self.assertEqual(verdict, "PASS")
-        self.assertIn("0 question", note)
+        self.assertEqual(verdict, "NO-DATA")
+        self.assertIn("nothing here states", note)
 
     def test_an_unreadable_file_FAILs_not_NO_DATA(self):
         """A broken claim is not an absent one."""

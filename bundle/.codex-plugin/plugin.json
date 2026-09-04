@@ -1,0 +1,37 @@
+{
+  "name": "brother",
+  "version": "1.0.2",
+  "description": "Turn a plain-language outcome into checked work, a rerunnable receipt, useful local memory, and a human acceptance decision.",
+  "author": {
+    "name": "Khalil Maaouni"
+  },
+  "homepage": "https://github.com/khalilmaaouni/Brother",
+  "repository": "https://github.com/khalilmaaouni/Brother",
+  "license": "MIT",
+  "keywords": [
+    "verified delivery",
+    "receipts",
+    "execution provenance",
+    "change assurance",
+    "local memory",
+    "codex"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Brother",
+    "shortDescription": "Checked work with a receipt you can rerun.",
+    "longDescription": "Brother reads what a piece of work actually is, applies the right amount of checking, and leaves a rerunnable receipt, local memory of what was learned, and a human acceptance decision. It keeps PASS, FAIL and NO-DATA distinct, so missing evidence stays visible instead of reading as a pass.",
+    "developerName": "Khalil Maaouni",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/khalilmaaouni/Brother",
+    "defaultPrompt": [
+      "Check this migration before I merge it.",
+      "Explain why last week's report number looks wrong.",
+      "Set up a receipt for the work I am about to start."
+    ]
+  }
+}

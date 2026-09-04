@@ -248,6 +248,17 @@ MANIFEST_REL=$(printf '%s\n' "$MANIFEST_ABS" | sed "s|^$TARGET/||")
 # -type f and would otherwise walk right back in through the exclusion list.
 # find is not asked to descend through any link (no -L, deliberately), so
 # nothing below a planted link is traversed or trusted.
+#
+# E80 (2026-09-04): the project working-state names below are matched as
+# ROOT-ANCHORED PATHS, not as bare names. A bare ! -name 'CANVAS.md' matches
+# at any depth, and the product ships project-template/CANVAS.md and
+# project-template/DELIVERY-PACKET.md as tracked template files, so those two
+# shipped files were dropped from this listing while the manifest still named
+# them: a clean install reported them MISSING. Root-anchored keeps the
+# intent (a user's own CANVAS.md at the install root is state, not payload)
+# without reaching into the shipped template directory. The same change is
+# in scripts/checksums.sh, which builds the manifest this listing is
+# compared against; the two lists must stay in step.
 find "$TARGET" ! -type d \
     ! -path "$TARGET/.git" \
     ! -path "$TARGET/.git/*" \
@@ -270,12 +281,12 @@ find "$TARGET" ! -type d \
     ! -path "$TARGET/Handover-*/*" \
     ! -name '.DS_Store' \
     ! -name '*.bak*' \
-    ! -name 'STATE.md' \
-    ! -name 'CANVAS.md' \
-    ! -name 'CANVAS-*.md' \
-    ! -name 'DELIVERY-PACKET.md' \
-    ! -name 'DELIVERY-PACKET-*.md' \
-    ! -name 'PROJECT-VIEW.html' \
+    ! -path "$TARGET/STATE.md" \
+    ! -path "$TARGET/CANVAS.md" \
+    ! -path "$TARGET/CANVAS-*.md" \
+    ! -path "$TARGET/DELIVERY-PACKET.md" \
+    ! -path "$TARGET/DELIVERY-PACKET-*.md" \
+    ! -path "$TARGET/PROJECT-VIEW.html" \
     > "$WORKDIR/installed_raw"
 
 # An EXTRA entry is exactly the shape of a planted backdoor (see the FAILED

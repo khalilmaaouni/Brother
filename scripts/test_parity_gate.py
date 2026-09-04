@@ -6,6 +6,8 @@ and an unassessed capability lowers the score rather than inheriting a guess.
 """
 import json
 import os
+import re
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -111,8 +113,50 @@ class TheShippedAssessmentIsHonest(unittest.TestCase):
                 if not str(c.get("evidence", "")).strip()]
         self.assertEqual(bare, [], "levels claimed with no evidence: %s" % bare)
 
-    def test_the_weights_are_the_directive_s_own_and_sum_to_one_hundred(self):
-        self.assertEqual(sum(c["weight"] for c in self.load()), 100)
+    def test_the_weights_are_the_directive_s_own_and_sum_to_one_hundred_and_seven(self):
+        """The original twelve summed to 100. E56 added a thirteenth row,
+        point-of-need memory and repeat prevention, at weight 7 (matching the
+        other critical mid-tier rows: scope auditing and crash recovery are
+        also weight 7). The gate itself normalises by the total weight
+        (parity_gate.score divides by sum(weight)), so the sum need not stay
+        100 for the percentages to read correctly; this test just pins the
+        number so a silent weight edit is caught."""
+        self.assertEqual(sum(c["weight"] for c in self.load()), 107)
+
+    def test_the_thirteenth_capability_prints_with_its_level(self):
+        """E56: the parity file had no memory-and-learning row. Prove the CLI
+        actually surfaces it, not just that the JSON holds it. The plain-text
+        table truncates a capability name to 24 characters (parity_gate.main:
+        str(r["capability"])[:24]), so check the truncated form there and the
+        full name plus level in --json, which does not truncate."""
+        name = "Point-of-need memory and repeat prevention"
+        row = next(c for c in self.load() if c["capability"] == name)
+
+        text = subprocess.run([sys.executable, P.__file__],
+                               capture_output=True, text=True, check=False)
+        self.assertIn(name[:24], text.stdout)
+
+        as_json = subprocess.run([sys.executable, P.__file__, "--json"],
+                                  capture_output=True, text=True, check=False)
+        payload = json.loads(as_json.stdout)
+        printed = next(r for r in payload["rows"] if r["capability"] == name)
+        self.assertEqual(printed["level"], row["level"])
+
+    def test_every_named_script_or_module_path_resolves_on_disk(self):
+        """A level is granted by evidence, and evidence that cites a file
+        which does not exist is worse than no evidence: it looks checkable
+        and is not. Scan every evidence string for a scripts/x.py or
+        products/x/y.py path and require it to resolve relative to the repo
+        root. A miss is reported, not silently skipped or auto-fixed."""
+        pattern = re.compile(r"\b((?:scripts|products)/[A-Za-z0-9_./-]+\.py)\b")
+        missing = []
+        for c in self.load():
+            for path in sorted(set(pattern.findall(c.get("evidence", "")))):
+                if not os.path.exists(os.path.join(P.ROOT, path)):
+                    missing.append("%s: %s" % (c["capability"], path))
+        self.assertEqual(missing, [],
+                          "evidence names a path that does not resolve on "
+                          "disk (finding, not auto-fixed): %s" % missing)
 
     def test_every_level_is_in_range(self):
         for c in self.load():

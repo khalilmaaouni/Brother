@@ -309,18 +309,59 @@ class TestTheSoundCase(EvidenceFixture):
 
 
 class TestStaleness(EvidenceFixture):
-    def test_a_receipt_from_an_earlier_commit_fails(self):
-        """A receipt only counts as evidence for the commit it was generated
-        against. The new commit here touches a file the receipt does not cover,
-        so the commit binding is the only control that can fire."""
+    def test_a_later_commit_touching_no_covered_file_carries_the_receipt_forward(self):
+        """THE BOUNDARY MOVED HERE, deliberately, in roadmap row E83, and this
+        test pins the new line rather than the old one.
+
+        It used to read: a receipt counts only for the commit it was generated
+        against, so ANY later commit staled it. That made evidence unable to
+        survive being merged, which is the only way evidence ever reaches
+        anybody: every receipt in this estate's own release dossier read as
+        broken for exactly that reason. The rule now is the one `policy.py`
+        already applied before it called `verify` at all: the bound commit is
+        an ancestor of this head, and nothing the receipt COVERS changed in
+        between. The commit here touches a file the receipt does not cover, so
+        the receipt still describes every file it speaks for.
+
+        What it must NOT be read as saying is that the command would still
+        pass today. The note says so in the receipt's own words, and the two
+        tests below hold the two edges that still refuse."""
         self.generate()
         write(self.repo, "docs/notes.md", "unrelated\n")
         git(self.repo, "add", "-A")
         git(self.repo, "commit", "-qm", "a later commit")
         code, data, text = self.verify()
+        self.assertEqual(data["verdict"], "PASS", text)
+        self.assertEqual(code, 0, text)
+        blob = json.dumps(data["reasons"])
+        self.assertIn("is an ancestor of the current head", blob, text)
+        self.assertIn("it says nothing about code it never covered", blob, text)
+
+    def test_a_later_commit_that_changes_a_covered_file_still_fails(self):
+        """THE EDGE THAT STILL REFUSES. The covered file moves in the same
+        commit, so the receipt is evidence about bytes that are gone."""
+        self.generate()
+        write(self.repo, "src/service.py", "def handle():\n    return 99\n")
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-qm", "a later commit over covered code")
+        code, data, text = self.verify()
         self.assertEqual(data["verdict"], "FAIL", text)
         self.assertEqual(code, 1, text)
         self.assertIn("not the current head", json.dumps(data["reasons"]), text)
+
+    def test_a_head_commit_this_repository_does_not_hold_is_no_data(self):
+        """NO-DATA, never a pass and never a FAIL that names a cause it did not
+        read. A commit nobody here has was never compared against anything, and
+        `verify` may not dress that up as either verdict."""
+        self.generate()
+        data = self.load()
+        data["headCommit"] = "0" * 40
+        self.save(self.reseal(data))
+        code, verdict, text = self.verify()
+        self.assertEqual(verdict["verdict"], "NO-DATA", text)
+        self.assertNotEqual(verdict["verdict"], "PASS", text)
+        self.assertIn("does not hold", json.dumps(verdict["reasons"]), text)
+        self.assertEqual(code, 0, text)
 
     def test_a_covered_file_changed_after_the_run_fails(self):
         self.generate()
@@ -1139,6 +1180,150 @@ class TestReceiptSurvivesItsOwnIntroducingCommit(unittest.TestCase):
                                    "--cwd", self.repo)
         self.assertNotEqual(code, 0, "a commit bundling the receipt with real work must "
                                      "still fail as stale: %s" % text)
+        self.assertIn("is not the current head", text)
+
+
+class TestReceiptFreshnessAcrossCommitsAndScopes(unittest.TestCase):
+    """ROADMAP ROW E83: the product read its own freshly minted receipts as
+    stale. Three separate defects produced that one symptom, and each test
+    below drives ONE of them backwards. Every test here fails on the code as it
+    stood before the row and passes after.
+
+    The repository is laid out the way this estate's own release dossier is: a
+    dossier directory with its own `.sbe/evidence` store inside it, so the
+    scoped read (`sbe status <dossier>`, whose cwd is the dossier and not the
+    repository root) is a real case here rather than a described one."""
+
+    DOSSIER = os.path.join("docs", "dossiers", "v1")
+
+    def setUp(self):
+        self.repo = tempfile.mkdtemp()
+        git(self.repo, "init", "-q")
+        git(self.repo, "config", "user.email", "fixture@example.invalid")
+        git(self.repo, "config", "user.name", "fixture")
+        write(self.repo, "app.py", "x = 1\n")
+        write(self.repo, os.path.join(self.DOSSIER, "01-purpose.md"), "why this exists\n")
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-qm", "seed")
+
+    def tearDown(self):
+        shutil.rmtree(self.repo, ignore_errors=True)
+
+    def _run_sbe(self, *argv, **kwargs):
+        proc = subprocess.run([sys.executable, SBE] + list(argv), cwd=kwargs.get("cwd",
+                              self.repo), capture_output=True, text=True, timeout=180)
+        return proc.returncode, proc.stdout + proc.stderr
+
+    def _mint(self, name, covers, cwd=None, out=None):
+        """One receipt, committed on its own, exactly the way `sbe evidence run`
+        then a commit leaves it. `covers` is spelled relative to `cwd`, the same
+        way the wrapper records it. `out` writes the receipt outside the
+        repository instead, for the cases that must survive a branch switch."""
+        cwd = cwd or self.repo
+        full = out or os.path.join(self.repo, self.DOSSIER, ".sbe", "evidence",
+                                   name + ".json")
+        code, text = self._run_sbe("evidence", "run", "--out", full, "--cwd", cwd,
+                                   "--covers", covers, "--", sys.executable, "-c", "pass")
+        self.assertEqual(code, 0, text)
+        if out is None:
+            git(self.repo, "add", "-A")
+            git(self.repo, "commit", "-qm", "mint %s" % name)
+        return full
+
+    def test_a_receipt_verified_from_the_dossier_it_lives_in_is_not_stale(self):
+        """DEFECT 1: the digest exemption was spelled relative to the caller's
+        cwd while the digest itself is spelled from the repository root, so
+        every scoped read exempted a name no digest contained and read every
+        receipt as stale."""
+        receipt = self._mint("design", "01-purpose.md", cwd=os.path.join(self.repo,
+                                                                        self.DOSSIER))
+        scope = os.path.join(self.repo, self.DOSSIER)
+        code, text = self._run_sbe("evidence", "verify", receipt, "--cwd", scope, cwd=scope)
+        self.assertEqual(code, 0, "a receipt read from the dossier it lives in must not be "
+                                  "stale: %s" % text)
+        self.assertIn("PASS", text)
+
+    def test_a_root_relative_covered_path_read_from_the_dossier_still_resolves(self):
+        """DEFECT 1 AGAIN, in the other reader. A receipt minted at the
+        repository root records its covered paths from the root; a dossier
+        scoped read joins them onto the dossier instead, and the file it points
+        at exists nowhere. The product reported a file that had never been
+        touched as one that "no longer exists" and threw the receipt away."""
+        receipt = self._mint("design", "docs/dossiers/v1/01-purpose.md")
+        scope = os.path.join(self.repo, self.DOSSIER)
+        code, text = self._run_sbe("evidence", "verify", receipt, "--cwd", scope, cwd=scope)
+        self.assertNotIn("no longer exists", text)
+        self.assertEqual(code, 0, "a root relative covered path must resolve for a scoped "
+                                  "reader too: %s" % text)
+
+    def test_a_covered_path_that_resolves_nowhere_is_still_reported_missing(self):
+        """THE GUARD on the test above: the repository root is tried second,
+        not treated as an answer. A path that exists in neither place is still
+        a broken claim."""
+        receipt = self._mint("design", "docs/dossiers/v1/01-purpose.md")
+        os.remove(os.path.join(self.repo, self.DOSSIER, "01-purpose.md"))
+        scope = os.path.join(self.repo, self.DOSSIER)
+        code, text = self._run_sbe("evidence", "verify", receipt, "--cwd", scope, cwd=scope)
+        self.assertNotEqual(code, 0, "a covered file that exists nowhere must fail: %s" % text)
+        self.assertIn("no longer exists", text)
+
+    def test_a_sibling_receipts_commit_does_not_stale_the_first_one(self):
+        """DEFECT 2: only the receipt's OWN path was exempt, so minting three
+        receipts left at most the last one fresh. Another receipt is not the
+        code under test, which this product already says for coverage."""
+        covers = "docs/dossiers/v1/01-purpose.md"
+        first = self._mint("design", covers)
+        self._mint("gate", covers)
+        self._mint("score", covers)
+        code, text = self._run_sbe("evidence", "verify", first, "--cwd", self.repo)
+        self.assertEqual(code, 0, "a sibling receipt's own commit must not stale this "
+                                  "one: %s" % text)
+        self.assertIn("PASS", text)
+
+    def test_a_covered_file_rewritten_with_the_same_bytes_is_not_a_finding(self):
+        """DEFECT 3: a covered file whose mtime moved past the run was a
+        problem even when its digest still matched. Every checkout, merge, pull
+        and new worktree rewrites files that way, so a merged receipt failed on
+        a fact about the filesystem rather than about the code."""
+        receipt = self._mint("design", "docs/dossiers/v1/01-purpose.md")
+        time.sleep(0.01)
+        write(self.repo, os.path.join(self.DOSSIER, "01-purpose.md"), "why this exists\n")
+        code, text = self._run_sbe("evidence", "verify", receipt, "--cwd", self.repo)
+        self.assertEqual(code, 0, "identical bytes rewritten after the run are the bytes "
+                                  "the receipt recorded: %s" % text)
+        self.assertNotIn("was written after the run ended", text)
+
+    def test_a_covered_file_rewritten_with_different_bytes_still_fails(self):
+        """THE GUARD on the test above: the digest, not the timestamp, is what
+        speaks for the bytes, and it still refuses."""
+        receipt = self._mint("design", "docs/dossiers/v1/01-purpose.md")
+        write(self.repo, os.path.join(self.DOSSIER, "01-purpose.md"), "rewritten\n")
+        code, text = self._run_sbe("evidence", "verify", receipt, "--cwd", self.repo)
+        self.assertNotEqual(code, 0, "changed bytes must still fail: %s" % text)
+        self.assertIn("the code changed after the evidence was made", text)
+
+    def test_a_receipt_on_a_history_this_head_never_descended_from_is_stale(self):
+        """THE ANCESTOR REQUIREMENT is doing real work, not decoration. The
+        covered file is byte identical on both branches, so the covered-files
+        question answers "nothing changed"; the receipt was still made on a
+        history this head never came from, and carrying evidence FORWARD is the
+        only thing the rule licenses."""
+        trunk = git(self.repo, "rev-parse", "--abbrev-ref", "HEAD")
+        git(self.repo, "checkout", "-q", "-b", "side")
+        write(self.repo, "side-only.py", "y = 1\n")
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-qm", "a commit only this branch has")
+        outside = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, outside, True)
+        receipt = self._mint("design", "docs/dossiers/v1/01-purpose.md",
+                             out=os.path.join(outside, "design.json"))
+        git(self.repo, "checkout", "-q", trunk)
+        write(self.repo, "app.py", "x = 2\n")
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-qm", "work on the trunk the receipt never saw")
+        code, text = self._run_sbe("evidence", "verify", receipt, "--cwd", self.repo)
+        self.assertNotEqual(code, 0, "a receipt from a history this head never descended "
+                                     "from must not carry forward: %s" % text)
         self.assertIn("is not the current head", text)
 
 

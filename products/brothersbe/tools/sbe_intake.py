@@ -627,7 +627,18 @@ def main():
     # correct an answer must not move when the change was actually declared,
     # the same "do not silently overwrite" reasoning `previous_intent` above
     # already applies to the intent block.
-    opened_at = previous_opened_at or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    #
+    # SBE_INTAKE_OPENED_AT overrides the real clock reading, same discipline
+    # as GIT_AUTHOR_DATE/GIT_COMMITTER_DATE in tools/fixtures/sandbox/
+    # build_sandbox.py's git(): a fresh (no previous file) dossier used to
+    # stamp real wall-clock time here unconditionally, which put a value that
+    # changes every second into a file this project also commits and hashes
+    # (docs/guides/00-sandbox.md pins the resulting commit; a first-run
+    # openedAt made that commit, and the hash it pins, unreproducible on
+    # every subsequent run). Unset, behaviour is unchanged: real time, same
+    # as before.
+    opened_at = (previous_opened_at or os.environ.get("SBE_INTAKE_OPENED_AT")
+                or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
     out = {"answers": answers, "tier": tier, "override": None, "override_reason": None,
            "openedAt": opened_at,
            "intent": {"desired_outcome": intent["desired_outcome"],

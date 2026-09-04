@@ -5,6 +5,8 @@ starting the same unit, so the exclusion test spawns real processes. A threading
 test would pass on a module that guards nothing across process boundaries, which
 is exactly the mistake being avoided.
 """
+import contextlib
+import io
 import json
 import os
 import subprocess
@@ -289,6 +291,44 @@ class ADeadOwnerNeedsNoWaitAtAll(unittest.TestCase):
         self.assertEqual(found[0]["status"], "abandoned")
         self.assertEqual(found[0]["owner"], "crashed-session")
 
+    def test_a_dead_pid_reclaim_names_the_pid_not_a_negative_expiry(self):
+        """E85. reconcile() phrased EVERY abandoned claim as elapsed time since
+        expiry, so a claim reclaimed because its owner pid died while time
+        remained on the lease printed 'the lease expired -3600s ago': a false
+        reason carrying a negative number. The detail must name the real cause
+        and never print a negative elapsed-seconds figure."""
+        dead = subprocess.Popen([sys.executable, "-c", "pass"])
+        dead.wait()
+        clock = FakeClock()
+        p = store()
+        C.acquire(p, "U1", "session-a", ttl=3600, clock=clock)
+        with open(p, encoding="utf-8") as fh:
+            data = json.load(fh)
+        data["U1"]["pid"] = dead.pid
+        data["U1"]["hostname"] = C._hostname()
+        with open(p, "w", encoding="utf-8") as fh:
+            json.dump(data, fh)
+
+        found, problem = C.reconcile(p, clock=clock)
+        self.assertIsNotNone(found, problem)
+        self.assertEqual(found[0]["status"], "abandoned")
+        detail = found[0]["detail"]
+        self.assertNotIn("-", detail.split("while still")[0],
+                         "no negative number may appear in the reason: %r" % detail)
+        self.assertIn("pid %d" % dead.pid, detail)
+        self.assertIn("dead on this host", detail)
+        self.assertNotIn("the lease expired", detail)
+
+    def test_a_time_expired_reclaim_still_says_the_lease_expired(self):
+        """The other half of E85: the time direction keeps its own wording, so
+        naming the pid case never renamed the case that was already right."""
+        clock = FakeClock()
+        p = store()
+        C.acquire(p, "U1", "session-a", ttl=60, clock=clock)
+        clock.advance(61)
+        found, _ = C.reconcile(p, clock=clock)
+        self.assertIn("the lease expired 1s ago", found[0]["detail"])
+
     def test_a_live_pid_with_an_expired_lease_still_reclaims_on_schedule(self):
         """Never weaken the time direction: an alive owner past its lease is
         still abandoned, exactly as before this fix."""
@@ -423,6 +463,88 @@ class ADeadLockHolderIsReclaimedNotWaitedOut(unittest.TestCase):
                 pass
         self.assertTrue(os.path.exists(lock_path),
                          "a lock from another host must not be reclaimed by pid alone")
+
+
+class TheLeaseLengthObeysItsEnvironmentOverride(unittest.TestCase):
+    """E62's own override, asserted directly. It appeared in tests only as a
+    fixture setting inside one end-to-end run, so the fallback that keeps a
+    malformed value from crashing every claim in the run was never driven."""
+
+    def setUp(self):
+        self._saved = os.environ.get(C.TTL_ENV_VAR)
+
+    def tearDown(self):
+        if self._saved is None:
+            os.environ.pop(C.TTL_ENV_VAR, None)
+        else:
+            os.environ[C.TTL_ENV_VAR] = self._saved
+
+    def test_a_malformed_override_falls_back_to_the_default(self):
+        os.environ[C.TTL_ENV_VAR] = "abc"
+        self.assertEqual(C.effective_ttl(), float(C.DEFAULT_TTL_SECONDS))
+
+    def test_a_numeric_override_is_honoured(self):
+        os.environ[C.TTL_ENV_VAR] = "4"
+        self.assertEqual(C.effective_ttl(), 4.0)
+
+    def test_an_explicit_argument_beats_the_override(self):
+        """The positive control for the two above: the default is not simply
+        what this function always returns."""
+        os.environ[C.TTL_ENV_VAR] = "4"
+        self.assertEqual(C.effective_ttl(9), 9.0)
+
+
+class RenewalReportsItsFailuresInsteadOfRaising(unittest.TestCase):
+    """renew_owned guards a live worker from a background thread, so a
+    failure it raised instead of returned would kill that thread silently
+    and leave the lease to expire under a still-running unit. The only
+    coverage was one wall-clock end-to-end run that never reached the
+    problems branch at all."""
+
+    def _seeded_then_torn(self):
+        p = store()
+        held, problem = C.acquire(p, "U1", "session-a")
+        self.assertIsNotNone(held, problem)
+        with open(p, "w", encoding="utf-8") as fh:
+            fh.write("{ this is not json")
+        return p
+
+    def test_an_unreadable_store_comes_back_as_a_problem(self):
+        p = self._seeded_then_torn()
+        renewed, problems = C.renew_owned(p, "session-a")
+        self.assertEqual(renewed, [])
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIsNone(problems[0][0])
+        self.assertIn("could not be read", problems[0][1])
+
+    def test_a_readable_store_renews_and_reports_nothing(self):
+        """The positive control: the pair above is about the torn file, not
+        about renew_owned reporting a problem no matter what it reads."""
+        p = store()
+        C.acquire(p, "U1", "session-a")
+        renewed, problems = C.renew_owned(p, "session-a")
+        self.assertEqual(problems, [])
+        self.assertEqual(renewed, ["U1"])
+
+    def test_the_background_loop_surfaces_the_failure_and_stops(self):
+        """BackgroundRenewal itself, named in no test until now: a renewal
+        against a state that already failed must be reported by stop() and
+        must not be retried in a loop against the same bad state."""
+        p = self._seeded_then_torn()
+        renewal = C.BackgroundRenewal(p, "session-a", ttl=1.0, interval=0.01)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            renewal.start()
+            deadline = time.time() + 10.0
+            while not renewal.failures and time.time() < deadline:
+                time.sleep(0.01)
+            failures = renewal.stop()
+        self.assertTrue(failures,
+                        "an unreadable store must reach the caller as a "
+                        "recorded failure, not as a silent dead thread")
+        self.assertIn("could not be read", failures[0][1])
+        self.assertIn("claim_store: renewal failed for (store)",
+                      err.getvalue())
 
 
 if __name__ == "__main__":

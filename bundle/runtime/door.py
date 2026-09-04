@@ -23,8 +23,10 @@ to --max-retries times, and after that the run fails loudly rather than
 storing something unschedulable.
 """
 import argparse
+import fnmatch
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -43,6 +45,566 @@ NODATA = "NO-DATA"
 MAX_OUTCOME_CHARS = 2000
 DEFAULT_MODEL_CMD = ["claude", "-p"]
 UNIT_COUNT_HINT = "2 to 9 units"
+
+#: P2 (persona integration, docs/plan/PERSONA-INTEGRATION-PLAN-2026-09-04.md
+#: gap P2; docs/plan/PERSONA-INTEGRATION-ROWS-2026-09-04.json). A pack
+#: manifest is data, not code: scripts/packs/<lens>.json, read here and
+#: nowhere wired into build_prompt yet (that is P3 and P5's row, not this
+#: one). PACKS_DIR is a module-level default computed once from HERE, which
+#: never changes after import, so it is safe as a default argument value
+#: (unlike a mutable module constant reassigned later).
+PACKS_DIR = os.path.join(HERE, "packs")
+
+#: The seven fields the persona document's pack manifest section (5.1) and
+#: this row's own brief name: lens id, detection signals, the one
+#: profession-aware challenge question (4.1 stage 3), the question budget
+#: (4.2), the evidence families a promotion-class unit requires (6.1),
+#: the pack-specific receipt fields (12.6), and the forcing classes that
+#: demand a human decision (25.2). Order is the order load_pack reports a
+#: missing key in.
+PACK_REQUIRED_KEYS = (
+    "lens",
+    "version",
+    "detection_signals",
+    "challenge_question",
+    "question_budget",
+    "required_evidence_families",
+    "receipt_fields",
+    "forcing_classes",
+)
+
+
+def load_pack(name, packs_dir=PACKS_DIR):
+    """The manifest at `packs_dir`/<name>.json, refused (ValueError, the
+    missing key(s) named) unless every key in PACK_REQUIRED_KEYS is present.
+    A manifest missing a key is unschedulable the same way work_record.py
+    refuses a unit missing `owns` or `done_check`: the caller finds out by
+    name, not by a KeyError three calls later."""
+    path = os.path.join(packs_dir, "%s.json" % name)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            raw = fh.read()
+    except OSError as exc:
+        raise ValueError("pack %r could not be read from %r: %s"
+                         % (name, path, exc))
+    try:
+        manifest = json.loads(raw)
+    except ValueError as exc:
+        raise ValueError("pack %r (%s) is not valid JSON: %s"
+                         % (name, path, exc))
+    if not isinstance(manifest, dict):
+        raise ValueError("pack %r (%s) is not a JSON object" % (name, path))
+    missing = [k for k in PACK_REQUIRED_KEYS if k not in manifest]
+    if missing:
+        raise ValueError("pack %r (%s) is missing required key(s): %s"
+                         % (name, path, ", ".join(missing)))
+    return manifest
+
+
+def pack_manifests(packs_dir=PACKS_DIR):
+    """{lens name: manifest}, one entry per *.json file under `packs_dir`,
+    each validated the same way load_pack validates one. Raises the same
+    ValueError as load_pack, naming the first invalid file, rather than
+    returning a partial map that hides a broken pack."""
+    try:
+        names = sorted(f[:-len(".json")] for f in os.listdir(packs_dir)
+                       if f.endswith(".json"))
+    except OSError as exc:
+        raise ValueError("packs directory %r could not be listed: %s"
+                         % (packs_dir, exc))
+    return {name: load_pack(name, packs_dir=packs_dir) for name in names}
+
+
+#: P3 (persona integration, gap P3, persona doc 3.3: "Infer from
+#: repository/work and let the human correct the inference"). Files that
+#: plausibly NAME a dependency, worth reading for a pack's manifest_strings
+#: signal (e.g. "mlflow" inside requirements.txt). Kept to an allowlist of
+#: basenames so this never opens an arbitrary file the tree happens to list.
+MANIFEST_FILENAMES = frozenset((
+    "requirements.txt", "pyproject.toml", "setup.py", "setup.cfg",
+    "environment.yml", "environment.yaml", "Pipfile", "package.json",
+))
+
+#: How many matched paths the intent screen's assumption line names before
+#: it falls back to "and N more": a repository with forty notebooks should
+#: not turn one line into a wall of filenames. The Work document itself
+#: still keeps the full matched_paths list.
+MAX_ASSUMPTION_PATHS = 3
+
+
+def _path_matches_signal(rel_path, signal):
+    """True when `rel_path` (as list_repo_files returns it: repository-
+    relative, forward slashes) matches one pack path signal. A signal
+    ending in '/' (e.g. 'mlruns/') matches any path with that directory
+    name among its parts, at any depth; anything else is matched with
+    fnmatch against the path's basename, so 'dvc.yaml' matches at any
+    depth and '*.ipynb' matches a notebook wherever it lives."""
+    sig = str(signal)
+    parts = str(rel_path).split("/")
+    if sig.endswith("/"):
+        return sig.rstrip("/") in parts[:-1]
+    return fnmatch.fnmatch(parts[-1], sig)
+
+
+def _manifest_string_hit(root, listed_files, needle):
+    """The first path in `listed_files` that is shaped like a manifest
+    (MANIFEST_FILENAMES) and whose content contains `needle`, or None.
+    Reads only files list_repo_files already found and only ones on that
+    allowlist, so this never opens a path the caller has not already seen."""
+    for rel in listed_files:
+        if os.path.basename(rel) not in MANIFEST_FILENAMES:
+            continue
+        try:
+            with open(os.path.join(root, rel), encoding="utf-8",
+                     errors="ignore") as fh:
+                content = fh.read()
+        except OSError as exc:
+            # Skipping one unreadable manifest among many candidates is the
+            # right behaviour (the scan keeps going), but a bare `continue`
+            # hid which file and why; naming it here on stderr is the fix.
+            print("door: %s could not be read (%s), skipped" % (rel, exc),
+                  file=sys.stderr)
+            continue
+        if needle in content:
+            return rel
+    return None
+
+
+#: The substrate pack, persona doc 5.2 ("core for scope, evidence, Vault
+#: and human acceptance", named in BOTH of that section's own example
+#: compositions). It carries no detection signals of its own, so it is
+#: never MATCHED into a composition: it is APPENDED last, under whatever
+#: was matched, as the base every other lens loads beside.
+BASE_LENS = "core"
+
+
+def _pack_matches(root, listed_files, manifest):
+    """(matched_paths, distinct_signals) for one pack manifest against one
+    tree listing. `distinct_signals` counts SIGNALS that fired, not files
+    they matched: a repository with forty notebooks has fired one signal,
+    and a repository matching '*.ipynb' plus 'mlruns/' plus an 'mlflow'
+    manifest string has fired three. That count is what specificity means
+    below, so a pack cannot out-rank another by matching one signal a
+    great many times."""
+    signals = (manifest or {}).get("detection_signals") or {}
+    matched = []
+    distinct = 0
+    for sig in (signals.get("paths") or []):
+        hits = [rel for rel in listed_files if _path_matches_signal(rel, sig)]
+        if hits:
+            distinct += 1
+            matched.extend(hits)
+    for needle in (signals.get("manifest_strings") or []):
+        hit = _manifest_string_hit(root, listed_files, needle)
+        if hit:
+            distinct += 1
+            matched.append(hit)
+    seen = set()
+    uniq = [m for m in matched if not (m in seen or seen.add(m))]
+    return uniq, distinct
+
+
+def infer_lenses(root, listed_files, packs_dir=PACKS_DIR):
+    """[(lens_name, matched_paths), ...]: EVERY pack whose detection_signals
+    match this tree, most specific first, with BASE_LENS appended last.
+
+    Persona doc 5.2, "Pack selection must be compositional": a dbt revenue
+    metric change loads analytics AND data-engineering AND business-analysis
+    AND qa-automation AND core, not whichever of them sorts first by name.
+    The version this replaces returned the FIRST pack in sorted lens-name
+    order, so with thirteen packs installed "architect" won every tree it
+    matched and a tree that is both data engineering and data science got
+    one lens.
+
+    Order is specificity: the number of DISTINCT signals a pack matched
+    (descending), then the pack's own optional integer `priority`
+    (descending, absent reads 0), then the lens name (ascending) so the
+    order is total and reproducible rather than dictionary-dependent.
+
+    Returns [] when nothing matches: the one-visible-Brother rule (persona
+    doc 3.3, 30.1: no new command, no new mode) means no match asks no
+    question and states no assumption, rather than guessing. core is
+    appended only when something else matched, for the same reason: an
+    unmatched tree gets no assumption line at all."""
+    try:
+        manifests = pack_manifests(packs_dir)
+    except ValueError as exc:
+        print("door: %s: no lens could be inferred" % exc, file=sys.stderr)
+        return []
+    scored = []
+    for name in sorted(manifests):
+        if name == BASE_LENS:
+            continue
+        matched, distinct = _pack_matches(root, listed_files, manifests[name])
+        if not matched:
+            continue
+        raw_priority = manifests[name].get("priority")
+        try:
+            priority = int(raw_priority or 0)
+        except (TypeError, ValueError):
+            print("door: pack %r has a non-integer priority %r, read as 0"
+                  % (name, raw_priority), file=sys.stderr)
+            priority = 0
+        scored.append((-distinct, -priority, name, matched))
+    if not scored:
+        return []
+    scored.sort()
+    out = [(name, matched) for _distinct, _priority, name, matched in scored]
+    if BASE_LENS in manifests:
+        out.append((BASE_LENS, []))
+    return out
+
+
+def infer_lens(root, listed_files, packs_dir=PACKS_DIR):
+    """(lens_name_or_None, matched_paths): the SINGLE most specific lens
+    infer_lenses() inferred, or (None, []) when nothing matched. Kept as
+    the accessor for the call sites that carry one lens (the Work
+    document's own `lens_inferred.lens`, the challenge question's primary
+    pack); the composed list is infer_lenses() above. BASE_LENS is never
+    returned here: it is appended last by infer_lenses and this reads the
+    first entry."""
+    inferred = infer_lenses(root, listed_files, packs_dir=packs_dir)
+    if not inferred:
+        return None, []
+    return inferred[0]
+
+
+def _lens_entry(entry):
+    """(lens, matched_paths) from either shape a composed inference is
+    carried in: the (name, paths) tuple infer_lenses returns, or the
+    {"lens", "matched_paths"} dict the Work document stores. Anything else
+    reads (None, []), so a malformed record states no assumption rather
+    than crashing the intent screen."""
+    if isinstance(entry, dict):
+        return entry.get("lens"), list(entry.get("matched_paths") or [])
+    if isinstance(entry, (list, tuple)) and len(entry) == 2:
+        return entry[0], list(entry[1] or [])
+    return None, []
+
+
+def lenses_assumption_line(inferred):
+    """The intent screen's assumption line for a COMPOSED inference: every
+    inferred lens with its own matched paths, each capped at
+    MAX_ASSUMPTION_PATHS names exactly as the single-lens line below caps
+    them. `inferred` is what infer_lenses returned, or the record's own
+    `lens_inferred.lenses` list of dicts.
+
+    A lens with no matched paths is left out, which is how BASE_LENS (no
+    signals of its own) stays off the line while still composing into the
+    receipt fields and evidence families below. "" when nothing was
+    inferred at all, so a plain repository's intent screen is unchanged."""
+    parts = []
+    for entry in (inferred or []):
+        lens, matched = _lens_entry(entry)
+        if not lens or not matched:
+            continue
+        shown = list(matched[:MAX_ASSUMPTION_PATHS])
+        extra = len(matched) - len(shown)
+        names = ", ".join(shown)
+        if extra > 0:
+            names += " and %d more" % extra
+        parts.append("%s work (found %s)" % (lens, names))
+    if not parts:
+        return ""
+    # One inferred lens reads EXACTLY as the single-lens line below has
+    # always read, word for word; composition only ever adds clauses.
+    return ("Assumed: %s; say otherwise to change it" % ", ".join(parts))
+
+
+#: The two manifest keys composed by union across the inferred packs
+#: (persona doc 5.1 "pack-specific receipt fields" and "mandatory evidence
+#: principles"; 5.2 "No user should need to know that composition occurred
+#: unless they inspect the receipt"). Order is the composed order, first
+#: occurrence kept, so the most specific pack's fields lead and core's
+#: base fields land underneath.
+UNION_KEYS = ("receipt_fields", "required_evidence_families")
+
+
+def _field_key(value):
+    """The identity of one receipt field or evidence family for deduping a
+    union: the string itself when a pack lists plain names (the shape both
+    landed packs use today), or its `name`/`id` when a pack lists the
+    fuller {name, meaning, how it is filled} object. "" for anything else,
+    which the union skips rather than deduping everything onto one key."""
+    if isinstance(value, dict):
+        return str(value.get("name") or value.get("id") or "").strip()
+    if isinstance(value, str):
+        return value.strip()
+    return ""
+
+
+def pack_union(lens_names, packs_dir=PACKS_DIR):
+    """{"receipt_fields": [...], "required_evidence_families": [...]}: the
+    UNION of those keys across `lens_names`, in composed order, each entry
+    kept verbatim in its first occurrence and deduped by _field_key.
+
+    This is the receipt half of compositional selection: a tree that is
+    both data engineering and data science owes the fields and evidence
+    families of BOTH packs, plus core's, not the first pack's alone. A
+    pack that cannot be read is named on stderr and left out, never
+    silently dropped and never a crash: an unreadable pack must not cost
+    the other packs' fields."""
+    out = {key: [] for key in UNION_KEYS}
+    seen = {key: set() for key in UNION_KEYS}
+    for name in (lens_names or []):
+        try:
+            pack = load_pack(name, packs_dir=packs_dir)
+        except ValueError as exc:
+            print("door: %s: its fields were left out of the composed union"
+                  % exc, file=sys.stderr)
+            continue
+        for key in UNION_KEYS:
+            for value in (pack.get(key) or []):
+                ident = _field_key(value)
+                if not ident or ident in seen[key]:
+                    continue
+                seen[key].add(ident)
+                out[key].append(value)
+    return out
+
+
+def forcing_class_triggers(pack):
+    """[(class_id, pattern), ...] built from one pack's own forcing_classes:
+    one word-bounded pattern per entry, the words taken from the entry's
+    `id` (underscore-separated, so "threshold_change" becomes the phrase
+    "threshold change"), so "promotional" can never fire "promotion".
+
+    Lives here rather than in receipt_door.py because both readers need it
+    and receipt_door already imports this module (the reverse import would
+    be a cycle): receipt_door.py builds RISK_TRIGGERS from it, and
+    compute_challenge below asks whether a composed pack's forcing classes
+    fire on a unit before spending a question on that pack."""
+    triggers = []
+    for entry in ((pack or {}).get("forcing_classes") or []):
+        class_id = str((entry or {}).get("id") or "").strip()
+        words = [w for w in class_id.split("_") if w]
+        if not words:
+            continue
+        triggers.append(
+            (class_id, r"\b" + r"\s+".join(re.escape(w) for w in words) + r"\b"))
+    return triggers
+
+
+def lens_assumption_line(lens, matched_paths):
+    """The intent screen's assumption line for a P3 inference, or "" when
+    nothing was inferred (no lens, or an empty match list). `matched_paths`
+    is capped to MAX_ASSUMPTION_PATHS names for display; the Work document
+    itself carries the full list."""
+    if not lens or not matched_paths:
+        return ""
+    shown = list(matched_paths[:MAX_ASSUMPTION_PATHS])
+    extra = len(matched_paths) - len(shown)
+    names = ", ".join(shown)
+    if extra > 0:
+        names += " and %d more" % extra
+    return ("Assumed: %s work (found %s); say otherwise to change it"
+            % (lens, names))
+
+
+#: P5 (persona integration, gap P5, persona doc 4.1 stage 3: "What is the
+#: pre-registered success metric and holdout/evaluation rule?"; 12.3 DS-05,
+#: the cherry-pick failure a metric chosen after the results were seen
+#: causes). What counts as "this unit's objective is about promotion or
+#: evaluation" for the challenge question to matter at all: read off the
+#: pack manifest's own "promotion_eval_words" key when it carries one, else
+#: this fixed default, taken from the doc's own words above and from the
+#: data-science pack's forcing_classes ("promotion", "threshold change").
+#: A fixed list, the same auditable shape this module already uses for
+#: detection_signals, rather than a second parser of the objective's
+#: English.
+DEFAULT_PROMOTION_EVAL_WORDS = (
+    "promot", "evaluat", "eval ", "compar", "metric", "benchmark",
+    "baseline", "holdout", "threshold",
+)
+
+
+def _unit_needs_challenge(unit, pack):
+    """True when `unit`'s objective is about promotion or evaluation, by
+    pack["promotion_eval_words"] (or DEFAULT_PROMOTION_EVAL_WORDS when the
+    pack carries none), a plain substring test against the lowercased
+    objective. A unit with no objective at all never needs the challenge."""
+    objective = str((unit or {}).get("objective") or "").lower()
+    if not objective:
+        return False
+    words = pack.get("promotion_eval_words") or DEFAULT_PROMOTION_EVAL_WORDS
+    return any(w in objective for w in words)
+
+
+#: P5's three tree signals, in the order find_metric_in_tree tries them: a
+#: metrics FILE, an eval SCRIPT, then a README LINE naming the metric or
+#: holdout by name (the brief's own three named signals: "a metrics file,
+#: an eval script, a README line"). Basenames only, matched against
+#: list_repo_files' own repository-relative output, the same
+#: MANIFEST_FILENAMES shape above.
+METRIC_FILE_BASENAMES = frozenset((
+    "metrics.json", "metrics.yaml", "metrics.yml",
+    "eval_results.json", "eval_results.txt", "eval_results.yaml",
+))
+METRIC_SCRIPT_BASENAMES = frozenset((
+    "eval.py", "evaluate.py", "evaluation.py",
+))
+METRIC_README_NEEDLES = ("metric", "holdout")
+
+
+def find_metric_in_tree(root, listed_files):
+    """The repository-relative path of the first of P5's three signals
+    found in `listed_files` (a metrics file, then an eval script, then a
+    README mentioning the metric or holdout by name, case-insensitively),
+    or None when none of the three is present. A README hit is read the
+    same tolerant way _manifest_string_hit already reads a manifest above:
+    read-only, errors ignored, since a file this module cannot decode
+    should not crash a search that only exists to avoid an unnecessary
+    question."""
+    for rel in listed_files:
+        if os.path.basename(rel) in METRIC_FILE_BASENAMES:
+            return rel
+    for rel in listed_files:
+        if os.path.basename(rel) in METRIC_SCRIPT_BASENAMES:
+            return rel
+    for rel in listed_files:
+        base = os.path.basename(rel)
+        if not base.lower().startswith("readme"):
+            continue
+        try:
+            with open(os.path.join(root, rel), encoding="utf-8",
+                     errors="ignore") as fh:
+                content = fh.read().lower()
+        except OSError as exc:
+            # Skipping one unreadable README among candidates is the right
+            # behaviour (the scan keeps going); naming it here on stderr
+            # beats a bare `continue` that hid which file and why.
+            print("door: %s could not be read (%s), skipped" % (rel, exc),
+                  file=sys.stderr)
+            continue
+        if any(needle in content for needle in METRIC_README_NEEDLES):
+            return rel
+    return None
+
+
+#: The ceiling on a COMPOSED intake, persona doc 4.2's own table: the
+#: largest per-shape budget in it is 6 ("Production infra change" and
+#: "Architecture decision", both 2 to 6). Composition sums the inferred
+#: packs' own question_budget maxima and then stops here, so thirteen packs
+#: matching one tree can never turn one intake into thirteen questions.
+#: 4.2's own metric, quoted: "The metric is not few questions. It is few
+#: wasted questions."
+QUESTION_BUDGET_CEILING = 6
+
+
+def _lens_name_list(lens_name):
+    """[lens name, ...] from either shape a caller carries: the single name
+    P5 shipped, or the composed list infer_lenses returns (names, or the
+    (name, paths) tuples themselves). [] for None or empty."""
+    if not lens_name:
+        return []
+    if isinstance(lens_name, str):
+        return [lens_name]
+    names = []
+    for entry in lens_name:
+        if isinstance(entry, str):
+            names.append(entry)
+            continue
+        name, _matched = _lens_entry(entry)
+        if name:
+            names.append(name)
+    return names
+
+
+def _question_budget_max(pack):
+    """The pack's own question_budget["max"] as an int, 0 when it carries
+    none or carries something that is not a number (a budget nobody can
+    read is not a budget, and reading it as 0 lets the composed limit fall
+    back to the one primary question below rather than inventing a cap)."""
+    budget = (pack or {}).get("question_budget") or {}
+    try:
+        return max(0, int(budget.get("max")))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _forcing_class_fires(pack, unit):
+    """True when any of `pack`'s own forcing classes fires on `unit`'s
+    objective, by the same word-bounded patterns receipt_door.py parks a
+    unit on (forcing_class_triggers, above). This is the test a SECONDARY
+    composed pack must pass before it costs a question: the most specific
+    lens asks its question because it is the work; another pack only earns
+    one when something it declares dangerous is actually in this unit."""
+    objective = str((unit or {}).get("objective") or "").lower()
+    if not objective:
+        return False
+    return any(re.search(pattern, objective)
+               for _class_id, pattern in forcing_class_triggers(pack))
+
+
+def compute_challenge(root, listed_files, lens_name, units, packs_dir=PACKS_DIR):
+    """(challenge_assumption, pending_challenge), P5's own decision: at most
+    one of the pair is ever non-None. `lens_name` is one lens name (as P5
+    shipped it) or the composed list infer_lenses now returns.
+
+    COMPOSED (persona doc 5.2): the most specific lens's challenge question
+    comes first, on the same terms as before (a real question, not core's
+    literal "NO-DATA", and at least one unit whose objective needs it,
+    _unit_needs_challenge). Every OTHER inferred pack adds its question
+    only when one of its own forcing classes fires on a unit
+    (_forcing_class_fires), so composition cannot turn a five-pack tree
+    into five questions about work nobody is doing. The composed list is
+    then cut to the sum of those packs' question_budget maxima, capped at
+    QUESTION_BUDGET_CEILING.
+
+    When the tree already answers the question (find_metric_in_tree), that
+    is an ASSUMPTION, stated on the intent screen, never asked; otherwise
+    the PENDING dict carries the primary question in the "lens" and
+    "question" keys P5 shipped, plus every composed question in
+    "questions", still budgeted to interactive mode only (brother_run.py's
+    own rule, not this module's: this function only decides which
+    questions are warranted, never whether any is actually asked)."""
+    names = _lens_name_list(lens_name)
+    if not names:
+        return None, None
+    composed = []
+    budget = 0
+    for name in names:
+        try:
+            pack = load_pack(name, packs_dir=packs_dir)
+        except ValueError as exc:
+            print("door: %s: no challenge question could be computed" % exc,
+                  file=sys.stderr)
+            continue
+        question = str(pack.get("challenge_question") or "")
+        if not question or question == NODATA:
+            continue
+        if not any(_unit_needs_challenge(u, pack) for u in units):
+            continue
+        if composed and not any(_forcing_class_fires(pack, u) for u in units):
+            continue
+        budget += _question_budget_max(pack)
+        composed.append({"lens": name, "question": question})
+    if not composed:
+        return None, None
+    # A pack that declares no readable maximum still gets its own one
+    # question, exactly as P5 shipped it; the cap only ever cuts a
+    # composition, it never silences the primary lens.
+    limit = min(budget, QUESTION_BUDGET_CEILING) or 1
+    composed = composed[:limit]
+    hit = find_metric_in_tree(root, listed_files)
+    if hit:
+        return ({"lens": composed[0]["lens"], "path": hit,
+                 "lenses": [entry["lens"] for entry in composed]}, None)
+    pending = dict(composed[0])
+    pending["questions"] = composed
+    return None, pending
+
+
+def challenge_assumption_line(assumption):
+    """The intent screen's line for a P5 tree-answered challenge question,
+    or "" when nothing was found (`assumption` is None). Mirrors
+    lens_assumption_line's own shape and correction wording."""
+    if not assumption:
+        return ""
+    lens = assumption.get("lens") or NODATA
+    path = assumption.get("path") or NODATA
+    return ("Assumed: the %s pack's pre-registered metric is already "
+            "documented at %s; say otherwise to change it" % (lens, path))
 
 
 #: How many existing paths to name in the prompt. A bound, not a real limit
@@ -127,6 +689,14 @@ def build_prompt(outcome, refusal=None, existing_files=None):
         "pattern such as *.py or **/*.py, which the scope check that runs "
         "after this unit cannot match against the file it actually wrote.",
         "  deps: a list of other units' ids this unit depends on (may be empty)",
+        "  evidence_family: OPTIONAL. One of E1 through E18, naming which "
+        "evidence family the done_check belongs to. Omit if unsure.",
+        "  oracle_source: OPTIONAL. One of requirement, business_rule, "
+        "independent_query, reference_impl, prior_release, "
+        "generated_from_impl, human_observation, none: what the "
+        "done_check's expected result was checked against. Use "
+        "generated_from_impl only when this same decomposition also wrote "
+        "the expected value the check compares against.",
         "",
         "Rules: ids are unique. Every entry in deps names another unit in this "
         "same list (no dangling dependency). The deps taken together must not "
@@ -214,6 +784,90 @@ def resolve_done_check_interpreter(cmd):
     return cmd, None
 
 
+#: E78 (security review 2026-09-03 night run): scripts/brother_run.py's
+#: _rewrite_broken_checks is the ONE place a fresh model reply becomes a
+#: unit's done_check with only resolve_done_check_interpreter (above)
+#: between them, and that only renames python to python3, so a plan record
+#: whose text steers the planner could make the engine run an arbitrary
+#: shell command. Since the security review of 2026-09-04 (Critical) this
+#: guard ALSO fences a Work document loaded from disk: brother_run.py's
+#: --resume takes a run directory by path and --continue finds one by its
+#: own recorded cwd, so a record a crafted repository ships would otherwise
+#: reach _reexecute_check's shell=True unfiltered. Both callers are records
+#: the door itself asked for as "a single shell command" (build_prompt),
+#: which is the same contract this guard states.
+#:
+#: What is still NOT filtered through this: the hand-written roadmap corpus
+#: in docs/plan/READINESS-ROADMAP-2026-08-29.json, which chains `cd X && Y`
+#: and `A; B` constantly and legitimately. board_status.py reads that file;
+#: brother_run.py never does, and an engine rule read off one run already
+#: broke the product's own acceptance contract once by trying to police it.
+#:
+#: Interpreter allowlist derived from the plan corpus itself:
+#: `grep -o '"done_check": "[^ ]*' docs/plan/READINESS-ROADMAP-2026-08-29.json
+#: | sort | uniq -c | sort -rn | head -20` (run 2026-09-03) showed real
+#: command-shaped first tokens python3 (80), sh (9), grep (4), gh (3); "test"
+#: (POSIX file-test) is this module's own rewrite-stub convention throughout
+#: scripts/test_brother_run.py ("test -f fixed.txt"). pytest, bash, git,
+#: make are the brief's own stated floor with no corpus hit yet.
+#: "true" and "false" are the same kind of entry as "test": POSIX no-op
+#: builtins used as a stub check throughout scripts/test_crash_resume.py and
+#: scripts/test_brother_run.py. Neither takes a command, so neither can run
+#: one; they widen what is ALLOWED without widening what can execute.
+ADOPTED_CHECK_ALLOWED_INTERPRETERS = frozenset((
+    "python3", "pytest", "sh", "bash", "git", "make", "gh", "grep", "test",
+    "true", "false",
+))
+
+#: Anywhere one of these appears in an adopted replacement, refuse it: each
+#: is exactly a way one shell command becomes two, or pulls in a
+#: substitution. A bare "|" is included ("a pipe into a second command");
+#: redirection ("<", ">", ">>") is judged separately below, since a plain
+#: `> out.txt` inside the tree is not itself dangerous.
+_ADOPTED_CHECK_FORBIDDEN_SUBSTRINGS = (
+    (";", "a `;` command separator"),
+    ("&&", "a `&&` chain"),
+    ("||", "a `||` chain"),
+    ("`", "a backtick command substitution"),
+    ("$(", "a `$(...)` command substitution"),
+    ("|", "a pipe into a second command"),
+    ("\n", "a newline"),
+)
+
+
+def guard_adopted_check(cmd):
+    """(allowed, reason_or_None) for a done_check this engine did not get
+    from a person: a model-adopted replacement (_rewrite_broken_checks) and
+    a Work document loaded from disk (_guard_record_checks), both in
+    brother_run.py. `reason`, when refused, names the rule broken and is
+    written for a log line; the caller must never echo the refused command
+    itself alongside it."""
+    text = str(cmd or "")
+    if not text.strip():
+        return False, "the done_check was empty"
+    for token, name in _ADOPTED_CHECK_FORBIDDEN_SUBSTRINGS:
+        if token in text:
+            return False, "the done_check contains %s" % name
+    try:
+        parts = shlex.split(text)
+    except ValueError as exc:
+        return False, ("the done_check could not be parsed as "
+                       "one shell command: %s" % exc)
+    if not parts:
+        return False, "the done_check was empty"
+    prog = os.path.basename(parts[0])
+    if prog not in ADOPTED_CHECK_ALLOWED_INTERPRETERS:
+        return False, ("the done_check's interpreter is not on "
+                       "the adopted-check allowlist")
+    for i, tok in enumerate(parts):
+        if tok in (">", ">>", "<") and i + 1 < len(parts):
+            target = parts[i + 1]
+            if target.startswith(("/", "~")) or ".." in target.split("/"):
+                return False, ("the done_check redirects to a "
+                               "path outside the tree")
+    return True, None
+
+
 def normalize_unit(u):
     """The prompt asks for objective/writes/deps because that reads as plain
     English to a model. work_record.py validates title/owns/depends_on. This
@@ -299,6 +953,30 @@ def main(argv=None):
     # GROUNDING, not a per-retry cost: the repository does not change between
     # retries of the SAME decomposition, only the refusal text does.
     existing_files = list_repo_files(os.getcwd())
+    # P3: the same listing, matched against every pack's own detection
+    # signals, once, before any decomposer call (the tree does not change
+    # between retries either). None when nothing matches.
+    # COMPOSITIONAL (persona doc 5.2): every pack that matches, most
+    # specific first, with core last as the base. `lens` and
+    # `matched_paths` still carry the most specific one, unchanged for
+    # every reader that wants a single lens; `lenses` carries the whole
+    # composition, and the receipt fields and evidence families are the
+    # union across it, so a receipt can show that composition occurred.
+    inferred = infer_lenses(os.getcwd(), existing_files)
+    lens_names = [name for name, _matched in inferred]
+    if inferred:
+        lens_name, lens_matched = inferred[0]
+        union = pack_union(lens_names)
+        lens_inferred = {
+            "lens": lens_name,
+            "matched_paths": lens_matched,
+            "lenses": [{"lens": name, "matched_paths": matched}
+                       for name, matched in inferred],
+            "receipt_fields": union["receipt_fields"],
+            "required_evidence_families": union["required_evidence_families"],
+        }
+    else:
+        lens_name, lens_matched, lens_inferred = None, [], None
 
     total_attempts = args.max_retries + 1
     refusal = None
@@ -340,8 +1018,15 @@ def main(argv=None):
             continue
 
         units = [normalize_unit(u) for u in raw if isinstance(u, dict)]
+        # P5: recomputed each attempt, since `units` can change between
+        # retries even though the tree and the inferred lens do not.
+        challenge_assumption, pending_challenge = compute_challenge(
+            os.getcwd(), existing_files, lens_names, units)
         store = None if args.dry_run else args.store
-        record, problems = WR.create(args.outcome, units, store=store)
+        record, problems = WR.create(
+            args.outcome, units, store=store, lens_inferred=lens_inferred,
+            challenge_assumption=challenge_assumption,
+            pending_challenge=pending_challenge)
         if not problems:
             if args.dry_run:
                 print("door: validated %d unit(s), nothing written "

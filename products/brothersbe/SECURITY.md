@@ -86,8 +86,8 @@ you point the estate check at, your own origin remote's branches and commit
 status through the two operator scripts above, and the git remotes
 `install.sh` talks to before a session exists.
 
-**2026-08-05 amendment (gate LP-0301, decision recorded in
-[docs/adr/2026-08-05-gui-server-amendment.md](docs/adr/2026-08-05-gui-server-amendment.md)):**
+**2026-08-05 amendment (gate LP-0301, recorded in this project's own decision
+register as the GUI server amendment):**
 the promise above is "no remote server", not "no server at all". A loopback-only
 GUI workspace is authorized: a future module, `src/brothersbe/gui/server.py`,
 may bind `127.0.0.1` and nothing else, never `0.0.0.0`, never a remote host, and

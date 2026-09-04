@@ -43,6 +43,32 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
+
+def _load_bm_repo_scope():
+    """Load bm_repo_scope.py by path, the same load-by-path shape every
+    sibling tool in this directory uses. E76 per-repository hook scoping:
+    checked ONCE here, before any chained program runs, rather than in
+    each of bm_lead.py, bm_view.py and bm_autosave.py individually, since
+    those three are reachable ONLY through this driver (hooks/hooks.json
+    never registers them directly). This is a narrower exception to "the
+    driver gates nothing" than it looks: that rule is about the CONSENT
+    gate specifically (tools/test_bm_consent.py enumerates every chained
+    program and demands each one gate itself, because consent is a
+    per-program install question); repo scoping is a per-invocation
+    question about which repository this whole hook run is happening in,
+    answered once and identical for every program in the chain, so
+    answering it once here is equivalent to every program answering it
+    separately, not a weaker check wearing the same name."""
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "bm_repo_scope_for_hookchain", os.path.join(HERE, "bm_repo_scope.py"))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception:  # sbe: allow-silent optional gate module load; hooks_off degrades to active when this returns None
+        return None
+
 #: Chain name to the (module, argv) rows it runs, in order. Every module
 #: lives beside this file in tools/ and carries its own consent gate;
 #: tools/test_bm_consent.py reads this table mechanically, so a program
@@ -104,7 +130,11 @@ def main(argv=None):
         payload = sys.stdin.read()
     except (IOError, OSError, ValueError):
         payload = ""
-    return run_chain(argv[0], payload.rstrip("\n"))
+    payload = payload.rstrip("\n")
+    _rs = _load_bm_repo_scope()
+    if _rs is not None and _rs.hooks_off(payload=payload):
+        return 0
+    return run_chain(argv[0], payload)
 
 
 if __name__ == "__main__":

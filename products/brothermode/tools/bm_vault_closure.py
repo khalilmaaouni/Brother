@@ -80,11 +80,15 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+# C3: the config directory is resolved by brother_paths, the one seam
+# that knows which coding client is running (docs/codex/HOOKS-MAPPING.md).
+# Loaded from beside this file because tools/ is not a package.
+import brother_paths  # noqa: E402
 import bm_vault_hierarchy_req as hr  # noqa: E402 -- reuse the up-walk, never re-derive it
 import bm_vault_promotions as promo  # noqa: E402 -- reuse its atomic write
 import bm_vault_shapes as vs         # noqa: E402 -- reuse load(), _covers, entity discovery
 
-STORE_PATH = os.path.join(os.path.expanduser("~/.claude"), "bm_vault_closure.json")
+STORE_PATH = brother_paths.config_path("bm_vault_closure.json")
 
 
 def _row_key(row):

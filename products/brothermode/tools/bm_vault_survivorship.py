@@ -50,7 +50,12 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-OVERRIDE_PATH = os.path.join(os.path.expanduser("~/.claude"),
+# C3: the config directory is resolved by brother_paths, the one seam
+# that knows which coding client is running (docs/codex/HOOKS-MAPPING.md).
+# Loaded from beside this file because tools/ is not a package.
+sys.path.insert(0, HERE)
+import brother_paths  # noqa: E402
+OVERRIDE_PATH = os.path.join(brother_paths.config_dir(),
                               "bm_vault_survivorship_overrides.jsonl")
 
 # Per-attribute exceptions to the default order. Empty on purpose: every

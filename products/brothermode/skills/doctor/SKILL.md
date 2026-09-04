@@ -3,9 +3,11 @@ name: doctor
 description: Check the BrotherMode install itself for problems. Use when the user explicitly asks to check the install, says something seems broken, or right after a fresh install or an update.
 ---
 
+Plugin root: a Claude Code install exports `${CLAUDE_PLUGIN_ROOT}` and a Codex install exports `${BROTHER_PLUGIN_ROOT}`; both name this plugin's own directory, so read whichever variable appears below as the one your client set. On a clone install neither is set: run the same commands from the checkout root instead.
+
 Outcome to produce: a plain-language readout of whether the BrotherMode install itself is healthy, not the project's own status.
 
-Run the mechanical command `python3 "${CLAUDE_PLUGIN_ROOT}/tools/brothermode_cli.py" doctor` (the packaged console script is `brothermode doctor`) and read its output; never guess at install health from memory of this conversation. A plugin install exports `${CLAUDE_PLUGIN_ROOT}` for skill and command content, so that path resolves on its own; on a clone install, where the variable is unset, run `python3 tools/brothermode_cli.py doctor` instead, from the BrotherMode root (`~/.claude/skills/brothermode`).
+Run the mechanical command `python3 "${CLAUDE_PLUGIN_ROOT}/tools/brothermode_cli.py" doctor` (the packaged console script is `brothermode doctor`) and read its output; never guess at install health from memory of this conversation. A plugin install exports `${CLAUDE_PLUGIN_ROOT}` for skill and command content, so that path resolves on its own; on a clone install, where the variable is unset, run `python3 tools/brothermode_cli.py doctor` instead, from the BrotherMode root (the directory that holds `tools/`).
 
 The command runs ten named checks, each read-only, each printing PASS, FAIL with one plain-word remediation a non-engineer can follow, or SKIP with the reason nothing could be checked there. A check never crashes the whole run: an unexpected error inside one check becomes that check's own FAIL, naming the exception, so one broken check cannot hide the other nine. The command exits 0 only when every check is PASS or SKIP.
 

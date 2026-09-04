@@ -66,9 +66,91 @@ import time
 # The hub's own product tree comes FIRST (2026-09-02, same defect class as the
 # erasure drill): a drill inside the hub proves the hub's bytes, never a
 # sibling or retired checkout's.
-HUB_TOOLS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                             "products", "brothermode", "tools")
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+HUB_TOOLS_DIR = os.path.join(REPO_ROOT, "products", "brothermode", "tools")
 CONVENTIONAL_TOOLS_DIR = "/tmp/bmu-main/tools"
+
+
+def current_commit(repo_root):
+    """The full SHA of HEAD in repo_root, or None with a printed reason.
+    readiness_gate.py binds this record's PASS to this commit being an
+    ancestor of the tree that reads it (evidence auditor 2026-09-03: an
+    unbound record reads PASS against any later code forever), so a drill
+    run outside a git checkout, or one where git itself is unavailable,
+    must say so rather than write a field that silently claims nothing."""
+    try:
+        proc = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo_root,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                               text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        print("commit: git rev-parse failed to run: %s" % exc, file=sys.stderr)
+        return None
+    if proc.returncode != 0:
+        print("commit: git rev-parse HEAD exited %d: %s"
+              % (proc.returncode, proc.stderr.strip()), file=sys.stderr)
+        return None
+    return proc.stdout.strip()
+
+
+#: The vault tools this drill actually exercises, every one of them invoked
+#: by run(tools_dir, "<name>.py", ...) or load_module(tools_dir, "<name>")
+#: below. Re-derive after adding a call:
+#:   grep -oE 'run\(tools_dir, "[a-z_]+\.py"|load_module\(tools_dir, "[a-z_]+"' \
+#:     scripts/restore_drill_enterprise.py | sed -E 's/.*"([a-z_]+)(\.py)?"?/\1.py/' | sort -u
+COVERED_TOOLS = (
+    "bm_vault.py",
+    "bm_vault_assertions.py",
+    "bm_vault_compose.py",
+    "bm_vault_export.py",
+    "bm_vault_identity.py",
+    "bm_vault_ids.py",
+    "bm_vault_provenance.py",
+    "bm_vault_retention.py",
+)
+
+
+def covered_files(tools_dir):
+    """[{"path": repo-relative posix path, "sha256": hex}] for this drill and
+    every vault tool it exercises, hashed as they exist at run time.
+
+    WHY THE RECORD CARRIES THIS. readiness_gate.py binds this record's PASS
+    to the code the drill ran against. Its first binding is ancestry, which
+    a public clone can never satisfy: scripts/export_public.py builds the
+    export as an ORPHAN commit, so no hub commit is an ancestor of it, and
+    on 2026-09-04 that refused the 1.0.2 tag with "foreign commit". Ancestry
+    was only ever a proxy for "the drill ran against this code", and content
+    is that same property measured directly, which is checkable in any
+    history. Returns None with a printed reason when a listed file cannot be
+    read: a partial list would narrow the binding silently."""
+    paths = [os.path.abspath(__file__)] + [
+        os.path.join(tools_dir, name) for name in COVERED_TOOLS]
+    covered = []
+    for path in paths:
+        rel = os.path.relpath(path, REPO_ROOT).replace(os.sep, "/")
+        if rel.startswith(".."):
+            print("covered: %s sits outside the repository, so no repository "
+                  "relative path can name it" % path, file=sys.stderr)
+            return None
+        try:
+            with open(path, "rb") as fh:
+                digest = hashlib.sha256(fh.read()).hexdigest()
+        except OSError as exc:
+            print("covered: %s is unreadable: %s" % (path, exc), file=sys.stderr)
+            return None
+        covered.append({"path": rel, "sha256": digest})
+    return covered
+
+
+def repo_relative_tools_dir(tools_dir):
+    """The tools directory as the record should name it: repository relative,
+    never absolute. An absolute path under one person's home is machine
+    local, leaks the layout of that machine, and made this record a declared
+    exception in scripts/test_export_public.py's portability gate."""
+    rel = os.path.relpath(tools_dir, REPO_ROOT).replace(os.sep, "/")
+    if rel.startswith(".."):
+        return ("outside this repository, resolved from $BROTHERMODEUP_TOOLS "
+                "or the conventional path")
+    return rel
 
 
 def find_tools_dir():
@@ -627,7 +709,9 @@ def main():
     result = {
         "drill": "restore_drill_enterprise",
         "drill_date": datetime.date.today().isoformat(),
-        "tools_dir": tools_dir,
+        "commit": current_commit(REPO_ROOT),
+        "covered": covered_files(tools_dir),
+        "tools_dir": repo_relative_tools_dir(tools_dir),
         "tenants": [t[0] for t in tenants],
         "passed": passed,
         "checks_total": len(all_checks),
@@ -649,7 +733,7 @@ def main():
         "wall_total_seconds": total_wall_seconds,
         "manual_steps_required": 0,
         "per_tenant_detail": per_tenant,
-        "scratch_root": root,
+        "scratch": "temporary directory, not kept",
     }
 
     print(json.dumps(result, indent=2, sort_keys=True))

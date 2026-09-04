@@ -187,6 +187,51 @@ def read_settings(path):
     return data, None
 
 
+def _hooks_json_names_the_fence(directory):
+    """True when `directory`/hooks/hooks.json exists and names the fence
+    basename. Best effort in the same sense as its caller: a missing or
+    unreadable file is simply not a match, never an exception."""
+    hooks = os.path.join(directory, "hooks", "hooks.json")
+    try:
+        with io.open(hooks, encoding="utf-8") as fh:
+            text = fh.read()
+    except OSError:  # sbe: allow-silent no hooks.json means this copy wires nothing, not a problem
+        return False
+    return FENCE_BASENAME in text
+
+
+def _loader_recorded_plugin_paths():
+    """Every installPath Claude Code's own ~/.claude/plugins/
+    installed_plugins.json records, in file order. This is the loader's
+    record of what it actually loaded, so it resolves the version
+    directory without doctor having to sort version strings and pick a
+    winner. Best effort: a missing, unreadable or unexpectedly shaped
+    file yields nothing rather than raising, because a machine with no
+    plugin installs is the common case, not a fault."""
+    record = os.path.join(
+        os.path.expanduser("~"), ".claude", "plugins",
+        "installed_plugins.json")
+    try:
+        with io.open(record, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):  # sbe: allow-silent absent or malformed record means no recorded copies, per docstring
+        return []
+    plugins = data.get("plugins") if isinstance(data, dict) else None
+    if not isinstance(plugins, dict):
+        return []
+    paths = []
+    for entries in plugins.values():
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            path = entry.get("installPath")
+            if isinstance(path, str) and path and path not in paths:
+                paths.append(path)
+    return paths
+
+
 def loader_managed_fence_copies():
     """BrotherMode copies Claude Code auto-loads as plugins, each carrying
     its own hook wiring so settings.json holds no block at all: directories
@@ -196,8 +241,22 @@ def loader_managed_fence_copies():
     run 2026-08-08, when this machine's duplicated settings.json wiring was
     retired in favor of the plugin loader and doctor had no model for that
     shape. Best effort: an unreadable directory is simply not a match, and
-    a private HOME (the test fixtures) sees only its own tree."""
+    a private HOME (the test fixtures) sees only its own tree.
+
+    THE CACHE IS VERSION KEYED, found 2026-09-04 on the founder's own
+    machine: a `/plugin install` lands the plugin at
+    cache/<marketplace>/<name>/<version>/, one level deeper than the scan
+    below reaches, so a correctly installed and live fence was invisible
+    here and doctor's check 1 said "NO FENCE HOOK IS WIRED" while check 8
+    said the same plugin's fence was wired. Guessing the version directory
+    would be a second guess; ~/.claude/plugins/installed_plugins.json is
+    the loader's OWN record of which path it loaded, so that is what is
+    read first, and the directory scan stays for the skills-dir shape and
+    for any flat cache layout."""
     out = []
+    for path in _loader_recorded_plugin_paths():
+        if _hooks_json_names_the_fence(path):
+            out.append(path)
     home = os.path.expanduser("~")
     bases = [os.path.join(home, ".claude", "skills")]
     cache = os.path.join(home, ".claude", "plugins", "cache")
@@ -219,7 +278,9 @@ def loader_managed_fence_copies():
             except OSError:  # sbe: allow-silent missing/unreadable hooks.json means this plugin has none, not a match
                 continue
             if FENCE_BASENAME in text:
-                out.append(os.path.join(base, name))
+                candidate = os.path.join(base, name)
+                if candidate not in out:
+                    out.append(candidate)
     return out
 
 
@@ -336,6 +397,29 @@ def blocked_write_simulation(command, command_words, tools_dir):
         target = os.path.join(root, SIM_REL_PATH)
         with io.open(target, "w", encoding="utf-8") as fh:
             fh.write("doctor simulation target, deleted when doctor exits\n")
+
+        # E50 SCOPING, and without this the whole simulation measures the
+        # wrong thing. An installer that left the scope marker beside the
+        # settings file runs its hooks ONLY in a repository carrying
+        # .brother/config, so in a throwaway directory nobody opted in the
+        # fence correctly stands down and this function reported "the hook is
+        # wired but it is not enforcing" on every fresh install. The question
+        # here is whether the fence ENFORCES where it applies, so the
+        # throwaway project is opted in exactly as a real one would be. It is
+        # inside the mkdtemp this function deletes, so nothing outside is
+        # touched. Whether the FOUNDER'S OWN repository is opted in is a
+        # different question, and _verify_real_store() below is where it is
+        # asked against the real store.
+        # The .git entry is part of the opt-in, not decoration:
+        # bm_repo_scope.find_repo_root walks up for a .git entry with plain
+        # os.path (it never invokes git) and only then looks for
+        # .brother/config beside it, so a throwaway with the config and no
+        # .git resolves to no repository at all and reads as not opted in.
+        os.makedirs(os.path.join(root, ".git"), exist_ok=True)
+        os.makedirs(os.path.join(root, ".brother"), exist_ok=True)
+        with io.open(os.path.join(root, ".brother", "config"), "w",
+                     encoding="utf-8") as fh:
+            fh.write("# doctor simulation opt-in, deleted when doctor exits\n")
 
         env = dict(os.environ)
         env["BROTHERMODE_ROOT"] = root

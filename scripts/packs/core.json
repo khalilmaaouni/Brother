@@ -1,0 +1,63 @@
+{
+  "lens": "core",
+  "version": "1.0.0",
+  "detection_signals": {
+    "paths": [],
+    "manifest_strings": [],
+    "note": "core carries no detection signals of its own: it is the substrate every other lens loads beside (persona doc 5.2, 'core for scope, evidence, Vault and human acceptance'), never something a repository is matched into."
+  },
+  "challenge_question": "NO-DATA",
+  "question_budget": {
+    "min": 0,
+    "max": 4,
+    "work_shape": "general code work (persona doc 4.2: 'Small reversible code change with strong tests' 0-2, 'Brownfield feature' 1-4); matches the estate's own existing ladder (docs/diagrams/brother-intake.html: zero, at most one, up to four)"
+  },
+  "required_evidence_families": [
+    "E1",
+    "E6"
+  ],
+  "receipt_fields": [
+    "id",
+    "objective",
+    "command",
+    "exit_code",
+    "output_location",
+    "state",
+    "reason",
+    "author",
+    "harness_revision",
+    "dependency_note"
+  ],
+  "forcing_classes": [
+    {
+      "id": "encoding",
+      "label": "Encoding",
+      "why": "encoding, decoding, charset or serialization touched (scripts/receipt_door.py RISK_TRIGGERS)"
+    },
+    {
+      "id": "auth",
+      "label": "Auth",
+      "why": "authentication, authorization, login or credential handling touched"
+    },
+    {
+      "id": "migration",
+      "label": "Migration",
+      "why": "a schema change, backfill or table alteration"
+    },
+    {
+      "id": "money",
+      "label": "Money",
+      "why": "payment, billing, pricing, refund or checkout touched"
+    },
+    {
+      "id": "irreversibility",
+      "label": "Irreversibility",
+      "why": "delete, destroy, purge, force-push or another unrecoverable action"
+    },
+    {
+      "id": "public API",
+      "label": "Public API",
+      "why": "a public API, endpoint, OpenAPI/GraphQL contract or published interface changed"
+    }
+  ]
+}

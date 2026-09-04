@@ -168,6 +168,64 @@ _CHECKS = None
 _CHECKS_ERROR = None
 
 
+_RS = None
+_RS_ERROR = None
+
+
+_BP = None
+_BP_ERROR = None
+
+
+def load_brother_paths():
+    """Import tools/brother_paths.py beside this file, or return None and
+    record why. Never raises: the same fail-open contract the two loaders
+    below use, so an install missing the C3 helper degrades to the pre-C3
+    literal ~/.claude rather than breaking every edit."""
+    global _BP, _BP_ERROR
+    if _BP is not None or _BP_ERROR is not None:
+        return _BP
+    try:
+        import importlib.util
+        path = os.path.join(HERE, "brother_paths.py")
+        spec = importlib.util.spec_from_file_location("brother_paths", path)
+        if spec is None or spec.loader is None:
+            _BP_ERROR = "no import spec for %s" % path
+            return None
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        sys.modules.setdefault("brother_paths", mod)
+        _BP = mod
+        return _BP
+    except Exception as e:
+        _BP_ERROR = "%s: %s" % (type(e).__name__, e)
+        return None
+
+
+def load_repo_scope_module():
+    """Import tools/sbe_repo_scope.py beside this file, or return None and
+    record why. Never raises: E76 per-repository hook scoping degrades to
+    active (default) when this returns None, the same fail-open contract
+    load_checks_module uses right below."""
+    global _RS, _RS_ERROR
+    if _RS is not None or _RS_ERROR is not None:
+        return _RS
+    try:
+        import importlib.util
+        path = os.path.join(HERE, "sbe_repo_scope.py")
+        spec = importlib.util.spec_from_file_location("sbe_repo_scope", path)
+        if spec is None or spec.loader is None:
+            _RS_ERROR = "no import spec for %s" % path
+            return None
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        sys.modules.setdefault("sbe_repo_scope", mod)
+        _RS = mod
+        return _RS
+    except Exception as e:
+        _RS_ERROR = "%s: %s" % (type(e).__name__, e)
+        return None
+
+
 def load_checks_module():
     """Import tools/sbe_checks.py beside this file, or return None and record
     why. Never raises: an unimportable helper is a fail-open condition, handled
@@ -519,8 +577,16 @@ def detect_companion(cwd, root):
     """A CompanionSignal for whether COMPANION_HOOK_BASENAME is wired into a
     PreToolUse hook for this session. See the section docstring above this
     function for the signal, why it was chosen, and what it misses."""
-    config_dir = os.environ.get(CLAUDE_CONFIG_DIR_ENV, "").strip() or os.path.join(
-        os.path.expanduser("~"), ".claude")
+    # C3: brother_paths reads CLAUDE_CONFIG_DIR first (so this is the
+    # same directory it always was under Claude) and only diverges to
+    # a Codex home on a positive Codex identification. Loaded by path,
+    # fail-open: a hook must not die because a sibling is missing.
+    paths = load_brother_paths()
+    if paths is None:
+        config_dir = os.environ.get(CLAUDE_CONFIG_DIR_ENV, "").strip() \
+            or os.path.join(os.path.expanduser("~"), ".claude")
+    else:
+        config_dir = paths.config_dir()
 
     candidates = [os.path.join(config_dir, "settings.json"),
                   os.path.join(config_dir, "settings.local.json")]
@@ -1712,6 +1778,9 @@ def cmd_hook(argv):
     if parsed.error is not None:
         _warn("sbe_fence_hook: FAILING OPEN, the write is allowed and the fence "
               "was NOT checked. Reason: %s" % parsed.error)
+        return 0
+    _rs = load_repo_scope_module()
+    if _rs is not None and _rs.hooks_off(payload=parsed.payload):
         return 0
     decision = decide(parsed.payload)
     for n in decision.notes:

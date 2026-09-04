@@ -4,6 +4,8 @@ description: Stop the Full-Auto controller run right now, draining in-flight wor
 disable-model-invocation: true
 ---
 
+Plugin root: a Claude Code install exports `${CLAUDE_PLUGIN_ROOT}` and a Codex install exports `${BROTHER_PLUGIN_ROOT}`; both name this plugin's own directory, so read whichever variable appears below as the one your client set. On a clone install neither is set: run the same commands from the checkout root instead.
+
 Outcome to produce: the controller run for this project is stopped, cleanly, with the user told exactly what state it landed in.
 
 Enter the Full-Auto stop flow. This is the kill switch on the RUN itself (distinct from pausing or revoking the underlying autonomy contract, which is `bm-autonomy pause` or `bm-autonomy revoke`, a separate act the user may also want).

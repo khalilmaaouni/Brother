@@ -8,6 +8,12 @@
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/tools/bm_sessionstart.py\"",
             "timeout": 30,
             "statusMessage": "Loading your project memory"
+          },
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/tools/bm_vault.py\" refresh",
+            "timeout": 30,
+            "statusMessage": "Refreshing the vault index"
           }
         ]
       }

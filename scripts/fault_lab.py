@@ -30,7 +30,7 @@ inside this sandbox, so a scripted stand-in plays it. Everything downstream
 of that seam is the real product: real git, real worktrees, real locks, real
 subprocesses.
 
-THE FOUR SCENARIOS, each driven only through bundle/runtime/brother-run
+THE FOUR LIFECYCLE SCENARIOS, each driven only through bundle/runtime/brother-run
 (resolved from a REAL, throwaway `claude plugin install`) and asserted only
 from files and CLI output:
 
@@ -52,6 +52,25 @@ from files and CLI output:
                             file; a follow-up acquire through the real
                             product must reclaim it promptly, not wait out
                             the timeout, and must say so.
+
+TWO MORE, ADDED FOR P13 (docs/plan/READINESS-ROADMAP-2026-08-29.json, doc
+21.6 DS-G01 and DS-G03): the data-science golden fixtures. Neither crashes
+or races anything; both prove the engine correctly refuses a trap rather
+than silently accepting it as proof.
+
+  ds-leakage                 a unit's done_check runs scripts/split_check.py
+                            against tests/fixtures/ds-leakage/ (a train and
+                            test CSV sharing an entity); the check must
+                            print FAIL and the unit must never read
+                            verified, however many attempts it is given.
+  ds-seed                    a unit's done_check runs
+                            tests/fixtures/ds-seed/eval.py, an eval script
+                            that draws its metric from an unseeded random
+                            source; the run must reach the check green by
+                            exit code alone, yet the receipt must still
+                            read the unit no-data, 'no metric recorded',
+                            because E18's own evidence file was never
+                            written.
 
 BARRIERS, NEVER SLEEPS, AS SYNCHRONIZATION. Every wait in this file polls
 for an on-disk FACT (a marker file, a claim's state, a lock file) with a
@@ -81,6 +100,7 @@ import argparse
 import glob
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -625,11 +645,224 @@ def scenario_kill_holding_lock(artifact):
     return _result("kill_holding_lock", _S4_INVARIANT, ok, detail, out2)
 
 
+# ---------------------------------------------------------------------------
+# Scenario 5 and 6 (P13, docs/plan/READINESS-ROADMAP-2026-08-29.json): the
+# two data-science golden fixtures, doc 21.6 DS-G01 (temporal leakage) and
+# DS-G03 (notebook random seed). Same law as the four scenarios above: no
+# product module imported, the product driven only through the real
+# installed launcher, answers read only from CLI output and the run's own
+# files. Unlike the four lifecycle scenarios, these two never crash or race
+# anything; they prove the engine correctly REFUSES two data-science traps
+# that would otherwise ship a leaked split or an unreproducible metric as
+# though it were proven.
+# ---------------------------------------------------------------------------
+
+_S5_INVARIANT = ("a unit whose done_check runs scripts/split_check.py "
+                 "against a genuinely leaky train/test split never reads "
+                 "verified: split_check itself prints FAIL, and the run "
+                 "spends the unit's retry budget naming it rather than "
+                 "marking it done")
+
+
+def scenario_ds_leakage(artifact):
+    workdir = tempfile.mkdtemp(prefix="fault-lab-ds-leak-")
+    repo = fresh_repo()
+    runs_root = tempfile.mkdtemp(dir=workdir, prefix="runs-")
+
+    # THE FIXTURE (tests/fixtures/ds-leakage/): a train and test CSV sharing
+    # entity C2 (the overlap class) and a train row (C3) dated after the
+    # cutoff (the temporal class); split_check.py reports the first class it
+    # finds, overlap, read left to right, exactly as its own docstring says.
+    fixture_dir = os.path.join(ROOT, "tests", "fixtures", "ds-leakage")
+    split_check_args = [sys.executable,
+                        os.path.join(ROOT, "scripts", "split_check.py"),
+                        "--train", os.path.join(fixture_dir, "train.csv"),
+                        "--test", os.path.join(fixture_dir, "test.csv"),
+                        "--key", "customer_id",
+                        "--time-col", "event_date",
+                        "--cutoff", "2026-01-01"]
+    check_cmd = " ".join(split_check_args)
+
+    decomposer = _write(os.path.join(workdir, "decomposer.py"), """
+import json, sys
+sys.stdin.read()
+print(json.dumps([{"id": "L1",
+                   "objective": "prove a leaky train/test split is refused",
+                   "done_check": %r,
+                   "writes": ["note.txt"], "deps": []}]))
+""" % check_cmd)
+    # THE WORKER CANNOT FIX THIS: it writes into its own lane's worktree,
+    # never into the fixed fixture files split_check.py reads, so L1's own
+    # check can never turn green however many attempts it gets. That is the
+    # invariant under test: a genuinely leaky split stays refused, it is
+    # never worn down by retries.
+    worker = _write(os.path.join(workdir, "worker.py"), """
+with open("note.txt", "w", encoding="utf-8") as fh:
+    fh.write("attempted\\n")
+print("ds-leakage worker wrote note.txt; the fixed fixture split-check "
+     "reads is untouched")
+""")
+    # THE ORACLE, run directly (never imported, the same way brother_run
+    # itself only ever shells out to split_check.py): confirms the fixture
+    # is genuinely leaky, independent of anything the product records about
+    # it, so a passing scenario is never merely "some check failed" but
+    # specifically "split_check read this exact fixture as FAIL".
+    oracle = _sh(split_check_args)
+    oracle_output = (oracle.stdout or "") + (oracle.stderr or "")
+    split_check_failed = (oracle.returncode == 1
+                          and "split-check: FAIL:" in oracle_output)
+
+    env = run_env(artifact, decomposer, worker)
+    outcome = "prove a leaky data-science split is refused by split_check"
+    proc = brother_run(artifact, outcome, repo, runs_root, env, timeout=120)
+    out = (proc.stdout or "") + (proc.stderr or "")
+
+    # THE PRODUCT'S OWN RECORD names the exact command it ran as L1's
+    # done_check (run.log, LOG_FILENAME in brother_run.py, mirrored here as
+    # a literal string never imported): confirms the real product used
+    # OUR split_check.py invocation, not a stand-in for it.
+    run_dirs = _run_dirs(runs_root)
+    log_text = ""
+    if run_dirs:
+        log_path = os.path.join(run_dirs[0], "run.log")
+        if os.path.isfile(log_path):
+            with open(log_path, encoding="utf-8") as fh:
+                log_text = fh.read()
+    check_cmd_used = check_cmd in log_text
+
+    never_verified = not any(l.split()[:1] == ["L1"] and "verified by:" in l
+                             for l in out.splitlines())
+    retry_budget_named = "L1" in out and "retry budget is exhausted" in out
+    ok = (split_check_failed and check_cmd_used and never_verified
+         and retry_budget_named)
+    detail = ("split_check_failed=%s check_cmd_used=%s never_verified=%s "
+             "retry_budget_named=%s" % (split_check_failed, check_cmd_used,
+                                        never_verified, retry_budget_named))
+    return _result("ds-leakage", _S5_INVARIANT, ok, detail,
+                   "oracle:\n%s\nproduct:\n%s" % (oracle_output, out))
+
+
+_S6_INVARIANT = ("a check that draws its metric from an unseeded random "
+                 "source is not proven by a green exit code: either the "
+                 "receipt names the unit no-data, 'no metric recorded' "
+                 "(when the installed artifact carries E18 evidence "
+                 "gating), or two independent re-executions of the exact "
+                 "same done_check print two different metric values, "
+                 "proving by itself that the number was never "
+                 "reproducible")
+
+_METRIC_RE = re.compile(r"accuracy=([0-9.]+)")
+
+#: The same three bookkeeping names _find_work_doc excludes in
+#: brother_run.py (CLAIMS_FILENAME, TARGET_FILENAME, CAPSULE_FILENAME),
+#: mirrored here as literals rather than imported, so the Work document
+#: (the one other *.json in a run directory) can be told apart from the
+#: engine's own files without importing work_record or brother_run.
+_ENGINE_JSON_FILES = ("claims.json", "target.json", "capsule.json")
+
+
+def _work_doc_evidence(run_dir, unit_id):
+    """The row's own `evidence` string (the exact text _verify_evidence
+    wrote, including the check's real captured output) for `unit_id` in
+    `run_dir`'s Work document, or "" when the run directory, the document,
+    or the row is not found. A file read, never a product import: the same
+    answer receipt_sentence's own `output_location` line points a reader
+    at, read directly here because the check's raw output text (unlike the
+    receipt's own summary line) is never echoed to stdout."""
+    if not os.path.isdir(run_dir):
+        return ""
+    candidates = [f for f in os.listdir(run_dir)
+                 if f.endswith(".json") and f not in _ENGINE_JSON_FILES]
+    if len(candidates) != 1:
+        return ""
+    try:
+        with open(os.path.join(run_dir, candidates[0]), encoding="utf-8") as fh:
+            doc = json.load(fh)
+    except (OSError, ValueError):
+        return ""
+    for row in (doc.get("rows") or doc.get("units") or []):
+        if row.get("id") == unit_id:
+            return str(row.get("evidence") or "")
+    return ""
+
+
+def _run_ds_seed_once(artifact, workdir, tag):
+    """One full, independent brother_run invocation against a fresh repo
+    and a fresh run directory: a genuine re-execution, never a --resume of
+    the same claim, so two calls are two separate proofs of what the check
+    prints, not one run read twice. Returns (cli_output, evidence_text)."""
+    repo = fresh_repo()
+    runs_root = tempfile.mkdtemp(dir=workdir, prefix="runs-%s-" % tag)
+    eval_script = os.path.join(ROOT, "tests", "fixtures", "ds-seed", "eval.py")
+    done_check = "test -f done.txt && %s %s" % (sys.executable, eval_script)
+    decomposer = _write(os.path.join(workdir, "decomposer-%s.py" % tag), """
+import json, sys
+sys.stdin.read()
+print(json.dumps([{"id": "S1",
+                   "objective": "prove an unseeded eval cannot back a "
+                               "reproducible metric",
+                   "done_check": %r,
+                   "writes": ["done.txt"], "deps": [],
+                   "evidence_family": "E18"}]))
+""" % done_check)
+    worker = _write(os.path.join(workdir, "worker-%s.py" % tag), _FAST_WORKER)
+    env = run_env(artifact, decomposer, worker)
+    outcome = "prove an unseeded eval script never backs a reproducible metric"
+    proc = brother_run(artifact, outcome, repo, runs_root, env, timeout=60)
+    out = (proc.stdout or "") + (proc.stderr or "")
+    run_dirs = _run_dirs(runs_root)
+    evidence = _work_doc_evidence(run_dirs[0], "S1") if run_dirs else ""
+    return out, evidence
+
+
+def scenario_ds_seed(artifact):
+    workdir = tempfile.mkdtemp(prefix="fault-lab-ds-seed-")
+
+    # THE FIXTURE (tests/fixtures/ds-seed/eval.py): exits 0 every time (an
+    # ordinary passing check by exit code alone), so the engine reads S1 as
+    # delivered on both runs regardless of anything else; the point under
+    # test is what backs that green exit code. Run TWICE, from scratch:
+    # never resumed, never the same claim re-read.
+    out1, evidence1 = _run_ds_seed_once(artifact, workdir, "1")
+    out2, evidence2 = _run_ds_seed_once(artifact, workdir, "2")
+
+    # PATH A: the installed artifact carries P6's E18 gating (evidence_family
+    # declared above), so the receipt itself refuses to call this a proven
+    # metric, in the roadmap's own words.
+    no_metric_recorded = ("no metric recorded" in out1
+                          or "no metric recorded" in out2)
+
+    # PATH B, provable regardless of whether the installed artifact carries
+    # E18 gating: the SAME done_check, run twice from scratch, prints two
+    # different numbers into its own row's evidence text (the check's real
+    # captured output, read from the Work document, never from stdout,
+    # which only ever names WHERE the output lives), which is fault_lab's
+    # own proof, never the product's, that the metric was never
+    # reproducible.
+    m1, m2 = _METRIC_RE.search(evidence1), _METRIC_RE.search(evidence2)
+    both_ran = bool(m1 and m2)
+    differing_value = both_ran and m1.group(1) != m2.group(1)
+
+    both_delivered_by_exit_code = ("S1 delivered:" in out1
+                                   and "S1 delivered:" in out2)
+    ok = both_delivered_by_exit_code and (no_metric_recorded or differing_value)
+    detail = ("no_metric_recorded=%s differing_value=%s (%s vs %s) "
+             "both_delivered_by_exit_code=%s"
+             % (no_metric_recorded, differing_value,
+                m1.group(1) if m1 else NODATA, m2.group(1) if m2 else NODATA,
+                both_delivered_by_exit_code))
+    return _result("ds-seed", _S6_INVARIANT, ok, detail,
+                   "run1 evidence: %s\nrun1 cli:\n%s\nrun2 evidence: %s\n"
+                   "run2 cli:\n%s" % (evidence1, out1, evidence2, out2))
+
+
 SCENARIOS = {
     "fail_then_repair": scenario_fail_then_repair,
     "crash_then_bare_invoke": scenario_crash_then_bare_invoke,
     "two_process_race": scenario_two_process_race,
     "kill_holding_lock": scenario_kill_holding_lock,
+    "ds-leakage": scenario_ds_leakage,
+    "ds-seed": scenario_ds_seed,
 }
 
 
@@ -747,7 +980,7 @@ def main(argv=None):
                     help="one of %s, or 'all' (default)"
                          % ", ".join(sorted(SCENARIOS)))
     ap.add_argument("--list", action="store_true",
-                    help="print the four scenario names and exit")
+                    help="print the scenario names and exit")
     ap.add_argument("--reintroduce", choices=sorted(DEFECTS),
                     help="drive the lab backwards: patch a fresh, throwaway "
                          "installed copy with one historical defect and "
@@ -772,7 +1005,7 @@ def main(argv=None):
     elif args.scenario in SCENARIOS:
         names = [args.scenario]
     else:
-        print("fault_lab: unknown scenario %r; --list for the four names"
+        print("fault_lab: unknown scenario %r; --list for the scenario names"
               % args.scenario, file=sys.stderr)
         return 1
 

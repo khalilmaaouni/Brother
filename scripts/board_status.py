@@ -31,6 +31,7 @@ import os
 import re
 import sys
 
+import journal
 import receipt_door
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -139,7 +140,7 @@ def lessons_recalled_this_week(audit_path=None, now=None):
     return count, command, None
 
 
-def receipts_bound(runs_root=None):
+def receipts_bound(runs_root=None, from_journal=False):
     """(count_or_None, command, error_or_None). Every receipt
     scripts/receipt_door.py's own receipts_for() marks "verified" (a
     claim's evidence re-executed and exited 0), across every run directory
@@ -157,7 +158,21 @@ def receipts_bound(runs_root=None):
     a run made from inside this repository against itself. A run directory
     name seen in more than one root counts once. A root that exists but
     holds nothing verified yet is a real 0, never NO-DATA; only when NONE
-    of the roots exist is this NO-DATA."""
+    of the roots exist is this NO-DATA.
+
+    E60, `from_journal=True`: fold <run_dir>/journal.jsonl instead of
+    opening the run's Work document and claims.json. receipt_door.py's own
+    receipts_for() already appends one "receipt.issued" event per CALL
+    (never one per receipt, since brother_run.py calls it several times a
+    run for the same final set -- see that append's own comment), carrying
+    a "verified" count alongside "receipts" and "unproven"; this reads the
+    LAST such event per run, which reflects the run's final receipt set the
+    same way the file-reading branch above reads the record's final state.
+    A run whose journal predates that field (E59's own journals, before
+    E60 added "verified") or has no receipt.issued event at all (nothing
+    integrated yet) contributes 0, exactly like a run this function's
+    file-reading branch would find nothing verified in -- never an error,
+    since one old or empty run must not blank the whole count."""
     if runs_root is None:
         roots = [RUNS_ROOT, USER_RUNS_ROOT]
     elif isinstance(runs_root, (list, tuple)):
@@ -180,6 +195,18 @@ def receipts_bound(runs_root=None):
             seen.add(name)
             run_dir = os.path.join(runs_dir, name)
             if not os.path.isdir(run_dir):
+                continue
+            if from_journal:
+                events = journal.read(run_dir)
+                if not events:
+                    continue
+                last = None
+                for event in events:
+                    if event.get("type") == "receipt.issued":
+                        last = event
+                if last is not None:
+                    count += int((last.get("payload") or {}).get(
+                        "verified") or 0)
                 continue
             wfiles = sorted(glob.glob(os.path.join(run_dir, "W-*.json")))
             if not wfiles:

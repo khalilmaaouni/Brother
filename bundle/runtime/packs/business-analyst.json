@@ -1,0 +1,561 @@
+{
+  "lens": "business-analyst",
+  "version": "1.0.0",
+  "detection_signals": {
+    "paths": [
+      "*.bpmn",
+      "*.dmn",
+      "*.feature",
+      "user-stories/",
+      "acceptance-criteria/",
+      "requirements.md",
+      "*-requirements.md"
+    ],
+    "manifest_strings": [
+      "doorstop",
+      "strictdoc",
+      "bpmn-js"
+    ],
+    "note": "This persona rarely owns code, so the signals are the artifacts of requirements and process work, not a language or a framework (persona doc 13.5, 'tables over code'): a BPMN process model (13.3 BA-03, BA-04), a DMN decision table (BA-07), a Gherkin acceptance file (BA-06, BA-12), a user-story or acceptance-criteria directory, and a requirements document by basename. The three manifest strings are the requirements and process tools that name themselves in a package manifest: doorstop and strictdoc (text based requirements management, both pip installable) and bpmn-js (the bpmn.io modeller, npm). DELIBERATELY EXCLUDED, and this is the whole specificity argument: a bare 'requirements/' directory signal, because a Python repository routinely carries requirements/base.txt and would then infer this lens over data-science, which sorts after 'business-analyst' in door.infer_lens's sorted order; and a bare 'docs/' or 'specs/' signal, because almost every repository has one. Measured on this hub at branch time: zero of 3358 tracked files match any signal above, so the lens is silent here and cannot steal core's or data-science's inference. The one collision to watch is '*.feature', which a future qa-automation pack may also claim; persona doc 5.2 says selection must be compositional, so the fix is composition, not deleting the signal."
+  },
+  "challenge_question": "Which stakeholder need does this satisfy, and what happens in the exception path?",
+  "question_budget": {
+    "min": 1,
+    "max": 4,
+    "work_shape": "requirements/process change (persona doc 3.1, work class 18); 4.2 lists no row of its own for that shape, so the budget follows its 'Brownfield feature' row, 1-4, which is the shape a BA requirement most often precedes. 4.2's own rule governs the count: the metric is few WASTED questions, not few questions, and 4.2's last row removes the cap entirely for a high-risk irreversible, security or payment change."
+  },
+  "required_evidence_families": [
+    "E2",
+    "E9",
+    "E17"
+  ],
+  "receipt_fields": [
+    "stakeholder_need_id",
+    "requirement_ids",
+    "business_rules",
+    "acceptance_criteria",
+    "named_acceptor",
+    "decisions_made_and_owner",
+    "assumptions",
+    "evidence_links",
+    "unresolved_requirements",
+    "observed_business_acceptance"
+  ],
+  "forcing_classes": [
+    {
+      "id": "stakeholder_conflict",
+      "label": "Stakeholder conflict",
+      "why": "Persona doc 25.2 names it as this persona's forcing example ('stakeholder conflict resolved'), and 21.7 BA-G03 is the fixture. The condition the engine can see: a diff changes a requirement or business rule for one requirement id while another requirement file that references that same id is left unchanged, so two approved-seeming statements now disagree in the tree."
+    },
+    {
+      "id": "missing_acceptance_criteria",
+      "label": "Missing acceptance criteria",
+      "why": "Persona doc 21.7 BA-G02 (happy path specified, rejection or refund absent) and 13.3 BA-06. The condition: a diff adds or edits a user story or requirement file and no acceptance artifact (a *.feature file, an acceptance-criteria/ file, or a Given/When/Then block in the same file) is added or edited in the same change."
+    },
+    {
+      "id": "unrecorded_decision",
+      "label": "Unrecorded decision",
+      "why": "Persona doc 25.1 puts product and business intent and final result acceptance in the always-human column, and 13.6 requires the owner in the receipt. The condition: a diff changes a chosen option in a requirement file (an edit to a 'decision', 'chosen', 'option' or 'out of scope' block) while no decision artifact in the same change names a person as its owner."
+    },
+    {
+      "id": "scope_change",
+      "label": "Scope change",
+      "why": "Persona doc 13.3 BA-08 (change request: impact map across requirements, design and tests) and BA-17 (requirement retirement: consumers and dependencies checked). The condition: a diff edits the in-scope or out-of-scope section of a requirement file, or deletes a requirement id that another tracked file still references by that id."
+    },
+    {
+      "id": "unsourced_figure",
+      "label": "Unsourced figure",
+      "why": "Persona doc 21.7 BA-G04 (vague-nfr: 'fast' is not measurable) and 13.3 BA-10 (NFR elicitation produces a measurable quality requirement). The condition: a diff adds a number to a requirement or report file (a threshold, a volume, a target, a percentage) and the same change cites no file, query, contract or external source the number came from."
+    }
+  ],
+  "work_classes": [
+    {
+      "number": 18,
+      "label": "requirements/process change",
+      "why": "The persona's home class: every one of 13.3 BA-01 to BA-18 lands here first."
+    },
+    {
+      "number": 1,
+      "label": "feature / capability",
+      "why": "13.3 BA-05 (feature requirement) and BA-06 (user story refinement) are what a feature gets built from."
+    },
+    {
+      "number": 9,
+      "label": "analysis / metric / dashboard change",
+      "why": "13.3 BA-11 (data/report requirement: metric, source and consumer semantics). The analytics lens owns the metric's mechanics; this lens owns whose decision the metric serves."
+    },
+    {
+      "number": 12,
+      "label": "QA campaign / regression / exploratory testing",
+      "why": "13.3 BA-12 (UAT planning: business scenarios plus decision owners) and BA-16 (acceptance review)."
+    },
+    {
+      "number": 17,
+      "label": "dependency/platform migration",
+      "why": "13.3 BA-14 (transition requirement: migration, training, continuity). This lens contributes the business continuity half, never the technical cutover."
+    },
+    {
+      "number": 19,
+      "label": "documentation/runbook change",
+      "why": "13.5 makes the artifact the deliverable: plain English, tables, diagrams, explicit Known / Assumed / Unknown / Decision markers."
+    },
+    {
+      "number": 20,
+      "label": "spike/research with no production mutation",
+      "why": "13.3 BA-01 (problem framing: outcome before solution) and BA-15 (regulatory or policy interpretation, source cited and uncertainty flagged) are research that must not turn into delivery."
+    }
+  ],
+  "risk_classes": [
+    {
+      "id": "customer_blast_radius",
+      "label": "customer blast radius",
+      "how_this_lens_reads_it": "Which roles, personas and tenants live through the changed process, and which of them find out only when the exception path fires (persona doc 13.2: roles/personas, alternate/exception flows)."
+    },
+    {
+      "id": "compliance_privacy",
+      "label": "compliance/privacy",
+      "how_this_lens_reads_it": "Whether a policy or regulatory constraint governs the requirement, cited to its source with the uncertainty flagged rather than paraphrased as settled (13.3 BA-15; 13.2 policy/compliance constraints)."
+    },
+    {
+      "id": "money",
+      "label": "money",
+      "how_this_lens_reads_it": "Whether the changed rule moves, prices, refunds or recognizes money, in which case the business rule catalogue (BA-07) is the oracle and an implementation derived expectation is refused (6.2)."
+    },
+    {
+      "id": "evidence_uncertainty",
+      "label": "evidence uncertainty",
+      "how_this_lens_reads_it": "How hard the outcome is to prove in business terms: an acceptance criterion nobody can observe is this persona's own BA-G04 failure, and it is scored here rather than waved through."
+    },
+    {
+      "id": "irreversibility",
+      "label": "irreversibility",
+      "how_this_lens_reads_it": "Whether the process change can be walked back once people have been trained and told, which is a transition question (BA-14), not only a technical rollback question."
+    },
+    {
+      "id": "data_loss_corruption",
+      "label": "data loss/corruption",
+      "how_this_lens_reads_it": "Whether the requirement asks for records to be merged, deduplicated, archived or retired, and what the business considers the surviving record (BA-17, consumers checked)."
+    },
+    {
+      "id": "compatibility",
+      "label": "compatibility",
+      "how_this_lens_reads_it": "deferred: the technical-business-analyst lens owns interface and data contract compatibility (persona doc 14.3 TBA-01, TBA-03). This pack raises only the business question of who downstream still depends on the old behaviour, and hands the contract over."
+    },
+    {
+      "id": "production_write",
+      "label": "production write",
+      "how_this_lens_reads_it": "deferred: scored by the backend, data-engineering and infrastructure lenses. This pack never authorizes a production mutation of its own (see dangerous_actions)."
+    },
+    {
+      "id": "security_permission",
+      "label": "security/permission",
+      "how_this_lens_reads_it": "deferred: scored by the technical lenses. This pack contributes only the business role matrix, who is allowed to do what in the process (13.2 roles/personas)."
+    },
+    {
+      "id": "operational_recoverability",
+      "label": "operational recoverability",
+      "how_this_lens_reads_it": "deferred: scored by the infrastructure lens. This pack contributes the business continuity requirement during the transition (BA-14)."
+    }
+  ],
+  "dangerous_actions": [
+    "Resolving a stakeholder conflict on the stakeholders' behalf. Persona doc 25.2 names this as the persona's forcing decision and 25.1 puts business intent in the always-human column: the pack states the conflict and the options, and stops.",
+    "Declaring business acceptance, or filling observed_business_acceptance from a passing automated test. 25.1 reserves final delivered-result acceptance for a human, and 13.6 asks for what was observed.",
+    "Retiring a requirement before its consumers and dependencies have been checked (13.3 BA-17).",
+    "Presenting a regulatory or policy reading as settled. 13.3 BA-15 requires the source cited and the uncertainty flagged; an unflagged interpretation is exactly the hallucination risk 13.1 names.",
+    "Inventing a requirement id, a stakeholder name, an acceptance criterion or an acceptor to fill a receipt field. NO-DATA is the correct value; a filled field is a claim.",
+    "Writing or changing code, schema, migrations or production data. This lens produces requirements, decisions and acceptance rules; the technical lenses own the mutation and its evidence.",
+    "Accepting an external risk (security, privacy, compliance or business) on the human's behalf (25.1)."
+  ],
+  "know_how": [
+    {
+      "id": "BA-01",
+      "situation": "A stakeholder arrives asking for a solution (a field, a button, a report) rather than describing the outcome they need.",
+      "brother_asks": "What decision or action does this let someone take that they cannot take today, and what do they do instead today?",
+      "proof_that_closes_it": "An outcome statement the stakeholder recognizes as theirs, with the requested solution recorded as one option under it rather than as the requirement. Fixture: 21.7 BA-G01 solution-before-problem.",
+      "source": "13.3 BA-01; 13.4 'outcome vs solution framing'"
+    },
+    {
+      "id": "BA-02",
+      "situation": "Several interview notes or messages describe the same process differently.",
+      "brother_asks": "Where do two people describe the same step differently, and which of the two has the authority to settle it?",
+      "proof_that_closes_it": "A synthesis in which every conflict and unknown is listed as a conflict or an unknown, not averaged away into one confident paragraph.",
+      "source": "13.3 BA-02; 13.4 'stakeholder maps'"
+    },
+    {
+      "id": "BA-03",
+      "situation": "The current process is known by the people who run it and written down nowhere.",
+      "brother_asks": "Who does each step, what triggers it, and what happens when it fails or is refused?",
+      "proof_that_closes_it": "An as-is model with actors, steps and exception paths explicit, in a diagram or a table (13.5). A *.bpmn artifact in the tree is the durable form.",
+      "source": "13.3 BA-03; 13.4 'process modeling'"
+    },
+    {
+      "id": "BA-04",
+      "situation": "A change to how the work is done is being proposed.",
+      "brother_asks": "Whose responsibility moves, and which control point that exists today disappears?",
+      "proof_that_closes_it": "A to-be model set against the as-is, naming every changed responsibility and every control point added or removed.",
+      "source": "13.3 BA-04; 13.4 'process modeling'"
+    },
+    {
+      "id": "BA-05",
+      "situation": "A feature is wanted and has to become something engineering can build and QA can test.",
+      "brother_asks": "Which stakeholder need does this satisfy, and what happens in the exception path?",
+      "proof_that_closes_it": "A traceable chain, need to behaviour to acceptance, where each link carries an id that survives into the engineering and QA receipts (13.5).",
+      "source": "13.3 BA-05; 13.1 IIBA traceability"
+    },
+    {
+      "id": "BA-06",
+      "situation": "A user story exists but its acceptance criteria are vague or cover only the happy path.",
+      "brother_asks": "What must be observably true for this to be accepted, and what does the system do when the precondition does not hold?",
+      "proof_that_closes_it": "Testable acceptance criteria plus at least one exception case, written so a person can observe the outcome without reading the implementation. Fixture: 21.7 BA-G02 missing-exception-flow.",
+      "source": "13.3 BA-06; 13.4 'acceptance-criteria quality'"
+    },
+    {
+      "id": "BA-07",
+      "situation": "The behaviour depends on business rules held informally.",
+      "brother_asks": "What is the rule, what are its boundary values, and where do two rules disagree?",
+      "proof_that_closes_it": "A rule catalogue or decision table with worked examples and boundaries, usable as an independent oracle (E2) rather than a restatement of what the code does.",
+      "source": "13.3 BA-07; 13.4 'business rules and decision tables'"
+    },
+    {
+      "id": "BA-08",
+      "situation": "A change request arrives against requirements already agreed.",
+      "brother_asks": "Which requirements, designs and tests does this touch, and which of them has nobody looked at yet?",
+      "proof_that_closes_it": "An impact map across requirements, design and tests, with the untouched-but-affected items named. Forcing class: scope_change.",
+      "source": "13.3 BA-08; 13.4 'change impact'"
+    },
+    {
+      "id": "BA-09",
+      "situation": "Scope must be cut or split and several cuts look defensible.",
+      "brother_asks": "Against which weighted criteria are we choosing, and which option wins on them rather than on preference?",
+      "proof_that_closes_it": "Weighted options with a recommendation and the reason the recommendation could be wrong, put to the owner as a decision (25.1, always-human).",
+      "source": "13.3 BA-09; 13.4 'options analysis'"
+    },
+    {
+      "id": "BA-10",
+      "situation": "A quality expectation is stated in adjectives: fast, reliable, easy.",
+      "brother_asks": "At what number, measured how, under what load, does this stop being acceptable?",
+      "proof_that_closes_it": "A measurable quality requirement with its threshold and its measurement method, sourced. Fixture: 21.7 BA-G04 vague-nfr. Forcing class: unsourced_figure.",
+      "source": "13.3 BA-10; 13.4 'functional vs non-functional vs transition requirements'"
+    },
+    {
+      "id": "BA-11",
+      "situation": "A report, metric or data field is requested.",
+      "brother_asks": "Who consumes this number, what decision does it drive, and which source is authoritative when two disagree?",
+      "proof_that_closes_it": "Metric, source and consumer semantics written down, then handed to the analytics lens for the grain, denominator and timezone (4.1 stage 3, analyst).",
+      "source": "13.3 BA-11"
+    },
+    {
+      "id": "BA-12",
+      "situation": "User acceptance testing is being planned.",
+      "brother_asks": "Which business scenarios must a person run themselves, and who owns the accept or reject decision on each?",
+      "proof_that_closes_it": "Business scenarios with a named decision owner each, and E17 evidence recorded when they are run: charter, environment, data, path, observations, remaining uncertainty.",
+      "source": "13.3 BA-12; 6.1 E17"
+    },
+    {
+      "id": "BA-13",
+      "situation": "Two requirements that both look approved cannot both be satisfied.",
+      "brother_asks": "Which of these two is the invariant and which is the current preference, and who decides between them?",
+      "proof_that_closes_it": "The alternatives stated plainly and the decision forced to the owner, never averaged. Fixture: 21.7 BA-G03 conflicting-stakeholders. Forcing class: stakeholder_conflict.",
+      "source": "13.3 BA-13; 25.2"
+    },
+    {
+      "id": "BA-14",
+      "situation": "The change requires people to work differently, or in-flight cases and data to move.",
+      "brother_asks": "What has to happen to the in-flight cases, the training and the old process before the new one carries the work?",
+      "proof_that_closes_it": "Transition requirements covering migration, training and business continuity, recorded separately from the functional requirement.",
+      "source": "13.3 BA-14; 13.4 'functional vs non-functional vs transition requirements'"
+    },
+    {
+      "id": "BA-15",
+      "situation": "A regulation, policy or contract clause governs what the system may do.",
+      "brother_asks": "Which clause exactly, and what in it is genuinely unclear to a non-lawyer reading it?",
+      "proof_that_closes_it": "The source cited to the clause with the uncertainty flagged in the same sentence, and the interpretation marked as needing a human owner (25.1, external-risk acceptance).",
+      "source": "13.3 BA-15"
+    },
+    {
+      "id": "BA-16",
+      "situation": "Work is being presented as done and acceptance is being asked for.",
+      "brother_asks": "Which piece of evidence proves which acceptance criterion, and which criteria have none?",
+      "proof_that_closes_it": "Evidence mapped to requirement, one to one, with the unproven criteria reported as NO-DATA rather than absorbed into a count of passing tests (6.3).",
+      "source": "13.3 BA-16; 13.4 'requirements traceability'"
+    },
+    {
+      "id": "BA-17",
+      "situation": "A requirement is believed obsolete and someone wants it removed.",
+      "brother_asks": "Who still depends on this, and what breaks quietly if it goes?",
+      "proof_that_closes_it": "Consumers and dependencies checked and listed by name before the retirement, not after. Forcing class: scope_change.",
+      "source": "13.3 BA-17; 13.4 'change impact'"
+    },
+    {
+      "id": "BA-18",
+      "situation": "The change shipped and the value it promised has not been checked.",
+      "brother_asks": "What did we say this would change in the business, and what actually changed?",
+      "proof_that_closes_it": "Intended value set beside the observed outcome, including the case where the outcome did not move, recorded rather than quietly dropped.",
+      "source": "13.3 BA-18; 13.4 'benefit/value verification'"
+    },
+    {
+      "id": "KH-01",
+      "situation": "Any intake where the request names a solution.",
+      "brother_asks": "What outcome is this solution serving?",
+      "proof_that_closes_it": "The outcome recorded above the solution on the intent screen (4.1 stage 4), with the solution demoted to an option.",
+      "source": "13.4 'outcome vs solution framing'"
+    },
+    {
+      "id": "KH-02",
+      "situation": "A stated problem may be the symptom of another.",
+      "brother_asks": "Why does that happen, asked only while each answer is still checkable, and stopped when it stops being checkable.",
+      "proof_that_closes_it": "A causal chain whose every link is a fact or an explicitly marked inference, not five ritual whys ending in a platitude.",
+      "source": "13.4 'Five Whys without ritualism'"
+    },
+    {
+      "id": "KH-03",
+      "situation": "More than one group is affected and it is unclear who decides.",
+      "brother_asks": "Who is affected, who is consulted, and who actually signs?",
+      "proof_that_closes_it": "A stakeholder map with the decision owner named, feeding the named_acceptor receipt field.",
+      "source": "13.4 'stakeholder maps'"
+    },
+    {
+      "id": "KH-04",
+      "situation": "The work touches how a process runs end to end.",
+      "brother_asks": "Which actor, which trigger, which exception?",
+      "proof_that_closes_it": "A process model whose exception paths are drawn, not implied (13.5 prefers a diagram where it is useful and a table otherwise).",
+      "source": "13.4 'process modeling'"
+    },
+    {
+      "id": "KH-05",
+      "situation": "Behaviour depends on conditions that combine.",
+      "brother_asks": "What does the system do for each combination, including the ones nobody mentioned?",
+      "proof_that_closes_it": "A decision table with every combination present, including the default and the impossible ones marked as such.",
+      "source": "13.4 'business rules and decision tables'"
+    },
+    {
+      "id": "KH-06",
+      "situation": "Requirements are being written and mixed together.",
+      "brother_asks": "Is this what the system must do, how well it must do it, or what must happen once to get there?",
+      "proof_that_closes_it": "Functional, non-functional and transition requirements separated, because they are proven by different evidence and accepted by different people.",
+      "source": "13.4 'functional vs non-functional vs transition requirements'"
+    },
+    {
+      "id": "KH-07",
+      "situation": "Acceptance criteria have been drafted.",
+      "brother_asks": "Could two people reading this disagree about whether it passed?",
+      "proof_that_closes_it": "Criteria a person can observe without reading code, with the exception path present (13.5, examples over abstract formalism).",
+      "source": "13.4 'acceptance-criteria quality'"
+    },
+    {
+      "id": "KH-08",
+      "situation": "Work is moving from requirements into build and test.",
+      "brother_asks": "Does every requirement link backward to a need and forward to a test?",
+      "proof_that_closes_it": "Traceability ids that survive into the engineering and QA receipts (13.5), so change impact can be computed later rather than remembered.",
+      "source": "13.4 'requirements traceability'; 13.1 [R7][R8]"
+    },
+    {
+      "id": "KH-09",
+      "situation": "Anything already agreed is being changed.",
+      "brother_asks": "What else has to change because of this, and who has not been told?",
+      "proof_that_closes_it": "An impact map across requirements, design, tests and the people who depend on the old behaviour.",
+      "source": "13.4 'change impact'"
+    },
+    {
+      "id": "KH-10",
+      "situation": "Acceptance testing must be designed with limited time.",
+      "brother_asks": "Which business scenarios would be expensive to get wrong, and which can we not cover at all?",
+      "proof_that_closes_it": "A scenario set chosen by business risk, with the uncovered area stated as NO-DATA rather than omitted (6.3).",
+      "source": "13.4 'UAT scenario design'"
+    },
+    {
+      "id": "KH-11",
+      "situation": "A choice exists and one option is being assumed.",
+      "brother_asks": "What are the real alternatives, on what criteria, weighted how?",
+      "proof_that_closes_it": "Weighted options with a recommendation and the condition that would flip it, put to the owner rather than decided here.",
+      "source": "13.4 'options analysis'; 23.1 'Options/recommendation quality'"
+    },
+    {
+      "id": "KH-12",
+      "situation": "The plan rests on something nobody has verified.",
+      "brother_asks": "What are we assuming, who owns it, and what happens if it is false?",
+      "proof_that_closes_it": "Assumptions and dependencies listed with owners, marked Known / Assumed / Unknown / Decision (13.5), carried in the assumptions receipt field.",
+      "source": "13.4 'assumption/dependency management'"
+    },
+    {
+      "id": "KH-13",
+      "situation": "The change is live and the business case is unexamined.",
+      "brother_asks": "Did the number we promised move, and if not, is the requirement wrong or the implementation?",
+      "proof_that_closes_it": "Observed outcome recorded against intended value, feeding BA-18 and the Vault rather than being forgotten at release.",
+      "source": "13.4 'benefit/value verification'"
+    }
+  ],
+  "intake_dimensions": [
+    "business outcome",
+    "stakeholder(s)/decision owner",
+    "current process",
+    "pain/opportunity",
+    "success measure",
+    "scope/out of scope",
+    "business rules",
+    "roles/personas",
+    "main flow",
+    "alternate/exception flows",
+    "data/information needed",
+    "policy/compliance constraints",
+    "non-functional needs stated in business terms",
+    "transition/change-management needs",
+    "assumptions/dependencies",
+    "acceptance criteria",
+    "open decisions"
+  ],
+  "artifact_style": {
+    "prefer": [
+      "plain English",
+      "a process, data-flow or decision diagram when useful",
+      "tables over code",
+      "examples over abstract formalism",
+      "explicit Known / Assumed / Unknown / Decision markers",
+      "traceability ids that survive into engineering and QA receipts"
+    ],
+    "avoid": "implementation paths, unless requested or necessary to show impact",
+    "source": "13.5"
+  },
+  "tool_adapters": [
+    {
+      "adapter_id": "git",
+      "tier": "0 (universal, persona doc 22.3)",
+      "capabilities": [
+        "requirement history",
+        "change impact scope"
+      ],
+      "detect": "git --version",
+      "mutates": false,
+      "when_absent": "NO-DATA: without history the pack cannot say which requirement changed when, and says so rather than inferring it from the current text."
+    },
+    {
+      "adapter_id": "doorstop",
+      "tier": "2 (ecosystem specific, persona doc 22.3)",
+      "capabilities": [
+        "requirement identity",
+        "backward and forward traceability links"
+      ],
+      "detect": "python3 -m doorstop --version",
+      "mutates": false,
+      "when_absent": "NO-DATA: traceability falls back to ids written in the requirement files themselves, and the receipt says the links were read from prose, not from a tool."
+    },
+    {
+      "adapter_id": "strictdoc",
+      "tier": "2 (ecosystem specific, persona doc 22.3)",
+      "capabilities": [
+        "requirement document validation",
+        "traceability export"
+      ],
+      "detect": "strictdoc --version",
+      "mutates": false,
+      "when_absent": "NO-DATA: the requirement documents are read as text and no structural validation verdict is claimed."
+    },
+    {
+      "adapter_id": "brother-decide",
+      "tier": "0 (the estate's own decision screen)",
+      "capabilities": [
+        "put a forced decision in front of the named owner"
+      ],
+      "detect": "python3 scripts/decide.py --help",
+      "mutates": false,
+      "when_absent": "NO-DATA: the decision is still stated in the receipt in words, and the pack says no screen was produced. Persona doc 22.1: detect, reuse, propose, install last; this pack installs nothing."
+    },
+    {
+      "adapter_id": "brother-capability-probe",
+      "tier": "0 (the estate's own probe)",
+      "capabilities": [
+        "measure which of the adapters above this machine actually has"
+      ],
+      "detect": "python3 scripts/capability_probe.py --json",
+      "mutates": false,
+      "when_absent": "NO-DATA: each adapter above is then detected by its own command, one at a time."
+    }
+  ],
+  "provenance": [
+    "3.1 (work classes, Axis A)",
+    "3.2 (risk classes, Axis B)",
+    "3.3 (practitioner lens, Axis C: the business-analyst lens id, and the rule that a lens is inferred rather than configured)",
+    "4.1 (intake sequence; stage 3 supplies this pack's challenge question verbatim)",
+    "4.2 (intake question budgets)",
+    "5.1 (pack manifest: the keys this file carries)",
+    "5.2 (selection must be compositional: a dbt revenue metric change loads business-analysis beside analytics, data-engineering, qa-automation and core)",
+    "6.1 (evidence families E2, E9, E17), 6.2 (evidence independence rule), 6.3 (risk coverage, not test count)",
+    "13.1 (what this persona is buying), 13.2 (intake dimensions), 13.3 (use-case library BA-01 to BA-18), 13.4 (know-how modules), 13.5 (default artifact style), 13.6 (receipt additions)",
+    "21.7 (BA golden fixtures BA-G01 to BA-G04)",
+    "22.1, 22.2, 22.3 (tool adapters: detect, reuse, propose, install last)",
+    "23.1 (universal rubric), 23.2 (BA overlay: stakeholder outcome, exception flows, acceptance criteria, traceability)",
+    "25.1 (always-human categories), 25.2 (BA forcing example: stakeholder conflict resolved)"
+  ],
+  "fixture": {
+    "must_infer": [
+      "docs/requirements.md",
+      "docs/business-requirements.md",
+      "docs/user-stories/BA-05-refund-request.md",
+      "docs/acceptance-criteria/refund.md",
+      "process/as-is-refund.bpmn",
+      "rules/refund-eligibility.dmn",
+      "acceptance/refund.feature"
+    ],
+    "manifest_string": "doorstop",
+    "must_not_infer": [
+      "a.ipynb",
+      "b.ipynb",
+      "mlruns/0/meta.yaml",
+      "README.md",
+      "src/main.py",
+      "requirements.txt",
+      "requirements/base.txt",
+      "requirements/dev.txt",
+      "src/stories/Button.stories.tsx",
+      "docs/architecture/adr-0001.md"
+    ],
+    "note": "must_not_infer_paths is deliberately the data-science fixture's own tree plus the three near misses this pack refused a signal for: a Python requirements/ directory, a Storybook stories/ directory, and a plain docs/ tree. 'business-analyst' sorts before 'core' and 'data-science' in door.infer_lens, so this lens is tried FIRST and a loose signal here would silently steal every other lens's inference; this list is what proves it does not. Driven both ways at branch time: must_infer_paths returns 'business-analyst' with all seven signals matched, the manifest string in a requirements.txt returns 'business-analyst', and must_not_infer_paths returns 'data-science'. A runner that lists must_not_infer_paths without creating the files gets door's own 'requirements.txt could not be read, skipped' line on stderr for each manifest string, which is that helper's documented tolerant path and not a failure; creating the listed files silences it."
+  },
+  "required_evidence_families_why": {
+    "E2": "Independent business oracle: The whole persona rests on it: acceptance is decided against an approved business rule, ledger, contract or manually curated fixture, never against what the implementation happened to produce (persona doc 6.1 E2, which names business logic and analytics as its primary case). 13.3 BA-07 (business rule catalog) and BA-16 (acceptance review, evidence mapped to requirement) have no meaning without it, and 6.2 would score an implementation derived expectation as circular_risk.",
+    "E9": "Golden / replay: This persona's own golden fixtures are replayed cases, not synthetic inputs: persona doc 21.7 lists BA-G01 solution-before-problem, BA-G02 missing-exception-flow, BA-G03 conflicting-stakeholders and BA-G04 vague-nfr. A requirement or process change is proven by replaying those four shapes through the new wording and showing that the failure each fixture names is now caught (6.1 E9).",
+    "E17": "Human exploratory evidence: Business acceptance is a human observation and 13.6 requires the receipt to carry it ('observed business acceptance'). 6.1 E17 fixes what that observation must record (charter, environment, data, path taken, observations, defects, remaining uncertainty), which is exactly what 13.3 BA-12 (UAT planning: business scenarios plus decision owners) produces. Without E17 the pack would report a UAT as passed with nothing behind the word."
+  },
+  "receipt_fields_details": {
+    "stakeholder_need_id": {
+      "meaning": "The identifier of the stakeholder need this work traces back to, so the reason behind the requirement survives into engineering and QA (persona doc 13.6; 13.1 on IIBA backward traceability).",
+      "filled_by": "human, at intake stage 1 (persona doc 4.1, outcome normalization). NO-DATA when the outcome arrived with no named stakeholder behind it: an invented id is worse than an absent one."
+    },
+    "requirement_ids": {
+      "meaning": "Every requirement identifier this change creates, edits or retires, in the tree's own numbering.",
+      "filled_by": "file: the requirement artifacts this pack's detection_signals matched (requirements.md, user-stories/, acceptance-criteria/). NO-DATA when the tree carries no requirement artifact, which is itself the finding."
+    },
+    "business_rules": {
+      "meaning": "The rules the behaviour must obey, with their examples, boundaries and known conflicts (persona doc 13.3 BA-07; 13.4 'business rules and decision tables').",
+      "filled_by": "file: a *.dmn decision table or the business rule catalogue in the tree. NO-DATA when the rule exists only in a person's head, which forces the stakeholder_conflict class below rather than a guess."
+    },
+    "acceptance_criteria": {
+      "meaning": "The business acceptance rule itself: the condition, in plain words, under which the business agrees this is done, including the exception path (persona doc 13.6; 13.3 BA-06, 'testable AC plus exceptions').",
+      "filled_by": "file: the Gherkin *.feature or acceptance-criteria/ artifact matched by the detection signals. NO-DATA when a requirement changed and no acceptance artifact changed with it, which is the missing_acceptance_criteria forcing class."
+    },
+    "named_acceptor": {
+      "meaning": "The person who signs the acceptance rule above, by role and name, not a team and not a queue. Persona doc 25.1 puts 'product/business intent' and 'final delivered-result acceptance' in the always-human column, so this field is what makes that human visible in the receipt.",
+      "filled_by": "human, recorded as a decision (persona doc 13.6, 'decisions made and owner'). The estate's own screen for putting the decision in front of that person is `python3 scripts/decide.py <spec.json>`. NO-DATA until a person has actually been named; an unnamed acceptor is an unrecorded_decision."
+    },
+    "decisions_made_and_owner": {
+      "meaning": "Each decision this work forced, the option chosen, the options rejected, and who owned the choice (persona doc 13.6; 13.4 'options analysis').",
+      "filled_by": "command: `python3 scripts/decide.py <spec.json> --out <path>` writes the decision screen; the receipt carries that path and the owner named on it. NO-DATA when the work forced no decision."
+    },
+    "assumptions": {
+      "meaning": "What was taken as true without proof, and what depends on it, marked with the persona's own Known / Assumed / Unknown / Decision markers (persona doc 13.5; 13.4 'assumption/dependency management').",
+      "filled_by": "human, at intake stages 0 and 1 (persona doc 4.1: every statement marked FACT, INFERENCE, UNKNOWN, HUMAN_DECISION or VAULT_CONTEXT). NO-DATA is never right here: a change with no assumptions says so in words."
+    },
+    "evidence_links": {
+      "meaning": "The forward half of traceability: which test or evidence artifact proves each acceptance criterion (persona doc 13.6, 'test/evidence links'; 13.1 forward links to solution components).",
+      "filled_by": "command: the unit's own done_check, recorded exactly the way core's `command`, `exit_code` and `output_location` fields already are. NO-DATA when an acceptance criterion has no evidence pointing at it, which is the honest reading of 6.3."
+    },
+    "unresolved_requirements": {
+      "meaning": "Requirements known to be open, ambiguous or in conflict at the moment this receipt was written (persona doc 13.6).",
+      "filled_by": "human. NO-DATA is the correct value only when nothing is open; while anything is open this field lists it, because an empty list here is a claim that the requirement set is closed."
+    },
+    "observed_business_acceptance": {
+      "meaning": "What a person actually observed when they ran the business scenario, not that a suite went green (persona doc 13.6; 6.1 E17).",
+      "filled_by": "human, after UAT (persona doc 13.3 BA-12). NO-DATA until a person has run the scenario; a passing automated test never fills this field."
+    }
+  }
+}

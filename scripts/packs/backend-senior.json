@@ -1,0 +1,785 @@
+{
+  "lens": "backend-senior",
+  "version": "1.0.0",
+  "engine_range": ">=1.0.0 <2.0.0",
+  "detection_signals": {
+    "paths": [
+      "openapi.yaml",
+      "openapi.yml",
+      "openapi.json",
+      "alembic.ini",
+      "schema.prisma",
+      "liquibase.properties",
+      "flyway.conf",
+      "*.proto",
+      "migrations/",
+      "migrate/",
+      "controllers/",
+      "handlers/"
+    ],
+    "manifest_strings": [
+      "fastapi",
+      "flask",
+      "django",
+      "sqlalchemy",
+      "alembic",
+      "celery",
+      "psycopg",
+      "express",
+      "fastify",
+      "@nestjs/core",
+      "prisma"
+    ],
+    "note": "service code only, not code in general (persona doc 7.5, 'adapt to what exists first'): a published interface file (OpenAPI, Protobuf, Prisma schema), a migration tool's own config (Alembic, Flyway, Liquibase) or migration directory (Alembic and Django use migrations/, Rails uses db/migrate), a route or handler directory, or a web, ORM or queue framework named in a package manifest. Deliberately excluded: *.py, src/, tests/, Dockerfile, docker-compose.yml and requirements.txt as such, because every repository has some of those and a lens that wins everywhere means nothing. A directory signal is ONE path component: door._path_matches_signal checks 'migrations' against each element of the path, so a two-segment form like 'migrations/versions/' or 'db/migrate/' can never fire and must not be reintroduced. This tree (the Brother hub) matches none of these signals, which is the intended result: the hub is a tool estate, not a service."
+  },
+  "challenge_question": "Is backward compatibility required for old clients during a rolling deploy?",
+  "question_budget": {
+    "min": 1,
+    "max": 4,
+    "work_shape": "Brownfield feature (persona doc 4.2: 1-4). A database or schema migration in the same unit raises it to 2-5, a production infrastructure change to 2-6, and a high-risk irreversible, security or payment change removes the cap entirely and requires the necessary decisions instead."
+  },
+  "required_evidence_families": [
+    "E7",
+    "E3",
+    "E12",
+    "E14",
+    "E6",
+    "E15"
+  ],
+  "receipt_fields": [
+    "interfaces_changed",
+    "compatibility_window_tested",
+    "migration_direction_and_rollback",
+    "idempotency_evidence",
+    "concurrency_evidence",
+    "auth_tenant_matrix_status",
+    "fault_paths_exercised",
+    "performance_delta",
+    "observability_change",
+    "unresolved_operational_risks"
+  ],
+  "forcing_classes": [
+    {
+      "id": "idempotency",
+      "label": "Idempotency",
+      "why": "the diff adds or changes a write on a path that can be delivered more than once (an HTTP handler, a webhook consumer, a queue consumer, a scheduled job, a payment call) with no idempotency key, unique constraint, conditional insert or dedupe store visible in the changed lines (persona doc 7.3 BE-04, BE-05, BE-16; 20 F08)."
+    },
+    {
+      "id": "retry",
+      "label": "Retries and timeouts",
+      "why": "the diff adds or changes a call to something outside this process (HTTP client, database driver, queue publish, RPC stub) whose construction or call site carries no timeout argument, or adds a retry loop with no attempt cap and no backoff setting (persona doc 7.3 BE-07, BE-14; 7.4 retry/backoff/jitter and timeout and cancellation propagation)."
+    },
+    {
+      "id": "concurrency",
+      "label": "Concurrency and transaction boundary",
+      "why": "the diff reads then writes the same row or key with no row lock, version column or conditional update between the two statements, or it opens, closes or moves a transaction boundary (begin and commit, a transactional decorator or annotation, a session or unit-of-work scope) (persona doc 7.3 BE-08; 7.4 optimistic/pessimistic concurrency; 20 F08)."
+    },
+    {
+      "id": "compatibility",
+      "label": "Contract compatibility",
+      "why": "a field is removed, renamed, retyped, narrowed or made required in an OpenAPI, JSON Schema, GraphQL, Protobuf or event payload file, or a route path, method or status code changes, while the consumer fixtures and contract tests covering it are unchanged in the same diff (persona doc 7.3 BE-01, BE-02; 25.2 'Backend: breaking API behavior accepted intentionally'; 20 F04)."
+    },
+    {
+      "id": "observability",
+      "label": "Observability",
+      "why": "the diff adds a new failure branch on a request, consumer or job path (a raise, a caught exception, an error return, a fallback value) and no log, metric, span or alert is emitted on that branch in the same diff (persona doc 7.6 'observability change'; 6.1 E15; 20 F12)."
+    }
+  ],
+  "work_classes": [
+    {
+      "number": 1,
+      "name": "feature / capability",
+      "note": "the ordinary case: a new endpoint, consumer or job."
+    },
+    {
+      "number": 2,
+      "name": "defect / incident correction",
+      "note": "BE-19: the root cause and its sibling call sites, never the symptom."
+    },
+    {
+      "number": 3,
+      "name": "refactor / internal improvement",
+      "note": "BE-12, BE-20: behavior promised identical, boundary checked."
+    },
+    {
+      "number": 4,
+      "name": "API or contract change",
+      "note": "BE-01, BE-02: the class this lens exists for."
+    },
+    {
+      "number": 5,
+      "name": "database/schema migration",
+      "note": "BE-03: raises the question budget to 2-5 (persona doc 4.2)."
+    },
+    {
+      "number": 7,
+      "name": "infrastructure/configuration change",
+      "note": "only where it is service configuration (timeouts, pool sizes, flags); a cluster or IaC change belongs to the infrastructure lens."
+    },
+    {
+      "number": 13,
+      "name": "release / deployment",
+      "note": "BE-17: rolling deploy compatibility and flag removal."
+    },
+    {
+      "number": 14,
+      "name": "incident investigation",
+      "note": "BE-19: the replay is the evidence."
+    },
+    {
+      "number": 15,
+      "name": "performance/cost optimization",
+      "note": "BE-15: equivalence proved beside the benchmark."
+    },
+    {
+      "number": 16,
+      "name": "security/privacy hardening",
+      "note": "BE-10, BE-11: composes with the core auth forcing class."
+    },
+    {
+      "number": 17,
+      "name": "dependency/platform migration",
+      "note": "BE-13: the release diff read, not assumed."
+    },
+    {
+      "number": 19,
+      "name": "documentation/runbook change",
+      "note": "the operational half of BE-06 and BE-18."
+    },
+    {
+      "number": 20,
+      "name": "spike/research with no production mutation",
+      "note": "no evidence burden beyond stating what was not proven."
+    }
+  ],
+  "risk_classes": [
+    {
+      "id": "irreversibility",
+      "backend_reading": "a migration with no tested down path, a delete with no retention copy, a queue purge (BE-03, BE-18)."
+    },
+    {
+      "id": "production_write",
+      "backend_reading": "the change mutates live rows, live queue state or a live provider (BE-04, BE-05, BE-18)."
+    },
+    {
+      "id": "data_loss_corruption",
+      "backend_reading": "a duplicate side effect from at-least-once delivery, a lost update from a race, a contract change that silently drops a field (BE-04, BE-08, BE-02)."
+    },
+    {
+      "id": "security_permission",
+      "backend_reading": "a role, tenant scope, token check or secret handling changes (BE-10, BE-11)."
+    },
+    {
+      "id": "money",
+      "backend_reading": "charge, refund, ledger, subscription or metered usage on the path (BE-04); composes with the core money class rather than repeating it."
+    },
+    {
+      "id": "customer_blast_radius",
+      "backend_reading": "how many tenants and callers reach the changed interface, and whether any of them is external."
+    },
+    {
+      "id": "compatibility",
+      "backend_reading": "old and new binaries coexisting during a rolling deploy, and consumers deployed on their own schedule (BE-02, BE-03)."
+    },
+    {
+      "id": "compliance_privacy",
+      "backend_reading": "personal data entering a log line, a cache key, an error payload or a retained backup (BE-09, BE-18)."
+    },
+    {
+      "id": "operational_recoverability",
+      "backend_reading": "whether the rollback, the dead letter queue replay and the restore were run rather than described (BE-06, BE-18)."
+    },
+    {
+      "id": "evidence_uncertainty",
+      "backend_reading": "how much of the risk above can only be shown by fault injection or an independent oracle rather than by the existing suite."
+    }
+  ],
+  "dangerous_actions": [
+    {
+      "action": "run a migration, backfill or destructive statement against a production database",
+      "why": "irreversible production write (persona doc 25.1, destructive or irreversible action with material consequence)."
+    },
+    {
+      "action": "delete, truncate or purge production rows, a queue or a dead letter queue",
+      "why": "the scope proof and the restore have to be accepted by a person first (BE-18)."
+    },
+    {
+      "action": "remove, weaken or bypass an authentication or authorization check",
+      "why": "widening production privilege is always human (persona doc 25.1)."
+    },
+    {
+      "action": "accept a breaking API or event contract change",
+      "why": "the persona doc names this as the backend forcing example by name (25.2)."
+    },
+    {
+      "action": "replay, retry or trigger a real payment, refund or provider call outside a sandbox",
+      "why": "money moves and cannot be un-moved."
+    },
+    {
+      "action": "deploy, release or merge to production",
+      "why": "reserved by the estate's own charter, not by this pack."
+    },
+    {
+      "action": "rotate, print, commit or move a credential, token or key",
+      "why": "credential handling stays a human action even where a session is authorized to work on the code around it."
+    },
+    {
+      "action": "raise a rate limit, remove a timeout or widen a connection pool in production configuration",
+      "why": "each converts a bounded failure into an unbounded one, and a person accepts the new ceiling."
+    },
+    {
+      "action": "disable or delete a feature flag guard that production traffic sits behind",
+      "why": "flag state combinations are the rollout's only brake (BE-17)."
+    },
+    {
+      "action": "install a test runner, scanner or framework the repository does not already use",
+      "why": "persona doc 22.1: detect, reuse, propose, install last, and never without explicit authorization for that class of environment mutation."
+    }
+  ],
+  "know_how": [
+    {
+      "id": "BE-01",
+      "situation": "A request handler, route or endpoint is added, or its path, method, parameters, status codes or error shape change.",
+      "risk": "contract and auth drift",
+      "brother_asks": "Is backward compatibility required for old clients during a rolling deploy, and which callers exist? Which roles and tenants may reach this path, and which must be refused?",
+      "proof_closes": "Contract tests against the published schema, an authorization matrix whose forbidden cells assert a refusal, and negative cases for malformed and unauthorized requests (E7, E14, E1).",
+      "source": "7.3 BE-01"
+    },
+    {
+      "id": "BE-02",
+      "situation": "A request or response schema changes: a field removed, renamed, retyped, narrowed or made required.",
+      "risk": "old clients break",
+      "brother_asks": "Which consumers read this field today, and are they deployed before, with, or after this service?",
+      "proof_closes": "Old payloads checked against the new schema, plus consumer fixtures recorded from the real callers, both failing when the field is removed (E7, E9).",
+      "source": "7.3 BE-02"
+    },
+    {
+      "id": "BE-03",
+      "situation": "A schema migration lands while a rolling deploy has old and new binaries running at once.",
+      "risk": "old and new binary mismatch",
+      "brother_asks": "Is this expand then contract or a single destructive step, and what restores the previous state?",
+      "proof_closes": "An expand, migrate, contract simulation run against a copy with both binary versions live, plus a rollback executed and observed rather than described (E11, E16, E7).",
+      "source": "7.3 BE-03"
+    },
+    {
+      "id": "BE-04",
+      "situation": "A payment, billing, refund or ledger path is added or changed.",
+      "risk": "duplicate charge, lost state",
+      "brother_asks": "What is the idempotency key, who generates it, and what does the ledger say the balance should be independently of this code?",
+      "proof_closes": "Replay of one request under one key asserting a single charge, and a ledger assertion derived from the business rule rather than from the implementation (E3, E4, E2).",
+      "source": "7.3 BE-04"
+    },
+    {
+      "id": "BE-05",
+      "situation": "A webhook or inbound event consumer is added or changed.",
+      "risk": "replay, out-of-order, forged event",
+      "brother_asks": "Is the signature verified before the body is parsed, what is the replay window, and what happens when events arrive twice or out of order?",
+      "proof_closes": "A forged event rejected, a duplicate delivery asserting one state change, and an out-of-order fixture replayed through the consumer (E14, E4, E3, E9).",
+      "source": "7.3 BE-05"
+    },
+    {
+      "id": "BE-06",
+      "situation": "A queue or stream worker is added, or its handling of a message changes.",
+      "risk": "poison messages, at-least-once duplication",
+      "brother_asks": "What happens to a message the worker can never process, how many times is it retried, and where does it land?",
+      "proof_closes": "Fault injection that makes handling fail, an assertion the message reaches the dead letter queue after the bounded attempts, and a replay out of that queue (E12, E9).",
+      "source": "7.3 BE-06"
+    },
+    {
+      "id": "BE-07",
+      "situation": "Retry behavior is added or changed on any call that can fail.",
+      "risk": "retry storm or repeated side effect",
+      "brother_asks": "What is the maximum attempt count and total time, is there jitter, and is the retried operation safe to repeat?",
+      "proof_closes": "A bounded retry test asserting the cap, a timeout fault proving the caller gives up, and an idempotency assertion on the repeated side effect (E12, E3).",
+      "source": "7.3 BE-07"
+    },
+    {
+      "id": "BE-08",
+      "situation": "An update reads a row or key and then writes it, or two code paths can write the same record.",
+      "risk": "lost update, race",
+      "brother_asks": "Which two writers can touch this record at once, and what stands between the read and the write?",
+      "proof_closes": "A concurrent fixture running both writers against one record, or a property test asserting no lost update, failing against the unguarded version (E3, E12).",
+      "source": "7.3 BE-08"
+    },
+    {
+      "id": "BE-09",
+      "situation": "A cache is introduced, its key changes, or its invalidation changes.",
+      "risk": "stale or cross-tenant data",
+      "brother_asks": "What invalidates this entry, what exactly is in the key, and does the key include the tenant?",
+      "proof_closes": "An invalidation replay showing a stale read after a write cannot happen, plus a cross tenant read asserting no leakage through the key (E4, E14).",
+      "source": "7.3 BE-09"
+    },
+    {
+      "id": "BE-10",
+      "situation": "Authentication or authorization logic changes: a role, scope, token check, session rule or policy.",
+      "risk": "privilege escalation",
+      "brother_asks": "Which roles gain access, which lose it, and which paths must stay forbidden?",
+      "proof_closes": "A role and tenant matrix exercised as tests with the forbidden cells asserted as refusals, and a mutation removing the check failing the suite (E14, E6).",
+      "source": "7.3 BE-10"
+    },
+    {
+      "id": "BE-11",
+      "situation": "A multi-tenant boundary changes: tenant scoping, row level security, a shared table or a shared cache.",
+      "risk": "data leakage across tenants",
+      "brother_asks": "What scopes every query to a tenant, and what happens if that scope is omitted?",
+      "proof_closes": "Cross tenant isolation tests written from the rule rather than from the query builder, plus a deliberate omission failing them (E14, E2, E6).",
+      "source": "7.3 BE-11"
+    },
+    {
+      "id": "BE-12",
+      "situation": "A refactor moves code across modules or rewrites an internal structure with no intended behavior change.",
+      "risk": "behavior or architecture drift",
+      "brother_asks": "What behavior is promised identical, and which architecture boundary does this move cross?",
+      "proof_closes": "Characterization tests recorded before the refactor, a static import or layer check, and a mutation run showing those tests still bite (E1, E10, E6).",
+      "source": "7.3 BE-12"
+    },
+    {
+      "id": "BE-13",
+      "situation": "A dependency, runtime or platform version is upgraded.",
+      "risk": "behavior or security regression",
+      "brother_asks": "What changed between the pinned version and the new one, and which of our call sites use the changed behavior?",
+      "proof_closes": "The release diff read and quoted, targeted tests over the touched call sites, and a vulnerability scan compared before and after (E5, E14).",
+      "source": "7.3 BE-13"
+    },
+    {
+      "id": "BE-14",
+      "situation": "An integration with an external API or third party service is added or changed.",
+      "risk": "rate limit, timeout, contract drift",
+      "brother_asks": "What is the rate limit and the timeout, and what does this service do when the provider is unavailable or answers late?",
+      "proof_closes": "Recorded fixtures of the real responses, injected timeout and rate limit faults, and the fallback path exercised rather than described (E9, E12).",
+      "source": "7.3 BE-14"
+    },
+    {
+      "id": "BE-15",
+      "situation": "A path is optimized for latency, throughput, memory or cost.",
+      "risk": "correctness traded for speed",
+      "brother_asks": "What is the measured baseline, and what output must stay identical?",
+      "proof_closes": "A benchmark before and after on the same input, plus an equivalence or reconciliation check proving the fast path returns what the slow path returned (E13, E5, E8).",
+      "source": "7.3 BE-15"
+    },
+    {
+      "id": "BE-16",
+      "situation": "A scheduled, cron or background job is added, or its schedule changes.",
+      "risk": "duplicate runs, missed runs",
+      "brother_asks": "What happens if this runs twice, is restarted mid run, or misses a window entirely?",
+      "proof_closes": "An idempotency assertion over a repeated run, a restart injected mid run, and a time window test covering a skipped and a late execution (E3, E12).",
+      "source": "7.3 BE-16"
+    },
+    {
+      "id": "BE-17",
+      "situation": "Behavior is put behind a feature flag, or a flag is flipped or removed.",
+      "risk": "incompatible states",
+      "brother_asks": "Which combinations of flag states can exist at once in production, and when is the flag removed?",
+      "proof_closes": "A flag state matrix exercised across the reachable combinations, plus a removal plan carrying its date (E1, E7).",
+      "source": "7.3 BE-17"
+    },
+    {
+      "id": "BE-18",
+      "situation": "Data is deleted, anonymized or archived, or a retention rule changes.",
+      "risk": "irreversible loss",
+      "brother_asks": "Exactly which rows are in scope, what proves the count before the delete, and what restores them?",
+      "proof_closes": "The scope query and its count quoted, a dry run over the same predicate, and a restore performed from the retention copy (E11, E16, E8).",
+      "source": "7.3 BE-18"
+    },
+    {
+      "id": "BE-19",
+      "situation": "A production incident is being fixed under time pressure.",
+      "risk": "symptom-only patch",
+      "brother_asks": "What is the root cause as opposed to the symptom, and which sibling call sites share it?",
+      "proof_closes": "The incident replayed against the unfixed code and failing, the same replay passing after, the regression test kept, and the search over sibling call sites reported with its hit count (E9, E6).",
+      "source": "7.3 BE-19"
+    },
+    {
+      "id": "BE-20",
+      "situation": "A module, service or monolith boundary moves, or a new service is split out.",
+      "risk": "hidden coupling",
+      "brother_asks": "What crosses this boundary today that should not, and which invariant defines the boundary?",
+      "proof_closes": "A dependency graph before and after, plus a boundary invariant test that fails when a forbidden import is reintroduced (E10, E3).",
+      "source": "7.3 BE-20"
+    },
+    {
+      "id": "BE-KH-01",
+      "situation": "Idempotency patterns. Applies whenever a caller, a queue or a scheduler can deliver the same intent more than once.",
+      "brother_asks": "What is the key, who mints it, how long is it kept, and is the dedupe record written in the same transaction as the effect?",
+      "cost": "a stored key per operation, a uniqueness constraint on the hot path, and a retention decision for the key table.",
+      "prevents": "duplicate charges, duplicate emails, double state transitions (20 F08).",
+      "proof_closes": "The same request replayed under one key with a state count assertion (E3, E4).",
+      "source": "7.4"
+    },
+    {
+      "id": "BE-KH-02",
+      "situation": "Transactional outbox and inbox. Applies when a database write and a message publish must both happen or neither.",
+      "brother_asks": "Is the message written to an outbox table in the same transaction as the row, and who drains it?",
+      "cost": "an extra table, a relay process, and end to end latency measured in the relay interval.",
+      "prevents": "the row committed with no event, or the event sent with no row (20 F04, F08).",
+      "proof_closes": "A crash injected between commit and publish, with the relay recovering the message (E12, E9).",
+      "source": "7.4"
+    },
+    {
+      "id": "BE-KH-03",
+      "situation": "Exactly-once myths against practical delivery semantics. Applies the first time a design says exactly once.",
+      "brother_asks": "Is the guarantee at-most-once, at-least-once, or at-least-once plus an idempotent consumer, and which of the three is written down?",
+      "cost": "accepting duplicates as normal and paying for dedupe at the consumer, instead of chasing a guarantee the transport does not offer.",
+      "prevents": "a design whose correctness rests on a promise no broker keeps (20 F03, F08).",
+      "proof_closes": "A duplicate delivered deliberately and the consumer state asserted unchanged (E4).",
+      "source": "7.4"
+    },
+    {
+      "id": "BE-KH-04",
+      "situation": "Expand and contract migrations. Applies whenever schema and code deploy separately.",
+      "brother_asks": "Which release adds the column, which backfills it, which starts reading it, and which drops the old one?",
+      "cost": "three or four deploys instead of one, and a period in which both shapes are written.",
+      "prevents": "the old binary meeting the new schema and failing on every request (20 F04).",
+      "proof_closes": "Both binary versions run against the intermediate schema, and the reverse step executed (E11, E7, E16).",
+      "source": "7.4"
+    },
+    {
+      "id": "BE-KH-05",
+      "situation": "Optimistic and pessimistic concurrency. Applies at every read-then-write on shared state.",
+      "brother_asks": "Is contention rare enough for a version column and a retry, or frequent enough to be worth a lock?",
+      "cost": "optimistic costs retries under contention; pessimistic costs held locks, queueing and deadlock risk.",
+      "prevents": "the lost update, where the second writer overwrites the first silently (20 F08).",
+      "proof_closes": "Two writers run concurrently against one record with the final state asserted (E3).",
+      "source": "7.4"
+    },
+    {
+      "id": "BE-KH-06",
+      "situation": "Pagination and stable ordering. Applies to any list endpoint or batch reader.",
+      "brother_asks": "Is the sort key unique and immutable, and what happens to a cursor when a row is inserted or deleted mid scan?",
+      "cost": "a keyset cursor is harder to express than an offset and forbids arbitrary jumps to page N.",
+      "prevents": "rows skipped or served twice across pages, and a consumer that silently misses records (20 F07).",
+      "proof_closes": "A full paginated scan with concurrent inserts, reconciled against a direct count (E8, E4).",
+      "source": "7.4"
+    },
+    {
+      "id": "BE-KH-07",
+      "situation": "API versioning and compatibility. Applies the moment an external caller exists.",
+      "brother_asks": "Is this change additive, and if not, is the old shape served in parallel and for how long?",
+      "cost": "two code paths and two test suites for the length of the deprecation window.",
+      "prevents": "a caller you do not control breaking on a deploy you thought was internal (20 F04).",
+      "proof_closes": "Consumer fixtures from the real callers replayed against the new build (E7, E9).",
+      "source": "7.4"
+    },
+    {
+      "id": "BE-KH-08",
+      "situation": "AuthZ testing. Applies to every change on an authenticated path, not only to changes of the auth code.",
+      "brother_asks": "Which role and tenant combinations exist, and which cells of that matrix must be a refusal?",
+      "cost": "the matrix grows as roles times resources, so it is written table-driven or it is not written.",
+      "prevents": "the allowed cases passing while an unauthorized case was never tried (20 F09, F06).",
+      "proof_closes": "The matrix run with forbidden cells asserted, plus a mutation removing the check that fails it (E14, E6).",
+      "source": "7.4"
+    },
+    {
+      "id": "BE-KH-09",
+      "situation": "Rate limiting and backpressure. Applies when a producer can outpace a consumer, or a caller can outpace a provider.",
+      "brother_asks": "What is the limit, is it per tenant or global, and does the caller shed load or queue it forever?",
+      "cost": "rejected requests a client must handle, plus a counter store with its own failure mode.",
+      "prevents": "one tenant starving the rest, and unbounded queue growth ending in memory exhaustion (20 F13, F10).",
+      "proof_closes": "A load injection above the limit with the rejection path and the recovery both observed (E12, E13).",
+      "source": "7.4"
+    },
+    {
+      "id": "BE-KH-10",
+      "situation": "Retry, backoff and jitter. Applies to every call that crosses a process boundary.",
+      "brother_asks": "Is the attempt count and total budget bounded, is the delay exponential, and is jitter applied?",
+      "cost": "higher tail latency on failures, and a longer time to surface a real outage.",
+      "prevents": "the synchronized retry storm that turns a partial outage into a total one (20 F13).",
+      "proof_closes": "A fault that keeps failing, with the attempt count and total elapsed time asserted (E12).",
+      "source": "7.4"
+    },
+    {
+      "id": "BE-KH-11",
+      "situation": "Timeout and cancellation propagation. Applies wherever a request calls something that calls something else.",
+      "brother_asks": "Does every outbound call carry a deadline, and is the remaining budget passed down rather than restarted at each hop?",
+      "cost": "threading a deadline through every layer, and choosing a number that will sometimes be wrong.",
+      "prevents": "the caller giving up while the callee keeps working, holding a connection and a transaction open (20 F08, F13).",
+      "proof_closes": "A slow dependency injected, with the caller's give-up time and the callee's cancellation both observed (E12).",
+      "source": "7.4"
+    },
+    {
+      "id": "BE-KH-12",
+      "situation": "Circuit breaking. Applies when a dependency's failure is better absorbed than retried.",
+      "brother_asks": "What opens the breaker, what closes it, and what does the caller return while it is open?",
+      "cost": "a degraded answer during the open window, and a breaker whose own thresholds need tuning.",
+      "prevents": "every request queueing behind a dead dependency until the service itself falls over (20 F10, F13).",
+      "proof_closes": "The dependency taken down, the breaker opening, the fallback served, and recovery observed (E12).",
+      "source": "7.4"
+    },
+    {
+      "id": "BE-KH-13",
+      "situation": "Cache invalidation patterns. Applies whenever a read is served from anywhere but the system of record.",
+      "brother_asks": "Is this write-through, write-behind or expiry only, what is the maximum staleness the caller can accept, and is the tenant in the key?",
+      "cost": "either a slower write path or a window of stale reads; there is no third option.",
+      "prevents": "a stale or cross tenant read that looks exactly like a correct one (20 F07, F09).",
+      "proof_closes": "A write then read replay, plus a cross tenant read asserting no leakage (E4, E14).",
+      "source": "7.4"
+    },
+    {
+      "id": "BE-KH-14",
+      "situation": "Distributed locks and fencing tokens. Applies when only one worker may act at a time across processes.",
+      "brother_asks": "What happens when the lock expires while its holder is still running, and does the protected resource check a fencing token?",
+      "cost": "a lock service on the critical path, plus a token check at the resource itself.",
+      "prevents": "two holders each believing they are exclusive after a pause, with the older one writing last (20 F08).",
+      "proof_closes": "A holder paused past its lease, with the fenced write rejected (E3, E12).",
+      "source": "7.4"
+    },
+    {
+      "id": "BE-KH-15",
+      "situation": "Queue, dead letter queue and replay operations. Applies to every asynchronous consumer once it reaches production.",
+      "brother_asks": "After how many failures does a message move to the dead letter queue, who watches that queue, and how is a message replayed safely?",
+      "cost": "an operational surface someone must own, and a replay path that is itself a write path.",
+      "prevents": "silent message loss, and a replay that duplicates every effect it re-drives (20 F11).",
+      "proof_closes": "A poison message driven to the dead letter queue and replayed, with the effect counted once (E12, E9, E3).",
+      "source": "7.4"
+    },
+    {
+      "id": "BE-KH-16",
+      "situation": "Data retention and deletion. Applies to any deletion, anonymization or retention rule change.",
+      "brother_asks": "What is the exact predicate, what does it count before it runs, what keeps a recoverable copy, and for how long?",
+      "cost": "a dry run and a retention copy on every deletion, including the routine ones.",
+      "prevents": "an over-broad predicate destroying rows nobody can name afterwards (20 F11).",
+      "proof_closes": "The count quoted, the dry run compared to it, and a restore performed from the copy (E11, E16, E8).",
+      "source": "7.4"
+    },
+    {
+      "id": "BE-KH-17",
+      "situation": "Rolling deploy compatibility. Applies whenever more than one instance runs and they are not replaced at once.",
+      "brother_asks": "For the minutes both versions are live, can each read what the other writes, in both directions?",
+      "cost": "a compatibility window in which no shape can be removed, only added.",
+      "prevents": "a deploy that works when finished and fails throughout its own rollout (20 F04).",
+      "proof_closes": "Both versions run against one datastore with traffic through each (E7, E11).",
+      "source": "7.4"
+    },
+    {
+      "id": "BE-KH-18",
+      "situation": "Incident to regression test conversion. Applies at the end of every incident, before the fix is called done.",
+      "brother_asks": "Does a test exist that fails on the pre-fix code for the reason the incident happened, and is it kept in the suite?",
+      "cost": "the fixture the incident needs is often awkward to build while the pressure is still on.",
+      "prevents": "the same outage returning because the only evidence of it was a chat thread (20 F16).",
+      "proof_closes": "The test run against the unfixed commit and failing, then against the fix and passing, both quoted (E9, E6).",
+      "source": "7.4"
+    }
+  ],
+  "tool_adapters": [
+    {
+      "id": "pytest",
+      "purpose": "native Python test runner: the repository's own functional, contract and fault tests.",
+      "detect": "python3 -m pytest --version",
+      "no_data": "NO-DATA: pytest is not installed here; Brother reads whatever runner the repository declares instead, and never installs one (persona doc 22.1).",
+      "source": "7.5"
+    },
+    {
+      "id": "unittest",
+      "purpose": "the stdlib runner, used where a Python repository has no third party runner at all.",
+      "detect": "python3 -c \"import unittest; print(unittest.__name__)\"",
+      "no_data": "NO-DATA: no Python present; the language of this repository decides the runner.",
+      "source": "7.5"
+    },
+    {
+      "id": "jest-vitest",
+      "purpose": "JavaScript and TypeScript test runners.",
+      "detect": "npx --no-install jest --version || npx --no-install vitest --version",
+      "no_data": "NO-DATA: neither runner is installed in this repository; Brother does not add one.",
+      "source": "7.5"
+    },
+    {
+      "id": "junit-build",
+      "purpose": "JVM test execution through the project's own build tool.",
+      "detect": "mvn -v || gradle -v",
+      "no_data": "NO-DATA: no Maven or Gradle on PATH; JVM tests were not run. Note that neither pom.xml nor build.gradle is a manifest this pack's manifest_strings can read, so a JVM service is detected by its interface and migration files instead.",
+      "source": "7.5"
+    },
+    {
+      "id": "go-test",
+      "purpose": "Go test execution including its race detector, the cheapest concurrency evidence available.",
+      "detect": "go version",
+      "no_data": "NO-DATA: no Go toolchain; the concurrency claim rests on something else, or it is a gap.",
+      "source": "7.5"
+    },
+    {
+      "id": "cargo-test",
+      "purpose": "Rust test execution.",
+      "detect": "cargo --version",
+      "no_data": "NO-DATA: no cargo on PATH.",
+      "source": "7.5"
+    },
+    {
+      "id": "openapi",
+      "purpose": "the published HTTP contract, and the file a compatibility diff is taken against.",
+      "detect": "ls openapi.yaml openapi.yml openapi.json",
+      "no_data": "NO-DATA: no OpenAPI document in this repository; interface compatibility has no machine readable baseline and must be argued from tests.",
+      "source": "7.5"
+    },
+    {
+      "id": "json-schema",
+      "purpose": "event and payload schemas outside HTTP.",
+      "detect": "grep -rl '\"$schema\"' --include=*.json .",
+      "no_data": "NO-DATA: no JSON Schema documents found.",
+      "source": "7.5"
+    },
+    {
+      "id": "graphql-schema",
+      "purpose": "the GraphQL type system as a contract surface.",
+      "detect": "find . -name '*.graphql' -print -quit",
+      "no_data": "NO-DATA: no GraphQL schema in this repository.",
+      "source": "7.5"
+    },
+    {
+      "id": "protobuf-grpc",
+      "purpose": "Protobuf and gRPC message and service definitions, where wire compatibility is decided by field numbers.",
+      "detect": "protoc --version",
+      "no_data": "NO-DATA: protoc is not installed; a .proto change was read as text and never compiled.",
+      "source": "7.5"
+    },
+    {
+      "id": "contract-harness",
+      "purpose": "consumer driven contract verification, where the team already runs one.",
+      "detect": "npx --no-install pact-broker version",
+      "no_data": "NO-DATA: no contract harness present; consumer compatibility rests on recorded fixtures instead.",
+      "source": "7.5"
+    },
+    {
+      "id": "db-migration",
+      "purpose": "the migration tool that owns forward and reverse, whichever one this repository uses.",
+      "detect": "alembic --version || flyway -v || liquibase --version || npx --no-install prisma --version || bin/rails -v || python3 manage.py showmigrations --list",
+      "no_data": "NO-DATA: no migration tool detected; a schema change here is hand written and its reverse path has no tool to run it.",
+      "source": "7.5"
+    },
+    {
+      "id": "load-perf",
+      "purpose": "latency and throughput measurement, used only where the repository already has it.",
+      "detect": "k6 version || locust --version || jmeter -v",
+      "no_data": "NO-DATA: no load tool present; a performance delta was measured by timing the existing tests, or not at all.",
+      "source": "7.5"
+    },
+    {
+      "id": "static-security",
+      "purpose": "pattern based static analysis whose findings can be read as evidence rather than as noise.",
+      "detect": "semgrep --version || codeql version",
+      "no_data": "NO-DATA: no static analyzer available; security claims rest on the authorization matrix alone.",
+      "source": "7.5"
+    },
+    {
+      "id": "dependency-scanner",
+      "purpose": "known vulnerability comparison across a dependency upgrade (BE-13).",
+      "detect": "pip-audit --version || npm audit --help",
+      "no_data": "NO-DATA: no scanner available; the upgrade's security half is unproven and says so.",
+      "source": "7.5"
+    },
+    {
+      "id": "containers",
+      "purpose": "a disposable integration environment for fault injection and migration rehearsal.",
+      "detect": "docker compose version",
+      "no_data": "NO-DATA: Docker is unavailable; fault injection ran in process, or it did not run.",
+      "source": "7.5"
+    },
+    {
+      "id": "observability",
+      "purpose": "evidence that the new behavior is visible in production: traces, structured logs, error reporting.",
+      "detect": "grep -rl opentelemetry . || grep -rl sentry .",
+      "no_data": "NO-DATA: no tracing or error reporting configuration found; the observability receipt field then records what was added by hand, or states that nothing was.",
+      "source": "7.5"
+    }
+  ],
+  "provenance": {
+    "document": "BROTHER-PERSONA-USE-CASE-LIBRARY-STRATEGY-2026-09-03 (private to this hub, quoted by section number only)",
+    "sections": [
+      "3.1",
+      "3.2",
+      "3.3",
+      "4.1",
+      "4.2",
+      "5.1",
+      "5.2",
+      "6.1",
+      "6.2",
+      "7.1",
+      "7.2",
+      "7.3",
+      "7.4",
+      "7.5",
+      "7.6",
+      "20",
+      "22.1",
+      "22.3",
+      "25.1",
+      "25.2"
+    ],
+    "note": "7.1 to 7.6 are this pack's own persona section; 3.1 fills work_classes, 3.2 risk_classes, 3.3 the lens id, 4.1 stage 3 the challenge question, 4.2 the question budget, 5.1 the manifest shape, 5.2 why this pack composes with core rather than replacing it, 6.1 the evidence families, 6.2 the independence rule the proof lines assume, 20 the failure ids quoted in know_how, 22 the adapter rule, 25 the dangerous actions."
+  },
+  "fixture": {
+    "must_infer": [
+      "openapi.yaml",
+      "alembic.ini",
+      "migrations/versions/0001_create_orders.py",
+      "db/migrate/20260904_create_orders.rb",
+      "app/controllers/orders_controller.py",
+      "proto/orders.proto"
+    ],
+    "manifest_string": "fastapi",
+    "manifest_file": "requirements.txt",
+    "must_infer_why": "a service repository: a published HTTP contract, a migration tool config and its versions directory, a controller, a service definition, and a web framework named in the manifest. Each path alone is enough; the list is what a real service looks like.",
+    "must_not_infer": [
+      "README.md",
+      "src/main.py",
+      "docs/architecture.md",
+      "a.ipynb",
+      "b.ipynb",
+      "mlruns/0/meta.yaml",
+      "requirements.txt",
+      "dvc.yaml",
+      "dbt_project.yml"
+    ],
+    "must_not_infer_why": "a plain tree must infer nothing, and the data-science fixture must still infer data-science: backend-senior sorts before data-science, so it is tried first and must match neither a notebook, an mlruns directory, a dvc or dbt file, nor a bare requirements.txt whose content names mlflow."
+  },
+  "required_evidence_families_why": {
+    "E7": "contract and compatibility tests are what make an interface change reviewable at all: the persona's promise is that a caller does not break, and BE-01, BE-02, BE-03 and BE-17 all close on a schema or consumer contract (persona doc 6.1 E7, 7.3).",
+    "E3": "the invariants this lens lives on are stated as properties, not examples: an idempotent operation repeated N times changes state once, a balance never goes negative, a layer never imports inward (persona doc 6.1 E3, 7.3 BE-04, BE-08, BE-16).",
+    "E12": "the failure modes a backend engineer is paid to own are timeouts, partial failures, retries, restarts and poison messages, and none of them appear in a green happy-path suite (persona doc 6.1 E12, 7.3 BE-06, BE-07, BE-14).",
+    "E14": "auth and tenant boundaries are the class of defect where a passing test suite and a data leak coexist comfortably; the forbidden cells have to be asserted, not assumed (persona doc 6.1 E14, 7.3 BE-10, BE-11).",
+    "E6": "mutation is the only family that answers whether the other four would have failed; it is the estate's own green-can-prove-nothing rule and the persona doc calls it central (persona doc 6.1 E6).",
+    "E15": "a correct change nobody can see fail in production is an unresolved operational risk, and this pack's receipt states the observability delta rather than leaving it blank (persona doc 6.1 E15, 7.6, 20 F12)."
+  },
+  "receipt_fields_details": {
+    "interfaces_changed": {
+      "meaning": "every published surface this change touched: route paths and methods, event or message payloads, GraphQL or Protobuf messages, and any CLI or library signature callers depend on.",
+      "filled_by": "command: git diff --name-only <base>..HEAD limited to the paths in detection_signals, plus the routes or schema entries inside them; NO-DATA when no interface file changed and the diff touches only internal code."
+    },
+    "compatibility_window_tested": {
+      "meaning": "which combination of old and new binary against old and new schema was actually exercised, and how long both are expected to coexist during the rolling deploy.",
+      "filled_by": "command: the repository's own contract or consumer-fixture test run, named and quoted; NO-DATA when only one version was ever run."
+    },
+    "migration_direction_and_rollback": {
+      "meaning": "whether the migration expands, contracts or does both in one step, and whether the reverse path was run rather than written down.",
+      "filled_by": "command: the migration tool's own up then down invocation (alembic upgrade head then alembic downgrade -1, or the Flyway, Liquibase, Prisma, Rails or Django equivalent), both exit codes quoted; NO-DATA when the change carries no migration."
+    },
+    "idempotency_evidence": {
+      "meaning": "what proves that repeating this operation with the same key changes state once, naming the key and where it is stored.",
+      "filled_by": "command: the replay or duplicate-delivery test, with the state count assertion in its output; NO-DATA when the path cannot be reached twice, stated with why."
+    },
+    "concurrency_evidence": {
+      "meaning": "what proves the update survives two writers, a race or a restart, naming the lock, version column or conditional update that makes it safe.",
+      "filled_by": "command: the concurrent fixture or property test; NO-DATA when the path is single-writer by construction, stated with what makes it so."
+    },
+    "auth_tenant_matrix_status": {
+      "meaning": "which roles and tenants were exercised against this path, including the cells that must be refused.",
+      "filled_by": "file: the matrix as committed test cases, with the refusal cells listed; NO-DATA when the change is on an unauthenticated internal path, stated with why."
+    },
+    "fault_paths_exercised": {
+      "meaning": "which failures were actually injected: dependency down, timeout, rate limit, partial write, poison message, restart mid run.",
+      "filled_by": "command: the fault injection test run; NO-DATA when nothing was injected, which is a gap and never a pass."
+    },
+    "performance_delta": {
+      "meaning": "the measured before and after on the same input, with its unit, not an impression that it feels faster.",
+      "filled_by": "command: the repository's own benchmark or load tool (k6, Locust, JMeter, or a timed test) run on both revisions; NO-DATA when performance was not a goal and no baseline exists."
+    },
+    "observability_change": {
+      "meaning": "what new log line, metric, span or alert lets someone detect this behavior failing in production, and what was removed.",
+      "filled_by": "command: git diff over the logging, metric and tracing call sites; NO-DATA when nothing was added and the new failure branch is therefore silent, which is itself a finding."
+    },
+    "unresolved_operational_risks": {
+      "meaning": "the plain-words list of what is still not proven, so the person accepting the change knows what they are accepting.",
+      "filled_by": "file: every NO-DATA in the fields above, carried forward by name; never emptied by rewording a NO-DATA into a pass."
+    }
+  }
+}

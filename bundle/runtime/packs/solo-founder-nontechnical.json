@@ -1,0 +1,648 @@
+{
+  "lens": "solo-founder-nontechnical",
+  "version": "1.0.0",
+  "detection_signals": {
+    "paths": [
+      "*.webflow.json",
+      "*.n8n.json",
+      "*.blueprint.json",
+      "no-code/",
+      "automation-exports/",
+      "FOUNDER-BRIEF.md",
+      "founder-brief.md"
+    ],
+    "manifest_strings": [
+      "@webflow/webflow-cli"
+    ],
+    "note": "A nontechnical founder's workspace is not a developer's repository, so these signals are deliberately no-code and low-code artifacts: a site builder export (*.webflow.json, and the site builder's own command line named inside package.json), an automation platform export (*.n8n.json, *.blueprint.json), the two folder names this pack declares for a founder who keeps such exports beside a written brief (no-code/, automation-exports/), and the brief itself in a tree that is otherwise only documents. Deliberately NOT used: *.csv, an unprefixed blueprint.json, vercel.json, netlify.toml, supabase/, firebase.json, or package.json on its own, because every one of those also sits in an ordinary developer repository and would make this lens win everywhere. The deploy, database, payment and error services of persona doc 17.7 are therefore carried in tool_adapters, which are detected only once a lens is already chosen, and never in detection. Verified against this hub checkout: git ls-files matches zero of these paths, which is the intended result for a developer tree."
+  },
+  "challenge_question": "Who is waiting for this, and what does it cost you if it breaks in front of them? Answer that first, then start with the smallest version one real person can use.",
+  "question_budget": {
+    "min": 1,
+    "max": 3,
+    "work_shape": "Founder MVP feature (persona doc 4.2: 'Founder MVP feature' 1-3). The same table gives no fixed cap to a high-risk irreversible, security or payment change, so any forcing class below lifts this ceiling and asks whatever the decision needs."
+  },
+  "required_evidence_families": [
+    "E1",
+    "E2",
+    "E11",
+    "E16"
+  ],
+  "required_evidence_families_why": {
+    "E1": "A worked example the founder can read for herself: this input, this result. Persona doc 6.1 calls this the weakest family, and it is here because it is the one a nontechnical reader can check personally, not because it settles anything on its own.",
+    "E2": "The expected answer comes from the business rule, the price list, the contract or the payment provider's own records, never from the software being checked. Persona doc 6.1 names this as especially important for money.",
+    "E11": "Show what a change would do before it does it: the plan for a database change, the difference a deploy would apply, the bill an action would add. For a founder who cannot read the change itself, this is what makes an irreversible step visible in advance.",
+    "E16": "Prove the way back works. Persona doc 17.5 requires a restore actually run, not a copy merely taken, and this pack refuses to call a launch ready without one.",
+    "note": "The E ids stay a plain list of strings above so this manifest keeps the exact value shape of scripts/packs/data-science.json; the reasons live in this parallel key rather than inside that list for the same reason. Persona doc 6.3: the target is risk coverage, not a count of checks."
+  },
+  "receipt_fields": [
+    "what_changed_in_plain_words",
+    "what_would_go_wrong_if_this_is_wrong",
+    "how_to_undo_it",
+    "user_or_business_outcome",
+    "validation_evidence",
+    "new_recurring_cost_or_dependency",
+    "security_data_or_payment_impact",
+    "operational_burden_added",
+    "production_readiness_status",
+    "backup_and_restore_status",
+    "vendor_lock_in_change",
+    "deferred_items_with_reason",
+    "founder_acceptance"
+  ],
+  "receipt_field_details": [
+    {
+      "name": "what_changed_in_plain_words",
+      "meaning": "One sentence somebody who has never seen the code would understand.",
+      "filled_by": "written by hand at close, in plain words; NO-DATA is not accepted here"
+    },
+    {
+      "name": "what_would_go_wrong_if_this_is_wrong",
+      "meaning": "The worst thing a customer would notice if this change is mistaken.",
+      "filled_by": "written by hand at close; NO-DATA is not accepted here"
+    },
+    {
+      "name": "how_to_undo_it",
+      "meaning": "The steps that put things back, and roughly how long they take.",
+      "filled_by": "written by hand at close, naming the command or the button; NO-DATA when nothing can undo it, which is itself a forcing class"
+    },
+    {
+      "name": "user_or_business_outcome",
+      "meaning": "What this is for, said as a result for a person, not as work done.",
+      "filled_by": "written by hand at close (persona doc 17.8)"
+    },
+    {
+      "name": "validation_evidence",
+      "meaning": "What tells you anybody actually wants this.",
+      "filled_by": "a usage figure, a request from a named customer, or NO-DATA when nobody has asked yet (persona doc 17.8 names NO-DATA here explicitly)"
+    },
+    {
+      "name": "new_recurring_cost_or_dependency",
+      "meaning": "What this adds to the monthly bill, and whose service you now depend on.",
+      "filled_by": "the provider's own billing page or bill file; NO-DATA when the bill for this has not been seen yet"
+    },
+    {
+      "name": "security_data_or_payment_impact",
+      "meaning": "Whether signing in, personal records or money were touched.",
+      "filled_by": "the forcing classes this change hit, listed by name; NO-DATA is not accepted when a forcing class fired"
+    },
+    {
+      "name": "operational_burden_added",
+      "meaning": "The new thing you now have to watch, renew or answer.",
+      "filled_by": "written by hand at close; NO-DATA when nothing was added"
+    },
+    {
+      "name": "production_readiness_status",
+      "meaning": "Where this sits against the launch list.",
+      "filled_by": "one of proven, not proven, human decision, external review recommended, deferred by founder (persona doc 17.5 gives exactly these five)"
+    },
+    {
+      "name": "backup_and_restore_status",
+      "meaning": "When a copy was last taken, and when one was last put back.",
+      "filled_by": "the date and place of the last restore actually run; NO-DATA when only copies exist and none has been restored"
+    },
+    {
+      "name": "vendor_lock_in_change",
+      "meaning": "Whether this made it harder to leave a supplier.",
+      "filled_by": "written by hand at close naming the supplier; NO-DATA when no supplier was added or deepened"
+    },
+    {
+      "name": "deferred_items_with_reason",
+      "meaning": "What was left undone on purpose, and why.",
+      "filled_by": "a list written at close; an empty list is a claim that nothing was left, never a NO-DATA"
+    },
+    {
+      "name": "founder_acceptance",
+      "meaning": "Your own yes, in your own words, to whatever is unproven here.",
+      "filled_by": "the founder's own answer; NO-DATA blocks any close that carries a not-proven line (persona doc 25.1, final delivered-result acceptance)"
+    }
+  ],
+  "forcing_classes": [
+    {
+      "id": "money moves",
+      "label": "Money moves",
+      "why": "the change touches a payment, billing, pricing, refund, payout or checkout path, visible in the diff as an edit under a payments or billing directory, a call into a payment provider's library, a handler for payment events, or an amount, currency or price field"
+    },
+    {
+      "id": "customer data stored",
+      "label": "Customer data is stored",
+      "why": "the change adds or widens a place personal records are kept, visible as a new column, table, bucket, log line or third party call carrying a name, email address, phone number, postal address, payment detail or uploaded file"
+    },
+    {
+      "id": "public claim changes",
+      "label": "A public page changes a claim",
+      "why": "the change edits text on a page anyone can reach that states a price, a guarantee, a security or privacy promise, an availability figure, or a terms or refund condition, visible as a diff in a marketing page, pricing page, terms file or landing copy file"
+    },
+    {
+      "id": "account setting changes",
+      "label": "An account setting changes",
+      "why": "the change alters who or what can reach a live service, visible as an edit to an access rule, permission or role file, an environment or secret file, a domain or DNS record, a firewall or network rule, or a billing plan or spending limit setting"
+    },
+    {
+      "id": "irreversible action",
+      "label": "Anything irreversible",
+      "why": "the change contains a step with no way back, visible as a drop, delete, truncate, purge, destroy, overwrite or force push instruction, a schema change that removes a column or table, or a data or file deletion with no copy taken first"
+    }
+  ],
+  "work_classes": [
+    "feature / capability",
+    "defect / incident correction",
+    "database/schema migration",
+    "infrastructure/configuration change",
+    "release / deployment",
+    "incident investigation",
+    "performance/cost optimization",
+    "security/privacy hardening",
+    "dependency/platform migration",
+    "documentation/runbook change",
+    "spike/research with no production mutation"
+  ],
+  "risk_classes": [
+    {
+      "id": "irreversibility",
+      "plain": "If this is wrong, can you put it back the way it was?"
+    },
+    {
+      "id": "production write",
+      "plain": "Does this change the live thing real people are using right now?"
+    },
+    {
+      "id": "data loss/corruption",
+      "plain": "Could this destroy, duplicate or quietly alter records you cannot recreate?"
+    },
+    {
+      "id": "security/permission",
+      "plain": "Does this change who can get in, or what they can reach once inside?"
+    },
+    {
+      "id": "money",
+      "plain": "Does this move money, change what somebody is charged, or change your own bill?"
+    },
+    {
+      "id": "customer blast radius",
+      "plain": "If this goes wrong, how many people notice, and are any of them paying?"
+    },
+    {
+      "id": "compatibility",
+      "plain": "Does anything else you or a customer built depend on this staying the same?"
+    },
+    {
+      "id": "compliance/privacy",
+      "plain": "Does this touch personal or regulated information about a real person?"
+    },
+    {
+      "id": "operational recoverability",
+      "plain": "If this breaks at three in the morning, can you find out and recover alone?"
+    },
+    {
+      "id": "evidence uncertainty",
+      "plain": "How hard is it to actually show this worked, rather than assume it did?"
+    }
+  ],
+  "dangerous_actions": [
+    "opening a paid product to strangers, which is your decision and never this pack's",
+    "moving, capturing, refunding or paying out real money",
+    "deleting or overwriting real customer records, files or accounts",
+    "widening who can reach the live service, including adding a person, a key or an open address",
+    "accepting a security, privacy, legal or compliance risk on your behalf",
+    "changing a claim on a public page about price, safety, privacy or availability",
+    "starting, changing or ending a paid plan for customers who already have one",
+    "any step with no way back, including a destructive database change with no copy taken first",
+    "signing you up to a new paid supplier, or raising a spending limit",
+    "declaring the product ready to launch: this pack reports proven, not proven, human decision, external review recommended or deferred by founder, and the launch itself stays yours"
+  ],
+  "know_how": [
+    {
+      "id": "SF-01",
+      "situation": "You have an idea and want to start building it.",
+      "brother_asks": "Who is the first person who will use this, and what do they do with it in their first five minutes?",
+      "proof_that_closes_it": "One slice written down that a real person can finish start to end, with everything else listed as waiting.",
+      "source": "17.4"
+    },
+    {
+      "id": "SF-02",
+      "situation": "Somebody asked for a feature and you are deciding whether to build it.",
+      "brother_asks": "How many people asked for this, and what does it add to your monthly bill and to what you have to look after?",
+      "proof_that_closes_it": "A short note putting the value asked for beside the cost added, and your own written yes or no.",
+      "source": "17.4"
+    },
+    {
+      "id": "SF-03",
+      "situation": "You are choosing what to build the product on, from nothing.",
+      "brother_asks": "If you handed this to somebody else in a year, could they run it without you?",
+      "proof_that_closes_it": "A written choice naming the boring option, its monthly cost, and how you would move off it later.",
+      "source": "17.4"
+    },
+    {
+      "id": "SF-04",
+      "situation": "You are adding or changing how people sign in.",
+      "brother_asks": "Besides signing in yourself, have you tried resetting a forgotten password and signing out on a second device?",
+      "proof_that_closes_it": "A run through sign up, sign in, forgotten password and sign out, with what you saw at each step saved.",
+      "source": "17.4"
+    },
+    {
+      "id": "SF-05",
+      "situation": "More than one company or team will use the same product.",
+      "brother_asks": "If two customers are using it at the same moment, what stops one seeing the other's records?",
+      "proof_that_closes_it": "A check that deliberately tries to read another customer's records and is refused.",
+      "source": "17.4"
+    },
+    {
+      "id": "SF-06",
+      "situation": "You are taking money through a payment provider.",
+      "brother_asks": "If the provider sends the same payment message twice, does your customer get charged or credited twice?",
+      "proof_that_closes_it": "The same payment message replayed twice, with the account changing exactly once.",
+      "source": "17.4"
+    },
+    {
+      "id": "SF-07",
+      "situation": "What a customer can use depends on what they pay for.",
+      "brother_asks": "When somebody cancels, or a card fails, at what exact moment do they lose access?",
+      "proof_that_closes_it": "The list of who paid set against the list of who has access, with nothing left over on either side.",
+      "source": "17.4"
+    },
+    {
+      "id": "SF-08",
+      "situation": "You are changing the shape of the stored records.",
+      "brother_asks": "Do you have a copy taken before this change, and have you ever put one back?",
+      "proof_that_closes_it": "A copy taken first, and a restore actually run into a spare place, with the date.",
+      "source": "17.4"
+    },
+    {
+      "id": "SF-09",
+      "situation": "People will upload or download files.",
+      "brother_asks": "Who else could open these files by guessing the address, and what does keeping them cost as they pile up?",
+      "proof_that_closes_it": "An attempt to open somebody else's file that is refused, plus this month's storage line on the bill.",
+      "source": "17.4"
+    },
+    {
+      "id": "SF-10",
+      "situation": "The product sends email to people.",
+      "brother_asks": "Where do these actually land, and how does somebody stop receiving them?",
+      "proof_that_closes_it": "A test send that arrives in an ordinary inbox, and an unsubscribe that stops the next one.",
+      "source": "17.4"
+    },
+    {
+      "id": "SF-11",
+      "situation": "Work happens quietly in the background after somebody clicks.",
+      "brother_asks": "If this fails at three in the morning, how do you find out?",
+      "proof_that_closes_it": "One of these made to fail on purpose, showing the retry and the alert that reached you.",
+      "source": "17.4"
+    },
+    {
+      "id": "SF-12",
+      "situation": "The product calls somebody else's service to do part of its work.",
+      "brother_asks": "What happens to your customer, and to your bill, if that service is slow or down for an hour?",
+      "proof_that_closes_it": "A run with the other service switched off, showing a clear message to the customer and a spend that stopped at a limit.",
+      "source": "17.4"
+    },
+    {
+      "id": "SF-13",
+      "situation": "The product needs keys and passwords to reach other services.",
+      "brother_asks": "Could any of these be read by somebody who opens your page in a browser?",
+      "proof_that_closes_it": "A search of everything the browser receives, and of the logs, finding none of them.",
+      "source": "17.4"
+    },
+    {
+      "id": "SF-14",
+      "situation": "You are about to let strangers in and charge them.",
+      "brother_asks": "Of signing in, money, records, recovery and alerts, which are proven and which are you accepting unproven?",
+      "proof_that_closes_it": "A list where every line reads proven, not proven, human decision, external review recommended, or deferred by founder.",
+      "source": "17.5"
+    },
+    {
+      "id": "SF-15",
+      "situation": "You want to be sure you could get your data back.",
+      "brother_asks": "When did you last put a copy back, rather than just take one?",
+      "proof_that_closes_it": "A restore run into a spare place, with the date and a note of what came back.",
+      "source": "17.4"
+    },
+    {
+      "id": "SF-16",
+      "situation": "You want to know when the product breaks for somebody who is not you.",
+      "brother_asks": "If a stranger hit an error right now, where would that show up, and how soon?",
+      "proof_that_closes_it": "An error caused on purpose, and the message that reached you, with the time between the two.",
+      "source": "17.4"
+    },
+    {
+      "id": "SF-17",
+      "situation": "Anyone on the internet can reach parts of the product.",
+      "brother_asks": "What stops one person calling this ten thousand times tonight?",
+      "proof_that_closes_it": "A burst of repeated calls that gets slowed or refused, and the spending ceiling that held.",
+      "source": "17.4"
+    },
+    {
+      "id": "SF-18",
+      "situation": "The pieces you build on have newer versions available.",
+      "brother_asks": "Is this closing a known security hole, or is it only newer?",
+      "proof_that_closes_it": "The list of security warnings before and after, plus the main customer journey still working.",
+      "source": "17.4"
+    },
+    {
+      "id": "SF-19",
+      "situation": "Something is broken for real users right now.",
+      "brother_asks": "What is the smallest step that gets people working again, before anybody looks for the cause?",
+      "proof_that_closes_it": "A note with times: what was seen, what was changed, when it recovered, and what is still unknown.",
+      "source": "17.4"
+    },
+    {
+      "id": "SF-20",
+      "situation": "You want to know whether this is safe enough to charge for.",
+      "brother_asks": "Where do money, personal records and signing in meet, and who has looked at those places?",
+      "proof_that_closes_it": "A worked-through list of the high-risk spots, and a written note wherever an outside expert is needed.",
+      "source": "17.4"
+    },
+    {
+      "id": "SF-21",
+      "situation": "Somebody asks you to delete everything you hold about them.",
+      "brother_asks": "Where does one person's information sit, including copies, exports and other companies' services?",
+      "proof_that_closes_it": "A map of every place it is kept, and a deletion run that leaves none of it behind.",
+      "source": "17.4"
+    },
+    {
+      "id": "SF-22",
+      "situation": "You want to know how tied you are to one supplier.",
+      "brother_asks": "If this supplier tripled its price next month, what would it take you to leave?",
+      "proof_that_closes_it": "A written list of what only that supplier can do, and roughly what leaving costs in weeks and money.",
+      "source": "17.4"
+    },
+    {
+      "id": "SF-23",
+      "situation": "You want your monthly bill to stay predictable.",
+      "brother_asks": "Which part of this costs more as more people use it, and what is your ceiling?",
+      "proof_that_closes_it": "This month's bill broken down by service, with a spending cap actually set on the biggest line.",
+      "source": "17.4"
+    },
+    {
+      "id": "SF-24",
+      "situation": "You are tempted to start the product again from scratch.",
+      "brother_asks": "Which specific problems would starting again fix, and has each one been tried in what you already have?",
+      "proof_that_closes_it": "The actual list of complaints, with a bounded fix attempted for each before any rewrite begins.",
+      "source": "17.4"
+    },
+    {
+      "id": "SF-25",
+      "situation": "You want to remove something to keep the product simple.",
+      "brother_asks": "Who still uses this, and what stops working the day it goes?",
+      "proof_that_closes_it": "Usage figures for the thing being removed, and a run through the main journey with it gone.",
+      "source": "17.4"
+    },
+    {
+      "id": "SF-26",
+      "situation": "A customer told you something is wrong.",
+      "brother_asks": "Can you make it happen yourself, the same way they did?",
+      "proof_that_closes_it": "The problem reproduced first, then a check that fails before the fix and passes after it.",
+      "source": "17.4"
+    },
+    {
+      "id": "SF-27",
+      "situation": "The work looks finished and you want a second opinion before launch.",
+      "brother_asks": "Which of these claims was actually proven, and which was only stated?",
+      "proof_that_closes_it": "Every claim marked either proven with what was run, or not proven, with nothing left unmarked.",
+      "source": "17.4"
+    },
+    {
+      "id": "SF-28",
+      "situation": "You are about to bring in your first engineer.",
+      "brother_asks": "Could somebody new run this, fix it and recover it without you in the room?",
+      "proof_that_closes_it": "A short map of the system, the decisions taken and why, the known debt, and the steps to run and recover it.",
+      "source": "17.4"
+    },
+    {
+      "id": "SF-29",
+      "situation": "You are wondering whether to make things bigger or faster.",
+      "brother_asks": "What measured number would tell you it is time, and are you past it yet?",
+      "proof_that_closes_it": "Today's measurement written beside the number that would trigger the work.",
+      "source": "17.4"
+    },
+    {
+      "id": "SF-30",
+      "situation": "One big customer wants something built only for them.",
+      "brother_asks": "Will this live alongside everybody else's version, or become a separate one you maintain forever?",
+      "proof_that_closes_it": "A note showing one product serving both, or your explicit written decision to maintain a separate one and who pays for it.",
+      "source": "17.4"
+    },
+    {
+      "id": "KH-01",
+      "situation": "The plan is growing and the first user has not tried anything yet.",
+      "brother_asks": "Which single piece would teach you the most, and what can wait without hurting?",
+      "proof_that_closes_it": "A scope written as one journey plus a named waiting list, agreed by you before building starts.",
+      "source": "17.6"
+    },
+    {
+      "id": "KH-02",
+      "situation": "There is a choice between a clever arrangement and a dull one.",
+      "brother_asks": "Which of these could you still understand and repair in six months, alone, in a hurry?",
+      "proof_that_closes_it": "The dull option chosen in writing, or a written reason the clever one is worth the upkeep.",
+      "source": "17.6"
+    },
+    {
+      "id": "KH-03",
+      "situation": "You can pay a service to do this, or build it yourself.",
+      "brother_asks": "What does buying cost per month, what does building cost in your hours, and which one can you walk away from?",
+      "proof_that_closes_it": "The two costs written side by side, with the exit route for whichever is chosen.",
+      "source": "17.6"
+    },
+    {
+      "id": "KH-04",
+      "situation": "The product needs accounts, and possibly separate companies inside it.",
+      "brother_asks": "Who is allowed to see what, and where is that rule actually enforced?",
+      "proof_that_closes_it": "The rule enforced on the server, proven by an attempt from the wrong account that is refused.",
+      "source": "17.6"
+    },
+    {
+      "id": "KH-05",
+      "situation": "Money will flow through the product on a schedule.",
+      "brother_asks": "Walk the whole life of one payment: first charge, failure, retry, cancellation, refund. Where does each of those land?",
+      "proof_that_closes_it": "Each of those five steps exercised once, with what the customer sees and what your records show.",
+      "source": "17.6"
+    },
+    {
+      "id": "KH-06",
+      "situation": "You are deciding whether this is ready for paying strangers.",
+      "brother_asks": "Which of signing in, money, records, reliability, security and daily running has real proof behind it?",
+      "proof_that_closes_it": "The launch list filled in, every line reading proven, not proven, human decision, external review recommended, or deferred by founder.",
+      "source": "17.5"
+    },
+    {
+      "id": "KH-07",
+      "situation": "Copies of your data are being taken automatically.",
+      "brother_asks": "A copy is not a rescue until it has been put back once. When was that?",
+      "proof_that_closes_it": "A restore run into a spare place, timed, with a note of what was missing when it came back.",
+      "source": "17.6"
+    },
+    {
+      "id": "KH-08",
+      "situation": "You are the only person who could notice a problem.",
+      "brother_asks": "What are the two or three signals worth waking you, and where do they arrive?",
+      "proof_that_closes_it": "Each of those signals triggered on purpose once, with the message that actually reached you.",
+      "source": "17.6"
+    },
+    {
+      "id": "KH-09",
+      "situation": "Getting a change live takes several fiddly manual steps.",
+      "brother_asks": "How many steps stand between a fix and your users, and which one goes wrong when you are tired?",
+      "proof_that_closes_it": "The steps written down and shortened, then run once start to end without improvising.",
+      "source": "17.6"
+    },
+    {
+      "id": "KH-10",
+      "situation": "The monthly bill is creeping and the runway is finite.",
+      "brother_asks": "What is the most you are willing to spend a month, and what happens automatically when it is reached?",
+      "proof_that_closes_it": "A limit set on the account, and an alert proven by pushing a test spend past a small threshold.",
+      "source": "17.6"
+    },
+    {
+      "id": "KH-11",
+      "situation": "One supplier is becoming the centre of the product.",
+      "brother_asks": "What would break if they changed their terms, and how long would leaving take?",
+      "proof_that_closes_it": "The tied parts listed, with an exit route sketched for the one that would hurt most.",
+      "source": "17.6"
+    },
+    {
+      "id": "KH-12",
+      "situation": "Something is on fire and there is nobody else to call.",
+      "brother_asks": "First get people working, then find out why. Which comes first here, and what will you write down as you go?",
+      "proof_that_closes_it": "A time-stamped note of what was seen, tried and changed, and a check added afterwards that would catch it next time.",
+      "source": "17.6"
+    },
+    {
+      "id": "KH-13",
+      "situation": "The risk here is bigger than anything you can check yourself.",
+      "brother_asks": "Is what is at stake larger than what any check here can prove?",
+      "proof_that_closes_it": "A written line saying an outside expert is recommended, naming what they should look at and why.",
+      "source": "17.6"
+    },
+    {
+      "id": "KH-14",
+      "situation": "There is a growing list of things that are known to be untidy.",
+      "brother_asks": "Which of these has actually cost you time or customers, and which only looks wrong?",
+      "proof_that_closes_it": "The list ordered by real cost, with the top item fixed and the rest deliberately left, each with a reason.",
+      "source": "17.6"
+    },
+    {
+      "id": "KH-15",
+      "situation": "Somebody else is about to work on this with you.",
+      "brother_asks": "What do they need on day one that only exists in your head?",
+      "proof_that_closes_it": "A map, the decisions and their reasons, the known debt and the running steps, all written where they can find them.",
+      "source": "17.6"
+    }
+  ],
+  "tool_adapters": [
+    {
+      "id": "code-hosting",
+      "what_it_is": "Where the product's files and their history are kept.",
+      "detect": "git remote -v",
+      "absent": "NO-DATA: no remote is configured, so nothing here can be checked against a hosted copy."
+    },
+    {
+      "id": "deploy-platform",
+      "what_it_is": "The service that puts the product on the internet.",
+      "detect": "ls vercel.json netlify.toml render.yaml railway.json railway.toml 2>/dev/null",
+      "absent": "NO-DATA: no deploy settings file is present, so how this reaches the internet is unknown and must be asked."
+    },
+    {
+      "id": "managed-database",
+      "what_it_is": "The service that stores the records, run by somebody else.",
+      "detect": "ls supabase/config.toml firebase.json 2>/dev/null",
+      "absent": "NO-DATA: no managed database settings file is present; ask where the records live before any change to them."
+    },
+    {
+      "id": "payments",
+      "what_it_is": "The service that takes money and sends payment messages back.",
+      "detect": "stripe --version",
+      "absent": "NO-DATA: the payment provider's command line tool is not installed, so payment messages cannot be replayed here."
+    },
+    {
+      "id": "error-reporting",
+      "what_it_is": "The service that tells you when a stranger hit an error.",
+      "detect": "ls .sentryclirc sentry.properties 2>/dev/null",
+      "absent": "NO-DATA: no error reporting settings file is present, so nothing proves you would hear about a failure."
+    },
+    {
+      "id": "product-analytics",
+      "what_it_is": "The service that shows whether anybody is using a feature.",
+      "detect": "grep -l posthog package.json",
+      "absent": "NO-DATA: no analytics library is named, so any claim about demand for a feature is an opinion."
+    },
+    {
+      "id": "dns-and-edge",
+      "what_it_is": "The service that owns the address people type, and whatever sits in front of it.",
+      "detect": "ls wrangler.toml wrangler.jsonc 2>/dev/null",
+      "absent": "NO-DATA: no edge or domain settings file is present here; the address is managed somewhere this pack cannot see."
+    },
+    {
+      "id": "dependency-scanner",
+      "what_it_is": "The check that says whether a known security hole is in what you build on.",
+      "detect": "pip-audit --version",
+      "absent": "NO-DATA: no dependency scanner is installed, so no security warning count exists before or after a change."
+    },
+    {
+      "id": "uptime-monitor",
+      "what_it_is": "The outside watcher that notices when the product stops answering.",
+      "detect": "ls .uptime.yml uptime.yml 2>/dev/null",
+      "absent": "NO-DATA: nothing in the tree names an outside watcher; ask the founder rather than concluding there is none."
+    },
+    {
+      "id": "local-production-like-run",
+      "what_it_is": "A way to run the whole product on your own machine the way it runs live.",
+      "detect": "ls docker-compose.yml compose.yaml 2>/dev/null",
+      "absent": "NO-DATA: no local composition file is present, so a rehearsal before a live change is not possible here."
+    },
+    {
+      "id": "policy",
+      "what_it_is": "How the adapters above are used at all.",
+      "detect": "not a tool: detect what is already there, reuse it, propose only what is missing, and install last (persona doc 22.1)",
+      "absent": "NO-DATA everywhere is an acceptable answer: a missing tool is reported by name and never quietly installed."
+    }
+  ],
+  "provenance": [
+    "3.1 work class axis",
+    "3.2 risk class axis",
+    "3.3 practitioner lens list, which names solo-founder-nontechnical",
+    "4.1 intake sequence",
+    "4.2 intake question budgets, Founder MVP feature row",
+    "5.1 pack manifest contents",
+    "5.2 compositional pack selection",
+    "6.1 evidence families E1, E2, E11, E16",
+    "6.2 evidence independence rule",
+    "6.3 evidence selection, not test-count maximization",
+    "17.1 why solo founders deserve a distinct pack",
+    "17.2 the nontechnical founder lens defaults",
+    "17.3 founder intake dimensions",
+    "17.4 founder use-case library SF-01 to SF-30",
+    "17.5 founder production-readiness gate and its five verdict words",
+    "17.6 founder know-how modules, carried here as KH-01 to KH-15",
+    "17.7 founder tool adapters",
+    "17.8 founder receipt additions",
+    "21.10 solo-founder golden fixtures",
+    "22.1 detect, reuse, propose, install last",
+    "25.1 always-human categories",
+    "25.2 founder forcing example, paid launch accepted with an explicit unproven risk",
+    "26 what a solo founder should feel"
+  ],
+  "fixture": {
+    "must_infer": [
+      "FOUNDER-BRIEF.md",
+      "no-code/site.webflow.json",
+      "automation-exports/signup.n8n.json",
+      "automation-exports/invoice-chase.blueprint.json",
+      "docs/pricing.md",
+      "package.json"
+    ],
+    "manifest_string": "@webflow/webflow-cli",
+    "manifest_file": "package.json",
+    "must_infer_why": "A nontechnical founder's workspace: a written brief, a site builder export, two automation exports, and documents. Every path but docs/pricing.md and package.json matches a path signal, and the manifest string matches inside package.json.",
+    "must_not_infer": [
+      "src/app/main.py",
+      "src/app/billing.py",
+      "tests/test_billing.py",
+      "pyproject.toml",
+      "Makefile",
+      "README.md",
+      "docs/architecture.md",
+      ".github/workflows/dispatch.yml"
+    ],
+    "must_not_infer_why": "An ordinary developer repository. No basename here matches a path signal, no directory named no-code or automation-exports appears, and pyproject.toml does not contain the site builder command line, so this lens must not fire."
+  }
+}

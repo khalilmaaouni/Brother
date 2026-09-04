@@ -254,5 +254,138 @@ class TestDoctorHooksWiringCheck(unittest.TestCase):
         self.assertIn(install, check["detail"], out.stdout)
 
 
+class TestHooksWiringUnderACodexClient(unittest.TestCase):
+    """C3: the same gate, run under a simulated Codex client.
+
+    WHY THIS EXISTS. Codex 0.153.0-alpha.5 has hooks (`codex features list`
+    prints "hooks stable true") but plugin-delivered hooks were REMOVED from it
+    ("plugin_hooks removed false" in the same listing), and the canonical
+    plugin validator refuses a manifest that declares them. So an installed
+    Brother Codex plugin ships no hooks.json at all, and the shipped-versus-
+    installed comparison this check runs has nothing to compare. A gate that
+    kept printing PASS there would be reporting on a Claude install while a
+    reader took it as a statement about the environment in front of them.
+
+    DRIVEN BOTH WAYS on purpose, because a guard that fires unconditionally
+    would satisfy a one-sided test: the Codex run must read NO-DATA and the
+    Claude run over the SAME fixture must still read PASS. The client is
+    simulated with BROTHER_CLIENT, brother_paths' own explicit override, so
+    neither run needs Codex or Claude installed."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        with io.open(SHIPPED_HOOKS_JSON, encoding="utf-8") as fh:
+            self.shipped = json.load(fh)
+        maker = TestDoctorHooksWiringCheck("test_unparseable_installed_copy_is_named")
+        maker.tmp = self.tmp
+        self.install = maker._make_install(copy.deepcopy(self.shipped))
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _wiring_under(self, client, codex_home=None):
+        env = dict(os.environ)
+        env["SBE_HOOKS_JSON"] = self.install
+        env["BROTHER_CLIENT"] = client
+        # brother_paths resolves a non-Claude client's config directory from
+        # CODEX_HOME, so pinning it to a directory this test owns is what
+        # keeps the Codex runs from reading whatever the machine's real
+        # ~/.codex happens to hold today.
+        env["CODEX_HOME"] = codex_home or os.path.join(self.tmp, "empty-codex-home")
+        env.pop("BROTHER_CONFIG_DIR", None)
+        env.pop("CLAUDE_CONFIG_DIR", None)
+        out = subprocess.run([sys.executable, SBE, "doctor", "--json"], cwd=ROOT,
+                             capture_output=True, text=True, env=env)
+        try:
+            data = json.loads(out.stdout)
+        except ValueError:
+            self.fail("doctor --json did not parse under BROTHER_CLIENT=%s: %s"
+                      % (client, out.stdout + out.stderr))
+        for check in data["checks"]:
+            if check["name"] == "hooks-wiring":
+                return check, out.stdout + out.stderr
+        self.fail("doctor carries no hooks-wiring check: %s" % out.stdout)
+
+    def test_codex_client_with_nothing_wired_reads_no_data_never_a_pass(self):
+        check, text = self._wiring_under("codex")
+        self.assertEqual(check["result"], "NO-DATA", text)
+        self.assertIn("plugin_hooks removed", check["detail"], text)
+        self.assertIn("HOOKS-MAPPING.md", check["detail"], text)
+
+    def test_the_same_fixture_still_passes_under_claude(self):
+        """The positive control. Without this, a guard that returned NO-DATA
+        for every client would pass the test above."""
+        check, text = self._wiring_under("claude")
+        self.assertEqual(check["result"], "PASS", text)
+        self.assertIn(self.install, check["detail"], text)
+
+
+class TestHooksWiringUnderACodexClientThatWiredItsOwnHooks(
+        TestHooksWiringUnderACodexClient):
+    """C3, the other half: Codex has no plugin hook delivery, but it DOES read
+    a user-scope hooks file, and `scripts/codex_hooks_install.py` writes one.
+    Once it is wired the gate has a real subject again, so NO-DATA would then
+    be under-reporting exactly as a PASS was over-reporting before.
+
+    DRIVEN BOTH WAYS, like its parent: a wired file reads PASS, the SAME file
+    with one command removed reads FAIL and names it. Inheriting the parent
+    class keeps its two runs (nothing wired reads NO-DATA, and Claude over
+    the same fixture still reads PASS) executing beside these, which is what
+    stops a guard that simply always PASSes under Codex from satisfying this
+    file."""
+
+    def _codex_home_wiring(self, drop=None):
+        """A Codex home holding the hooks file `codex_hooks_install.py` would
+        write for this fixture: the shipped events, `${CLAUDE_PLUGIN_ROOT}`
+        expanded to the install root, `timeout` renamed `timeoutSec`. When
+        `drop` is given, the command whose text contains it is left out, which
+        is the tampering the FAIL run must catch.
+
+        Translated here rather than imported from scripts/ on purpose: a
+        product's own tests must not depend on the umbrella checkout, and a
+        second independent implementation of the translation is a check on
+        the first."""
+        install_root = os.path.dirname(os.path.dirname(self.install))
+        hooks = {}
+        for event, blocks in self.shipped.get("hooks", {}).items():
+            translated = []
+            for block in blocks:
+                entries = []
+                for hook in block.get("hooks", []):
+                    command = hook["command"].replace(
+                        "${CLAUDE_PLUGIN_ROOT}", install_root)
+                    if drop and drop in command:
+                        continue
+                    entry = {"type": "command", "command": command,
+                             "async": False}
+                    if hook.get("timeout") is not None:
+                        entry["timeoutSec"] = hook["timeout"]
+                    entries.append(entry)
+                if not entries:
+                    continue
+                translated_block = {"hooks": entries}
+                if block.get("matcher"):
+                    translated_block["matcher"] = block["matcher"]
+                translated.append(translated_block)
+            if translated:
+                hooks[event] = translated
+        home = tempfile.mkdtemp(dir=self.tmp)
+        with io.open(os.path.join(home, "hooks.json"), "w",
+                     encoding="utf-8") as handle:
+            handle.write(json.dumps({"description": "fixture", "hooks": hooks}))
+        return home
+
+    def test_a_wired_codex_hooks_file_reads_pass(self):
+        check, text = self._wiring_under("codex", self._codex_home_wiring())
+        self.assertEqual(check["result"], "PASS", text)
+        self.assertIn("hooks.json", check["detail"], text)
+
+    def test_a_codex_hooks_file_missing_one_command_reads_fail(self):
+        home = self._codex_home_wiring(drop="sbe_fence_hook.py")
+        check, text = self._wiring_under("codex", home)
+        self.assertEqual(check["result"], "FAIL", text)
+        self.assertIn("sbe_fence_hook.py", check["detail"], text)
+
+
 if __name__ == "__main__":
     unittest.main()

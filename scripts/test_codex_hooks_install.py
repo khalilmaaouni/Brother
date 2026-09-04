@@ -1,0 +1,179 @@
+#!/usr/bin/env python3
+"""C3: what scripts/codex_hooks_install.py must never get wrong.
+
+Every case here runs the real module against the real shipped hooks files.
+Nothing that needs the Codex binary is asserted here: the binary is the
+subject of the end-to-end evidence in docs/codex/HOOKS-MAPPING.md, and a unit
+suite that shelled out to an app bundle would be NO-DATA on any machine
+without it, which is worse than being narrow on purpose.
+"""
+import io
+import json
+import os
+import shutil
+import sys
+import tempfile
+import unittest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+
+import codex_hooks_install as chi  # noqa: E402
+
+ROOT = os.path.dirname(HERE)
+BROTHERMODE = os.path.join(ROOT, "products", "brothermode")
+BROTHERSBE = os.path.join(ROOT, "products", "brothersbe")
+
+
+class TestTranslation(unittest.TestCase):
+
+    def setUp(self):
+        with io.open(os.path.join(BROTHERSBE, "hooks", "hooks.json"),
+                     encoding="utf-8") as handle:
+            self.shipped = json.load(handle)
+
+    def test_the_plugin_root_placeholder_is_expanded(self):
+        """A user-scope hooks file is not inside a plugin, so nothing would
+        substitute ${CLAUDE_PLUGIN_ROOT} at run time. A file that shipped it
+        unexpanded would register hooks that cannot run."""
+        result = chi.translate(self.shipped, "/somewhere/brothersbe")
+        blob = json.dumps(result["hooks"])
+        self.assertNotIn("CLAUDE_PLUGIN_ROOT", blob)
+        self.assertIn("/somewhere/brothersbe/tools/sbe_fence_hook.py", blob)
+
+    def test_claude_timeout_becomes_codex_timeout_sec(self):
+        result = chi.translate(self.shipped, "/somewhere/brothersbe")
+        entries = [hook for blocks in result["hooks"].values()
+                   for block in blocks for hook in block["hooks"]]
+        self.assertTrue(entries)
+        self.assertNotIn("timeout", set().union(*(set(e) for e in entries)))
+        self.assertTrue(any("timeoutSec" in e for e in entries))
+
+    def test_every_hook_is_synchronous(self):
+        """Brother's PreToolUse hooks are refusals. A refusal that runs
+        asynchronously cannot refuse anything, so `async` is never left to a
+        default."""
+        result = chi.translate(self.shipped, "/somewhere/brothersbe")
+        for blocks in result["hooks"].values():
+            for block in blocks:
+                for hook in block["hooks"]:
+                    self.assertIs(hook["async"], False, hook)
+
+    def test_an_event_codex_does_not_know_is_skipped_and_named(self):
+        """NO-DATA, never a silent drop and never a guessed rename."""
+        shipped = {"hooks": {"NotAnEventCodexHas": [
+            {"hooks": [{"type": "command", "command": "echo x"}]}]}}
+        result = chi.translate(shipped, "/somewhere")
+        self.assertEqual(result["hooks"], {})
+        self.assertEqual([event for event, _why in result["skipped"]],
+                         ["NotAnEventCodexHas"])
+
+    def test_both_products_merge_into_one_document(self):
+        built = chi.build([BROTHERMODE, BROTHERSBE])
+        self.assertEqual(built["problems"], [])
+        commands = [hook["command"]
+                    for blocks in built["document"]["hooks"].values()
+                    for block in blocks for hook in block["hooks"]]
+        self.assertEqual(len(commands), 18, commands)
+        self.assertTrue(any("bm_fence_hook.py" in c for c in commands))
+        self.assertTrue(any("sbe_fence_hook.py" in c for c in commands))
+
+    def test_a_product_with_no_hooks_file_is_a_named_failure(self):
+        built = chi.build([os.path.join(ROOT, "no-such-product")])
+        self.assertTrue(built["problems"])
+        self.assertIn("no-such-product", built["problems"][0])
+
+
+class TestHomeResolution(unittest.TestCase):
+
+    def test_the_real_codex_home_is_refused_by_default(self):
+        """A hooks file can refuse every edit on a machine, so writing the
+        founder's own Codex home is never the default."""
+        resolved = chi.resolve_home(os.path.join("~", ".codex"), False)
+        self.assertIsNone(resolved["path"])
+        self.assertIn("refusing to write", resolved["problem"])
+
+    def test_the_real_codex_home_is_allowed_when_meant(self):
+        """The positive control: without it, a refusal that fired for every
+        path would satisfy the test above."""
+        resolved = chi.resolve_home(os.path.join("~", ".codex"), True)
+        self.assertIsNotNone(resolved["path"])
+        self.assertIsNone(resolved["problem"])
+
+    def test_no_home_at_all_is_a_named_failure(self):
+        saved = os.environ.pop("CODEX_HOME", None)
+        try:
+            resolved = chi.resolve_home(None, False)
+        finally:
+            if saved is not None:
+                os.environ["CODEX_HOME"] = saved
+        self.assertIsNone(resolved["path"])
+        self.assertIn("CODEX_HOME", resolved["problem"])
+
+
+class TestCheckAndTrust(unittest.TestCase):
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_an_unwired_home_is_no_data_never_a_pass(self):
+        built = chi.build([BROTHERSBE])
+        verdict, detail = chi.check(self.tmp, built["document"])
+        self.assertEqual(verdict, "NO-DATA")
+        self.assertIn("not wired", detail)
+
+    def test_a_written_home_checks_pass_and_a_tampered_one_fails(self):
+        built = chi.build([BROTHERSBE])
+        self.assertIsNone(chi.write_hooks_json(self.tmp, built["document"])["problem"])
+        self.assertEqual(chi.check(self.tmp, built["document"])[0], "PASS")
+        path = chi.hooks_json_path(self.tmp)
+        with io.open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+        data["hooks"].pop("PreToolUse")
+        with io.open(path, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(data))
+        self.assertEqual(chi.check(self.tmp, built["document"])[0], "FAIL")
+
+    def test_the_trust_section_is_rewritten_in_place_not_appended_twice(self):
+        entries = [{"sourcePath": "/h/hooks.json", "key": "k1",
+                    "currentHash": "sha256:aaa"}]
+        first = chi.trust_block(entries, "/h/hooks.json")
+        self.assertIsNone(chi.write_trust(self.tmp, first)["problem"])
+        entries[0]["currentHash"] = "sha256:bbb"
+        second = chi.trust_block(entries, "/h/hooks.json")
+        self.assertIsNone(chi.write_trust(self.tmp, second)["problem"])
+        with io.open(os.path.join(self.tmp, "config.toml"),
+                     encoding="utf-8") as handle:
+            text = handle.read()
+        self.assertEqual(text.count(chi.TRUST_BEGIN), 1, text)
+        self.assertIn("sha256:bbb", text)
+        self.assertNotIn("sha256:aaa", text)
+
+    def test_a_foreign_hook_state_table_is_refused_rather_than_rewritten(self):
+        path = os.path.join(self.tmp, "config.toml")
+        with io.open(path, "w", encoding="utf-8") as handle:
+            handle.write('[hooks.state."someone-elses"]\nenabled = true\n')
+        block = chi.trust_block([], "/h/hooks.json")
+        problem = chi.write_trust(self.tmp, block)["problem"]
+        self.assertIsNotNone(problem)
+        self.assertIn("by hand", problem)
+
+    def test_unrelated_config_lines_survive_a_trust_write(self):
+        path = os.path.join(self.tmp, "config.toml")
+        with io.open(path, "w", encoding="utf-8") as handle:
+            handle.write('model = "gpt-5"\n')
+        entries = [{"sourcePath": "/h/hooks.json", "key": "k1",
+                    "currentHash": "sha256:aaa"}]
+        self.assertIsNone(chi.write_trust(
+            self.tmp, chi.trust_block(entries, "/h/hooks.json"))["problem"])
+        with io.open(path, encoding="utf-8") as handle:
+            text = handle.read()
+        self.assertIn('model = "gpt-5"', text)
+        self.assertIn("sha256:aaa", text)
+
+
+if __name__ == "__main__":
+    unittest.main()

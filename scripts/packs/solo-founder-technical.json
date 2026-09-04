@@ -1,0 +1,782 @@
+{
+  "lens": "solo-founder-technical",
+  "version": "1.0.0",
+  "detection_signals": {
+    "paths": [
+      "vercel.json",
+      "netlify.toml",
+      "render.yaml",
+      "railway.json",
+      "fly.toml",
+      "eas.json",
+      "supabase/",
+      "fastlane/"
+    ],
+    "manifest_strings": [
+      "stripe",
+      "posthog",
+      "@supabase/supabase-js",
+      "\"expo\":"
+    ],
+    "note": "the product surfaces a one-person company actually ships (persona doc 17.7 founder tool adapters: 'Vercel/Netlify/Render/Railway-like deploy metadata', 'Supabase/Firebase/managed Postgres metadata', 'Stripe test/webhook tooling', 'PostHog/analytics for outcome evidence'), plus the app store submission surfaces (eas.json for an Expo build and submit profile, fastlane/ for a store lane). Deliberately NOT claimed here: terraform, kubernetes, helm and ansible trees (the infrastructure lens owns those, persona doc 9), and service or framework layout alone (the backend lens owns that, persona doc 7). The manifest string is written as \"expo\": with the JSON quotes and colon on purpose: the bare word expo is a substring of export and exports, which every modern package.json carries, and a signal every repository matches makes this lens win everywhere. Composition, not exclusivity, is the intended answer when a founder repository is also a backend repository (persona doc 5.2)."
+  },
+  "challenge_question": "You have no second reader on this: what would another engineer refuse to sign off, and is this needed to validate demand now rather than turning the MVP into an operations burden before users require it?",
+  "question_budget": {
+    "min": 1,
+    "max": 3,
+    "work_shape": "Founder MVP feature (persona doc 4.2: 'Founder MVP feature' 1-3)",
+    "no_cap_when": "a forcing class below fires (money, customer data, a deploy with no rollback, a secret in the tree, a destructive cleanup): persona doc 4.2 'High-risk irreversible/security/payment change: no fixed cap; require necessary decisions'"
+  },
+  "required_evidence_families": [
+    "E1",
+    "E2",
+    "E11",
+    "E14",
+    "E16"
+  ],
+  "receipt_fields": [
+    "user_business_outcome",
+    "validation_evidence",
+    "new_recurring_cost_or_dependency",
+    "security_data_payment_impact",
+    "operational_burden_added",
+    "production_readiness_status",
+    "backup_restore_status",
+    "vendor_lock_in_change",
+    "deferred_items",
+    "founder_acceptance",
+    "rollback_command",
+    "customer_facing_surface_changed"
+  ],
+  "forcing_classes": [
+    {
+      "id": "customer money",
+      "label": "Customers' money or data, with no second reader",
+      "why": "the diff touches a payment, billing, subscription, webhook, refund or personal-data path (a file or directory named for stripe, billing, checkout, subscription, invoice, webhook, or a migration on a table holding user rows) in a repository whose git shortlog shows a single committer, so no human but the founder ever reads it (persona doc 17.1 'no peer reviewer', 17.4 SF-06, SF-07, SF-21)."
+    },
+    {
+      "id": "deploy without rollback",
+      "label": "A deploy with no rollback",
+      "why": "the diff changes a deploy or release surface (vercel.json, netlify.toml, fly.toml, render.yaml, railway.json, a Procfile, a Dockerfile entrypoint, a deploy or release script) and no rollback command appears in the diff, in the receipt's rollback_command field, or in a runbook file the change points at (persona doc 17.5 Operations 'rollback', 17.4 SF-14)."
+    },
+    {
+      "id": "secret in tree",
+      "label": "A secret in the tree or in the client bundle",
+      "why": "the diff adds a tracked env or credential file (.env, .env.production, a service-account or credentials JSON) or a line assigning a key-shaped literal (a live payment provider secret key, a cloud access key id, a code host personal access token, a PEM private key header, a bearer token), or puts any such value behind a client-visible environment prefix, the kind a bundler inlines into the browser build (persona doc 21.10 SF-G01 'paid API key bundled in frontend', 17.5 Identity and access 'secrets not shipped to client/logs'). The literal prefixes are described rather than written out: a pack that spells them out is itself a secret-shaped value in the repository, and this file was refused by the hub's own pre-push scanner for exactly that on its first push."
+    },
+    {
+      "id": "public claim",
+      "label": "A public claim with no source",
+      "why": "the diff changes a customer-facing page, pricing table, marketing copy block or app store listing so that it asserts a capability, a price, a guarantee or a compliance status, and no file in the same change implements or evidences it (persona doc 17.4 SF-30, 17.8 'user/business outcome', 21.10 SF-G10 'overbuild-before-validation')."
+    },
+    {
+      "id": "destructive cleanup",
+      "label": "A destructive cleanup with no export",
+      "why": "the change deletes, drops, truncates, prunes or force-overwrites stored data, a bucket, a project or a model artifact, and no backup, export or dry run appears in the same change (persona doc 17.1 [R20], the AI cleanup that deleted a production model; 21.10 SF-G04 and SF-G06)."
+    }
+  ],
+  "work_classes": [
+    {
+      "number": 1,
+      "name": "feature / capability",
+      "why": "the persona's default request: SF-01 smallest testable slice, SF-02 existing feature request."
+    },
+    {
+      "number": 2,
+      "name": "defect / incident correction",
+      "why": "SF-26 user-reported bug, where the founder is also the support desk."
+    },
+    {
+      "number": 3,
+      "name": "refactor / internal improvement",
+      "why": "SF-24 rewrite temptation and SF-25 feature deletion, both judged as refactor against rewrite."
+    },
+    {
+      "number": 4,
+      "name": "API or contract change",
+      "why": "SF-30 customer-specific enterprise feature, where a contract fork becomes an architecture fork."
+    },
+    {
+      "number": 5,
+      "name": "database/schema migration",
+      "why": "SF-08 database migration, which for this persona means backup, rollback and compatibility before the ALTER."
+    },
+    {
+      "number": 7,
+      "name": "infrastructure/configuration change",
+      "why": "SF-09 file and object storage, SF-13 secrets and environment setup, SF-29 scale trigger, all on managed primitives rather than owned infrastructure."
+    },
+    {
+      "number": 8,
+      "name": "architecture decision / design",
+      "why": "SF-03 greenfield stack choice and SF-22 vendor lock-in review: boring, supportable, exit-aware."
+    },
+    {
+      "number": 12,
+      "name": "QA campaign / regression / exploratory testing",
+      "why": "SF-14 pre-launch readiness and SF-27 'AI says done' audit are regression campaigns run by the person who wrote the code."
+    },
+    {
+      "number": 13,
+      "name": "release / deployment",
+      "why": "SF-14 launch gate, with the rollback path proven rather than assumed."
+    },
+    {
+      "number": 14,
+      "name": "incident investigation",
+      "why": "SF-19 production incident, run calmly by a team of one."
+    },
+    {
+      "number": 15,
+      "name": "performance/cost optimization",
+      "why": "SF-23 cost and runway review and SF-17 rate limiting: for this persona a cost bug is an outage with a delay."
+    },
+    {
+      "number": 16,
+      "name": "security/privacy hardening",
+      "why": "SF-04 auth, SF-05 multi-tenancy, SF-20 security review, SF-21 privacy and data deletion."
+    },
+    {
+      "number": 17,
+      "name": "dependency/platform migration",
+      "why": "SF-18 dependency update, where security and breakage are traded with no staging team to absorb the mistake."
+    },
+    {
+      "number": 19,
+      "name": "documentation/runbook change",
+      "why": "SF-28 handover to the first engineer: system map, decisions, debt, runbooks."
+    },
+    {
+      "number": 20,
+      "name": "spike/research with no production mutation",
+      "why": "SF-12 external AI or API dependency and SF-29 scale trigger both start as bounded spikes with no mutation."
+    }
+  ],
+  "risk_classes": [
+    {
+      "id": "irreversibility",
+      "label": "Irreversibility",
+      "why": "a one-person company has no second engineer to undo the change while the founder sleeps: a change without a proven rollback command is scored irreversible even when a rollback exists on paper."
+    },
+    {
+      "id": "production write",
+      "label": "Production write",
+      "why": "the founder's laptop and production are frequently one command apart, and there is usually no staging estate: any mutation of the live managed database, bucket or project scores here."
+    },
+    {
+      "id": "data loss/corruption",
+      "label": "Data loss or corruption",
+      "why": "SF-G06 is this persona's signature incident: an ambiguous cleanup destroying an untracked artifact nobody had a copy of."
+    },
+    {
+      "id": "security/permission",
+      "label": "Security and permission",
+      "why": "auth, secrets, row-level security and tenancy are the exact places a polished product hides a fatal flaw (persona doc 17.1 [R19])."
+    },
+    {
+      "id": "money",
+      "label": "Money",
+      "why": "payments and cloud spend are the same risk for this persona: one path charges a customer wrongly, the other charges the founder unboundedly (21.10 SF-G08)."
+    },
+    {
+      "id": "customer blast radius",
+      "label": "Customer blast radius",
+      "why": "small numbers make it worse, not better: with ten paying customers one broken tenant is ten percent of revenue and a personal phone call."
+    },
+    {
+      "id": "compatibility",
+      "label": "Compatibility",
+      "why": "a mobile client already in a store cannot be rolled forward on demand, so a server change has to keep the shipped binary working (SF-30, and the eas.json and fastlane/ signals above)."
+    },
+    {
+      "id": "compliance/privacy",
+      "label": "Compliance and privacy",
+      "why": "SF-21 requires a map of stored personal data and a working deletion path; Brother names the constraint and never gives legal advice (persona doc 17.3)."
+    },
+    {
+      "id": "operational recoverability",
+      "label": "Operational recoverability",
+      "why": "backup, restore, rollback and monitoring are the difference between an incident and a closed company: restore proof is the bolded requirement of 17.5."
+    },
+    {
+      "id": "evidence uncertainty",
+      "label": "Evidence uncertainty",
+      "why": "the founder is both author and reviewer, so an expected value derived from the implementation is circular by default (persona doc 6.2): the independence field is scored before the check counts."
+    }
+  ],
+  "dangerous_actions": [
+    {
+      "id": "destructive_production_mutation",
+      "never_without": "a drop, truncate, delete, purge or destructive migration against live customer data is never authorized by this pack alone: it needs an E11 plan read first, an E16 restore already rehearsed, and the founder's own yes."
+    },
+    {
+      "id": "live_payment_mode",
+      "never_without": "no call, key or webhook is switched from test mode to live mode by the pack: the switch is a founder action taken with the replay and duplicate evidence already PROVEN."
+    },
+    {
+      "id": "real_customer_contact",
+      "never_without": "no email, push, invoice, charge or refund reaches a real customer from a development or verification run; fixtures and test mode only."
+    },
+    {
+      "id": "credential_handling",
+      "never_without": "the pack never creates, rotates, prints or commits a credential, and never accepts one pasted into a transcript: the founder places it in the platform's own secret store."
+    },
+    {
+      "id": "plan_or_billing_change",
+      "never_without": "no vendor plan, quota, budget or payment method is changed by the pack, and no terms or consent screen is accepted on the founder's behalf."
+    },
+    {
+      "id": "public_surface_publication",
+      "never_without": "no deploy to a production domain, no app store submission, no DNS change and no public claim is published by the pack: it prepares the change and the rollback, the founder ships it."
+    },
+    {
+      "id": "readiness_declaration",
+      "never_without": "the pack never writes 'production safe: yes'. It writes PROVEN, NOT PROVEN, HUMAN DECISION, EXTERNAL REVIEW RECOMMENDED or DEFERRED BY FOUNDER, and never fills founder_acceptance itself."
+    },
+    {
+      "id": "history_rewrite",
+      "never_without": "no force push, no rewritten history and no deletion of a branch or tag that carries the only copy of work."
+    }
+  ],
+  "know_how": [
+    {
+      "id": "SF-01",
+      "situation": "An idea arrives as a whole product and the founder wants it built end to end.",
+      "brother_asks": "Which single user action, done once by a stranger, would tell you this is worth building, and which named subsystems wait until it happens?",
+      "proof_that_closes_it": "A scope record naming the one journey in scope and every deferred subsystem with its condition, E1 tests over that journey only, and founder acceptance that the deferred list is right.",
+      "source": "17.4 SF-01"
+    },
+    {
+      "id": "SF-02",
+      "situation": "A feature request arrives, often from the founder's own head or a single loud user.",
+      "brother_asks": "Which user asked, what does it cost to run forever, and what does the product stop being able to change once it exists?",
+      "proof_that_closes_it": "The validation_evidence receipt field filled or explicitly NO-DATA, a cost line for the new dependency, and a smallest-version option offered beside the asked-for one.",
+      "source": "17.4 SF-02"
+    },
+    {
+      "id": "SF-03",
+      "situation": "A greenfield stack has to be chosen and every choice is reversible only on paper.",
+      "brother_asks": "Which parts of this stack could you replace in a weekend, and which would take a rewrite?",
+      "proof_that_closes_it": "A decision record naming the boring default, the alternative, the exit path for each vendor surface, and what would flip the choice (E10 structural checks where a boundary is claimed).",
+      "source": "17.4 SF-03, 17.6 boring architecture defaults"
+    },
+    {
+      "id": "SF-04",
+      "situation": "Authentication is being set up or changed, and the founder has only ever tested logging in.",
+      "brother_asks": "Which account lifecycle paths besides login exist: signup, reset, email change, session expiry, logout everywhere, admin?",
+      "proof_that_closes_it": "E1 tests over every lifecycle path including reset, plus E14 authorization checks proving the server, not the client, decides (21.10 SF-G09 auth-reset-broken).",
+      "source": "17.4 SF-04, 17.5 Identity and access"
+    },
+    {
+      "id": "SF-05",
+      "situation": "The product starts serving more than one customer out of one database.",
+      "brother_asks": "What is the isolation model, and which single query, policy or missing predicate would let one tenant read another?",
+      "proof_that_closes_it": "E14 cross-tenant authorization tests that fail without the policy, plus E10 static checks that no query path bypasses the tenant predicate (21.10 SF-G02 missing-rls).",
+      "source": "17.4 SF-05"
+    },
+    {
+      "id": "SF-06",
+      "situation": "A payment integration goes in, usually with the happy path already working.",
+      "brother_asks": "What happens when the same webhook arrives twice, arrives late, or arrives unsigned?",
+      "proof_that_closes_it": "E4 metamorphic replay proving a duplicate idempotency key changes state once, E14 signature verification, E2 amounts checked against the price list rather than against the code (21.10 SF-G03).",
+      "source": "17.4 SF-06, 17.5 Money"
+    },
+    {
+      "id": "SF-07",
+      "situation": "Subscriptions and entitlements have to decide what a paying user can actually reach.",
+      "brother_asks": "When billing state and product access disagree, which one wins, and how would you notice they disagreed?",
+      "proof_that_closes_it": "E8 reconciliation between the billing provider's subscription state and the product's entitlement table at a declared grain, plus E1 tests for cancel, lapse, refund and reactivation.",
+      "source": "17.4 SF-07, 17.5 Money"
+    },
+    {
+      "id": "SF-08",
+      "situation": "A schema migration is about to run against the only copy of customer data.",
+      "brother_asks": "What is the backup, has a restore from it been run, and does the old code still work while the new schema is live?",
+      "proof_that_closes_it": "E11 migration plan read before the run, E16 restore rehearsal with a row count or checksum compared, and an expand-then-contract sequence so mixed versions coexist (21.10 SF-G04).",
+      "source": "17.4 SF-08, 17.5 Data"
+    },
+    {
+      "id": "SF-09",
+      "situation": "File or object storage is added for uploads, exports or user content.",
+      "brother_asks": "Who can read an object that is not theirs, what deletes it, and what does a month of storage cost at ten times today's volume?",
+      "proof_that_closes_it": "E14 permission tests on a signed and an unsigned URL, an E1 deletion path test, and a cost line in the receipt's new_recurring_cost_or_dependency field.",
+      "source": "17.4 SF-09"
+    },
+    {
+      "id": "SF-10",
+      "situation": "Transactional email is wired up: verification, reset, receipts, notifications.",
+      "brother_asks": "What happens when the provider is down or the address bounces, and can a user stop receiving this?",
+      "proof_that_closes_it": "E12 fault injection on the provider call proving a retry with no duplicate send, E1 tests for unsubscribe and suppression state, and the deliverability records named in the receipt.",
+      "source": "17.4 SF-10"
+    },
+    {
+      "id": "SF-11",
+      "situation": "Background jobs appear: queues, cron, workers doing the slow work.",
+      "brother_asks": "When a job fails at 3am, who knows, and what does running it twice do?",
+      "proof_that_closes_it": "E3 idempotency invariant (N runs, one effect), E12 poison-message and timeout injection, and E15 evidence that a failure emits something the founder actually sees.",
+      "source": "17.4 SF-11"
+    },
+    {
+      "id": "SF-12",
+      "situation": "The product depends on an external AI or third-party API in its main path.",
+      "brother_asks": "What is the timeout, the rate limit, the cost per call at the volume you hope for, and what does the product do when the vendor is down?",
+      "proof_that_closes_it": "E12 injection of timeout, rate limit and error responses with the fallback exercised, E13 cost per call measured, and a vendor exit note (21.10 SF-G05, SF-G08).",
+      "source": "17.4 SF-12"
+    },
+    {
+      "id": "SF-13",
+      "situation": "Secrets and environments are being set up, usually late and usually by hand.",
+      "brother_asks": "Which of these values reaches the browser bundle, and which environment holds the live keys?",
+      "proof_that_closes_it": "E14 scan of the built client bundle for every secret name, E10 check that no client-visible prefix carries a private value, and separate stores for development and production (21.10 SF-G01).",
+      "source": "17.4 SF-13, 17.5 Security"
+    },
+    {
+      "id": "SF-14",
+      "situation": "The founder is about to take money from strangers and wants to know whether it is safe to launch.",
+      "brother_asks": "Which of the seven readiness areas has actual evidence behind it, and which are you deciding to launch without?",
+      "proof_that_closes_it": "The readiness gate reported area by area (identity and access, money, data with restore proof, reliability, security, operations, product truth), each carrying exactly one of PROVEN, NOT PROVEN, HUMAN DECISION, EXTERNAL REVIEW RECOMMENDED, DEFERRED BY FOUNDER; never 'production safe: yes'.",
+      "source": "17.4 SF-14, 17.5 in full"
+    },
+    {
+      "id": "SF-15",
+      "situation": "Backups exist, or are believed to exist, and have never been restored.",
+      "brother_asks": "When did a restore from this backup last run, and how long did it take to serve traffic again?",
+      "proof_that_closes_it": "E16 restore into a scratch target with the restored data compared to the source and the wall-clock recovery time recorded; a configured backup with no restore is NO-DATA.",
+      "source": "17.4 SF-15, 17.5 Data"
+    },
+    {
+      "id": "SF-16",
+      "situation": "Monitoring and error reporting are missing, so failures are found by users or not at all.",
+      "brother_asks": "If a stranger's signup broke right now, what would tell you, and where would it arrive?",
+      "proof_that_closes_it": "E15 evidence that a deliberately failed request produces a structured error at a destination the founder reads, plus a health check that fails when the dependency is down (21.10 SF-G07).",
+      "source": "17.4 SF-16, 17.6 observability for one person"
+    },
+    {
+      "id": "SF-17",
+      "situation": "An endpoint is open to the internet and can cost money per call.",
+      "brother_asks": "What does one abusive client cost you in a day, and what stops it?",
+      "proof_that_closes_it": "E13 cost per request multiplied out to a daily ceiling, E12 burst test showing the limiter refusing, and a spend cap set at the vendor (21.10 SF-G08).",
+      "source": "17.4 SF-17"
+    },
+    {
+      "id": "SF-18",
+      "situation": "Dependencies are out of date and an update is either security work or breakage.",
+      "brother_asks": "Which of these updates closes a real advisory, and which only moves a version number you will have to debug?",
+      "proof_that_closes_it": "E14 dependency scan before and after naming the advisories closed, E1 tests green on the updated tree, and a lock diff read as E11 plan evidence.",
+      "source": "17.4 SF-18"
+    },
+    {
+      "id": "SF-19",
+      "situation": "Production is broken and the only responder is the founder.",
+      "brother_asks": "What is the smallest reversible action that restores service, and what evidence do we capture before we change anything?",
+      "proof_that_closes_it": "The failing signal captured first, the rollback or mitigation run with its command quoted, then E9 replay of the incident case as a regression test that fails on the old code.",
+      "source": "17.4 SF-19, 17.6 incident response when the team is one person"
+    },
+    {
+      "id": "SF-20",
+      "situation": "A security review is wanted before launch or before a first serious customer.",
+      "brother_asks": "Which risks here exceed what any automated check can prove, and therefore need a paid human?",
+      "proof_that_closes_it": "E14 across authorization, tenant isolation, injection, secret exposure and dependencies, with an explicit EXTERNAL REVIEW RECOMMENDED verdict where the risk outruns the evidence.",
+      "source": "17.4 SF-20, 17.6 when to buy outside security expertise"
+    },
+    {
+      "id": "SF-21",
+      "situation": "A user asks for their data to be deleted, or a privacy question arrives.",
+      "brother_asks": "Where does this person's data physically live, including backups, logs, analytics and the email provider, and what deletes each copy?",
+      "proof_that_closes_it": "A personal-data inventory by store, an E1 deletion test proving each copy is gone or scheduled, and the legal question routed to a human rather than answered.",
+      "source": "17.4 SF-21, 17.3 legal constraints without pretending to give legal advice"
+    },
+    {
+      "id": "SF-22",
+      "situation": "The founder wonders how trapped the product is inside its vendors.",
+      "brother_asks": "Which vendor, if it doubled its price or shut down tomorrow, would take more than a week to leave?",
+      "proof_that_closes_it": "A dependency map marking each surface replaceable, costly or proprietary, with a named exit path and rough cost for each proprietary one (21.10 SF-G05).",
+      "source": "17.4 SF-22, 17.6 vendor lock-in and exit paths"
+    },
+    {
+      "id": "SF-23",
+      "situation": "The monthly bill is growing faster than revenue and nobody has read it line by line.",
+      "brother_asks": "Which three line items are most of the bill, and which of them scales with users rather than with time?",
+      "proof_that_closes_it": "A service inventory with monthly figures, E13 measurement of the per-user cost of the top hotspot, and a budget or spend cap set where the vendor supports one.",
+      "source": "17.4 SF-23, 17.6 cost and runway controls"
+    },
+    {
+      "id": "SF-24",
+      "situation": "The codebase feels wrong and a rewrite is starting to sound reasonable.",
+      "brother_asks": "Which specific defects or limits are you actually trying to remove, and would a bounded remediation remove them?",
+      "proof_that_closes_it": "A named list of the concrete problems with the cost of fixing each in place, set against the rewrite's estimate and the features frozen during it (21.10 SF-G11 rewrite-loop).",
+      "source": "17.4 SF-24, 17.6 technical-debt triage"
+    },
+    {
+      "id": "SF-25",
+      "situation": "A feature nobody uses is being removed.",
+      "brother_asks": "Who still depends on this, including data, links, integrations and anyone mid-flow right now?",
+      "proof_that_closes_it": "Usage evidence for the removal, an E10 check that no remaining code path reaches the deleted surface, an export of the data it owned, and a redirect or message for existing links.",
+      "source": "17.4 SF-25"
+    },
+    {
+      "id": "SF-26",
+      "situation": "A real user reports a bug, and the founder is also the support desk.",
+      "brother_asks": "What exactly did the user do, and how many other customers are silently in the same state?",
+      "proof_that_closes_it": "A reproduction before any edit, an E1 regression test failing before and passing after, and a count of affected records with the customer-facing consequence in the receipt.",
+      "source": "17.4 SF-26"
+    },
+    {
+      "id": "SF-27",
+      "situation": "An agent reports the work is done and the founder cannot personally check every claim.",
+      "brother_asks": "Which of these green checks derives its expected value from the same code it is checking?",
+      "proof_that_closes_it": "E6 mutation of the claimed behavior showing the evidence goes red, plus the independence field scored for each check (persona doc 6.2); a check that stays green under mutation proves nothing (21.11 X-G03, X-G09).",
+      "source": "17.4 SF-27"
+    },
+    {
+      "id": "SF-28",
+      "situation": "A first engineer is about to be hired and everything lives in the founder's head.",
+      "brother_asks": "What would a competent stranger need on day one to change this system without breaking it?",
+      "proof_that_closes_it": "A system map, the decision records with their reasons, the debt list with consequences, runbooks for deploy, rollback and restore, and one journey a new person can run end to end from the documents alone.",
+      "source": "17.4 SF-28, 17.6 first-engineer handoff"
+    },
+    {
+      "id": "SF-29",
+      "situation": "Scaling work is proposed: caching, queues, replicas, a bigger plan.",
+      "brother_asks": "What measurement says the current shape is the limit, and at what number would you add this?",
+      "proof_that_closes_it": "E13 measurement of the current ceiling with the trigger threshold written down, and the work deferred with that condition when the measurement does not reach it.",
+      "source": "17.4 SF-29"
+    },
+    {
+      "id": "SF-30",
+      "situation": "A first enterprise customer asks for something the product does not do.",
+      "brother_asks": "Is this a configuration of the product or a second product, and who maintains it in a year?",
+      "proof_that_closes_it": "The requirement expressed as configuration or a flag on the single code path, E7 contract tests proving the shared path still serves everyone else, and an explicit decision recorded if a fork is accepted anyway (21.10 SF-G12).",
+      "source": "17.4 SF-30"
+    },
+    {
+      "id": "SF-KH-01",
+      "situation": "MVP scope discipline: the request is larger than the thing that would answer the question.",
+      "brother_asks": "What is the smallest version that could still be wrong in an informative way?",
+      "proof_that_closes_it": "A scope record with an explicit out-of-scope list, each deferred item carrying the condition that would bring it back.",
+      "source": "17.6 MVP scope discipline"
+    },
+    {
+      "id": "SF-KH-02",
+      "situation": "Boring architecture defaults: a novel stack is proposed for a product with no users.",
+      "brother_asks": "What does this choice buy over the boring option, and who else here can operate it?",
+      "proof_that_closes_it": "A decision record naming the boring alternative and the concrete reason it was rejected, never a preference stated as a fact.",
+      "source": "17.6 boring architecture defaults"
+    },
+    {
+      "id": "SF-KH-03",
+      "situation": "Managed-service tradeoffs: build it or rent it.",
+      "brother_asks": "What does running this yourself cost in hours a month, and what does renting it cost in money and in exit difficulty?",
+      "proof_that_closes_it": "A two-column comparison with the operational burden and the exit path both named, and the choice recorded with its flip condition.",
+      "source": "17.6 managed-service tradeoffs"
+    },
+    {
+      "id": "SF-KH-04",
+      "situation": "Auth and tenancy basics: the founder implemented enough auth to log themselves in.",
+      "brother_asks": "Where is authorization decided, and does every read path go through it?",
+      "proof_that_closes_it": "E10 evidence that no data path bypasses the authorization layer, plus E14 tests from an unauthorized and a cross-tenant caller.",
+      "source": "17.6 auth and tenancy basics"
+    },
+    {
+      "id": "SF-KH-05",
+      "situation": "Payment lifecycle: money moves in more states than the happy path.",
+      "brother_asks": "Which of trial, upgrade, downgrade, dunning, cancellation, refund and chargeback does the product handle today?",
+      "proof_that_closes_it": "A state table with each transition either covered by an E1 test or explicitly deferred, and E2 amounts checked against the price list.",
+      "source": "17.6 payment lifecycle"
+    },
+    {
+      "id": "SF-KH-06",
+      "situation": "Production readiness: launch is a date, not a state.",
+      "brother_asks": "Which readiness areas are you launching without, and did you decide that or discover it?",
+      "proof_that_closes_it": "The 17.5 gate run in full with its five verdict words, and DEFERRED BY FOUNDER used only where the founder actually said so.",
+      "source": "17.6 production readiness"
+    },
+    {
+      "id": "SF-KH-07",
+      "situation": "Backups and restores: the backup is configured and unproven.",
+      "brother_asks": "What is your recovery time, measured rather than estimated?",
+      "proof_that_closes_it": "E16 restore rehearsal with the elapsed time and a data comparison; anything short of that is NO-DATA.",
+      "source": "17.6 backups and restores"
+    },
+    {
+      "id": "SF-KH-08",
+      "situation": "Observability for one person: alerts either do not exist or are ignored.",
+      "brother_asks": "Which single destination do you actually read, and what is allowed to send to it?",
+      "proof_that_closes_it": "E15 evidence of one high-signal alert path proven by a deliberate failure, with noisy sources excluded on purpose.",
+      "source": "17.6 observability for one person"
+    },
+    {
+      "id": "SF-KH-09",
+      "situation": "Low-toil deployment: shipping is a manual sequence only the founder knows.",
+      "brother_asks": "How many manual steps stand between a commit and production, and which of them is undocumented?",
+      "proof_that_closes_it": "A deploy runbook with every step listed and the rollback command proven on a production-like target (21.11 X-G05 hidden-manual-step).",
+      "source": "17.6 low-toil deployment"
+    },
+    {
+      "id": "SF-KH-10",
+      "situation": "Cost and runway controls: spend can grow without a decision.",
+      "brother_asks": "Which vendor could bill you an unbounded amount this month, and where is the cap?",
+      "proof_that_closes_it": "A per-vendor budget or hard cap where the vendor offers one, and an E13 worst-case figure written down where it does not.",
+      "source": "17.6 cost and runway controls"
+    },
+    {
+      "id": "SF-KH-11",
+      "situation": "Vendor lock-in and exit paths: the product is quietly becoming one vendor's application.",
+      "brother_asks": "Which data and which behavior only exist inside a vendor's product today?",
+      "proof_that_closes_it": "An export path proven for each vendor holding customer data, and the exit cost recorded for each proprietary runtime surface.",
+      "source": "17.6 vendor lock-in and exit paths"
+    },
+    {
+      "id": "SF-KH-12",
+      "situation": "Incident response when the team is one person: the founder is on call forever.",
+      "brother_asks": "What is the first action, before diagnosis, that limits the damage?",
+      "proof_that_closes_it": "A one-page incident card naming the mitigate-first action, the evidence to capture, and the rollback command, tested outside an incident.",
+      "source": "17.6 incident response when the team is one person"
+    },
+    {
+      "id": "SF-KH-13",
+      "situation": "When to buy outside expertise: the risk exceeds what Brother can prove.",
+      "brother_asks": "Would a mistake here be expensive enough that an outside specialist costs less than the failure?",
+      "proof_that_closes_it": "An explicit EXTERNAL REVIEW RECOMMENDED verdict naming the specific area and why the available evidence cannot settle it.",
+      "source": "17.6 when to buy outside security and infrastructure expertise"
+    },
+    {
+      "id": "SF-KH-14",
+      "situation": "Technical-debt triage: everything feels like debt and nothing is scheduled.",
+      "brother_asks": "Which debt has already cost you an incident or a slowed change, and which is only aesthetic?",
+      "proof_that_closes_it": "A debt list ranked by observed consequence, each entry naming the incident, the slowdown or the risk it created; items with none are recorded as aesthetic and deferred.",
+      "source": "17.6 technical-debt triage"
+    },
+    {
+      "id": "SF-KH-15",
+      "situation": "First-engineer handoff: the bus factor is one and hiring is imminent.",
+      "brother_asks": "Can a stranger deploy, roll back and restore this system from the documents alone?",
+      "proof_that_closes_it": "The three runbooks executed by someone other than their author, or by the founder following them literally with no recalled steps.",
+      "source": "17.6 first-engineer handoff, 17.4 SF-28"
+    }
+  ],
+  "tool_adapters": [
+    {
+      "id": "github",
+      "surface": "GitHub: repository, pull requests, and the single-committer evidence the no-second-reader forcing class needs.",
+      "detect": "command -v gh",
+      "no_data": "NO-DATA: gh is not installed; reviewer evidence falls back to git shortlog on the local clone and the pack says so rather than assuming a reviewer existed."
+    },
+    {
+      "id": "vercel",
+      "surface": "Vercel deploy metadata: which build is live, and what the previous deployment was for a rollback.",
+      "detect": "command -v vercel",
+      "no_data": "NO-DATA: no Vercel CLI; the rollback_command receipt field is filled by the founder from the platform's own dashboard or left NO-DATA, which fires the deploy forcing class."
+    },
+    {
+      "id": "netlify",
+      "surface": "Netlify deploy metadata and rollback to a previously published deploy.",
+      "detect": "command -v netlify",
+      "no_data": "NO-DATA: no Netlify CLI; deploy and rollback evidence is NO-DATA rather than assumed."
+    },
+    {
+      "id": "flyctl",
+      "surface": "Fly.io machine and release metadata for a container deploy and its rollback.",
+      "detect": "command -v flyctl",
+      "no_data": "NO-DATA: no flyctl; release history and rollback target are NO-DATA."
+    },
+    {
+      "id": "supabase",
+      "surface": "Supabase project metadata, migrations and row-level-security policies, read only.",
+      "detect": "command -v supabase",
+      "no_data": "NO-DATA: no Supabase CLI; tenant isolation is checked from the migration files in the tree instead, and the pack states that the live policies were not read."
+    },
+    {
+      "id": "stripe",
+      "surface": "Stripe test mode and webhook replay: duplicate, late and unsigned event evidence.",
+      "detect": "command -v stripe",
+      "no_data": "NO-DATA: no Stripe CLI; webhook replay evidence is NO-DATA and the money forcing class stays open."
+    },
+    {
+      "id": "sentry",
+      "surface": "Sentry-like error reporting: does a deliberate failure actually arrive somewhere the founder reads.",
+      "detect": "command -v sentry-cli",
+      "no_data": "NO-DATA: no sentry-cli; E15 observability evidence is NO-DATA, never inferred from the presence of a DSN in the config."
+    },
+    {
+      "id": "analytics",
+      "surface": "PostHog or an equivalent product analytics dependency, as outcome evidence for the validation_evidence field.",
+      "detect": "grep -l posthog package.json",
+      "no_data": "NO-DATA: no analytics dependency in the manifest; validation_evidence is NO-DATA rather than a guess about usage."
+    },
+    {
+      "id": "dns",
+      "surface": "Cloudflare and DNS metadata for the customer-facing domain.",
+      "detect": "command -v wrangler",
+      "no_data": "NO-DATA: no wrangler; DNS and edge configuration are not read, and any claim about the live domain is NO-DATA."
+    },
+    {
+      "id": "dependency_scan",
+      "surface": "Dependency and secret scanners for E14 evidence.",
+      "detect": "command -v gitleaks",
+      "no_data": "NO-DATA: no gitleaks; the secret check falls back to the repository's own scan script when it has one, and to NO-DATA when it does not."
+    },
+    {
+      "id": "container_smoke",
+      "surface": "Docker or Compose production-like smoke run of the core journey.",
+      "detect": "command -v docker",
+      "no_data": "NO-DATA: no docker; the journey was exercised only in the development environment, which the receipt states (21.11 X-G08 production-vs-local-gap)."
+    }
+  ],
+  "provenance": [
+    {
+      "section": "3.1",
+      "what_it_gave": "the work classes this pack assists, by number and name."
+    },
+    {
+      "section": "3.2",
+      "what_it_gave": "the ten risk classes, re-read for a one-person company."
+    },
+    {
+      "section": "3.3",
+      "what_it_gave": "the lens id solo-founder-technical, and the rule that the lens is inferred rather than configured."
+    },
+    {
+      "section": "4.1",
+      "what_it_gave": "the stage 3 founder challenge question, and the stage 2 rule that an inspectable answer is inspected, not asked."
+    },
+    {
+      "section": "4.2",
+      "what_it_gave": "the question budget: Founder MVP feature 1 to 3, no fixed cap on a high-risk irreversible, security or payment change."
+    },
+    {
+      "section": "5.1",
+      "what_it_gave": "the manifest's required declarations: work classes, detection signals, optional tools, evidence principles, dangerous actions, receipt fields, fixtures, provenance."
+    },
+    {
+      "section": "5.2",
+      "what_it_gave": "compositional selection: this pack expects to load beside backend, qa-automation and core rather than instead of them."
+    },
+    {
+      "section": "6.1",
+      "what_it_gave": "the evidence families E1, E2, E11, E14 and E16 required here, and E3, E4, E6, E7, E8, E9, E10, E12, E13, E15 cited inside know_how."
+    },
+    {
+      "section": "6.2",
+      "what_it_gave": "the independence rule that makes a founder-authored expected value circular by default."
+    },
+    {
+      "section": "6.3",
+      "what_it_gave": "risk coverage over test count, and NO-DATA stated rather than hidden."
+    },
+    {
+      "section": "17.1",
+      "what_it_gave": "why this persona is distinct: no peer reviewer, the demo-to-production gap, the deleted production model, overbuilding before validation."
+    },
+    {
+      "section": "17.2",
+      "what_it_gave": "the technical founder lens specifically: concise, engineering-dense, challenge architecture and operability, minimize the peer-review gap."
+    },
+    {
+      "section": "17.3",
+      "what_it_gave": "the intake dimensions behind the question budget and the receipt fields."
+    },
+    {
+      "section": "17.4",
+      "what_it_gave": "all thirty use cases SF-01 to SF-30, each present in know_how."
+    },
+    {
+      "section": "17.5",
+      "what_it_gave": "the production readiness gate and its five verdict words."
+    },
+    {
+      "section": "17.6",
+      "what_it_gave": "the fifteen know-how modules, carried as SF-KH-01 to SF-KH-15."
+    },
+    {
+      "section": "17.7",
+      "what_it_gave": "the tool adapters and, through them, most of the detection signals."
+    },
+    {
+      "section": "17.8",
+      "what_it_gave": "ten of the twelve receipt fields; rollback_command and customer_facing_surface_changed are added by this pack."
+    },
+    {
+      "section": "21.10",
+      "what_it_gave": "the golden fixtures SF-G01 to SF-G12 that give the forcing classes their concrete conditions."
+    },
+    {
+      "section": "21.11",
+      "what_it_gave": "the cross-persona adversarial fixtures X-G03, X-G05, X-G08, X-G09 and X-G10 cited in know_how and dangerous_actions."
+    }
+  ],
+  "fixture": {
+    "must_infer": [
+      "vercel.json",
+      "supabase/migrations/0001_init.sql",
+      "app/pricing/page.tsx",
+      "package.json"
+    ],
+    "manifest_string": "stripe",
+    "manifest_file": "package.json",
+    "manifest_content": "{\n  \"name\": \"founder-app\",\n  \"dependencies\": {\n    \"stripe\": \"14.0.0\",\n    \"next\": \"14.0.0\"\n  }\n}\n",
+    "must_not_infer": [
+      "README.md",
+      "src/main.py",
+      "docs/architecture.md"
+    ],
+    "note": "the pack's own self-check: must_infer is a tree that has to resolve to this lens, must_not_infer a tree that must resolve to no lens at all. manifest_path and manifest_content are written into the fixture tree so the manifest_string signal is exercised, not only the path signals. Nothing here matches the data-science pack's signals (*.ipynb, mlruns/, dvc.yaml, dbt_project.yml, mlflow, dvc, dbt_project), and door.infer_lens tries packs in sorted lens-name order, so data-science is tried before solo-founder-technical and keeps its own fixture either way."
+  },
+  "required_evidence_families_why": {
+    "E1": "the founder's own journey has to run at all: known input to expected output over the one user path the slice claims (persona doc 6.1 E1). Weakest family on its own, which is why it never stands alone in this pack.",
+    "E2": "there is no reviewer to catch an expected value copied out of the implementation, so money and entitlement results are checked against an independent rule: the price list, the payment provider's own record, the plan matrix, a hand-curated fixture (persona doc 6.1 E2, 17.5 Money 'entitlement reconciliation').",
+    "E11": "a solo founder cannot afford to learn what a change does by running it on production: a migration plan, a deployment diff, a SQL dry run or a lock diff is read BEFORE the mutation (persona doc 6.1 E11, 17.4 SF-08, 21.10 SF-G04 'no-backup-before-migration').",
+    "E14": "the failures that end a one-person company are authorization, tenant isolation, secret exposure and dependency vulnerabilities, and none of them show in a polished UI (persona doc 6.1 E14, 17.1 [R19], 21.10 SF-G01 client-side secret and SF-G02 missing tenant isolation).",
+    "E16": "17.5 bolds restore proof for this persona and 17.8 makes backup and restore status a receipt field: a backup nobody restored is NO-DATA, not recovery (persona doc 6.1 E16, 17.4 SF-15, 17.1 [R20] the AI cleanup that deleted a production model)."
+  },
+  "receipt_fields_details": {
+    "user_business_outcome": {
+      "meaning": "in one plain sentence, what a user or the business can now do that they could not before.",
+      "filled_by": "a file: the unit's own objective line in the Work document, copied verbatim, never re-worded at receipt time."
+    },
+    "validation_evidence": {
+      "meaning": "what says a user actually wants this: a request, a support thread, a usage number, a paying customer.",
+      "filled_by": "NO-DATA when nothing outside the founder's own conviction says so; persona doc 17.8 names NO-DATA as a legitimate value here."
+    },
+    "new_recurring_cost_or_dependency": {
+      "meaning": "every service, plan or vendor this change starts paying for or depending on, with the monthly figure.",
+      "filled_by": "a file: the diff of the dependency manifest and of any infrastructure or deploy config in the change; NO-DATA when nothing was added."
+    },
+    "security_data_payment_impact": {
+      "meaning": "whether this change touches authentication, authorization, tenant boundaries, personal data or money, and how.",
+      "filled_by": "a command: the tree's own security or dependency scan run over the change (persona doc 6.1 E14), quoted with its verdict line."
+    },
+    "operational_burden_added": {
+      "meaning": "what the founder now has to watch, restart, rotate, top up or answer for at 3am.",
+      "filled_by": "a file: the runbook or README section the change added or amended; NO-DATA when the change adds none, which is itself a claim to check."
+    },
+    "production_readiness_status": {
+      "meaning": "the launch verdict for this change, in the five words the gate is allowed to use.",
+      "filled_by": "a command: the readiness gate run for this unit, reporting one of PROVEN, NOT PROVEN, HUMAN DECISION, EXTERNAL REVIEW RECOMMENDED, DEFERRED BY FOUNDER (persona doc 17.5)."
+    },
+    "backup_restore_status": {
+      "meaning": "whether the data this change can damage has a backup that was actually restored, not merely configured.",
+      "filled_by": "a command: the restore rehearsal, with the row count or checksum compared after it; NO-DATA when only the backup half ran (persona doc 6.1 E16)."
+    },
+    "vendor_lock_in_change": {
+      "meaning": "what this change makes harder to leave: a proprietary API, a managed runtime, a data format only one vendor reads.",
+      "filled_by": "a file: the exit note naming the replacement path and its rough cost, or NO-DATA when the change adds no new vendor surface."
+    },
+    "deferred_items": {
+      "meaning": "what was deliberately not built or not proven, each with the reason and what would bring it back.",
+      "filled_by": "a file: the unit's deferred list, each entry carrying a condition, never an empty promise of later."
+    },
+    "founder_acceptance": {
+      "meaning": "the founder's own yes to shipping this, in the founder's own words.",
+      "filled_by": "NO-DATA until a human writes it; the agent may never fill this field for itself (persona doc 21.11 X-G10 'human-acceptance-spoof')."
+    },
+    "rollback_command": {
+      "meaning": "the exact command that puts production back the way it was, and how long it takes.",
+      "filled_by": "a command: the rollback itself, quoted, with the run that proved it works on a production-like target; NO-DATA when the change is not reversible by a command, which fires the deploy forcing class below."
+    },
+    "customer_facing_surface_changed": {
+      "meaning": "which surface a stranger now sees differently: a page, a price, an email, a store listing, an API response.",
+      "filled_by": "a file: the changed paths in the diff that render to a customer, listed by name; NO-DATA only for a change no customer can observe."
+    }
+  }
+}

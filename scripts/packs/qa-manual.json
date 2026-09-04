@@ -1,0 +1,578 @@
+{
+  "lens": "qa-manual",
+  "version": "1.0.0",
+  "detection_signals": {
+    "paths": [
+      "test-cases/",
+      "testcases/",
+      "exploratory/",
+      "charters/",
+      "*test-plan*.md",
+      "test-charter*.md",
+      "bug_report.md",
+      "bug_report.yml",
+      "bug-report-template.md",
+      "*acceptance-checklist*.md"
+    ],
+    "manifest_strings": [
+      "testrail",
+      "zephyr-scale",
+      "qaseio"
+    ],
+    "note": "the documents a manual tester writes and reads (persona doc 16.3 QA-M-01 charter, QA-M-15 bug reproduction, QA-M-17 UAT acceptance; 16.6 'TestRail/Zephyr/Xray-like cases if connected'), never an automation runner config: playwright.config, cypress.config, pytest.ini and the JUnit or Allure surfaces belong to the qa-engineer lens (persona doc 15.6) and are deliberately absent here, so the two QA lenses do not both fire on one repository. A tree carrying only source and unit tests matches none of these."
+  },
+  "challenge_question": "Which user/configuration/state combinations are highest risk and impossible to cover exhaustively?",
+  "question_budget": {
+    "min": 1,
+    "max": 4,
+    "work_shape": "Manual QA campaign (persona doc 4.2)"
+  },
+  "required_evidence_families": [
+    "E17",
+    "E1",
+    "E9",
+    "E15",
+    "E2"
+  ],
+  "receipt_fields": [
+    "charter_id",
+    "executed_test_case_ids",
+    "build_version_commit",
+    "environment",
+    "device_browser_locale",
+    "account_role_test_data_identity",
+    "preconditions",
+    "steps_or_exploratory_path",
+    "observed_result",
+    "expected_basis",
+    "screenshot_paths",
+    "attachments_log_pointers",
+    "severity_user_impact",
+    "reproducibility",
+    "related_requirement_change",
+    "remaining_uncertainty",
+    "human_tester_identity"
+  ],
+  "forcing_classes": [
+    {
+      "id": "release_acceptance",
+      "label": "Release accepted with an open user-path issue",
+      "why": "a release checklist file in the change still carries an unchecked box, or an open defect file is referenced by the release note, while the change claims the release gate is met (persona doc 25.2 'Manual QA: release accepted with known unresolved user-path issue'; 16.3 QA-M-18)"
+    },
+    {
+      "id": "unreproduced_defect",
+      "label": "Defect closed without a reproduction",
+      "why": "a bug report file is edited to reference a fix while its steps-to-reproduce section stays empty, or a defect is marked cannot-reproduce with no environment comparison recorded beside it (persona doc 16.3 QA-M-15, QA-M-16)"
+    },
+    {
+      "id": "uncovered_matrix",
+      "label": "Device, browser, locale or configuration matrix left uncovered",
+      "why": "a matrix file in the repository lists a combination whose result cell is empty while the diff touches the screens or strings that matrix covers (persona doc 16.3 QA-M-04, QA-M-05, QA-M-12, QA-M-13)"
+    },
+    {
+      "id": "unevidenced_screen_change",
+      "label": "Screen change with no screenshot evidence",
+      "why": "the diff touches a view, screen, template or locale string file and no image or video path was added under the evidence directory the receipt names (persona doc 16.4 attachments, 16.3 QA-M-20)"
+    },
+    {
+      "id": "circular_acceptance",
+      "label": "Acceptance basis derived from the implementation",
+      "why": "an acceptance checklist or test case records an expected value copied from the code under change, and no requirement, approved rule or curated fixture file is cited beside it (persona doc 6.2 oracle_source generated_from_impl, 16.3 QA-M-02, QA-M-17)"
+    },
+    {
+      "id": "production_verification",
+      "label": "Verification run against production",
+      "why": "a charter or test case names a production environment or a live customer account in its environment field, so the session writes to real user state (persona doc 3.2 production write, 16.3 QA-M-19)"
+    },
+    {
+      "id": "real_user_test_data",
+      "label": "Real user data used as test data",
+      "why": "a fixture or test-data file added by the change carries personal fields (name, email, phone, address, national identifier) that were not generated (persona doc 3.2 compliance and privacy, 16.3 QA-M-06, QA-M-07, 16.2 test data)"
+    }
+  ],
+  "work_classes": [
+    {
+      "id": "qa_campaign",
+      "label": "QA campaign, regression or exploratory testing",
+      "why": "the pack's home class: every charter, sweep and prioritized regression pass in 16.3 lands here (persona doc 3.1 item 12)"
+    },
+    {
+      "id": "feature_capability",
+      "label": "Feature or capability",
+      "why": "feature acceptance testing traces a requirement to scenarios before the feature is called done (persona doc 3.1 item 1, 16.3 QA-M-02)"
+    },
+    {
+      "id": "defect_correction",
+      "label": "Defect or incident correction",
+      "why": "bug reproduction and cannot-reproduce investigation are the pack's second largest use-case group (persona doc 3.1 item 2, 16.3 QA-M-15, QA-M-16)"
+    },
+    {
+      "id": "release_deployment",
+      "label": "Release or deployment",
+      "why": "the release exploratory smoke covers the high-risk human paths automation does not (persona doc 3.1 item 13, 16.3 QA-M-18)"
+    },
+    {
+      "id": "incident_investigation",
+      "label": "Incident investigation",
+      "why": "production issue verification reproduces the exact incident state and confirms the fixed behaviour (persona doc 3.1 item 14, 16.3 QA-M-19)"
+    },
+    {
+      "id": "dependency_platform_migration",
+      "label": "Dependency or platform migration",
+      "why": "upgrade and migration testing walks the old state to new state journey a fresh install never exercises (persona doc 3.1 item 17, 16.3 QA-M-08)"
+    },
+    {
+      "id": "requirements_process_change",
+      "label": "Requirements or process change",
+      "why": "UAT facilitation captures a business acceptance against a scenario, which is a requirements act rather than a code one (persona doc 3.1 item 18, 16.3 QA-M-17)"
+    }
+  ],
+  "risk_classes": [
+    {
+      "id": "evidence_uncertainty",
+      "label": "Evidence uncertainty",
+      "why": "a timeboxed human session can never prove absence, so what was not reached is the primary risk this pack must state rather than hide (persona doc 3.2, 16.3 QA-M-01)"
+    },
+    {
+      "id": "customer_blast_radius",
+      "label": "Customer blast radius",
+      "why": "the pack prioritizes by which user roles and journeys a defect would reach, not by which component changed (persona doc 3.2, 16.2 user roles and highest-cost failure)"
+    },
+    {
+      "id": "security_permission",
+      "label": "Security and permission",
+      "why": "role and permission testing and cross-tenant negative scenarios are manual work the automated suite usually skips (persona doc 3.2, 16.3 QA-M-06, QA-M-07)"
+    },
+    {
+      "id": "compliance_privacy",
+      "label": "Compliance and privacy",
+      "why": "test data and captured screenshots are the two routes by which real personal data leaks out of a QA session (persona doc 3.2, 16.2 test data, 16.6 artifacts)"
+    },
+    {
+      "id": "money",
+      "label": "Money",
+      "why": "the payment and subscription journey covers cancellation, retry, refund and receipt states, each of which moves real money in a live environment (persona doc 3.2, 16.3 QA-M-14)"
+    },
+    {
+      "id": "production_write",
+      "label": "Production write",
+      "why": "verifying a production incident means acting on live state, which is a mutation even when the tester only intended to look (persona doc 3.2, 16.3 QA-M-19)"
+    },
+    {
+      "id": "data_loss_corruption",
+      "label": "Data loss or corruption",
+      "why": "upgrade and migration testing walks records from an old shape to a new one, where silent alteration is the failure that matters (persona doc 3.2, 16.3 QA-M-08)"
+    },
+    {
+      "id": "compatibility",
+      "label": "Compatibility",
+      "why": "a device, browser, locale and configuration matrix is a compatibility surface, and it is the one no single tester can cover exhaustively (persona doc 3.2, 16.3 QA-M-04, QA-M-05)"
+    }
+  ],
+  "dangerous_actions": [
+    "mutating production data or a live customer account while verifying an incident: the pack proposes the verification steps, a human runs anything that writes (persona doc 25.1 widening production privilege, 16.3 QA-M-19)",
+    "declaring a release gate met, or accepting a release that still carries a known unresolved user-path issue: the release decision stays with the human (persona doc 25.1, 25.2 Manual QA)",
+    "closing a defect as cannot-reproduce, or downgrading its severity, without an environment and state comparison recorded (persona doc 16.3 QA-M-16)",
+    "generating an expected result from the implementation and presenting it as an acceptance basis: the pack may record such a basis, always flagged as circular (persona doc 6.2, 25.1 acceptance of materially changed semantics)",
+    "creating or importing test data from real user records, or attaching a screenshot, HAR trace or log that carries a secret or a real personal detail (persona doc 3.2 compliance and privacy, 16.6)",
+    "editing, resolving or transitioning a case, defect or run in a connected test management or issue system: the pack reads and exports, it does not act on the human's behalf (persona doc 16.6 'ingest/export, not replace')",
+    "signing a UAT acceptance on a stakeholder's behalf: the pack prepares the scenario and captures the answer, the business owner gives it (persona doc 25.1 final delivered-result acceptance, 16.3 QA-M-17)"
+  ],
+  "know_how": [
+    {
+      "id": "QA-M-01",
+      "situation": "a risky area needs human attention and nobody has framed what the session is for",
+      "brother_asks": "what is the mission, which risk does it chase, which environment, account and data does it need, and how long is the timebox",
+      "proof_that_closes_it": "a charter recording risk, mission, data, timebox and an evidence template, closed with observations and the uncertainty that remains (E17)",
+      "source": "16.3 QA-M-01"
+    },
+    {
+      "id": "QA-M-02",
+      "situation": "a feature is called done and someone must decide whether it does what was asked",
+      "brother_asks": "which requirement does each scenario trace to, and where does the expected result come from if not from the code",
+      "proof_that_closes_it": "a requirement to scenario trace where every expected value cites a rule, requirement or approved fixture rather than the implementation (E1, E2)",
+      "source": "16.3 QA-M-02"
+    },
+    {
+      "id": "QA-M-03",
+      "situation": "a large change lands and the full regression pass does not fit the time available",
+      "brother_asks": "which components did the change touch, and where have defects escaped from before",
+      "proof_that_closes_it": "a prioritized regression list built from the change impact and the defect history, with the deprioritized areas named as uncovered (E17)",
+      "source": "16.3 QA-M-03"
+    },
+    {
+      "id": "QA-M-04",
+      "situation": "a configurable enterprise application has more setting combinations than anyone can test",
+      "brother_asks": "which settings interact, which combinations are known to be used, and which pairs carry the risk",
+      "proof_that_closes_it": "a risk weighted or pairwise configuration matrix with the executed cells filled and the rest visibly empty (E1, E17)",
+      "source": "16.3 QA-M-04"
+    },
+    {
+      "id": "QA-M-05",
+      "situation": "a user-facing change must hold across browsers and devices",
+      "brother_asks": "which devices and browsers do real users arrive on, and which of them render this surface differently",
+      "proof_that_closes_it": "a prioritized device and browser matrix with a screenshot per executed cell and the untested cells named (E9, E15)",
+      "source": "16.3 QA-M-05"
+    },
+    {
+      "id": "QA-M-06",
+      "situation": "permissions changed and the question is what each role can now see and do",
+      "brother_asks": "which roles exist, which actions are gated, and which combinations are supposed to be refused",
+      "proof_that_closes_it": "a role and action matrix where the refusals were exercised, not only the permissions (E1, E17)",
+      "source": "16.3 QA-M-06"
+    },
+    {
+      "id": "QA-M-07",
+      "situation": "a multi-tenant product changed and tenant isolation is the thing that must not break",
+      "brother_asks": "which identifiers scope a tenant, and what should happen when one tenant's identifier is used in another tenant's session",
+      "proof_that_closes_it": "cross-tenant negative scenarios executed and refused, each recorded with the account identity used (E1, E17)",
+      "source": "16.3 QA-M-07"
+    },
+    {
+      "id": "QA-M-08",
+      "situation": "an upgrade or migration ships and existing users will arrive carrying old state",
+      "brother_asks": "which old states exist in the field, and which of them are supposed to survive the upgrade unchanged",
+      "proof_that_closes_it": "an old state to new state journey walked for each supported prior version, with the record shape compared before and after (E9, E17)",
+      "source": "16.3 QA-M-08"
+    },
+    {
+      "id": "QA-M-09",
+      "situation": "the product is used where the network drops, and recovery behaviour is unknown",
+      "brother_asks": "which operations are interruptible, and what is supposed to happen to an operation cut in half",
+      "proof_that_closes_it": "an interruption and recovery charter where the network was actually cut mid-operation and the resulting state recorded (E17, E15)",
+      "source": "16.3 QA-M-09"
+    },
+    {
+      "id": "QA-M-10",
+      "situation": "a workflow is technically correct and still hard to use",
+      "brother_asks": "what is the real user task, and where did the tester hesitate, backtrack or guess",
+      "proof_that_closes_it": "a task walked end to end with friction observations recorded as observations, not as formal usability research (E17)",
+      "source": "16.3 QA-M-10"
+    },
+    {
+      "id": "QA-M-11",
+      "situation": "automated accessibility checks pass and the surface is still unusable without a mouse",
+      "brother_asks": "can the whole task be completed by keyboard alone, and does a screen reader announce what changed",
+      "proof_that_closes_it": "a keyboard and screen-reader pass recorded, with the gaps automated checking cannot see stated explicitly (E17)",
+      "source": "16.3 QA-M-11"
+    },
+    {
+      "id": "QA-M-12",
+      "situation": "the product ships in more than one locale and the strings changed",
+      "brother_asks": "which locales are supported, which strings grew, and what happens to dates, numbers and currency in each",
+      "proof_that_closes_it": "a per-locale pass covering string length, format and fallback, with a screenshot per locale of the affected screens (E9, E15)",
+      "source": "16.3 QA-M-12"
+    },
+    {
+      "id": "QA-M-13",
+      "situation": "a mobile surface changed and the operating system will interrupt it",
+      "brother_asks": "what happens on background and resume, on rotation, and when a permission is denied or revoked mid-session",
+      "proof_that_closes_it": "a lifecycle charter covering background, resume, rotation and permission denial, each with the observed state recorded (E17, E15)",
+      "source": "16.3 QA-M-13"
+    },
+    {
+      "id": "QA-M-14",
+      "situation": "a payment or subscription path changed and money moves through it",
+      "brother_asks": "which states can a subscription be in, and what does the user see on cancellation, retry, refund and receipt",
+      "proof_that_closes_it": "each state transition exercised in a sandbox with the receipt and the resulting entitlement captured (E1, E9)",
+      "source": "16.3 QA-M-14"
+    },
+    {
+      "id": "QA-M-15",
+      "situation": "a defect was seen but the report does not let anyone else see it",
+      "brother_asks": "what is the smallest sequence that still produces it, and what is the exact build, environment and account it needs",
+      "proof_that_closes_it": "a minimized reliable reproduction with an evidence bundle: build, environment, steps, observed result and attachments (E9, E15, E17)",
+      "source": "16.3 QA-M-15"
+    },
+    {
+      "id": "QA-M-16",
+      "situation": "a report cannot be reproduced and is about to be closed as invalid",
+      "brother_asks": "how does the reporter's environment, build, account, data and state differ from the one that failed to reproduce",
+      "proof_that_closes_it": "a documented environment and state comparison naming the differences examined, before any close decision reaches a human (E17)",
+      "source": "16.3 QA-M-16"
+    },
+    {
+      "id": "QA-M-17",
+      "situation": "a business owner must accept the change and needs a scenario rather than a test case",
+      "brother_asks": "which business scenario represents the outcome, and who is answerable for accepting it",
+      "proof_that_closes_it": "the scenario prepared, walked with the owner, and their acceptance captured in their own words with the date and identity (E2, E17)",
+      "source": "16.3 QA-M-17"
+    },
+    {
+      "id": "QA-M-18",
+      "situation": "a release is imminent and automation covers only part of the risk",
+      "brother_asks": "which human paths are high risk and not automated, and what is the smallest set that would catch a bad release",
+      "proof_that_closes_it": "a smoke pack of high-signal human paths executed against the release build, with each result and the paths skipped named (E1, E17)",
+      "source": "16.3 QA-M-18"
+    },
+    {
+      "id": "QA-M-19",
+      "situation": "a production incident was fixed and someone must confirm the fix in the place it broke",
+      "brother_asks": "what was the exact state at the time of the incident, and can that state be recreated without writing to real user data",
+      "proof_that_closes_it": "the incident state replayed and the fixed behaviour observed, with the environment recorded and any production write flagged for a human (E9, E17)",
+      "source": "16.3 QA-M-19"
+    },
+    {
+      "id": "QA-M-20",
+      "situation": "a session produced findings nobody else will be able to interpret later",
+      "brother_asks": "which screenshots, recordings and logs belong to which step, and what context does a later reader need to trust them",
+      "proof_that_closes_it": "each artifact stored with its context metadata: build, environment, device, locale, account and the step it belongs to (E15)",
+      "source": "16.3 QA-M-20"
+    },
+    {
+      "id": "KH-01",
+      "situation": "a session is about to start with no stated mission and will drift into whatever is easy to click",
+      "brother_asks": "what is this charter hunting, and what would make it a failure to have spent the timebox",
+      "proof_that_closes_it": "a written charter with mission, risk, timebox and an evidence template agreed before execution",
+      "source": "16.5 exploratory charters"
+    },
+    {
+      "id": "KH-02",
+      "situation": "the tester has covered the obvious path and has no idea where to look next",
+      "brother_asks": "which tour fits this surface: the data tour, the interruption tour, the configuration tour, the boundary tour",
+      "proof_that_closes_it": "the heuristic or tour used is named in the session note, so the coverage claim is legible and repeatable",
+      "source": "16.5 heuristics and tours"
+    },
+    {
+      "id": "KH-03",
+      "situation": "there is more to test than time, and the order is being chosen by habit",
+      "brother_asks": "which failure costs the most, and which area has escaped defects before",
+      "proof_that_closes_it": "an ordering justified by impact and defect history, with the unreached areas recorded rather than dropped silently",
+      "source": "16.5 risk-based testing"
+    },
+    {
+      "id": "KH-04",
+      "situation": "the product's behaviour depends on a state, a role and a configuration at once, and cases are being written one at a time",
+      "brother_asks": "what are the states, the roles and the settings, and which of their combinations are actually reachable",
+      "proof_that_closes_it": "an explicit model of states, roles and configurations from which the executed cases are derived and traceable",
+      "source": "16.5 state, role and configuration models"
+    },
+    {
+      "id": "KH-05",
+      "situation": "the combination count is in the hundreds and exhaustive testing is not on the table",
+      "brother_asks": "which parameters interact, and which pairs must appear at least once",
+      "proof_that_closes_it": "a pairwise set covering every pair once, with the forced combinations listed separately as deliberate additions",
+      "source": "16.5 pairwise testing"
+    },
+    {
+      "id": "KH-06",
+      "situation": "a rule has several conditions and the cases cover only the paths someone happened to think of",
+      "brother_asks": "what are the conditions, and what is the expected action for every combination of them",
+      "proof_that_closes_it": "a decision table whose rules are all accounted for, with any impossible combination marked as impossible and why",
+      "source": "16.5 decision tables"
+    },
+    {
+      "id": "KH-07",
+      "situation": "every executed case is a happy path and the product has never been asked to refuse anything",
+      "brother_asks": "what are the limits of each input, and what is supposed to happen just outside them",
+      "proof_that_closes_it": "boundary and negative scenarios executed at each limit, with the refusal message and resulting state recorded",
+      "source": "16.5 boundary and negative scenarios"
+    },
+    {
+      "id": "KH-08",
+      "situation": "a finding is written in a way only its author can act on",
+      "brother_asks": "what did you expect, what happened, on which build and environment, and what does the reader need to see it too",
+      "proof_that_closes_it": "a report carrying every field of the manual evidence record, with attachments that show rather than describe",
+      "source": "16.5 defect reporting"
+    },
+    {
+      "id": "KH-09",
+      "situation": "a reproduction takes twenty steps and nobody will follow it",
+      "brother_asks": "which of these steps can be removed while the defect still appears",
+      "proof_that_closes_it": "a minimized sequence, plus the repeat count showing it still reproduces after minimization",
+      "source": "16.5 reproduction minimization"
+    },
+    {
+      "id": "KH-10",
+      "situation": "an automated accessibility scan came back clean and is being read as accessible",
+      "brother_asks": "which checks does the scanner not perform, and were those performed by hand",
+      "proof_that_closes_it": "a manual pass covering keyboard, focus order, announcement and contrast in use, with the automated coverage boundary stated",
+      "source": "16.5 accessibility manual checks"
+    },
+    {
+      "id": "KH-11",
+      "situation": "a locale build was checked only for missing strings",
+      "brother_asks": "does the layout survive the longest translation, are formats local, and what shows when a key is missing",
+      "proof_that_closes_it": "a locale pass covering length, format and fallback, with the longest-string screens captured",
+      "source": "16.5 localization checks"
+    },
+    {
+      "id": "KH-12",
+      "situation": "the tester found the flow awkward and is about to present that as a usability finding",
+      "brother_asks": "what did you observe yourself doing, and what would it take to know whether real users do the same",
+      "proof_that_closes_it": "observations recorded as one tester's observations, with the claim they do not support stated plainly",
+      "source": "16.5 usability observation without pretending to be formal UX research"
+    },
+    {
+      "id": "KH-13",
+      "situation": "a business owner is being asked to accept a change through a screen share with no record",
+      "brother_asks": "which scenario are we walking, who is accepting, and what is the exception path they also need to see",
+      "proof_that_closes_it": "the session facilitated against a written scenario, with the acceptance and any exception raised captured against the owner's identity",
+      "source": "16.5 UAT facilitation"
+    }
+  ],
+  "tool_adapters": [
+    {
+      "id": "github_issues",
+      "purpose": "read and export defect evidence to and from GitHub issues, never transitioning one on the human's behalf",
+      "detect": "command -v gh",
+      "absent": "NO-DATA: no gh on PATH, defect evidence stays in the repository as files"
+    },
+    {
+      "id": "issue_templates",
+      "purpose": "reuse the repository's own bug report template so a finding lands in the shape the team already reads",
+      "detect": "ls .github/ISSUE_TEMPLATE",
+      "absent": "NO-DATA: no issue template found, the pack's own manual evidence record shape is used instead"
+    },
+    {
+      "id": "test_management",
+      "purpose": "ingest and export cases and runs from a connected test management system (TestRail, Zephyr, Xray shaped)",
+      "detect": "grep -rilE 'testrail|zephyr-scale|qaseio' requirements.txt package.json pyproject.toml",
+      "absent": "NO-DATA: no test management client declared, executed_test_case_ids come from repository files only"
+    },
+    {
+      "id": "network_capture",
+      "purpose": "read a HAR trace captured during a session so a reproduction can name the failing request",
+      "detect": "command -v jq",
+      "absent": "NO-DATA: no jq on PATH, HAR files are attached whole rather than summarized"
+    },
+    {
+      "id": "reproduction_by_api",
+      "purpose": "reproduce a state through the product's own API instead of clicking twenty steps to reach it",
+      "detect": "command -v curl",
+      "absent": "NO-DATA: no curl on PATH, preconditions are reached through the interface by hand"
+    },
+    {
+      "id": "setup_script",
+      "purpose": "generate a setup script that walks the product to a precondition, so the human time goes on the risky part",
+      "detect": "command -v npx",
+      "absent": "NO-DATA: no npx on PATH, no setup script is offered and preconditions stay manual"
+    },
+    {
+      "id": "build_identity",
+      "purpose": "stamp every session with the exact build it ran against",
+      "detect": "command -v git",
+      "absent": "NO-DATA: no git on PATH, build_version_commit must be supplied by the tester"
+    },
+    {
+      "id": "ios_simulator_capture",
+      "purpose": "capture screenshots and device metadata from an iOS simulator during a mobile lifecycle charter",
+      "detect": "command -v xcrun",
+      "absent": "NO-DATA: no xcrun on PATH, mobile captures come from the physical device the tester holds"
+    }
+  ],
+  "provenance": [
+    "3.1 work classes",
+    "3.2 risk classes",
+    "3.3 practitioner lens qa-manual",
+    "4.1 stage 3 profession-aware challenge (Manual QA)",
+    "4.2 intake question budgets (Manual QA campaign)",
+    "5.1 pack manifest",
+    "5.2 pack selection must be compositional",
+    "6.1 evidence families E1, E2, E9, E15, E17",
+    "6.2 evidence independence rule",
+    "6.3 evidence selection, not test-count maximization",
+    "16.1 what this persona is buying from Brother",
+    "16.2 manual QA intake dimensions",
+    "16.3 manual QA use-case library (QA-M-01 to QA-M-20)",
+    "16.4 manual QA first-class evidence type",
+    "16.5 manual QA know-how modules",
+    "16.6 manual QA tooling",
+    "25.1 always-human categories",
+    "25.2 persona forcing example (Manual QA)"
+  ],
+  "fixture": {
+    "must_infer": [
+      "test-cases/TC-101-checkout.md",
+      "exploratory/2026-08-30-charter-payments.md",
+      ".github/ISSUE_TEMPLATE/bug_report.md",
+      "docs/release-test-plan.md"
+    ],
+    "manifest_string": "testrail",
+    "manifest_file": "requirements.txt",
+    "must_not_infer": [
+      "README.md",
+      "src/main.py",
+      "tests/test_api.py",
+      "docs/architecture.md"
+    ],
+    "note": "each must_infer path matches one paths signal (the directory signals test-cases/ and exploratory/, the basename signals bug_report.md and *test-plan*.md); must_infer_manifest_string is the needle a requirements.txt must contain for a manifest hit when no matching path is present. must_not_infer_paths is the tree a plain service repository lists: it matches no signal in this pack, so infer_lens returns no lens for it. No must_infer path matches the data-science pack's signals, and qa-manual sorts after data-science, so this pack cannot take that fixture's inference."
+  },
+  "required_evidence_families_why": {
+    "E17": "Human exploratory evidence: a manual session is only evidence when the charter, environment, data, path taken, observations and the uncertainty left over are all recorded; a paragraph in chat is not (persona doc 6.1 E17, 16.4 'a manual finding should not be a paragraph in chat')",
+    "E1": "Example-based functional test: a scripted manual case is a known input and an expected output, and it carries the same weakness the family names: an expected output copied from the implementation proves nothing (persona doc 6.1 E1, 16.3 QA-M-02)",
+    "E9": "Golden and replay evidence: a defect closes by replaying the captured incident state and seeing the fixed behaviour, and a visual or locale check needs an approved baseline to compare against (persona doc 6.1 E9, 16.3 QA-M-19, QA-M-15)",
+    "E15": "Observability evidence: the screenshots, video, console output, HAR traces and build identifiers a tester attaches are the only durable trace of a session nobody can re-run; without them the finding cannot be reused by engineering or the Vault (persona doc 6.1 E15, 16.3 QA-M-20, 16.6)",
+    "E2": "Independent business oracle: the expected basis of a manual result must come from an approved rule, a requirement or a curated fixture, not from reading the code under test; the receipt records which, so a circular acceptance is visible rather than assumed (persona doc 6.1 E2, 6.2 oracle_source, 16.3 QA-M-17)"
+  },
+  "receipt_fields_details": {
+    "charter_id": {
+      "meaning": "which exploratory charter or campaign this session belongs to",
+      "filled_by": "file: the charter document under the repository's charter or test-case directory; NO-DATA when the session was unchartered"
+    },
+    "executed_test_case_ids": {
+      "meaning": "the identifiers of the manual cases actually run in this session, not the ones planned",
+      "filled_by": "file: the ids listed in the session note or in the test-case files touched; NO-DATA when the session was purely exploratory and produced no case ids"
+    },
+    "build_version_commit": {
+      "meaning": "the exact build the tester had in front of them",
+      "filled_by": "command: git rev-parse HEAD, plus the app's own build identifier where it prints one; NO-DATA when the build under test was not identifiable"
+    },
+    "environment": {
+      "meaning": "which environment the session ran against, and whether it was a live one",
+      "filled_by": "human: stated by the tester at the start of the charter; NO-DATA is never acceptable here for a session that mutated anything"
+    },
+    "device_browser_locale": {
+      "meaning": "the device, operating system, browser and locale combination the observations belong to",
+      "filled_by": "human or command: the browser's own user agent and locale readout where the surface exposes one; NO-DATA when the surface is not a browser and the tester recorded no device"
+    },
+    "account_role_test_data_identity": {
+      "meaning": "which account, role and test-data identity was used, named without any secret or real personal detail",
+      "filled_by": "human: the non-secret label of the fixture account; NO-DATA when no authenticated session was involved"
+    },
+    "preconditions": {
+      "meaning": "the state the system had to be in before the steps make sense",
+      "filled_by": "human: written into the charter or case before execution; NO-DATA when the path started from a clean install"
+    },
+    "steps_or_exploratory_path": {
+      "meaning": "what the tester actually did, in order, including the detours a scripted case would not contain",
+      "filled_by": "human: the session note; NO-DATA here is a failed session, never a passing one"
+    },
+    "observed_result": {
+      "meaning": "what the product did, described as seen rather than as interpreted",
+      "filled_by": "human: the session note, with the attachment pointers below as its backing"
+    },
+    "expected_basis": {
+      "meaning": "where the expected behaviour came from: an approved rule, a requirement, a prior release, a curated fixture, or the implementation itself",
+      "filled_by": "human: one of the oracle_source values of persona doc 6.2; an implementation-derived basis is recorded as such and carries a circularity warning"
+    },
+    "screenshot_paths": {
+      "meaning": "the repository-relative paths of the screenshots and video captured, so a later reader can see what the tester saw",
+      "filled_by": "file: the image and video files added under the evidence directory this receipt names; NO-DATA when nothing visual was captured, which is itself a finding for a screen change"
+    },
+    "attachments_log_pointers": {
+      "meaning": "the console output, HAR traces, server logs and request captures backing the observation",
+      "filled_by": "file: the artifact paths; NO-DATA when the surface produced no logs the tester could reach"
+    },
+    "severity_user_impact": {
+      "meaning": "who is hurt by the finding and how badly, in user terms rather than in component terms",
+      "filled_by": "human: assigned by the tester, never by the agent alone"
+    },
+    "reproducibility": {
+      "meaning": "how many attempts out of how many reproduced the finding, and under which conditions it stopped reproducing",
+      "filled_by": "human: the repeat count from the session; NO-DATA when the finding was seen once and not retried"
+    },
+    "related_requirement_change": {
+      "meaning": "the requirement, ticket or commit range this session was testing",
+      "filled_by": "command: git log over the range under test, plus the requirement identifier the tester names"
+    },
+    "remaining_uncertainty": {
+      "meaning": "the combinations, states and configurations the timebox did not reach, stated plainly so nobody reads the session as coverage",
+      "filled_by": "human: written at the close of the charter; an empty value is refused, since no timeboxed session covers everything"
+    },
+    "human_tester_identity": {
+      "meaning": "who ran the session and is answerable for the judgment in it",
+      "filled_by": "command: git config user.name for a session recorded through the repository; NO-DATA when the tester is outside the repository and was not named"
+    }
+  }
+}

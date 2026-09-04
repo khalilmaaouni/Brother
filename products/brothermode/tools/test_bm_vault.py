@@ -938,6 +938,166 @@ class ADefaultVaultDegradesOnAShapeInvalidConfig(unittest.TestCase):
             self.assertIn("NO-DATA", out)
 
 
+DECAY_LOUD = """---
+name: grumbleflux-decayed-notes
+description: the louder note, which wins on wording alone
+type: project
+decay: 0.0
+---
+
+Grumbleflux telemetry rotation. Grumbleflux telemetry rotation is the grumbleflux
+telemetry rotation everybody means when they say grumbleflux telemetry rotation.
+"""
+
+DECAY_QUIET = """---
+name: grumbleflux-current-notes
+description: the quieter note, which mentions the terms once
+type: project
+---
+
+Grumbleflux telemetry rotation was settled here.
+"""
+
+
+class DecayReordersInsideOneAuthorityTier(unittest.TestCase):
+    """E57 mechanism 2, borrowed from MemoryBank's Ebbinghaus decay and
+    reinforcement (https://arxiv.org/abs/2305.10250, code at
+    https://github.com/zhongwanjun/MemoryBank-SiliconFriend).
+
+    THE GAP THIS CLOSES. Until this row bm_vault ranked a note written in
+    February and never confirmed since exactly like a note confirmed
+    yesterday: BM25 plus anchors plus links has no notion of a note's own
+    usefulness over time. The loud note below repeats every query term and
+    wins the fused score outright, which is what happens before the change;
+    declaring decay: 0.0 must drop it below the quiet one.
+
+    THE BOUNDARY, tested as hard as the reordering: the decayed note is still
+    SERVED. The vault constitution says notes are never deleted, and a note
+    that falls out of the result set has been deleted from the reader's view
+    whatever the file system still holds, so bm_vault_decay.FLOOR keeps it in.
+    Both notes are casual, so authority is a tie and the decayed similarity
+    score is what decides, which is the seam this mechanism is wired into.
+
+    Queries run --fast for the same reason every other ranking suite here
+    does: this is lexical-signal territory and must not pay the dense load."""
+
+    QUERY = ["recall", "--query", "grumbleflux telemetry rotation",
+             "--limit", "3", "--fast"]
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp(prefix="bm-vault-decay-")
+        cls.vault = os.path.join(cls.tmp, "vault")
+        os.makedirs(cls.vault)
+        for fn, text in (("loud.md", DECAY_LOUD), ("quiet.md", DECAY_QUIET)):
+            with open(os.path.join(cls.vault, fn), "w") as f:
+                f.write(text)
+        cls.env = dict(os.environ)
+        cls.env["HOME"] = cls.tmp
+        cls.env["BROTHERMODE_ROOT"] = cls.tmp
+        cls.env["BM_FRESHNESS_ROOTS"] = cls.tmp
+        cls.env["BM_FRESHNESS_STATE"] = os.path.join(cls.tmp, "freshness_state.sqlite3")
+        # The sidecar store, pointed at the temp tree: no test ever reads or
+        # writes this machine's real reinforcement record.
+        cls.env["BM_VAULT_DECAY"] = os.path.join(cls.tmp, "vault-decay.json")
+        os.makedirs(os.path.join(cls.tmp, ".claude"))
+        cls.index_code, cls.index_out = run(["index", "--vault", cls.vault], cls.env)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_01_the_corpus_indexed(self):
+        self.assertEqual(self.index_code, 0, self.index_out)
+
+    def test_02_a_decayed_note_loses_rank_to_a_quieter_current_one(self):
+        code, out = run(self.QUERY, self.env)
+        self.assertEqual(code, 0, out)
+        self.assertIn("grumbleflux-current-notes", out)
+        self.assertIn("grumbleflux-decayed-notes", out)
+        self.assertLess(out.index("grumbleflux-current-notes"),
+                        out.index("grumbleflux-decayed-notes"),
+                        "a note declaring decay: 0.0 still outranked a current "
+                        "note on wording alone:\n%s" % out[:900])
+
+    def test_03_a_decayed_note_is_still_served_never_dropped(self):
+        """The constitution's line, at the ranking seam: decay reorders and
+        never removes."""
+        code, out = run(self.QUERY, self.env)
+        self.assertEqual(code, 0, out)
+        self.assertIn("grumbleflux-decayed-notes", out,
+                      "decay deleted a note from the reader's view, which is "
+                      "the one thing it may never do:\n%s" % out[:900])
+
+
+class DecayIsACurveNotAFlag(unittest.TestCase):
+    """bm_vault_decay's own contract, decided without an index. The curve is
+    MemoryBank's Ebbinghaus shape (https://arxiv.org/abs/2305.10250) and the
+    reinforcement half is what makes a confirmed note last longer rather than
+    merely restart."""
+
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location(
+            "bm_vault_decay", os.path.join(HERE, "bm_vault_decay.py"))
+        cls.decay = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.decay)
+
+    def test_a_note_nobody_has_touched_is_never_penalised(self):
+        """Absence is not a measurement: 898 notes declare nothing today, and
+        demoting every one of them would be a rewrite of the ranking dressed
+        up as a decay curve."""
+        self.assertEqual(self.decay.retention("no-entry", "", {}), 1.0)
+        self.assertEqual(self.decay.scale("no-entry", "", {}), 1.0)
+
+    def test_retention_falls_with_the_days_since_the_last_reinforcement(self):
+        now = 1_000_000_000.0
+        store = {"n": {"reps": 0, "last": now - 60 * self.decay.SECONDS_PER_DAY}}
+        old = self.decay.retention("n", "", store, now)
+        store = {"n": {"reps": 0, "last": now - 1 * self.decay.SECONDS_PER_DAY}}
+        fresh = self.decay.retention("n", "", store, now)
+        self.assertLess(old, fresh)
+        self.assertGreater(old, 0.0, "the curve never reaches zero")
+
+    def test_reinforcement_lengthens_the_memory_rather_than_only_resetting_it(self):
+        now = 1_000_000_000.0
+        days = 60 * self.decay.SECONDS_PER_DAY
+        once = self.decay.retention("n", "", {"n": {"reps": 1, "last": now - days}}, now)
+        thrice = self.decay.retention("n", "", {"n": {"reps": 3, "last": now - days}}, now)
+        self.assertGreater(thrice, once,
+                           "a note confirmed three times fades as fast as one "
+                           "confirmed once, so reinforcement does nothing")
+
+    def test_the_scale_never_falls_below_the_floor(self):
+        self.assertEqual(self.decay.scale("n", "---\ndecay: 0.0\n---\nbody"),
+                         self.decay.FLOOR)
+        self.assertGreater(self.decay.FLOOR, 0.0,
+                           "a floor of zero deletes a note from the reader's view")
+
+    def test_an_unreadable_declared_value_is_not_guessed_at(self):
+        for body in ("---\ndecay: soon\n---\n", "---\ndecay: 7\n---\n",
+                     "---\ndecay: -1\n---\n"):
+            self.assertIsNone(self.decay.declared_retention(body), body)
+
+    def test_reinforce_writes_the_sidecar_and_never_the_note(self):
+        tmp = tempfile.mkdtemp(prefix="bm-vault-decay-store-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        note = os.path.join(tmp, "a-note.md")
+        body = "---\nname: a-note\n---\nbody\n"
+        with open(note, "w") as fh:
+            fh.write(body)
+        store = os.path.join(tmp, "vault-decay.json")
+        first = self.decay.reinforce("a-note", path=store)
+        second = self.decay.reinforce("a-note", path=store)
+        self.assertEqual(first["reps"], 1)
+        self.assertEqual(second["reps"], 2)
+        self.assertTrue(os.path.exists(store))
+        with open(note) as fh:
+            self.assertEqual(fh.read(), body,
+                             "reinforcement rewrote the note; the vault "
+                             "constitution says notes are never rewritten")
+
+
 class LinkExpansionResolvesByFilenameStem(unittest.TestCase):
     """The defect: link expansion joined a RAW WIKILINK STEM against a note title
     derived from frontmatter, and almost no note carries that frontmatter field, so

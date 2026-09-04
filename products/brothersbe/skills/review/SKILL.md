@@ -3,6 +3,8 @@ name: review
 description: Use when reviewing a diff, a pull request, or a colleague's change against the design it claims to implement. Runs the deterministic reviewer route to decide who looks, dispatches only the read-only specialists it names, normalizes and deduplicates every finding into the landed schema, and returns a fixed summary (ready or not, mechanical counts, the lenses used, blockers, improvements, pre-existing issues, one next action) with detail underneath. Invoke as /brothersbe:review.
 ---
 
+Plugin root: a Claude Code install exports `${CLAUDE_PLUGIN_ROOT}` and a Codex install exports `${BROTHER_PLUGIN_ROOT}`; both name this plugin's own directory, so read whichever variable appears below as the one your client set. On a clone install neither is set: run the same commands from the checkout root instead.
+
 # Review
 
 Read `${CLAUDE_PLUGIN_ROOT}/SKILL.md`, then

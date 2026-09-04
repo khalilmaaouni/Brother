@@ -158,6 +158,19 @@ else
     # prefixes, so that machine state stays excluded whether it is a real
     # directory (already skipped by ! -type d) or a symlink standing in for
     # one.
+    #
+    # E80 (2026-09-04, external release integrity trial on the public v1.0.1
+    # clone): the project working-state files below used to be excluded by
+    # BARE NAME (! -name 'CANVAS.md'), which matches at any depth. The
+    # product SHIPS project-template/CANVAS.md and
+    # project-template/DELIVERY-PACKET.md as tracked template files, so the
+    # bare name silently dropped two shipped files from the manifest here
+    # and from the installed listing in verify-install.sh. Excluding them by
+    # ROOT-ANCHORED PATH keeps the thing the exclusion was for (a user's own
+    # CANVAS.md sitting at the project root, which is state, not payload)
+    # and stops it reaching into the template directory. .DS_Store and
+    # *.bak* stay bare names: those are junk at any depth and no tracked
+    # file is ever named that.
     find . ! -type d \
         ! -path './.git' \
         ! -path './.git/*' \
@@ -180,12 +193,12 @@ else
         ! -path './Handover-*/*' \
         ! -name '.DS_Store' \
         ! -name '*.bak*' \
-        ! -name 'STATE.md' \
-        ! -name 'CANVAS.md' \
-        ! -name 'CANVAS-*.md' \
-        ! -name 'DELIVERY-PACKET.md' \
-        ! -name 'DELIVERY-PACKET-*.md' \
-        ! -name 'PROJECT-VIEW.html' \
+        ! -path './STATE.md' \
+        ! -path './CANVAS.md' \
+        ! -path './CANVAS-*.md' \
+        ! -path './DELIVERY-PACKET.md' \
+        ! -path './DELIVERY-PACKET-*.md' \
+        ! -path './PROJECT-VIEW.html' \
         | sed 's|^\./||' > "$WORKDIR/filelist"
 fi
 

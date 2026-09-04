@@ -7,7 +7,7 @@ brief that a test would have caught. Each test here guards a claim the project
 makes about itself: secrets are redacted, sensitive files are owner-only, project
 identity does not collide, and the autosave captures untracked work non-invasively.
 """
-import ast, glob, hashlib, io, os, json, re, shutil, stat, sys, tempfile, subprocess, importlib.util
+import ast, contextlib, glob, hashlib, io, os, json, re, shutil, stat, sys, tempfile, time, subprocess, importlib.util
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -5161,6 +5161,48 @@ class TestEverySuiteIsWiredIntoAGate(unittest.TestCase):
             "neither and 10 the workflow ran while the battery did not."
             % (only_wf or "none", only_bat or "none"))
 
+    # One-repo transition (M3/M4): this product lives inside the hub
+    # repository, which ships its OWN battery, scripts/check_all.sh, above
+    # BOTH gates this class already holds to each other. That hub battery ran
+    # evals/run_evals.py and this file directly but never release-control/
+    # baseline/run-battery.sh, the ninety-plus-suite battery the two tests
+    # above hold in step with the workflow, so a hub run answered for two
+    # suites out of ninety while believing it had answered for the product.
+    # Registered the same change (QA reviewer finding 3, 2026-09-04) that
+    # lands the hub line calling this script; the smallest addition that
+    # fails the moment someone removes that line rather than only when the
+    # workflow and this battery drift from each other.
+    HUB_BATTERY = os.path.join("scripts", "check_all.sh")
+
+    def test_the_hub_battery_also_registers_this_script(self):
+        hub_root = os.path.dirname(os.path.dirname(os.path.abspath(ROOT)))
+        hub_battery = os.path.join(hub_root, self.HUB_BATTERY)
+        if not os.path.isfile(hub_battery):
+            self.skipTest(
+                "NO-DATA: no %s found two directories above this product "
+                "(%s); this checkout does not have the product nested "
+                "inside the hub repository, so there is no outer battery "
+                "to check" % (self.HUB_BATTERY, hub_root))
+        text = io.open(hub_battery, encoding="utf-8", errors="replace").read()
+        rel = self.BATTERY.replace(os.sep, "/")
+        # INVOKED, never merely mentioned, matching _read()'s own rule above:
+        # a bare assertIn against the whole file passed this test the first
+        # time it was written, because the path also appears in this test's
+        # own explanatory comment a few lines up. Require the path to appear
+        # on a line that actually starts a run_check call.
+        invoked = re.search(
+            r'^\s*run_check\s+"[^"]+"\s+.*' + re.escape(rel), text, re.M)
+        self.assertTrue(
+            invoked,
+            "%s does not INVOKE %s on any run_check line (the path may still "
+            "appear in a comment, which does not run it). Add a run_check "
+            "line there that runs this product's own battery from the "
+            "product directory (for example: run_check "
+            "\"product-brothersbe-battery\" sh -c 'cd products/brothersbe "
+            "&& sh %s ...'), or the ninety-plus suites it wires stay "
+            "invisible to the hub's own battery run."
+            % (self.HUB_BATTERY, rel, rel))
+
 
 class TestTheWaiverBlastRadiusStaysOneRule(unittest.TestCase):
     """The self-minted-waiver route from BLOCKED to PASS must not widen.
@@ -5403,5 +5445,619 @@ class TestTheOwnerOnlyWriteSitesStayNamed(unittest.TestCase):
 # wired into no workflow and a release document missing three steps the tool
 # prints: a control that exists, passes when you ask it directly, and is never
 # asked by the thing that gates. Append new classes ABOVE this line.
+class TestSbeRepoScope(unittest.TestCase):
+    """E76: per-repository hook scoping. tools/sbe_repo_scope.py is the
+    shared reader every hook calls at entry; this proves its own logic
+    (find_repo_root, the config parse, the once-per-session notice) and
+    then drives EVERY hook command hooks/hooks.json actually registers, as
+    real subprocesses, so a hook added later is covered automatically
+    rather than by a hand-picked sample."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        subprocess.run(["git", "init", "-q", self.tmp], check=True)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _write_config(self, text):
+        d = os.path.join(self.tmp, ".brother")
+        os.makedirs(d, exist_ok=True)
+        with io.open(os.path.join(d, "config"), "w", encoding="utf-8") as f:
+            f.write(text)
+
+    def _load(self):
+        spec = importlib.util.spec_from_file_location(
+            "sbe_repo_scope_under_test", os.path.join(HERE, "sbe_repo_scope.py"))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_absent_config_is_active(self):
+        mod = self._load()
+        self.assertFalse(mod.hooks_off(cwd=self.tmp))
+
+    def test_off_line_turns_hooks_off(self):
+        self._write_config("hooks: off\n")
+        mod = self._load()
+        self.assertTrue(mod.hooks_off(payload={"session_id": "s1"}, cwd=self.tmp))
+
+    def test_off_line_is_case_insensitive_past_comments_and_blanks(self):
+        self._write_config("# a comment\n\nHOOKS: OFF\n")
+        mod = self._load()
+        self.assertTrue(mod.hooks_off(cwd=self.tmp))
+
+    def test_readable_text_that_is_not_the_off_line_stays_active(self):
+        self._write_config("this is not the magic line\n")
+        mod = self._load()
+        with mock.patch("sys.stderr", io.StringIO()):
+            off = mod.hooks_off(cwd=self.tmp)
+        self.assertFalse(off)
+
+    def test_undecodable_bytes_default_active_with_one_diagnostic_line(self):
+        d = os.path.join(self.tmp, ".brother")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "config"), "wb") as f:
+            f.write(b"\xff\xfe\x00garbage")
+        mod = self._load()
+        err = io.StringIO()
+        with mock.patch("sys.stderr", err):
+            off = mod.hooks_off(cwd=self.tmp)
+        self.assertFalse(off)
+        self.assertIn("could not be read", err.getvalue())
+
+    def test_notice_prints_once_per_session_across_two_calls(self):
+        self._write_config("hooks: off\n")
+        mod = self._load()
+        first = io.StringIO()
+        with mock.patch("sys.stderr", first):
+            self.assertTrue(
+                mod.hooks_off(payload={"session_id": "sX"}, cwd=self.tmp))
+        second = io.StringIO()
+        with mock.patch("sys.stderr", second):
+            self.assertTrue(
+                mod.hooks_off(payload={"session_id": "sX"}, cwd=self.tmp))
+        self.assertIn("hooks are off", first.getvalue())
+        self.assertEqual(second.getvalue(), "")
+
+    def test_a_different_session_gets_its_own_notice(self):
+        self._write_config("hooks: off\n")
+        mod = self._load()
+        with mock.patch("sys.stderr", io.StringIO()):
+            mod.hooks_off(payload={"session_id": "sA"}, cwd=self.tmp)
+        second = io.StringIO()
+        with mock.patch("sys.stderr", second):
+            mod.hooks_off(payload={"session_id": "sB"}, cwd=self.tmp)
+        self.assertIn("hooks are off", second.getvalue())
+
+    def test_find_repo_root_walks_up_from_a_subdirectory(self):
+        sub = os.path.join(self.tmp, "a", "b", "c")
+        os.makedirs(sub, exist_ok=True)
+        mod = self._load()
+        self.assertEqual(os.path.realpath(mod.find_repo_root(sub)),
+                         os.path.realpath(self.tmp))
+
+    def _registered_hook_commands(self):
+        """Every (event, script_filename, extra_argv) hooks/hooks.json
+        actually registers, read from the file itself rather than
+        retyped."""
+        hooks_json = os.path.join(ROOT, "hooks", "hooks.json")
+        with io.open(hooks_json, encoding="utf-8") as f:
+            spec = json.load(f)
+        pat = re.compile(r'tools/([\w.]+\.py)"?\s*(.*)')
+        out = []
+        for event, entries in spec["hooks"].items():
+            for entry in entries:
+                for h in entry.get("hooks", []):
+                    m = pat.search(h.get("command", ""))
+                    if not m:
+                        continue
+                    script = m.group(1)
+                    tail = m.group(2).strip()
+                    argv = [a.strip('"') for a in tail.split()] if tail else []
+                    out.append((event, script, argv))
+        return out
+
+    def test_every_registered_hook_exits_zero_and_stays_inert_when_off(self):
+        """The done_check's behavioral proof: every hook hooks/hooks.json
+        wires up, run as a real subprocess against a repository with
+        hooks turned off, exits 0 and prints nothing to stdout (no
+        decision, no digest, no output at all), which means it stopped at
+        the gate instead of doing its normal work.
+
+        Narrowed 2026-09-04 (security review, Major): the WRITE GUARDS are
+        exempt from the inertness claim on purpose, because a repository
+        may not switch off the check standing between it and the person's
+        disk. They are driven the other way, as guards, by
+        test_the_write_guards_are_not_switched_off_by_the_repo_config below
+        and by test_sbe_bash_guard.py. The exemption is read from
+        sbe_repo_scope's own tuple rather than retyped."""
+        self._write_config("hooks: off\n")
+        guards = self._load().WRITE_GUARD_HOOKS
+        commands = self._registered_hook_commands()
+        self.assertGreater(
+            len(commands), 0,
+            "hooks.json parsed to zero commands; the regex or the fixture drifted")
+        for i, (event, script, argv) in enumerate(commands):
+            if script in guards:
+                continue
+            payload = json.dumps({
+                "cwd": self.tmp, "session_id": "sess-%d" % i,
+                "hook_event_name": event, "tool_name": "Write",
+                "tool_input": {"file_path": os.path.join(self.tmp, "x.py")},
+                "transcript_path": os.path.join(self.tmp, "nonexistent.jsonl"),
+                "reason": "test",
+            })
+            r = subprocess.run(
+                [sys.executable, os.path.join(HERE, script)] + argv,
+                input=payload, capture_output=True, text=True, cwd=self.tmp)
+            self.assertEqual(
+                r.returncode, 0,
+                "%s %s (%s) did not exit 0 with hooks off: stderr=%r"
+                % (script, argv, event, r.stderr))
+            self.assertEqual(
+                r.stdout, "",
+                "%s %s (%s) printed to stdout with hooks off, so it did its "
+                "normal work instead of stopping at the gate: %r"
+                % (script, argv, event, r.stdout))
+
+    def test_the_write_guards_are_not_switched_off_by_the_repo_config(self):
+        """Security review 2026-09-04, Major. .brother/config is content
+        that arrives WITH a repository, and "hooks: off" used to make every
+        registered hook of both products exit at once, the write guards
+        included. So a clone could switch off the check standing between it
+        and the person's disk, with one stderr line as the only trace.
+        Here at the mechanism: the SAME config, read twice, answers True
+        for an ordinary hook and False for a write guard, and each named
+        guard's own source really passes the flag, so a call site edited
+        back to the plain call fails here instead of silently reopening the
+        hole. The refusal itself is driven end to end in
+        test_sbe_bash_guard.py."""
+        self._write_config("hooks: off\n")
+        mod = self._load()
+        with mock.patch("sys.stderr", io.StringIO()):
+            self.assertTrue(
+                mod.hooks_off(payload={"session_id": "g1"}, cwd=self.tmp))
+            self.assertFalse(
+                mod.hooks_off(payload={"session_id": "g1"}, cwd=self.tmp,
+                              write_guard=True))
+        for script in ("sbe_authority_hook.py", "sbe_bash_write_guard.py"):
+            self.assertIn(script, mod.WRITE_GUARD_HOOKS)
+            with io.open(os.path.join(HERE, script), encoding="utf-8") as f:
+                source = f.read()
+            self.assertIn(
+                "write_guard=True", source,
+                "%s is named a write guard but does not pass "
+                "write_guard=True, so .brother/config can switch it off "
+                "again" % script)
+
+    def test_absent_config_leaves_a_hook_unaffected(self):
+        """No .brother/config at all: compare two runs of the same hook,
+        one with no config file at all present, to prove E76 introduced no
+        behavior change on the common path. sbe_bash_write_guard.py is a
+        write-scoped PreToolUse hook, so an inert Bash command (no writes)
+        is the natural inert-baseline case."""
+        def run():
+            return subprocess.run(
+                [sys.executable, os.path.join(HERE, "sbe_bash_write_guard.py")],
+                input=json.dumps({
+                    "cwd": self.tmp, "session_id": "sess-plain",
+                    "tool_name": "Bash",
+                    "tool_input": {"command": "echo hi"},
+                }),
+                capture_output=True, text=True, cwd=self.tmp)
+        baseline = run()
+        after = run()
+        self.assertEqual(baseline.returncode, 0)
+        self.assertEqual(baseline.returncode, after.returncode)
+        self.assertEqual(baseline.stdout, after.stdout)
+        self.assertNotIn("hooks are off", after.stdout)
+
+    # --- E50: the INSTALL-side default. The marker tools/install.py writes
+    # beside the Claude settings directory turns the absent-config case from
+    # ACTIVE into INACTIVE, so a machine that installed BrotherSBE for one
+    # project runs nothing anywhere else.
+
+    def _scoped_config_dir(self, text=None):
+        """A throwaway CLAUDE_CONFIG_DIR carrying the E50 scope marker."""
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        if text is None:
+            text = self._load().SCOPE_MARKER_TEXT
+        with io.open(os.path.join(d, "brother-hook-scope"), "w",
+                     encoding="utf-8") as f:
+            f.write(text)
+        return d
+
+    def _with_config_dir(self, d):
+        old = os.environ.get("CLAUDE_CONFIG_DIR")
+        os.environ["CLAUDE_CONFIG_DIR"] = d
+
+        def restore():
+            if old is None:
+                os.environ.pop("CLAUDE_CONFIG_DIR", None)
+            else:
+                os.environ["CLAUDE_CONFIG_DIR"] = old
+        self.addCleanup(restore)
+
+    def test_scoped_install_makes_an_unopted_repository_inactive(self):
+        self._with_config_dir(self._scoped_config_dir())
+        mod = self._load()
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            off = mod.hooks_off(payload={"session_id": "s50"}, cwd=self.tmp)
+        self.assertTrue(off)
+        self.assertEqual(err.getvalue(), "",
+                         "a repository nobody opted in must cost nothing, "
+                         "not even a line of stderr")
+
+    def test_opting_a_repository_in_makes_it_active_again(self):
+        self._with_config_dir(self._scoped_config_dir())
+        mod = self._load()
+        self._write_config(mod.ON_LINE + "\n")
+        self.assertFalse(mod.hooks_off(payload={"session_id": "s51"},
+                                       cwd=self.tmp))
+
+    def test_off_still_wins_inside_an_opted_in_repository(self):
+        self._with_config_dir(self._scoped_config_dir())
+        mod = self._load()
+        self._write_config("hooks: off\n")
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertTrue(mod.hooks_off(payload={"session_id": "s52"},
+                                          cwd=self.tmp))
+
+    def test_no_marker_keeps_the_e76_default_so_a_clone_is_unchanged(self):
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        self._with_config_dir(d)
+        mod = self._load()
+        self.assertFalse(mod.hooks_off(cwd=self.tmp))
+
+    def test_a_marker_without_the_scope_line_scopes_nothing(self):
+        self._with_config_dir(self._scoped_config_dir("scope: everything\n"))
+        mod = self._load()
+        self.assertFalse(mod.hooks_off(cwd=self.tmp))
+
+    def test_an_unreadable_marker_stays_active_with_one_diagnostic(self):
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        with open(os.path.join(d, "brother-hook-scope"), "wb") as f:
+            f.write(b"\xff\xfe\x00garbage")
+        self._with_config_dir(d)
+        mod = self._load()
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            off = mod.hooks_off(cwd=self.tmp)
+        self.assertFalse(off, "a broken marker must never be the reason a "
+                              "hook stops working")
+        self.assertIn("could not be read", err.getvalue())
+
+    @staticmethod
+    def _tree(root):
+        found = set()
+        for dirpath, dirnames, filenames in os.walk(root):
+            for name in dirnames + filenames:
+                found.add(os.path.relpath(os.path.join(dirpath, name), root))
+        return found
+
+    def test_the_inert_path_reads_nothing_and_finishes_well_under_50_ms(self):
+        """E50's own done_check wording, timed in process because that is
+        what measures BrotherSBE's work rather than a CPython start."""
+        self._with_config_dir(self._scoped_config_dir())
+        mod = self._load()
+        before = self._tree(self.tmp)
+        started = time.time()
+        for i in range(20):
+            self.assertTrue(mod.hooks_off(payload={"session_id": "t%d" % i},
+                                          cwd=self.tmp))
+        each_ms = (time.time() - started) * 1000.0 / 20
+        self.assertEqual(self._tree(self.tmp), before,
+                         "the inert path wrote into the repository")
+        self.assertLess(each_ms, 50.0,
+                        "the inert gate took %.3f ms per call; the row "
+                        "promises under 50" % each_ms)
+        sys.stderr.write("\n[E50] inert gate: %.3f ms per call\n" % each_ms)
+
+    def test_every_registered_hook_is_inert_in_an_unopted_repository(self):
+        """With a scoped install and NO .brother/config, every hook
+        hooks/hooks.json registers, run as a real subprocess with its cwd
+        inside an unrelated git repository, exits 0, prints nothing on
+        either stream, and leaves the repository exactly as it found it."""
+        env = dict(os.environ)
+        env["CLAUDE_CONFIG_DIR"] = self._scoped_config_dir()
+        commands = self._registered_hook_commands()
+        self.assertGreater(
+            len(commands), 0,
+            "hooks.json parsed to zero commands; the regex or the fixture drifted")
+        before = self._tree(self.tmp)
+        for i, (event, script, argv) in enumerate(commands):
+            payload = json.dumps({
+                "cwd": self.tmp, "project_dir": self.tmp,
+                "session_id": "scoped-%d" % i,
+                "hook_event_name": event, "tool_name": "Write",
+                "tool_input": {"file_path": os.path.join(self.tmp, "x.py")},
+                "transcript_path": os.path.join(self.tmp, "nonexistent.jsonl"),
+                "reason": "test",
+            })
+            r = subprocess.run(
+                [sys.executable, os.path.join(HERE, script)] + argv,
+                input=payload, capture_output=True, text=True, cwd=self.tmp,
+                env=env)
+            self.assertEqual(
+                r.returncode, 0,
+                "%s %s (%s) did not exit 0 in an unopted repository: stderr=%r"
+                % (script, argv, event, r.stderr))
+            self.assertEqual(
+                r.stdout, "",
+                "%s %s (%s) printed to stdout in an unopted repository: %r"
+                % (script, argv, event, r.stdout))
+            self.assertEqual(
+                r.stderr, "",
+                "%s %s (%s) printed to stderr in an unopted repository: %r"
+                % (script, argv, event, r.stderr))
+        self.assertEqual(
+            self._tree(self.tmp), before,
+            "a hook wrote into an unopted repository; E50 promises it costs "
+            "nothing at all")
+
+
+class TestSbeInstallHookScope(unittest.TestCase):
+    """E50, the install side of BrotherSBE: apply_hook_scope writes the
+    marker, opts the RESOLVED TARGET in (this installer already knows which
+    project was meant), and says where hooks are active in one line."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.config_dir = os.path.join(self.tmp, "claude")
+        os.makedirs(self.config_dir)
+        self.target = os.path.join(self.tmp, "project")
+        os.makedirs(self.target)
+        old = os.environ.get("CLAUDE_CONFIG_DIR")
+        os.environ["CLAUDE_CONFIG_DIR"] = self.config_dir
+
+        def restore():
+            if old is None:
+                os.environ.pop("CLAUDE_CONFIG_DIR", None)
+            else:
+                os.environ["CLAUDE_CONFIG_DIR"] = old
+        self.addCleanup(restore)
+        spec = importlib.util.spec_from_file_location(
+            "sbe_install_under_test", os.path.join(HERE, "install.py"))
+        self.mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.mod)
+
+    def _apply(self, hooks_everywhere=False, dry_run=False):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.mod.apply_hook_scope(dry_run, self.target, hooks_everywhere)
+        return out.getvalue()
+
+    @property
+    def marker(self):
+        return os.path.join(self.config_dir, "brother-hook-scope")
+
+    def test_the_default_scopes_the_machine_and_opts_the_target_in(self):
+        out = self._apply()
+        self.assertTrue(os.path.exists(self.marker),
+                        "the default install left no scope marker, so its "
+                        "hooks would run in every repository on the machine")
+        with io.open(self.marker, encoding="utf-8") as f:
+            self.assertIn("scope: repositories", f.read())
+        cfg = os.path.join(self.target, ".brother", "config")
+        with io.open(cfg, encoding="utf-8") as f:
+            self.assertEqual(f.read().strip(), "hooks: on")
+        lines = [l for l in out.splitlines() if "hooks: active in" in l]
+        self.assertEqual(len(lines), 1,
+                         "expected exactly one line naming where hooks are "
+                         "active; got %r" % lines)
+        self.assertIn(self.target, lines[0])
+        self.assertIn(".brother/config", lines[0],
+                      "the line has to say how to add a repository")
+
+    def test_an_existing_config_is_never_rewritten(self):
+        """It may hold the "hooks: off" line somebody put there on purpose."""
+        d = os.path.join(self.target, ".brother")
+        os.makedirs(d)
+        with io.open(os.path.join(d, "config"), "w", encoding="utf-8") as f:
+            f.write("hooks: off\n")
+        self._apply()
+        with io.open(os.path.join(d, "config"), encoding="utf-8") as f:
+            self.assertEqual(f.read().strip(), "hooks: off")
+
+    def test_hooks_everywhere_writes_no_marker_and_removes_one(self):
+        with io.open(self.marker, "w", encoding="utf-8") as f:
+            f.write("scope: repositories\n")
+        out = self._apply(hooks_everywhere=True)
+        self.assertFalse(os.path.exists(self.marker),
+                         "--hooks-everywhere left a marker behind, so the "
+                         "install it printed is not the install it made")
+        self.assertIn("EVERY repository", out)
+
+    def test_a_dry_run_writes_nothing(self):
+        out = self._apply(dry_run=True)
+        self.assertFalse(os.path.exists(self.marker))
+        self.assertFalse(os.path.exists(
+            os.path.join(self.target, ".brother", "config")))
+        self.assertIn("would:", out)
+
+    def test_the_flag_is_parsed(self):
+        self.assertEqual(self.mod._parse_args(["--hooks-everywhere"])[3], True)
+        self.assertEqual(self.mod._parse_args([])[3], False)
+
+
+class TestAnUnparseableRepoScopeModuleDegradesToActive(unittest.TestCase):
+    """E76: four hooks load tools/sbe_repo_scope.py by path and swallow every
+    exception, returning None. That None SILENTLY degrades the gate to
+    "hooks active", and until this test no test in either product named the
+    fallback at all: PR #145 annotated all six swallows as reviewed
+    exemptions and shipped no test.
+
+    Driven differentially, because a silent degrade cannot be seen any other
+    way: the same repository with hooks turned off, run once against the real
+    gate module and once against an unparseable one."""
+
+    #: The four hooks whose loaders PR #145 exempted, with the argv
+    #: hooks.json registers for each.
+    HOOKS = (("sbe_session_reconcile.py", []),
+             ("sbe_bash_write_guard.py", []),
+             ("sbe_fence_hook.py", []),
+             ("sbe_autosave.py", ["precompact"]))
+
+    def setUp(self):
+        self.repo = tempfile.mkdtemp(prefix="sbe-repo-scope-repo-")
+        self._scratch = [self.repo]
+        subprocess.run(["git", "init", "-q", self.repo], check=True)
+        os.makedirs(os.path.join(self.repo, ".brother"))
+        with io.open(os.path.join(self.repo, ".brother", "config"), "w",
+                     encoding="utf-8") as f:
+            f.write("hooks: off\n")
+
+    def tearDown(self):
+        for path in self._scratch:
+            shutil.rmtree(path, ignore_errors=True)
+
+    def _tools_farm(self, gate_module_text=None):
+        """A symlink farm of the whole product root whose tools/ holds every
+        real sibling except sbe_repo_scope.py, written from
+        `gate_module_text` (None: symlink the real one). A farm rather than
+        a copy because these hooks resolve siblings from their own directory
+        and the product root above it."""
+        base = tempfile.mkdtemp(prefix="sbe-repo-scope-farm-")
+        self._scratch.append(base)
+        for name in os.listdir(ROOT):
+            if name != "tools":
+                os.symlink(os.path.join(ROOT, name), os.path.join(base, name))
+        tools = os.path.join(base, "tools")
+        os.makedirs(tools)
+        for name in os.listdir(HERE):
+            if gate_module_text is not None and name == "sbe_repo_scope.py":
+                continue
+            os.symlink(os.path.join(HERE, name), os.path.join(tools, name))
+        if gate_module_text is not None:
+            with io.open(os.path.join(tools, "sbe_repo_scope.py"), "w",
+                         encoding="utf-8") as f:
+                f.write(gate_module_text)
+        return tools
+
+    def _run(self, tools, script, argv):
+        payload = json.dumps({
+            "cwd": self.repo, "session_id": "degrade-probe",
+            "tool_name": "Bash",
+            "tool_input": {"command": "echo hi",
+                           "file_path": os.path.join(self.repo, "x.py")},
+            "transcript_path": os.path.join(self.repo, "nonexistent.jsonl"),
+            "reason": "test"})
+        return subprocess.run(
+            [sys.executable, os.path.join(tools, script)] + argv,
+            input=payload, capture_output=True, text=True, cwd=self.repo)
+
+    def test_no_hook_is_taken_down_by_an_unreadable_gate_module(self):
+        good = self._tools_farm()
+        bad = self._tools_farm(
+            gate_module_text="def hooks_off(  # deliberately unparseable\n")
+        differed = []
+        for script, argv in self.HOOKS:
+            before = self._run(good, script, argv)
+            after = self._run(bad, script, argv)
+            self.assertEqual(before.returncode, 0,
+                             "%s with a working gate module: stderr=%r"
+                             % (script, before.stderr))
+            self.assertEqual(
+                after.returncode, 0,
+                "%s: an unparseable gate module must never take the hook "
+                "down with it, it must degrade to active; stderr=%r"
+                % (script, after.stderr))
+            if before.stdout != after.stdout:
+                differed.append(script)
+        self.assertTrue(
+            differed,
+            "every hook behaved identically with a working and an "
+            "unparseable gate module, so this test proves nothing about the "
+            "degrade: it would pass on hooks that never consulted the gate "
+            "at all. Hooks tried: %r" % [s for s, _ in self.HOOKS])
+
+
+class TestEveryShippedExampleStillPassesItsOwnGate(unittest.TestCase):
+    """docs/for-engineers/examples/ ships executable teaching scripts and a
+    published figure (model-promotion's two AUC derivations and their
+    threshold check). Until this test, no registered test ran sbe_gate over
+    any examples directory: the PASS existed only as a done-check quoted by
+    hand into the roadmap, so an edit to a published number, or to a
+    derivation behind one, went unnoticed by the whole battery."""
+
+    def _gate(self, directory):
+        return subprocess.run(
+            [sys.executable, os.path.join(HERE, "sbe_gate.py"), directory,
+             "--strict"], capture_output=True, text=True)
+
+    def test_sbe_gate_strict_exits_zero_for_each_example_directory(self):
+        base = os.path.join(ROOT, "docs", "for-engineers", "examples")
+        names = sorted(n for n in os.listdir(base)
+                       if os.path.isdir(os.path.join(base, n)))
+        self.assertTrue(names, "no example directories under %s" % base)
+        for name in names:
+            proc = self._gate(os.path.join(base, name))
+            self.assertEqual(
+                proc.returncode, 0,
+                "examples/%s: sbe_gate --strict exited %d\n%s"
+                % (name, proc.returncode, proc.stdout + proc.stderr))
+
+    def test_every_recorded_rerun_value_is_what_the_derivation_prints_today(self):
+        """What the gate above does NOT do. `numbers` reads the manifest's
+        `rerun` block as a RECORDED CLAIM and re-executes nothing, so a
+        published figure whose derivation has drifted still reads PASS.
+        Measured, not assumed: adding 0.01 to compute_auc_rank.py's printed
+        value left `numbers PASS` and exit 0 on the whole directory. This
+        test runs the two commands the manifest itself names and compares
+        what they print now against the values recorded beside them, which
+        is the part that actually pins the number."""
+        base = os.path.join(ROOT, "docs", "for-engineers", "examples")
+        manifests = sorted(glob.glob(
+            os.path.join(base, "*", "numbers-manifest.json")))
+        self.assertTrue(manifests, "no numbers-manifest.json under %s" % base)
+        checked = 0
+        for manifest in manifests:
+            where = os.path.dirname(manifest)
+            with io.open(manifest, encoding="utf-8") as f:
+                spec = json.load(f)
+            for figure in spec.get("figures") or []:
+                rerun = figure.get("rerun") or {}
+                for value_key, command_key in (("primary", "query"),
+                                               ("secondary",
+                                                "second_derivation")):
+                    recorded = rerun.get(value_key)
+                    # The manifest documents each command with a trailing
+                    # "# ..." note for a human reader; only the command
+                    # itself is executable.
+                    command = str(figure.get(command_key) or "").split("#")[0]
+                    argv = command.split()
+                    if recorded is None or not argv:
+                        continue
+                    if argv[0] not in ("python3", "python"):
+                        continue  # not a command this test can run itself
+                    argv[0] = sys.executable
+                    proc = subprocess.run(argv, cwd=where, capture_output=True,
+                                          text=True)
+                    self.assertEqual(
+                        proc.returncode, 0,
+                        "%s: %r exited %d\n%s" % (manifest, command,
+                                                  proc.returncode,
+                                                  proc.stdout + proc.stderr))
+                    self.assertEqual(
+                        float(proc.stdout.strip()), float(recorded),
+                        "%s: %s records %s for %r, but that command prints "
+                        "%r today. Either the derivation drifted or the "
+                        "published figure did; the gate cannot see this "
+                        "because it re-runs nothing."
+                        % (manifest, value_key, recorded, command,
+                           proc.stdout.strip()))
+                    checked += 1
+        self.assertGreater(
+            checked, 0,
+            "no recorded rerun value was actually re-executed, so this test "
+            "proved nothing about any published figure")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

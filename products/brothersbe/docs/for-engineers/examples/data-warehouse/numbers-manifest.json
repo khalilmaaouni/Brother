@@ -1,0 +1,15 @@
+{
+  "figures": [
+    {
+      "label": "march_recognised_revenue_cents",
+      "snapshot_id": "snap_2026_03_31",
+      "query": "SELECT SUM(amount_cents) FROM revenue_event WHERE recognised_on >= '2026-03-01' AND recognised_on < '2026-04-01'",
+      "second_derivation": "SELECT SUM(i.amount_cents) - COALESCE(SUM(r.refunded_cents), 0) FROM invoice i LEFT JOIN refund r ON r.invoice_id = i.invoice_id WHERE i.issued_on >= '2026-03-01' AND i.issued_on < '2026-04-01'",
+      "rerun": {
+        "ran": true,
+        "primary": 84213977,
+        "secondary": 84213977
+      }
+    }
+  ]
+}

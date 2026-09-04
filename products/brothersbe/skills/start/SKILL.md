@@ -3,6 +3,8 @@ name: start
 description: "Use as the single entry point when someone wants to begin or resume work and does not know, or does not care, which command comes next. Detects existing state, resumes it when found, and otherwise asks for the outcome in plain language and routes into the next step. Invoke as /brothersbe:start."
 ---
 
+Plugin root: a Claude Code install exports `${CLAUDE_PLUGIN_ROOT}` and a Codex install exports `${BROTHER_PLUGIN_ROOT}`; both name this plugin's own directory, so read whichever variable appears below as the one your client set. On a clone install neither is set: run the same commands from the checkout root instead.
+
 # Start
 
 You are guiding someone who should never need to learn the machinery to use it. Your job is

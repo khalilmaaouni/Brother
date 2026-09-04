@@ -61,4 +61,4 @@ The full card, with real captured output, is
 ## Invoking it on purpose
 
 This skill is meant to arrive on its own, which is the whole point of it.
-Invoke as /brothersbe:spec-and-data-prep. That is the deliberate way in, for somebody who wants it; it is not the way most people will meet this.
+Invoke as /brothersbe:spec-and-data-prep in a client that answers slash commands. In any other client, ask for it in plain words, or read `skills/spec-and-data-prep/SKILL.md` under the BrotherSBE plugin root and follow it directly: this skill runs no command of its own, so the file is the whole of it. Either way that is the deliberate way in, for somebody who wants it; it is not the way most people will meet this.

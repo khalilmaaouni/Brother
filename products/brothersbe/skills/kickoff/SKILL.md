@@ -3,6 +3,8 @@ name: kickoff
 description: Use before designing or writing anything, when a backend, infrastructure, or data engineering change has not had its ground mapped yet and nobody has named what will verify it before it begins. Classifies the work profile, maps the ground (git state, disk, the repo's own build and test commands), scores the intake into a tier, and names the checks that will verify the work before the work begins. Fires on the work itself, the same way start already routes into it, so nothing needs to be typed to reach it.
 ---
 
+Plugin root: a Claude Code install exports `${CLAUDE_PLUGIN_ROOT}` and a Codex install exports `${BROTHER_PLUGIN_ROOT}`; both name this plugin's own directory, so read whichever variable appears below as the one your client set. On a clone install neither is set: run the same commands from the checkout root instead.
+
 # Kickoff
 
 You are the engineer's senior colleague. This skill starts a piece of work correctly, which

@@ -1,0 +1,330 @@
+# The export allowlist for scripts/export_public.py.
+#
+# THE LAW: nothing exports from the private hub to the public repository
+# unless its root path is named on this list, one path per line. A path not
+# listed here never leaves the hub, no matter how harmless it looks.
+#
+# editions/ and any .brother-edition file are excluded by the exporters own
+# code even if they were ever added here by mistake: that boundary is hard,
+# not merely a line in this file (docs/plan/HUB-MIGRATION-PLAN-2026-08-30.md
+# step 4, docs/plan/PRIVACY-FILTERING-SPEC.md).
+#
+# DERIVATION, 2026-08-30: this is the INITIAL allowlist, taken from the
+# current hub trees own top-level tracked paths (git ls-files, cut on the
+# first slash, sorted unique) minus editions/ (the four private overlay
+# directories) and minus the root .brother-edition marker (hub bookkeeping,
+# not product content). Everything below was already public by history
+# before the hub migration, per the founders ruling that nothing is deleted
+# or rewritten at any step. Refining this list toward a narrower, hand
+# curated one is later, ongoing work, never a reason to hold this initial
+# pass.
+#
+# REMOVED 2026-08-31, one line off that initial pass: COMMAND-CENTER.md. An
+# outside audit of the public repository at v0.9.9 found it shipping while it
+# describes a PRIVATE tree state, quotes a head that has since moved, and
+# names a path on one machine. It is a hub board, not product content, so the
+# private hub keeps it and still generates it (scripts/gen_command_center.py
+# writes it at the repository root as before); it simply never leaves.
+# Nothing in the public payload links to it.
+# Added 2026-09-04 for Codex ship gates 1 and 2 (rows C1, C2): the repo/team
+# Codex marketplace. bundle/.codex-plugin needs no line of its own, because
+# `bundle` below already carries every hub-tracked file under it, dotfiles
+# included (build_export_tree walks `git ls-files`, not a glob).
+.agents/plugins/marketplace.json
+.brothersbe
+.claude
+.claude-plugin
+# Added 2026-09-01 under docs/plan/ACTIONS-POLICY-2026-09-01.md: the virgin
+# environment proof runs IN the public repo (dispatch only, ubuntu only, free on
+# a public repository). linux-smoke.yml is hub-only and deliberately NOT listed.
+.github/workflows/virgin-install.yml
+.gitignore
+# Named as leaf paths, not the bare .sbe directory (security finding,
+# 2026-09-04): a bare directory entry sweeps in whatever the hub happens to
+# track there later, with no review at export time. These two are the
+# hub's own tracked leaf files under .sbe today (git ls-files .sbe); a new
+# file added under .sbe in future never exports until it is named here too.
+.sbe/break-glass.json
+.sbe/team-profile.json
+AGENTS.md
+COORDINATION.md
+# GANTT.html removed 2026-09-01 (E11): its stamp is a 2026-08-28 session and it is
+# generated from superseded plan JSONs; the live board is READINESS-BOARD.html and
+# the published artifact link. A stale dashboard on the public front page was
+# EVAD run 5 trial 6's finding.
+LICENSE
+PROJECT-VIEW.html
+PROJECT.md
+README.md
+SYSTEM.md
+benchmarks
+bundle
+contracts
+design
+# docs NARROWED 2026-09-01 night under governance/DOCUMENTATION-GOVERNANCE.md
+# (founder-ordered steering): the bare `docs` line exported the ENTIRE internal
+# docs tree (plans, handovers, benchmark scorecards, sessions, wisdom, internal
+# personas), which is exactly the private material the governance forbids on a
+# public surface. Only the canonical public pages and the two trees the product
+# checks depend on remain: docs/releases (release_invariant.py requires
+# docs/releases/<version>.md) and docs/VERSIONING.md (version-truth reads it).
+# Everything else under docs/ is private hub material from this line onward.
+docs/VERSIONING.md
+docs/releases
+docs/explanation/VAULT.md
+docs/how-to/USE-THE-VAULT.md
+# Added 2026-09-03, a critic reading the published v1.0.0 tag found both
+# missing: README.md cites docs/CHARTER.md directly and two public test
+# files (tests/test_truth_claims.py, tests/test_surface.py) read it at
+# import time; README.md also says this repository keeps its acceptance
+# records under docs/deliveries and the toy run in the README has one
+# there. Both scanned clean of private terms before adding.
+docs/CHARTER.md
+# Added 2026-09-04 with the .agents line above: the Codex package's own
+# documentation (the package shape decision and the hook mapping's per-event
+# NO-DATA table). A dual-client install that ships the manifest but not the
+# note saying which hooks are unsupported is the half that reads as a claim.
+docs/codex
+docs/deliveries
+# Added 2026-09-04, rows E67 and E70. A fresh clone of the public tag
+# v1.0.1 ran its own scripts/readiness_gate.py and printed NOT READY on one
+# critical item (Restore drill, NO-DATA) while the hub printed ready,
+# because the gate reads the restore drill RECORD and the export never
+# carried it; the same clone could not run python3 scripts/
+# test_battery_verdict.py, which README.md names as its own proof, because
+# BATTERY-EXPECTATIONS.json was not there either. Both are records of runs
+# already described in public pages, and both scanned clean of private
+# terms before being added. The three START-HERE and STARTUP-WEEK pages are
+# linked from README.md and were dropped by the 2026-09-01 narrowing above,
+# which left three of its six relative links dead in the tag.
+docs/plan/RESTORE-DRILL-ENTERPRISE-RESULT.json
+docs/plan/BATTERY-EXPECTATIONS.json
+# E80, 2026-09-04: this file itself. An external release integrity trial on
+# the public v1.0.1 clone found scripts/export_public.py and
+# scripts/reproduce_export.py both refusing at once, because load_allowlist()
+# looks for THIS path and the tag did not carry it, so a stranger could not
+# run either script at all. Shipping it says, in the export's own words,
+# which root paths are allowed to leave the hub. It is the LIST that ships,
+# never what it excludes: every entry here is a path already public by
+# definition (it is the export), and this file was scanned clean of the
+# private terms before it was added.
+docs/plan/EXPORT-ALLOWLIST.txt
+docs/for-engineers/00-START-HERE.md
+docs/for-engineers/STARTUP-WEEK.md
+docs/for-analysts/00-START-HERE.md
+# Added 2026-09-04, row BO2. Listing only the three pages README.md links
+# left the export carrying three guides that link onward to eight siblings
+# the allowlist did not name, so the tag-time check_markdown_links would
+# read them dead in a clone exactly as EVAD trial 6 read the three above.
+# These eight close the link graph: every relative link in every page of
+# both guide directories now resolves inside the export tree, and nothing
+# under them points anywhere else. All eight scanned clean of private terms
+# before being added (the exporter's own private_terms_scan over the
+# candidate tree, PASS).
+docs/for-engineers/A-REAL-RUN.md
+docs/for-engineers/A-WORKED-EXAMPLE.md
+docs/for-engineers/ADOPTING-ON-YOUR-TEAM.md
+docs/for-engineers/CHEATSHEET.md
+docs/for-engineers/DAY-ONE.md
+docs/for-engineers/END-TO-END.md
+docs/for-analysts/A-WORKED-EXAMPLE.md
+docs/for-analysts/DAY-ONE.md
+scripts
+tests
+tools
+
+# M6 cutover, 2026-08-31: the SHIPPABLE halves of the two products that ship
+# from this one repo (D1, ONE-REPO-TRANSITION-2026-08-31.md). Each entry is a
+# functional runtime path (plugin manifest, skill, command, hook, agent, tool,
+# schema, template) or a piece of user-facing reference documentation, hand
+# picked file by file rather than taking the product directory wholesale.
+# EXCLUDED ON PURPOSE, and not listed below: every docs/ subdirectory under
+# either product (both are internal knowledge bases mixing handover packs,
+# closure records, session logs, ADRs, receipts and dated research notes with
+# the rare generic page; splitting that file by file is future curation, not
+# this pass), every top level file with a date in its name (a session
+# artifact by construction), and named internal-process files: PROJECT.md
+# (the product's own private orientation file, same shape as the hub's),
+# PROGRESS.html/GANTT.html/CANVAS-*/(closeout|allnines) (private dashboards
+# and scorecards), HANDOFF-PACKET-v3-finalization.md and
+# FABLE-CURSOR-HANDOVER.md (handover packs), BROTHERMODE_TOTAL_LEADERSHIP_
+# STRATEGY.md and PRODUCT-DIRECTION.md (internal strategy), MANIFEST-
+# extraction.md, PUBLISH-CHECKLIST.md, TESTERS.md, OPEN-ITEMS-lessons.md,
+# LEARNED.md (internal process/people-adjacent records), azure-pipelines.yml
+# and bitbucket-pipelines.yml (CI wiring not needed to install or run the
+# plugin), and for brothersbe the ci/, release-control/, design/ and program/
+# directories (internal QA kits, release process control, and program
+# management, none of it needed for the plugin to function).
+products/brothermode/.claude-plugin
+products/brothermode/CHANGELOG.md
+products/brothermode/CHECKSUMS.sha256
+products/brothermode/CLAUDE.md
+products/brothermode/CONTRIBUTING.md
+products/brothermode/DIGEST.md
+products/brothermode/INVARIANTS.md
+products/brothermode/LICENSE
+products/brothermode/README.md
+products/brothermode/RUBRIC.md
+products/brothermode/SECURITY.md
+products/brothermode/SKILL.md
+products/brothermode/STATE.template.md
+products/brothermode/VERSION
+products/brothermode/agents
+products/brothermode/brotherme
+products/brothermode/capabilities.status.json
+products/brothermode/commands
+products/brothermode/hooks
+products/brothermode/mcp
+products/brothermode/product.identity.json
+products/brothermode/project-template
+products/brothermode/pyproject.toml
+products/brothermode/references
+products/brothermode/schema
+products/brothermode/schemas
+products/brothermode/scripts
+products/brothermode/skills
+products/brothermode/tools
+products/brothermode/vault-template
+products/brothermode/docs/AUTONOMY.md
+products/brothermode/docs/AZURE-REPOS.md
+products/brothermode/docs/BENCHMARK.md
+products/brothermode/docs/BITBUCKET.md
+products/brothermode/docs/CURSOR-COMPAT.md
+products/brothermode/docs/DEMO.md
+products/brothermode/docs/DESIGN.md
+products/brothermode/docs/ECOSYSTEM.md
+products/brothermode/docs/ECOSYSTEM-REFRESH.md
+products/brothermode/docs/FULL-AUTO.md
+products/brothermode/docs/HOOKS.md
+products/brothermode/docs/HOW-IT-WORKS.md
+products/brothermode/docs/INTAKE-TEMPLATE.md
+products/brothermode/docs/KNOWN-LIMITS.md
+products/brothermode/docs/NORTH-STAR-CHAIN.md
+products/brothermode/docs/OBSIDIAN.md
+products/brothermode/docs/PACKAGING.md
+products/brothermode/docs/PASSPORT.md
+products/brothermode/docs/PERFORMANCE.md
+products/brothermode/docs/PLUGIN-DIRECTORY-SUBMISSION.md
+products/brothermode/docs/QUICKSTART.md
+products/brothermode/docs/RELEASE.md
+products/brothermode/docs/RETRIEVAL-RULES.md
+products/brothermode/docs/ROADMAP.md
+products/brothermode/docs/RUNTIMES.md
+products/brothermode/docs/SETUP.md
+products/brothermode/docs/STATUS-LINE.md
+products/brothermode/docs/SUNSET.md
+products/brothermode/docs/VAULT-PLUGIN-POLICY.md
+products/brothermode/docs/VAULT-TRUST-BOUNDARY.md
+products/brothermode/docs/WHITEPAPER.md
+products/brothermode/docs/WHY-THE-CORE-IS-SMALL.md
+products/brothermode/docs/WINDOWS-CHECK.md
+products/brothermode/docs/WORKING-WITH-BROTHERSBE.md
+products/brothersbe/.claude-plugin
+products/brothersbe/CHANGELOG.md
+products/brothersbe/CHECKSUMS.sha256
+products/brothersbe/CITATION.cff
+products/brothersbe/DIGEST.md
+products/brothersbe/INVARIANTS.md
+products/brothersbe/LAWS-REFERENCE.md
+products/brothersbe/LICENSE
+products/brothersbe/NORTH-STAR.md
+products/brothersbe/PARITY.md
+products/brothersbe/PRACTICES.md
+products/brothersbe/README.md
+products/brothersbe/RUBRIC.md
+products/brothersbe/SECURITY.md
+products/brothersbe/SKILL.md
+products/brothersbe/STATE.template.md
+products/brothersbe/TEST-PROTOCOL.md
+products/brothersbe/VERSION
+products/brothersbe/agents
+products/brothersbe/bin
+products/brothersbe/contracts
+products/brothersbe/evals
+products/brothersbe/hooks
+products/brothersbe/install.sh
+products/brothersbe/memory-template
+products/brothersbe/references
+products/brothersbe/scripts
+products/brothersbe/skills
+products/brothersbe/src
+products/brothersbe/tables
+products/brothersbe/templates
+products/brothersbe/tools
+products/brothersbe/docs/ADOPTION.md
+products/brothersbe/docs/BENCHMARK-vs-superpowers.md
+products/brothersbe/docs/BYPASS-COVERAGE.md
+products/brothersbe/docs/CI-ORDER.md
+products/brothersbe/docs/CITATIONS.md
+products/brothersbe/docs/CLI.md
+products/brothersbe/docs/DATA-CONTRACTS.md
+products/brothersbe/docs/DESIGN.md
+products/brothersbe/docs/DIRECTION.md
+products/brothersbe/docs/ECOSYSTEM.md
+products/brothersbe/docs/ENGINEERING-REFERENCE.md
+products/brothersbe/docs/HOOKS.md
+products/brothersbe/docs/HOW-IT-WORKS.md
+products/brothersbe/docs/INTEROPERABILITY.md
+products/brothersbe/docs/KNOWN-LIMITS.md
+products/brothersbe/docs/LOCAL-VERIFICATION.md
+products/brothersbe/docs/MIGRATION.md
+products/brothersbe/docs/PRINCIPLES.md
+products/brothersbe/docs/RELEASE.md
+products/brothersbe/docs/ROLLOUT.md
+products/brothersbe/docs/RUNTIMES.md
+products/brothersbe/docs/SETUP.md
+products/brothersbe/docs/THREAT_MODEL.md
+products/brothersbe/docs/WINDOWS-CHECK.md
+products/brothersbe/docs/ci-cd.md
+products/brothersbe/docs/commands.md
+products/brothersbe/docs/getting-started.md
+products/brothersbe/docs/technical-qa.md
+products/brothersbe/docs/workflow-map.md
+
+# products/brotherds excluded entirely, 2026-08-31: not in marketplace.json
+# today, and its own PROJECT.md says "scope defined by the founder; nothing
+# built". The tree is almost all private planning (docs/HANDOVER-*, docs/
+# COORDINATED-PLAN, docs/PLAN-*, docs/SCOPE-*, research/A1-B2). Revisit once
+# it ships as an actual installable plugin.
+
+# Added 2026-09-04, the 1.0.2 tag-time link check (scripts/export_public.py
+# check_markdown_links). Over a freshly built export tree that check refused
+# with 39 dead relative links. Eighteen of them pointed at pages that are
+# plain public reading, already linked from pages this list carries, and each
+# was scanned clean of the private terms and of machine paths before being
+# named here. Named leaf by leaf, never as a directory: a bare directory line
+# sweeps in whatever the hub tracks there later.
+#
+# The six for-engineers pages and the two for-analysts pages are the rest of
+# the reader path the three START-HERE and STARTUP-WEEK pages above already
+# open; each of the eight was dropped by the 2026-09-01 narrowing, and the
+# three pages that survived it link straight into them.
+docs/for-engineers/DAY-ONE.md
+docs/for-engineers/A-REAL-RUN.md
+docs/for-engineers/A-WORKED-EXAMPLE.md
+docs/for-engineers/CHEATSHEET.md
+docs/for-engineers/END-TO-END.md
+docs/for-engineers/ADOPTING-ON-YOUR-TEAM.md
+docs/for-analysts/DAY-ONE.md
+docs/for-analysts/A-WORKED-EXAMPLE.md
+# Two generic product pages at the brothermode docs root, both linked from
+# pages already listed above (README.md cites CONTINUITY.md, docs/WORKING-
+# WITH-BROTHERSBE.md cites HANDOVER-BY-HAND.md). Neither is a dated session
+# artifact and neither sits in a docs subdirectory, so neither falls under
+# the M6 exclusion note; both describe a procedure a reader runs.
+products/brothermode/docs/CONTINUITY.md
+products/brothermode/docs/HANDOVER-BY-HAND.md
+# Three brothersbe field guides, the first exception to the M6 note that
+# every product docs subdirectory stays behind, and taken file by file
+# exactly as that note said the curation would have to be. Five shipped
+# pages link at 05-a-worked-engagement.md and call it the best place to
+# start; DESIGN.md links 03-work-doctrines.md and getting-started.md links
+# 00-sandbox.md. All three are self-contained (no relative links of their
+# own) and carry no client, team or machine content.
+products/brothersbe/docs/guides/00-sandbox.md
+products/brothersbe/docs/guides/03-work-doctrines.md
+products/brothersbe/docs/guides/05-a-worked-engagement.md
+# The teaching numbers manifest scripts/test_receipt_door.py copies into a
+# temp root; the README names that suite as its own proof, and v1.0.2's
+# first tag attempt was refused because the export tree did not carry it.
+products/brothersbe/docs/for-engineers/examples/data-warehouse/numbers-manifest.json

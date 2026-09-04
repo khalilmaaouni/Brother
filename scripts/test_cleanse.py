@@ -449,6 +449,44 @@ class CleanseCalibration(unittest.TestCase):
             os.remove(commented_terms)
 
 
+class CleansePathsWithASpaceAreStillOpened(unittest.TestCase):
+    """E78, 2026-09-03: the term, attribution and dash scans all pipe
+    SCAN_FILES (one path per line, spaces preserved) into `xargs` without
+    -0. xargs without -0 splits on WHITESPACE as well as newlines, so a
+    tracked path holding a space was handed to the scanner as two or more
+    non-existent paths; the open failure went to /dev/null and the real
+    file was never opened, with no visible sign anything was skipped.
+    cleanse.sh now converts SCAN_FILES to NUL-delimited right before every
+    xargs call and reads it with -0, so a path with a space is the one
+    argument it is."""
+
+    def setUp(self):
+        self.terms_path = make_terms_file([SHORT_TERM, LONG_TERM])
+        self.roots = []
+
+    def tearDown(self):
+        os.remove(self.terms_path)
+        for root in self.roots:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_a_dash_inside_a_filename_with_a_space_is_caught(self):
+        # Assembled from a code point, never a literal em dash, so this
+        # test file itself is never a hit for the very scan it drives.
+        text = 'a note with an em dash %s in it\n' % chr(0x2014)
+        root = make_tree_at('my file.md', text)
+        self.roots.append(root)
+        code, out, err = run_cleanse(root, self.terms_path)
+        self.assertEqual(code, 1, msg=out + err)
+        self.assertIn('FAIL: em or en dash', out)
+
+    def test_a_client_term_inside_a_filename_with_a_space_is_caught(self):
+        root = make_tree_at('my file.md', 'the vendor code is QZXW here\n')
+        self.roots.append(root)
+        code, out, err = run_cleanse(root, self.terms_path)
+        self.assertEqual(code, 1, msg=out + err)
+        self.assertIn('FAIL: NAME-1', out)
+
+
 #: E34's real list, outside every repository. Read at run time only, never
 #: copied into a literal here: this source file must not carry what it
 #: exists to test the refusal of.

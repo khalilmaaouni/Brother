@@ -8692,9 +8692,17 @@ def _git_head(root):
 @case("a-stale-headcommit-ran-receipt-no-longer-passes", "ran", "FAIL")
 def cb1(root):
     # THE DONE-CHECK DEFECT, reproduced: a ran-receipt.json that would PASS on
-    # its own is bound to the FIRST commit, then a second, unrelated commit
-    # moves HEAD on without touching the receipt at all. The receipt's checks
-    # are sound by every field they carry; only the commit it names is stale.
+    # its own is bound to the FIRST commit, then a second commit moves HEAD on
+    # and changes tracked code the receipt says nothing about. The receipt's
+    # checks are sound by every field they carry; only the commit it names is
+    # stale.
+    #
+    # THE SECOND COMMIT MUST TOUCH SOMETHING OUTSIDE THE RECEIPT, and this is
+    # the whole fixture. Row E83 taught the reader that a receipt survives a
+    # commit which changed nothing but the receipt and its evidence store, so
+    # a fixture whose second commit added only the receipt file stopped being
+    # a stale receipt at all and these three cases went green as PASS against
+    # want=FAIL. Changing x is what makes the tree actually move.
     git_init(root)
     write(root, "x", "1")
     subprocess.run(["git", "-C", root, "add", "."], check=True)
@@ -8702,6 +8710,7 @@ def cb1(root):
     old = _git_head(root)
     write(root, "ran-receipt.json", {"headCommit": old, "checks": [
         {"name": "reconcile", "exit_code": 0, "duration_ms": 812}]})
+    write(root, "x", "2")
     subprocess.run(["git", "-C", root, "add", "."], check=True)
     subprocess.run(["git", "-C", root, "commit", "-qm", "second"], check=True)
 
@@ -8717,6 +8726,9 @@ def cb2(root):
         "label": "gmv", "snapshot_id": "snap-1", "query": "SELECT SUM(amount) FROM orders",
         "second_derivation": "SELECT SUM(qty*price) FROM order_lines",
         "rerun": {"ran": True, "primary": 17570, "secondary": 17570}}]})
+    # See cb1: the second commit must move tracked code the receipt does not
+    # cover, or the reader rightly carries the receipt forward.
+    write(root, "x", "2")
     subprocess.run(["git", "-C", root, "add", "."], check=True)
     subprocess.run(["git", "-C", root, "commit", "-qm", "second"], check=True)
 
@@ -8733,6 +8745,9 @@ def cb3(root):
         "forward": {"ran_against_restore": True},
         "reverse": {"ran_against_restore": True, "rehearsal_run_id": "job-8842"},
         "row_counts": {"before": 100, "after_reverse": 100}})
+    # See cb1: the second commit must move tracked code the receipt does not
+    # cover, or the reader rightly carries the receipt forward.
+    write(root, "x", "2")
     subprocess.run(["git", "-C", root, "add", "."], check=True)
     subprocess.run(["git", "-C", root, "commit", "-qm", "second"], check=True)
 

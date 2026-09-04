@@ -72,7 +72,10 @@ import os
 import socket
 import sys
 import tempfile
+import threading
 import time
+
+import journal
 
 NODATA = "NO-DATA"
 
@@ -82,6 +85,29 @@ NODATA = "NO-DATA"
 #: verdict, so a lease that outlives that would keep a unit locked to a worker
 #: everything else has given up on.
 DEFAULT_TTL_SECONDS = 20 * 60
+
+#: E62: a lease shorter than the default, for a test proving renewal without
+#: an actual twenty-minute wait. Read FRESH on every call by effective_ttl()
+#: below, never captured as a function default at definition time (a
+#: `def f(ttl=DEFAULT_TTL_SECONDS)` binds at import, before a test's os.environ
+#: write could ever be seen).
+TTL_ENV_VAR = "BROTHER_CLAIM_TTL_SECONDS"
+
+
+def effective_ttl(ttl=None):
+    """`ttl` when a caller gave one; else TTL_ENV_VAR's value when it is set
+    and parses as a number; else DEFAULT_TTL_SECONDS. Never raises on a
+    malformed override: a broken env value falls back to the real default
+    rather than crashing every claim in the run."""
+    if ttl is not None:
+        return float(ttl)
+    raw = os.environ.get(TTL_ENV_VAR, "").strip()
+    if raw:
+        try:
+            return float(raw)
+        except ValueError:  # sbe: allow-silent the observable consequence is DEFAULT_TTL_SECONDS below: a malformed BROTHER_CLAIM_TTL_SECONDS falls back to the standard TTL rather than crashing every claim in the run
+            pass
+    return float(DEFAULT_TTL_SECONDS)
 
 
 def _now(clock=None):
@@ -188,6 +214,13 @@ class _Lock(object):
             return True  # another waiter already reclaimed it; try again
         print("claim_store: reclaiming lock %s, owning pid %d is dead"
               % (self.path, pid), file=sys.stderr)
+        # E59: reclaiming is never silent, and the journal is the durable
+        # half of that rule: the stderr line above dies with the terminal.
+        run_dir = _run_dir(self.path)
+        journal.append(run_dir, "claim.reclaimed",
+                       parent_ids=journal.previous(run_dir),
+                       payload={"dead_pid": pid, "lock": os.path.basename(
+                           self.path)})
         return True
 
     def __exit__(self, *exc):
@@ -206,8 +239,27 @@ class _Lock(object):
         return False
 
 
+#: The same cross-process lock, under a public name, so another module can
+#: serialise its own writes on this one discipline rather than inventing a
+#: second. E61's work_record.write_record() is the first such caller: the
+#: Work document and the claim store live in the same run directory and are
+#: killed by the same signal, so they should not survive it differently.
+Lock = _Lock
+
+
 def _hostname():
     return socket.gethostname()
+
+
+def _run_dir(path):
+    """E59: the run directory a claim store lives in. brother_run puts
+    claims.json inside the run directory it also puts the Work document and
+    the run log in (brother_run.main: claims_path = os.path.join(run_dir,
+    "claims.json")), so the journal is one dirname away and no signature
+    here had to grow a parameter to find it. A claim store somewhere else
+    (a test's temp directory) journals beside itself, which harms nothing
+    and is deleted with it."""
+    return os.path.dirname(os.path.abspath(path))
 
 
 def pid_alive(pid):
@@ -231,23 +283,41 @@ def pid_alive(pid):
         return True
 
 
-def live(claim, now):
-    """A claim is dead when EITHER its lease expired OR its owning pid is gone
+def dead_reason(claim, now):
+    """Why this claim is not live, phrased for a human, or None when it is.
+
+    A claim is dead when EITHER its lease expired OR its owning pid is gone
     ON THIS HOST. The pid check never runs against a different host's claim
     (its pid namespace means nothing here), so a claim from elsewhere falls
     back to pure time-based expiry, unchanged. A live pid never overrides an
-    expired lease: the time direction still reclaims on schedule regardless."""
-    if float(claim.get("expires_at", 0)) <= now:
-        return False
+    expired lease: the time direction still reclaims on schedule regardless.
+
+    THE REASON AND THE VERDICT COME FROM ONE PLACE ON PURPOSE. Reporting
+    callers used to re-derive the reason themselves, always as elapsed time
+    since expiry, which printed "the lease expired -3600s ago" for a claim
+    actually reclaimed on a dead pid: a false cause carrying a negative
+    number. A caller that only wants the verdict uses live()."""
+    expires = float(claim.get("expires_at", 0))
+    if expires <= now:
+        return "the lease expired %.0fs ago" % (now - expires)
     pid = claim.get("pid")
     if pid and claim.get("hostname") == _hostname() and not pid_alive(pid):
-        return False
-    return True
+        return ("owner pid %s is dead on this host, with %.0fs still left on "
+                "the lease" % (pid, expires - now))
+    return None
 
 
-def acquire(path, unit_id, owner, work_id="", ttl=DEFAULT_TTL_SECONDS,
+def live(claim, now):
+    """Is this claim still live. The single liveness rule for the estate:
+    every caller deciding dead-or-alive about a claim asks this or
+    dead_reason(), never its own arithmetic over expires_at."""
+    return dead_reason(claim, now) is None
+
+
+def acquire(path, unit_id, owner, work_id="", ttl=None,
             clock=None, attempt=None):
     """(claim, problem). Exclusive. Never returns a claim somebody else holds."""
+    ttl = effective_ttl(ttl)
     now = _now(clock)
     try:
         with _Lock(path, clock=clock):
@@ -271,13 +341,28 @@ def acquire(path, unit_id, owner, work_id="", ttl=DEFAULT_TTL_SECONDS,
                                         and held.get("owner") != owner else None)}
             data[unit_id] = claim
             _write(path, data)
+            run_dir = _run_dir(path)
+            journal.append(run_dir, "claim.acquired",
+                           parent_ids=journal.previous(run_dir),
+                           unit_id=unit_id,
+                           payload={"owner": owner, "attempt": n,
+                                    "reclaimed_from":
+                                        claim["reclaimed_from"]})
             return claim, ""
     except (TimeoutError, OSError) as exc:
         return None, "could not take the claim store lock: %s" % exc
 
 
-def renew(path, unit_id, owner, ttl=DEFAULT_TTL_SECONDS, clock=None):
-    """Push the lease out. A long unit must not lose its claim mid-run."""
+def renew(path, unit_id, owner, ttl=None, clock=None):
+    """Push the lease out. A long unit must not lose its claim mid-run.
+
+    E62: this was written 2026-08-29 with no caller outside its own tests,
+    so a unit whose worker outlived the lease read abandoned under a still-
+    live owner. The caller is now brother_run.run_loop's background
+    renewal (claim_store.BackgroundRenewal, below), and the renewal itself
+    is journaled here, not only at the call site, so it is visible however
+    it is invoked."""
+    ttl = effective_ttl(ttl)
     now = _now(clock)
     try:
         with _Lock(path, clock=clock):
@@ -293,6 +378,12 @@ def renew(path, unit_id, owner, ttl=DEFAULT_TTL_SECONDS, clock=None):
             held["expires_at"] = now + float(ttl)
             data[unit_id] = held
             _write(path, data)
+            run_dir = _run_dir(path)
+            journal.append(run_dir, "claim.renewed",
+                           parent_ids=journal.previous(run_dir),
+                           unit_id=unit_id,
+                           payload={"owner": owner, "ttl": ttl,
+                                    "expires_at": held["expires_at"]})
             return held, ""
     except (TimeoutError, OSError) as exc:
         return None, "could not take the claim store lock: %s" % exc
@@ -329,6 +420,17 @@ def release(path, unit_id, owner, state="done", clock=None, evidence=None):
                 held["evidence"] = evidence
             data[unit_id] = held
             _write(path, data)
+            run_dir = _run_dir(path)
+            # E59: the state the claim ENDED in, and the exit code of the
+            # check that decided it when integrate.py gave one; the output
+            # itself stays in the claim's evidence where it already lives.
+            journal.append(run_dir, "claim.released",
+                           parent_ids=journal.previous(run_dir),
+                           unit_id=unit_id,
+                           payload={"owner": owner, "state": state,
+                                    "attempt": held.get("attempt"),
+                                    "check_exit": evidence.get("exit_code")
+                                    if isinstance(evidence, dict) else None})
             return held, ""
     except (TimeoutError, OSError) as exc:
         return None, "could not take the claim store lock: %s" % exc
@@ -358,11 +460,81 @@ def reconcile(path, clock=None):
             out.append({"unit_id": unit_id, "status": "abandoned",
                         "owner": claim.get("owner"),
                         "attempt": claim.get("attempt"),
-                        "detail": ("the lease expired %.0fs ago while still in "
-                                   "state claimed, so the owner did not finish "
-                                   "and did not release. Whether this unit may "
-                                   "be retried depends on whether its side "
-                                   "effects are safe to repeat, which this "
-                                   "cannot decide"
-                                   % (now - float(claim["expires_at"])))})
+                        "detail": ("%s while still in state claimed, so the "
+                                   "owner did not finish and did not release. "
+                                   "Whether this unit may be retried depends "
+                                   "on whether its side effects are safe to "
+                                   "repeat, which this cannot decide"
+                                   % dead_reason(claim, now))})
     return out, ""
+
+
+def renew_owned(path, owner, ttl=None, clock=None):
+    """Renew every claim in `path` still held by `owner` in state "claimed".
+
+    (renewed_unit_ids, problems): problems is a list of (unit_id, why) for
+    every claim that would not renew (the store could not be read/locked,
+    or the claim moved to a different owner since this caller last looked).
+    Never raises: the caller, a background renewal loop guarding a live
+    worker, decides what a failure means for the wait it is guarding."""
+    data, problem = _read(path)
+    if data is None:
+        return [], [(None, problem)]
+    renewed, problems = [], []
+    for unit_id, claim in sorted(data.items()):
+        if claim.get("owner") != owner or claim.get("state") != "claimed":
+            continue
+        held, why = renew(path, unit_id, owner, ttl=ttl, clock=clock)
+        if held is None:
+            problems.append((unit_id, why))
+        else:
+            renewed.append(unit_id)
+    return renewed, problems
+
+
+class BackgroundRenewal(object):
+    """E62: keeps every claim `owner` holds alive for as long as the worker
+    it guards is running, so a unit longer than the lease never reads
+    abandoned under a still-live owner.
+
+    Started right before a blocking wait on that worker (brother_run's
+    run_loop wraps its one call into loop_bridge.main() with this) and
+    stopped right after. Renews on a timer of HALF the lease, per E62's own
+    "ships" line, so a lease is always pushed out again before it can
+    expire under a worker still running.
+
+    A renewal failure (the store unreachable, or the claim already moved to
+    another owner) is printed naming the unit AND STOPS THIS LOOP rather
+    than silently continuing to retry against the same bad state: `.stop()`
+    returns every failure recorded, for the caller to surface in its own
+    refusal shape. It never kills the worker it is guarding: deciding that
+    a live worker must be stopped is not this class's call, only claim_store's
+    own DEAD OWNER and lease-expiry rules make that decision, elsewhere."""
+
+    def __init__(self, path, owner, ttl=None, interval=None, clock=None):
+        self.path, self.owner, self.clock = path, owner, clock
+        self.ttl = effective_ttl(ttl)
+        self.interval = self.ttl / 2.0 if interval is None else float(interval)
+        self.failures = []
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+
+    def start(self):
+        self._thread.start()
+        return self
+
+    def _loop(self):
+        while not self._stop.wait(self.interval):
+            _renewed, problems = renew_owned(self.path, self.owner,
+                                             ttl=self.ttl, clock=self.clock)
+            if problems:
+                for unit_id, why in problems:
+                    print("claim_store: renewal failed for %s: %s"
+                         % (unit_id or "(store)", why), file=sys.stderr)
+                self.failures.extend(problems)
+                return  # stop renewing against a state that already failed
+
+    def stop(self, timeout=5.0):
+        self._stop.set()
+        self._thread.join(timeout=timeout)
+        return list(self.failures)

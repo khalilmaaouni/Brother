@@ -5,8 +5,8 @@ description: Claude as the founder's colleague and coordinator, adaptive to the 
 
 # BrotherMode
 
-PRODUCT AUTHORITY: [PRODUCT-DIRECTION.md](PRODUCT-DIRECTION.md) at the
-repository root is the product authority (founder direction, 2026-08-11). It
+PRODUCT AUTHORITY: the product direction record this project keeps outside
+the published tree is the product authority (founder direction, 2026-08-11). It
 is read before any roadmap change, architecture decision, new public command,
 runtime adapter, plugin, skill, MCP server, or autonomous capability is
 approved, and it supersedes conflicting product-scope guidance anywhere else.

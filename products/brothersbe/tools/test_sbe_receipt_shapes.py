@@ -293,6 +293,50 @@ class TestTheFixDidNotLoosenTheGate(ReceiptShapeFixture):
         self.assertIn("exited nonzero", line)
 
 
+class TestTheGateReadsTheSameFreshnessRuleAsTheReceiptReader(ReceiptShapeFixture):
+    """ROADMAP ROW E83. This gate kept its own copy of the staleness rule,
+    exact equality against HEAD, and said in its own docstring that this was
+    "the same mismatch src/brothersbe/evidence.py's own _check_commit already
+    treats as a broken claim". It stopped being the same rule the moment the
+    reader learned that a receipt survives the commit that carries it, and the
+    two then disagreed out loud: `sbe evidence verify` called a receipt sound
+    and `sbe gate ran` failed the same file in the same tree.
+
+    Both directions are driven here, because a gate that agrees by always
+    saying yes is not agreeing with anything."""
+
+    def test_a_receipt_the_reader_calls_sound_is_not_failed_by_the_gate(self):
+        receipt, code, text = self.mint("evidence/ran-receipt.json",
+                                        [sys.executable, "-c", "pass"])
+        self.assertEqual(code, 0, text)
+        write(self.repo, "docs/notes.md", "a later commit over nothing this covers\n")
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-qm", "later work outside the coverage")
+        reader = self.verify_receipt(receipt)
+        self.assertIn("PASS", reader.text, "fixture drifted: the reader must call this "
+                                           "receipt sound for the disagreement to be "
+                                           "testable: %s" % reader.text)
+        report = self.run_gate_ran()
+        self.assertEqual(verdict_of(report, "ran"), "PASS",
+                         "the gate must not fail a receipt the reader calls sound: %s"
+                         % verdict_line(report, "ran"))
+
+    def test_a_receipt_the_reader_calls_stale_is_still_failed_by_the_gate(self):
+        """THE GUARD. The later commit moves the file the receipt covers, so
+        both the reader and the gate must refuse it."""
+        receipt, code, text = self.mint("evidence/ran-receipt.json",
+                                        [sys.executable, "-c", "pass"])
+        self.assertEqual(code, 0, text)
+        write(self.repo, "src/service.py", "def handle():\n    return 2\n")
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-qm", "later work over the covered code")
+        report = self.run_gate_ran()
+        self.assertEqual(verdict_of(report, "ran"), "FAIL",
+                         "a receipt whose covered code moved must still fail: %s"
+                         % verdict_line(report, "ran"))
+        self.assertIn("is not the current head", verdict_line(report, "ran"))
+
+
 class TestRequireHeadcommitFlag(ReceiptShapeFixture):
     """P6: `docs/KNOWN-LIMITS.md`'s "A hard-gate receipt with no headCommit
     still passes unbound" names the gap this closes for an opt-in caller.

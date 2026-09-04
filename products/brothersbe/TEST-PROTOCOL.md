@@ -5,8 +5,9 @@ BrotherSBE plugin is loaded. You type slash commands or ordinary sentences to
 Claude. There is no terminal work in this protocol; if a step ever seems to
 demand one, stop and report that as a finding.
 
-[TESTERS.md](TESTERS.md) covers the one-time install and where to report. This
-file is what to do once you are in the session.
+The one-time install is [docs/SETUP.md](docs/SETUP.md), and where to report is
+[SECURITY.md](SECURITY.md). This file is what to do once you are in the
+session.
 
 Two tracks. Pick the one that matches you, or run both.
 

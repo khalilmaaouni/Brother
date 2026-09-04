@@ -124,6 +124,32 @@ def _load_store_module():
         return None
 
 
+_RS = None
+_RS_LOADED = False
+
+
+def _load_repo_scope_module():
+    """Loads tools/bm_repo_scope.py by path, same shape as
+    _load_store_module above. E76 per-repository hook scoping, checked at
+    the top of cmd_pre and cmd_post, before either does any real work."""
+    global _RS, _RS_LOADED
+    if _RS_LOADED:
+        return _RS
+    _RS_LOADED = True
+    try:
+        import importlib.util
+        path = os.path.join(HERE, "bm_repo_scope.py")
+        spec = importlib.util.spec_from_file_location("bm_repo_scope", path)
+        if spec is None or spec.loader is None:
+            return None
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _RS = mod
+        return _RS
+    except Exception:  # sbe: allow-silent optional gate module load; hooks_off degrades to active when this returns None
+        return None
+
+
 def _load_fence_hook_module():
     """Loads tools/bm_fence_hook.py by path. This file OWNS no logic for
     "which paths are fenced" or "who owns them": it reuses the already
@@ -928,6 +954,9 @@ def cmd_pre(argv):
     # That is the same defect already corrected once in bm_fence_hook.py.
     # Outside a BrotherMode project this block now does nothing at all.
     payload, err = _read_stdin_json()
+    _rs = _load_repo_scope_module()
+    if err is None and _rs is not None and _rs.hooks_off(payload=payload):
+        return 0
     if err is None and _enforced() and isinstance(payload, dict):
         bs = _load_store_module()
         root = None
@@ -1089,6 +1118,9 @@ def cmd_post(argv):
         _warn(_CONSENT_REQUIRED_LINE)
         return 0
     payload, err = _read_stdin_json()
+    _rs = _load_repo_scope_module()
+    if err is None and _rs is not None and _rs.hooks_off(payload=payload):
+        return 0
     try:
         if err is not None:
             raise _FailOpen(err)

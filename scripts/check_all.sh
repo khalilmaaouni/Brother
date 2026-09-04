@@ -50,6 +50,19 @@ run_check() {
        fi ;;
     2) nodata=$((nodata+1)); verdict="NO-DATA"; nodata_names="$nodata_names $name" ;;
     *) fail=$((fail+1));   verdict="FAIL   "; failed_names="$failed_names $name"
+       # THE SUMMARY LINE NAMES THE FAILURE, NEVER WHATEVER PRINTED LAST.
+       # `last` above is the output's generic last non-empty line, which
+       # can be a wholly unrelated, innocuous line (a check whose real
+       # failure printed earlier, then some other component logged its own
+       # unrelated OK on the way out): a FAIL verdict then read "OK the
+       # board still matches the world" beside it, which is a battery
+       # summary lying about its own FAIL. For a failing check, prefer the
+       # LAST line that actually carries a failure word (FAIL, REFUSED,
+       # BLOCK, or Error); keep the generic last line only when nothing in
+       # the output says so, so a check with no such wording never goes
+       # silent instead.
+       fail_line="$(printf '%s\n' "$out" | grep -E 'FAIL|REFUSED|BLOCK|Error' | tail -1 | cut -c1-72)"
+       [ -n "$fail_line" ] && last="$fail_line"
        # CAPTURE EVERYTHING, READ A SLICE. Keeping only the last line
        # destroyed the failing test's own name twice in one night (a flake
        # in a concurrent battery could not be diagnosed either time). A
@@ -92,6 +105,12 @@ run_check "surface"        /usr/bin/python3 -m unittest -v tests/test_surface.py
 # builds contracts/, per this estate's own recorded lesson that an
 # unregistered check is invisible to every check the project owns.
 run_check "contracts-root" python3 scripts/test_contracts_root.py -v
+# E47: the charter's own named paths, and the suite that drives that
+# checker backwards over fixture trees. Registered in the same change
+# that lands them, per this estate's recorded lesson that an
+# unregistered check is invisible to every check the project owns.
+run_check "charter-paths"  python3 scripts/charter_paths.py
+run_check "charter-paths-self" python3 scripts/test_charter_paths.py -v
 run_check "context-budget" /usr/bin/python3 -m unittest -v tests/test_context_budget.py
 run_check "truth-claims"   /usr/bin/python3 -m unittest -v tests/test_truth_claims.py
 run_check "foreign-method" /usr/bin/python3 -m unittest -v tests/test_foreign_method_compat.py
@@ -175,6 +194,9 @@ run_check "wbs-self"             python3 scripts/test_wbs.py -v
 # somebody to commit the list, which is the exact thing it prevents.
 run_check "private-terms-self"   python3 scripts/test_private_terms_scan.py -v
 run_check "loop-bridge-self"     python3 scripts/test_loop_bridge.py -v
+# C3: the Codex hooks adapter. Registered the day it landed, because a gate
+# the battery never runs is red for as long as nobody runs it.
+run_check "codex-hooks-self"     python3 scripts/test_codex_hooks_install.py -v
 run_check "installed-surface"    python3 scripts/test_check_installed_surface.py -v
 # The L5 layer is only worth having if its commands are real. Wired the day it
 # landed, after five of its own steps named flags that do not exist.
@@ -300,6 +322,12 @@ run_check "work-record-self"       python3 scripts/test_work_record.py -v
 # work-record-self's is: a cyclic decomposition must leave the store untouched.
 run_check "door-self"              python3 scripts/test_door.py -v
 
+# Every persona pack in scripts/packs, generically: it enumerates the
+# directory rather than naming packs, so pack fourteen joins this gate by
+# existing. Each pack's own fixture is run through the real inference, so a
+# detection signal that collides with a sibling pack fails here.
+run_check "packs-self"             python3 scripts/test_packs.py -v
+
 # Adversarial intake, the "Simple intake" parity capability's L4 evidence:
 # empty/whitespace outcomes, prompt-injection-shaped text, an oversized
 # outcome, invalid UTF-8 in the outcome argument, a decomposer that never
@@ -415,6 +443,17 @@ run_check "acceptance"      python3 scripts/acceptance.py
 # is invisible to every check the project owns.
 run_check "brother-run-self" python3 scripts/test_brother_run.py -v
 
+# E59, the canonical state lane under the founder's ruling A of 2026-09-03
+# (docs/decisions/canonical-state-journal-first-2026-09-03.json): one
+# append-only journal per run, fed by the writers that already exist. Its own
+# gate, registered in the change that lands it: the append is atomic against
+# another process, the id scheme carries what a chain is rebuilt from, a torn
+# line is skipped, a missing journal reads NO-DATA rather than an empty run,
+# and a payload over the atomicity bound still lands as one line. The chain
+# itself (run.opened to acceptance.screened on a real stub-model run) is
+# proven by brother-run-self above.
+run_check "journal-self" python3 scripts/test_journal.py -v
+
 # The receipt door, option A of the door redesign decided 2026-08-31
 # (docs/plan/DOOR-REDESIGN-STUDY-2026-08-31.md): every delivery ends with its
 # own proof in plain words, the engine's internal narration goes to the run
@@ -424,6 +463,13 @@ run_check "brother-run-self" python3 scripts/test_brother_run.py -v
 # must be ABSENT from the surface and PRESENT in the log, so "we removed the
 # noise" cannot be satisfied by deleting the record.
 run_check "receipt-door-self" python3 scripts/test_receipt_door.py -v
+
+# E75, acceptance compression: the receipt orders a reviewer's attention into
+# four sections computed from the diff, and counts the cognitive debt the
+# delivery leaves behind (a new dependency, a new abstraction, a file outside
+# the declared scope). The count is INTERNAL by design, so this line is the
+# only thing that runs it: a rule with no check behind it is a docstring.
+run_check "acceptance-compression" python3 scripts/test_acceptance_compression.py -v
 
 # P0.1 packaging: the installed bundle ships no code of its own beside
 # commands and skills, so /brother's BUILD IT route was dead on an installed
@@ -501,6 +547,14 @@ run_check "portable-pack-self" python3 scripts/test_portable_pack.py -v
 # gone, and the storage (a run id or run directory) never reaches the person.
 run_check "door-routing-prose-self" python3 scripts/test_door_routing_prose.py -v
 
+# E43: the shipped surface must only tell a stranger things a stranger can
+# run. The skill shipped an estate-only vault baker path under a FOUNDER
+# ORDER heading, and the bundle-install smoke stayed green throughout
+# because it never reads the words. This greps bundle/ prose for absolute
+# /Users/ paths, vault-tools, and "founder order"; the maintainer half of
+# the block lives in docs/how-to/MAINTAINER-CLOSING-CEREMONY.md.
+run_check "shipped-surface-portable" python3 scripts/test_shipped_surface_portable.py -v
+
 # R26.1: the privacy filtering spec (docs/plan/PRIVACY-FILTERING-SPEC.md)
 # names, by content class, which edition owns it, the rule a session applies
 # before writing, and what generalization means if it must cross toward
@@ -520,6 +574,15 @@ run_check "filtering-spec-self" python3 scripts/test_check_filtering_spec.py -v
 # every check the project owns.
 run_check "accept-delivery-self" python3 scripts/test_accept_delivery.py -v
 
+# BO2, 2026-09-04: the README's own executable claims, driven backwards
+# against the shape the public tag v1.0.1 shipped (a receipt sample no
+# format string produces any more, a release-verification instruction that
+# rewrote the manifest it told you to verify against, and a concrete tag
+# typed into the tag-verification sentence). Registered the same change
+# that lands it, per this estate's own recorded lesson that an unregistered
+# tool is invisible to every check the project owns.
+run_check "readme-honesty" python3 scripts/test_readme_honesty.py -v
+
 # R26.2/R26.4: the allowlist exporter and the edition guard, docs/plan/
 # HUB-MIGRATION-PLAN-2026-08-30.md steps 4 and 5. edition_guard.py binds a
 # directory to its nearest .brother-edition and refuses a push toward the
@@ -531,6 +594,13 @@ run_check "accept-delivery-self" python3 scripts/test_accept_delivery.py -v
 # unregistered tool is invisible to every check the project owns.
 run_check "edition-guard-self" python3 scripts/test_edition_guard.py -v
 run_check "export-public-self" python3 scripts/test_export_public.py -v
+# The same exporter's tag-time link rule, read over the REAL export tree
+# rather than a fixture: the 1.0.2 tag was refused by 39 dead relative links
+# into pages the allowlist withholds, and nothing short of attempting the
+# release looked. Registered the same change that lands it, per this
+# estate's own recorded lesson that an unregistered tool is invisible to
+# every check the project owns.
+run_check "export-links"       python3 scripts/test_export_links.py -v
 # R28.1: the law auditor (docs/plan/READINESS-ROADMAP-2026-08-29.json). Parses
 # the ENFORCEMENT/ENFORCED bullets already in the law books and checks every
 # ENFORCED law's named file is actually on disk; a law naming a missing file
@@ -628,6 +698,10 @@ run_check "clean-env-restore"        python3 scripts/test_clean_env_restore.py
 # estate's own recorded lesson that an unregistered tool is invisible to
 # every check the project owns.
 run_check "readiness-gate-self"  python3 -m unittest -v scripts/test_readiness_gate.py
+# The gate itself, not only its self-test: from now on its verdict enters
+# the release candidate verdict, because the public v1.0.0 tag failed this
+# gate the night the battery still read green on readiness-gate-self alone.
+run_check "readiness-gate"       python3 scripts/readiness_gate.py
 
 # A4 / Root 3 (docs/plan/ROOT-CAUSE-REGISTER-2026-08-31.md): the release
 # identity chain, checked mechanically at the exact path the readiness gate
@@ -690,6 +764,26 @@ run_check "product-brothersbe" sh -c 'cd products/brothersbe && python3 evals/ru
 # Registered the same change that wires it into the product's own gates too.
 run_check "product-brothersbe-tests" sh -c 'cd products/brothersbe && python3 tools/test_sbe.py'
 
+# QA reviewer finding 3 (2026-09-03 22:35 JST): the two lines above run only
+# evals/run_evals.py and this one file; release-control/baseline/run-battery.sh
+# is the product's OWN ninety-plus-suite battery (TestEverySuiteIsWiredIntoAGate
+# in tools/test_sbe.py holds it in step with .github/workflows/brothersbe-gates.yml),
+# and nothing in this hub ran it, so most of the product's own coverage was
+# invisible to a hub battery run. HEAVY: measured end to end on 2026-09-04,
+# about 23 minutes for the full 94 steps, the slowest line in this file by a
+# wide margin; the round grew by that much the day this line was added.
+# Eight of the 94 steps read FAIL on that run and are declared, by name, in
+# docs/plan/BATTERY-EXPECTATIONS.json under this check's own entry.
+#
+# run-battery.sh's OWN exit code is not useful here: run_step records each
+# step's exit in its summary.txt but the script always exits 0 itself (a
+# deliberate "run everything, never stop early" design, mirroring
+# fail-fast: false), so a plain invocation would read PASS here even if every
+# one of the 94 steps failed. This wrapper reads the summary the same way a
+# person would: any step whose recorded exit is not 0 fails this line, and a
+# missing summary.txt (the script did not reach its own end) fails it too.
+run_check "product-brothersbe-battery" sh -c 'cd products/brothersbe && d=$(mktemp -d) && sh release-control/baseline/run-battery.sh "$d" >/dev/null 2>&1; if [ ! -f "$d/summary.txt" ]; then echo "no summary.txt at $d, battery did not run to completion"; exit 1; fi; bad=$(grep -E "exit=[1-9][0-9]*$" "$d/summary.txt"); if [ -n "$bad" ]; then printf "%s\n" "$bad"; echo "battery output: $d"; exit 1; fi; echo "battery clean: $d"'
+
 # One-repo transition M4: BrotherModeUp's OWN battery, delegated, run from
 # its subtree path with its own exit code, exactly as the line above does
 # for its sibling. Above the summary block ON PURPOSE: the first
@@ -708,6 +802,12 @@ run_check "product-brothermode" sh -c 'cd products/brothermode && python3 tools/
 # battery failure rather than a thing somebody has to notice.
 run_check "evad-score-self"    python3 scripts/evad_score.py --selftest
 run_check "evad-score"         python3 scripts/evad_score.py
+
+# P16 (persona plan section 31.2, the DS flywheel): --personas bolted onto
+# this same CLI (the roadmap's own done-check names this file and flag
+# directly), with its own test file since its subject has nothing to do
+# with the seven EVAD trials above.
+run_check "evad-score-personas" python3 scripts/test_evad_score.py -v
 
 # The loom, the committed second step of the door redesign
 # (docs/decisions/door-redesign-2026-08-31.json, option A). It is the
@@ -759,6 +859,134 @@ run_check "write-ledger-self" python3 scripts/test_write_ledger.py -v
 # "refuses everything" can never read as "enforces correctly". It sets the mode only
 # in a child process's environment; it never writes machine configuration.
 run_check "fence-enforced" python3 scripts/fence_enforced_drill.py
+
+# required-fast: the cheap mandatory pre-merge contract every merge into main
+# already runs by hand (scripts/required_fast.sh, ~90 seconds). Registered
+# here as its own self-test only, per this estate's own recorded lesson that
+# an unregistered tool is invisible to every check the project owns; the
+# real script stays a pre-merge gate, run on demand, not a battery member,
+# the same reasoning as parity-gate-self and readiness-gate-self above.
+run_check "required-fast-self" python3 scripts/test_required_fast.py -v
+
+# QA reviewer finding 3 (2026-09-03 22:35 JST): 107 shipped checkers were
+# invoked by no battery. The block below closes the scripts/test_*.py half
+# of that gap: every scripts/test_*.py this repository ships that neither
+# check_all.sh nor required_fast.sh named before tonight. Registered the
+# same change that measured the gap, per this estate's own recorded lesson
+# that an unregistered tool is invisible to every check the project owns.
+run_check "authority-path-coverage-self" python3 scripts/test_authority_path_coverage.py -v
+run_check "autonomy-dial-self"           python3 scripts/test_autonomy_dial.py -v
+run_check "benchmark-atomic-self"        python3 scripts/test_benchmark_atomic.py -v
+run_check "brother-run-bare-resume-self" python3 scripts/test_brother_run_bare_resume.py -v
+run_check "brother-run-continue-self"    python3 scripts/test_brother_run_continue.py -v
+run_check "bundle-install-smoke-self"    python3 scripts/test_bundle_install_smoke.py -v
+# check_all_run_check-self and journal-projection-self: two more suites the
+# same QA-reviewer gap named tonight, landed by other lanes with no battery
+# line of their own. Registered the same way as their neighbours above.
+run_check "check_all_run_check-self"     python3 scripts/test_check_all_run_check.py -v
+run_check "journal-projection-self"      python3 scripts/test_journal_projection.py -v
+# continuity-self: E73.1, the resume screen built from the journal and the
+# stores. Registered the same way as its neighbours above.
+run_check "continuity-self"              python3 scripts/test_continuity.py -v
+# continuity-matrix-self: E73.3, the hostile resume matrix -- fourteen kill
+# points, each asserting no duplicate integration, no lost unit, and a
+# refusal when state cannot be trusted. Registered the same way.
+run_check "continuity-matrix-self"       python3 scripts/test_continuity_matrix.py -v
+# test_cleanse.py: the regression test for the 2026-08-30 close-ceremony
+# leak (a team member's name reached the public repo past cleanse's own
+# force-add exclude). The 23 tests here are the mechanical proof that leak
+# stays fixed; it had never run in a battery.
+run_check "cleanse-self"                 python3 scripts/test_cleanse.py -v
+run_check "gen-command-center-md-self"   python3 scripts/test_gen_command_center_md.py -v
+run_check "identity-guard-self"          python3 scripts/test_identity_guard.py -v
+# prevented_word_gate.py itself is registered separately below (its own
+# live scan, not just this self-test) because it is a gate, not only a
+# suite: PREVENTION-CONTROL-ARM-DESIGN.md section 7's mechanism.
+run_check "prevented-word-gate-self"     python3 scripts/test_prevented_word_gate.py -v
+run_check "r25-end-to-end-self"          python3 scripts/test_r25_end_to_end.py -v
+run_check "reviewer-brief-self"          python3 scripts/test_reviewer_brief.py -v
+# test_task_watchdog.py is NOT added here: it was already registered above
+# (line ~213, "task-watchdog-self", via the dotted-module form `python3 -m
+# unittest -v scripts.test_task_watchdog`). A first pass of this change
+# added a second "task-watchdog-self" line here, a real duplicate this
+# estate's own filename-substring measurement missed because the existing
+# line spells the module as scripts.test_task_watchdog, never as the literal
+# string test_task_watchdog.py; caught before commit by an exact-name count
+# rather than a substring search, and removed rather than left running the
+# same 40 tests twice under one name.
+run_check "v3-receipts-self"             python3 scripts/test_v3_receipts.py -v
+run_check "v3-judge-self"                python3 scripts/test_v3_judge.py -v
+run_check "v3-night-receipts-self"       python3 scripts/test_v3_night_receipts.py -v
+run_check "v3-surfacing-self"            python3 scripts/test_v3_surfacing.py -v
+run_check "verify-advisor-self"          python3 scripts/test_verify_advisor.py -v
+# repair-drain-self is FAIL on the unchanged tree: its own second-attempt
+# scenario now collides with receipt_door.py's later "a check that already
+# passed before the work proves nothing" rule (memory: a-check-that-
+# already-passes-before-the-work-proves-nothing). Declared at test
+# granularity in docs/plan/BATTERY-EXPECTATIONS.json rather than silenced
+# here, per this estate's rule that a suite-level exception hides every new
+# failure in the suite.
+run_check "repair-drain-self"            python3 scripts/test_repair_drain.py -v
+
+# prevented_word_gate.py's own live scan (not just its self-test above):
+# PREVENTION-CONTROL-ARM-DESIGN.md section 7's fail-closed grep, so the word
+# "prevented" cannot reach a surface with no prevented_fraction citation.
+# Scoped to README.md, the one fixed, canonical top-level surface named in
+# the tool's own docstring ("board, README, benchmark or release note");
+# widening this to every board and release note is separate, deliberate
+# work, not a silent expansion of what one registration line scans.
+run_check "prevented-word-gate" python3 scripts/prevented_word_gate.py README.md --strict
+
+# E28 companion: the assurance product's proof gate (numbers, migration,
+# approval, ran, proof), beside silent-failure-lints above. --strict makes a
+# FAIL block; a NO-DATA gate (today: `proof`, because no dossier row in this
+# repository backticks a check name yet -- lane I's own follow-up) does not,
+# by this tool's own contract, so this line stays green on that honest gap
+# rather than papering over it.
+run_check "sbe-proof-gate" python3 products/brothersbe/tools/sbe_gate.py . --strict
+
+# P8: the split/leakage check pattern (doc E3, DS-02, DS-03, golden fixtures
+# DS-G01/DS-G02). Nothing else in this tree checks a train/test split for an
+# overlapping entity or a feature dated after its cutoff before a data-science
+# unit's receipt is written; this is only the self-test, the check itself is
+# a tool a data-science pack unit names as its own done_check, not something
+# this repository has data to run against on every push.
+run_check "split-check-self" python3 scripts/test_split_check.py -v
+
+# C4: every shipped SKILL.md stays readable by a client other than the one it
+# was written on. The three habits it refuses (a ~/.claude path, a
+# CLAUDE_PLUGIN_ROOT with no vendor neutral alternative, a slash command with
+# no route beside it) are invisible under Claude Code and fatal under Codex,
+# so nothing here would have caught them. It re-execs itself under an
+# interpreter that has PyYAML when the caller's lacks it, and reports NO-DATA
+# rather than a pass when no interpreter on the machine has one.
+run_check "skills-portable" python3 scripts/test_skills_portable.py
+# C1/C2: the Codex package. This check asks the control that owns the
+# decision: it shells out to the CANONICAL validator installed with the Codex
+# plugin-creator skill and asserts that command's own exit code, so it cannot
+# pass while Codex itself would refuse the package. It reports NO-DATA (a
+# unittest skip whose reason carries the string, which run_check reads as its
+# own verdict) on a machine where that validator or uv is absent, never a
+# pass. It also asserts .claude-plugin/marketplace.json still lists its three
+# plugins: ship gate 1 forbids regressing the Claude package, and nothing else
+# here would notice.
+run_check "codex-package-self" python3 scripts/test_codex_package.py -v
+# C7: the clean-install Codex smoke. Drives the four `codex plugin` commands
+# into a throwaway CODEX_HOME and a throwaway HOME, then a real `codex exec`
+# turn against a toy repository whose tool call runs the Brother engine and
+# leaves a receipt. It hashes the founder's own ~/.codex before and after and
+# fails if that witness moved, so the isolation is measured rather than
+# asserted. NO-DATA (exit 2) on a machine with no Codex binary, never a pass.
+# The credentialled half is deliberately NOT here: it needs a signed-in Codex,
+# and docs/codex/SMOKE-RUNBOOK.md is the runbook that closes it.
+run_check "codex-smoke" python3 scripts/codex_smoke.py
+# The smoke's own two decision points, driven BOTH ways: the NO-DATA guard
+# (absent binary, a directory, and the real binary as the positive control)
+# and the receipt reader (no receipt, a receipt naming no changed file, one
+# naming a file, and an unreadable one). A receipt with every unit refused is
+# the state the C7 lane actually hit, and reading it as a pass is the failure
+# this test exists to stop.
+run_check "codex-smoke-self" python3 scripts/test_codex_smoke.py -v
 
 echo
 echo "pass $pass   fail $fail   no-data $nodata"

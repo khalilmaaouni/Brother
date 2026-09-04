@@ -111,6 +111,12 @@ KNOWN_REPOS = (
     # the door against a clone of that public repository, so its evidence
     # cites commits this estate's own trees have never held.
     os.path.expanduser("~/SaveClaudeTokens"),
+    # The founder's Kay Vault joined 2026-09-04: E55's evidence names commits
+    # of that repository (remote origin github.com/khalilmaaouni/kay-vault,
+    # private), and a checker blind to it reports a real, pushed commit as
+    # drifted. If this path is absent on a machine, _commit_exists already
+    # skips it (no .git found) rather than failing the check.
+    os.path.expanduser("~/Documents/Kay Vault"),
 )
 
 

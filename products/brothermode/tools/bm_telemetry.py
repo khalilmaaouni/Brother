@@ -718,6 +718,9 @@ def cmd_outcomes_append():
     tp = payload.get("transcript_path") or ""
     sid = payload.get("session_id") or "unknown"
     cwd = payload.get("cwd") or ""
+    _rs = _load_bm_repo_scope()
+    if _rs is not None and _rs.hooks_off(payload=payload):
+        return
     if not tp or not os.path.isfile(tp):
         print("bm_telemetry: transcript not found; nothing recorded")
         return
@@ -2124,6 +2127,22 @@ def cmd_precompact_brief():
             os.close(fd)
     except OSError:  # sbe: allow-silent best-effort hook write; this module's own law is it never blocks work
         pass
+
+
+def _load_bm_repo_scope():
+    """Load bm_repo_scope.py by path, same shape as _load_bm_autosave right
+    below: E76 per-repository hook scoping, checked before
+    cmd_outcomes_append does any transcript work."""
+    try:
+        import importlib.util
+        here = os.path.dirname(os.path.abspath(__file__))
+        spec = importlib.util.spec_from_file_location(
+            "bm_repo_scope_for_telemetry", os.path.join(here, "bm_repo_scope.py"))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception:  # sbe: allow-silent optional gate module load; hooks_off degrades to active when this returns None
+        return None
 
 
 def _load_bm_autosave():

@@ -641,6 +641,12 @@ class TelemetryEveryHookProgramPreConsentCase(unittest.TestCase):
     # point-of-need recall hook; it is one command string and one program,
     # not a chain, so both floors move by exactly one.
     #
+    # Raised 9 to 10 and 13 to 14 on 2026-09-04 (row E54) when the
+    # SessionStart group gained a second entry beside bm_sessionstart.py:
+    # tools/bm_vault.py refresh, the index-refresh step. One command string,
+    # one program, so both floors move by exactly one, the same shape as
+    # the V1 raise above.
+    #
     # BOTH NUMBERS SURVIVED THE 2026-08-17 WINDOWS PORT UNCHANGED, and that
     # is the point rather than a coincidence. The port moved the Stop and
     # PreCompact chains out of two `sh -c` strings and into
@@ -651,8 +657,8 @@ class TelemetryEveryHookProgramPreConsentCase(unittest.TestCase):
     # programs still run on the same eight command strings, and a program
     # dropped from the table fails here exactly as a program dropped from a
     # command string used to.
-    MIN_WIRED_COMMAND_STRINGS = 9
-    MIN_WIRED_PROGRAMS = 13
+    MIN_WIRED_COMMAND_STRINGS = 10
+    MIN_WIRED_PROGRAMS = 14
     _PROGRAM_RE = re.compile(
         r"(?:python3|sh)\s+\S*?(?:tools|scripts)/\S+\.(?:py|sh)")
 
@@ -909,6 +915,15 @@ class TelemetryEveryHookProgramPreConsentCase(unittest.TestCase):
         # same per-command shape bm_bash_audit.py uses: a private,
         # duplicated _consented() checked before either happens.
         "vault_recall_hook.py": ("per-command", "_consented()"),
+        # Row E54 (2026-09-04): the SessionStart index refresh. It is wired
+        # directly into hooks.json (`bm_vault.py refresh`), unlike
+        # status-line and recall, which vault_recall_hook.py gates before it
+        # ever shells out here. refresh can write the index at
+        # ~/.claude/bm_vault_index.sqlite3 on a stranger's machine before
+        # consent, so it carries its own gate, the same per-command shape
+        # as vault_recall_hook.py's own: a private, duplicated
+        # _consented() checked before the vault or the index is touched.
+        "bm_vault.py": ("per-command", "_consented()"),
     }
 
     def test_every_hook_wired_command_of_every_module_checks_consent(self):

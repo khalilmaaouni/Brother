@@ -119,9 +119,14 @@ def _save(path, doc):
 def triggers_by_unit(record):
     """{unit_id: [(risk_class, the words it hit on)]}, straight from
     receipt_door.risk_triggers, which is a pattern match over what each unit
-    itself declared. Nothing here decides what is risky."""
+    itself declared. Nothing here decides what is risky.
+
+    The record's own inferred lenses are passed through, so a persona pack's
+    forcing classes are armed for a run that pack was inferred for and for
+    no other (receipt_door._lens_forcing_triggers)."""
     out = {}
-    for name, uid, words in receipt_door.risk_triggers(_rows(record)):
+    for name, uid, words in receipt_door.risk_triggers(
+            _rows(record), receipt_door.record_lenses(record)):
         out.setdefault(uid, []).append((name, words))
     return out
 

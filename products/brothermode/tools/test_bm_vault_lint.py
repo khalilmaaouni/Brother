@@ -15,6 +15,7 @@ import io
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -58,6 +59,39 @@ class TheSixRules(unittest.TestCase):
 
     def test_required_fields_clean_note_passes(self):
         text = note(type_="failure", symptom="thing broke")
+        self.assertEqual(self._findings("required_fields", text), [])
+
+    # P11: two new types, data_semantic and test_oracle, each requiring
+    # source_receipt and human_approved. ------------------------------
+    def test_required_fields_catches_data_semantic_missing_both(self):
+        text = note(type_="data_semantic")
+        findings = self._findings("required_fields", text)
+        self.assertTrue(any("source_receipt" in m for _r, m in findings), findings)
+        self.assertTrue(any("human_approved" in m for _r, m in findings), findings)
+
+    def test_required_fields_data_semantic_clean_note_passes(self):
+        text = note(type_="data_semantic",
+                    extra_lines=["source_receipt: run-2026-09-04",
+                                 "human_approved: true"])
+        self.assertEqual(self._findings("required_fields", text), [])
+
+    def test_required_fields_catches_test_oracle_missing_both(self):
+        text = note(type_="test_oracle")
+        findings = self._findings("required_fields", text)
+        self.assertTrue(any("source_receipt" in m for _r, m in findings), findings)
+        self.assertTrue(any("human_approved" in m for _r, m in findings), findings)
+
+    def test_required_fields_test_oracle_clean_note_passes(self):
+        text = note(type_="test_oracle",
+                    extra_lines=["source_receipt: run-2026-09-04",
+                                 "human_approved: false"])
+        self.assertEqual(self._findings("required_fields", text), [])
+
+    def test_required_fields_existing_types_never_require_source_receipt(self):
+        # The two new fields bind data_semantic/test_oracle only; an
+        # ordinary note (the vault's existing 898 notes' shape) is
+        # untouched, never re-linted into requiring a field it never had.
+        text = note(type_="reference")
         self.assertEqual(self._findings("required_fields", text), [])
 
     # id_format --------------------------------------------------------
@@ -256,6 +290,190 @@ class FixIsMechanicalOnly(unittest.TestCase):
             after = fh.read()
         _after_block, after_end = lint.frontmatter_span(after)
         self.assertEqual(after[after_end:], original_body)
+
+
+class FixDerivesWhatItCannotInvent(unittest.TestCase):
+    """E55: fix supplies created and id where they are absent, and nowhere
+    else. Structure mirrors FixIsMechanicalOnly above (temp vault, one _write
+    helper, cmd_fix driven directly), with a real git repository underneath so
+    the created rule is proven against history rather than against a stub.
+
+    Driven BACKWARDS on purpose: the two tests that matter most are the ones
+    where nothing may be written, an untracked note and a note that already
+    carries a value, because a derivation that fires there is a fabrication
+    rather than a fix.
+    """
+
+    def setUp(self):
+        if shutil.which("git") is None:
+            self.skipTest("git is not on PATH, so the created rule cannot be driven")
+        self.tmp = tempfile.mkdtemp(prefix="bm-vault-lint-derive-")
+        self.vault = os.path.join(self.tmp, "vault")
+        os.makedirs(self.vault)
+        self._git("init", "-q")
+        self._git("config", "user.email", "test@example.invalid")
+        self._git("config", "user.name", "vault lint test")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _git(self, *args, **kwargs):
+        """git inside the temp vault. A non-zero exit fails the test loudly:
+        a silently failed fixture commit would make the created rule look
+        like it read NO-DATA correctly when it never had history to read."""
+        env = dict(os.environ)
+        when = kwargs.pop("when", None)
+        if when is not None:
+            env["GIT_AUTHOR_DATE"] = when
+            env["GIT_COMMITTER_DATE"] = when
+        proc = subprocess.run(("git",) + args, cwd=self.vault, env=env,
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        self.assertEqual(proc.returncode, 0,
+                         proc.stdout.decode("utf-8", errors="replace"))
+        return proc.stdout.decode("utf-8", errors="replace")
+
+    def _write(self, name, text):
+        path = os.path.join(self.vault, name)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        return path
+
+    def _read(self, name):
+        with open(os.path.join(self.vault, name), encoding="utf-8") as fh:
+            return fh.read()
+
+    def _fix(self, apply_changes=True):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = lint.cmd_fix(self.vault, apply_changes=apply_changes)
+        self.assertEqual(code, 0, buf.getvalue())
+        return buf.getvalue()
+
+    def _fmap(self, name):
+        block, _end = lint.frontmatter_span(self._read(name))
+        return lint._field_map(lint._iter_fields(block))
+
+    def test_created_comes_from_the_first_add_not_a_later_one(self):
+        """The history is built so the two candidate readings disagree: the
+        note is added, deleted, then added again, which is the only shape
+        where `git log --diff-filter=A` prints more than one line. Reading the
+        newest line would stamp the re-add date, so this test is what pins
+        the oldest line as the answer."""
+        text = note(created="").replace("created: \n", "")
+        self._write("dated.md", text)
+        self._git("add", "dated.md")
+        self._git("commit", "-q", "-m", "add the note", when="2026-07-04T09:00:00+09:00")
+        self._git("rm", "-q", "dated.md")
+        self._git("commit", "-q", "-m", "remove the note", when="2026-08-01T09:00:00+09:00")
+        self._write("dated.md", text)
+        self._git("add", "dated.md")
+        self._git("commit", "-q", "-m", "add it back", when="2026-08-21T09:00:00+09:00")
+        adds = self._git("log", "--diff-filter=A", "--follow", "--format=%ad",
+                         "--date=short", "--", "dated.md")
+        self.assertEqual([ln for ln in adds.split() if ln],
+                          ["2026-08-21", "2026-07-04"], adds)
+        out = self._fix()
+        self.assertIn("derived created=2026-07-04 from git first commit: dated.md", out)
+        self.assertEqual(self._fmap("dated.md")["created"], "2026-07-04")
+
+    def test_created_survives_a_rename_as_the_date_the_note_first_appeared(self):
+        text = note(created="").replace("created: \n", "")
+        self._write("before-rename.md", text)
+        self._git("add", "before-rename.md")
+        self._git("commit", "-q", "-m", "add", when="2026-03-09T09:00:00+09:00")
+        self._git("mv", "before-rename.md", "after-rename.md")
+        self._git("commit", "-q", "-m", "rename", when="2026-08-25T09:00:00+09:00")
+        out = self._fix()
+        self.assertIn("derived created=2026-03-09 from git first commit: after-rename.md", out)
+        self.assertEqual(self._fmap("after-rename.md")["created"], "2026-03-09")
+
+    def test_an_untracked_note_reads_no_data_and_stays_without_created(self):
+        text = note(created="").replace("created: \n", "")
+        self._write("untracked.md", text)
+        out = self._fix()
+        self.assertIn("NO-DATA: created for untracked.md: no git first-commit date", out)
+        self.assertNotIn("created", self._fmap("untracked.md"))
+        self.assertNotIn("derived created=", out)
+
+    def test_a_vault_that_is_not_a_repository_reads_no_data(self):
+        shutil.rmtree(os.path.join(self.vault, ".git"))
+        text = note(created="").replace("created: \n", "")
+        self._write("orphan.md", text)
+        out = self._fix()
+        self.assertIn("NO-DATA: created for orphan.md", out)
+        self.assertNotIn("created", self._fmap("orphan.md"))
+
+    def test_an_existing_created_is_never_overwritten(self):
+        self._write("kept.md", note(created="2020-01-02"))
+        self._git("add", "kept.md")
+        self._git("commit", "-q", "-m", "add", when="2026-08-30T09:00:00+09:00")
+        out = self._fix()
+        self.assertEqual(self._fmap("kept.md")["created"], "2020-01-02")
+        self.assertNotIn("derived created=", out)
+
+    def test_a_template_placeholder_created_is_kept_not_derived(self):
+        self._write("template.md", note(created="YYYY-MM-DD"))
+        self._git("add", "template.md")
+        self._git("commit", "-q", "-m", "add", when="2026-08-30T09:00:00+09:00")
+        out = self._fix()
+        self.assertEqual(self._fmap("template.md")["created"], "YYYY-MM-DD")
+        self.assertIn("kept template placeholder created=YYYY-MM-DD: template.md", out)
+
+    def test_a_non_date_created_such_as_unset_is_derived_over(self):
+        self._write("unset.md", note(created="unset"))
+        self._git("add", "unset.md")
+        self._git("commit", "-q", "-m", "add", when="2026-06-11T09:00:00+09:00")
+        self._fix()
+        self.assertEqual(self._fmap("unset.md")["created"], "2026-06-11")
+
+    def test_an_existing_id_is_never_overwritten_even_when_malformed(self):
+        self._write("hand-id.md", note(id_="n-a-hand-written-id"))
+        out = self._fix()
+        self.assertEqual(self._fmap("hand-id.md")["id"], "n-a-hand-written-id")
+        self.assertNotIn("derived id=", out)
+
+    def test_a_derived_id_matches_the_vault_id_shape(self):
+        text = note().replace("id: n-0123456789abcdef\n", "")
+        self._write("no-id.md", text)
+        out = self._fix()
+        new_id = self._fmap("no-id.md")["id"]
+        self.assertRegex(new_id, r"^n-[0-9a-f]{16}$")
+        self.assertIsNotNone(lint.Rules().ids_mod, "bm_vault_ids must be loadable")
+        self.assertTrue(lint.Rules().ids_mod.ID_VALUE_RE.match(new_id), new_id)
+        self.assertIn("derived id=%s from the note path: no-id.md" % new_id, out)
+        self.assertEqual(new_id, lint.derive_path_id("no-id.md"))
+
+    def test_a_derived_id_does_not_collide_with_one_already_in_use(self):
+        taken = lint.derive_path_id("clash.md")
+        self._write("holder.md", note(id_=taken))
+        self._write("clash.md", note().replace("id: n-0123456789abcdef\n", ""))
+        self._fix()
+        self.assertEqual(self._fmap("holder.md")["id"], taken)
+        self.assertNotEqual(self._fmap("clash.md")["id"], taken)
+        self.assertRegex(self._fmap("clash.md")["id"], r"^n-[0-9a-f]{16}$")
+
+    def test_a_second_fix_run_changes_nothing(self):
+        text = note().replace("id: n-0123456789abcdef\n", "")
+        text = text.replace("created: 2026-08-30\n", "")
+        self._write("both.md", text)
+        self._git("add", "both.md")
+        self._git("commit", "-q", "-m", "add", when="2026-05-05T09:00:00+09:00")
+        self._fix()
+        after_first = self._read("both.md")
+        self.assertIn("created: 2026-05-05", after_first)
+        out = self._fix()
+        self.assertEqual(self._read("both.md"), after_first)
+        self.assertNotIn("derived created=", out)
+        self.assertNotIn("derived id=", out)
+
+    def test_a_dry_run_writes_nothing_it_would_derive(self):
+        text = note().replace("id: n-0123456789abcdef\n", "")
+        path = self._write("dry-derive.md", text)
+        before = self._read("dry-derive.md")
+        out = self._fix(apply_changes=False)
+        self.assertIn("would: derived id=", out)
+        self.assertEqual(self._read("dry-derive.md"), before)
+        self.assertTrue(os.path.exists(path))
 
 
 class CheckJson(unittest.TestCase):

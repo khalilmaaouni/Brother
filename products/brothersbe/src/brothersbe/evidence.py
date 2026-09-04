@@ -131,6 +131,13 @@ from sbe_telemetry import SECRET_PATTERNS  # noqa: E402
 #: postdates.
 KNOWN_SCHEMA_VERSIONS = ("1.0", "1.1", "1.2", "1.3", "1.4")
 
+#: Where receipts live, spelled exactly as `tasks.DEFAULT_EVIDENCE_DIR` spells
+#: it and written out here rather than imported, so the reader that judges a
+#: receipt never depends on the module that writes task records. Read by
+#: `_under_evidence_store`: a path inside one of these directories is another
+#: receipt, and another receipt is never the code a receipt covers.
+EVIDENCE_STORE_REL = ".sbe/evidence"
+
 #: The version NEW receipts are stamped with. Evidence-local on purpose: the
 #: package-wide SCHEMA_VERSION governs other stores (the task registry, the
 #: init config), and coupling their versions would force every consumer to
@@ -1219,42 +1226,237 @@ def _check_seal(receipt):
             % (claimed, actual, GENERATOR))
 
 
-def _check_commit(receipt, cwd, path=None):
-    """(problem, note). The binding that makes a receipt evidence for ONE
-    commit: `headCommit` binds to a DIGEST of the tracked content at that
+def _repo_top_level(cwd):
+    """The absolute repository root reached from `cwd`, or None when `cwd` is
+    not inside a work tree. Every path compared against `content_binding`
+    output has to be spelled from HERE, because `git ls-tree --full-tree`
+    answers in repository-root-relative paths no matter which directory the
+    command ran in."""
+    code, out, _err = _git(["rev-parse", "--show-toplevel"], cwd)
+    if code != 0:
+        return None
+    # REALPATH, not the caller's spelling. On macOS the temporary
+    # directories every fixture here runs in are reached through a
+    # symlink (/var -> /private/var), and git answers with the resolved
+    # path, so an unresolved `cwd` made every path below relative to a
+    # different root and silently exempted and compared NOTHING.
+    return os.path.realpath(out.strip()) if out.strip() else None
+
+
+def _under_evidence_store(rel):
+    """True for a path inside ANY evidence store in the tree: the repository's
+    own `.sbe/evidence`, and the dossier-scoped stores that sit at
+    `<dossier>/.sbe/evidence`. Matched on path SEGMENTS, the same way
+    `_under_excluded` matches, so `.sbe/evidence-old` is a different
+    directory rather than a prefix of this one."""
+    norm = "/" + rel.replace(os.sep, "/").strip("/")
+    return ("/" + EVIDENCE_STORE_REL + "/") in norm
+
+
+def _binding_exemptions(cwd, path, exclude_dirs, refs):
+    """The repo-root-relative paths whose change must never stale a receipt:
+    the receipt's own file, every other receipt in an evidence store, and any
+    directory the caller excluded.
+
+    TWO DEFECTS THIS CLOSES, both found on this estate's own release dossier
+    (roadmap row E83), both of which read a receipt as stale the moment it was
+    committed:
+
+    1. The exemption used to be spelled relative to `cwd`, while
+       `content_binding.tracked_blobs` answers in repository-root-relative
+       paths. Any scoped read (`sbe status docs/dossiers/v1.0-release`, whose
+       `cwd` is the dossier) therefore exempted a name that appears in no
+       digest, so every receipt read as stale.
+    2. Only the receipt's OWN path was exempt, so a sibling receipt's
+       introducing commit staled it. Minting three receipts left at most the
+       last one fresh. Evidence is not the code under test, which this module
+       already says for coverage (`_check_covered`'s `exclude_dirs`, and
+       docs/KNOWN-LIMITS.md "Evidence covering evidence"); it is equally true
+       for the commit binding.
+
+    THE PROPERTY THIS KEEPS. A commit that bundles a receipt with real work
+    still changes a tracked path outside these exemptions, so it still stales
+    the receipt exactly as before."""
+    root = _repo_top_level(cwd)
+    if root is None:
+        return frozenset()
+    exempt = set()
+    if path:
+        rel = os.path.relpath(os.path.realpath(path), root).replace(os.sep, "/")
+        if not rel.startswith(".."):
+            exempt.add(rel)
+    excluded_rel = []
+    for entry in exclude_dirs or ():
+        full = entry if os.path.isabs(entry) else os.path.join(cwd, entry)
+        rel = os.path.relpath(os.path.realpath(full), root).replace(os.sep, "/")
+        if not rel.startswith(".."):
+            excluded_rel.append(rel)
+    for ref in refs:
+        if not ref:
+            continue
+        blobs = content_binding.tracked_blobs(cwd, ref)
+        if blobs is None:
+            # An unresolvable ref exempts nothing here; `content_unchanged`
+            # reports the same ref as no comparison at all, which is where
+            # that finding belongs.
+            continue
+        for tracked in blobs:
+            if _under_evidence_store(tracked) or _under_excluded(tracked, excluded_rel):
+                exempt.add(tracked)
+    return frozenset(exempt)
+
+
+def _covered_file(cwd, rel):
+    """The absolute path a `coveredFiles` entry names, resolved against `cwd`
+    first and against the REPOSITORY ROOT second.
+
+    A receipt records its covered paths relative to the directory the run was
+    given (`sbe evidence run --cwd`), which is normally the repository root; a
+    reader can arrive with a narrower one (`sbe status <dossier>` reads from
+    inside the dossier). Joining a root-relative path onto a dossier cwd
+    produced `<dossier>/docs/dossiers/<dossier>/08-behaviour.md`, which exists
+    nowhere, and the receipt was reported as covering a file that "no longer
+    exists" while the file sat untouched in the tree (roadmap row E83).
+
+    THE ROOT IS TRIED SECOND, NEVER FIRST, and this is not a leniency: a path
+    that resolves under `cwd` still resolves there and is judged exactly as
+    before, a path that resolves in neither place is still reported missing,
+    and whichever file is found still has to match the digest the receipt
+    recorded."""
+    if os.path.isabs(rel):
+        return rel
+    here = os.path.join(cwd, rel)
+    if os.path.exists(here):
+        return here
+    root = _repo_top_level(cwd)
+    if root:
+        there = os.path.join(root, rel)
+        if os.path.exists(there):
+            return there
+    return here
+
+
+def _commit_known(cwd, ref):
+    """True when `ref` names a commit this repository actually holds. A
+    receipt naming a commit nobody here has (a branch never fetched, a
+    rewritten history) is not evidence that the code moved: it is a
+    comparison that cannot be made."""
+    code, _out, _err = _git(["cat-file", "-e", "%s^{commit}" % ref], cwd)
+    return code == 0
+
+
+def _check_commit(receipt, cwd, path=None, exclude_dirs=None):
+    """(problem, note, nodata). The binding that makes a receipt evidence for
+    ONE commit: `headCommit` binds to a DIGEST of the tracked content at that
     commit, not to the commit identifier itself (see
     `docs/adr/2026-08-12-handover-across-two-machines.md` and the founder
     decision in `docs/plans/2026-08-12-overnight-team-version-and-
-    roadmap.md` section 2.1 that this implements). `path` (the receipt
-    file itself, as passed to `verify`) is exempted from that digest by
-    exact repo-relative path the same way `handover.py` exempts
-    `12-handover.json`: a commit whose entire diff is the receipt file is
-    the receipt announcing itself, never "the code moved". Any commit that
-    bundles the receipt with anything else changes a tracked path outside
-    the exemption, so it still fails this exactly as before. `path` outside
-    `cwd`, or omitted, exempts nothing -- callers that pass no path (or a
-    path this repository never tracks) still get an exact content match at
-    HEAD, which is what an unmodified tree always was anyway."""
+    roadmap.md` section 2.1 that this implements). What that digest exempts,
+    and why, is `_binding_exemptions`: the receipt itself, its siblings in an
+    evidence store, and the caller's excluded directories, all spelled from
+    the repository root. A commit that bundles the receipt with anything else
+    changes a tracked path outside the exemption, so it still fails this
+    exactly as before.
+
+    When that digest says the tree moved, `_carried_forward` asks the narrower
+    question the estate's own policy layer already asks (`policy.py`,
+    `_covered_files_that_moved`): is the bound commit an ancestor of this head
+    with every covered file untouched between them. A receipt is not stale
+    merely for having been merged.
+
+    A `headCommit` this repository does not hold returns NO-DATA rather than a
+    problem: nothing was compared, and NO-DATA is never a pass."""
     code, out, err = _git(["rev-parse", "HEAD"], cwd)
     if code != 0:
         return None, ("HEAD does not resolve in %s (%s), so the commit binding was not "
                       "checked and nothing here confirms which code this receipt covers"
-                      % (cwd, err.strip() or "no message"))
+                      % (cwd, err.strip() or "no message")), None
     current = out.strip()
     claimed = answered(receipt.get("headCommit"))
     if claimed == current:
-        return None, "headCommit %s is the current head" % current[:12]
-    exempt = frozenset()
-    if path:
-        rel = os.path.relpath(os.path.abspath(path), os.path.abspath(cwd)).replace(os.sep, "/")
-        if not rel.startswith(".."):
-            exempt = frozenset((rel,))
+        return None, "headCommit %s is the current head" % current[:12], None
+    if claimed and not _commit_known(cwd, claimed):
+        return None, None, ("headCommit %s names a commit this repository does not hold, so "
+                            "the content that receipt bound to was never read and nothing "
+                            "here can say whether it still describes this tree"
+                            % str(claimed)[:12])
+    exempt = _binding_exemptions(cwd, path, exclude_dirs, (claimed, current))
     if claimed and content_binding.content_unchanged(cwd, claimed, current, exempt):
-        return None, ("headCommit %s is the current head aside from its own introducing "
-                      "commit(s), which changed nothing but this receipt" % claimed[:12])
+        return None, ("headCommit %s is the current head aside from commits that changed "
+                      "nothing but this receipt and the evidence store around it"
+                      % claimed[:12]), None
+    carried, carried_note = _carried_forward(receipt, cwd, claimed, current, exclude_dirs)
+    if carried:
+        return None, carried_note, None
     return ("headCommit %s is not the current head %s: this receipt is evidence for a commit "
             "that is no longer checked out, and the code it covered has moved"
-            % (str(claimed)[:12], current[:12]), None)
+            % (str(claimed)[:12], current[:12]), None, None)
+
+
+def _carried_forward(receipt, cwd, claimed, current, exclude_dirs=None):
+    """(bool, note). The NARROW second way a receipt is still evidence for the
+    tree in front of you, after the whole-tree digest has already said the tree
+    moved: `claimed` is an ANCESTOR of the current head, and not one file the
+    receipt covers changed anywhere between the two.
+
+    WHY THIS EXISTS. The digest above answers "is this the same tree", which is
+    the strongest thing a receipt can say and the thing it says at the commit
+    it was made on. It is not the only true thing. A receipt minted on Monday
+    and merged on Friday sits behind a week of commits to code it never
+    covered, and calling it stale means the estate can never carry evidence
+    across a merge at all: on this estate every receipt in its own release
+    dossier read as broken for exactly that reason (roadmap row E83). Unchanged
+    covered files at a descendant commit are the same evidence about the same
+    files.
+
+    WHAT IT DELIBERATELY DOES NOT SAY. It does not say the command would still
+    exit 0 today, because something outside the coverage list (the runner, a
+    dependency) may have moved. That is a different control and it already
+    exists: `_check_registered` re-checks a registered check's runner hashes
+    and spec digest, and `_check_covered` re-hashes every covered file against
+    the working tree. This one answers only what it names, and the note it
+    returns says so rather than claiming the strong form.
+
+    ANCESTRY IS REQUIRED HERE, unlike the digest path, which deliberately does
+    not require it (`content_binding`: a rebase reproducing the same tree reads
+    as unchanged). "Nothing I cover changed between us" is only a statement
+    about carrying evidence FORWARD; between two divergent histories it is not
+    a statement at all."""
+    if not claimed or not current:
+        return False, None
+    root = _repo_top_level(cwd)
+    if root is None:
+        return False, None
+    code, _out, _err = _git(["merge-base", "--is-ancestor", claimed, current], cwd)
+    if code != 0:
+        return False, None
+    covered = []
+    for entry in receipt.get("coveredFiles") or []:
+        rel = answered(entry.get("path"))
+        if rel is None or _under_excluded(rel, exclude_dirs):
+            continue
+        full = _covered_file(cwd, rel)
+        repo_rel = os.path.relpath(os.path.realpath(full), root).replace(os.sep, "/")
+        if repo_rel.startswith("..") or _under_evidence_store(repo_rel):
+            continue
+        covered.append(repo_rel)
+    if not covered:
+        # Nothing this receipt covers is judgeable here, so there is nothing to
+        # carry forward. The stale finding stands: an absence never upgrades a
+        # verdict.
+        return False, None
+    code, out, err = _git(["diff", "--name-only", claimed, current, "--"] + covered, root)
+    if code != 0:
+        return False, None
+    if err.strip():
+        return False, None
+    moved = [line for line in out.splitlines() if line.strip()]
+    if moved:
+        return False, None
+    return True, ("headCommit %s is an ancestor of the current head %s and none of the %d "
+                  "file(s) this receipt covers changed between them, so it still describes "
+                  "those files; it says nothing about code it never covered"
+                  % (claimed[:12], current[:12], len(covered)))
 
 
 def _under_excluded(rel, exclude_dirs):
@@ -1277,10 +1479,13 @@ def _check_covered(receipt, cwd, exclude_dirs=None):
 
     Two ways a covered file stops being covered, and both are named separately
     because they are different findings: the bytes differ from the digest the
-    receipt recorded, or the file was written after the run ended. The second
-    catches a change that was made and reverted, and it is deliberately strict:
-    a file touched after the evidence was made is a file the evidence did not
-    see in its current state.
+    receipt recorded, or the file was written after the run ended with no
+    digest recorded to speak for it. The second is the fallback for a receipt
+    that carries no `sha256` for a covered path, where the write time is the
+    only evidence left. A later write over a digest that MATCHES is not a
+    finding: git rewrites files on every checkout, merge, pull and new
+    worktree, so treating that as staleness failed every receipt this estate
+    had merged (roadmap row E83), while saying nothing at all about the bytes.
 
     `exclude_dirs`, when given, names path prefixes this receipt's coverage
     must never be judged against, even though `coveredFiles` still lists them
@@ -1307,9 +1512,10 @@ def _check_covered(receipt, cwd, exclude_dirs=None):
         if _under_excluded(rel, exclude_dirs):
             excluded += 1
             continue
-        full = rel if os.path.isabs(rel) else os.path.join(cwd, rel)
+        full = _covered_file(cwd, rel)
         if not os.path.exists(full):
-            problems.append("covered file %s no longer exists" % rel)
+            problems.append("covered file %s no longer exists (looked under %s and under the "
+                            "repository root)" % (rel, cwd))
             continue
         checked += 1
         recorded = entry.get("sha256")
@@ -1328,16 +1534,49 @@ def _check_covered(receipt, cwd, exclude_dirs=None):
                 continue
             if mtime > ended:
                 touched += 1
-                problems.append("covered file %s was written after the run ended (%s vs %s); "
-                                "a file touched after the evidence was made is a file the "
-                                "evidence did not see"
-                                % (rel, _iso(mtime), _iso(ended)))
-    note = ("%d covered file(s) re-hashed against the receipt, %d written after the run"
-            % (checked, touched))
+                if not recorded:
+                    # A LAST RESORT, not the rule. With no recorded digest the
+                    # write time is the only thing left that can speak for this
+                    # file, so a later write is a finding. WITH a digest that
+                    # just matched, it is not: the bytes on disk ARE the bytes
+                    # the receipt recorded, and a later mtime only says
+                    # something rewrote them identically. Every checkout,
+                    # merge, pull and fresh worktree does exactly that, which
+                    # made every receipt on this estate's own release dossier
+                    # read as stale the moment the branch carrying it was
+                    # merged (roadmap row E83). Counted in the note either way.
+                    problems.append("covered file %s was written after the run ended (%s vs "
+                                    "%s) and the receipt recorded no digest for it, so "
+                                    "nothing here says the bytes are the ones it saw"
+                                    % (rel, _iso(mtime), _iso(ended)))
+    note = ("%d covered file(s) re-hashed against the receipt, %d rewritten after the run "
+            "with the bytes the receipt recorded" % (checked, touched))
     if excluded:
         note += (", %d under an excluded path (the evidence store) never judged as coverage"
                  % excluded)
     return problems, note, excluded
+
+
+def commit_binding_holds(receipt, cwd, path=None, exclude_dirs=None):
+    """True when this receipt's `headCommit` still binds it to the tree in
+    `cwd`: the same question `_check_commit` answers, exported so nothing has
+    to ask it a second way.
+
+    THE DRIFT THIS EXISTS TO STOP, and it was live. `tools/sbe_gate.py`
+    carried its own copy of the rule, comparing `headCommit` to HEAD for exact
+    equality and saying in its own docstring that this is "the same mismatch
+    src/brothersbe/evidence.py's own _check_commit already treats as a broken
+    claim". Once the reader here learned that a receipt survives its own
+    introducing commit, the two answers disagreed: the hard gate failed
+    receipts this module had already called sound. One rule, one
+    implementation, both callers.
+
+    A `headCommit` this repository does not hold reads FALSE here, not True:
+    `verify` can return NO-DATA for that case because it has three verdicts to
+    return, a boolean has two, and the safe half of two is the one that does
+    not pass."""
+    problem, _note, nodata = _check_commit(receipt, cwd, path, exclude_dirs)
+    return problem is None and nodata is None
 
 
 def verify(path, cwd=None, exclude_dirs=None):
@@ -1363,7 +1602,7 @@ def verify(path, cwd=None, exclude_dirs=None):
         return {"verdict": "FAIL", "reasons": [str(exc)], "inspected": inspected,
                 "receipt": None, "trust": None, "trustWhy": None}
 
-    problems, notes = [], []
+    problems, notes, unanswerable = [], [], []
 
     schema_problem = _check_schema(receipt)
     inspected.append("schemaVersion")
@@ -1399,11 +1638,13 @@ def verify(path, cwd=None, exclude_dirs=None):
         problems.append(seal_problem)
 
     inspected.append("the current git HEAD in %s" % cwd)
-    commit_problem, commit_note = _check_commit(receipt, cwd, path)
+    commit_problem, commit_note, commit_nodata = _check_commit(receipt, cwd, path, exclude_dirs)
     if commit_problem:
         problems.append(commit_problem)
     if commit_note:
         notes.append(commit_note)
+    if commit_nodata:
+        unanswerable.append(commit_nodata)
 
     covered = receipt.get("coveredFiles") or []
     inspected.append("%d covered file(s)" % len(covered))
@@ -1415,6 +1656,13 @@ def verify(path, cwd=None, exclude_dirs=None):
 
     if problems:
         return {"verdict": "FAIL", "reasons": problems, "inspected": inspected,
+                "receipt": receipt, "trust": level, "trustWhy": why}
+
+    if unanswerable:
+        # A comparison that could not be made at all. Reported ahead of every
+        # advisory case below because it is the stronger statement: those know
+        # what they read and call it weak, this one read nothing.
+        return {"verdict": "NO-DATA", "reasons": unanswerable, "inspected": inspected,
                 "receipt": receipt, "trust": level, "trustWhy": why}
 
     if receipt.get("workingTreeDirty") is not False:

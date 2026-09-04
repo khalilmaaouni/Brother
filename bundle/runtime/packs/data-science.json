@@ -1,0 +1,60 @@
+{
+  "lens": "data-science",
+  "version": "1.0.0",
+  "detection_signals": {
+    "paths": [
+      "*.ipynb",
+      "mlruns/",
+      "dvc.yaml",
+      "dbt_project.yml"
+    ],
+    "manifest_strings": [
+      "mlflow",
+      "dvc",
+      "dbt_project"
+    ],
+    "note": "the persona document's own cited grep terms (docs/plan/PERSONA-INTEGRATION-PLAN-2026-09-04.md section 2.1, gap P3: 'grep -rli for mlflow, ipynb, dvc.yaml, mlruns, dbt_project'); detection itself is P3's row, not wired here."
+  },
+  "challenge_question": "What is the pre-registered success metric and holdout/evaluation rule?",
+  "question_budget": {
+    "min": 1,
+    "max": 4,
+    "work_shape": "ML experiment (persona doc 4.2)"
+  },
+  "required_evidence_families": [
+    "E2",
+    "E8",
+    "E18"
+  ],
+  "receipt_fields": [
+    "dataset_identity_cutoff",
+    "split_identity",
+    "code_environment_model_identity",
+    "primary_metric_guardrails",
+    "baseline_comparison",
+    "leakage_checks",
+    "slice_results",
+    "reproducibility_status",
+    "cost_latency",
+    "promotion_rollback_decision",
+    "monitoring_thresholds",
+    "unresolved_evaluation_gaps"
+  ],
+  "forcing_classes": [
+    {
+      "id": "promotion",
+      "label": "Model promotion",
+      "why": "an untracked artifact without a registry identity and evaluation gate (persona doc 12.3 DS-09)"
+    },
+    {
+      "id": "threshold_change",
+      "label": "Threshold change",
+      "why": "a business tradeoff selected without a confusion/cost matrix and acceptance (persona doc 12.3 DS-11; 25.2 'DS: business tradeoff threshold selected')"
+    },
+    {
+      "id": "training_data_refresh",
+      "label": "Training-data refresh",
+      "why": "a changed population without a dataset version/profile differential (persona doc 12.3 DS-08 'Data refresh/retrain')"
+    }
+  ]
+}

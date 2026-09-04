@@ -20,6 +20,7 @@ runs or force every assertion to tolerate whatever state a prior run left):
      it was generated outside a checkout, and --check TOLERATES a stamp that
      differs from a fresh generation while still refusing a hash that does.
 """
+import hashlib
 import importlib.machinery
 import importlib.util
 import json
@@ -140,10 +141,14 @@ class ManifestMatchesTheClosure(unittest.TestCase):
             manifest = json.load(fh)
         by_path = {f["path"]: f["sha256"] for f in manifest["files"]}
 
-        expected_names = set(self.closure) | {BR.LAUNCHER_NAME}
+        # The launcher and the verifier are the two generated files with no
+        # scripts/ source (E80 added the verifier); everything else is the
+        # closure.
+        expected_names = set(self.closure) | {BR.LAUNCHER_NAME,
+                                              BR.VERIFIER_NAME}
         self.assertEqual(set(by_path), expected_names,
                          "the manifest must name exactly the closure plus "
-                         "the launcher, no more and no less")
+                         "the launcher and the verifier, no more and no less")
 
         for name in self.closure:
             source = _read(os.path.join(self.scripts_dir, name))
@@ -187,6 +192,101 @@ class DriftDetectedOnSourceEditWithoutRegen(unittest.TestCase):
         self.assertFalse(ok2, "an edited source with no regeneration must "
                              "check red")
         self.assertTrue(any("claim_store.py" in p for p in problems2), problems2)
+
+
+class DataDirectoriesAreMirrored(unittest.TestCase):
+    """DATA_DIRS ("packs"): a data directory a closure file references by a
+    bare string constant (door.py's PACKS_DIR) is mirrored recursively into
+    bundle/runtime, hashed into the manifest, and checked, exactly like a
+    closure .py file. An unreferenced or absent directory is left alone."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="bundle-runtime-datadirs-")
+
+    def test_a_referenced_data_dir_is_mirrored_and_hashed(self):
+        scripts_dir = os.path.join(self.tmp, "scripts")
+        runtime_dir = os.path.join(self.tmp, "bundle", "runtime")
+        copy_scripts_subset(scripts_dir)
+        shutil.copytree(os.path.join(HERE, "packs"),
+                        os.path.join(scripts_dir, "packs"))
+
+        closure, changed = BR.generate(scripts_dir=scripts_dir,
+                                       runtime_dir=runtime_dir)
+        self.assertIn("packs/core.json", changed, changed)
+        self.assertIn("packs/data-science.json", changed, changed)
+
+        manifest = _manifest(os.path.join(runtime_dir, BR.MANIFEST_NAME))
+        by_path = {f["path"]: f["sha256"] for f in manifest["files"]}
+        for rel in ("packs/core.json", "packs/data-science.json"):
+            copy_path = os.path.join(runtime_dir, *rel.split("/"))
+            source_path = os.path.join(scripts_dir, *rel.split("/"))
+            source_bytes = _read(source_path)
+            self.assertTrue(os.path.isfile(copy_path), rel)
+            self.assertEqual(_read(copy_path), source_bytes, rel)
+            self.assertIn(rel, by_path, by_path)
+            self.assertEqual(by_path[rel],
+                             hashlib.sha256(source_bytes).hexdigest(), rel)
+
+        ok, problems, _ = BR.check(scripts_dir=scripts_dir,
+                                   runtime_dir=runtime_dir)
+        self.assertTrue(ok, problems)
+
+        _closure2, changed2 = BR.generate(scripts_dir=scripts_dir,
+                                          runtime_dir=runtime_dir)
+        self.assertEqual(changed2, [], changed2)
+
+    def test_an_edited_pack_turns_check_red(self):
+        scripts_dir = os.path.join(self.tmp, "scripts")
+        runtime_dir = os.path.join(self.tmp, "bundle", "runtime")
+        copy_scripts_subset(scripts_dir)
+        shutil.copytree(os.path.join(HERE, "packs"),
+                        os.path.join(scripts_dir, "packs"))
+        BR.generate(scripts_dir=scripts_dir, runtime_dir=runtime_dir)
+
+        with open(os.path.join(scripts_dir, "packs", "core.json"),
+                  "a", encoding="utf-8") as fh:
+            fh.write("\n")
+
+        ok, problems, _ = BR.check(scripts_dir=scripts_dir,
+                                   runtime_dir=runtime_dir)
+        self.assertFalse(ok, "an edited pack with no regeneration must "
+                             "check red")
+        self.assertTrue(any("packs/core.json" in p for p in problems),
+                        problems)
+
+    def test_an_unreferenced_data_dir_is_not_mirrored(self):
+        scripts_dir = os.path.join(self.tmp, "scripts")
+        runtime_dir = os.path.join(self.tmp, "bundle", "runtime")
+        os.makedirs(scripts_dir)
+        write_stub(scripts_dir, "brother_run.py", """
+            print("stub entry, no data dir reference")
+        """)
+        packs_dir = os.path.join(scripts_dir, "packs")
+        os.makedirs(packs_dir)
+        with open(os.path.join(packs_dir, "core.json"), "w",
+                  encoding="utf-8") as fh:
+            fh.write("{}\n")
+
+        BR.generate(scripts_dir=scripts_dir, runtime_dir=runtime_dir)
+
+        self.assertFalse(os.path.exists(os.path.join(runtime_dir, "packs")))
+        manifest = _manifest(os.path.join(runtime_dir, BR.MANIFEST_NAME))
+        self.assertFalse(any(f["path"].startswith("packs/")
+                             for f in manifest["files"]), manifest["files"])
+
+    def test_absent_data_dir_is_fine(self):
+        scripts_dir = os.path.join(self.tmp, "scripts")
+        runtime_dir = os.path.join(self.tmp, "bundle", "runtime")
+        copy_scripts_subset(scripts_dir)
+        self.assertFalse(os.path.isdir(os.path.join(scripts_dir, "packs")))
+
+        BR.generate(scripts_dir=scripts_dir, runtime_dir=runtime_dir)
+        ok, problems, _ = BR.check(scripts_dir=scripts_dir,
+                                   runtime_dir=runtime_dir)
+        self.assertTrue(ok, problems)
+        manifest = _manifest(os.path.join(runtime_dir, BR.MANIFEST_NAME))
+        self.assertFalse(any(f["path"].startswith("packs/")
+                             for f in manifest["files"]), manifest["files"])
 
 
 class TheManifestStampsItsSourceRevision(unittest.TestCase):
@@ -305,6 +405,17 @@ class RealRepositoryCliIsClean(unittest.TestCase):
                   "--check"])
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
 
+    def test_real_manifest_lists_the_real_data_packs(self):
+        # This repository's own door.py references "packs", so its
+        # committed bundle/runtime/RUNTIME-MANIFEST.json must name both
+        # real pack files, not just the closure.
+        manifest_path = os.path.join(os.path.dirname(HERE), "bundle",
+                                     "runtime", BR.MANIFEST_NAME)
+        manifest = _manifest(manifest_path)
+        paths = {f["path"] for f in manifest["files"]}
+        self.assertIn("packs/core.json", paths, paths)
+        self.assertIn("packs/data-science.json", paths, paths)
+
 
 class LauncherRunsOutsideAnyCheckout(unittest.TestCase):
     def setUp(self):
@@ -390,6 +501,77 @@ class LauncherDefaultRunsRoot(unittest.TestCase):
         repo = make_repo(self.tmp)
         got = self.mod.default_runs_root(launcher_dir=repo, env={})
         self.assertEqual(os.path.realpath(got), os.path.realpath(repo))
+
+
+class ShippedVerifierReadsTheManifestWithNoScriptsBesideIt(unittest.TestCase):
+    """E80 item 5 (2026-09-04, external release integrity trial on the
+    public v1.0.1 clone): RUNTIME-MANIFEST.json carried a sha256 for every
+    shipped file and NOTHING on an installed plugin ever read one.
+    bundle_runtime.py --check cannot: it compares bundle/runtime against
+    scripts/, and an installed plugin has no scripts/. So the runtime now
+    ships verify_runtime.py beside the manifest.
+
+    Every case here runs the GENERATED file out of a runtime directory with
+    no scripts/ anywhere near it, which is the situation the verifier exists
+    for. Driven backwards: a tamper reads FAIL and a missing manifest reads
+    NO-DATA, so a green PASS is not the only outcome the code can produce."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="bundle-runtime-verify-")
+        self.scripts_dir = os.path.join(self.tmp, "scripts")
+        # The runtime lands OUTSIDE the scripts directory and nothing copies
+        # scripts/ next to it: an installed plugin has only bundle/runtime.
+        self.runtime_dir = os.path.join(self.tmp, "install", "bundle", "runtime")
+        copy_scripts_subset(self.scripts_dir)
+        BR.generate(scripts_dir=self.scripts_dir, runtime_dir=self.runtime_dir)
+        self.verifier = os.path.join(self.runtime_dir, BR.VERIFIER_NAME)
+
+    def _run(self):
+        return sh([sys.executable, self.verifier], cwd=self.tmp)
+
+    def test_the_verifier_ships_in_the_runtime_and_is_manifested(self):
+        self.assertTrue(os.path.isfile(self.verifier), self.verifier)
+        manifest = _manifest(os.path.join(self.runtime_dir, BR.MANIFEST_NAME))
+        paths = [f["path"] for f in manifest["files"]]
+        self.assertIn(BR.VERIFIER_NAME, paths, paths)
+
+    def test_an_untouched_runtime_reads_pass(self):
+        proc = self._run()
+        out = proc.stdout + proc.stderr
+        self.assertEqual(proc.returncode, 0, out)
+        self.assertIn("PASS", out, out)
+
+    def test_a_one_byte_tamper_reads_fail_and_names_the_file(self):
+        target = os.path.join(self.runtime_dir, BR.ENTRY)
+        with open(target, "ab") as fh:
+            fh.write(b"#")
+        proc = self._run()
+        out = proc.stdout + proc.stderr
+        self.assertEqual(proc.returncode, 1, out)
+        self.assertIn("FAIL", out, out)
+        self.assertIn(BR.ENTRY, out, out)
+
+    def test_a_deleted_shipped_file_reads_fail(self):
+        os.remove(os.path.join(self.runtime_dir, BR.ENTRY))
+        proc = self._run()
+        out = proc.stdout + proc.stderr
+        self.assertEqual(proc.returncode, 1, out)
+        self.assertIn("FAIL", out, out)
+
+    def test_a_missing_manifest_reads_no_data_and_never_passes(self):
+        os.remove(os.path.join(self.runtime_dir, BR.MANIFEST_NAME))
+        proc = self._run()
+        out = proc.stdout + proc.stderr
+        self.assertEqual(proc.returncode, 2, out)
+        self.assertIn(BR.NODATA, out, out)
+        self.assertNotIn("PASS", out, out)
+
+    def test_check_notices_the_verifier_being_removed(self):
+        os.remove(self.verifier)
+        ok, problems, _closure = BR.check(scripts_dir=self.scripts_dir,
+                                          runtime_dir=self.runtime_dir)
+        self.assertFalse(ok)
+        self.assertTrue(any(BR.VERIFIER_NAME in p for p in problems), problems)
 
 
 if __name__ == "__main__":

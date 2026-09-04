@@ -40,6 +40,18 @@ MARKET = os.path.join(ROOT, ".claude-plugin", "marketplace.json")
 #: BrotherSBE repository this used to name is archived.
 SLUG = "khalilmaaouni/Brother"
 
+#: The "one door" front page, current since the umbrella `brother` plugin
+#: (sourced from `bundle/`, see the hub root .claude-plugin/marketplace.json)
+#: became the public install route: a stranger installs `brother@brother`,
+#: never `brothersbe` directly, and the next move is the bare `/brother`
+#: command, not a product-named skill. This mirrors the hub root README.md
+#: verbatim (BrotherSBE's own README says as much: "The root Brother install
+#: is the public route"), so both READMEs are held to the identical line.
+DOOR_PLUGIN = "brother@brother"
+#: Relative to ROOT (products/brothersbe): the skill `/brother` actually
+#: invokes, two directories up at the hub root's own bundle/.
+DOOR_SKILL = os.path.join(ROOT, "..", "..", "bundle", "skills", "using-brother", "SKILL.md")
+
 
 def read(path):
     with io.open(path, encoding="utf-8") as handle:
@@ -53,22 +65,23 @@ class TheFrontPagePromise(unittest.TestCase):
         self.readme = read(README)
 
     def test_the_install_is_two_commands_and_they_are_the_documented_ones(self):
+        # The "one door" front page (see DOOR_PLUGIN's comment) chains both
+        # commands on one line with `&&`, the same line the hub root
+        # README.md ships verbatim; still two commands, one line.
         block = re.search(r"```bash\n(claude plugin marketplace add[^`]*?)```", self.readme)
         self.assertIsNotNone(block, "the README no longer opens with a bash install block")
-        lines = [line.strip() for line in block.group(1).strip().splitlines() if line.strip()]
-        self.assertEqual(len(lines), 2,
+        commands = [c.strip() for c in block.group(1).strip().split("&&") if c.strip()]
+        self.assertEqual(len(commands), 2,
                          "the install block is %d command(s), not 2. Installation is the "
-                         "boring part or it is a barrier: %r" % (len(lines), lines))
-        self.assertEqual(lines[0], "claude plugin marketplace add %s" % SLUG)
-        self.assertEqual(lines[1], "claude plugin install brothersbe@brother")
+                         "boring part or it is a barrier: %r" % (len(commands), commands))
+        self.assertEqual(commands[0], "claude plugin marketplace add %s" % SLUG)
+        self.assertEqual(commands[1], "claude plugin install %s" % DOOR_PLUGIN)
 
     def test_the_first_move_after_install_is_named_and_real(self):
-        self.assertIn("/brothersbe:start", self.readme,
+        self.assertIn("/brother", self.readme,
                       "the front page installs the plugin and never says what to type next")
-        skill = os.path.join(ROOT, "skills", "start", "SKILL.md")
-        self.assertTrue(os.path.exists(skill),
-                        "the front page points at /brothersbe:start and %s does not exist"
-                        % skill)
+        self.assertTrue(os.path.exists(DOOR_SKILL),
+                        "the front page points at /brother and %s does not exist" % DOOR_SKILL)
 
 
 class TheManifestsAFetchWouldLandOn(unittest.TestCase):

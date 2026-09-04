@@ -1,0 +1,666 @@
+{
+  "lens": "data-engineer-senior",
+  "version": "1.0.0",
+  "detection_signals": {
+    "paths": [
+      "dags/",
+      "dbt_packages/",
+      "_delta_log/",
+      "airflow.cfg",
+      "dagster.yaml",
+      "dagster_cloud.yaml",
+      "prefect.yaml",
+      "profiles.yml",
+      ".sqlfluff",
+      "great_expectations.yml"
+    ],
+    "manifest_strings": [
+      "dbt-core",
+      "apache-airflow",
+      "dagster",
+      "great_expectations",
+      "sqlfluff"
+    ],
+    "note": "Orchestrator and warehouse-transformation artifacts only (persona doc 8.5, this pack's own priority adapter list, and 4.1 stage 0 'data project metadata (dbt_project.yml, manifests, Airflow/Dagster definitions, etc.)'). Deliberately DISJOINT from data-science.json: that pack already claims *.ipynb, mlruns/, dvc.yaml, dbt_project.yml and the manifest strings mlflow, dvc, dbt_project, and door.infer_lens takes the FIRST match in sorted lens-name order, where data-engineer-senior sorts before data-science. Claiming any of those six would silently move every notebook, MLflow or dbt_project.yml tree onto this lens, so none of them appears here: a notebook or an mlruns directory must never infer data engineering. dbt is still reached, by profiles.yml and by the dbt-core manifest string, neither of which data-science claims. pyspark is deliberately NOT a signal either: a PySpark dependency is ambiguous between this lens and data-science, and until pack selection is compositional (persona doc 5.2, owned by a sibling row) an ambiguous signal is a theft rather than a composition; Spark is carried in tool_adapters instead, where its absence reports NO-DATA. The bare string 'prefect' is NOT a manifest string either, although Prefect is a first-class orchestrator here: door._manifest_string_hit is a plain substring match, so 'prefect' also matches 'prefecture' and a package.json naming any Japanese-prefecture package would infer this lens and, sorting first, win over every other one. Prefect is detected by the exact path prefect.yaml instead, which has no such trap. Every remaining manifest string was checked the same way for a substring it did not mean. No signal here matches a plain application tree (README.md, src/main.py), so such a tree infers nothing at all, which persona doc 3.3 prefers over a guess."
+  },
+  "challenge_question": "Should historical partitions be recomputed, and what is the authoritative reconciliation grain?",
+  "question_budget": {
+    "min": 2,
+    "max": 5,
+    "work_shape": "data/schema migration (persona doc 4.2: 'Data/schema migration' 2-5); every entry in this pack's use-case library changes schema, history or both, so the pipeline shape inherits the migration budget rather than the 0-2 small-reversible one"
+  },
+  "required_evidence_families": [
+    "E2",
+    "E3",
+    "E5",
+    "E7",
+    "E8",
+    "E11"
+  ],
+  "receipt_fields": [
+    "lineage_touched",
+    "declared_grain_and_key",
+    "schema_compatibility",
+    "historical_range_changed",
+    "reconciliation_grain_and_result",
+    "incremental_full_equivalence",
+    "freshness_impact",
+    "downstream_consumers_checked",
+    "pii_classification_impact",
+    "compute_cost_delta",
+    "replay_recovery_evidence",
+    "remaining_no_data_ranges"
+  ],
+  "forcing_classes": [
+    {
+      "id": "backfill",
+      "label": "Backfill",
+      "why": "the diff reruns the pipeline over a past window: a changed start or end date, partition list or date literal in a schedule, model config, job argument or WHERE clause, or a full-refresh flag added to a build command (persona doc 8.3 DE-04, 8.2 'backfill range')"
+    },
+    {
+      "id": "schema_drift",
+      "label": "Schema drift",
+      "why": "a column is added, renamed, dropped or retyped where a consumer can see it: a changed SELECT column list, an ALTER TABLE or DDL migration, a changed CAST, or a changed field in an Avro, Protobuf, JSON-schema or contract file (8.3 DE-01, DE-02, DE-19)"
+    },
+    {
+      "id": "late_arriving_data",
+      "label": "Late-arriving data",
+      "why": "the diff changes how out-of-order records are treated: a watermark, allowed-lateness, event-time window, session gap, ordering key or tombstone setting in a streaming or CDC job (8.3 DE-07, DE-08; 8.4 'event-time vs processing-time')"
+    },
+    {
+      "id": "grain_change",
+      "label": "Grain change",
+      "why": "the declared grain or key of a model changes: a changed GROUP BY column list, a DISTINCT added or removed, a changed unique_key config, or a changed primary or unique key constraint (8.3 DE-05, 8.2 'grain/key/cardinality')"
+    },
+    {
+      "id": "fan_out",
+      "label": "Fan-out",
+      "why": "the diff adds a way for output rows to exceed input rows: a JOIN clause added, a key dropped from an ON condition, a join repointed at a many-side table, or an UNNEST, EXPLODE, LATERAL or array flattening introduced (8.3 DE-05 'row explosion')"
+    },
+    {
+      "id": "system_of_record_change",
+      "label": "System-of-record change",
+      "why": "the authoritative source of a field or metric moves: a changed source, ref or FROM target, a changed source table, feed or connector, or a warehouse, table-format or file-format migration (8.3 DE-11, DE-24; 8.2 'source and sink')"
+    },
+    {
+      "id": "historical_restatement",
+      "label": "Historical restatement",
+      "why": "already-published rows are rewritten: an UPDATE, DELETE, MERGE, INSERT OVERWRITE or partition replacement whose target range is older than the current load window, or SCD validity columns (valid_from, valid_to, is_current) rewritten on existing rows (8.3 DE-06, DE-20; 25.2 'Data: historical KPI restatement accepted')"
+    },
+    {
+      "id": "lineage_scoped_deletion",
+      "label": "Lineage-scoped deletion",
+      "why": "a delete-by-subject operation lands: a DELETE, purge, anonymization or retention-expiry job keyed on a person or account identifier, or a retention window shortened in a table or bucket policy (8.3 DE-21, 8.4 'PII movement and retention')"
+    }
+  ],
+  "work_classes": [
+    {
+      "id": "data_pipeline_model_change",
+      "source_class": "3.1 item 6, data pipeline/model change",
+      "why": "the pack's home class: every entry in 8.3 is one"
+    },
+    {
+      "id": "database_schema_migration",
+      "source_class": "3.1 item 5, database/schema migration",
+      "why": "8.3 DE-01, DE-02 and DE-19 are schema changes with consumers on the far side, and 4.2 gives this shape the 2-5 question budget the pack adopts"
+    },
+    {
+      "id": "api_or_contract_change",
+      "source_class": "3.1 item 4, API or contract change",
+      "why": "a data contract is a published interface: 8.3 DE-19 fails as a producer and consumer mismatch exactly the way an API break does"
+    },
+    {
+      "id": "defect_incident_correction",
+      "source_class": "3.1 item 2, defect/incident correction",
+      "why": "8.3 DE-20 (data incident repair) and DE-10 (source outage) are correction work whose critical failure is hidden residual corruption"
+    },
+    {
+      "id": "incident_investigation",
+      "source_class": "3.1 item 14, incident investigation",
+      "why": "8.4 names source-to-dashboard incident diagnosis as a know-how module of its own (carried here as KH-17)"
+    },
+    {
+      "id": "refactor_internal_improvement",
+      "source_class": "3.1 item 3, refactor/internal improvement",
+      "why": "8.3 DE-12 is the class where the refactor is meant to preserve behaviour and a downstream metric moves anyway"
+    },
+    {
+      "id": "analysis_metric_dashboard_change",
+      "source_class": "3.1 item 9, analysis/metric/dashboard change",
+      "why": "shared with the analytics lens (5.2 names a dbt revenue metric change as loading analytics and data-engineering together); this pack owns the pipeline half and never the metric definition"
+    },
+    {
+      "id": "performance_cost_optimization",
+      "source_class": "3.1 item 15, performance/cost optimization",
+      "why": "8.3 DE-13 and DE-14 are cost work whose critical failure is a changed result for a cheaper query"
+    },
+    {
+      "id": "security_privacy_hardening",
+      "source_class": "3.1 item 16, security/privacy hardening",
+      "why": "8.3 DE-18 and DE-21 move or delete classified fields; 8.2 names PII classification an intake dimension"
+    },
+    {
+      "id": "dependency_platform_migration",
+      "source_class": "3.1 item 17, dependency/platform migration",
+      "why": "8.3 DE-11, DE-22 and DE-24 are platform moves whose critical failure is semantic drift rather than a build error"
+    }
+  ],
+  "risk_classes": [
+    {
+      "id": "data_loss_corruption",
+      "source_class": "3.2 data loss/corruption",
+      "why": "the pack's dominant risk: DE-04, DE-17 and DE-20 destroy, duplicate or silently alter records while every job reports success"
+    },
+    {
+      "id": "irreversibility",
+      "source_class": "3.2 irreversibility",
+      "why": "an overwritten partition and a dropped column have no local undo, and the source is often past its own retention window by the time the error is found"
+    },
+    {
+      "id": "compatibility",
+      "source_class": "3.2 compatibility",
+      "why": "consumers of a table are unversioned and largely invisible from the producing repository (DE-01, DE-19, DE-24)"
+    },
+    {
+      "id": "evidence_uncertainty",
+      "source_class": "3.2 evidence uncertainty",
+      "why": "8.1 names reverse-engineering lineage as the lost hours; correctness here is proven by reconciliation at a grain nobody has declared yet, which is exactly what the challenge question asks for"
+    },
+    {
+      "id": "compliance_privacy",
+      "source_class": "3.2 compliance/privacy",
+      "why": "DE-18 and DE-21 move and delete personal data, and a partial deletion looks identical to a complete one from inside the job"
+    },
+    {
+      "id": "money",
+      "source_class": "3.2 money",
+      "why": "warehouse spend is the pack's own cost axis (DE-13, DE-14) and the outputs are frequently the revenue and billing figures themselves"
+    },
+    {
+      "id": "operational_recoverability",
+      "source_class": "3.2 operational recoverability",
+      "why": "DE-09 and DE-20 turn on whether a half-finished run can be restarted without double counting; the receipt's replay_recovery_evidence field exists for this"
+    },
+    {
+      "id": "customer_blast_radius",
+      "source_class": "3.2 customer blast radius",
+      "why": "one shared table feeds every downstream dashboard and export at once, so blast radius is the consumer count from lineage, not the size of the diff"
+    },
+    {
+      "id": "production_write",
+      "source_class": "3.2 production write",
+      "why": "the pipeline's normal operation is a production data write, which is why 8.5 makes read and dry-run mode the default rather than an option"
+    },
+    {
+      "id": "security_permission",
+      "source_class": "3.2 security/permission",
+      "why": "scored but rarely dominant here: warehouse grants, row-level policies and service-account scope move with the tables (8.2 PII/classification)"
+    }
+  ],
+  "dangerous_actions": [
+    "Running a backfill, full refresh or INSERT OVERWRITE against production data. The pack prepares the bounded command and names the affected range; a human accepts the range (8.3 DE-04, 25.1 destructive or irreversible action with material consequence).",
+    "Accepting a restatement of already-published history or of a reported KPI. This is 25.2's named data forcing example and is never inferred from a green pipeline.",
+    "Dropping, renaming or retyping a column, table or partition that any consumer reads, and dropping a table or schema at all.",
+    "Executing a delete-by-subject, anonymization or regulatory erasure job. The pack proves the lineage scope; the human accepts that the scope is complete (8.3 DE-21).",
+    "Cutting over the system of record for a field or metric, including ending a dual-run warehouse migration by pointing consumers at the new side (8.3 DE-11).",
+    "Publishing or promoting a data contract change that is not backward compatible for the existing consumers (8.3 DE-19).",
+    "Widening a warehouse grant, row-level policy or service-account scope in order to make a pipeline run.",
+    "Disabling, downgrading to a warning, or deleting a failing data test, freshness check or assertion in order to make a pipeline green.",
+    "Moving a field classified as personal or sensitive into a wider-audience table, an export, a log line or a non-production environment (8.3 DE-18).",
+    "Shortening a retention or expiry policy so that data becomes unrecoverable earlier than it was."
+  ],
+  "know_how": [
+    {
+      "id": "DE-01",
+      "situation": "A source column is added or altered upstream, or this change adds or alters one.",
+      "brother_asks": "Which downstream models, dashboards and exports read this column, and is the change additive for every one of them?",
+      "proof_that_closes_it": "A schema contract for the changed column plus a lineage impact list, each consumer marked exercised or listed-only. Silent downstream drift is the failure, so a green producer build closes nothing.",
+      "source_section": "8.3"
+    },
+    {
+      "id": "DE-02",
+      "situation": "A column's data type changes (widening, narrowing, string to numeric, timestamp precision, timezone-aware to naive).",
+      "brother_asks": "Which values at the boundary of the old and the new type exist in the real data, and what does each consumer do with them?",
+      "proof_that_closes_it": "Boundary fixtures (max, min, null, empty, precision loss, out of range) run through the transformation, plus a consumer compatibility check. Truncation and silent coercion are the failure.",
+      "source_section": "8.3"
+    },
+    {
+      "id": "DE-03",
+      "situation": "An incremental model's logic, filter, unique key or merge strategy changes.",
+      "brother_asks": "Over the same window, does the incremental run produce exactly the rows a full refresh produces?",
+      "proof_that_closes_it": "A full-vs-incremental differential at the declared grain, both built into separate schemas and diffed row by row. Missed and duplicated records are the failure, and both are invisible in a row count alone.",
+      "source_section": "8.3"
+    },
+    {
+      "id": "DE-04",
+      "situation": "A backfill is about to run over a historical range.",
+      "brother_asks": "What is the exact partition range, and does the sink already hold rows inside it?",
+      "proof_that_closes_it": "A bounded dry run naming the affected range, then reconciliation against the source at the declared grain after the first partition lands. Duplication and unintended restatement are the failure.",
+      "source_section": "8.3"
+    },
+    {
+      "id": "DE-05",
+      "situation": "A join is added or changed, or a model's shape changes.",
+      "brother_asks": "What is the cardinality on both sides of the join, and can one input row now produce more than one output row?",
+      "proof_that_closes_it": "A cardinality invariant (output rows cannot exceed the declared relationship bound) plus a grain assertion on the model's key. Row explosion is the failure and it inflates every aggregate downstream silently.",
+      "source_section": "8.3"
+    },
+    {
+      "id": "DE-06",
+      "situation": "Slowly-changing-dimension or history logic changes (validity windows, current flags, versioning).",
+      "brother_asks": "For any key, can two versions be valid at the same instant, or can an instant fall inside no version at all?",
+      "proof_that_closes_it": "Temporal property tests: no overlapping validity ranges per key, no gaps, exactly one current row per key. Lost and overlapping validity is the failure.",
+      "source_section": "8.3"
+    },
+    {
+      "id": "DE-07",
+      "situation": "A change-data-capture pipeline changes.",
+      "brother_asks": "What happens to a duplicate event, an out-of-order event, and a delete tombstone?",
+      "proof_that_closes_it": "Replay fixtures covering all three: the same event twice, events delivered in reverse order, and a tombstone followed by nothing. Order, duplicate and delete semantics are the failure surface.",
+      "source_section": "8.3"
+    },
+    {
+      "id": "DE-08",
+      "situation": "A streaming job changes (windowing, watermark, allowed lateness, state).",
+      "brother_asks": "How late can an event arrive and still be counted, and what happens to one that arrives later than that?",
+      "proof_that_closes_it": "A late and out-of-order replay including an event past the watermark, showing whether it is counted, dropped or side-output. Watermark and late-data loss is the failure and it never appears on the happy path.",
+      "source_section": "8.3"
+    },
+    {
+      "id": "DE-09",
+      "situation": "Batch orchestration changes (task order, retries, sensors, dependencies, schedule).",
+      "brother_asks": "If this run dies half way through, what does a rerun do to the rows already written?",
+      "proof_that_closes_it": "A restart and idempotency drill: kill the run mid-way, rerun it, compare the sink at the declared grain against a clean run. Partial completion is the failure.",
+      "source_section": "8.3"
+    },
+    {
+      "id": "DE-10",
+      "situation": "A source becomes unavailable, stale or empty.",
+      "brother_asks": "Does the pipeline fail, or does it succeed on yesterday's data?",
+      "proof_that_closes_it": "A freshness check with a declared threshold plus a dependency fault injection (source removed, empty, or timing out). A stale-but-green pipeline is the failure, and it is the one nobody is paged for.",
+      "source_section": "8.3"
+    },
+    {
+      "id": "DE-11",
+      "situation": "A warehouse or engine migration is under way.",
+      "brother_asks": "Where do the two engines disagree on nulls, ordering, rounding, timezone handling and type coercion?",
+      "proof_that_closes_it": "A dual-run reconciliation: both engines over the same window, compared at the declared grain, every difference explained rather than tolerated. Semantic drift is the failure.",
+      "source_section": "8.3"
+    },
+    {
+      "id": "DE-12",
+      "situation": "A dbt model is refactored with no intended behaviour change.",
+      "brother_asks": "Which models and exposures sit downstream, and does any published metric move?",
+      "proof_that_closes_it": "Manifest lineage for the touched node plus a result differential of the model and of every downstream metric it feeds. A downstream metric change is the failure a refactor is least expected to cause.",
+      "source_section": "8.3"
+    },
+    {
+      "id": "DE-13",
+      "situation": "A query or model is rewritten to cost less.",
+      "brother_asks": "Is the cheaper query returning the same rows, or merely fewer of them?",
+      "proof_that_closes_it": "An equivalence check between the old and the new query over a real window, plus the query-cost delta in bytes scanned, credits or slot time. A changed result for a cheaper query is the failure.",
+      "source_section": "8.3"
+    },
+    {
+      "id": "DE-14",
+      "situation": "A partitioning or clustering strategy changes.",
+      "brother_asks": "Which predicate prunes partitions now, and what happens at the first and the last partition of the range?",
+      "proof_that_closes_it": "Partition boundary tests (first, last, empty, and a value exactly on the boundary) plus scan-cost evidence showing pruning actually happens. Skipped data and over-scanning are the two failures and they look opposite.",
+      "source_section": "8.3"
+    },
+    {
+      "id": "DE-15",
+      "situation": "Timezone, calendar or fiscal-period handling changes.",
+      "brother_asks": "In which timezone is a day defined, and what does this change do at a DST transition, a month end and a fiscal boundary?",
+      "proof_that_closes_it": "Fixtures at a DST spring-forward and fall-back hour, at month end, and at the fiscal year boundary. Reporting discontinuity is the failure and it lands as a business dispute, never as an error.",
+      "source_section": "8.3"
+    },
+    {
+      "id": "DE-16",
+      "situation": "Null handling or a default value changes.",
+      "brother_asks": "Does a null here mean unknown, not applicable, or zero, and who decided that?",
+      "proof_that_closes_it": "A source profile of the column's real null and distinct-value distribution plus an explicit written rule for what a null becomes. Fabricated or lost business meaning is the failure: COALESCE to zero invents revenue.",
+      "source_section": "8.3"
+    },
+    {
+      "id": "DE-17",
+      "situation": "Deduplication logic changes, or a new source may carry duplicates.",
+      "brother_asks": "On what key are duplicates judged, and which row wins when two share it?",
+      "proof_that_closes_it": "Duplicate injection into a fixture plus a key uniqueness invariant on the output. Overcounting is the failure and it moves every sum and every count downstream.",
+      "source_section": "8.3"
+    },
+    {
+      "id": "DE-18",
+      "situation": "A field classified as personal or sensitive moves between tables, environments or exports.",
+      "brother_asks": "Where does this field end up, who can read it there, and is it now in a log?",
+      "proof_that_closes_it": "A classification check on the destination, a lineage trace of the field, and a log scan for the column name and its values. Privacy exposure is the failure and it is not reversible once exported.",
+      "source_section": "8.3"
+    },
+    {
+      "id": "DE-19",
+      "situation": "A data contract is introduced or rolled out.",
+      "brother_asks": "Which producers and consumers are on the old version today, and can both versions run at once?",
+      "proof_that_closes_it": "Contract compatibility tests against the existing consumers plus a staged rollout in which both versions stay readable through the overlap. Producer and consumer mismatch is the failure.",
+      "source_section": "8.3"
+    },
+    {
+      "id": "DE-20",
+      "situation": "A data incident is being repaired.",
+      "brother_asks": "What is the exact affected range, and how will you show that nothing outside it was touched and nothing inside it is still wrong?",
+      "proof_that_closes_it": "Reconciliation over the affected range against an independent source, a replay, and a check that rows outside the range are unchanged. Hidden residual corruption is the failure.",
+      "source_section": "8.3"
+    },
+    {
+      "id": "DE-21",
+      "situation": "A delete-by-subject or regulatory erasure operation runs.",
+      "brother_asks": "Every place this subject's data was copied to, including derived tables, exports, backups and logs: which of them does this operation actually reach?",
+      "proof_that_closes_it": "A lineage-scoped deletion proof: the full destination list from lineage, each entry marked deleted, out of scope with a reason, or NO-DATA. Incomplete deletion is the failure and it reports success.",
+      "source_section": "8.3"
+    },
+    {
+      "id": "DE-22",
+      "situation": "A pipeline dependency is upgraded (engine, driver, connector, serialization library).",
+      "brother_asks": "Does the new version write and read the same bytes for the same input?",
+      "proof_that_closes_it": "A representative replay through both versions with a schema and content hash comparison of the output. Serialization and runtime drift is the failure: a float precision or timestamp encoding change survives every unit test.",
+      "source_section": "8.3"
+    },
+    {
+      "id": "DE-23",
+      "situation": "A Spark or other distributed transform changes.",
+      "brother_asks": "Is the output deterministic for the same input, and what does one hot key do to it?",
+      "proof_that_closes_it": "A scale fixture with a deliberately skewed key plus deterministic invariants (a sorted output hash stable across two runs, aggregate totals independent of partition count). Skew and partition nondeterminism are the failure.",
+      "source_section": "8.3"
+    },
+    {
+      "id": "DE-24",
+      "situation": "A file or table format changes (Parquet to Iceberg, a Delta protocol version, compression, ORC, schema evolution mode).",
+      "brother_asks": "Which readers other than this pipeline open these files, and does each of them support the new format and version?",
+      "proof_that_closes_it": "A multi-reader contract test (every named reader opens the new output) plus table metadata validation. Reader incompatibility is the failure and it lands on whoever reads the table next week.",
+      "source_section": "8.3"
+    },
+    {
+      "id": "KH-01",
+      "situation": "The grain or cardinality of a model is unstated or in doubt.",
+      "brother_asks": "What does one row mean, which columns make it unique, and how many output rows can one input row produce at most?",
+      "proof_that_closes_it": "A written grain statement plus a uniqueness assertion on that key, both living in the repository rather than in the conversation.",
+      "source_section": "8.4"
+    },
+    {
+      "id": "KH-02",
+      "situation": "A pipeline may be run more than once over the same input.",
+      "brother_asks": "Does running this twice change the sink twice?",
+      "proof_that_closes_it": "An idempotency property: the operation applied N times leaves the same state as applying it once, proven by rerunning and diffing the sink.",
+      "source_section": "8.4"
+    },
+    {
+      "id": "KH-03",
+      "situation": "Facts or dimension rows can arrive after the window they belong to has closed.",
+      "brother_asks": "Where does a fact that arrives three days late land, and does its dimension row exist yet?",
+      "proof_that_closes_it": "A late-arrival fixture covering both the late fact and the missing-dimension case, showing whether the row is placed in its own period, in the current one, or dropped.",
+      "source_section": "8.4"
+    },
+    {
+      "id": "KH-04",
+      "situation": "A model is built incrementally rather than fully.",
+      "brother_asks": "What is the incremental predicate, and can a row that changes outside that predicate ever be picked up?",
+      "proof_that_closes_it": "A full-vs-incremental differential over a window that deliberately contains a late-changed row.",
+      "source_section": "8.4"
+    },
+    {
+      "id": "KH-05",
+      "situation": "History must be preserved as an attribute changes over time.",
+      "brother_asks": "Which SCD type is this, and what is the effective-dating rule at the boundary?",
+      "proof_that_closes_it": "Temporal invariants (no overlap, no gap, one current row per key) plus a fixture in which two changes land on the same day.",
+      "source_section": "8.4"
+    },
+    {
+      "id": "KH-06",
+      "situation": "The pipeline consumes a change stream rather than a snapshot.",
+      "brother_asks": "How are inserts, updates, deletes and out-of-order events distinguished, and what marks a delete?",
+      "proof_that_closes_it": "A replay covering each operation type including the tombstone, with the sink state asserted after each one.",
+      "source_section": "8.4"
+    },
+    {
+      "id": "KH-07",
+      "situation": "The upstream schema will keep changing after this lands.",
+      "brother_asks": "Which upstream changes should the pipeline absorb silently, and which should stop it?",
+      "proof_that_closes_it": "An explicit evolution policy (additive absorbed, breaking rejected) with a test on each side, rather than an implicit accept-everything reader.",
+      "source_section": "8.4"
+    },
+    {
+      "id": "KH-08",
+      "situation": "A producer and a consumer are owned by different people.",
+      "brother_asks": "What is promised across this boundary, and what counts as a breaking change to it?",
+      "proof_that_closes_it": "A written contract with a compatibility test that fails on a breaking change, run by the producer's own build rather than by the consumer's.",
+      "source_section": "8.4"
+    },
+    {
+      "id": "KH-09",
+      "situation": "The blast radius of a change is unknown.",
+      "brother_asks": "What reads this, and what reads that?",
+      "proof_that_closes_it": "A lineage trace from the changed node out to every leaf consumer, with the ones outside the repository named as NO-DATA rather than assumed absent.",
+      "source_section": "8.4"
+    },
+    {
+      "id": "KH-10",
+      "situation": "The output must be shown to be right, not merely to have been produced.",
+      "brother_asks": "Against what independent number is this compared, and at what grain?",
+      "proof_that_closes_it": "A reconciliation with a declared grain against an independent oracle: a source-system total, a ledger, or a curated fixture, never a second query over the same model.",
+      "source_section": "8.4"
+    },
+    {
+      "id": "KH-11",
+      "situation": "A large historical rerun is being designed.",
+      "brother_asks": "In what order, in what size of chunk, and what makes it safe to stop half way?",
+      "proof_that_closes_it": "A bounded design (chunk size, ordering, checkpoint, stop condition) proven on one chunk first, with reconciliation on that chunk before the rest runs.",
+      "source_section": "8.4"
+    },
+    {
+      "id": "KH-12",
+      "situation": "Two different times exist for the same record.",
+      "brother_asks": "Is this partitioned, filtered and reported on when it happened or on when it was processed?",
+      "proof_that_closes_it": "The choice written down per column plus a fixture where the two times fall on different days, showing which period the row lands in.",
+      "source_section": "8.4"
+    },
+    {
+      "id": "KH-13",
+      "situation": "Table layout is chosen or changed.",
+      "brother_asks": "Which predicate does the common query filter on, and does the layout let it prune?",
+      "proof_that_closes_it": "Scan-cost evidence for the common query before and after, plus boundary tests at the first and the last partition.",
+      "source_section": "8.4"
+    },
+    {
+      "id": "KH-14",
+      "situation": "Warehouse spend is a constraint.",
+      "brother_asks": "What does this query scan, how often does it run, and what is the cheapest form that returns the same rows?",
+      "proof_that_closes_it": "A dry-run byte or credit estimate for both forms plus an equivalence check, so cost falls without the answer changing.",
+      "source_section": "8.4"
+    },
+    {
+      "id": "KH-15",
+      "situation": "Data quality must be expressed as checks rather than as a feeling.",
+      "brother_asks": "Which of completeness, uniqueness, validity, consistency, timeliness and accuracy is at risk here, and what threshold makes it a failure?",
+      "proof_that_closes_it": "A named check per at-risk dimension with a declared threshold, each one driven to fail once so it is known to be capable of failing.",
+      "source_section": "8.4"
+    },
+    {
+      "id": "KH-16",
+      "situation": "Personal or sensitive data is in scope.",
+      "brother_asks": "Which columns are classified, where may they travel, and how long may they be kept?",
+      "proof_that_closes_it": "A classification list for the touched columns, a destination check, and a retention statement, with every log and export path scanned explicitly.",
+      "source_section": "8.4"
+    },
+    {
+      "id": "KH-17",
+      "situation": "A number on a dashboard is wrong and nobody knows where it broke.",
+      "brother_asks": "At which hop between the source and the dashboard does the number stop matching the source?",
+      "proof_that_closes_it": "A per-hop reconciliation walking source to staging to model to mart to dashboard at one fixed grain, isolating the first hop where the totals diverge.",
+      "source_section": "8.4"
+    }
+  ],
+  "tool_adapters": [
+    {
+      "id": "dbt",
+      "tool": "dbt artifacts: manifest.json, run_results.json, tests and semantic definitions (8.5 priority 1)",
+      "detect": "command -v dbt >/dev/null 2>&1 && dbt --version",
+      "when_absent": "NO-DATA: dbt is not installed here, so lineage, the manifest node list and test results are unavailable; lineage_touched and downstream_consumers_checked report NO-DATA naming dbt rather than being inferred from file names."
+    },
+    {
+      "id": "sqlfluff",
+      "tool": "SQLFluff, or the repository's own SQL lint (8.5)",
+      "detect": "command -v sqlfluff >/dev/null 2>&1 && sqlfluff --version",
+      "when_absent": "NO-DATA: no SQL lint available, so the static structural checks over the changed SQL (6.1 E10) are reported unrun, never assumed clean."
+    },
+    {
+      "id": "warehouse_cli",
+      "tool": "Warehouse CLI or API in read and dry-run mode by default (8.5)",
+      "detect": "for c in bq snowsql psql databricks; do command -v \"$c\" >/dev/null 2>&1 && echo \"$c\"; done",
+      "when_absent": "NO-DATA: no warehouse client on this machine, so the E11 dry run, the byte or credit estimate and the reconciliation query cannot execute; compute_cost_delta and reconciliation_grain_and_result report NO-DATA. A client that IS found is still used read-only: any write is a human decision under dangerous_actions."
+    },
+    {
+      "id": "orchestrator",
+      "tool": "Airflow, Dagster or Prefect definitions and logs (8.5)",
+      "detect": "for c in airflow dagster prefect; do command -v \"$c\" >/dev/null 2>&1 && echo \"$c\"; done",
+      "when_absent": "NO-DATA: the job graph is read as files only, so task dependencies and the DE-09 restart drill are unproven rather than assumed correct."
+    },
+    {
+      "id": "spark",
+      "tool": "Spark and PySpark test environment (8.5)",
+      "detect": "command -v spark-submit >/dev/null 2>&1 || python3 -c \"import pyspark\" 2>/dev/null",
+      "when_absent": "NO-DATA: no local Spark, so the DE-23 scale and skew fixture cannot run and distributed determinism stays unproven."
+    },
+    {
+      "id": "data_quality",
+      "tool": "Great Expectations, Soda, Deequ or an equivalent check suite already in the repository (8.5)",
+      "detect": "for c in great_expectations soda; do command -v \"$c\" >/dev/null 2>&1 && echo \"$c\"; done",
+      "when_absent": "NO-DATA: no declarative quality suite, so the KH-15 dimensions are covered only by the assertions the repository already carries, and the uncovered ones are listed by name."
+    },
+    {
+      "id": "lineage_catalog",
+      "tool": "OpenLineage, Marquez or a catalog lineage API when available (8.5)",
+      "detect": "command -v marquez >/dev/null 2>&1 || python3 -c \"import openlineage\" 2>/dev/null",
+      "when_absent": "NO-DATA: lineage beyond this repository's own files is unavailable, so consumers outside it are listed as unknown rather than as none."
+    },
+    {
+      "id": "data_diff",
+      "tool": "A data-diff or reconciliation utility (8.5)",
+      "detect": "command -v data-diff >/dev/null 2>&1 && data-diff --version",
+      "when_absent": "NO-DATA: differential evidence (E5) falls back to an explicit query written for this change, and says so, rather than claiming a tool ran."
+    },
+    {
+      "id": "schema_registry",
+      "tool": "Kafka and schema registry contracts where present (8.5)",
+      "detect": "command -v kafka-topics >/dev/null 2>&1 || python3 -c \"import confluent_kafka\" 2>/dev/null",
+      "when_absent": "NO-DATA: event-contract compatibility (DE-19) cannot be checked against the registry and is reported unchecked."
+    },
+    {
+      "id": "table_format",
+      "tool": "Table-format metadata for Iceberg, Delta or Hudi where present (8.5)",
+      "detect": "python3 -c \"import pyiceberg\" 2>/dev/null || python3 -c \"import deltalake\" 2>/dev/null",
+      "when_absent": "NO-DATA: table metadata and snapshot history are unreadable, so DE-24 reader compatibility and time-travel recovery evidence are NO-DATA."
+    }
+  ],
+  "provenance": {
+    "document": "Brother persona use-case, test, know-how, tooling and intake library strategy, 2026-09-03. Private to this hub, quoted here only as role-level and profession-level content: it names no client, no person and no machine path.",
+    "sections": [
+      "3.1 work classes",
+      "3.2 risk classes",
+      "3.3 practitioner lens list (this lens is data-engineer-senior)",
+      "4.1 intake sequence, stage 3 (the challenge question is the Data engineer example, verbatim)",
+      "4.2 intake question budgets (Data/schema migration, 2-5)",
+      "5.1 pack manifest fields",
+      "5.2 pack selection must be compositional",
+      "6.1 evidence families E1 to E18",
+      "6.2 evidence independence rule",
+      "6.3 evidence selection, not test-count maximization",
+      "8.1 what this persona is buying from Brother",
+      "8.2 data-engineering intake dimensions",
+      "8.3 data-engineering use-case library, DE-01 to DE-24, all 24 carried in know_how",
+      "8.4 data engineering know-how modules, all 17 carried in know_how as KH-01 to KH-17",
+      "8.5 data tool adapters",
+      "8.6 data receipt additions, all 12 carried in receipt_fields",
+      "25.1 always-human categories",
+      "25.2 persona forcing examples (Data: historical KPI restatement accepted)"
+    ]
+  },
+  "fixture": {
+    "must_infer": [
+      "dags/daily_revenue.py",
+      "airflow.cfg",
+      "profiles.yml",
+      "_delta_log/00000000000000000000.json"
+    ],
+    "manifest_string": "dbt-core",
+    "manifest_file": "requirements.txt",
+    "manifest_content": "dbt-core==1.7.9\n",
+    "must_not_infer": [
+      "a.ipynb",
+      "b.ipynb",
+      "mlruns/0/meta.yaml",
+      "dbt_project.yml",
+      "dvc.yaml",
+      "README.md",
+      "src/main.py"
+    ],
+    "must_not_infer_why": "the first five are data-science.json's own signals and cover its two inference tests; data-engineer-senior sorts before data-science, so any of them matching here would silently steal that pack's fixture. The last two are a plain application tree, which must infer no lens at all (persona doc 3.3).",
+    "note": "A self-check builds a temporary tree from must_infer.paths plus one manifest file holding manifest_content, and asserts door.infer_lens returns data-engineer-senior; it then asserts infer_lens over must_not_infer.paths returns anything other than data-engineer-senior."
+  },
+  "required_evidence_families_why": {
+    "E2": "Independent business oracle: 6.1 E2 names data pipelines explicitly as a place where the expected result must come from an approved rule, ledger or source query rather than from the transformation under test; a test whose expected value is another SELECT over the same model is circular (6.2 independence rule, oracle_source generated_from_impl)",
+    "E3": "Property and invariant tests: 8.2 names grain, key and cardinality as intake dimensions and 8.3 DE-05 names row explosion as the critical failure; the invariants that output cardinality cannot exceed the declared relationship bound and that a rerun changes state once (DE-09) are the only checks that survive a change of input data",
+    "E5": "Differential tests: 8.3 DE-03 (full-vs-incremental differential), DE-11 (dual-run reconciliation) and DE-12 (result differential) all close by comparing the new model against a previous known-good run; 6.1 E5 requires the second side not to share the same logic, so an incremental run is compared against a full refresh, never against itself",
+    "E7": "Contract and compatibility tests: 8.6 requires a schema-compatibility line in every data receipt, and 8.3 DE-01, DE-02, DE-19 and DE-24 all fail as a consumer incompatibility rather than as a broken build; the producing job stays green while the consumer breaks, so compatibility is proven against the consumer's schema, not the producer's",
+    "E8": "Reconciliation tests: the pack's whole promise (8.1) is showing how a change will be reconciled; 8.6 requires the reconciliation grain and result in the receipt and 6.1 E8 defines it as totals, counts or hashes compared at a declared grain across source to transform to sink. A reconciliation with no declared grain is not evidence",
+    "E11": "Dry-run and plan evidence: 8.5 requires warehouse CLIs and APIs in read or dry-run mode by default, and 8.3 DE-04 closes a backfill on a bounded dry run; 6.1 E11 names SQL explain and dry run as the artifact. This is the family that exists so the mutation is understood before it is made, not after"
+  },
+  "receipt_fields_details": {
+    "lineage_touched": {
+      "meaning": "every source, transform and sink the change passes through, named end to end, so a reader can see what the change can invalidate without reconstructing it",
+      "filled_by": "command: dbt ls --select +<model>+ --resource-type model, or the repository's own lineage command; NO-DATA with the reason when no manifest or catalog exists (persona doc 8.6, 8.5 OpenLineage/Marquez when available)"
+    },
+    "declared_grain_and_key": {
+      "meaning": "what one row of the changed model means, and which columns identify it uniquely",
+      "filled_by": "file: the model's own unique_key config, primary key constraint or uniqueness test, quoted with its path and line; NO-DATA when the model declares no key, which is itself the finding (8.2 grain/key/cardinality)"
+    },
+    "schema_compatibility": {
+      "meaning": "whether every downstream consumer can still read the output after the change, column by column for anything added, dropped or retyped",
+      "filled_by": "command: the repository's schema or contract check (a build of the consumer models, a schema-registry compatibility call, or a generated-vs-published schema diff); NO-DATA names the consumers not checked (8.6, 8.3 DE-01 and DE-19)"
+    },
+    "historical_range_changed": {
+      "meaning": "which already-published partitions or effective-dated rows this change rewrites, as an explicit date or partition range, never as the word history",
+      "filled_by": "command: the bounded dry run's own affected-range output, or the backfill's WHERE clause quoted verbatim; NO-DATA only when the change provably writes no historical partition (8.6, 8.3 DE-04 and DE-20)"
+    },
+    "reconciliation_grain_and_result": {
+      "meaning": "at what grain source and sink were compared and what the comparison returned, including the size and direction of any residual difference",
+      "filled_by": "command: the reconciliation query itself, with its grain in the GROUP BY and its output quoted; NO-DATA when no independent source total exists to compare against (8.6, 6.1 E8)"
+    },
+    "incremental_full_equivalence": {
+      "meaning": "whether an incremental run and a full refresh over the same window produce the same rows, and where they differ if they do not",
+      "filled_by": "command: the full-vs-incremental differential (build both into separate schemas, diff at the declared grain); NO-DATA for a model with no incremental mode (8.6, 8.3 DE-03)"
+    },
+    "freshness_impact": {
+      "meaning": "how the change moves the time between the source event and the sink becoming readable, against whatever freshness commitment exists",
+      "filled_by": "command: the repository's own freshness check, before and after; NO-DATA when no freshness commitment is declared anywhere, which is the finding (8.2 freshness/SLA, 8.3 DE-10)"
+    },
+    "downstream_consumers_checked": {
+      "meaning": "which dashboards, models, exports, reverse-ETL syncs and services reading this output were actually exercised, and which were only listed",
+      "filled_by": "file: the lineage query's consumer list, each entry marked exercised or listed-only; NO-DATA is required for every consumer outside the repository that could not be reached (8.6, 8.1 'prove downstream consumers still see the intended truth')"
+    },
+    "pii_classification_impact": {
+      "meaning": "whether the change moves, copies, widens the visibility of, or logs any field classified as personal or sensitive",
+      "filled_by": "command: the classification or column-tag scan over the touched columns, plus a log-site grep for those column names; NO-DATA when the repository carries no classification (8.6, 8.3 DE-18)"
+    },
+    "compute_cost_delta": {
+      "meaning": "what the change costs to run, in bytes scanned, credits, slot time or job duration, before and after",
+      "filled_by": "command: the warehouse dry-run or EXPLAIN estimate for both versions, or the orchestrator's own run duration; NO-DATA when the warehouse exposes no estimate (8.6, 8.3 DE-13 and DE-14, 6.1 E13)"
+    },
+    "replay_recovery_evidence": {
+      "meaning": "what was actually done to prove the pipeline can be rerun or restored after a failure part way through, not what the runbook claims",
+      "filled_by": "command: the restart or replay drill (kill the run mid-way, rerun, compare the sink at the declared grain); NO-DATA when no drill was run, never a claim quoted from a runbook (8.6, 8.3 DE-09 and DE-20, 6.1 E16)"
+    },
+    "remaining_no_data_ranges": {
+      "meaning": "the date ranges, partitions, consumers and failure modes this change proved nothing about, stated as ranges rather than as an absence",
+      "filled_by": "file: the receipt's own NO-DATA lines collected in one place; this field is never empty and never NO-DATA itself, because 'nothing is unproven' is the claim this pack exists to refuse (8.6, 6.3)"
+    }
+  }
+}

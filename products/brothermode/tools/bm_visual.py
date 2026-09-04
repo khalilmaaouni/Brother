@@ -2951,6 +2951,13 @@ REFUSAL_HELP = {
         "more than one folder answers to that, so this refuses rather "
         "than guess",
         "Tell me the full path of the project folder."),
+    "root-outside-start": (
+        "finding your project folder",
+        "a setting left over from another project points somewhere that "
+        "does not contain the folder this work is about, and following it "
+        "would file this work in that other project's records",
+        "Tell me which project you mean, or ask me to clear that leftover "
+        "setting and use the folder you are in."),
     "run-exists": (
         "starting the work",
         "a run is already open for this project, and two at once would "

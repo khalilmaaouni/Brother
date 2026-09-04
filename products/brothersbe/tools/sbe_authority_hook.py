@@ -148,6 +148,21 @@ def _load_by_path(mod_name, filename):
         return _LoadResult(None, "%s: %s" % (type(e).__name__, e))
 
 
+_RS_MOD = None
+_RS_MOD_ERROR = None
+
+
+def _load_sbe_repo_scope():
+    """`tools/sbe_repo_scope.py` (E76 per-repository hook scoping). Cached;
+    never raises."""
+    global _RS_MOD, _RS_MOD_ERROR
+    if _RS_MOD is not None or _RS_MOD_ERROR is not None:
+        return _RS_MOD
+    result = _load_by_path("sbe_repo_scope_for_authority_hook", "sbe_repo_scope.py")
+    _RS_MOD, _RS_MOD_ERROR = result.mod, result.error
+    return _RS_MOD
+
+
 def load_fence_module():
     """`tools/sbe_fence_hook.py`, for WRITE_TOOLS, extract_targets,
     canonical_target, paths_overlap, normalize_claim and
@@ -640,6 +655,15 @@ def cmd_hook(argv):
     if parsed.error is not None:
         _warn("sbe_authority_hook: FAILING OPEN, the write is allowed and the authority-file "
               "guard was NOT checked. Reason: %s" % parsed.error)
+        return 0
+    _rs = _load_sbe_repo_scope()
+    # write_guard=True: this hook decides whether a write happens, and
+    # .brother/config arrives with the repository, so it may not switch this
+    # one off (security review 2026-09-04, Major; sbe_repo_scope's
+    # WRITE_GUARD_HOOKS). Still called rather than skipped, so the
+    # once-per-session notice and the garbage-config diagnostic are printed.
+    if _rs is not None and _rs.hooks_off(payload=parsed.payload,
+                                         write_guard=True):
         return 0
     decision = decide(parsed.payload)
     for n in decision.notes:

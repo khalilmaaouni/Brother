@@ -92,6 +92,10 @@ import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+# C3: the config directory is resolved by brother_paths, the one seam
+# that knows which coding client is running (docs/codex/HOOKS-MAPPING.md).
+sys.path.insert(0, HERE)
+import brother_paths  # noqa: E402
 ROOT_DIR = os.path.dirname(HERE)
 
 BREAK_GLASS_REL = ".sbe/break-glass.json"
@@ -628,7 +632,7 @@ def _repeat_state_dir():
     override = os.environ.get(STATE_DIR_ENV, "").strip()
     if override:
         return override
-    return os.path.join(os.path.expanduser("~"), ".claude", "sbe-reconcile-state")
+    return brother_paths.config_path("sbe-reconcile-state")
 
 
 def _repeat_state_path(session_id):
@@ -727,6 +731,22 @@ def block_payload(reason):
     }
 
 
+def _load_sbe_repo_scope():
+    """Load sbe_repo_scope.py by path, works from any cwd and never
+    raises. E76 per-repository hook scoping, checked before the
+    BROTHERSBE_RECONCILE_OFF escape hatch: a repository turned off is off
+    for every hook, not just this one's own private switch."""
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "sbe_repo_scope_for_reconcile", os.path.join(HERE, "sbe_repo_scope.py"))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception:  # sbe: allow-silent optional gate module load; hooks_off degrades to active when this returns None
+        return None
+
+
 def cmd_hook(argv):
     raw = ""
     try:
@@ -748,6 +768,10 @@ def cmd_hook(argv):
         session_id = os.environ.get("BROTHERSBE_SESSION_ID", "").strip()
     cwd = payload.get("cwd")
     cwd = cwd.strip() if isinstance(cwd, str) and cwd.strip() else os.getcwd()
+
+    _rs = _load_sbe_repo_scope()
+    if _rs is not None and _rs.hooks_off(payload=payload, cwd=cwd):
+        return 0
 
     if os.environ.get("BROTHERSBE_RECONCILE_OFF", "").strip() not in ("", "0"):
         _warn("sbe_session_reconcile: BROTHERSBE_RECONCILE_OFF is set, so the "

@@ -37,14 +37,16 @@
 # removes on exit, the same discipline scripts/test-install-artifact.sh
 # holds itself to.
 #
-# The honesty this script exists to enforce: as of this wave, this
-# repository has never cut a tag (docs/RELEASE.md says so plainly; `main` at
-# commit 1c86c9d predates tagging entirely). An upgrade-and-rollback test
-# with no previous release to upgrade FROM cannot exercise an upgrade, and a
-# script that reported PASSED anyway, or silently skipped with exit 0 and no
-# explanation, would be claiming a control ran when it did not. So: when no
-# previous tag exists, this prints a NO-DATA verdict naming the reason and
-# exits 0 without ever claiming an upgrade was tested. Exit 0 here means
+# The honesty this script exists to enforce: as of this wave, no release of
+# THIS PRODUCT has been tagged in this repository (`git tag --list
+# 'brothersbe--v[0-9]*'` is empty; the hub's plain `v<digit>` tags are the
+# umbrella's, not this product's, see the selection block below). An
+# upgrade-and-rollback test with no previous release to upgrade FROM cannot
+# exercise an upgrade, and a script that reported PASSED anyway, or silently
+# skipped with exit 0 and no explanation, would be claiming a control ran
+# when it did not. So: when no previous product tag exists, this prints a
+# NO-DATA verdict naming exactly what it looked for and what it deliberately
+# ignored, and exits 0 without ever claiming an upgrade was tested. Exit 0 here means
 # "nothing failed", the same as everywhere else in this project; it does
 # NOT mean "passed". No unit suite asserts this branch, deliberately: the
 # moment this repository cuts its first tag the branch stops being
@@ -69,19 +71,41 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 cd "$ROOT"
 
-# Find the most recent RELEASE tag that is an ANCESTOR of HEAD, i.e. a real
-# previous release on this line of history, not a tag sitting on an unrelated
-# branch or pointing at HEAD itself. Release tags are the `v<digit>` family
-# (docs/RELEASE.md cuts `vX.Y.Z`); the pattern matters because this repository
-# also carries `archive/*` tags, which are preservation snapshots of deleted
-# branch tips, not releases anyone installed. Without the pattern this loop
-# once selected `archive/worktree-agent-a2e2f84b3d27f281f` as "the previous
+# Find the most recent RELEASE tag OF THIS PRODUCT that is an ANCESTOR of
+# HEAD, i.e. a real previous release on this line of history, not a tag
+# sitting on an unrelated branch or pointing at HEAD itself.
+#
+# THE PATTERN IS PRODUCT-PREFIXED, and that is the whole point. This product
+# no longer owns its repository: it is one of three products inside the
+# Brother hub, and the hub carries its OWN umbrella tags in the plain
+# `v<digit>` form (v0.9.6, v1.0.1, v2.1.1 as of 2026-09-04). Those are
+# releases of the hub, not of this product, and at most of them
+# products/brothersbe/ did not exist at all. The plain pattern selected
+# v0.9.6 as "the previous release of this product" and then failed because
+# scripts/verify-install.sh did not ship in it, which is a true statement
+# about a tree that was never this product's release.
+#
+# The estate's documented per-product form is `{plugin-name}--v{version}`,
+# TWO dashes (products/brothermode/docs/plan/ADR-2026-08-23-one-brother-repository.md,
+# corrected against the plugin-dependencies documentation; a single dash
+# fails silently with no-matching-tag), so this product's releases are
+# `brothersbe--v<version>` and nothing else. The old standalone repository
+# also cut plain `v3.2.0`-style tags before the merge; those live in
+# BrotherSBE's history, not in this repository, so they are unreachable here
+# and are deliberately NOT matched (matching them would re-open the exact
+# hole above: a plain `v` pattern reads the hub's umbrella tags).
+#
+# The pattern also keeps out `archive/*` tags, preservation snapshots of
+# deleted branch tips that nobody installed. Without a pattern this loop once
+# selected `archive/worktree-agent-a2e2f84b3d27f281f` as "the previous
 # release" and failed verify-install against a tree nobody ever published.
-# `git tag --list` can be empty (today, always); guarded explicitly rather
-# than let a bare `for` over an empty command substitution misbehave under
-# `set -e` on some shells.
+#
+# `git tag --list` can be empty (today, always: no `brothersbe--v*` tag has
+# been cut in the hub yet); guarded explicitly rather than let a bare `for`
+# over an empty command substitution misbehave under `set -e` on some shells.
+TAG_PATTERN='brothersbe--v[0-9]*'
 PREV_TAG=""
-ALL_TAGS=$(git tag --list 'v[0-9]*' 2>/dev/null || true)
+ALL_TAGS=$(git tag --list "$TAG_PATTERN" 2>/dev/null || true)
 if [ -n "$ALL_TAGS" ]; then
     for t in $ALL_TAGS; do
         if ! git merge-base --is-ancestor "$t" HEAD 2>/dev/null; then
@@ -103,15 +127,23 @@ if [ -n "$ALL_TAGS" ]; then
 fi
 
 if [ -z "$PREV_TAG" ]; then
-    echo "test-upgrade-rollback: NO-DATA. This repository has cut no previous tag yet"
-    echo "test-upgrade-rollback: (docs/RELEASE.md: tagging and pushing, steps 5 and 6, have"
-    echo "test-upgrade-rollback: never been executed; \`main\` at 1c86c9d predates tagging"
-    echo "test-upgrade-rollback: entirely). There is no earlier release to upgrade FROM, so an"
+    echo "test-upgrade-rollback: NO-DATA. No previous release of THIS PRODUCT was found."
+    echo "test-upgrade-rollback: What was looked for, exactly: \`git tag --list '$TAG_PATTERN'\`"
+    echo "test-upgrade-rollback: (the estate's per-product tag form, {plugin-name}--v{version},"
+    echo "test-upgrade-rollback: two dashes), restricted to tags that are ancestors of HEAD and"
+    echo "test-upgrade-rollback: are not HEAD itself. That list is empty in this repository."
+    echo "test-upgrade-rollback: What was deliberately NOT looked at: the hub's own umbrella tags"
+    echo "test-upgrade-rollback: in the plain \`v<digit>\` form. Those are releases of the Brother"
+    echo "test-upgrade-rollback: hub, not of this product; most of them predate"
+    echo "test-upgrade-rollback: products/brothersbe/ existing, and installing one of them as"
+    echo "test-upgrade-rollback: 'the previous release of this product' proves nothing about this"
+    echo "test-upgrade-rollback: product's upgrade path."
+    echo "test-upgrade-rollback: So there is no earlier release to upgrade FROM, and an"
     echo "test-upgrade-rollback: upgrade-then-rollback cannot be exercised against real history"
     echo "test-upgrade-rollback: on this run. This is not a pass: it is a stated absence of the"
     echo "test-upgrade-rollback: one fixture this script needs. No claim is made that an upgrade"
-    echo "test-upgrade-rollback: was tested. Once the first tag exists, this script finds it"
-    echo "test-upgrade-rollback: automatically and exercises the real path below."
+    echo "test-upgrade-rollback: was tested. Once the first $TAG_PATTERN tag exists, this script"
+    echo "test-upgrade-rollback: finds it automatically and exercises the real path below."
     exit 0
 fi
 
@@ -194,6 +226,14 @@ install_and_verify() {
 # any other previous tag is NOT this exemption and hard fails below, the
 # same as before this exemption existed. Widening this list is a
 # deliberate, reviewed decision, never an automatic one.
+#
+# NOTE, 2026-09-04: v3.2.0 was cut in the standalone BrotherSBE repository,
+# whose history is not this repository's, and the tag selection above now
+# matches only `brothersbe--v*`. So this exemption is unreachable here and
+# excuses nothing today. It is KEPT rather than deleted because it records a
+# real defect in a published, immutable tag: if that history is ever grafted
+# in, or the tag re-cut under the prefixed form, the exemption must still be
+# the pinned two-file one it always was, not a rediscovered class.
 EXEMPT_TAG="v3.2.0"
 printf '%s\n' "docs/book/assets/mermaid.min.js" "scripts/derive_refusal_table.py" | sort > "$WORKDIR/prev_allowed"
 

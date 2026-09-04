@@ -96,6 +96,33 @@ def _load_store_module():
         return None
 
 
+_RS = None
+_RS_LOADED = False
+
+
+def _load_repo_scope_module():
+    """Import tools/bm_repo_scope.py beside this file, same load-by-path
+    shape and same fail-open contract as _load_store_module above: E76
+    per-repository hook scoping, checked at the very top of cmd_hook,
+    before payload identity, targets or the store are ever touched."""
+    global _RS, _RS_LOADED
+    if _RS_LOADED:
+        return _RS
+    _RS_LOADED = True
+    try:
+        import importlib.util
+        path = os.path.join(HERE, "bm_repo_scope.py")
+        spec = importlib.util.spec_from_file_location("bm_repo_scope", path)
+        if spec is None or spec.loader is None:
+            return None
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _RS = mod
+        return _RS
+    except Exception:  # sbe: allow-silent optional gate module load; hooks_off degrades to active when this returns None
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Output funnels. Two of them, on purpose (same discipline bm_store.py
 # enforces structurally): stdout carries the decision JSON and nothing else,
@@ -1215,6 +1242,14 @@ def cmd_hook(argv):
             return 0
         _warn("bm_fence_hook: FAILING OPEN, the write is allowed and the "
               "fence was NOT checked. Reason: %s" % err)
+        return 0
+    _rs = _load_repo_scope_module()
+    # write_guard=True: this hook decides whether a write happens, and
+    # .brother/config arrives with the repository, so it may not switch this
+    # one off (security review 2026-09-04, Major; bm_repo_scope's
+    # WRITE_GUARD_HOOKS). Still called rather than skipped, so the
+    # once-per-session notice and the garbage-config diagnostic are printed.
+    if _rs is not None and _rs.hooks_off(payload=payload, write_guard=True):
         return 0
     decision, notes = decide(payload)
     for n in notes:

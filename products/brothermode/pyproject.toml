@@ -97,6 +97,10 @@ package-dir = { "" = "tools", "brotherme" = "brotherme" }
 # module here is a decision, and the packaging test in tools/test_bm.py
 # fails if this list and the shipping tools in tools/ disagree.
 py-modules = [
+    # C3: the path helper the hooks and the vault tools import for the config
+    # directory and the plugin root. A copy of scripts/brother_paths.py, kept
+    # byte-identical by scripts/test_brother_paths.py.
+    "brother_paths",
     "bm_bench",
     "bm_passport",
     "bm_passport_validator",
@@ -106,6 +110,7 @@ py-modules = [
     "bm_reconcile",
     "bm_reconcile_worktrees",
     "bm_release_invariant",
+    "bm_repo_scope",
     "bm_learning",
     "bm_learn",
     "bm_packs",
@@ -200,6 +205,13 @@ py-modules = [
     # 2026-08-30, D13: retention and deletion propagation (census and
     # targeted propagate over the retrieval index's derived tables).
     "bm_vault_retention",
+    # 2026-09-04, E57 mechanism 2: time decay and reinforcement, the
+    # usefulness half of the same sort. An old note nobody has confirmed fades
+    # in RANK on an Ebbinghaus curve (borrowed from MemoryBank,
+    # https://arxiv.org/abs/2305.10250) while a confirmed one strengthens.
+    # Ranking only, floored so it reorders and never removes, and it writes to
+    # a sidecar store rather than to any note.
+    "bm_vault_decay",
     # 2026-08-30, VB2-06: staleness and consolidation, the reading half.
     # A note's verified_at (bm_vault_temporal's field) ages past its class
     # horizon and demotes its own authority rank in bm_vault's recall sort.

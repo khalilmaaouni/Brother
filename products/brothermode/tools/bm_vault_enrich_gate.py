@@ -71,6 +71,10 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+# C3: the config directory is resolved by brother_paths, the one seam
+# that knows which coding client is running (docs/codex/HOOKS-MAPPING.md).
+# Loaded from beside this file because tools/ is not a package.
+import brother_paths  # noqa: E402
 import bm_vault_attribute_provenance as attrprov  # noqa: E402
 import bm_vault_enrich as enrich                  # noqa: E402
 import bm_vault_ids as ids                        # noqa: E402
@@ -78,7 +82,8 @@ import bm_vault_lifecycle as lc                   # noqa: E402
 import bm_vault_promotions as promo               # noqa: E402
 
 ENTITY_EXTRACT_FIELD = "entity_extract"
-DEFAULT_STATE = os.path.expanduser("~/.claude/bm_vault_enrich_gate_state.json")
+DEFAULT_STATE = brother_paths.config_path(
+    "bm_vault_enrich_gate_state.json")
 
 # ---------------------------------------------------- the declared schema
 #

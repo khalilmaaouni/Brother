@@ -230,14 +230,47 @@ class TheRealDecisionStillResolves(unittest.TestCase):
                     broken.append("%s: %s" % (opt["name"], note))
         self.assertEqual(broken, [], "code anchors have rotted: %s" % broken)
 
+    #: A source can honestly live OUTSIDE this repository. A decision scored
+    #: against the founder's own machine level files (his hooks, his global
+    #: instructions, his spend guard) cites them, and copying those files into
+    #: the tree is forbidden by the privacy rules, so the citation is the only
+    #: honest form. Such a source declares scope "machine" and is skipped for
+    #: existence. This test NEVER expands ~ and never reads the machine it runs
+    #: on: a verdict that depends on which machine ran it is a recorded failure
+    #: class here, and it would read green on the founder's laptop while every
+    #: clone read red.
+    MACHINE_SCOPE = "machine"
+
     def test_every_source_names_a_file_that_exists(self):
+        """The flag is not a mute button, so it is checked in both directions: a
+        machine level source must name a path that is outside this tree by
+        construction, and an outside path carrying no flag still fails."""
         missing = []
+        machine = []
         for name, spec in self.specs():
           for opt in spec["options"]:
             for s in opt.get("sources") or []:
                 p = s.get("found_in")
-                if p and not os.path.isfile(os.path.join(ROOT, p)):
+                if not p:
+                    continue
+                outside = p.startswith("~") or os.path.isabs(p)
+                if s.get("scope") == self.MACHINE_SCOPE:
+                    self.assertTrue(
+                        outside,
+                        "%s: %r is declared machine level but is a repo relative "
+                        "path, so it must exist in this tree" % (opt["name"], p))
+                    machine.append(p)
+                    continue
+                self.assertFalse(
+                    outside,
+                    "%s: %r points outside this tree, so it must declare scope "
+                    "%r; this test never expands ~ and never reads the machine "
+                    "it runs on" % (opt["name"], p, self.MACHINE_SCOPE))
+                if not os.path.isfile(os.path.join(ROOT, p)):
                     missing.append(p)
+        if machine:
+            print("%s: %d source(s) are machine level, so their existence was "
+                  "not checked: %s" % (D.NODATA, len(machine), ", ".join(machine)))
         self.assertEqual(missing, [], "sources cite missing files: %s" % missing)
 
     def test_every_option_is_marked_on_every_criterion(self):

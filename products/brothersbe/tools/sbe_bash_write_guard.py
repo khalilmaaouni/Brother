@@ -190,6 +190,16 @@ def require_authority_module():
                           "the case-fold-confirmed authority-surface match")
 
 
+def load_repo_scope_module():
+    """`tools/sbe_repo_scope.py` (E76 per-repository hook scoping), the same
+    cached _load_by_path shape as the require_*_module functions above, but
+    NEVER raising: an unreadable gate module degrades to active (default)
+    rather than taking this guard down with it."""
+    result = _load_by_path("sbe_repo_scope_for_bash_guard",
+                           os.path.join(HERE, "sbe_repo_scope.py"))
+    return result.mod
+
+
 def require_tasks_module():
     return require_module("brothersbe_tasks_for_bash_guard",
                           os.path.join(ROOT_DIR, "src", "brothersbe", "tasks.py"),
@@ -1312,6 +1322,15 @@ def cmd_hook(argv):
     if parsed.error is not None:
         _warn("sbe_bash_write_guard: FAILING OPEN, the command is allowed and the write "
               "boundary was NOT checked. Reason: %s" % parsed.error)
+        return 0
+    _rs = load_repo_scope_module()
+    # write_guard=True: this hook decides whether a write happens, and
+    # .brother/config arrives with the repository, so it may not switch this
+    # one off (security review 2026-09-04, Major; sbe_repo_scope's
+    # WRITE_GUARD_HOOKS). Still called rather than skipped, so the
+    # once-per-session notice and the garbage-config diagnostic are printed.
+    if _rs is not None and _rs.hooks_off(payload=parsed.payload,
+                                         write_guard=True):
         return 0
     decision = decide(parsed.payload)
     for n in decision.notes:

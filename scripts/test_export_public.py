@@ -6,6 +6,7 @@ scanners' test fixtures (see scripts/test_private_terms_scan.py's own
 docstring): a term real enough to matter, committed alongside the tool that
 looks for it, publishes exactly what the tool exists to stop.
 """
+import contextlib
 import hashlib
 import os
 import re
@@ -105,6 +106,122 @@ def _seed_bare_remote(remote_dir):
                         check=True)
         subprocess.run(["git", "-C", seed_dir, "push", remote_dir, "main"],
                         check=True)
+
+
+#: A stand-in for the GitHub CLI, written onto PATH for the tests that
+#: drive the release route. It is a real script, not a mock, because the
+#: exporter shells out: `pr create` prints a URL the way gh does, and `pr
+#: merge` performs the merge the only way it can be performed against a
+#: local bare repository, by pushing the branch's commit onto main. That
+#: leaves the remote in the state a merged pull request leaves it in, so
+#: the assertions below read the real thing. FAKE_GH_FAIL_CREATE and
+#: FAKE_GH_FAIL_MERGE drive the two refusal paths backwards.
+FAKE_GH = """#!/bin/sh
+set -e
+sub="$1 $2"
+shift 2
+remote=$(git remote get-url origin)
+case "$sub" in
+  "pr create")
+    if [ -n "$FAKE_GH_FAIL_CREATE" ]; then
+      echo "fake gh: pull request refused by the ruleset" >&2
+      exit 1
+    fi
+    head=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --head) head="$2"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    echo "https://example.invalid/pull/1 (head $head)"
+    ;;
+  "pr merge")
+    if [ -n "$FAKE_GH_FAIL_MERGE" ]; then
+      echo "fake gh: merge refused, the branch is not mergeable" >&2
+      exit 1
+    fi
+    git push --quiet "$remote" "HEAD:refs/heads/main"
+    echo "Merged pull request"
+    ;;
+  *)
+    echo "fake gh: unsupported command $sub" >&2
+    exit 2
+    ;;
+esac
+"""
+
+
+@contextlib.contextmanager
+def _fake_gh(**extra_env):
+    """Put the stand-in gh first on PATH for the duration of the block.
+    Patching os.environ covers both routes into the exporter: a direct
+    push_appended call (whose subprocesses inherit this process's own
+    environment) and a CLI run (whose test builds its env from
+    dict(os.environ) inside the block)."""
+    bindir = tempfile.mkdtemp(prefix="fake-gh-")
+    try:
+        gh = os.path.join(bindir, "gh")
+        with open(gh, "w", encoding="utf-8") as fh:
+            fh.write(FAKE_GH)
+        os.chmod(gh, 0o755)
+        env = {"PATH": bindir + os.pathsep + os.environ.get("PATH", "")}
+        env.update(extra_env)
+        with mock.patch.dict(os.environ, env):
+            yield bindir
+    finally:
+        shutil.rmtree(bindir, ignore_errors=True)
+
+
+#: What a tag-time check needs to find in an export tree, seeded into any
+#: fixture that exercises a TAGGED push: the tree's own readiness gate (row
+#: E67) and a README naming a prove command that really runs there (row
+#: E70). Kept minimal on purpose: the real gate reads this estate's whole
+#: evidence set, which a five file fixture cannot carry, and what is under
+#: test here is the exporter's refusal, never that gate's own verdict.
+READY_GATE_STUB = ("#!/usr/bin/env python3\n"
+                   "print('GATE: every critical item is proven')\n")
+NOT_READY_GATE_STUB = (
+    "#!/usr/bin/env python3\n"
+    "import sys\n"
+    "print('GATE: NOT READY. 1 critical item(s) unproven: "
+    "Restore drill (NO-DATA)')\n"
+    "sys.exit(1)\n")
+#: What the REAL gate prints, measured from scripts/readiness_gate.py's own
+#: main() on 2026-09-04: the GATE: line is bare, and the items are one
+#: "  - Title (VERDICT)" line each underneath. The stub above puts the item
+#: on the GATE: line itself, which is why the refusal LOOKED like it named
+#: what was unproven while the real refusal named nothing but "NOT READY."
+#: and the operator had to rebuild the export tree by hand to find out.
+REAL_SHAPE_NOT_READY_GATE_STUB = (
+    "#!/usr/bin/env python3\n"
+    "import sys\n"
+    "print('GATE: NOT READY.')\n"
+    "print('  1 critical item(s) unproven:')\n"
+    "print('  - Restore drill (NO-DATA)')\n"
+    "sys.exit(1)\n")
+
+
+def _seed_tag_time_needs(root, gate=READY_GATE_STUB, readme=None,
+                         prove_exit=0):
+    """The three files a tagged export tree must carry for tag_time_checks
+    to reach a verdict: its own readiness gate, a README naming a prove
+    command, and that command's script. Written into a fixture ROOT (so the
+    allowlist carries them into the export tree) or straight into an export
+    tree. A caller writing into a fixture root re-tracks afterwards."""
+    scripts = os.path.join(root, "scripts")
+    os.makedirs(scripts, exist_ok=True)
+    with open(os.path.join(scripts, "readiness_gate.py"), "w",
+              encoding="utf-8") as fh:
+        fh.write(gate)
+    with open(os.path.join(scripts, "test_fixture_prove.py"), "w",
+              encoding="utf-8") as fh:
+        fh.write("#!/usr/bin/env python3\nimport sys\n"
+                 "print('fixture prove')\nsys.exit(%d)\n" % prove_exit)
+    with open(os.path.join(root, "README.md"), "w", encoding="utf-8") as fh:
+        fh.write(readme if readme is not None else
+                 "# Fixture\n\nProve it with "
+                 "`python3 scripts/test_fixture_prove.py`.\n")
 
 
 def _gate_exit(stdout, name):
@@ -409,6 +526,273 @@ class EachGateOfRunGatesIsIndividuallyLoadBearing(unittest.TestCase):
             self.assertNotIn("fakebrothertermxyz", "\n".join(lines))
 
 
+#: A shape SECRET_SHAPES matches (scripts/pre_push_gate.py: ghp_ + 36
+#: alphanumerics). Fake in the same sense as the estate's own private-term
+#: fixtures: real enough to match the pattern under test, invented for
+#: this file, never a value that ever authenticated anything.
+FAKE_GHP_SECRET = "ghp_" + "a" * 36
+
+
+class AFourthGateCatchesASecretShapedValueTheOtherThreeMiss(unittest.TestCase):
+    """The security gap this closes: push_appended pushes through a plain
+    temp `git init` with no pre-push hook installed, so
+    scripts/pre_push_gate.py's own SECRET_SHAPES check never runs on this
+    route at all, and none of cleanse.sh, identity_guard.py or
+    private_terms_scan.py look for a credential shape. check_secrets is
+    the fourth gate run_gates now composes, over the same SECRET_SHAPES
+    patterns pre_push_gate.py already carries, against the candidate
+    export tree itself."""
+
+    def test_a_ghp_shaped_value_in_an_allowlisted_file_refuses_and_names_it(self):
+        with tempfile.TemporaryDirectory() as remote_dir, \
+             tempfile.TemporaryDirectory() as root:
+            _seed_bare_remote(remote_dir)
+            _make_fake_root(root, {
+                "leaky.md": "the token is %s, do not ship it\n"
+                            % FAKE_GHP_SECRET,
+            })
+            allowlist_path = _write_lines(
+                os.path.join(root, "ALLOWLIST.txt"), ["scripts", "leaky.md"])
+            terms_path = _write_lines(
+                os.path.join(root, "terms.txt"), ["FAKETERM-NEVER-PRESENT"])
+            env = dict(os.environ)
+            env["BROTHER_PRIVATE_TERMS"] = terms_path
+            proc = _run_cli(["--allowlist", allowlist_path, "--root", root,
+                              "--remote", remote_dir, "--branch", "main",
+                              "--dry-run"], env)
+            self.assertEqual(proc.returncode, EP.EXIT_REFUSED,
+                              proc.stdout + proc.stderr)
+            self.assertIn("REFUSED: a secret-shaped value was found in "
+                          "leaky.md", proc.stdout)
+            # the finding names the file; the value itself never appears
+            self.assertNotIn(FAKE_GHP_SECRET, proc.stdout)
+            self.assertNotIn(FAKE_GHP_SECRET, proc.stderr)
+
+    def test_the_public_aws_example_key_passes_and_any_other_aws_shape_refuses(self):
+        # The one value in KNOWN_PUBLIC_EXAMPLE_VALUES is the access key id
+        # AWS prints in its own documentation; the products' detection
+        # fixtures and a changelog reproduce it on purpose. A VALUE
+        # allowlist, never a path one: the same shape with any other
+        # value still refuses.
+        example = EP.KNOWN_PUBLIC_EXAMPLE_VALUES[0]
+        other = "AKIA" + "Q" * 16
+        with tempfile.TemporaryDirectory() as export_dir, \
+             tempfile.TemporaryDirectory() as root:
+            _make_fake_root(root, {
+                "fixture.md": "the documented example is %s\n" % example})
+            EP.build_orphan_commit(export_dir, ["scripts", "fixture.md"],
+                                   root=root)
+            ok, lines = EP.check_secrets(export_dir)
+            self.assertTrue(ok, lines)
+            self.assertTrue(any(l.startswith("secrets: 0 hit(s)")
+                                for l in lines), lines)
+        with tempfile.TemporaryDirectory() as export_dir, \
+             tempfile.TemporaryDirectory() as root:
+            _make_fake_root(root, {
+                "leaky.md": "the key is %s\n" % other})
+            EP.build_orphan_commit(export_dir, ["scripts", "leaky.md"],
+                                   root=root)
+            ok, lines = EP.check_secrets(export_dir)
+            self.assertFalse(ok, lines)
+            self.assertIn("leaky.md", "\n".join(lines))
+            self.assertNotIn(other, "\n".join(lines))
+
+    def test_a_clean_tree_prints_the_zero_hit_count(self):
+        with tempfile.TemporaryDirectory() as export_dir, \
+             tempfile.TemporaryDirectory() as identity_dir, \
+             tempfile.TemporaryDirectory() as root:
+            _make_fake_root(root, {
+                "public.md": "hello, nothing private here\n"})
+            EP.build_orphan_commit(export_dir, ["scripts", "public.md"],
+                                   root=root)
+            subprocess.run(["git", "init", "-q"], cwd=identity_dir,
+                            check=True)
+            terms_path = _write_lines(
+                os.path.join(root, "terms.txt"), ["FAKETERM-NEVER-PRESENT"])
+            with mock.patch.dict(os.environ,
+                                  {"BROTHER_PRIVATE_TERMS": terms_path}):
+                all_ok, lines = EP.run_gates(export_dir, identity_dir)
+            secrets_lines = [l for l in lines if l.startswith("secrets: ")]
+            self.assertEqual(len(secrets_lines), 1, lines)
+            m = re.match(r"secrets: 0 hit\(s\) over (\d+) file\(s\)$",
+                         secrets_lines[0])
+            self.assertIsNotNone(m, secrets_lines[0])
+            self.assertGreater(int(m.group(1)), 0, secrets_lines[0])
+
+    def test_secret_check_is_load_bearing_in_the_composed_all_ok(self):
+        """check_secrets alone must flip all_ok, the same load-bearing
+        proof EachGateOfRunGatesIsIndividuallyLoadBearing runs for the
+        other three: a fixture where cleanse.sh, identity_guard.py and
+        private_terms_scan.py all clear, and only the secret shape
+        refuses."""
+        with tempfile.TemporaryDirectory() as export_dir, \
+             tempfile.TemporaryDirectory() as identity_dir, \
+             tempfile.TemporaryDirectory() as root:
+            _make_fake_root(root, {
+                "leaky.md": "token: %s\n" % FAKE_GHP_SECRET})
+            EP.build_orphan_commit(export_dir, ["scripts", "leaky.md"],
+                                   root=root)
+            subprocess.run(["git", "init", "-q"], cwd=identity_dir,
+                            check=True)
+            terms_path = _write_lines(
+                os.path.join(root, "terms.txt"), ["FAKETERM-NEVER-PRESENT"])
+            with mock.patch.dict(os.environ,
+                                  {"BROTHER_PRIVATE_TERMS": terms_path}):
+                all_ok, lines = EP.run_gates(export_dir, identity_dir)
+            self.assertFalse(all_ok, lines)
+            cleanse_line = next(l for l in lines if l.startswith("cleanse:"))
+            terms_line = next(l for l in lines
+                               if l.startswith("private_terms_scan:"))
+            self.assertIn("exit 0,", cleanse_line, lines)
+            self.assertIn("exit 0,", terms_line, lines)
+            self.assertTrue(
+                any(l.startswith("REFUSED: a secret-shaped value")
+                    for l in lines), lines)
+            self.assertNotIn(FAKE_GHP_SECRET, "\n".join(lines))
+
+    def test_a_file_it_cannot_read_is_a_refusal_naming_that_file(self):
+        """The fail-closed OSError branch, shipped in a merge that touched
+        no test file at all. This is the publication trust boundary: a file
+        the scanner could not open was never scanned, so a silent skip
+        would let it leave through the export unchecked. Driven both ways
+        in one method, because "it refused" means nothing without the same
+        tree passing when the file is readable."""
+        with tempfile.TemporaryDirectory() as export_dir, \
+             tempfile.TemporaryDirectory() as identity_dir, \
+             tempfile.TemporaryDirectory() as root:
+            _make_fake_root(root, {
+                "opaque.md": "nothing secret here at all\n"})
+            EP.build_orphan_commit(export_dir, ["scripts", "opaque.md"],
+                                   root=root)
+            target = os.path.join(export_dir, "opaque.md")
+            # the control: readable, and this tree is otherwise clean
+            ok, lines = EP.check_secrets(export_dir)
+            self.assertTrue(ok, lines)
+            os.chmod(target, 0o000)
+            try:
+                if os.access(target, os.R_OK):
+                    self.skipTest(
+                        "NO-DATA: this process reads a mode 000 file (root, "
+                        "or a filesystem ignoring the mode), so the "
+                        "unreadable branch cannot be driven here")
+                ok, lines = EP.check_secrets(export_dir)
+                self.assertFalse(ok, lines)
+                self.assertTrue(
+                    any(l.startswith("secrets: NO-DATA, could not read "
+                                     "opaque.md") for l in lines), lines)
+                self.assertIn("was not fully scanned for secrets",
+                              "\n".join(lines))
+                # and it is load bearing in the composed verdict, not
+                # merely a line printed beside a PASS
+                subprocess.run(["git", "init", "-q"], cwd=identity_dir,
+                               check=True)
+                terms_path = _write_lines(
+                    os.path.join(root, "terms.txt"),
+                    ["FAKETERM-NEVER-PRESENT"])
+                with mock.patch.dict(os.environ,
+                                     {"BROTHER_PRIVATE_TERMS": terms_path}):
+                    all_ok, lines = EP.run_gates(export_dir, identity_dir)
+                self.assertFalse(all_ok, lines)
+            finally:
+                # restored inside the fixture's own lifetime: an addCleanup
+                # would fire after TemporaryDirectory had removed the file
+                os.chmod(target, 0o644)
+
+
+class CheckSecretsScansOnlyLinesAddedSinceTheBaseline(unittest.TestCase):
+    """check_secrets(export_dir, baseline_dir): baseline_dir is
+    build_baseline_dir's checkout of the public remote's current branch
+    tip. The problem this closes: a value allowlist of 21 named fakes is
+    the wrong shape for the products' own credential-detection fixtures, a
+    changelog reproducing a documented example, and docs that teach the
+    scanner, all of which legitimately carry a secret-shaped value the
+    public tree already ships. Scoping the scan to lines ADDED since the
+    baseline (the same "outgoing range, not the whole tree" reasoning
+    pre_push_gate.py already applies to the hub's own push) means a
+    long-standing fixture line never refuses merely for still being there,
+    while a genuinely new value, in an old file or a brand new one, still
+    does."""
+
+    def test_a_baseline_line_repeated_unchanged_in_the_candidate_passes(self):
+        fixture_line = ("the token is %s, a long-standing fixture\n"
+                         % FAKE_GHP_SECRET)
+        with tempfile.TemporaryDirectory() as export_dir, \
+             tempfile.TemporaryDirectory() as baseline_dir:
+            with open(os.path.join(baseline_dir, "leaky.md"), "w",
+                      encoding="utf-8") as fh:
+                fh.write(fixture_line)
+            with open(os.path.join(export_dir, "leaky.md"), "w",
+                      encoding="utf-8") as fh:
+                fh.write(fixture_line)
+            ok, lines = EP.check_secrets(export_dir, baseline_dir)
+            self.assertTrue(ok, lines)
+            self.assertTrue(any(l.startswith("secrets: 0 hit(s)")
+                                for l in lines), lines)
+
+    def test_a_new_line_added_to_an_old_file_refuses_and_names_it(self):
+        new_secret = "ghp_" + "c" * 36
+        with tempfile.TemporaryDirectory() as export_dir, \
+             tempfile.TemporaryDirectory() as baseline_dir:
+            with open(os.path.join(baseline_dir, "leaky.md"), "w",
+                      encoding="utf-8") as fh:
+                fh.write("nothing secret here\n")
+            with open(os.path.join(export_dir, "leaky.md"), "w",
+                      encoding="utf-8") as fh:
+                fh.write("nothing secret here\ntoken: %s\n" % new_secret)
+            ok, lines = EP.check_secrets(export_dir, baseline_dir)
+            self.assertFalse(ok, lines)
+            self.assertIn("leaky.md", "\n".join(lines))
+            self.assertNotIn(new_secret, "\n".join(lines))
+
+    def test_a_brand_new_file_carrying_a_secret_shape_refuses(self):
+        with tempfile.TemporaryDirectory() as export_dir, \
+             tempfile.TemporaryDirectory() as baseline_dir:
+            # baseline_dir carries no file at this path at all: a new file
+            # scans whole, exactly like the no-baseline case.
+            with open(os.path.join(export_dir, "brand-new.md"), "w",
+                      encoding="utf-8") as fh:
+                fh.write("token: %s\n" % FAKE_GHP_SECRET)
+            ok, lines = EP.check_secrets(export_dir, baseline_dir)
+            self.assertFalse(ok, lines)
+            self.assertIn("brand-new.md", "\n".join(lines))
+            self.assertNotIn(FAKE_GHP_SECRET, "\n".join(lines))
+
+    def test_with_no_baseline_dir_the_whole_candidate_file_is_scanned(self):
+        with tempfile.TemporaryDirectory() as export_dir:
+            with open(os.path.join(export_dir, "leaky.md"), "w",
+                      encoding="utf-8") as fh:
+                fh.write("token: %s\n" % FAKE_GHP_SECRET)
+            ok, lines = EP.check_secrets(export_dir)
+            self.assertFalse(ok, lines)
+            self.assertIn("leaky.md", "\n".join(lines))
+            self.assertNotIn(FAKE_GHP_SECRET, "\n".join(lines))
+
+    def test_an_already_public_value_on_a_line_changed_for_another_reason_passes(self):
+        # Measured 2026-09-04 against the real dry run: a line can carry
+        # TWO independent secret-shaped values (here a ghp_ shaped one and
+        # an sk- shaped one). Editing only the ghp_ one makes the WHOLE
+        # line read as added under a line-level diff, and the untouched
+        # sk- value rides along. That sk- value already sat, verbatim, in
+        # the baseline; it must not refuse just because its neighbour on
+        # the same line changed. A genuinely new ghp_ value on that same
+        # line still refuses.
+        old_ghp = "ghp_" + "d" * 36
+        new_ghp = "ghp_" + "e" * 36
+        already_public_sk = "sk-" + "f" * 30
+        with tempfile.TemporaryDirectory() as export_dir, \
+             tempfile.TemporaryDirectory() as baseline_dir:
+            with open(os.path.join(baseline_dir, "fixture.py"), "w",
+                      encoding="utf-8") as fh:
+                fh.write('PATH = "/x/%s/%s/y"\n' % (already_public_sk, old_ghp))
+            with open(os.path.join(export_dir, "fixture.py"), "w",
+                      encoding="utf-8") as fh:
+                fh.write('PATH = "/x/%s/%s/y"\n' % (already_public_sk, new_ghp))
+            ok, lines = EP.check_secrets(export_dir, baseline_dir)
+            self.assertFalse(ok, lines)
+            self.assertIn("fixture.py", "\n".join(lines))
+            self.assertNotIn(new_ghp, "\n".join(lines))
+
+
 class OneTermListFeedsEveryGate(unittest.TestCase):
     """E37, 2026-09-03. The exporter used to default its gates to
     ~/.claude/private-terms.txt while the estate's law, bm_private_scan.py
@@ -546,6 +930,35 @@ class TheHardBoundaryHoldsEvenIfListed(unittest.TestCase):
             self.assertFalse(os.path.exists(os.path.join(dest, "editions")))
             self.assertFalse(
                 os.path.exists(os.path.join(dest, ".brother-edition")))
+
+
+class TheAllowlistNamesSbeLeavesNotTheBareDirectory(unittest.TestCase):
+    """Security finding, 2026-09-04: a bare `.sbe` line in
+    docs/plan/EXPORT-ALLOWLIST.txt swept in whatever the hub happens to
+    track under that directory later, with no review at export time. The
+    real allowlist now names the tracked leaf paths individually; a new
+    file added under .sbe in future must never export until it, too, is
+    named."""
+
+    def test_the_real_allowlist_has_no_bare_sbe_entry(self):
+        entries = EP.load_allowlist()
+        self.assertNotIn(".sbe", entries)
+        self.assertTrue(any(e.startswith(".sbe/") for e in entries), entries)
+
+    def test_an_unlisted_new_file_under_sbe_does_not_export(self):
+        with tempfile.TemporaryDirectory() as root, \
+             tempfile.TemporaryDirectory() as dest:
+            _make_fake_root(root, {
+                ".sbe/kept.json": "{}\n",
+                ".sbe/new-untracked-by-the-allowlist.json": "{}\n",
+            })
+            allowlist = ["scripts", ".sbe/kept.json"]  # the new file unlisted
+            copied = EP.build_export_tree(dest, allowlist, root=root)
+            self.assertIn(".sbe/kept.json", copied)
+            self.assertTrue(
+                os.path.isfile(os.path.join(dest, ".sbe", "kept.json")))
+            self.assertFalse(os.path.exists(os.path.join(
+                dest, ".sbe", "new-untracked-by-the-allowlist.json")))
 
 
 class TheExportedProductManifestDescribesTheExportedBytes(unittest.TestCase):
@@ -709,8 +1122,9 @@ class TheCommitIsExactlyTheGatedTree(unittest.TestCase):
                 with open(manifest_path, encoding="utf-8") as fh:
                     self.assertIn("tracked.csv", fh.read())
 
-            code, lines = EP.push_appended(self.ALLOWLIST, remote_dir,
-                                           "main", root=root)
+            with _fake_gh():
+                code, lines = EP.push_appended(self.ALLOWLIST, remote_dir,
+                                               "main", root=root)
             self.assertEqual(code, EP.EXIT_OK, lines)
 
             subprocess.run(["git", "clone", "-q", remote_dir, clone_dir],
@@ -766,8 +1180,9 @@ class TheCommitIsExactlyTheGatedTree(unittest.TestCase):
                     probe, "products", "myproduct", "__pycache__")))
                 self.assertFalse(os.path.exists(os.path.join(probe, ".sbe")))
 
-            code, lines = EP.push_appended(allowlist, remote_dir, "main",
-                                           root=root)
+            with _fake_gh():
+                code, lines = EP.push_appended(allowlist, remote_dir, "main",
+                                               root=root)
             self.assertEqual(code, EP.EXIT_OK, lines)
 
             subprocess.run(["git", "clone", "-q", remote_dir, clone_dir],
@@ -797,7 +1212,7 @@ class TheCommitIsExactlyTheGatedTree(unittest.TestCase):
                 fh.write("hub tracks this; the denylist withholds it\n")
             _git_track_all(root)
 
-            with mock.patch.object(
+            with _fake_gh(), mock.patch.object(
                     EP, "load_denylist",
                     return_value=["products/myproduct/withheld.md"]):
                 code, lines = EP.push_appended(self.ALLOWLIST, remote_dir,
@@ -859,8 +1274,10 @@ class TheExportersOwnInvocationPasses(unittest.TestCase):
                 os.path.join(root, "ALLOWLIST.txt"), ["scripts", "clean.md"])
             terms_path = _write_lines(
                 os.path.join(root, "terms.txt"), ["FAKETERM-NEVER-PRESENT"])
+            gh_bin = self.enterContext(_fake_gh())
             env = dict(os.environ)
             env["BROTHER_PRIVATE_TERMS"] = terms_path
+            self.assertTrue(os.path.isfile(os.path.join(gh_bin, "gh")))
 
             dry = _run_cli(["--allowlist", allowlist_path, "--root", root,
                              "--remote", remote_dir, "--branch", "main",
@@ -927,6 +1344,7 @@ class TheExportersOwnInvocationPasses(unittest.TestCase):
                 os.path.join(root, "ALLOWLIST.txt"), ["scripts", "clean.md"])
             terms_path = _write_lines(
                 os.path.join(root, "terms.txt"), ["FAKETERM-NEVER-PRESENT"])
+            self.enterContext(_fake_gh())
             env = dict(os.environ)
             env["BROTHER_PRIVATE_TERMS"] = terms_path
 
@@ -974,10 +1392,15 @@ class ABrandNewRemoteIsStartedOnlyWithBootstrap(unittest.TestCase):
     outgoing range against a remote that has nothing to fetch (g pins that
     shape: origin/HEAD set, origin/main..HEAD exactly one commit)."""
 
-    ALLOWLIST = ["scripts", "clean.md"]
+    ALLOWLIST = ["scripts", "clean.md", "README.md"]
 
     def _export_root(self, root):
         _make_fake_root(root, {"clean.md": "first export, clean\n"})
+        # rows E67 and E70: cases b and e tag, and a tagged export tree
+        # must carry its own readiness gate and a README whose prove
+        # command really runs there
+        _seed_tag_time_needs(root)
+        _git_track_all(root)
 
     def _count(self, remote_dir, branch):
         return subprocess.run(
@@ -1223,12 +1646,16 @@ class ATagRefusesAnExportTreeItsOwnProductsCannotVerify(unittest.TestCase):
     root) plus a miniature product borrowing brothersbe's real
     checksums.sh and verify-install.sh, never test-only stand-ins."""
 
-    ALLOWLIST = ["scripts", "products/myproduct"]
+    ALLOWLIST = ["scripts", "products/myproduct", "README.md"]
 
-    def _seed_product(self, root):
+    def _seed_product(self, root, gate=None, readme=None, prove_exit=0):
         _make_fake_root(root, {
             "products/myproduct/kept.md": "kept content, shipped\n",
         })
+        # rows E67 and E70: a TAGGED export tree must carry its own
+        # readiness gate and a README whose prove command runs there
+        _seed_tag_time_needs(root, gate=gate or READY_GATE_STUB,
+                             readme=readme, prove_exit=prove_exit)
         scripts = os.path.join(root, "products", "myproduct", "scripts")
         os.makedirs(scripts, exist_ok=True)
         shutil.copy2(REAL_PRODUCT_CHECKSUMS_SH,
@@ -1270,8 +1697,8 @@ class ATagRefusesAnExportTreeItsOwnProductsCannotVerify(unittest.TestCase):
                     fh.write("%s  ghost.md\n" % ("0" * 64))
                 return copied
 
-            with mock.patch.object(EP, "build_export_tree",
-                                   side_effect=stale_build):
+            with _fake_gh(), mock.patch.object(EP, "build_export_tree",
+                                               side_effect=stale_build):
                 code, lines = EP.push_appended(
                     self.ALLOWLIST, remote_dir, "main", root=root,
                     tag="v9.9.9")
@@ -1290,8 +1717,10 @@ class ATagRefusesAnExportTreeItsOwnProductsCannotVerify(unittest.TestCase):
              tempfile.TemporaryDirectory() as root:
             _seed_bare_remote(remote_dir)
             self._seed_product(root)
-            code, lines = EP.push_appended(
-                self.ALLOWLIST, remote_dir, "main", root=root, tag="v9.9.9")
+            with _fake_gh():
+                code, lines = EP.push_appended(
+                    self.ALLOWLIST, remote_dir, "main", root=root,
+                    tag="v9.9.9")
             self.assertEqual(code, EP.EXIT_OK, lines)
             verified = [l for l in lines if l.startswith("verified: ")]
             self.assertEqual(len(verified), 1, lines)
@@ -1308,8 +1737,127 @@ class ATagRefusesAnExportTreeItsOwnProductsCannotVerify(unittest.TestCase):
             self.assertEqual(int(m.group(1)),
                              len(shipped.strip().splitlines()))
             self.assertNotIn("ci/internal.md", shipped)
+            # rows E67 and E70: the three tag-time checks below the product
+            # verifiers each print their own summary line, not merely a
+            # pass/fail, so a reader can see what was actually proven.
+            self.assertIn("readiness: GATE: every critical item is proven",
+                          lines)
+            self.assertIn("links: 0 resolved, 0 external skipped, 0 dead",
+                          lines)
+            self.assertIn(
+                "prove: python3 scripts/test_fixture_prove.py exit 0", lines)
             self.assertTrue(any(l.startswith("TAGGED") for l in lines), lines)
             self.assertEqual(self._remote_state(remote_dir), ("2", ["v9.9.9"]))
+
+    def _refused_tag(self, remote_dir, root):
+        """A tagged push of the seeded fixture, asserted to have refused and
+        to have written nothing: the seed commit stands alone and no tag
+        exists. Returns the gate lines."""
+        with _fake_gh():
+            code, lines = EP.push_appended(
+                self.ALLOWLIST, remote_dir, "main", root=root, tag="v9.9.9")
+        self.assertEqual(code, EP.EXIT_REFUSED, lines)
+        self.assertFalse(any(l.startswith(("PUSHED", "TAGGED"))
+                             for l in lines), lines)
+        self.assertEqual(self._remote_state(remote_dir), ("1", []))
+        return lines
+
+    def test_h_a_not_ready_readiness_gate_refuses_the_tagged_push(self):
+        """Row E67's refusal, which NOT_READY_GATE_STUB was written for and
+        which nothing ever passed to _seed_tag_time_needs: the constant sat
+        in this file referenced nowhere, so the negative fixture existed and
+        the code never read it. test_f above proves only the READY side, and
+        a check_readiness_gate that returned (True, ...) for every tree
+        would satisfy it."""
+        with tempfile.TemporaryDirectory() as remote_dir, \
+             tempfile.TemporaryDirectory() as root:
+            _seed_bare_remote(remote_dir)
+            self._seed_product(root, gate=NOT_READY_GATE_STUB)
+            lines = self._refused_tag(remote_dir, root)
+            self.assertTrue(any(l.startswith(
+                "REFUSED: the export tree's own readiness gate does not "
+                "read READY") for l in lines), lines)
+            # the gate's own verdict is quoted, so a reader sees WHAT was
+            # unproven rather than merely that something was
+            self.assertIn("Restore drill (NO-DATA)", "\n".join(lines))
+            # fail fast: the later checks never ran
+            self.assertFalse(any(l.startswith("prove: ") for l in lines),
+                             lines)
+
+    def test_h2_the_refusal_quotes_the_gates_own_failing_item_lines(self):
+        """Measured 2026-09-04 on the 1.0.2 cut: the real gate prints a bare
+        "GATE: NOT READY." and names its unproven items on separate lines,
+        so the refusal quoted a verdict that said nothing about WHICH item
+        was unproven, and the blocker had to be reproduced by hand in a
+        rebuilt export tree. test_h above never caught it because its stub
+        crams the item onto the GATE: line."""
+        with tempfile.TemporaryDirectory() as remote_dir, \
+             tempfile.TemporaryDirectory() as root:
+            _seed_bare_remote(remote_dir)
+            self._seed_product(root, gate=REAL_SHAPE_NOT_READY_GATE_STUB)
+            lines = self._refused_tag(remote_dir, root)
+            self.assertTrue(any(l.startswith(
+                "REFUSED: the export tree's own readiness gate does not "
+                "read READY") for l in lines), lines)
+            self.assertIn("  gate item: Restore drill (NO-DATA)", lines)
+
+    def test_i_a_readme_prove_command_that_dies_refuses_the_tagged_push(self):
+        """Row E70's exact defect, driven for the first time: a command the
+        README names as its own proof, which exits non-zero in a fresh
+        clone. `_seed_tag_time_needs`'s prove_exit parameter defaulted to 0
+        at all five of its call sites, so this branch had never run."""
+        with tempfile.TemporaryDirectory() as remote_dir, \
+             tempfile.TemporaryDirectory() as root:
+            _seed_bare_remote(remote_dir)
+            self._seed_product(root, prove_exit=1)
+            lines = self._refused_tag(remote_dir, root)
+            self.assertIn(
+                "prove: python3 scripts/test_fixture_prove.py exit 1", lines)
+            self.assertTrue(any(l.startswith(
+                "REFUSED: the README names python3 "
+                "scripts/test_fixture_prove.py as its own proof and it "
+                "fails on the export tree") for l in lines), lines)
+            # the failing command's own last line, so the refusal names what
+            # broke rather than only that something did
+            self.assertIn("fixture prove", "\n".join(lines))
+
+    def test_j_a_dead_readme_link_refuses_and_a_live_one_is_counted(self):
+        """Row E70's other half. The only assertion on this gate was
+        "links: 0 resolved, 0 external skipped, 0 dead", which a
+        check_markdown_links returning ("", []) for every tree would satisfy
+        exactly: neither the resolve path nor the refusal had ever run. Both
+        run here, on the same fixture, differing only in the README."""
+        live = "[kept](products/myproduct/kept.md)"
+        prove = "Prove it with `python3 scripts/test_fixture_prove.py`.\n"
+        with tempfile.TemporaryDirectory() as remote_dir, \
+             tempfile.TemporaryDirectory() as root:
+            _seed_bare_remote(remote_dir)
+            self._seed_product(
+                root, readme="# Fixture\n\n%s and [gone](docs/missing.md)\n\n%s"
+                             % (live, prove))
+            lines = self._refused_tag(remote_dir, root)
+            self.assertIn("dead link: README.md points at docs/missing.md, "
+                          "which the export tree does not carry", lines)
+            # the resolving link was counted, so the refusal is about the
+            # dangling target and not about the gate rejecting every link
+            self.assertIn("links: 1 resolved, 0 external skipped, 1 dead",
+                          lines)
+            self.assertFalse(any(l.startswith("prove: ") for l in lines),
+                             lines)
+        with tempfile.TemporaryDirectory() as remote_dir, \
+             tempfile.TemporaryDirectory() as root:
+            _seed_bare_remote(remote_dir)
+            self._seed_product(
+                root, readme="# Fixture\n\n%s\n\n%s" % (live, prove))
+            with _fake_gh():
+                code, lines = EP.push_appended(
+                    self.ALLOWLIST, remote_dir, "main", root=root,
+                    tag="v9.9.9")
+            self.assertEqual(code, EP.EXIT_OK, lines)
+            self.assertIn("links: 1 resolved, 0 external skipped, 0 dead",
+                          lines)
+            self.assertEqual(self._remote_state(remote_dir),
+                             ("2", ["v9.9.9"]))
 
     def test_g_a_placeholder_release_note_refuses_the_tagged_push(self):
         with tempfile.TemporaryDirectory() as remote_dir, \
@@ -1322,13 +1870,16 @@ class ATagRefusesAnExportTreeItsOwnProductsCannotVerify(unittest.TestCase):
                     % (EP.SOURCE_REVISION_HEADER,
                        EP.SOURCE_REVISION_PLACEHOLDER),
             })
+            _seed_tag_time_needs(root)
+            _git_track_all(root)
             # _make_fake_root stages files (git add) so build_export_tree's
             # git-ls-files walk can see them, but never commits: HEAD stays
             # unborn, so hub_head_rev still finds nothing and the stamp
             # still cannot fire, the exact 0.9.11 shape this pins.
-            code, lines = EP.push_appended(
-                ["scripts", "docs"], remote_dir, "main", root=root,
-                tag="v9.9.9")
+            with _fake_gh():
+                code, lines = EP.push_appended(
+                    ["scripts", "docs", "README.md"], remote_dir, "main",
+                    root=root, tag="v9.9.9")
             self.assertEqual(code, EP.EXIT_REFUSED, lines)
             self.assertIn("REFUSED: docs/releases/9.9.9.md still carries the "
                           "placeholder source revision; a tag must carry the "
@@ -1352,9 +1903,15 @@ class ATagRefusesAnExportTreeItsOwnProductsCannotVerify(unittest.TestCase):
                          "and is unusable.\n"
                          % (EP.SOURCE_REVISION_HEADER,
                             EP.SOURCE_REVISION_PLACEHOLDER))
+            _seed_tag_time_needs(export_dir)
             ok, lines = EP.tag_time_checks(export_dir, "9.9.9")
             self.assertTrue(ok, lines)
-            self.assertEqual(lines, [])  # no product, nothing to verify
+            # no product, so no verified: line; what this pins is that the
+            # quoted placeholder never produced a refusal
+            self.assertFalse(any(l.startswith("REFUSED") for l in lines),
+                             lines)
+            self.assertFalse(any(l.startswith("verified:") for l in lines),
+                             lines)
 
 
 class TheReleaseRecordShipsItsOwnSourceRevision(unittest.TestCase):
@@ -1390,6 +1947,7 @@ class TheReleaseRecordShipsItsOwnSourceRevision(unittest.TestCase):
             _make_fake_root(root, {
                 "docs/releases/9.9.9.md": "# Brother 9.9.9\n\nnotes.\n",
             })
+            _seed_tag_time_needs(root)
             self._git("init", "-q", cwd=root)
             self._git("config", "user.name", "Hub", cwd=root)
             self._git("config", "user.email", "hub@example.com", cwd=root)
@@ -1399,9 +1957,10 @@ class TheReleaseRecordShipsItsOwnSourceRevision(unittest.TestCase):
                 ["git", "-C", root, "rev-parse", "HEAD"],
                 capture_output=True, text=True, check=True).stdout.strip()
 
-            code, lines = EP.push_appended(
-                ["scripts", "docs"], remote_dir, "main", root=root,
-                tag="v9.9.9")
+            with _fake_gh():
+                code, lines = EP.push_appended(
+                    ["scripts", "docs", "README.md"], remote_dir, "main",
+                    root=root, tag="v9.9.9")
             self.assertEqual(code, EP.EXIT_OK, lines)
             self.assertTrue(
                 any("stamped" in l and head in l for l in lines), lines)
@@ -1467,5 +2026,330 @@ class TheReleaseRecordShipsItsOwnSourceRevision(unittest.TestCase):
             self.assertEqual(text, original)
 
 
+class TheRealExportTreeIsWhatTheReadmeSendsAReaderTo(unittest.TestCase):
+    """BO2, against the REAL allowlist and the REAL hub tree, because the
+    2026-09-04 docs honesty audit found its defects in a fresh clone and
+    nothing in this repository looked at the exported tree the way that
+    clone did. check_markdown_links and check_readme_prove_commands landed
+    with row E70 and had no test of their own, so the only thing that would
+    have caught a re-narrowed allowlist was a person cutting a tag.
+
+    Everything here is read from the export tree build_export_tree really
+    produces, never from the hub checkout: the hub carries docs/plan and
+    docs/for-engineers whether or not they export, which is exactly how the
+    v1.0.1 defects survived a green hub."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp(prefix="export-real-tree-")
+        cls.tree = os.path.join(cls.tmp, "tree")
+        os.makedirs(cls.tree)
+        cls.copied = EP.build_export_tree(cls.tree, EP.load_allowlist())
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def readme_link_closure(self, tree=None):
+        """Every page reachable from the export tree's README.md by
+        following relative markdown links, and every dead target found on
+        the way. This is the docs honesty auditor's own scope, the front
+        page and the guides it links, walked transitively so a page added
+        to the allowlist without its neighbours is caught here rather than
+        by the next reader."""
+        tree = tree or self.tree
+        seen = set()
+        dead = []
+        queue = ["README.md"]
+        while queue:
+            rel = queue.pop()
+            if rel in seen:
+                continue
+            seen.add(rel)
+            path = os.path.join(tree, rel)
+            if not path.endswith(".md") or not os.path.isfile(path):
+                continue
+            with open(path, encoding="utf-8") as fh:
+                text = fh.read()
+            base = os.path.dirname(path)
+            for target in EP.MD_LINK_RE.findall(text):
+                if target.startswith(("http://", "https://", "mailto:",
+                                      "#")):
+                    continue
+                target_path = target.split("#", 1)[0]
+                if not target_path:
+                    continue
+                full = os.path.abspath(os.path.join(base, target_path))
+                root = os.path.abspath(tree)
+                inside = (full == root or full.startswith(root + os.sep))
+                if inside and os.path.exists(full):
+                    queue.append(os.path.relpath(full, tree))
+                else:
+                    dead.append("%s points at %s" % (rel, target))
+        return sorted(seen), dead
+
+    def test_every_link_reachable_from_the_readme_resolves(self):
+        """v1.0.1 shipped three dead links out of README.md's six, and the
+        three guides it now carries link onward to eight more pages. The
+        whole set has to be in the export, or a reader following the
+        "Choose your path" table lands on nothing, which is what the
+        2026-09-04 audit did."""
+        pages, dead = self.readme_link_closure()
+        self.assertEqual(dead, [], "\n".join(dead))
+        self.assertGreater(len(pages), 6, pages)
+
+    def test_the_v1_0_1_allowlist_shape_is_still_refused(self):
+        """The positive control, so the test above is known to
+        discriminate rather than to pass on any tree at all. The public tag
+        v1.0.1 carried README.md and the two vault pages and neither guide
+        directory, and its "Choose your path" table sent three of four
+        readers nowhere. Built here from that same narrower allowlist, over
+        the CURRENT README, the walk must still find them dead."""
+        narrow = os.path.join(self.tmp, "v101")
+        os.makedirs(narrow, exist_ok=True)
+        EP.build_export_tree(narrow, ["README.md", "LICENSE",
+                                      "docs/explanation/VAULT.md",
+                                      "docs/how-to/USE-THE-VAULT.md"])
+        _pages, dead = self.readme_link_closure(narrow)
+        for target in ("docs/for-engineers/00-START-HERE.md",
+                       "docs/for-engineers/STARTUP-WEEK.md",
+                       "docs/for-analysts/00-START-HERE.md"):
+            self.assertIn("README.md points at %s" % target, dead, dead)
+
+    def test_the_whole_tree_link_check_names_only_pages_outside_that_reach(
+            self):
+        """check_markdown_links reads EVERY .md the export carries, and
+        today it refuses on product documentation whose private siblings
+        the M6 allowlist deliberately withholds (30 targets under
+        products/, 2026-09-04). That is a real blocker for a tag and it is
+        not this row's: what this asserts is that none of those dead links
+        sits on a page a reader reaches from the front door, so the two
+        problems never get confused for each other."""
+        ok, lines = EP.check_markdown_links(self.tree)
+        pages, _dead = self.readme_link_closure()
+        reachable = set(pages)
+        for line in lines:
+            if not line.startswith("dead link: "):
+                continue
+            page = line[len("dead link: "):].split(" points at ")[0]
+            self.assertNotIn(
+                page, reachable,
+                "a page a reader reaches from README.md carries a dead "
+                "link: %s" % line)
+        if ok:
+            self.assertTrue(any(l.startswith("links: ") for l in lines),
+                            lines)
+
+    def test_the_readme_paths_the_choose_your_path_table_names_are_carried(
+            self):
+        """The exact three the auditor clicked, named here so a failure
+        says which page went missing rather than only 'a link is dead'."""
+        with open(os.path.join(self.tree, "README.md"), encoding="utf-8") as fh:
+            readme = fh.read()
+        for target in ("docs/for-engineers/00-START-HERE.md",
+                       "docs/for-engineers/STARTUP-WEEK.md",
+                       "docs/for-analysts/00-START-HERE.md"):
+            self.assertIn(target, readme, target)
+            self.assertTrue(os.path.isfile(os.path.join(self.tree, target)),
+                            "README.md links %s and the export tree does "
+                            "not carry it" % target)
+
+    def test_every_readme_prove_command_names_a_script_the_tree_carries(self):
+        """The full check runs each suite (minutes); this asserts the
+        cheap half of it, that the file exists at all, for every command."""
+        with open(os.path.join(self.tree, "README.md"), encoding="utf-8") as fh:
+            commands = EP.readme_prove_commands(fh.read())
+        self.assertTrue(commands, "README.md names no prove command")
+        for command in commands:
+            rel = command.split()[-1]
+            self.assertTrue(os.path.isfile(os.path.join(self.tree, rel)),
+                            "README.md names %s and the export tree does "
+                            "not carry %s" % (command, rel))
+
+    def test_the_battery_proof_the_readme_names_really_runs_in_the_export(
+            self):
+        """Row E70's own defect, driven where it happened: in a fresh clone
+        of v1.0.1 this command died with FileNotFoundError on docs/plan/
+        BATTERY-EXPECTATIONS.json, which the allowlist did not carry. Run,
+        not proxied on the file's presence, because the file being there is
+        not the same claim as the README's proof reproducing."""
+        rel = os.path.join("scripts", "test_battery_verdict.py")
+        self.assertTrue(os.path.isfile(os.path.join(self.tree, rel)), rel)
+        proc = EP._run(["python3", rel], self.tree, timeout=600)
+        text = ((proc.stdout or "") + (proc.stderr or "")).strip()
+        self.assertEqual(proc.returncode, 0,
+                         "the README names this as its own proof and it "
+                         "fails on the export tree:\n%s"
+                         % "\n".join(text.splitlines()[-15:]))
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheCodexArtifactsShipAndCarryNoMachinePath(unittest.TestCase):
+    """Ship gate 6, rows C4 and C6: every Codex artifact reaches the public
+    tree, and nothing machine-local rides out with it.
+
+    THE TWO HALVES ARE ONE TEST FOR A REASON. A Codex artifact that does not
+    export leaves a Codex user with a package they cannot install; an artifact
+    that exports carrying an absolute path under one person's home leaves them
+    with a package that only works on that person's machine, and leaks the
+    layout of it. Both were live findings when this was written: `AGENTS.md`
+    was on the allowlist AND on the denylist, and the denylist wins, so the
+    file Codex reads as a project's standing instructions never left the hub;
+    and `scripts/test_codex_package.py` named the canonical validator by an
+    absolute path under one home, which is why it now resolves it from
+    `pathlib.Path.home()`.
+
+    THE EXPORT TREE, NOT THE HUB. Every assertion below reads the tree
+    `build_export_tree` actually produces, through the exporter's own code, so
+    it measures what would ship rather than a second opinion about the
+    allowlist.
+    """
+
+    #: Absolute paths already in the tree before this gate existed, each named
+    #: individually with what it is. Declared at PATH granularity on purpose:
+    #: a suite-level exemption would hide the next leak as well as this one,
+    #: which is the whole failure this list is shaped to avoid. It is not a
+    #: Codex artifact and does not sit under an agent runtime's configuration
+    #: directory; it is outside rows C4 and C6 and is reported as a
+    #: pre-existing finding rather than fixed here, because fixing a fixture
+    #: belongs to whoever owns that file.
+    #:
+    #: docs/plan/RESTORE-DRILL-ENTERPRISE-RESULT.json LEFT THIS LIST on
+    #: 2026-09-04: it named the worktree the drill ran in, so the gate that
+    #: exists to catch machine-local paths was standing aside for the one
+    #: file that carried one. scripts/restore_drill_enterprise.py now writes
+    #: a repository-relative tools path and no scratch path at all, and the
+    #: gate protects the record like every other exported file.
+    PRE_EXISTING_ABSOLUTE_PATHS = {
+        "products/brothersbe/tools/test_sbe_first_contact_paths.py":
+            "a test fixture's vendor path, BrotherSBE's own file",
+    }
+
+    #: What a Codex user must find in a clone. Files, never directories: a
+    #: directory that exists but is empty would satisfy a looser check.
+    CODEX_ARTIFACTS = (
+        "AGENTS.md",
+        ".agents/plugins/marketplace.json",
+        "bundle/.codex-plugin/plugin.json",
+        "bundle/codex-skills/STRIPPED.json",
+        "docs/codex/PACKAGE-SHAPE.md",
+        "docs/codex/HOOKS-MAPPING.md",
+    )
+
+    #: A home-anchored configuration directory for either agent runtime. This
+    #: is the shape that makes an exported file unusable anywhere but one
+    #: machine, so it is refused outright rather than counted.
+    #: The placeholder names are excluded here for the same reason they are
+    #: excluded below: `/home/user/.claude/projects/...` in
+    #: products/brothermode/docs/HOOKS.md is Claude's own documented hook
+    #: payload, written for a reader, and refusing it would be refusing the
+    #: documentation rather than a leak.
+    RUNTIME_CONFIG_PATH = re.compile(
+        r"/(?:Users|home)/(?!you\b|user\b|<)"
+        r"[A-Za-z0-9._-]+/\.(?:codex|claude)\b")
+
+    #: The home directory of the machine BUILDING the export, taken from the
+    #: environment rather than written down. Measured over this tree
+    #: 2026-09-04: every other home-shaped string in it is a documentation
+    #: placeholder (/Users/j, /Users/jane, /home/runner, /Users/you and a
+    #: dozen more), so a pattern matching "any home" would fail on sixteen
+    #: kinds of prose while saying nothing about portability. The real
+    #: property is narrower and exactly checkable: a file that names THIS
+    #: machine's home only works on THIS machine.
+
+    @classmethod
+    def setUpClass(cls):
+        allowlist = EP.load_allowlist()
+        if allowlist is None:
+            raise unittest.SkipTest(
+                "NO-DATA: no export allowlist, so nothing can be measured")
+        cls.dest = tempfile.mkdtemp(prefix="codex-portability-")
+        # build_export_tree narrates its manifest regeneration on stdout.
+        with contextlib.redirect_stdout(sys.stderr):
+            cls.copied = EP.build_export_tree(cls.dest, allowlist)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(getattr(cls, "dest", ""), ignore_errors=True)
+
+    def exported_text_files(self):
+        """(relative posix path, text) for every readable text file in the
+        export tree. A file that is not UTF-8 is binary and carries no path
+        string to find, so it is skipped rather than guessed at."""
+        for dirpath, dirnames, filenames in os.walk(self.dest):
+            dirnames[:] = [d for d in dirnames if d != ".git"]
+            for name in filenames:
+                full = os.path.join(dirpath, name)
+                rel = os.path.relpath(full, self.dest).replace(os.sep, "/")
+                try:
+                    with open(full, encoding="utf-8") as fh:
+                        yield rel, fh.read()
+                except (OSError, UnicodeDecodeError):
+                    continue
+
+    def test_every_codex_artifact_reaches_the_exported_tree(self):
+        missing = [rel for rel in self.CODEX_ARTIFACTS
+                   if not os.path.isfile(os.path.join(self.dest,
+                                                      *rel.split("/")))]
+        self.assertEqual(
+            missing, [],
+            "the export drops %s; check EXPORT-ALLOWLIST.txt AND "
+            "EXPORT-DENYLIST.txt, since a denylist line wins over an "
+            "allowlist one" % ", ".join(missing))
+
+    def test_the_generated_codex_skills_ship_with_their_content(self):
+        """The mirror ships as skills, not as an empty directory plus a
+        record. bundle/codex-skills/STRIPPED.json alone would satisfy the
+        artifact list above while shipping no skill at all."""
+        root = os.path.join(self.dest, "bundle", "codex-skills")
+        self.assertTrue(os.path.isdir(root),
+                        "bundle/codex-skills did not export")
+        skills = sorted(
+            name for name in os.listdir(root)
+            if os.path.isfile(os.path.join(root, name, "SKILL.md")))
+        self.assertTrue(
+            skills, "bundle/codex-skills exported with no SKILL.md under it")
+
+    def test_no_exported_file_names_a_runtime_config_directory(self):
+        """~/.codex and ~/.claude, the two directories that make an exported
+        file work on exactly one machine. No exception list: this shape has no
+        legitimate reason to ship."""
+        hits = []
+        for rel, text in self.exported_text_files():
+            for line_no, line in enumerate(text.splitlines(), 1):
+                if self.RUNTIME_CONFIG_PATH.search(line):
+                    hits.append("%s:%d" % (rel, line_no))
+        self.assertEqual(
+            hits, [],
+            "exported file(s) name a home-anchored .codex or .claude path, so "
+            "they only work on the machine that wrote them: "
+            + ", ".join(hits))
+
+    def test_no_new_exported_file_names_this_machines_home(self):
+        """Wider than the case above, and therefore carrying the two named
+        pre-existing paths. A file appearing here that is not on that list is
+        a NEW leak and fails."""
+        home = os.path.expanduser("~")
+        if not home or home == "~" or home in ("/", ""):
+            self.skipTest("NO-DATA: this machine reports no home directory, "
+                          "so there is no path to look for")
+        offenders = set()
+        for rel, text in self.exported_text_files():
+            if home in text:
+                offenders.add(rel)
+        unexpected = sorted(offenders - set(self.PRE_EXISTING_ABSOLUTE_PATHS))
+        self.assertEqual(
+            unexpected, [],
+            "new exported file(s) carry an absolute path under a real home "
+            "directory: " + ", ".join(unexpected))
+        # A declared exception that stopped being true is a stale exception,
+        # and a reason nobody can point at is a reason to look, not to renew.
+        stale = sorted(set(self.PRE_EXISTING_ABSOLUTE_PATHS) - offenders)
+        self.assertEqual(
+            stale, [],
+            "these paths are declared here as pre-existing but no longer "
+            "carry a home directory; remove them from the list: "
+            + ", ".join(stale))

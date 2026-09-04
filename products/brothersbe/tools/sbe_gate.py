@@ -102,6 +102,13 @@ or under".
 import datetime, json, os, shutil, sys, re, subprocess, unicodedata
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# The package beside these tools, mounted the same way `sbe_decision_verify.py`
+# mounts it. `_receipt_still_binds` reads the receipt freshness rule out of
+# `brothersbe.evidence` rather than keeping a second copy of it here, and
+# without this line that import fails and the helper answers False for every
+# receipt: a rule that reads as "no" whatever the tree says.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__))), "src"))
 from sbe_checks import (Check, run_guarded, answered, answered_as, numeric, count,
                         derivation_fold, distinct, fold, one_line, say, skeleton, unit_of,
                         Pruner, scope_note, evidence_problem, unreadable_identity_words,
@@ -494,7 +501,7 @@ def _current_head(root):
     return head or None
 
 
-def _commit_problem(d, head, rel):
+def _commit_problem(d, head, rel, root=None, full=None):
     """The FAIL sentence for a receipt whose recorded headCommit has moved on
     from the current HEAD, or None when there is nothing wrong.
 
@@ -523,10 +530,40 @@ def _commit_problem(d, head, rel):
         return ("%s: headCommit is %s, not a commit id string, so nothing here confirms "
                 "which commit this receipt covers" % (rel, type(claimed).__name__))
     if claimed != head:
+        # ONE RULE, ONE IMPLEMENTATION. This used to be exact equality, which
+        # this gate's own docstring above described as "the same mismatch
+        # src/brothersbe/evidence.py's own _check_commit already treats as a
+        # broken claim". It was not the same any more: that reader lets a
+        # receipt survive commits that changed nothing it covers, and this
+        # gate went on failing receipts the reader had called sound, which is
+        # how every hard-gate receipt in this estate's own release dossier
+        # read FAIL (roadmap row E83). Asking the reader is the fix; keeping a
+        # second copy of the rule in step by hand is not.
+        if root is not None and _receipt_still_binds(d, root, full):
+            return None
         return ("%s: headCommit %s is not the current head %s: this receipt is evidence for "
                 "a commit that is no longer checked out, the code it covered has moved, and a "
                 "stale receipt does not PASS" % (rel, claimed[:12], head[:12]))
     return None
+
+
+def _receipt_still_binds(d, root, full):
+    """`evidence.commit_binding_holds`, or False when this checkout cannot
+    answer at all.
+
+    FALSE IS THE SAFE HALF and it is what an unreadable answer returns: an
+    import that fails, a directory that is not a work tree, or a reader that
+    raises leaves the caller's stale finding exactly where it was. This never
+    turns a FAIL into a PASS on the strength of something it could not read.
+    """
+    try:
+        from brothersbe import evidence as evidence_mod
+    except ImportError:
+        return False
+    try:
+        return bool(evidence_mod.commit_binding_holds(d, root, full))
+    except (OSError, ValueError, TypeError, KeyError):
+        return False
 
 
 #: Set once in `main()` from `--require-headcommit`, the same module-global
@@ -967,7 +1004,7 @@ def gate_numbers(root):
         if d is None:
             unreadable.append("%s: %s" % (os.path.relpath(m, root), err))
             continue
-        bp = _commit_problem(d, head, os.path.relpath(m, root))
+        bp = _commit_problem(d, head, os.path.relpath(m, root), root, m)
         if bp:
             problems.append(bp)
         ub = _unbound_receipt_problem(d, head, os.path.relpath(m, root))
@@ -1144,7 +1181,7 @@ def gate_migration(root):
         if d is None:
             unreadable.append("%s: %s" % (rel, err))
             continue
-        bp = _commit_problem(d, head, rel)
+        bp = _commit_problem(d, head, rel, root, m)
         if bp:
             problems.append(bp)
         ub = _unbound_receipt_problem(d, head, rel)
@@ -1815,7 +1852,7 @@ def gate_ran(root):
             no_producer.append(finding)
             if STRICT_PRODUCER:
                 problems.append(finding)
-        bp = _commit_problem(d, head, os.path.relpath(m, root))
+        bp = _commit_problem(d, head, os.path.relpath(m, root), root, m)
         if bp:
             problems.append(bp)
         ub = _unbound_receipt_problem(d, head, os.path.relpath(m, root))
