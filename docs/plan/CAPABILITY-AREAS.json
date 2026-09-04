@@ -1,0 +1,69 @@
+[
+ {
+  "id": "1",
+  "name": "time to first useful action",
+  "contributor_does": "Points the tool at a real repository it has never seen and asks for one small, correct change, then times how long until something useful actually lands.",
+  "fails_when": "The test cannot produce a landed, correct change inside a fixed time budget, or the tool needs manual setup steps the test did not script."
+ },
+ {
+  "id": "2",
+  "name": "interrupt and redirect without losing state",
+  "contributor_does": "Starts a task, interrupts it mid-way with a new instruction, and checks that the original state and partial progress are not silently discarded.",
+  "fails_when": "The redirect drops earlier context, restarts from scratch, or corrupts the in-progress work instead of resuming it."
+ },
+ {
+  "id": "3",
+  "name": "partial diff acceptance",
+  "contributor_does": "Reviews a multi-hunk diff and accepts only some of the hunks, then confirms the rejected hunks never landed and the accepted ones did.",
+  "fails_when": "Accepting part of a diff also applies the rejected part, or the tool cannot express partial acceptance at all."
+ },
+ {
+  "id": "4",
+  "name": "monorepos and generated code",
+  "contributor_does": "Works inside a large monorepo with generated files present, asking for a change scoped to hand-written source only.",
+  "fails_when": "The tool edits generated files, loses track of package boundaries, or times out scanning the whole tree for a scoped change."
+ },
+ {
+  "id": "5",
+  "name": "terminal cancellation and hung command recovery",
+  "contributor_does": "Runs a long or hanging shell command through the tool, then cancels it and confirms the terminal and the session both return to a usable state.",
+  "fails_when": "Cancellation leaves the terminal wedged, the session hangs waiting on the dead process, or the next command inherits stale state."
+ },
+ {
+  "id": "6",
+  "name": "dirty trees and rebases preserving unrelated changes",
+  "contributor_does": "Works in a tree with uncommitted, unrelated changes already present, then rebases or pulls and confirms nothing unrelated was lost or clobbered.",
+  "fails_when": "An unrelated uncommitted change is overwritten, silently dropped, or the rebase requires manual conflict resolution the tool could not surface."
+ },
+ {
+  "id": "7",
+  "name": "choosing the right tests and telling not-run from passed",
+  "contributor_does": "Asks the tool to verify a change and checks that it runs the tests that actually cover the change, and reports a skipped or not-run test as distinct from a passed one.",
+  "fails_when": "The tool reports success when tests were skipped, not found, or never executed, or it runs an unrelated suite and calls that verification."
+ },
+ {
+  "id": "8",
+  "name": "safety without approval fatigue",
+  "contributor_does": "Runs a normal session of many small safe actions end to end and counts how many required a manual approval versus how many a reasonable policy would have let through.",
+  "fails_when": "Routine safe actions are gated as often as dangerous ones, training the contributor to rubber-stamp every prompt, or a genuinely dangerous action is let through with no gate at all."
+ },
+ {
+  "id": "9",
+  "name": "crash recovery and resumable sessions",
+  "contributor_does": "Kills the tool's process mid-task (SIGKILL, not a clean exit) and then resumes, checking whether the session picks back up from a known state.",
+  "fails_when": "The resumed session has no record of the in-flight work, duplicates completed work, or leaves an unowned lock or claim behind."
+ },
+ {
+  "id": "10",
+  "name": "everyday editor conveniences",
+  "contributor_does": "Uses the ordinary things an editor is expected to do all day: jump to definition, rename a symbol across files, inline diff view, undo a specific edit.",
+  "fails_when": "A rename misses a call site, jump to definition is unavailable or wrong, or undo affects more than the one edit the contributor asked to undo.",
+  "acceptance_classification_2026_08_30": "NO-DATA by design, not a gap to close. The area names IDE editor-surface behavior (LSP jump to definition, buffer-aware rename, inline diff rendering, keystroke-scoped undo) that Brother's door contract (one plain-language outcome in, one integrated verified git change out) cannot express: no cursor, buffer, or keystroke crosses that boundary. Incumbent it represented: IDE-integrated agents (Cursor-class). Brother covers the underlying need differently where it can: rename-across-files completeness is enforced by unit done-checks over every call site, targeted undo at unit granularity is area 3, and diffs ship in the delivery report. Testing only that slice and calling area 10 passed would overclaim against this area's own fails_when. Flip condition: Brother or its host growing an owned interactive editing surface, at which point the three sub-behaviors get real seams through that surface."
+ },
+ {
+  "id": "11",
+  "name": "operational credibility",
+  "contributor_does": "Checks whether the tool's own status, logs, and error messages are trustworthy enough that a contributor would believe them without re-deriving the truth by hand.",
+  "fails_when": "A status or log message contradicts the tool's actual observable behavior, or an error is silently swallowed instead of surfaced."
+ }
+]

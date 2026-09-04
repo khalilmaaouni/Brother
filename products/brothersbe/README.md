@@ -48,16 +48,23 @@ python3 tools/test_sbe.py
 python3 evals/run_evals.py
 ```
 
-The first checks the working tools. The second drives the verdict rules through their recorded cases and reports any regression.
+The first runs the working tools and exits nonzero on any failure. The second drives the verdict rules through their recorded cases and reports any regression. A check that needs a file this public export deliberately does not carry reports NO-DATA and names that file, which is not a pass.
 
-Verify the shipped files against their checksum manifest:
+Check an installed or downloaded copy against the manifest that shipped with it. This is the verifier, and it is the command to run first:
 
 ```bash
-sh scripts/checksums.sh CHECKSUMS.sha256
 bash scripts/verify-install.sh
 ```
 
-The first command refreshes the manifest for the current tree. The second refuses a missing, extra, or changed shipped file.
+It re-hashes the files the manifest names and reports how many matched, mismatched, were missing, were extra, or were not regular files, and it counts entries under excluded paths separately. Read the verdict for exactly what it claims: the files it examined agree with the manifest it was handed. It does not authenticate that manifest, and it says nothing about a path it excluded.
+
+The other command is the manifest WRITER, and only a maintainer preparing a release tree runs it:
+
+```bash
+sh scripts/checksums.sh CHECKSUMS.sha256
+```
+
+It rewrites CHECKSUMS.sha256 from whatever is on disk at that moment. Running it before verifying replaces the reference you meant to check against, so a modified tree would then verify clean against its own fresh manifest.
 
 ## A reviewer path
 
@@ -73,7 +80,7 @@ For a migration, do not treat the existence of a reverse file as proof that it r
 
 - BrotherSBE checks the evidence it is given. It does not guarantee that the right check was chosen.
 - NO-DATA does not fail a run by itself. A person must decide whether that unknown matters for this change.
-- The tool does not approve, merge, release, or deploy.
+- The work code path never runs a git merge, rebase, push, or deploy. `TestNoMergeLaw` in `tools/test_sbe_work.py` parses `src/brothersbe/work.py` and fails on any git argument vector whose first word is one of those four, and on any argument head that scan cannot read statically. Approval and release are a design limit, not a proven one: no check here establishes them.
 - It does not replace engineering, security, data, or quality review.
 - Platform-specific behavior needs evidence from the platform where it will run.
 - The current public tag is unsigned.

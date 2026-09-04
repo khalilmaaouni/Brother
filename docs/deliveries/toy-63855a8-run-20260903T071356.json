@@ -8,6 +8,7 @@
       "exit_code": 0,
       "file": "mathlib.py",
       "output_location": "~/.claude/brother-run/docs/plan/runs/20260903T071356-make-add-refuse-non-numeric-input-with-a/run.log",
+      "output_location_scope": "machine-local",
       "reason": "",
       "state": "verified",
       "unit": "guard"
@@ -18,6 +19,7 @@
       "exit_code": 0,
       "file": "test_mathlib.py",
       "output_location": "~/.claude/brother-run/docs/plan/runs/20260903T071356-make-add-refuse-non-numeric-input-with-a/run.log",
+      "output_location_scope": "machine-local",
       "reason": "this unit depends on guard, and its check was never re-run with that change reverted, so nothing shows the check exercises it",
       "state": "no-data",
       "unit": "test"
@@ -27,5 +29,15 @@
   "name": "make add() refuse non-numeric input with a clear error, on the toy repository",
   "recorded_by": "agent",
   "ref": "toy-63855a8-run-20260903T071356",
+  "run": {
+    "receipt_digest": "sha256:9cce4d5fd4dd9fa6cb5be54a48260ab765a2c096053bc2a2787dbf22ab6526d9",
+    "receipt_files": [
+      "W-make-add-refuse-nonnumeric-input-with-a-.json",
+      "claims.json"
+    ],
+    "run_dir_in_repository": false,
+    "run_dir_local": "~/.claude/brother-run/docs/plan/runs/20260903T071356-make-add-refuse-non-numeric-input-with-a",
+    "run_id": "20260903T071356-make-add-refuse-non-numeric-input-with-a"
+  },
   "words": "Accepted by delegation: on 2026-09-03 at about 13:25 the founder wrote, fable, go ahead and take all actions on my behalf. What is accepted is the guard: its check fails at the revision before and passes after, reproduced from clean clones by the evidence auditor. The test unit's own line reads NO-DATA under the engine's rule of the same day (its check still passes with the guard reverted), and the README says so beside the run."
 }

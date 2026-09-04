@@ -18,6 +18,21 @@ sys.path.insert(0, SCRIPTS)
 import accept_delivery as ad  # noqa: E402
 import pattern_note as P  # noqa: E402
 
+# E100: one sandbox for every temp tree this process makes, removed at exit.
+import os as _e100_os, sys as _e100_sys  # noqa: E402
+_e100_sys.path.append(_e100_os.path.join(
+    _e100_os.path.dirname(_e100_os.path.abspath(__file__)), '.'))
+try:  # noqa: E402
+    import tmp_sandbox as _e100_tmp
+    _e100_tmp.install()
+except ImportError:
+    # A packager (scripts/export_public.py, make_benchmark_bundle.py)
+    # can copy this test without scripts/tmp_sandbox.py beside it. Say
+    # so rather than dying: the sandbox is hygiene, not the subject.
+    _e100_sys.stderr.write(
+        "tmp_sandbox absent: %s leaves its temp trees behind\n"
+        % _e100_os.path.basename(__file__))
+
 
 class RecordFunction(unittest.TestCase):
     def setUp(self):
@@ -37,6 +52,21 @@ class RecordFunction(unittest.TestCase):
         self.assertEqual(entry["recorded_by"], "person")
         self.assertNotIn("delegation", entry)
         self.assertEqual(entry["words"], "looks right")
+
+    def test_a_record_with_no_receipt_reads_NO_DATA_in_its_checks_field(self):
+        """E94: omitting the field made a record that proves nothing the
+        same shape on disk as one that never claimed to, which is exactly
+        how the shipped record read. NO-DATA with its reason, never an
+        absent key and never an empty list."""
+        ok, path = ad.record("no receipt was given", "sha-no-receipt",
+                             "Khalil Maaouni", "2026-09-04", "person",
+                             directory=self.tmp)
+        self.assertTrue(ok, path)
+        with open(path, encoding="utf-8") as fh:
+            entry = json.load(fh)
+        self.assertEqual(entry["checks"], "NO-DATA")
+        self.assertIn("--run-dir", entry["checks_reason"])
+        self.assertNotIn("run", entry)
 
     def test_words_is_optional_and_omitted_when_blank(self):
         ok, path = ad.record("no words given", "sha-abc123", "Khalil Maaouni",
@@ -398,6 +428,57 @@ class ChecksDerivedFromARunDirectory(unittest.TestCase):
             entry = json.load(fh)
         self.assertEqual([c["file"] for c in entry["checks"]], ["mathlib.py"])
 
+    def test_the_record_names_the_run_by_identity_not_only_a_local_path(self):
+        """E94: a path is not an identity. A record written from a run
+        carries that run's id and a digest over the receipt bytes its
+        checks were read from, and says whether the path beside them is one
+        a reader of this repository can open."""
+        out = os.path.join(self.tmp, "deliveries-identity")
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            code = ad.main([
+                "--name", "toy delivery", "--ref", "toy-identity",
+                "--accepted-by", "Khalil Maaouni",
+                "--accepted-at", "2026-09-04", "--recorded-by", "person",
+                "--run-dir", self.run, "--dir", out,
+                "--pattern-root", os.path.join(self.tmp, "vault")])
+        self.assertEqual(code, 0, buf.getvalue())
+        with open(ad.record_path("toy-identity", out), encoding="utf-8") as fh:
+            entry = json.load(fh)
+        run = entry["run"]
+        self.assertEqual(run["run_id"], os.path.basename(self.run))
+        self.assertTrue(run["receipt_digest"].startswith("sha256:"), run)
+        self.assertEqual(len(run["receipt_digest"]), len("sha256:") + 64)
+        self.assertEqual(run["receipt_files"],
+                         ["W-toy.json", "claims.json"])
+        self.assertFalse(run["run_dir_in_repository"])
+        for check in entry["checks"]:
+            self.assertEqual(check["output_location_scope"], "machine-local")
+
+    def test_the_digest_changes_when_the_receipt_bytes_change(self):
+        """A digest that does not move when the receipt moves identifies
+        nothing. Drive it backwards: same directory, different claims."""
+        first, reason = ad.run_identity(self.run)
+        self.assertEqual(reason, "")
+        with open(os.path.join(self.run, "claims.json"), encoding="utf-8") as fh:
+            claims = json.load(fh)
+        claims["guard"]["evidence"]["exit_code"] = 1
+        with open(os.path.join(self.run, "claims.json"), "w",
+                  encoding="utf-8") as fh:
+            json.dump(claims, fh)
+        second, reason = ad.run_identity(self.run)
+        self.assertEqual(reason, "")
+        self.assertNotEqual(first["receipt_digest"], second["receipt_digest"])
+
+    def test_every_changed_file_carries_a_command_and_an_exit_code(self):
+        checks, reason = ad.checks_from_run_dir(self.run)
+        self.assertEqual(reason, "")
+        self.assertTrue(checks)
+        for check in checks:
+            self.assertTrue(str(check.get("file") or "").strip(), check)
+            self.assertTrue(str(check.get("check_command") or "").strip(), check)
+            self.assertIn("exit_code", check)
+
     def test_both_sources_of_checks_at_once_is_refused(self):
         buf = io.StringIO()
         with redirect_stderr(buf), self.assertRaises(SystemExit):
@@ -429,6 +510,30 @@ class EveryShippedDeliveryRecordCarriesItsPerFileChecks(unittest.TestCase):
                 "--run-dir or --checks-file." % entry.get("ref"))
             ok, reason = ad.receipt_door.require_per_file_checks(checks)
             self.assertTrue(ok, "%s: %s" % (entry.get("ref"), reason))
+
+    def test_no_shipped_record_cites_a_path_without_naming_its_run(self):
+        """E94: the shipped record's only pointer at its evidence was a run
+        directory under one machine's home, which no reader of this
+        repository can open. A record whose checks cite a machine-local
+        path must also carry the run's own identity."""
+        for entry in ad.load_all():
+            checks = entry.get("checks")
+            if not isinstance(checks, list):
+                continue
+            local = [c for c in checks
+                     if c.get("output_location_scope") != "in-repository"]
+            if not local:
+                continue
+            run = entry.get("run")
+            self.assertIsNotNone(
+                run,
+                "the shipped delivery record %r cites a run directory a "
+                "reader cannot open and names no run id or receipt digest "
+                "to identify the run by" % entry.get("ref"))
+            self.assertTrue(str(run.get("run_id") or "").strip(), run)
+            self.assertTrue(
+                str(run.get("receipt_digest") or "").startswith("sha256:"),
+                run)
 
     def test_each_check_names_a_file_and_a_command_a_stranger_could_run(self):
         for entry in ad.load_all():

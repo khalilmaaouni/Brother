@@ -278,6 +278,19 @@ what its entry recorded; its own verdict sentence states that limit.
 Re-checking content against the live page is a human job at review time. Full
 text: `docs/CITATIONS.md` (preamble), `docs/HOW-IT-WORKS.md` (section 6).
 
+Where the root ships a `CHECKSUMS.sha256`, that manifest is the shipped file
+list and its markdown entries are the scanned set. A manifest naming files the
+tree does not carry therefore leaves the scan scope unestablished, and the
+verdict is NO-DATA naming that root, never FAIL: the manifest and the missing
+files both belong to the named tree (for the default root, the installation
+itself), so the gap is that tree's packaging defect and never a finding about
+the repository being scored. NO-DATA is not a pass and never becomes one; a
+file that EXISTS and cannot be opened is still a gate severity FAIL, because a
+document this check cannot read can hide a URL the verdict would miss. Found
+as row E29: the published plugin 3.7.3 shipped a manifest naming 291 markdown
+files the install did not carry, and every user scoring their own clean
+repository read a gate FAIL about the vendor's tree.
+
 ## One uncited URL turned six tests red across two suites (FIXED 2026-08-18)
 
 Kept after the fix, in the same spirit as the Windows section below: the shape

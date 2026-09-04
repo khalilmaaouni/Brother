@@ -41,6 +41,21 @@ DOCS_PATH = os.path.join(os.path.dirname(HERE), "docs", "HOOKS.md")
 
 import importlib.util
 
+# E100: one sandbox for every temp tree this process makes, removed at exit.
+import os as _e100_os, sys as _e100_sys  # noqa: E402
+_e100_sys.path.append(_e100_os.path.join(
+    _e100_os.path.dirname(_e100_os.path.abspath(__file__)), '../../../scripts'))
+try:  # noqa: E402
+    import tmp_sandbox as _e100_tmp
+    _e100_tmp.install()
+except ImportError:
+    # A packager (scripts/export_public.py, make_benchmark_bundle.py)
+    # can copy this test without scripts/tmp_sandbox.py beside it. Say
+    # so rather than dying: the sandbox is hygiene, not the subject.
+    _e100_sys.stderr.write(
+        "tmp_sandbox absent: %s leaves its temp trees behind\n"
+        % _e100_os.path.basename(__file__))
+
 _spec = importlib.util.spec_from_file_location("bm_store", STORE_PATH)
 bs = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(bs)
@@ -327,6 +342,33 @@ class CalibratedFailOpen(FenceHookBase):
                 os.remove(p)
         decision, notes = self.decide(payload(self.OTHER, self.root))
         self._assert_fails_open(decision, notes, "no store at")
+
+    def test_calibrated_4b_the_printed_init_command_runs_from_the_project_root(self):
+        """E108: the fix-it command used to be a bare `tools/bm_store.py
+        init`, which only resolves relative to this file's own directory.
+        Whoever reads the refusal is standing in THEIR project root, not
+        here, so running the printed command verbatim from there raised
+        Errno 2 (measured 2026-09-04). The remedy must be the ABSOLUTE path
+        of the bm_store.py this hook actually loaded, so it is runnable
+        from wherever the refusal was shown, which this drives for real by
+        executing the exact command the hook printed."""
+        for suffix in ("", "-wal", "-shm"):
+            p = bs.store_path(self.root) + suffix
+            if os.path.exists(p):
+                os.remove(p)
+        decision, notes = self.decide(payload(self.OTHER, self.root))
+        self.assertAllowed(decision)
+        joined = " ".join(notes)
+        m = re.search(r"run `(python3 \S+ init)`", joined)
+        self.assertIsNotNone(
+            m, "no printed init command found in fail-open notes: %r" % joined)
+        cmd = m.group(1).split()
+        result = subprocess.run(cmd, cwd=self.root, capture_output=True,
+                                text=True)
+        self.assertEqual(
+            result.returncode, 0,
+            "the refusal's own printed command failed from the project "
+            "root %r: cmd=%r stderr=%r" % (self.root, cmd, result.stderr))
 
     def test_zero_byte_store_fails_open(self):
         self.claim("api", ["src/app.py"], self.label(self.VICTIM))

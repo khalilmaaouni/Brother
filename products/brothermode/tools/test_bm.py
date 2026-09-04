@@ -134,6 +134,21 @@ def _claims(root, lifecycle_uuid):
 
 import unittest
 
+# E100: one sandbox for every temp tree this process makes, removed at exit.
+import os as _e100_os, sys as _e100_sys  # noqa: E402
+_e100_sys.path.append(_e100_os.path.join(
+    _e100_os.path.dirname(_e100_os.path.abspath(__file__)), '../../../scripts'))
+try:  # noqa: E402
+    import tmp_sandbox as _e100_tmp
+    _e100_tmp.install()
+except ImportError:
+    # A packager (scripts/export_public.py, make_benchmark_bundle.py)
+    # can copy this test without scripts/tmp_sandbox.py beside it. Say
+    # so rather than dying: the sandbox is hygiene, not the subject.
+    _e100_sys.stderr.write(
+        "tmp_sandbox absent: %s leaves its temp trees behind\n"
+        % _e100_os.path.basename(__file__))
+
 
 def _cli_receipt(runner, root, cid):
     """Mint a real approval receipt THROUGH THE CLI and return its token.
@@ -3187,6 +3202,70 @@ class TestFinding4InstallVerifierSeesEveryEntryType(unittest.TestCase):
                              "project state at the install root must not "
                              "raise EXTRA:\n%s\n%s" % (r.stdout, r.stderr))
             self.assertIn("PASSED", r.stdout)
+
+    # -- E97, 2026-09-04. t5's failure-injection gauntlet forced line 195's
+    # `if [ "$actual" = "$expected" ]; then` to `if true` and no suite here
+    # noticed, because every test above plants an EXTRA or TYPESWAP entry
+    # rather than tampering the bytes of one already-manifested file. This
+    # closes exactly that gap.
+
+    def test_a_tampered_manifested_file_is_named_mismatch_then_restoring_passes(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = os.path.realpath(d)
+            self._make_install(root)
+            manifested = os.path.join(root, "tools", "bm_telemetry.py")
+            with io.open(manifested, encoding="utf-8") as fh:
+                original_bytes = fh.read()
+
+            r = self._verify(root)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertIn("PASSED", r.stdout)
+
+            with io.open(manifested, "a", encoding="utf-8") as fh:
+                fh.write("X")  # one tampered byte
+            r = self._verify(root)
+            self.assertNotEqual(r.returncode, 0,
+                                "a single tampered byte in a manifested file "
+                                "must not pass:\n%s\n%s" % (r.stdout, r.stderr))
+            self.assertIn("FAILED", r.stderr)
+            self.assertIn("MISMATCH:  tools/bm_telemetry.py", r.stdout)
+
+            with io.open(manifested, "w", encoding="utf-8") as fh:
+                fh.write(original_bytes)
+            r = self._verify(root)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertIn("PASSED", r.stdout)
+
+    def test_gutting_the_compare_to_always_true_misses_the_same_tamper(self):
+        """Proves the test above actually watches line 195: a throwaway copy
+        of verify-install.sh, kept OUTSIDE the install tree so it is never
+        itself walked as an unmanifested EXTRA entry, with only that one
+        comparison replaced by `if true`, reports PASSED over the identical
+        single-byte tamper the real script just caught above."""
+        compare_line = 'if [ "$actual" = "$expected" ]; then'
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as outside:
+            root = os.path.realpath(d)
+            self._make_install(root)
+            manifested = os.path.join(root, "tools", "bm_telemetry.py")
+            with io.open(manifested, "a", encoding="utf-8") as fh:
+                fh.write("X")
+
+            real_script = os.path.join(root, "scripts", "verify-install.sh")
+            with io.open(real_script, encoding="utf-8") as fh:
+                source = fh.read()
+            self.assertEqual(source.count(compare_line), 1,
+                             "the compare line moved; update this fixture to match")
+            gutted = os.path.join(os.path.realpath(outside), "verify-install-gutted.sh")
+            with io.open(gutted, "w", encoding="utf-8") as fh:
+                fh.write(source.replace(compare_line, "if true; then"))
+            os.chmod(gutted, 0o755)
+
+            r = subprocess.run(
+                ["sh", gutted, os.path.join(root, "CHECKSUMS.sha256"), root],
+                capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertIn("PASSED", r.stdout)
+            self.assertNotIn("MISMATCH", r.stdout)
 
 
 def _identity_rows(root, name):

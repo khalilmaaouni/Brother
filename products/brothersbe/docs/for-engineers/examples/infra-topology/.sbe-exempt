@@ -1,0 +1,10 @@
+gates: approval
+reason: This is the teaching dossier, and its APPROVAL file is DESIGNED to fail:
+a bare typed name with no signature and no review id, kept that way because two
+guides paste that exact refusal as the lesson (see the CI note in
+docs/guides/01-quickstart.md, which scopes the real gates to the live dossier
+root for the same reason). This waiver exists so a whole-checkout scan of this
+repository reports the pedagogy as WAIVED with this reason printed, never as a
+FAIL of the repository's own controls and never as a PASS. The other three
+gates are not named: this example's numbers, migration and ran receipts are
+well-formed fixtures and are allowed to be read and judged as what they are.

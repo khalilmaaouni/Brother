@@ -16,9 +16,28 @@
 
 cd "$(dirname "$0")/.." || exit 1
 
+# E100. Two worktrees run this gate at the same time during a night run and
+# they share one $TMPDIR. Lane BM2's run once read a traceback out of lane
+# AW2's tree because the failure capture was keyed by check name alone. The
+# key is now the WORKTREE plus the pid, so two lanes can neither write nor
+# read each other's file.
+worktree_key="$(basename "$(pwd)")-$$"
+
 pass=0; fail=0; nodata=0
 failed_names=""
 nodata_names=""
+summary_printed=0
+
+# A gate that dies before its own summary (a killed lane, a full disk, a
+# peer's pkill) used to print nothing at all, which reads exactly like a
+# clean tail to whoever scrolls to the end. NO-DATA is never a pass, so say
+# so on the way out.
+early_exit_report() {
+  [ "$summary_printed" -eq 1 ] && return 0
+  echo
+  echo "NO-DATA: required-fast stopped after $((pass+fail+nodata)) check(s), before its own summary (worktree $worktree_key).  This is NOT a pass."
+}
+trap early_exit_report EXIT
 
 run_check() {
   name="$1"; shift
@@ -32,7 +51,7 @@ run_check() {
     2) nodata=$((nodata+1)); verdict="NO-DATA"; nodata_names="$nodata_names $name" ;;
     *) fail=$((fail+1));   verdict="FAIL   "; failed_names="$failed_names $name"
        # CAPTURE EVERYTHING, READ A SLICE (same estate lesson as check_all.sh).
-       keep="${TMPDIR:-/tmp}/required-fast-fail-$name-$$.txt"
+       keep="${TMPDIR:-/tmp}/required-fast-fail-$name-$worktree_key.txt"
        printf '%s\n' "$out" > "$keep" 2>/dev/null && last="$last  [full: $keep]"
        ;;
   esac
@@ -86,5 +105,6 @@ echo
 echo "pass $pass   fail $fail   no-data $nodata"
 [ -n "$failed_names" ] && echo "FAILED:$failed_names"
 [ -n "$nodata_names" ] && echo "NO-DATA:$nodata_names  (not a pass, and not a failure)"
+summary_printed=1
 [ "$fail" -eq 0 ] || exit 1
 exit 0

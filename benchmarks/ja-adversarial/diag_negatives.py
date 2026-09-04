@@ -6,11 +6,13 @@ relevant notes) is told apart from a small-corpus artifact (forbidden merely
 inside a wide top-k over a small note set). Read-only: it builds jbench's own
 in-memory fixture vault and runs its own _search; it changes no product code.
 
-Needs a BrotherModeUp checkout carrying the vault tools. Resolution order for
-that directory: $BROTHERMODEUP_TOOLS, else ~/Documents/BrotherModeUp/tools.
+Needs the vault tools that ship in this repository. Resolution order for
+that directory: $BROTHERMODEUP_TOOLS, else the in-tree sibling
+products/brothermode/tools (the shipped harness, bm_vault_jbench.py).
 The corpus defaults to the sibling adversarial-ja-corpus.json.
 
-Usage: BROTHERMODEUP_TOOLS=<bmu>/tools python3 diag_negatives.py [corpus.json]
+Usage: python3 diag_negatives.py [corpus.json]
+       BROTHERMODEUP_TOOLS=<other tools dir> python3 diag_negatives.py [corpus.json]
 """
 import importlib.util
 import json
@@ -18,16 +20,16 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-TOOLS = os.environ.get(
-    "BROTHERMODEUP_TOOLS",
-    os.path.expanduser("~/Documents/BrotherModeUp/tools"))
+IN_TREE_TOOLS = os.path.normpath(
+    os.path.join(HERE, "..", "..", "products", "brothermode", "tools"))
+TOOLS = os.environ.get("BROTHERMODEUP_TOOLS", IN_TREE_TOOLS)
 CORPUS = sys.argv[1] if len(sys.argv) > 1 else os.path.join(
     HERE, "adversarial-ja-corpus.json")
 
 JBENCH = os.path.join(TOOLS, "bm_vault_jbench.py")
 if not os.path.isfile(JBENCH):
     print("NO-DATA: bm_vault_jbench.py not found under %r; set "
-          "BROTHERMODEUP_TOOLS to a BrotherModeUp tools dir on origin/main"
+          "BROTHERMODEUP_TOOLS to a directory carrying it"
           % TOOLS)
     sys.exit(2)
 

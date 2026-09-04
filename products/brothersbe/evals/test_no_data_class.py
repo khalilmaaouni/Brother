@@ -580,6 +580,30 @@ NOT_A_VERDICT = {
     ("test_sbe_evidence.py", "_run_sbe"): "this suite's own fixture helper; returns (exit code, "
                                           "combined stdout+stderr) from running the CLI in a "
                                           "subprocess, not a verdict",
+    ("test_sbe_evidence.py", "_run_sbe_at"): "the same fixture helper in "
+                                             "TestReceiptFreshnessAcrossCommitsAndScopes, which "
+                                             "adds a cwd override; returns (exit code, combined "
+                                             "stdout+stderr) from running the CLI in a "
+                                             "subprocess, not a verdict. It was named _run_sbe "
+                                             "too until this reconciliation, and one exemption "
+                                             "cannot be reviewed for two bodies, so it carries "
+                                             "its own name and its own entry",
+    ("install.py", "check_origin_url"): "validates a remote.origin.url read out of git config "
+                                        "and returns (ok, refusal reason or None), a boolean and "
+                                        "an operator sentence, never a verdict string",
+    ("sbe_repo_scope.py", "installation_is_scoped"): "returns (scoped, diagnostic or None) for "
+                                                     "the scope marker file, a boolean and a "
+                                                     "reason the marker could not be read, not a "
+                                                     "verdict",
+    ("test_sbe_doctor_wiring.py", "_wiring_under"): "this suite's own fixture helper; runs `sbe "
+                                                    "doctor --json` in a subprocess and returns "
+                                                    "(the hooks-wiring check object parsed out of "
+                                                    "the doctor's own JSON, stdout plus stderr), "
+                                                    "so the verdict inside that object is the "
+                                                    "doctor's and this helper neither forms nor "
+                                                    "alters one; the same shape as "
+                                                    "_doctor_json_with_installed_plugins_record "
+                                                    "beside it",
     ("test_sbe_bash_guard.py", "_make_other_project"): "this suite's own fixture helper; "
                                                        "returns (the standin other project's "
                                                        "root path, the tool script path "

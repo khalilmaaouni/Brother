@@ -1333,9 +1333,16 @@ CAPABILITY_END = "<!-- END GENERATED CAPABILITY STATUS -->"
 # is not offered last. The meanings mirror the `source_of_truth` sentence in
 # capabilities.status.json, and tools/test_bm_docs.py refuses a register entry
 # carrying a state outside this set, so the two cannot drift apart in silence.
+# "proven in this tree today" was the certified meaning until 2026-09-04, row
+# E111. A Codex pass read the published v1.0.2 tag as a newcomer and called it
+# what it is: "today" is the day the register was last edited, not the day
+# anyone reads the page, and nothing on the page re-measures anything when a
+# reader opens it. The state now says what the row's own evidence says, which
+# is the only thing the register can honestly promise.
 CAPABILITY_STATES = (
     ("certified", "Certified",
-     "proven in this tree today by the evidence named"),
+     "proven by the evidence named in the row, on the date that evidence "
+     "records"),
     ("beta", "Beta", "real, with a named gap"),
     ("experimental", "Experimental", "built or planned, not measured"),
     ("unsupported", "Unsupported",
@@ -1421,9 +1428,18 @@ def render_capability_status(data):
         "",
         "Four states and no others, read out of `%s`%s: %s."
         % (CAPABILITY_REGISTER,
-           (", updated %s" % updated) if updated else "",
+           (", last edited %s" % updated) if updated else "",
            "; ".join("%s means %s" % (state, meaning)
                      for state, _heading, meaning in CAPABILITY_STATES)),
+        "",
+        # Row E111, 2026-09-04. Without this sentence a reader takes the date
+        # above for the date the rows were checked, and the block for a live
+        # verdict on the tree in front of them. It is neither: it is a
+        # generated copy of a file someone last edited on that date.
+        "That date is when the register was last edited, not a check that ran "
+        "when you opened this page: every row is proven by the evidence it "
+        "names, on the date that evidence records, and nothing here is "
+        "re-measured as you read it.",
     ]
     for state, heading, meaning in CAPABILITY_STATES:
         rows = [e for e in entries if e["state"] == state]
@@ -1598,7 +1614,7 @@ def render_roadmap_status(data):
         "",
         "Six proof states, mapped from the four states in `%s`%s: %s."
         % (CAPABILITY_REGISTER,
-           (", updated %s" % updated) if updated else "",
+           (", last edited %s" % updated) if updated else "",
            "; ".join("%s means %s" % (state, meaning)
                      for state, _heading, meaning in ROADMAP_STATES)),
         "",

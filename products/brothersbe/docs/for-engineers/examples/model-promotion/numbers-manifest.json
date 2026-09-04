@@ -1,0 +1,11 @@
+{
+  "figures": [
+    {
+      "label": "model_promotion_challenger_holdout_auc",
+      "snapshot_id": "snap_2026_02_14",
+      "query": "python3 compute_auc_rank.py holdout.csv  # Mann-Whitney rank-sum: (sum of positive ranks - n_pos*(n_pos+1)/2) / (n_pos*n_neg)",
+      "second_derivation": "python3 compute_auc_trapezoid.py holdout.csv  # trapezoidal integration of the ROC curve swept over every distinct score threshold",
+      "rerun": {"ran": true, "primary": 0.765625, "secondary": 0.765625}
+    }
+  ]
+}

@@ -318,9 +318,10 @@ def main(argv):
         _err("bm_shell: REFUSED. The fence FAILED OPEN, which means these "
              "paths were not checked at all, and an unchecked declared write "
              "must not be reported as a checked one. The hook's reason is the "
-             "line above. Fix that (usually: run `python3 tools/bm_store.py "
+             "line above. Fix that (usually: run `python3 %s/bm_store.py "
              "init` and claim the paths), or accept that this write is outside "
-             "mechanical protection and run it as plain Bash.")
+             "mechanical protection and run it as plain Bash."
+             % TOOLS)
         return EXIT_REFUSED
     if problems:
         _err("bm_shell: REFUSED. The fence rejected %d of %d declared path(s):"

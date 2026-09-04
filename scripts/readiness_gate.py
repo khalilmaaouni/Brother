@@ -51,7 +51,11 @@ RESTORE_DRILL_MAX_AGE_DAYS = 7
 #:   kind "suite":  `path` is a script run read-only (python3 <path>); its own
 #:                  exit code is the evidence. Missing file is NO-DATA.
 #:   kind "record": `path` is a JSON file recording a run, read for a boolean
-#:                  "passed" field. Missing file or field is NO-DATA.
+#:                  "passed" field AND bound to the code the run happened on
+#:                  (a `commit` that is an ancestor, or a `covered` list of
+#:                  files still byte identical). Missing file, missing field
+#:                  or missing binding is NO-DATA. An item may add
+#:                  "max_age_days" to also require a fresh `drill_date`.
 ITEMS = [
     {"id": "reproducible-benchmark", "title": "Reproducible benchmark",
      "critical": True, "kind": "suite",
@@ -79,7 +83,11 @@ ITEMS = [
                 "245 cases, six classes, per-class floors); this Brother-side wrapper runs "
                 "that tool as a black box to prove it from this repository"},
     {"id": "restore-drill", "title": "Restore drill",
-     "critical": True, "kind": "record", "bind_commit": True,
+     "critical": True, "kind": "record",
+     # Freshness is the ONE thing about this row that is drill specific, so
+     # it is the one thing the row declares. The commit and content binding
+     # is not declared here any more: every record item gets it (row E107).
+     "max_age_days": RESTORE_DRILL_MAX_AGE_DAYS,
      "path": os.path.join("docs", "plan", "RESTORE-DRILL-ENTERPRISE-RESULT.json"),
      "blocker": "no enterprise restore drill has proven the governed stores "
                 "(populated multi-tenant backup, destroy, restore, validate)"},
@@ -116,24 +124,6 @@ def _check_suite(root, relpath):
     return FAIL, "%s exit %d" % (relpath, proc.returncode)
 
 
-def _check_record(root, relpath, key="passed"):
-    """(verdict, evidence). Reads a recorded run's boolean field."""
-    path = os.path.join(root, relpath)
-    if not os.path.isfile(path):
-        return NODATA, "%s does not exist" % relpath
-    try:
-        with open(path, encoding="utf-8") as fh:
-            doc = json.load(fh)
-    except (OSError, ValueError) as exc:
-        return NODATA, "%s unreadable: %s" % (relpath, exc)
-    val = doc.get(key)
-    if val is True:
-        return PASS, "%s: %s=true" % (relpath, key)
-    if val is False:
-        return FAIL, "%s: %s=false" % (relpath, key)
-    return NODATA, "%s carries no boolean %r field" % (relpath, key)
-
-
 def _commit_is_ancestor(root, commit):
     """True if commit is an ancestor of (or equal to) root's current HEAD,
     False if git can positively say it is not, None if git could not answer
@@ -157,8 +147,9 @@ def _commit_is_ancestor(root, commit):
 
 
 def _covered_matches(root, doc):
-    """(ok, detail) for the drill record's CONTENT binding, the second half of
-    the ancestry binding below.
+    """(ok, detail) for a record's CONTENT binding, the second half of the
+    ancestry binding in _check_record below. Every record item is bound this
+    way, not only the restore drill (row E107).
 
     WHY A SECOND BINDING EXISTS. `scripts/export_public.py` builds the public
     tree as an ORPHAN commit (build_orphan_commit), so no hub commit is ever
@@ -195,21 +186,33 @@ def _covered_matches(root, doc):
     return True, "%d covered file(s)" % len(covered)
 
 
-def _check_restore_drill(root, relpath, key="passed", today=None):
-    """(verdict, evidence). Same shape as _check_record, but the restore
-    drill's PASS is bound to the code it actually ran on (evidence auditor,
-    2026-09-03: _check_record reads only passed=true, so a three-day-old
-    drill certified a tag it never ran against, and would keep certifying
-    every later commit forever). A record with no commit field, or one older
-    than RESTORE_DRILL_MAX_AGE_DAYS, reads NO-DATA naming the specific gap --
-    never a silent pass and never a FAIL, because neither state is a proven
-    break, only an unproven claim.
+def _check_record(root, relpath, key="passed", today=None, max_age_days=None):
+    """(verdict, evidence). A recorded run's boolean field, BOUND to the code
+    the run happened on. Every record item gets this binding; none opts in.
 
-    A commit that is NOT an ancestor falls through to the content binding
-    (_covered_matches), which is the same property measured a second way for
-    a history where ancestry cannot exist: the public export tree is an
-    orphan commit. All covered files identical reads PASS with the binding
-    named; any difference, or a record with no covered list, reads NO-DATA."""
+    WHY EVERY RECORD ITEM, not only the restore drill (row E107). Until
+    2026-09-04 the binding was a per-item `bind_commit` flag and the default
+    record path read only passed=true, which is exactly the defect the
+    evidence auditor found on the drill on 2026-09-03: an unbound record
+    certifies every later tree forever. A binding that has to be remembered
+    is one forgotten keyword away from not being there, and the item that
+    forgets it is critical by the time anyone notices. So the flag is gone
+    and the binding is the record contract itself.
+
+    TWO WAYS TO SATISFY IT, one property. Ancestry (`commit` is an ancestor
+    of HEAD) is the direct reading, and a public clone can never satisfy it:
+    scripts/export_public.py builds the export as an ORPHAN commit, so no hub
+    commit is an ancestor of it, and on 2026-09-04 that refused the 1.0.2 tag
+    with "foreign commit". Content (`covered`, a list of path plus sha256
+    still byte identical in this tree) is the same property measured
+    directly, and it is checkable in ANY history, which is what makes a
+    record verifiable by whoever clones the public repository.
+
+    A record with no commit field, or one whose binding cannot be satisfied
+    either way, reads NO-DATA naming the specific gap: never a silent pass,
+    and never a FAIL, because neither state is a proven break, only an
+    unproven claim. `max_age_days`, when the item declares one, adds a
+    freshness bar over the record's `drill_date` on top of the binding."""
     path = os.path.join(root, relpath)
     if not os.path.isfile(path):
         return NODATA, "%s does not exist" % relpath
@@ -221,7 +224,8 @@ def _check_restore_drill(root, relpath, key="passed", today=None):
 
     commit = doc.get("commit")
     if not commit:
-        return NODATA, "%s carries no commit field" % relpath
+        return NODATA, ("%s carries no commit field, so nothing binds it to the "
+                         "code it ran on" % relpath)
 
     content_note = ""
     is_ancestor = _commit_is_ancestor(root, commit)
@@ -234,28 +238,31 @@ def _check_restore_drill(root, relpath, key="passed", today=None):
         content_note = ("; bound by content: %s unchanged since %s"
                          % (covered_detail, commit[:12]))
 
-    drill_date = doc.get("drill_date")
-    if not drill_date:
-        return NODATA, "%s carries no drill_date field" % relpath
-    from datetime import date
-    try:
-        ran = date.fromisoformat(drill_date)
-    except ValueError:
-        return NODATA, "%s: drill_date %r is not an ISO date" % (relpath, drill_date)
-    today_date = date.fromisoformat(today) if today else date.today()
-    age_days = (today_date - ran).days
-    if age_days > RESTORE_DRILL_MAX_AGE_DAYS:
-        return NODATA, ("%s: drill_date %s is %d day(s) old, over the %d day "
-                         "freshness bar" % (relpath, drill_date, age_days,
-                                             RESTORE_DRILL_MAX_AGE_DAYS))
+    age_note = ""
+    if max_age_days is not None:
+        drill_date = doc.get("drill_date")
+        if not drill_date:
+            return NODATA, "%s carries no drill_date field" % relpath
+        from datetime import date
+        try:
+            ran = date.fromisoformat(drill_date)
+        except ValueError:
+            return NODATA, "%s: drill_date %r is not an ISO date" % (relpath, drill_date)
+        today_date = date.fromisoformat(today) if today else date.today()
+        age_days = (today_date - ran).days
+        if age_days > max_age_days:
+            return NODATA, ("%s: drill_date %s is %d day(s) old, over the %d day "
+                             "freshness bar" % (relpath, drill_date, age_days,
+                                                 max_age_days))
+        age_note = " age %d days" % age_days
 
     val = doc.get(key)
     if val is True:
-        return PASS, ("%s: %s=true commit %s age %d days%s"
-                       % (relpath, key, commit[:12], age_days, content_note))
+        return PASS, ("%s: %s=true commit %s%s%s"
+                       % (relpath, key, commit[:12], age_note, content_note))
     if val is False:
-        return FAIL, ("%s: %s=false commit %s age %d days%s"
-                       % (relpath, key, commit[:12], age_days, content_note))
+        return FAIL, ("%s: %s=false commit %s%s%s"
+                       % (relpath, key, commit[:12], age_note, content_note))
     return NODATA, "%s carries no boolean %r field" % (relpath, key)
 
 
@@ -265,10 +272,9 @@ def evaluate(root=ROOT, today=None):
     for spec in ITEMS:
         if spec["kind"] == "suite":
             verdict, evidence = _check_suite(root, spec["path"])
-        elif spec.get("bind_commit"):
-            verdict, evidence = _check_restore_drill(root, spec["path"], today=today)
         else:
-            verdict, evidence = _check_record(root, spec["path"])
+            verdict, evidence = _check_record(root, spec["path"], today=today,
+                                              max_age_days=spec.get("max_age_days"))
         if verdict == NODATA and spec["blocker"]:
             evidence = "%s -- %s" % (evidence, spec["blocker"])
         rows.append({"id": spec["id"], "title": spec["title"],

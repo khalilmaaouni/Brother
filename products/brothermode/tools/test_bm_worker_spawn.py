@@ -153,6 +153,17 @@ class RanButSaidSomethingUnreadable(unittest.TestCase):
         self.assertEqual(got["usage"], {"tokens_in": 100, "tokens_out": 40,
                                         "tokens_cached": 25})
 
+    def test_the_cache_write_count_rides_the_same_passthrough(self):
+        """E92: model_worker.py now also puts tokens_cache_write (the claude
+        CLI's cache_creation_input_tokens) in its cost dict, and without it
+        reaching brother_run no cache share can be computed at all."""
+        stdout = json.dumps({"worker_claim": "did it", "artifacts": ["a.py"],
+                             "cost": {"tokens_in": 30, "tokens_out": 40,
+                                      "tokens_cached": 22972,
+                                      "tokens_cache_write": 70272}})
+        w = S.SpawningWorker(["x"], runner=runner_returning(stdout=stdout))
+        self.assertEqual(w.run({})["usage"]["tokens_cache_write"], 70272)
+
     def test_no_usage_in_the_cost_dict_leaves_the_key_off_the_answer(self):
         """The backwards case, and today's ordinary shape (GOOD above): a
         cost dict with no tokens_in/out/cached must never manufacture a

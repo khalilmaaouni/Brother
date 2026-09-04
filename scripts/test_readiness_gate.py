@@ -20,6 +20,21 @@ from datetime import date, timedelta
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import readiness_gate as RG  # noqa: E402
 
+# E100: one sandbox for every temp tree this process makes, removed at exit.
+import os as _e100_os, sys as _e100_sys  # noqa: E402
+_e100_sys.path.append(_e100_os.path.join(
+    _e100_os.path.dirname(_e100_os.path.abspath(__file__)), '.'))
+try:  # noqa: E402
+    import tmp_sandbox as _e100_tmp
+    _e100_tmp.install()
+except ImportError:
+    # A packager (scripts/export_public.py, make_benchmark_bundle.py)
+    # can copy this test without scripts/tmp_sandbox.py beside it. Say
+    # so rather than dying: the sandbox is hygiene, not the subject.
+    _e100_sys.stderr.write(
+        "tmp_sandbox absent: %s leaves its temp trees behind\n"
+        % _e100_os.path.basename(__file__))
+
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -68,6 +83,22 @@ def _write_restore_drill(d, commit=None, drill_date=None, passed=True,
         doc["commit"] = commit
     if drill_date is not None:
         doc["drill_date"] = drill_date
+    if covered is not None:
+        doc["covered"] = covered
+    with open(os.path.join(d, rel), "w", encoding="utf-8") as fh:
+        json.dump(doc, fh)
+    return rel
+
+
+def _write_generic_record(d, commit=None, passed=True, covered=None,
+                           rel=os.path.join("docs", "r.json")):
+    """A record for an item that declares NO freshness bar, so it exercises
+    the record contract every kind "record" item now shares (row E107): the
+    commit and content binding, with no drill_date of its own."""
+    os.makedirs(os.path.join(d, os.path.dirname(rel)), exist_ok=True)
+    doc = {"passed": passed}
+    if commit is not None:
+        doc["commit"] = commit
     if covered is not None:
         doc["covered"] = covered
     with open(os.path.join(d, rel), "w", encoding="utf-8") as fh:
@@ -135,28 +166,25 @@ class AnItemIsGrantedByEvidenceNeverByAssertion(unittest.TestCase):
         self.assertEqual(verdict, RG.NODATA)
         self.assertIn("does not exist", evidence)
 
-    def test_a_record_with_passed_true_is_pass(self):
+    def test_a_bound_record_with_passed_true_is_pass(self):
         d = tempfile.mkdtemp()
-        rel = os.path.join("docs", "r.json")
-        os.makedirs(os.path.join(d, "docs"))
-        with open(os.path.join(d, rel), "w", encoding="utf-8") as fh:
-            json.dump({"passed": True}, fh)
+        sha = _init_git_repo(d)
+        rel = _write_generic_record(d, commit=sha, passed=True)
         self.assertEqual(RG._check_record(d, rel)[0], RG.PASS)
 
-    def test_a_record_with_passed_false_is_fail(self):
+    def test_a_bound_record_with_passed_false_is_fail(self):
         d = tempfile.mkdtemp()
-        rel = os.path.join("docs", "r.json")
-        os.makedirs(os.path.join(d, "docs"))
-        with open(os.path.join(d, rel), "w", encoding="utf-8") as fh:
-            json.dump({"passed": False}, fh)
+        sha = _init_git_repo(d)
+        rel = _write_generic_record(d, commit=sha, passed=False)
         self.assertEqual(RG._check_record(d, rel)[0], RG.FAIL)
 
-    def test_a_record_with_no_passed_field_is_no_data(self):
+    def test_a_bound_record_with_no_passed_field_is_no_data(self):
         d = tempfile.mkdtemp()
+        sha = _init_git_repo(d)
         rel = os.path.join("docs", "r.json")
-        os.makedirs(os.path.join(d, "docs"))
+        os.makedirs(os.path.join(d, "docs"), exist_ok=True)
         with open(os.path.join(d, rel), "w", encoding="utf-8") as fh:
-            json.dump({"something_else": True}, fh)
+            json.dump({"commit": sha, "something_else": True}, fh)
         self.assertEqual(RG._check_record(d, rel)[0], RG.NODATA)
 
     def test_a_no_data_verdict_names_the_blocking_wbs_row(self):
@@ -165,6 +193,89 @@ class AnItemIsGrantedByEvidenceNeverByAssertion(unittest.TestCase):
         tenancy = [r for r in rows if r["id"] == "tenancy-leakage-zero"][0]
         self.assertEqual(tenancy["verdict"], RG.NODATA)
         self.assertIn("VB3-03", tenancy["evidence"])
+
+
+class EveryRecordItemIsBoundNotOnlyTheOneThatOptedIn(unittest.TestCase):
+    """Row E107. Until 2026-09-04 the binding was a per-item `bind_commit`
+    flag and every other record item fell through to a checker that read
+    only passed=true. That is the same defect the evidence auditor found on
+    the drill on 2026-09-03, still live for the next record item anyone adds,
+    and a public clone could not have verified such an item at all. These
+    cases drive the new contract backwards: an unbound record can never PASS
+    on the generic path, a bound one PASSes without any drill_date, and the
+    content binding (the only one an orphan history can satisfy) works for a
+    record that declares no freshness bar."""
+
+    def test_an_unbound_record_with_passed_true_is_no_data_not_pass(self):
+        """The hole itself. Under the old contract this record read PASS."""
+        d = tempfile.mkdtemp()
+        _init_git_repo(d)
+        rel = _write_generic_record(d, commit=None, passed=True)
+        verdict, evidence = RG._check_record(d, rel)
+        self.assertEqual(verdict, RG.NODATA)
+        self.assertIn("no commit field", evidence)
+
+    def test_a_bound_record_needs_no_drill_date_when_no_bar_is_declared(self):
+        """Freshness stays the restore drill's own bar, declared by that item
+        as max_age_days, never imposed on every record."""
+        d = tempfile.mkdtemp()
+        sha = _init_git_repo(d)
+        rel = _write_generic_record(d, commit=sha, passed=True)
+        verdict, evidence = RG._check_record(d, rel)
+        self.assertEqual(verdict, RG.PASS)
+        self.assertNotIn("drill_date", evidence)
+        self.assertNotIn("age ", evidence)
+
+    def test_a_generic_record_binds_by_content_in_a_real_orphan_history(self):
+        """The public clone's shape: export_public builds an ORPHAN commit,
+        so ancestry cannot hold and content is the only readable binding."""
+        d = tempfile.mkdtemp()
+        sha = _init_git_repo(d)
+        entry = _write_covered_file(d, "scripts/covered_tool.py", "print(1)\n")
+        rel = _write_generic_record(d, commit=sha, passed=True, covered=[entry])
+        _make_orphan_head(d)
+        verdict, evidence = RG._check_record(d, rel)
+        self.assertEqual(verdict, RG.PASS)
+        self.assertIn("bound by content", evidence)
+        self.assertIn("1 covered file(s)", evidence)
+
+    def test_a_drifted_covered_file_sinks_a_generic_record_in_an_orphan_history(self):
+        d = tempfile.mkdtemp()
+        sha = _init_git_repo(d)
+        entry = _write_covered_file(d, "scripts/covered_tool.py", "print(1)\n")
+        rel = _write_generic_record(d, commit=sha, passed=True, covered=[entry])
+        _make_orphan_head(d)
+        with open(os.path.join(d, "scripts", "covered_tool.py"), "w",
+                   encoding="utf-8") as fh:
+            fh.write("print(2)\n")
+        verdict, evidence = RG._check_record(d, rel)
+        self.assertEqual(verdict, RG.NODATA)
+        self.assertIn("covered_tool.py", evidence)
+
+    def test_no_item_still_carries_the_retired_opt_in_flag(self):
+        """The flag is what made an unbound record possible: an item that
+        forgot it got the unbound checker silently. There is nothing to
+        forget any more, and this fails the moment someone reintroduces it."""
+        for spec in RG.ITEMS:
+            self.assertNotIn("bind_commit", spec, spec["id"])
+
+    def test_every_record_item_reads_no_data_when_its_record_is_unbound(self):
+        """The structural guard, run over ITEMS rather than over one hard
+        coded id, so a record item added later is covered the day it lands.
+        Each record item's own path is written with passed=true and no
+        commit, and the gate must refuse to certify any of them."""
+        record_items = [s for s in RG.ITEMS if s["kind"] == "record"]
+        self.assertTrue(record_items, "ITEMS holds no record item to bind")
+        for spec in record_items:
+            d = tempfile.mkdtemp()
+            _init_git_repo(d)
+            full = os.path.join(d, spec["path"])
+            os.makedirs(os.path.dirname(full), exist_ok=True)
+            with open(full, "w", encoding="utf-8") as fh:
+                json.dump({"passed": True, "drill_date": date.today().isoformat()}, fh)
+            row = [r for r in RG.evaluate(d) if r["id"] == spec["id"]][0]
+            self.assertEqual(row["verdict"], RG.NODATA, spec["id"])
+            self.assertIn("no commit field", row["evidence"], spec["id"])
 
 
 class TheRestoreDrillReadsNoDataForAnUnboundRecord(unittest.TestCase):
@@ -179,7 +290,8 @@ class TheRestoreDrillReadsNoDataForAnUnboundRecord(unittest.TestCase):
         d = tempfile.mkdtemp()
         sha = _init_git_repo(d)
         rel = _write_restore_drill(d, commit=sha, drill_date=date.today().isoformat())
-        verdict, evidence = RG._check_restore_drill(d, rel)
+        verdict, evidence = RG._check_record(
+            d, rel, max_age_days=RG.RESTORE_DRILL_MAX_AGE_DAYS)
         self.assertEqual(verdict, RG.PASS)
         self.assertIn(sha[:12], evidence)
         self.assertIn("age 0 days", evidence)
@@ -189,7 +301,8 @@ class TheRestoreDrillReadsNoDataForAnUnboundRecord(unittest.TestCase):
         _init_git_repo(d)
         foreign = "abc123def456abc123def456abc123def456abc"
         rel = _write_restore_drill(d, commit=foreign, drill_date=date.today().isoformat())
-        verdict, evidence = RG._check_restore_drill(d, rel)
+        verdict, evidence = RG._check_record(
+            d, rel, max_age_days=RG.RESTORE_DRILL_MAX_AGE_DAYS)
         self.assertEqual(verdict, RG.NODATA)
         self.assertIn(foreign[:12], evidence)
 
@@ -197,7 +310,8 @@ class TheRestoreDrillReadsNoDataForAnUnboundRecord(unittest.TestCase):
         d = tempfile.mkdtemp()
         _init_git_repo(d)
         rel = _write_restore_drill(d, commit=None, drill_date=date.today().isoformat())
-        verdict, evidence = RG._check_restore_drill(d, rel)
+        verdict, evidence = RG._check_record(
+            d, rel, max_age_days=RG.RESTORE_DRILL_MAX_AGE_DAYS)
         self.assertEqual(verdict, RG.NODATA)
         self.assertIn("no commit field", evidence)
 
@@ -206,7 +320,8 @@ class TheRestoreDrillReadsNoDataForAnUnboundRecord(unittest.TestCase):
         sha = _init_git_repo(d)
         stale = (date.today() - timedelta(days=RG.RESTORE_DRILL_MAX_AGE_DAYS + 1)).isoformat()
         rel = _write_restore_drill(d, commit=sha, drill_date=stale)
-        verdict, evidence = RG._check_restore_drill(d, rel)
+        verdict, evidence = RG._check_record(
+            d, rel, max_age_days=RG.RESTORE_DRILL_MAX_AGE_DAYS)
         self.assertEqual(verdict, RG.NODATA)
         self.assertIn("day(s) old", evidence)
 
@@ -215,14 +330,16 @@ class TheRestoreDrillReadsNoDataForAnUnboundRecord(unittest.TestCase):
         sha = _init_git_repo(d)
         edge = (date.today() - timedelta(days=RG.RESTORE_DRILL_MAX_AGE_DAYS)).isoformat()
         rel = _write_restore_drill(d, commit=sha, drill_date=edge)
-        verdict, _evidence = RG._check_restore_drill(d, rel)
+        verdict, _evidence = RG._check_record(
+            d, rel, max_age_days=RG.RESTORE_DRILL_MAX_AGE_DAYS)
         self.assertEqual(verdict, RG.PASS)
 
     def test_no_drill_date_field_is_no_data(self):
         d = tempfile.mkdtemp()
         sha = _init_git_repo(d)
         rel = _write_restore_drill(d, commit=sha, drill_date=None)
-        verdict, evidence = RG._check_restore_drill(d, rel)
+        verdict, evidence = RG._check_record(
+            d, rel, max_age_days=RG.RESTORE_DRILL_MAX_AGE_DAYS)
         self.assertEqual(verdict, RG.NODATA)
         self.assertIn("no drill_date field", evidence)
 
@@ -278,7 +395,8 @@ class TheRestoreDrillBindsByContentWhereAncestryCannotExist(unittest.TestCase):
 
     def test_unchanged_covered_files_pass_a_foreign_commit_naming_the_binding(self):
         d, rel, foreign = self._foreign_root(second=True)
-        verdict, evidence = RG._check_restore_drill(d, rel)
+        verdict, evidence = RG._check_record(
+            d, rel, max_age_days=RG.RESTORE_DRILL_MAX_AGE_DAYS)
         self.assertEqual(verdict, RG.PASS, evidence)
         self.assertIn("bound by content: 2 covered file(s) unchanged since %s"
                       % foreign[:12], evidence)
@@ -288,7 +406,8 @@ class TheRestoreDrillBindsByContentWhereAncestryCannotExist(unittest.TestCase):
         with open(os.path.join(d, *self.COVERED_REL.split("/")), "a",
                   encoding="utf-8") as fh:
             fh.write("# one byte of drift\n")
-        verdict, evidence = RG._check_restore_drill(d, rel)
+        verdict, evidence = RG._check_record(
+            d, rel, max_age_days=RG.RESTORE_DRILL_MAX_AGE_DAYS)
         self.assertEqual(verdict, RG.NODATA)
         self.assertIn(self.COVERED_REL, evidence)
         self.assertIn("has changed since the drill ran", evidence)
@@ -296,7 +415,8 @@ class TheRestoreDrillBindsByContentWhereAncestryCannotExist(unittest.TestCase):
     def test_a_missing_covered_file_is_no_data_naming_that_file(self):
         d, rel, _foreign = self._foreign_root()
         os.remove(os.path.join(d, *self.COVERED_REL.split("/")))
-        verdict, evidence = RG._check_restore_drill(d, rel)
+        verdict, evidence = RG._check_record(
+            d, rel, max_age_days=RG.RESTORE_DRILL_MAX_AGE_DAYS)
         self.assertEqual(verdict, RG.NODATA)
         self.assertIn(self.COVERED_REL, evidence)
         self.assertIn("unreadable", evidence)
@@ -306,7 +426,8 @@ class TheRestoreDrillBindsByContentWhereAncestryCannotExist(unittest.TestCase):
         _init_git_repo(d)
         rel = _write_restore_drill(d, commit="abc123def456abc123def456abc123def456abc",
                                     drill_date=date.today().isoformat())
-        verdict, evidence = RG._check_restore_drill(d, rel)
+        verdict, evidence = RG._check_record(
+            d, rel, max_age_days=RG.RESTORE_DRILL_MAX_AGE_DAYS)
         self.assertEqual(verdict, RG.NODATA)
         self.assertIn("foreign commit", evidence)
         self.assertIn("carries no covered list", evidence)
@@ -318,7 +439,8 @@ class TheRestoreDrillBindsByContentWhereAncestryCannotExist(unittest.TestCase):
         _init_git_repo(d)
         rel = _write_restore_drill(d, commit="abc123def456abc123def456abc123def456abc",
                                     drill_date=date.today().isoformat(), covered=[])
-        self.assertEqual(RG._check_restore_drill(d, rel)[0], RG.NODATA)
+        self.assertEqual(RG._check_record(
+            d, rel, max_age_days=RG.RESTORE_DRILL_MAX_AGE_DAYS)[0], RG.NODATA)
 
     def test_a_covered_entry_missing_its_hash_is_no_data(self):
         d = tempfile.mkdtemp()
@@ -327,7 +449,8 @@ class TheRestoreDrillBindsByContentWhereAncestryCannotExist(unittest.TestCase):
         rel = _write_restore_drill(d, commit="abc123def456abc123def456abc123def456abc",
                                     drill_date=date.today().isoformat(),
                                     covered=[{"path": self.COVERED_REL}])
-        verdict, evidence = RG._check_restore_drill(d, rel)
+        verdict, evidence = RG._check_record(
+            d, rel, max_age_days=RG.RESTORE_DRILL_MAX_AGE_DAYS)
         self.assertEqual(verdict, RG.NODATA)
         self.assertIn("no path or no sha256", evidence)
 
@@ -337,7 +460,8 @@ class TheRestoreDrillBindsByContentWhereAncestryCannotExist(unittest.TestCase):
         d = tempfile.mkdtemp()
         sha = _init_git_repo(d)
         rel = _write_restore_drill(d, commit=sha, drill_date=date.today().isoformat())
-        verdict, evidence = RG._check_restore_drill(d, rel)
+        verdict, evidence = RG._check_record(
+            d, rel, max_age_days=RG.RESTORE_DRILL_MAX_AGE_DAYS)
         self.assertEqual(verdict, RG.PASS)
         self.assertNotIn("bound by content", evidence)
 
@@ -353,14 +477,16 @@ class TheRestoreDrillBindsByContentWhereAncestryCannotExist(unittest.TestCase):
                                     covered=entries)
         _make_orphan_head(d)
         self.assertIs(RG._commit_is_ancestor(d, sha), False)
-        verdict, evidence = RG._check_restore_drill(d, rel)
+        verdict, evidence = RG._check_record(
+            d, rel, max_age_days=RG.RESTORE_DRILL_MAX_AGE_DAYS)
         self.assertEqual(verdict, RG.PASS, evidence)
         self.assertIn("bound by content: 1 covered file(s) unchanged since %s"
                       % sha[:12], evidence)
         with open(os.path.join(d, *self.COVERED_REL.split("/")), "a",
                   encoding="utf-8") as fh:
             fh.write("# drift\n")
-        self.assertEqual(RG._check_restore_drill(d, rel)[0], RG.NODATA)
+        self.assertEqual(RG._check_record(
+            d, rel, max_age_days=RG.RESTORE_DRILL_MAX_AGE_DAYS)[0], RG.NODATA)
 
     def test_evaluate_reads_ready_end_to_end_on_a_foreign_commit_bound_by_content(self):
         """Through the real evaluate()/main() path, not the helper alone."""

@@ -1,0 +1,165 @@
+{
+  "id": "hostile-japanese-identity",
+  "name": "Hostile Japanese Identity",
+  "frozen_at": "2026-09-05",
+  "status": "SPECIFIED, PARTLY RUN: the corpus and the harness exist and have scored once; the mutation and fresh-qualification arms have not run",
+  "source": {
+    "document": "SWITCHING-STRATEGY-2026-09-04.md",
+    "sections": [7, 19, 20],
+    "gauntlet_section": "20.5"
+  },
+  "zone": {
+    "id": 6,
+    "name": "Japanese Enterprise Trust",
+    "section": "7, Zone 6"
+  },
+  "workload_families": [
+    {"n": 12, "name": "hostile Japanese identity/disambiguation task"}
+  ],
+  "seeded_conditions": [
+    "corporate legal names",
+    "bank vs shinkin",
+    "parent/subsidiary",
+    "branch/business-unit identity",
+    "same-reading/different-kanji entities",
+    "near-identical legal names",
+    "geography",
+    "attribute contradictions",
+    "OCR-like confusables",
+    "explicit negative evidence"
+  ],
+  "seeded_conditions_note": "The ten strings above are section 7 Zone 6's own focus list, copied without addition; section 20.5 states the measures rather than the seeds, so the seeds come from the zone. The frozen blind corpus at benchmarks/ja-adversarial/adversarial-ja-corpus.json already carries these traps: its own result document names bank versus shinkin confusion, parent versus subsidiary, homophone kanji companies, near identical names differing by one token, attribute swap and contradictory statement traps, and OCR-like character substitutions. The corpus was authored blind, by an author with no sight of the ranking behaviour, and it is FROZEN: it must not be edited to raise a score.",
+  "fairness_controls": [
+    "starting repository",
+    "model where possible",
+    "task instruction",
+    "hardware/environment",
+    "maximum human interventions",
+    "scoring rubric before execution"
+  ],
+  "fairness_notes": {
+    "starting repository": "The vault under test is pinned to a named revision and the corpus file is pinned by its own commit. A score without both is not comparable to any other score.",
+    "model where possible": "No model runs in this gauntlet: retrieval is deterministic, which is why this is the one gauntlet whose numbers repeat exactly. That is a property to state, not to hide.",
+    "task instruction": "Each case's query is data in the frozen corpus and is never rewritten at run time.",
+    "hardware/environment": "One machine. The dictionary terms must sit under _meta.dictionary_terms, which is where the harness reads them; the blind author placed them under a 'dictionary' key and the earlier result recorded that mismatch honestly.",
+    "maximum human interventions": "Zero. A tuned query is a tuned corpus.",
+    "scoring rubric before execution": "The per class floors are the harness's own and predate this file; scoring_rubric below is frozen with it."
+  },
+  "fairness_controls_not_applicable": {
+    "token budget": "The scoring path spends no model tokens: the harness builds its fixture vault and runs the ranker in process, so there is no budget to freeze."
+  },
+  "metrics": [
+    {
+      "metric": "TASK CORRECTNESS",
+      "status": "measured",
+      "instrument": "products/brothermode/tools/bm_vault_jbench.py",
+      "row": "E4",
+      "proved": "The blind corpus re-scored after the disambiguation fix: negative class 1 of 13 to 12 of 13, overall 64 of 78 to 75 of 78, exit 0, 78 of 78 cases intact, with the 245 case team benchmark undisturbed at 245 of 245."
+    },
+    {
+      "metric": "FALSE PASS COUNT",
+      "status": "measured",
+      "instrument": "benchmarks/ja-adversarial/diag_negatives.py",
+      "row": "E4",
+      "proved": "The rank diagnostic reports where the forbidden note actually ranks per failing negative, which is what tells a genuine false positive from a small corpus artifact. On the pre-fix run it printed ranks [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 4, 6], establishing the weakness was real."
+    },
+    {
+      "metric": "DEFECTS DETECTED",
+      "status": "partial",
+      "instrument": "scripts/mutation_gate.py",
+      "row": "R27",
+      "proved": "The estate has a working pattern for asking whether a check really kills: four bounded mutants at named seams, each killed by a named observer, and the unkillable one reported rather than hidden.",
+      "gap": "Its four mutant classes are seeded in this estate's own engine modules, not in the ranker. Mutation sensitivity as section 20.5 means it, breaking the disambiguation mechanism on purpose and watching the negative class fall, has no harness: nothing today mutates the fused ranker and re-scores the corpus."
+    },
+    {
+      "metric": "TIME TO OUTCOME",
+      "status": "partial",
+      "instrument": "products/brothermode/tools/test_bm_vault_speed.py",
+      "row": "E4",
+      "proved": "A speed test exists beside the vault tools, so retrieval latency has a home.",
+      "gap": "No published score of this corpus carries a time, and the result document reports accuracy only. Time is not part of the Zone 6 win condition, so it is recorded for completeness rather than scored."
+    },
+    {
+      "metric": "NO-DATA HONESTY",
+      "status": "partial",
+      "instrument": "scripts/test_japanese_threshold.py",
+      "row": "E4",
+      "proved": "The readiness gate's japanese-threshold item is proven from a Brother side witness rather than assumed from a merge in the other repository, so an unproven threshold reads as unproven.",
+      "gap": "Row E96 is OPEN on exactly this class of dishonesty inside this benchmark directory: benchmarks/ja-adversarial/ADVERSARIAL-JA-RESULT-2026-08-31.md still declares the pre-fix 1 of 13 while a fresh run of the shipped harness on the same frozen corpus scores 12 of 13. A stale published number is a truthfulness defect even when it is the pessimistic one, and this gauntlet cannot be reported clean while that row is open."
+    }
+  ],
+  "measures_outside_the_fifteen": [
+    {
+      "measure": "requested entity rank",
+      "from": "section 20.5",
+      "status": "measured",
+      "instrument": "benchmarks/ja-adversarial/diag_negatives.py"
+    },
+    {
+      "measure": "forbidden candidate rank",
+      "from": "section 20.5",
+      "status": "measured",
+      "instrument": "benchmarks/ja-adversarial/diag_negatives.py"
+    },
+    {
+      "measure": "margin between the two ranks",
+      "from": "section 20.5",
+      "status": "partial",
+      "instrument": "benchmarks/ja-adversarial/diag_negatives.py",
+      "would_require": "The diagnostic prints the forbidden note's rank per failing negative. The margin, the distance between the requested entity and the forbidden one, is derivable from the same search but is not printed today, so it is reported NO-DATA until the diagnostic prints both ranks per case."
+    },
+    {
+      "measure": "negative-class accuracy",
+      "from": "section 20.5",
+      "status": "measured",
+      "instrument": "products/brothermode/tools/bm_vault_jbench.py"
+    },
+    {
+      "measure": "mutation sensitivity",
+      "from": "section 20.5",
+      "status": "none",
+      "instrument": "NO INSTRUMENT YET",
+      "would_require": "A harness that disables or perturbs the disambiguation mechanism in the fused ranker and re-scores the frozen corpus, so a claim that the mechanism matters rests on the score falling when it is removed. Without it, a high score is consistent with the mechanism doing nothing."
+    },
+    {
+      "measure": "fresh unseen qualification",
+      "from": "section 7, Zone 6",
+      "status": "none",
+      "instrument": "NO INSTRUMENT YET",
+      "would_require": "A second corpus authored blind, after the fix, by an author who has not seen the first one or the ranker. The 2026-08-31 corpus can no longer measure generalization for a system that has since been fixed against it; it now measures regression, which is a different and lesser claim."
+    }
+  ],
+  "scoring_rubric": {
+    "fixed_before_execution": true,
+    "rules": [
+      "The corpus is frozen. A number that rises only after the corpus is edited is not progress and is reported as an edit, not a score.",
+      "Per class scores are published with their floors, never an overall percentage alone.",
+      "A negative case passes only when the forbidden note stays out of the top k, with k stated.",
+      "Every published score names the vault revision and the corpus commit. A score without both is NO-DATA.",
+      "The mutation arm and the fresh qualification arm read NO-DATA until their harnesses exist. They are never inferred from the frozen corpus score.",
+      "No claim of universal Japanese ability. The claim is the measured qualification and nothing wider, which is section 7 Zone 6's own instruction."
+    ]
+  },
+  "win_condition": {
+    "section": "7, Zone 6",
+    "text": [
+      "standard Japanese benchmark: 100%",
+      "frozen blind adversarial benchmark: 100%",
+      "negative/disambiguation class: 100%",
+      "fresh unseen qualification: 100%",
+      "mutation tests prove the mechanism matters"
+    ],
+    "met_when": "All five hold at once on a named vault revision. Today the first is met at 245 of 245, the second and third are close but not met at 75 of 78 and 12 of 13, and the fourth and fifth have no harness at all.",
+    "caution": "Do not claim universal Japanese perfection. Claim only the measured qualification."
+  },
+  "raw_artifacts": {
+    "rule": "Publish raw artifacts. Do not publish only a synthetic score.",
+    "root": "benchmarks/ja-adversarial/ plus docs/plan/runs/gauntlet-hostile-japanese-identity-<date>/",
+    "contents": [
+      "the frozen corpus file itself, unedited, at benchmarks/ja-adversarial/adversarial-ja-corpus.json",
+      "the harness output per class with its floors, in the shape of benchmarks/ja-adversarial/ADVERSARIAL-JA-RESULT-2026-08-31.md",
+      "the per case rank diagnostic output",
+      "the vault revision and the corpus commit, in the same file as the score"
+    ]
+  }
+}

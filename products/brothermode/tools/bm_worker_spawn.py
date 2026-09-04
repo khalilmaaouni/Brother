@@ -27,9 +27,10 @@ recording adapter did not already do.
 
 USAGE, an ADDITIVE key on top of that contract, present only when the child's
 own "cost" carried real numbers under tokens_in / tokens_out / tokens_cached
-(scripts/model_worker.py, forwarding the claude CLI's own --output-format
-json usage object): run(brief) then also carries "usage": {...} with those
-same three keys, which is the shape scripts/brother_run.py's
+/ tokens_cache_write (scripts/model_worker.py, forwarding the claude CLI's
+own --output-format json usage object): run(brief) then also carries
+"usage": {...} with whichever of those four keys the child reported, which
+is the shape scripts/brother_run.py's
 _sum_usage_field already expects. Absent entirely, never {}, when the child
 reported none: a caller must never read a missing key as zero usage.
 
@@ -88,7 +89,13 @@ def _empty_cost():
 #: carry (scripts/model_worker.py, from the claude CLI's own --output-format
 #: json "usage" object). Forwarded under these exact names because
 #: scripts/brother_run.py's _sum_usage_field already expects them.
-USAGE_FIELDS = ("tokens_in", "tokens_out", "tokens_cached")
+#: tokens_cache_write (roadmap row E92) carries the CLI's
+#: cache_creation_input_tokens, which is the count build_cost_block needs to
+#: divide by a real denominator; a worker whose answer never carried it
+#: simply forwards the other three, and the cost block says NO-DATA rather
+#: than reading the absence as a zero.
+USAGE_FIELDS = ("tokens_in", "tokens_out", "tokens_cached",
+                "tokens_cache_write")
 
 
 def _extract_usage(cost):

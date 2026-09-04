@@ -29,6 +29,21 @@ import threading
 import unicodedata
 import unittest
 
+# E100: one sandbox for every temp tree this process makes, removed at exit.
+import os as _e100_os, sys as _e100_sys  # noqa: E402
+_e100_sys.path.append(_e100_os.path.join(
+    _e100_os.path.dirname(_e100_os.path.abspath(__file__)), '../../../scripts'))
+try:  # noqa: E402
+    import tmp_sandbox as _e100_tmp
+    _e100_tmp.install()
+except ImportError:
+    # A packager (scripts/export_public.py, make_benchmark_bundle.py)
+    # can copy this test without scripts/tmp_sandbox.py beside it. Say
+    # so rather than dying: the sandbox is hygiene, not the subject.
+    _e100_sys.stderr.write(
+        "tmp_sandbox absent: %s leaves its temp trees behind\n"
+        % _e100_os.path.basename(__file__))
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 SBE = os.path.join(HERE, "..", "bin", "sbe")
 
@@ -292,10 +307,16 @@ class TestSchemaAndDerivation(HandoverScenario):
         out = os.path.join(self.repo, ".sbe", "evidence", "a.json")
         code, text = self._receipt(out, "src/a.py")
         self.assertEqual(code, 0, text)
-        # Move HEAD without touching src/a.py: the receipt's own headCommit
-        # binding is now stale even though its covered file is untouched.
-        io.open(os.path.join(self.repo, "unrelated.txt"), "w").write("x\n")
-        self.commit_all("unrelated commit")
+        # Move HEAD BY CHANGING src/a.py, the file this receipt covers, which
+        # is what stales its headCommit binding. It used to be enough to
+        # commit any unrelated file; d9dd8f569 ("A receipt stops being stale
+        # the moment it is committed", roadmap row E83) made a receipt fresh
+        # while its commit is an ancestor of HEAD with no covered file changed
+        # in between, so an unrelated commit correctly leaves it current and
+        # this fixture stopped producing the state the assertion is about.
+        with io.open(os.path.join(self.repo, "src", "a.py"), "w") as fh:
+            fh.write("changed after the receipt\n")
+        self.commit_all("commit over the covered file")
         code, text, _ = self.handover("prepare", doss, "--outgoing", "alice@example.com",
                                       "--receiver", "bob@example.com")
         self.assertEqual(code, 0, text)

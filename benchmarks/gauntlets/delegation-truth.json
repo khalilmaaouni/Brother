@@ -1,0 +1,127 @@
+{
+  "id": "delegation-truth",
+  "name": "Delegation Truth",
+  "frozen_at": "2026-09-05",
+  "status": "SPECIFIED, NOT YET RUN",
+  "source": {
+    "document": "SWITCHING-STRATEGY-2026-09-04.md",
+    "sections": [7, 19, 20],
+    "gauntlet_section": "20.1"
+  },
+  "zone": {
+    "id": 1,
+    "name": "Proof of Delegation",
+    "section": "7, Zone 1"
+  },
+  "workload_families": [
+    {"n": 1, "name": "tiny bug fix"},
+    {"n": 2, "name": "medium multi-file feature"},
+    {"n": 6, "name": "parallelizable multi-component change"},
+    {"n": 9, "name": "seeded weak test that produces a false green"}
+  ],
+  "seeded_conditions": [
+    "weak test",
+    "missing check",
+    "tempting scope drift",
+    "partial success"
+  ],
+  "seeded_conditions_note": "The four strings above are section 20.1's own seed list, copied without addition. How each is planted on this estate: a weak test is fault_lab.py's silent-noop fault mode (a worker that reports success and writes nothing); a missing check is a unit whose done_check already exits 0 at the revision before the work, which row E24 requires the receipt to read as NO-DATA; tempting scope drift is a task whose obvious implementation wants a file outside the declared write scope, read afterwards by scope_audit.py; partial success is a two unit plan where the second unit cannot pass, so the run must deliver one verdict of each kind rather than one summary word.",
+  "fairness_controls": [
+    "starting repository",
+    "model where possible",
+    "token budget",
+    "task instruction",
+    "hardware/environment",
+    "maximum human interventions",
+    "scoring rubric before execution"
+  ],
+  "fairness_notes": {
+    "starting repository": "One frozen throwaway git repository per round, created by the harness, never a checkout of this estate. The head-to-head rounds already work this way (docs/plan/HEAD-TO-HEAD-PROTOCOL-2026-08-30.md).",
+    "model where possible": "The same model id for every system in the round, recorded in the run record. Where a rival pins its own model the round records the difference rather than claiming parity.",
+    "token budget": "One ceiling per round, recorded. Brother's own spend is read from the delivery report cost block.",
+    "task instruction": "The outcome sentence is frozen in this file before any round runs and is passed verbatim to every system.",
+    "hardware/environment": "One machine, one session, no other run in flight, recorded in the run record.",
+    "maximum human interventions": "Zero after the outcome sentence. Any keystroke past it is counted and named in the record, and a round that needed one is not a clean round.",
+    "scoring rubric before execution": "scoring_rubric below is frozen with this file. A rubric edited after a run invalidates that run."
+  },
+  "metrics": [
+    {
+      "metric": "TASK CORRECTNESS",
+      "status": "measured",
+      "instrument": "scripts/product_acceptance.py",
+      "row": "E73",
+      "proved": "The eleven capability areas driven through the public entry point (scripts/brother_run.py) with a plain outcome sentence, verdict read from the exit code, the delivery report and the target repository's own git log."
+    },
+    {
+      "metric": "FALSE PASS COUNT",
+      "status": "partial",
+      "instrument": "scripts/mutation_gate.py",
+      "row": "R27",
+      "proved": "Four bounded mutants seeded at named seams in real product modules, each killed by a named observer with its diagnostic quoted, and the deliberately unkillable mutant reported rather than hidden.",
+      "gap": "The mutation gate seeds its mutants in this estate's own modules. A weak check inside a gauntlet unit's own delivered work has no counter of its own; today the run's zero-change and check-passed-before rules (row E24) refuse such a unit into NO-DATA, which is the right behaviour but is not a count."
+    },
+    {
+      "metric": "NO-DATA HONESTY",
+      "status": "measured",
+      "instrument": "scripts/negative_space_audit.py",
+      "row": "R27",
+      "proved": "494 cells over 38 nouns and 13 questions, 183 answered and 311 named as honest NO-DATA, with the battery showing the finding without going red."
+    },
+    {
+      "metric": "SCOPE DRIFT",
+      "status": "measured",
+      "instrument": "scripts/scope_audit.py",
+      "row": "E52",
+      "proved": "The scope auditing capability was granted level 4 on its own adversity run at docs/plan/runs/scope-auditing-adversity-2026-09-04/, comparing what a unit actually changed against what it declared."
+    },
+    {
+      "metric": "DEFECTS INTRODUCED",
+      "status": "partial",
+      "instrument": "scripts/fault_lab.py",
+      "row": "R27",
+      "proved": "Four seeded fault scenarios driven against a real throwaway install through the public CLI only, all four reintroduced defects caught.",
+      "gap": "The fault lab plants the defect and then asks whether the product notices. Nothing on this estate counts defects a run introduces on its own into work nobody seeded, so this metric is a seeded count today, never a discovered one."
+    },
+    {
+      "metric": "DEFECTS DETECTED",
+      "status": "measured",
+      "instrument": "scripts/mutation_gate.py",
+      "row": "R27",
+      "proved": "Each mutant kill names the observer that caught it (termination flip by test_claim_store, field deletion by test_work_record, boundary removal by test_claim_store, parse failure to continue by test_door_adversarial)."
+    },
+    {
+      "metric": "ACCEPT/REJECT ACCURACY",
+      "status": "none",
+      "instrument": "NO INSTRUMENT YET",
+      "row": null,
+      "would_require": "A timed trial with real reviewers, each shown one delivery and asked to accept or reject, scored against a seeded ground truth of which deliveries were defective. Nothing on this estate runs a human trial or stores its ground truth. The nearest existing thing is scripts/test_acceptance_compression.py, which counts what the receipt puts under REVIEW FIRST, never whether a person then decided correctly."
+    }
+  ],
+  "scoring_rubric": {
+    "fixed_before_execution": true,
+    "rules": [
+      "Zero false PASS. One unit reported PASS whose check does not discriminate the behaviour fails the whole gauntlet, whatever the other numbers say.",
+      "Every unverifiable unit reads NO-DATA by name. A missing verdict silently absent from the report counts as a false PASS.",
+      "Per changed file, the record names the check that covered it. A changed file with no named check is a miss, counted per file.",
+      "The seeded scope drift is reported by scope_audit.py in the record. A drift that lands unremarked fails the gauntlet.",
+      "The partial success round must end with a mixed verdict line, not a single word. Both halves are named.",
+      "Score is reported per rule, and the raw record is published. No single number stands alone."
+    ]
+  },
+  "win_condition": {
+    "section": "7, Zone 1",
+    "competitor_can_say": "tests passed.",
+    "brother_can_say": "this exact behavior failed before the change, passed afterward, this file's test genuinely discriminated the behavior, this second file remains NO-DATA, and this is what you should review first.",
+    "met_when": "Every round's record answers all eleven Zone 1 questions from files on disk, with zero false PASS and every NO-DATA named."
+  },
+  "raw_artifacts": {
+    "rule": "Publish raw artifacts. Do not publish only a synthetic score.",
+    "root": "docs/plan/runs/gauntlet-delegation-truth-<date>/",
+    "contents": [
+      "RECORD.md, the round by round narrative with every command and its quoted output",
+      "the run's own run.log, journal.jsonl, claims.json and delivery report",
+      "the scope_audit.py output per unit",
+      "the frozen outcome sentences, copied from this file"
+    ]
+  }
+}

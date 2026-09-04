@@ -122,9 +122,67 @@ def _git(args, cwd=ROOT, runner=None):
         return None    # sbe: allow-silent the caller turns this into NO-DATA
 
 
-def check_collision(cwd=ROOT, runner=None):
+def _worktree_warn(cwd=ROOT, runner=None):
+    trees = _git(["worktree", "list"], cwd, runner)
+    if trees is None or trees.returncode != 0:
+        return []
+    extra = [l for l in (trees.stdout or "").splitlines()[1:] if l.strip()]
+    if not extra:
+        return []
+    return [(WARN, "collision",
+             "%d other worktree(s) exist on this repository, so another "
+             "session may be mid-edit in the same history. This warns rather "
+             "than blocks: a worktree is normal, and an ABANDONED one is the "
+             "hazard" % len(extra))]
+
+
+def _collision_from_updates(updates, cwd=ROOT, runner=None):
+    """The refs THIS push updates, judged against the sha git read from the
+    remote itself moments before calling the hook. Needs no branch and no
+    fetch, so it works on a detached HEAD, which is the whole point (E105)."""
+    out = []
+    for local_ref, local_sha, remote_ref, remote_sha in updates:
+        if _is_zero(local_sha) or _is_zero(remote_sha):
+            continue          # a deletion, or a ref the remote does not have
+        have = _git(["cat-file", "-e", remote_sha + "^{commit}"], cwd, runner)
+        if have is None or have.returncode != 0:
+            out.append((BLOCK, "collision",
+                        "%s on the remote is at %s, a commit this checkout "
+                        "does not have. Pushing now either fails or clobbers "
+                        "work somebody else landed: fetch first"
+                        % (remote_ref, remote_sha[:12])))
+            continue
+        ff = _git(["merge-base", "--is-ancestor", remote_sha, local_sha],
+                  cwd, runner)
+        if ff is None or ff.returncode not in (0, 1):
+            out.append((NODATA, "collision",
+                        "could not tell whether this push fast-forwards %s, "
+                        "so the collision check did not run. That is not a "
+                        "pass" % remote_ref))
+        elif ff.returncode == 1:
+            out.append((BLOCK, "collision",
+                        "%s is at %s, which is not an ancestor of what this "
+                        "push sends it, so the push would discard commits "
+                        "somebody else landed: pull first"
+                        % (remote_ref, remote_sha[:12])))
+    if not out:
+        out.append((OK, "collision",
+                    "every ref in this push fast-forwards its remote"))
+    return out
+
+
+def check_collision(cwd=ROOT, runner=None, stdin_text=None):
     """Other sessions. Blocks, because pushing over somebody's work is the one
-    failure a revert does not undo."""
+    failure a revert does not undo.
+
+    Reads the pushed refs when git gave us any (E105): they describe the push
+    exactly, on a detached HEAD as well as an attached branch. Only with no
+    ref lines at all (a manual run of this gate, no push in flight) does it
+    fall back to judging the checked-out branch."""
+    updates = _pushed_updates(stdin_text)
+    if updates:
+        return _collision_from_updates(updates, cwd, runner) \
+            + _worktree_warn(cwd, runner)
     branch = _git(["rev-parse", "--abbrev-ref", "HEAD"], cwd, runner)
     if branch is None or branch.returncode != 0:
         return [(NODATA, "collision", "could not read the current branch")]
@@ -159,15 +217,7 @@ def check_collision(cwd=ROOT, runner=None):
                         "not have. Pushing now either fails or clobbers work "
                         "somebody else landed: pull first" % (behind, name)))
 
-    trees = _git(["worktree", "list"], cwd, runner)
-    if trees is not None and trees.returncode == 0:
-        extra = [l for l in (trees.stdout or "").splitlines()[1:] if l.strip()]
-        if extra:
-            out.append((WARN, "collision",
-                        "%d other worktree(s) exist on this repository, so "
-                        "another session may be mid-edit in the same history. "
-                        "This warns rather than blocks: a worktree is normal, "
-                        "and an ABANDONED one is the hazard" % len(extra)))
+    out.extend(_worktree_warn(cwd, runner))
     if not out:
         out.append((OK, "collision", "level with the remote, no other worktrees"))
     return out
@@ -193,16 +243,37 @@ def _default_branch(cwd=ROOT, runner=None):
     return None
 
 
-def _pushed_refs(stdin_text):
+def _is_zero(sha):
+    """git spells "this ref does not exist on that side" as an all-zero sha
+    (40 hex zeros today, 64 under sha256), never as an empty field."""
+    sha = (sha or "").strip()
+    return not sha or set(sha) == {"0"}
+
+
+def _pushed_updates(stdin_text):
     """git's pre-push hook protocol feeds one line per ref update on stdin:
-    '<local ref> <local sha1> <remote ref> <remote sha1>'. Returns the set of
-    REMOTE ref names this push would actually update."""
-    refs = set()
+    '<local ref> <local sha1> <remote ref> <remote sha1>'. Returns those four
+    fields per line, which is the ONLY authoritative description of what a
+    push actually sends.
+
+    THIS IS THE FIX FOR E105, measured 2026-09-04 21:10: every check below
+    used to read the CHECKOUT's HEAD instead. A push from a worktree with a
+    detached HEAD (git push hub <sha>:refs/heads/<branch>) therefore printed
+    "NO-DATA collision", "NO-DATA correctness" and "HEAD is detached (a
+    pinned worktree); nothing pushes from here", and the push LANDED
+    unscanned. The checkout's HEAD is a guess about the push; stdin is the
+    push."""
+    updates = []
     for line in (stdin_text or "").splitlines():
         parts = line.split()
-        if len(parts) >= 3:
-            refs.add(parts[2])
-    return refs
+        if len(parts) >= 4:
+            updates.append((parts[0], parts[1], parts[2], parts[3]))
+    return updates
+
+
+def _pushed_refs(stdin_text):
+    """The set of REMOTE ref names this push would actually update."""
+    return {u[2] for u in _pushed_updates(stdin_text)}
 
 
 def check_handback(cwd=ROOT, runner=None, stdin_text=None):
@@ -273,9 +344,58 @@ def _imported_roots(cwd=ROOT, runner=None):
     return roots
 
 
-def check_correctness(cwd=ROOT, runner=None):
+def _ranges_from_updates(updates, cwd=ROOT, runner=None):
+    """(range, shown) per ref this push updates, plus a NO-DATA finding for
+    any update whose range could not be computed. E105: this is what makes a
+    detached-HEAD push scannable, because the range comes from the pushed sha
+    rather than from a branch the checkout may not have."""
+    ranges, problems = [], []
+    for local_ref, local_sha, remote_ref, remote_sha in updates:
+        if _is_zero(local_sha):
+            continue          # a deletion sends no objects, so nothing to scan
+        probe = _git(["cat-file", "-e", local_sha + "^{commit}"], cwd, runner)
+        if probe is None or probe.returncode != 0:
+            problems.append((NODATA, "correctness",
+                             "the sha this push sends to %s does not resolve "
+                             "in this repository, so its outgoing range could "
+                             "not be computed and nothing was scanned. That is "
+                             "not a pass" % (remote_ref or local_ref or "?")))
+            continue
+        if _is_zero(remote_sha):
+            # A ref the remote does not have yet: outgoing is everything under
+            # this sha that no remote already carries, the same shape (and the
+            # same --not toggling care) as a brand new branch below.
+            ranges.append(([local_sha, "--not", "--remotes"],
+                           "%s not already on any remote"
+                           % (remote_ref or local_sha[:12])))
+        else:
+            ranges.append((["%s..%s" % (remote_sha, local_sha)],
+                           "%s..%s" % (remote_sha[:12], local_sha[:12])))
+    return ranges, problems
+
+
+def check_correctness(cwd=ROOT, runner=None, stdin_text=None):
     """This change, over the OUTGOING RANGE rather than the working tree,
-    because the range is what actually leaves the machine."""
+    because the range is what actually leaves the machine.
+
+    E105, measured 2026-09-04: the range comes from git's own pre-push ref
+    lines whenever there are any. Reading the checkout's HEAD instead let a
+    push from a detached-HEAD worktree report NO-DATA and land unscanned. With
+    no ref lines there is no push in flight, and only then does the checked
+    out branch stand in."""
+    updates = _pushed_updates(stdin_text)
+    if updates:
+        ranges, problems = _ranges_from_updates(updates, cwd, runner)
+        if not ranges:
+            # Every update was a deletion, or none resolved. Deletions send no
+            # objects; an unresolvable sha already produced its own NO-DATA.
+            return problems or [(OK, "correctness",
+                                 "this push sends no commits (ref deletions "
+                                 "only), so there is nothing to scan")]
+        out = list(problems)
+        for rng, shown in ranges:
+            out.extend(_scan_range(rng, shown, cwd, runner))
+        return out
     branch = _git(["rev-parse", "--abbrev-ref", "HEAD"], cwd, runner)
     if branch is None or branch.returncode != 0:
         return [(NODATA, "correctness", "could not read the current branch")]
@@ -313,6 +433,12 @@ def check_correctness(cwd=ROOT, runner=None):
         # backwards on the very branch that carries it.
         rng = [name, "--not", "--remotes"]
         shown = "%s not already on any remote" % name
+    return _scan_range(rng, shown, cwd, runner)
+
+
+def _scan_range(rng, shown, cwd=ROOT, runner=None):
+    """The four families over one outgoing range. Every caller supplies the
+    range; this function never decides what is outgoing."""
     # D9, founder-approved 2026-08-31 in the question UI (record:
     # docs/decisions/2026-08-31-scanner-scope-after-subtree-imports.html).
     # Commits reachable from the imported product tips in
@@ -480,8 +606,9 @@ def check_remote_rules(cwd=ROOT, runner=None):
 
 def gate(cwd=ROOT, runner=None, stdin_text=None, remote_url=None, env=None):
     """Every finding, worst first."""
-    found = (check_handback(cwd, runner, stdin_text) + check_collision(cwd, runner)
-             + check_correctness(cwd, runner)
+    found = (check_handback(cwd, runner, stdin_text)
+             + check_collision(cwd, runner, stdin_text)
+             + check_correctness(cwd, runner, stdin_text)
              + check_edition(cwd, remote_url, env)
              + check_remote_rules(cwd, runner) + check_drift(cwd, runner))
     rank = {BLOCK: 0, NODATA: 1, WARN: 2, OK: 3}
@@ -530,11 +657,18 @@ def main(argv=None):
         # declaration for this gate; exiting clear here removes the need
         # for the workaround at its source. An ATTACHED branch whose real
         # state could not be read still refuses below, exactly as before.
+        # E105, measured 2026-09-04 21:10: this escape used to fire on the
+        # checkout's HEAD alone, so a REAL push from a detached-HEAD worktree
+        # (git push hub <sha>:refs/heads/<branch>) printed exactly this line
+        # and landed unscanned. A detached HEAD legitimately pushes nothing
+        # only when git handed the hook NO REF LINES at all.
         head = _git(["rev-parse", "--abbrev-ref", "HEAD"], args.cwd)
-        if head is not None and head.returncode == 0 \
+        if not _pushed_updates(stdin_text) \
+                and head is not None and head.returncode == 0 \
                 and (head.stdout or "").strip() == "HEAD":
-            print("pre-push: HEAD is detached (a pinned worktree); nothing "
-                  "pushes from here", file=sys.stderr)
+            print("pre-push: HEAD is detached and no ref lines arrived (a "
+                  "pinned worktree, no push in flight); nothing pushes from "
+                  "here", file=sys.stderr)
             return EXIT_OK
         print("pre-push: NO-DATA, something could not be checked, which is not "
               "a pass", file=sys.stderr)

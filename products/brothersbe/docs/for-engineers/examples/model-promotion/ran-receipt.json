@@ -1,0 +1,5 @@
+{"checks": [
+  {"name": "split-check-holdout", "exit_code": 0, "duration_ms": 20.661},
+  {"name": "promotion-threshold", "exit_code": 0, "duration_ms": 15.591},
+  {"name": "seed-recorded", "exit_code": 0, "duration_ms": 16.229}
+]}

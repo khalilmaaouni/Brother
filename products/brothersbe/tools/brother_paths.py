@@ -62,7 +62,9 @@ No em or en dashes anywhere in this file or its output.
 
 import json
 import os
+import re
 import sys
+import unicodedata
 
 CLAUDE = "claude"
 CODEX = "codex"
@@ -220,16 +222,53 @@ def describe(env=None):
             "package_root": package_root()}
 
 
+_LINE_BREAKS = re.compile("[\r\n\v\f\x85\u2028\u2029]+")
+
+
+def one_line(text):
+    """Every line this module prints is flattened through this choke point.
+
+    Mirrors tools/sbe_checks.py::one_line (control, format and surrogate
+    characters become their visible escape, a tab becomes a space) rather
+    than importing it, the same way tools/sbe_autosave.py and
+    tools/sbe_stall_detector.py each carry their own copy: a hook loads this
+    file by path (tools/sbe_fence_hook.py::load_brother_paths) and it stays
+    import-light on purpose. The values below are environment-supplied paths,
+    which is exactly the shape that can carry a line break or a cursor escape
+    and forge a second report line.
+    """
+    out = []
+    for ch in _LINE_BREAKS.sub(" \\n ", str(text)):
+        if ch == "\t":
+            out.append(" ")
+        elif unicodedata.category(ch) in ("Cc", "Cf", "Cs"):
+            n = ord(ch)
+            out.append("\\x%02x" % n if n <= 0xFF else
+                       "\\u%04x" % n if n <= 0xFFFF else "\\U%08x" % n)
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+def say(text):
+    sys.stdout.write(one_line(text) + "\n")
+    sys.stdout.flush()
+
+
 def main(argv):
     """--json prints describe(); no argument prints the same three lines in
     plain text. Exit 2 (NO-DATA, never a pass) when the client is unknown, so
     a shell caller can gate on the identification itself."""
     facts = describe()
     if "--json" in argv[1:]:
-        print(json.dumps(facts, indent=2, sort_keys=True))
+        # Compact rather than indent=2, so the document is the one line this
+        # module's own contract promises. json.dumps escapes every control
+        # character inside a value itself, so flattening cannot corrupt it and
+        # a consumer still parses exactly the same object.
+        say(json.dumps(facts, sort_keys=True))
     else:
         for key in ("client", "plugin_root", "config_dir", "package_root"):
-            print("%-12s %s" % (key, facts[key]))
+            say("%-12s %s" % (key, facts[key]))
     return 2 if facts["client"] == "NO-DATA" else 0
 
 

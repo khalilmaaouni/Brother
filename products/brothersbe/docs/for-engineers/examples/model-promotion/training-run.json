@@ -1,0 +1,7 @@
+{
+  "run_id": "run_2026_02_14_0137",
+  "seed": 20260214,
+  "code_version": "challenger-churn-model@a1c9e3f",
+  "feature_snapshot_id": "snap_2026_02_14",
+  "hyperparameters": {"model": "gradient_boosted_trees", "n_estimators": 300, "max_depth": 4}
+}

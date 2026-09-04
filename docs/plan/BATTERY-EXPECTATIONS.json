@@ -38,24 +38,6 @@
       "review_by": "2026-09-17",
       "removal_condition": "structural, not a defect: a worktree pinned at one SHA carries a detached HEAD by construction, so pre-push-gate reads NO-DATA there for as long as certification runs against pinned worktrees. Remove this entry only if that workflow stops using detached checkouts, or pre_push_gate.py is redesigned to give a verdict there some other way"
     },
-    "product-brothersbe-tests": {
-      "class": "expected_unavailable",
-      "reason": "E33 registered products/brothersbe/tools/test_sbe.py in the battery on 2026-09-03. The file reads OK (skipped=2) and one skip's own reason says NO-DATA: TestTheUpdateNoticeIsUnconditional reads the sibling BrotherModeUp's real source only when it is installed at the legacy skills path (~/.claude/skills/brothermode/tools/bm_telemetry.py), and on this machine the sibling is installed as a plugin, not at that path. The battery's rule counts a skip whose reason says NO-DATA as NO-DATA, which is right; this declaration records that it is machine-bound. A FAIL under this declaration still blocks.",
-      "recorded": "2026-09-03",
-      "review_by": "2026-09-17",
-      "removal_condition": "the test resolves the sibling through the plugin install path as well as the legacy skills path, or the skip is rewritten to read the installed plugin's copy; then the line reads PASS (recovered) and this entry is deleted",
-      "failing_tests": {
-        "tools/test_sbe.py": {
-          "test_this_repository_passes_its_own_root_scan_with_the_pedagogy_waived": {
-            "reason": "reads red since PR 88 (2026-09-04 00:0x JST) minted design, gate and score receipts for the estate's own dossiers: the assurance product reads a receipt as stale once any later commit lands (row E83, the receipt freshness defects: a dossier-scoped status never lets a receipt exempt itself and a sibling receipt's commit invalidates the others), so gate --strict over the repository root fails on its own receipts. Being fixed in the founder's separate session (E83).",
-            "recorded": "2026-09-04",
-            "review_by": "2026-09-11",
-            "removal_condition": "E83 lands and bin/sbe gate --strict over the repository root reads PASS on the minted receipts; then delete this test entry"
-          }
-        }
-      },
-      "class_note_2026_09_04": "moved from known_no_data to expected_unavailable at 03:35 JST because the suite reads FAIL (one declared test under E83), not NO-DATA, and the verdict shelters only the declared class"
-    },
     "repair-drain-self": {
       "class": "expected_unavailable",
       "reason": "Registered in the battery for the first time 2026-09-04 (QA reviewer finding 3, 107 unrun checkers). scripts/test_repair_drain.py's own second-attempt scenario now collides with a rule that landed after this test was written: receipt_door.py's 'the check already passed before the work' handling (memory: a-check-that-already-passes-before-the-work-proves-nothing.md). test_second_attempt_repairs_after_a_failed_first drives brother_run through a failing first attempt and a repairing second attempt, and asserts the second attempt exits 0 (PASS). Because the fixture's check already reads true before the second attempt's own work runs, brother_run now correctly refuses to credit it as a proof and reports the piece NO-DATA instead, so the run exits 2, not 0, verbatim: 'brother_run: exit 2: nothing in this run was verified (0 PASS, 1 NO-DATA); a run that refused nothing but proved nothing is not the same thing as success' and 'F1 is NO-DATA: the check already passed before the work began, so it cannot prove the work.' This is the newer rule working as designed against an older test's assumption, not a product regression; the test's assertion is stale, not the code, and is left failing rather than weakened per this estate's rule that a failing test is never softened to get green.",
@@ -70,15 +52,6 @@
           }
         }
       }
-    },
-    "product-brothersbe-battery": {
-      "class": "expected_unavailable",
-      "reason": "NARROWED 2026-09-04 (row E82, lane BI2). The entry previously declared three failing steps: 05-honesty-meta, 05b-honesty-seeded and 35-upgrade-rollback. All three are now fixed at the root and read exit=0. 05-honesty-meta and 05b-honesty-seeded: the residual was fifteen helper functions across eight tools/ files that evals/test_no_data_class.py's inverted verdict-source lint flagged as 'can return the verdict PASS but sit in no registry'. Each of the fifteen was read individually; none forms, alters or forwards a verdict. They are three shapes only, the same three every pre-existing allowlist entry belongs to: a parser or reader returning (value, problems), a subprocess or captured-output wrapper returning (exit code, combined output) where any verdict word in that text belongs to the tool under test, and one fixture builder returning (path, path). Each was added to that file's own NOT_A_VERDICT allowlist with a reason naming its return shape, which is the lint's designed and reconciled escape hatch: an entry naming no function fails, and an entry resolving to two functions of that name fails, so the exemption binds to the body that was reviewed. No lint rule was loosened and no helper was rewritten to satisfy the scanner. 35-upgrade-rollback: products/brothersbe/scripts/test-upgrade-rollback.sh selected the newest ancestor tag matching 'v[0-9]*' as 'the previous release of this product', but that family is the HUB's umbrella tags, shared across the monorepo. It picked v0.9.6, a hub release that predates products/brothersbe/ existing in the tree, and then failed because scripts/verify-install.sh 'did not ship' in it, which is a true statement about a tree that was never this product's release. The selection now matches the estate's documented per-product tag form, 'brothersbe--v[0-9]*' (two dashes; products/brothermode/docs/plan/ADR-2026-08-23-one-brother-repository.md), and no such tag has been cut in the hub yet, so the script prints NO-DATA naming exactly what it looked for and what it deliberately ignored, and exits 0 without claiming an upgrade was tested. Driven BOTH ways rather than only to green: with a throwaway local brothersbe--v tag on an ancestor commit the script selected it, installed the previous release, HEAD and the rollback, verified all three clean and printed PASSED; the tag was then deleted. WHAT STILL FAILS, and it is not one of this row's original eight: 01-hard-gates and 06-tool-tests read FAIL because design/*/.sbe/evidence ran-receipts are pinned to a commit main has moved past. That is row E83 (the receipt freshness defects: a dossier-scoped status never lets a receipt exempt itself, and a sibling receipt's commit invalidates the others), owned by a separate session. The battery wrapper greps its own summary.txt for any non-zero exit, so this check line stays FAIL for as long as those two steps do.",
-      "recorded": "2026-09-04",
-      "review_by": "2026-09-11",
-      "removal_condition": "E83 lands and 01-hard-gates and 06-tool-tests read exit=0 in a fresh release-control/baseline/run-battery.sh run; then this entry is deleted. No other step is sheltered by it: a non-zero exit from any of the other 92 steps blocks.",
-      "failing_tests": "none: this check wraps release-control/baseline/run-battery.sh, a 94-step shell battery, not a single unittest suite, so its own output names step numbers rather than unittest test names. The two steps still non-zero are 01-hard-gates (python3 tools/sbe_gate.py --strict design) and 06-tool-tests (python3 tools/test_sbe.py), both on the E83 stale-receipt class. Every one of this row's original eight steps now reads exit=0.",
-      "class_note_2026_09_04_narrowed": "narrowed at 14:0x JST from three declared failing steps to the two that remain, both on row E83; the three E82 steps are fixed at the root, not waived"
     },
     "evad-score": {
       "class": "expected_unavailable",

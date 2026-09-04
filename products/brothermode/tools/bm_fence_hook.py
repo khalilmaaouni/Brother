@@ -63,6 +63,15 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
+#: Absolute path to the bm_store.py that produced this refusal. A refusal is
+#: shown from wherever the user's project root happens to be, never from
+#: this plugin's own tools directory, so a bare "tools/bm_store.py" in a
+#: fix-it command only resolves by accident (E108, measured 2026-09-04: a
+#: refusal shown from a project root printed `python3 tools/bm_store.py
+#: init`, and running it verbatim from that root raised Errno 2, because
+#: that relative path only resolves from this file's own directory).
+_BM_STORE_PATH = os.path.join(HERE, "bm_store.py")
+
 # Loaded by path rather than by package import: tools/ is not a package, and
 # the hook is invoked by Claude Code with an arbitrary cwd, so a plain
 # `import bm_store` would resolve against sys.path and could pick up a
@@ -674,7 +683,8 @@ _FAIL_REASONS = {
     "no-store": (
         "this project has no BrotherMode store, so there is no fence to check "
         "against",
-        "run `python3 tools/bm_store.py init` in the project root"),
+        "run bm_store.py's own `init` command; the runnable command, with "
+        "its full path, is on stderr just above this message"),
     "store-unreadable": (
         "the BrotherMode store could not be opened read-only: it is missing, "
         "empty, busy or corrupt",
@@ -685,7 +695,9 @@ _FAIL_REASONS = {
     "no-active-claims": (
         "the BrotherMode store holds no active claims, so no fence exists, "
         "and enforced mode requires a claim before an edit",
-        "claim the paths first with `python3 tools/bm_store.py claim`"),
+        "claim the paths first with bm_store.py's own `claim` command; the "
+        "runnable command, with its full path, is on stderr just above "
+        "this message"),
     "no-identity": (
         "this session's fence token could not be read or created, so its "
         "ownership label could not be derived",
@@ -702,7 +714,7 @@ _FAIL_REASONS = {
         "it as a defect"),
     "no-root": (
         "no BrotherMode project root was found, so there is no fence here",
-        "run `python3 tools/bm_store.py init` if this should be a project"),
+        "run `python3 %s init` if this should be a project" % _BM_STORE_PATH),
     "battery-unreadable": (
         "a test gate may be running against this checkout and its state "
         "could not be established, so the write could invalidate a live "
@@ -929,8 +941,8 @@ def active_claims(root):
         raise _FailOpen("bm_store.py could not be imported (%s)" % _BS_ERROR, "store-unimportable")
     path = bs.store_path(root)
     if not os.path.isfile(path):
-        raise _FailOpen("no store at %s (run `python3 tools/bm_store.py init`)"
-                        % path, "no-store")
+        raise _FailOpen("no store at %s (run `python3 %s init`)"
+                        % (path, _BM_STORE_PATH), "no-store")
     try:
         store = bs.ReadOnlyStore(root)
     except Exception as e:
@@ -971,9 +983,9 @@ def _takeover_command(row, my_label):
     --adopt-from-live-session is bm_store's own documented door for taking a
     record that is active under a different live session; naming anything
     else here would send the reader to a command that refuses."""
-    return ("python3 tools/bm_store.py adopt %s --version %s --session %s "
+    return ("python3 %s adopt %s --version %s --session %s "
             "--adopt-from-live-session"
-            % (row["lifecycle_uuid"], row["version"], my_label))
+            % (_BM_STORE_PATH, row["lifecycle_uuid"], row["version"], my_label))
 
 
 # ---------------------------------------------------------------------------
@@ -1100,8 +1112,11 @@ def decide(payload):
 
         rows = active_claims(root)
         if not rows:
-            raise _FailOpen("the store at %s holds no active claims, so there "
-                            "is no fence to enforce" % bs.store_path(root), "no-active-claims")
+            raise _FailOpen(
+                "the store at %s holds no active claims, so there is no "
+                "fence to enforce (claim the paths first with `python3 %s "
+                "claim`)" % (bs.store_path(root), _BM_STORE_PATH),
+                "no-active-claims")
 
         try:
             my_label = session_label(root, session_id)
@@ -1130,21 +1145,21 @@ def decide(payload):
                     "edit across the fence. Report the needed change to the "
                     "owner instead. To take the fence over deliberately, run:\n"
                     "  %s\n"
-                    "then re-claim the paths you need with `bm_store.py claim "
+                    "then re-claim the paths you need with `python3 %s claim "
                     "... --session %s`."
                     % (rel, _safe_display(r["name"]), r["lifecycle_uuid"],
                        r["version"], r["session_id"] or "(none)", my_label,
                        _safe_display(r["path"]),
-                       _takeover_command(r, my_label), my_label))
+                       _takeover_command(r, my_label), _BM_STORE_PATH, my_label))
                 return deny_payload(reason), notes
             if strict and not covering:
                 reason = (
                     "BrotherMode fence (strict mode): %s is not inside any "
                     "active record's fence, and BM_FENCE_STRICT is set, so "
                     "claim-before-edit is being enforced. Claim it first:\n"
-                    "  python3 tools/bm_store.py claim <name> --lifetime "
+                    "  python3 %s claim <name> --lifetime "
                     "ephemeral --objective '...' --files %s --session %s"
-                    % (rel, rel, my_label))
+                    % (rel, _BM_STORE_PATH, rel, my_label))
                 return deny_payload(reason), notes
         return None, notes
     except _FailOpen as e:

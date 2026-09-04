@@ -41,9 +41,13 @@ READING THE MODEL'S OWN ANSWER. --output-format json makes the model
 command's stdout one JSON object rather than plain text, and this worker's
 own claim text and real usage both come out of it: "result" becomes the
 claim text, and "usage" is renamed into the tokens_in / tokens_out /
-tokens_cached names build_cost_block already sums (scripts/brother_run.py),
-tokens_cached read from cache_read_input_tokens since that is the count of
-tokens the model actually reused rather than paid for fresh. Anything that
+tokens_cached / tokens_cache_write names build_cost_block already sums
+(scripts/brother_run.py), tokens_cached read from cache_read_input_tokens
+since that is the count of tokens the model actually reused rather than paid
+for fresh, and tokens_cache_write read from cache_creation_input_tokens
+because without it no share can be computed at all (roadmap row E92: the
+CLI's input_tokens counts only the uncached, non-cache-write input, so the
+denominator a rate needs is input + cache_read + cache_write). Anything that
 is not that shape (a test's plain-text stub via MODEL_WORKER_CMD, a
 malformed line) falls back to the raw stdout as the claim and NO usage: a
 worker that cannot read a structured answer must never invent token counts
@@ -220,8 +224,20 @@ def _default_argv(env=None):
 #: build_cost_block sums (scripts/brother_run.py COST_FIELDS). tokens_cached
 #: reads cache_read_input_tokens: the count of tokens the model actually
 #: reused from cache, which is what a cache HIT rate means.
+#:
+#: tokens_cache_write reads cache_creation_input_tokens (roadmap row E92).
+#: The CLI's input_tokens counts ONLY the uncached, non-cache-write input
+#: (measured live 2026-09-03: input_tokens 2 beside cache_read_input_tokens
+#: 22972 and cache_creation_input_tokens 70272 on a one word reply), so
+#: cache_read over input_tokens is not a share of anything and the cost
+#: block could only print NO-DATA. Forwarding the cache-creation count gives
+#: build_cost_block the real denominator (input + cache_read + cache_write).
+#: An answer that carries no cache_creation_input_tokens forwards no
+#: tokens_cache_write at all, and the rate then stays NO-DATA rather than
+#: reading an absent count as a zero.
 USAGE_FIELD_MAP = {"tokens_in": "input_tokens", "tokens_out": "output_tokens",
-                    "tokens_cached": "cache_read_input_tokens"}
+                    "tokens_cached": "cache_read_input_tokens",
+                    "tokens_cache_write": "cache_creation_input_tokens"}
 
 
 #: Codex's JSONL event names and token fields, read on 2026-09-04 from the
@@ -240,6 +256,13 @@ USAGE_FIELD_MAP = {"tokens_in": "input_tokens", "tokens_out": "output_tokens",
 #: token count is only ever reported when the fields were actually found.
 CODEX_AGENT_MESSAGE = "agent_message"
 CODEX_TOKEN_COUNT = "token_count"
+#:
+#: NO tokens_cache_write HERE, deliberately (roadmap row E92): Codex's own
+#: wire schema names input_tokens, cached_input_tokens and output_tokens and
+#: no cache-creation count, so this adapter genuinely lacks the field a cache
+#: share needs. A codex run's cost block therefore reads NO-DATA for
+#: cache_hit_rate, which is the honest answer, and inventing a zero here to
+#: make a number appear is exactly what that NO-DATA exists to prevent.
 CODEX_USAGE_FIELD_MAP = {"tokens_in": "input_tokens",
                          "tokens_out": "output_tokens",
                          "tokens_cached": "cached_input_tokens"}

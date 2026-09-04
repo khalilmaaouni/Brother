@@ -1,0 +1,5 @@
+# Byte-identical checkouts on every platform. The tracked manifest hashes
+# exact bytes and the doc-truth suites compare transcripts byte for byte,
+# so line-ending conversion is drift by definition (first proven live by
+# the windows-latest leg, run 31039904060: committed \n, working tree \r).
+* -text

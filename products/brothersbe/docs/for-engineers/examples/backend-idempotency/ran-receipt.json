@@ -1,0 +1,4 @@
+{"checks": [
+  {"name": "idempotency-concurrency", "exit_code": 0, "duration_ms": 4127},
+  {"name": "key-reuse-rejected", "exit_code": 0, "duration_ms": 812}
+]}

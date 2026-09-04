@@ -1194,6 +1194,13 @@ def check_citation_inventory(ctx=None):
     stated limit rides on the verdict sentence because it is the whole honesty
     of this check: structure and coverage are proven offline, live page content
     is never read, and no network connection is ever opened.
+
+    When the root ships a CHECKSUMS.sha256 manifest naming markdown files that
+    are not on disk, the verdict is NO-DATA naming that root: the shipped file
+    list and the shipped bytes disagree, so the document set to cover cannot be
+    established. That is a packaging defect of the named tree, which for the
+    default root is the installation itself, and it is never a finding about
+    the repository being scored (row E29).
     """
     root = os.environ.get("SBE_CITATION_ROOT")
     self_note = ""
@@ -1222,7 +1229,7 @@ def check_citation_inventory(ctx=None):
     # list and its markdown entries are the set; otherwise every .md under
     # the root is walked (hidden directories skipped), so the set can only
     # widen with the tree, never lag a hand-maintained tuple.
-    docs, unopened = [], []
+    docs, unopened, absent = [], [], []
     pruner = Pruner()
     manifest = os.path.join(root, "CHECKSUMS.sha256")
     manifest_rels = []
@@ -1244,7 +1251,17 @@ def check_citation_inventory(ctx=None):
             elif os.path.lexists(p):
                 docs.append(p)
             else:
-                unopened.append("%s (in the manifest but absent)" % rel)
+                # An absence, NOT a broken claim. evidence_problem's own rule
+                # (tools/sbe_checks.py) is that a path which EXISTS and cannot
+                # be read is named as broken, while a path that is absent is
+                # the caller's NO-DATA. This branch used to push absences into
+                # `unopened`, so a manifest naming a file nobody shipped came
+                # out as a gate-severity FAIL whose sentence said those paths
+                # "exist and could not be read", which was not true of a single
+                # one of them. The installed plugin 3.7.3 hit it with 291 such
+                # names and every user running the scorer over their own clean
+                # repository read a gate FAIL about the vendor's tree.
+                absent.append(rel)
     else:
         scan_scope = "every markdown file under the root"
         for dp, dns, fns in os.walk(root, onerror=pruner.onerror):
@@ -1294,6 +1311,22 @@ def check_citation_inventory(ctx=None):
                         "check cannot open can cite a URL this verdict would miss, so it cannot "
                         "call the citation set covered; %d document(s) were scanned%s%s"
                         % (len(refused), root, _first_named(refused, "; "), scanned, note, offline))
+    if absent:
+        # NO-DATA, never FAIL and never a silent fall back to walking the tree.
+        # The manifest IS the shipped-file list, so a manifest naming files the
+        # tree does not carry means the scan scope cannot be established at all,
+        # and a scope nobody can establish is an absence of evidence. It is also
+        # never a statement about the repository the user asked about: the
+        # manifest and the missing files both belong to the tree named here,
+        # which for the default root is the installation itself.
+        return "NO-DATA", ("the CHECKSUMS.sha256 manifest under %s%s names %d markdown "
+                           "file(s) that are not on disk (%s), so the shipped file list and "
+                           "the shipped bytes disagree and the document set to cover cannot "
+                           "be established; that is a defect of THAT tree's own packaging, "
+                           "never of the repository being scored, and an unestablished scope "
+                           "is not a covered citation set; %d document(s) were scanned%s%s"
+                           % (root, self_note, len(absent),
+                              _first_named(sorted(absent), "; "), scanned, note, offline))
     if not scanned:
         return "NO-DATA", ("no markdown document under %s%s (scanned: %s), so no "
                            "URL set exists to cover%s%s" % (root, self_note, scan_scope,

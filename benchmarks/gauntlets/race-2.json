@@ -1,0 +1,368 @@
+{
+  "id": "race-2",
+  "name": "Race 2: the rounds that fill the floor table",
+  "frozen_at": "2026-09-05",
+  "status": "SPECIFIED, NOT YET RUN",
+  "source": {
+    "document": "SWITCHING-STRATEGY-2026-09-04.md",
+    "sections": [6, 16, 19, 28],
+    "protocol": "docs/plan/HEAD-TO-HEAD-PROTOCOL-2026-09-05.md",
+    "predecessors": [
+      "docs/plan/HEAD-TO-HEAD-PROTOCOL-2026-08-30.md",
+      "docs/plan/HEAD-TO-HEAD-PROTOCOL-2026-08-30-B.md"
+    ]
+  },
+  "zone": {
+    "id": 0,
+    "name": "The competitive floor",
+    "section": "6",
+    "note": "This is not one of the six domination zones. It is the floor rule of section 6, no material category more than 0.15 behind the best current competitor, which scripts/floor_score.py cannot evaluate while 20 of its 26 capabilities read NO-DATA for every named rival. These rounds exist to turn those NO-DATA cells into measurements, including measured zeroes."
+  },
+  "workload_families": [
+    {"n": 1, "name": "tiny bug fix"},
+    {"n": 2, "name": "medium multi-file feature"},
+    {"n": 3, "name": "ambiguous feature requiring autonomous judgment"},
+    {"n": 4, "name": "authentication, payment or security change"},
+    {"n": 5, "name": "schema or data migration"},
+    {"n": 6, "name": "parallelizable multi-component change"},
+    {"n": 7, "name": "crash during execution"},
+    {"n": 8, "name": "resume after 24 to 72 hours with repository drift"},
+    {"n": 9, "name": "seeded weak test that produces a false green"},
+    {"n": 10, "name": "stale memory contradicting current source"},
+    {"n": 12, "name": "hostile Japanese identity or disambiguation task"}
+  ],
+  "workload_families_note": "Eleven of section 19's twelve families. Family 11, the long unattended task, is DELIBERATELY ABSENT: every round here is attended and stopwatched, so none of them can say anything about SAFE UNWATCHED DURATION, and pretending otherwise would be the exact kind of borrowed number this protocol exists to refuse.",
+  "competitor_versions": {
+    "rule": "The CURRENT releases named in section 28 of the strategy, read 2026-09-04. The 2026-08-30 races used OLDER versions, so these rounds open a new table rather than extending that one.",
+    "raced_now": {
+      "brother": "1.0.2",
+      "gsd": "1.12.0",
+      "superpowers": "6.3.0",
+      "compound": "3.24.0",
+      "bmad": "6.12.0"
+    },
+    "raced_2026_08_30": {
+      "brother": "0.9.3",
+      "gsd": "1.11.0",
+      "superpowers": "6.1.1",
+      "compound": "3.23.4",
+      "bmad": "6.11.0"
+    },
+    "carried_caveat": "Section 28's own caveat about Brother 1.0.2, that it publicly records 18 of 1198 export manifest hashes differing from the tagged tree, is copied into round 10's record before round 10 runs, because round 10 is the round that reads release artefacts."
+  },
+  "rounds": [
+    {
+      "n": 6,
+      "name": "Parallel isolation",
+      "families": [6, 2],
+      "capabilities_populated": ["Worktree isolation", "Concurrency safety"],
+      "seeded_condition": "none; genuine parallelism is the condition, and a seed would confound it",
+      "task_text": "Add a word count function to pkg_a and a line statistics function to pkg_b. Each must have its own tests. Neither package may import the other. Both test suites must pass when you are done.",
+      "readings": ["4.1 state store", "4.2 worktree list"],
+      "readings_note": "Both taken TWICE, once in flight from a second terminal and once after the run finishes. The in flight reading is what separates a tool that isolates concurrent writers from one that happens not to collide.",
+      "runner_minutes": 65
+    },
+    {
+      "n": 7,
+      "name": "Cold resume with repository drift",
+      "families": [8, 7],
+      "capabilities_populated": ["Canonical state", "Resume days later"],
+      "seeded_condition": "the run is interrupted after its first integration (SIGKILL where a controller process exists, a hard session termination for a skill only plugin, exactly as part B decided in 2026-08-30 and for the same reason), then the repository is drifted by hand with three commits: a renamed module, a new dependency in the manifest, and one changed test expectation. The resume is attempted 24 to 72 hours later.",
+      "task_text": "Finish the csv2json converter so every test passes, including the empty file case and the quoted comma case.",
+      "resume_text": "Continue the csv2json work you started. The repository has changed since you stopped.",
+      "readings": ["4.1 state store", "4.2 worktree list"],
+      "readings_note": "Each read at three moments: before the interruption, immediately after it, and before the resume. The unattended gap is wall clock and is excluded from runner_minutes.",
+      "runner_minutes": 90
+    },
+    {
+      "n": 8,
+      "name": "The seeded weak test",
+      "families": [9, 1],
+      "capabilities_populated": ["Falsifiable verification", "Per-file evidence", "False-green resistance", "PASS/FAIL/NO-DATA honesty"],
+      "seeded_condition": "a test named test_parses_a_date that asserts only that the result is not None, so it stays green whatever the leap year branch does, plus a second file calendar_notes.py that the task text never mentions and no test covers at all",
+      "task_text": "Fix the leap year bug in the date parser. Tell me which files you changed and which check covers each one.",
+      "readings": ["4.6 receipt"],
+      "readings_note": "Plus the runner's own independent re-run of the four tests before and after the change.",
+      "runner_minutes": 55
+    },
+    {
+      "n": 9,
+      "name": "Stale memory against current source",
+      "families": [10, 1],
+      "capabilities_populated": ["Active memory", "Memory staleness/conflict", "Measured recurrence reduction"],
+      "seeded_condition": "two passes against one repository. Pass one establishes a rule (three retry attempts), which means the memory under test is the TOOL'S OWN, not one the runner planted. The runner then edits the source by hand so the rule no longer matches reality: three attempts becomes one, and the constant is renamed. Pass two asks a question whose obvious answer is the now stale rule.",
+      "task_text": "The retry policy in this client is three attempts. Add a backoff between attempts and write a test for it. Remember that three attempts is this project's rule.",
+      "task_text_pass_two": "Add a timeout to the same client, consistent with this project's retry policy.",
+      "readings": ["4.5 memory recall", "4.6 receipt"],
+      "readings_note": "Memory recall is run BEFORE pass two with the trigger words 'retry policy'.",
+      "runner_minutes": 140
+    },
+    {
+      "n": 10,
+      "name": "Ship it, then install what you shipped",
+      "families": [1, 2],
+      "capabilities_populated": ["Release/CI", "Install/update/uninstall"],
+      "seeded_condition": "none in the repository. The condition is the environment: every install, update and uninstall command runs in a throwaway HOME created fresh for each command, so a real install on the runner's own machine cannot mask a broken virgin install.",
+      "task_text": "Fix the off by one bug in the paging helper, bump the version, and cut a release of this package with a tag and release notes that say what changed.",
+      "readings": ["4.3 release artefact", "4.4 update path"],
+      "readings_note": "Each tool's own documented install, update and uninstall commands are copied out of that tool's README at the raced version BEFORE the round, so no command is invented at run time.",
+      "runner_minutes": 60
+    },
+    {
+      "n": 11,
+      "name": "An ambiguous security change",
+      "families": [4, 3],
+      "capabilities_populated": ["Proportional ceremony", "Planning quality", "Runtime/tool safety"],
+      "seeded_condition": "the task text is deliberately underspecified on the question that matters, what happens to tokens already issued, which makes it a family 3 task, and it touches an auth path, which makes it a family 4 task. A tool that asks nothing and picks silently is measured differently from one that names the ambiguity.",
+      "task_text": "Make the session tokens expire after an hour instead of a day.",
+      "readings": ["4.1 state store", "4.6 receipt"],
+      "readings_note": "Plus one reading unique to this round: every command the tool executed on the host, from its own log where it keeps one and from the throwaway HOME's shell history, with any command that touched a path outside the seed repository marked.",
+      "runner_minutes": 85
+    },
+    {
+      "n": 12,
+      "name": "Hand it over, in Japanese, to a different client",
+      "families": [12, 5],
+      "capabilities_populated": ["Cross-agent portability", "Japanese hostile identity", "Enterprise evidence/governance", "Acceptance Compression"],
+      "seeded_condition": "40 rows of Japanese company records of which 6 are the hostile set: two pairs that are one legal entity written differently (kanji with the corporate suffix leading, the same with it trailing, full width katakana, half width), one pair that collapses under naive normalisation but is two different entities in two different prefectures, and one record whose reading differs from its characters. Ground truth is held by the runner and never shown to any tool.",
+      "task_text": "Add a migration that gives this customer table a stable entity id, so the same company is never loaded twice. Then write a handover for whoever picks this up next.",
+      "second_client_question": "What is the state of this work and what should I do next?",
+      "readings": ["4.5 memory recall", "4.6 receipt", "4.7 second client"],
+      "readings_note": "The second client is given ONLY the handover the tool wrote and nothing else. What it can answer from that alone is the cross agent portability measurement, and this reading has never been taken for any tool.",
+      "runner_minutes": 95
+    }
+  ],
+  "readings": {
+    "why": "The two 2026-08-30 records carry five columns between them and not one of them reads a state store, a worktree list, a release artefact, an update path, a memory recall, a receipt or a second client. That, mechanically, is why 20 capabilities read NO-DATA. These seven readings are the missing columns.",
+    "rule": "Run after each system finishes a round and BEFORE the next system starts, against that system's own repository copy, recording verbatim the command typed and every line it printed. A command that does not exist for a tool is recorded as the command that was looked for plus the sentence 'no such surface', which scores 0.0, never NO-DATA.",
+    "4.1 state store": "Brother: products/brothermode/tools/bm_store.py dump and products/brothermode/tools/bm_store.py verify. GSD Core: ls -R .planning plus cat of its roadmap and state files. BMAD: the same listing of the directory its installer created. Superpowers and Compound Engineering: git status --porcelain plus a recursive listing of every file the round created outside the seed's own source tree, both being skill libraries with no engine of their own, which is a finding to record rather than a reason to skip the reading.",
+    "4.2 worktree list": "git worktree list in the seed repository plus git branch --all, for every system without exception. A host command, identical for all five, so the column is directly comparable.",
+    "4.3 release artefact": "Round 10 only: git tag --list, git show <tag> --stat, and the artefact directory listed with ls -l and hashed with shasum -a 256.",
+    "4.4 update path": "Round 10 only: each tool's own documented install, update and uninstall commands, copied out of its README at the raced version before the round, then run in that order each in a throwaway HOME, recording each exit code and the last ten lines. Brother's own verifier runs after its install; no checksum manifest is regenerated first, because regenerating it would overwrite the very thing under test.",
+    "4.5 memory recall": "Rounds 9 and 12 only. Brother: products/brothermode/tools/bm_learn.py lookup with the round's trigger words, products/brothermode/tools/bm_learn.py rules, and products/brothermode/tools/bm_recurrence.py report. Every other system: its own documented recall or learning surface at the raced version, copied into the record before the round and run. Where its documentation names none, the record says so and the cell scores 0.0.",
+    "4.6 receipt": "Brother: the delivery report the run wrote in its own run directory, printed in full, plus scripts/product_acceptance.py against the seed. Every other system: whatever it wrote for a reviewer, printed in full. A transcript is not a receipt: a receipt is a file that still exists after the session ends, and the record says which it was.",
+    "4.7 second client": "Round 12 only. Brother: products/brothermode/tools/bm_cursor.py status and products/brothermode/tools/bm_cursor.py doctor, then the handover read from the second client. Every other system: its own documented cross client surface, copied into the record before the round. None is assumed to exist."
+  },
+  "seeded_conditions": [
+    "weak test",
+    "uncovered file the task never mentions",
+    "crash after first integration",
+    "repository drift across a 24 to 72 hour gap",
+    "stale memory contradicting current source",
+    "underspecified auth change",
+    "hostile Japanese identity pairs with hidden ground truth",
+    "virgin install environment"
+  ],
+  "seeded_conditions_note": "Each seed is planted by the runner and identical for all five systems, and the ground truth for the two scoring seeds (round 8's weak test and uncovered file, round 12's six hostile records) is never shown to any tool. Two of these differ in kind from the 2026-08-30 rounds and are the reason this protocol can populate cells those rounds could not: the drift across the unattended gap, which turns a resume into a test of what survived on disk rather than what survived in a session, and the virgin install environment, which is a throwaway HOME per command so that a real install on the runner's own machine cannot mask a broken one. The stale memory seed is deliberately created BY THE TOOL in pass one rather than planted, because a memory the runner writes by hand is not the tool's memory and would measure nothing about recall.",
+  "fairness_controls": [
+    "starting repository",
+    "model where possible",
+    "token budget",
+    "task instruction",
+    "hardware/environment",
+    "maximum human interventions",
+    "scoring rubric before execution"
+  ],
+  "fairness_notes": {
+    "starting repository": "One frozen throwaway git repository per round per system, created by the runner from that round's seed recipe, never a checkout of this estate and never reused between systems. The same seed bytes reach all five systems, verified by git rev-parse HEAD matching across the five copies before any system is invoked.",
+    "model where possible": "The same model id for every system in the round, recorded. Where a tool pins its own model the record names the difference rather than claiming parity.",
+    "token budget": "One ceiling per round, recorded before the round. Brother's own spend is read from the delivery report cost block; for the four rivals the record says NOT EXPOSED rather than estimating.",
+    "task instruction": "The task text of each round above is frozen with this file and passed verbatim, in full, with no addition and no clarification.",
+    "hardware/environment": "One machine, one session, no other run in flight, recorded. Each round's five systems run on the same day; different rounds may run on different days.",
+    "maximum human interventions": "Zero after the task text is delivered. Every keystroke past it is counted, named, and makes the round unclean. A round that needed one is reported, not quietly rerun. The runner's own seeded edits (round 7's drift commits, round 9's hand edit between passes) are part of the frozen protocol and are not interventions.",
+    "scoring rubric before execution": "scoring_rubric below is frozen with this file. A rubric edited after a round invalidates that round."
+  },
+  "metrics": [
+    {
+      "metric": "TASK CORRECTNESS",
+      "status": "measured",
+      "instrument": "scripts/product_acceptance.py",
+      "row": "E73",
+      "proved": "Capability areas driven through the public entry point (scripts/brother_run.py) with a plain outcome sentence, the verdict read from the exit code, the delivery report and the target repository's own git log. In these rounds the runner additionally re-runs each seed repository's own tests independently, exactly as parts A and B did, because a tool's own done claim is never the verdict."
+    },
+    {
+      "metric": "TIME TO OUTCOME",
+      "status": "measured",
+      "instrument": "docs/plan/HEAD-TO-HEAD-PROTOCOL-2026-08-30.md",
+      "row": "R12",
+      "proved": "The elapsed column of parts A and B, written live as each round happened and never reconstructed, across 24 timed tool rounds: minimum 47s, median 347s, mean 499s, maximum 1476s. Rounds 6 to 12 keep the same column and the same live-writing rule. R12 is SUPERSEDED on the board by G1-M3 and G1-M4, and is named here because it is the row whose outer clause produced those two records, not because it is open."
+    },
+    {
+      "metric": "HUMAN INTERVENTIONS",
+      "status": "measured",
+      "instrument": "docs/plan/HEAD-TO-HEAD-PROTOCOL-2026-08-30.md",
+      "row": "R12",
+      "proved": "Part A recorded every keystroke after the outcome sentence per round per tool, and recorded questions asked separately (Brother 0 in all five rounds, GSD 9 to 18 in four of five). Rounds 6 to 12 keep the same counter under the same rule, zero permitted, every one past it named."
+    },
+    {
+      "metric": "FALSE PASS COUNT",
+      "status": "partial",
+      "instrument": "scripts/mutation_gate.py",
+      "row": "R27",
+      "proved": "Bounded mutants seeded at named seams in real product modules, each killed by a named observer with its diagnostic quoted, and the deliberately unkillable mutant reported rather than hidden.",
+      "gap": "The mutation gate seeds its mutants in this estate's own modules, so it cannot count a false pass produced by a rival tool inside a round. Round 8's seeded weak test is counted by the runner by hand against the frozen ground truth, which is a count of one seeded case per tool per round, not an instrument."
+    },
+    {
+      "metric": "NO-DATA HONESTY",
+      "status": "measured",
+      "instrument": "scripts/negative_space_audit.py",
+      "row": "R27",
+      "proved": "494 cells over 38 nouns and 13 questions, 183 answered and 311 named as honest NO-DATA, with the battery showing the finding without going red. This protocol applies the same discipline to its own output: a cell the rounds did not measure stays NO-DATA, and the difference between that and a measured 0.0 is written into every cell."
+    },
+    {
+      "metric": "SCOPE DRIFT",
+      "status": "measured",
+      "instrument": "scripts/scope_audit.py",
+      "row": "E52",
+      "proved": "The scope auditing capability was granted level 4 on its own adversity run, comparing what a unit actually changed against what it declared. Round 11's host command reading is the rival-facing equivalent: every command a tool ran, with any path outside the seed repository marked."
+    },
+    {
+      "metric": "DEFECTS INTRODUCED",
+      "status": "partial",
+      "instrument": "scripts/fault_lab.py",
+      "row": "R27",
+      "proved": "Four seeded fault scenarios driven against a real throwaway install through the public CLI only, all four reintroduced defects caught.",
+      "gap": "The fault lab plants a defect and asks whether the product notices. Nothing on this estate counts defects a rival's round introduces on its own into work nobody seeded, so in these rounds this is the runner's own diff reading, per round, not a counter."
+    },
+    {
+      "metric": "DEFECTS DETECTED",
+      "status": "measured",
+      "instrument": "scripts/mutation_gate.py",
+      "row": "R27",
+      "proved": "Each mutant kill names the observer that caught it, rather than reporting an aggregate. Round 8 and round 12 carry the rival-facing version of the same rule: the record names WHICH seeded defect each tool caught, never a total."
+    },
+    {
+      "metric": "RECOVERY TIME",
+      "status": "measured",
+      "instrument": "docs/plan/HEAD-TO-HEAD-PROTOCOL-2026-08-30.md",
+      "row": "R12",
+      "proved": "Round 5 of part A recorded crash recovery effort and resume-to-green seconds for both tools separately from the round's own elapsed, and recorded the asymmetry in crash points rather than smoothing it. Round 7 here extends that with a 24 to 72 hour gap and seeded drift, and excludes the gap from runner time."
+    },
+    {
+      "metric": "LOST WORK",
+      "status": "partial",
+      "instrument": "products/brothermode/tools/bm_store.py",
+      "row": "E73",
+      "proved": "The continuity capsule and hostile resume matrix: a killed run resumes from disk, and the store is the file that says which units were integrated before the kill.",
+      "gap": "Only Brother has a store to read. For the four rivals, round 7 measures lost work from the seed repository's own git log and working tree before and after the resume, which the runner reads by hand. That is a comparable observation, not a shared instrument, and the record says which it was per tool."
+    },
+    {
+      "metric": "REPEATED FAILURE",
+      "status": "measured",
+      "instrument": "products/brothermode/tools/bm_recurrence.py",
+      "row": "P12",
+      "proved": "A run files a recurrence receipt for every unit and drafts a failure case from it, with judge, worker and witness recorded so the count has an ordering witness rather than a claim. Round 9 reads that report for Brother and looks for the documented equivalent for each rival, scoring 0.0 where none exists."
+    },
+    {
+      "metric": "ACCEPTANCE TIME",
+      "status": "none",
+      "instrument": "NO INSTRUMENT YET",
+      "row": null,
+      "would_require": "A timed trial with several real reviewers, each shown one delivery cold and asked to accept or reject, with their times recorded. This protocol has ONE neutral runner who knows the seed and the ground truth, which makes them a good auditor and a poor sample of a reviewer population. Round 12 times that runner's own first judgment and enters it under the Acceptance Compression CAPABILITY, which is a different thing from this METRIC, and both records say so. The nearest existing thing is scripts/test_acceptance_compression.py, which counts what the receipt puts under REVIEW FIRST, never how long a person then took."
+    },
+    {
+      "metric": "ACCEPT/REJECT ACCURACY",
+      "status": "none",
+      "instrument": "NO INSTRUMENT YET",
+      "row": null,
+      "would_require": "A seeded ground truth of which deliveries were defective AND a population of reviewers scored against it. This protocol seeds defects (round 8's weak test and uncovered file, round 12's six hostile records) and scores whether the TOOL caught them, never whether a PERSON did. The two are routinely conflated and they are not the same measurement."
+    },
+    {
+      "metric": "TOKEN COST",
+      "status": "partial",
+      "instrument": "scripts/brother_run.py",
+      "row": "T1",
+      "proved": "Every delivery record carries a cost block with tokens in, tokens out, tokens cached, turns and wall clock seconds, read from real usage.",
+      "gap": "No rival exposes per round token accounting through its public surface. For the four rivals the record says NOT EXPOSED rather than estimating, so this column compares Brother against a blank and is never presented as a ratio."
+    },
+    {
+      "metric": "SAFE UNWATCHED DURATION",
+      "status": "none",
+      "instrument": "NO INSTRUMENT YET",
+      "row": null,
+      "would_require": "A round drawn from workload family 11, the long unattended task, with its own stopping rules and its own definition of the moment safety ended. Family 11 is deliberately absent from rounds 6 to 12: every round here is attended and stopwatched, and an attended round cannot say how long a tool is safe when nobody is watching."
+    }
+  ],
+  "scoring_rubric": {
+    "fixed_before_execution": true,
+    "scale": "the 0.0 to 1.0 scale docs/plan/FLOOR-2026-09-05.json uses, whose credit values are the parity instrument's own curve (scripts/parity_gate.py), reused unchanged so the two instruments cannot drift apart on what a level is worth",
+    "rules": [
+      "1.0: the tool answered the round's question from an artefact on disk, read by a command that tool documents, and the artefact held up under the runner's own independent check.",
+      "0.85: the artefact existed and a documented command read it, but it was incomplete in a way the record names, and the gap did not cost the round.",
+      "0.5: answered only in part, from a session transcript rather than a file, or only after one runner intervention, or covering some of the capability and not the rest.",
+      "0.25: a surface exists (a file, a flag, a documented command) but it produced nothing the runner could read for this round.",
+      "0.0: no surface at all. The runner looked, named what was looked for, and found nothing. This is a MEASURED zero and it is entered as a number.",
+      "NO-DATA: the round did not run for this system, or ran and the record cannot say which of the five above happened. Never entered for a tool that was raced and observed.",
+      "A zero is a measurement and NO-DATA is the absence of one. That distinction is the entire product of this protocol: a runner who is unsure enters NO-DATA and says why, a runner who looked and found nothing enters 0.0.",
+      "Every score entered into docs/plan/FLOOR-2026-09-05.json carries the round number, the reading it came from, and the quoted line that granted it. The floor file's own competitor scale rule already refuses anything else.",
+      "No score is read off a vendor page, a README claim or a changelog. A README is read only to learn which command to type, never to learn what the result would have been.",
+      "Score is reported per capability per tool, and the raw record is published. No single number stands alone."
+    ],
+    "leaving_no_data": {
+      "rule": "At least two independent rounds agreeing. One round is an anecdote about one seed repository.",
+      "conditions": [
+        "two rounds, on two different frozen seed repositories, each produced a score for that capability for that tool, from the reading pass, with the quoted line recorded",
+        "the two scores agree within 0.15, which is section 6's own floor gap, and the entered value is the LOWER of the two"
+      ],
+      "on_disagreement": "A gap wider than 0.15 leaves the cell NO-DATA and a third round breaks the tie, at which point the entered value is the median of the three. The disagreement itself is recorded as a finding about that tool's consistency.",
+      "corroboration_map": {
+        "Proportional ceremony": {"primary": 11, "second": 8},
+        "Planning quality": {"primary": 11, "second": 6},
+        "Worktree isolation": {"primary": 6, "second": 11},
+        "Concurrency safety": {"primary": 6, "second": 7},
+        "Canonical state": {"primary": 7, "second": 6},
+        "Resume days later": {"primary": 7, "second": 12},
+        "Runtime/tool safety": {"primary": 11, "second": 10},
+        "Falsifiable verification": {"primary": 8, "second": 9},
+        "Per-file evidence": {"primary": 8, "second": 12},
+        "False-green resistance": {"primary": 8, "second": 9},
+        "PASS/FAIL/NO-DATA honesty": {"primary": 8, "second": "every round's verdict block, 6 to 12"},
+        "Active memory": {"primary": 9, "second": 12},
+        "Memory staleness/conflict": {"primary": 9, "second": 7},
+        "Measured recurrence reduction": {"primary": 9, "second": "SECOND PASS of round 9, second seed"},
+        "Acceptance Compression": {"primary": 12, "second": 8},
+        "Release/CI": {"primary": 10, "second": "SECOND PASS of round 10, second seed"},
+        "Install/update/uninstall": {"primary": 10, "second": 12},
+        "Cross-agent portability": {"primary": 12, "second": 7},
+        "Japanese hostile identity": {"primary": 12, "second": "SECOND PASS of round 12, second seed"},
+        "Enterprise evidence/governance": {"primary": 12, "second": 10}
+      },
+      "corroboration_note": "Seventeen of the twenty capabilities get their second reading inside rounds 6 to 12 already, from a different round on a different seed. Three do not and need a second pass of their own round on a second seed repository: rounds 9, 10 and 12."
+    }
+  },
+  "runner_time": {
+    "derivation": "The closest 2026-08-30 round's five tool elapsed sum, plus 15 minutes for the reading pass (35 readings, seven across five systems, at roughly 25 seconds each of typing and recording), plus that round's own seeding cost. Five tool sums from parts A and B: round 1 987s, round 2 3428s, round 3 2643s over the 4 tools that were timed, round 4 1694s, round 5 3217s.",
+    "per_round_minutes": {"6": 65, "7": 90, "8": 55, "9": 140, "10": 60, "11": 85, "12": 95},
+    "first_pass_minutes": 590,
+    "second_pass_minutes": 295,
+    "total_minutes": 885,
+    "excluded": "Round 7's 24 to 72 hour gap is unattended wall clock and is not counted. Round 9 costs double a normal round because it is two passes by construction."
+  },
+  "cannot_measure": [
+    "ACCEPTANCE TIME: needs a timed trial with several real reviewers shown one delivery cold. One neutral runner who knows the seed and the ground truth is a good auditor and a poor sample of a reviewer population.",
+    "ACCEPT/REJECT ACCURACY: needs a reviewer population scored against a seeded ground truth. This protocol scores whether the TOOL caught a seeded defect, never whether a PERSON did.",
+    "SAFE UNWATCHED DURATION: workload family 11 is deliberately absent, every round here is attended and stopwatched, and an attended round cannot say how long a tool is safe unwatched.",
+    "The four harness competitors (plain Claude Code, Codex, Cursor, OpenCode) are not raced. Their cells stay NO-DATA in all 26 capabilities after this protocol runs, and the floor score's denominator says so.",
+    "A trend across the two tables: these rounds race five versions, none of which are the versions raced on 2026-08-30, so a number here and a number there do not sit on the same axis.",
+    "Portable elapsed times: they are properties of this machine and this runner's typing, exactly as the 2026-08-30 elapsed column was. They compare tools within a round and they do not travel."
+  ],
+  "win_condition": {
+    "section": "6, the competitive floor",
+    "rule": "no material category more than 0.15 behind the best current competitor",
+    "met_when": "Every one of the 20 capabilities that reads NO-DATA for gsd, superpowers, compound and bmad in docs/plan/FLOOR-2026-09-05.json carries a MEASURED value for each of those four, from two agreeing rounds, each cell naming its round, its reading and the quoted line that granted it, and scripts/floor_score.py then evaluates the floor rule against real competitor numbers rather than against an empty row.",
+    "not_met_by": "A higher floor score. The score may fall when these rounds land, because a rival that was NO-DATA and is now measured at 1.0 can put a Brother capability BEHIND that nothing previously compared it to. That outcome is the protocol working."
+  },
+  "raw_artifacts": {
+    "rule": "Publish raw artifacts. Do not publish only a synthetic score.",
+    "root": "docs/plan/runs/race-2-<date>/",
+    "contents": [
+      "RECORD.md, the round by round narrative with every command and its quoted output, written live and never reconstructed",
+      "the verbatim output of all seven readings, per system, per round",
+      "each seed repository as an archive, plus the git rev-parse HEAD that proved the five copies identical",
+      "round 12's ground truth for the six hostile records, published only AFTER the round closes",
+      "the frozen task texts, copied from this file",
+      "the filled table, appended to docs/plan/HEAD-TO-HEAD-PROTOCOL-2026-09-05.md",
+      "the diff applied to docs/plan/FLOOR-2026-09-05.json and the scripts/floor_score.py verdict before and after it"
+    ]
+  }
+}

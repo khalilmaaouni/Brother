@@ -23,6 +23,21 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import release_note_from_tree as R  # noqa: E402
 import receipt_door as RD  # noqa: E402
 
+# E100: one sandbox for every temp tree this process makes, removed at exit.
+import os as _e100_os, sys as _e100_sys  # noqa: E402
+_e100_sys.path.append(_e100_os.path.join(
+    _e100_os.path.dirname(_e100_os.path.abspath(__file__)), '.'))
+try:  # noqa: E402
+    import tmp_sandbox as _e100_tmp
+    _e100_tmp.install()
+except ImportError:
+    # A packager (scripts/export_public.py, make_benchmark_bundle.py)
+    # can copy this test without scripts/tmp_sandbox.py beside it. Say
+    # so rather than dying: the sandbox is hygiene, not the subject.
+    _e100_sys.stderr.write(
+        "tmp_sandbox absent: %s leaves its temp trees behind\n"
+        % _e100_os.path.basename(__file__))
+
 
 def make_note(dirpath, name, body):
     p = os.path.join(dirpath, name)
@@ -634,6 +649,191 @@ class TheHandWrittenParagraphIsReadFromAFileNeverTypedIntoTheNote(
         body, problems = R.build(version)
         self.assertEqual(problems, [])
         self.assertIn(text, body)
+
+
+class TheTableSwapTouchesNothingElse(unittest.TestCase):
+    """--write-table exists because re-running the whole generator over an
+    ALREADY CUT note would restate its digest and revision (true about the
+    tag) as facts about today's tree. The swap has to be surgical or it is
+    worse than leaving the wrong table in place."""
+
+    NOTE = "\n".join([
+        "# Brother 1.0.1", "",
+        "## Source revision", "",
+        "Cut from hub commit `deadbeef`.", "",
+        "## Files behind these claims", "",
+        "old prose",
+        "| Claim | Suite | Source file(s) |",
+        "|---|---|---|",
+        "| a | `x` | `y` |", "",
+        "## Something after", "",
+        "kept", ""])
+
+    def test_only_the_table_section_changes(self):
+        out = R.replace_files_table(
+            self.NOTE, R.render_files_table("1.0.1",
+                                            [("a", "scripts/x.py", None)]))
+        self.assertIn("Cut from hub commit `deadbeef`.", out)
+        self.assertIn("## Something after", out)
+        self.assertIn("kept", out)
+        self.assertNotIn("old prose", out)
+        self.assertNotIn("| Claim | Suite | Source file(s) |", out)
+
+    def test_a_no_data_row_prints_no_data_not_a_suite(self):
+        out = R.replace_files_table(
+            self.NOTE, R.render_files_table("1.0.1",
+                                            [("a", "scripts/x.py", None)]))
+        self.assertIn("| a | `scripts/x.py` | %s |" % R.NODATA, out)
+
+    def test_a_note_without_the_section_is_refused_not_appended_to(self):
+        self.assertIsNone(
+            R.replace_files_table("# a note\n\nnothing here\n",
+                                  R.render_files_table("1.0.1", [])))
+
+
+class FakePerturb:
+    """The seam measured_file_rows takes, so every branch of the table's
+    suite column can be driven without running a real suite. `caught` maps
+    (suite, file) to the verdict covers() should report."""
+
+    class RestoreFailed(Exception):
+        pass
+
+    def __init__(self, caught, siblings=None, raise_restore_on=None,
+                 dirty_at_end=False, baseline_for=None):
+        self.caught = caught
+        self.siblings = siblings or {}
+        self.raise_restore_on = raise_restore_on
+        self.dirty_at_end = dirty_at_end
+        self.baseline_for = baseline_for or {}
+        self.baselines_run = []
+        self.driven = []
+
+    def check_ledger(self):
+        if self.dirty_at_end:
+            raise FakePerturb.RestoreFailed(
+                "scripts/x.py changed after this run restored it")
+
+    def run_suite(self, rel, root=None, timeout=None):
+        self.baselines_run.append(rel)
+        return self.baseline_for.get(rel, 0), "OK"
+
+    def covers(self, suite, rel, root=None, baseline=None):
+        self.driven.append((suite, rel))
+        if self.raise_restore_on == (suite, rel):
+            raise FakePerturb.RestoreFailed(
+                "%s did not restore byte-identically" % rel)
+        return self.caught.get((suite, rel), False), "detail"
+
+    def sibling_suite(self, rel, root=None):
+        return self.siblings.get(rel)
+
+
+class TheFilesTableIsMeasuredNotInferred(unittest.TestCase):
+    """GAP 8, row E95: the suite column used to be the claim's own suite
+    beside every module that suite imported. An import is not coverage, and
+    four of eleven files in the v1.0.1 note survived a perturbation under the
+    suite named beside them. Every branch of the replacement is driven here."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        for name in ("subject.py", "other.py", "test_subject.py",
+                     "test_thing.py"):
+            with open(os.path.join(self.tmp, name), "w",
+                      encoding="utf-8") as fh:
+                fh.write("x = 1\n")
+        with open(os.path.join(self.tmp, "test_thing.py"), "w",
+                  encoding="utf-8") as fh:
+            fh.write("import subject\nimport other\n")
+
+    def test_a_file_its_own_suite_catches_keeps_that_suite(self):
+        fake = FakePerturb({("test_thing.py", "subject.py"): True,
+                            ("test_thing.py", "other.py"): True})
+        with mock.patch.object(R, "ROOT", self.tmp):
+            rows, problem = R.measured_file_rows(
+                [("claim", "test_thing.py")], perturb=fake)
+        self.assertIsNone(problem)
+        self.assertEqual(rows, [("claim", "other.py", "test_thing.py"),
+                                ("claim", "subject.py", "test_thing.py")])
+
+    def test_a_file_its_own_suite_misses_takes_the_sibling_that_catches_it(self):
+        """The bm_vault.py shape: the claim's suite writes a fake and never
+        executes the real file, while test_<stem>.py beside it does."""
+        fake = FakePerturb({("test_subject.py", "subject.py"): True,
+                            ("test_thing.py", "other.py"): True},
+                           siblings={"subject.py": "test_subject.py"})
+        with mock.patch.object(R, "ROOT", self.tmp):
+            rows, problem = R.measured_file_rows(
+                [("claim", "test_thing.py")], perturb=fake)
+        self.assertIsNone(problem)
+        self.assertIn(("claim", "subject.py", "test_subject.py"), rows)
+
+    def test_a_file_no_suite_catches_reads_no_data_never_a_suite_name(self):
+        fake = FakePerturb({("test_thing.py", "other.py"): True},
+                           siblings={"subject.py": "test_subject.py"})
+        with mock.patch.object(R, "ROOT", self.tmp):
+            rows, problem = R.measured_file_rows(
+                [("claim", "test_thing.py")], perturb=fake)
+        self.assertIsNone(problem)
+        self.assertIn(("claim", "subject.py", None), rows)
+
+    def test_a_failed_restore_refuses_the_note_rather_than_writing_a_row(self):
+        fake = FakePerturb({}, raise_restore_on=("test_thing.py",
+                                                 "other.py"))
+        with mock.patch.object(R, "ROOT", self.tmp):
+            rows, problem = R.measured_file_rows(
+                [("claim", "test_thing.py")], perturb=fake)
+        self.assertEqual(rows, [])
+        self.assertIn("may still be perturbed", problem)
+        self.assertTrue(problem.startswith(R.NODATA))
+
+    def test_a_file_dirtied_after_its_own_measurement_refuses_the_note(self):
+        """The first full run of the real tool restored every file it
+        perturbed and STILL finished with scripts/decide.py carrying an
+        injected block, so a per-measurement restore check is not enough on
+        its own: the ledger is read once more at the end, and a mismatch
+        refuses the note rather than shipping a table measured on a tree that
+        moved underneath it."""
+        fake = FakePerturb({("test_thing.py", "subject.py"): True,
+                            ("test_thing.py", "other.py"): True},
+                           dirty_at_end=True)
+        with mock.patch.object(R, "ROOT", self.tmp):
+            rows, problem = R.measured_file_rows(
+                [("claim", "test_thing.py")], perturb=fake)
+        self.assertEqual(rows, [])
+        self.assertIn("may still be perturbed", problem)
+
+    def test_a_suite_that_cannot_be_run_is_asked_once_not_once_per_file(self):
+        """A suite whose baseline is red, or that could not be run at all,
+        proves nothing about any file. Asking it again for every candidate
+        costs one full run each time and changes no answer."""
+        fake = FakePerturb({}, baseline_for={"test_thing.py": 1})
+        with mock.patch.object(R, "ROOT", self.tmp):
+            rows, problem = R.measured_file_rows(
+                [("claim", "test_thing.py")], perturb=fake)
+        self.assertEqual(fake.baselines_run.count("test_thing.py"), 1,
+                         fake.baselines_run)
+        self.assertEqual(fake.driven, [], "a red suite was perturbed anyway")
+        self.assertIsNone(problem)
+        self.assertIn(("claim", "subject.py", None), rows)
+
+    def test_nothing_measurable_is_a_refusal_not_an_empty_table(self):
+        fake = FakePerturb({})
+        with mock.patch.object(R, "ROOT", self.tmp):
+            rows, problem = R.measured_file_rows(
+                [("claim", "test_subject.py")], perturb=fake)
+        self.assertEqual(rows, [])
+        self.assertIn("no source file could be measured", problem)
+
+    def test_the_sibling_is_not_probed_when_it_is_the_claims_own_suite(self):
+        fake = FakePerturb({}, siblings={"subject.py": "test_thing.py"})
+        with mock.patch.object(R, "ROOT", self.tmp):
+            R.measured_file_rows([("claim", "test_thing.py")], perturb=fake)
+        self.assertEqual(
+            [p for p in fake.driven if p == ("test_thing.py", "subject.py")],
+            [("test_thing.py", "subject.py")],
+            "the same suite was driven twice for one file: %s" % fake.driven)
 
 
 if __name__ == "__main__":

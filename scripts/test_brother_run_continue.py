@@ -12,6 +12,7 @@ second is durably claimed) rather than re-implementing it: that rig is
 already the proven way to land a live claim under a dead owner.
 """
 import os
+import shlex
 import sys
 import tempfile
 import time
@@ -21,6 +22,21 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import test_brother_run as tbr  # noqa: E402
 import product_acceptance as pa  # noqa: E402
+
+# E100: one sandbox for every temp tree this process makes, removed at exit.
+import os as _e100_os, sys as _e100_sys  # noqa: E402
+_e100_sys.path.append(_e100_os.path.join(
+    _e100_os.path.dirname(_e100_os.path.abspath(__file__)), '.'))
+try:  # noqa: E402
+    import tmp_sandbox as _e100_tmp
+    _e100_tmp.install()
+except ImportError:
+    # A packager (scripts/export_public.py, make_benchmark_bundle.py)
+    # can copy this test without scripts/tmp_sandbox.py beside it. Say
+    # so rather than dying: the sandbox is hygiene, not the subject.
+    _e100_sys.stderr.write(
+        "tmp_sandbox absent: %s leaves its temp trees behind\n"
+        % _e100_os.path.basename(__file__))
 
 BROTHER_RUN = tbr.BROTHER_RUN
 
@@ -175,6 +191,133 @@ class ContinueIgnoresATerminalRun(unittest.TestCase):
         out = cont.stdout + cont.stderr
         self.assertEqual(cont.returncode, 0, out)
         self.assertIn("no unfinished run found", out, out)
+
+
+def _runs_in(runs_root):
+    """Every run directory under a runs root, by name; the count is what
+    tells a resumed run from a second, competing one."""
+    runs_dir = os.path.join(runs_root, "docs", "plan", "runs")
+    return sorted(os.listdir(runs_dir)) if os.path.isdir(runs_dir) else []
+
+
+def _command_after(out, marker):
+    """The copyable command a refusal printed: the first non-empty line
+    AFTER the line holding `marker`. Returns None when the marker never
+    appeared, so a test can say which half is missing."""
+    lines = out.splitlines()
+    for i, line in enumerate(lines):
+        if marker in line:
+            for later in lines[i + 1:]:
+                if later.strip():
+                    return later.strip()
+            return None
+    return None
+
+
+class ARefusalNamesItsNextCommand(unittest.TestCase):
+    """E81, the half the 2026-09-04 stranger trial found missing: a run that
+    refuses says WHY and then stops, leaving the person who typed the first
+    command with nothing to type second. Both refusal shapes are covered:
+    the door refusing before anything is claimed, and a run that reached the
+    end with its work refused."""
+
+    def test_a_refused_run_prints_the_command_that_continues_it(self):
+        runs_root = tempfile.mkdtemp(prefix="next-cmd-runs-")
+        scratch = tempfile.mkdtemp(prefix="next-cmd-scratch-")
+        repo = tbr.make_repo(tempfile.mkdtemp(prefix="next-cmd-repo-"))
+
+        proc = _leave_unfinished(scratch, runs_root, repo,
+                                 "the refused outcome", "R1", "r1.txt")
+        out = proc.stdout + proc.stderr
+        self.assertNotEqual(proc.returncode, 0, out)
+        self.assertIn("this run is not finished. Continue it with:", out, out)
+
+        cmd = _command_after(out, "Continue it with:")
+        self.assertIsNotNone(cmd, out)
+        argv = shlex.split(cmd)
+        self.assertIn("--continue", argv, cmd)
+        self.assertIn(repo, argv, cmd)
+        self.assertIn(runs_root, argv, cmd)
+
+    def test_a_door_refusal_prints_the_ask_again_command(self):
+        runs_root = tempfile.mkdtemp(prefix="next-cmd-door-runs-")
+        scratch = tempfile.mkdtemp(prefix="next-cmd-door-scratch-")
+        repo = tbr.make_repo(tempfile.mkdtemp(prefix="next-cmd-door-repo-"))
+
+        # The door's own refusal shape: the decomposer never answers, so no
+        # store is written and there is nothing to continue. The next
+        # command is therefore the same ask, not --continue.
+        env = dict(os.environ)
+        env["DOOR_MODEL_CMD"] = "%s %s" % (
+            sys.executable,
+            tbr.write_stub(scratch, "no_model.py", tbr.FAILING_MODEL))
+        outcome = "an outcome the door cannot read a plan for"
+        proc = tbr.sh([sys.executable, BROTHER_RUN, outcome,
+                       "--cwd", repo, "--runs-root", runs_root], env=env)
+        out = proc.stdout + proc.stderr
+        self.assertNotEqual(proc.returncode, 0, out)
+        self.assertIn("the door refused this outcome", out, out)
+        self.assertIn("nothing to continue: the store is untouched", out, out)
+
+        cmd = _command_after(out, "Ask again")
+        self.assertIsNotNone(cmd, out)
+        argv = shlex.split(cmd)
+        self.assertIn(outcome, argv, cmd)
+        self.assertIn(repo, argv, cmd)
+        self.assertNotIn("--continue", argv, cmd)
+
+
+class ThePrintedCommandContinuesTheSameRun(unittest.TestCase):
+    """The command a refusal prints is worth nothing unless it works. This
+    takes the line verbatim off the refusal's own output, runs it, and
+    checks that it resumed THE SAME run rather than starting a second one
+    against the same repository."""
+
+    def test_running_the_printed_command_resumes_rather_than_restarts(self):
+        runs_root = tempfile.mkdtemp(prefix="next-cmd-works-runs-")
+        scratch = tempfile.mkdtemp(prefix="next-cmd-works-scratch-")
+        repo = tbr.make_repo(tempfile.mkdtemp(prefix="next-cmd-works-repo-"))
+
+        outcome = "the file the first attempt never wrote"
+        proc = _leave_unfinished(scratch, runs_root, repo, outcome,
+                                 "W1", "w1.txt")
+        self.assertNotEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        before = _runs_in(runs_root)
+        self.assertEqual(len(before), 1, before)
+
+        cmd = _command_after(proc.stdout + proc.stderr, "Continue it with:")
+        self.assertIsNotNone(cmd, proc.stdout + proc.stderr)
+
+        # The second attempt gets a model that actually writes, which is the
+        # only thing that changed between the two runs: same repository,
+        # same runs root, same run directory.
+        env = dict(os.environ)
+        env["MODEL_WORKER_CMD"] = "%s %s" % (
+            sys.executable, tbr.write_stub(scratch, "writer.py",
+                                           tbr.WRITER_MODEL))
+        again = tbr.sh(shlex.split(cmd), env=env)
+        out = again.stdout + again.stderr
+        self.assertIn("brother_run: resuming", out, out)
+        self.assertIn(outcome, out, out)
+        self.assertEqual(_runs_in(runs_root), before, out)
+
+
+class ContinuingWithNothingToContinueIsNoData(unittest.TestCase):
+    """An absence is neither a pass nor a failure. A repository that never
+    ran anything must say NO-DATA in the estate's own vocabulary, and must
+    never hand a stranger a traceback."""
+
+    def test_no_unfinished_run_reads_no_data_and_never_a_traceback(self):
+        runs_root = tempfile.mkdtemp(prefix="nodata-runs-")
+        repo = tbr.make_repo(tempfile.mkdtemp(prefix="nodata-repo-"))
+
+        proc = tbr.sh([sys.executable, BROTHER_RUN, "--continue",
+                       "--cwd", repo, "--runs-root", runs_root])
+        out = proc.stdout + proc.stderr
+        self.assertEqual(proc.returncode, 0, out)
+        self.assertIn("NO-DATA", out, out)
+        self.assertIn("no unfinished run found", out, out)
+        self.assertNotIn("Traceback", out, out)
 
 
 if __name__ == "__main__":

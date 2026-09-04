@@ -21,6 +21,16 @@
 
 cd "$(dirname "$0")/.." || exit 1
 
+# E100. The battery's own temp footprint, read at the start and again at the
+# end, so a run that leaves residue behind says so in its own output rather
+# than being discovered later as 85,119 entries and 11 GB of leftover test
+# trees (measured 2026-09-04 18:05, when free disk fell from 13 GiB to 8 GiB
+# in two hours of lane runs). It also prunes what nothing has written to for
+# an hour, naming every path it removes. Not a run_check: it is a reading
+# about the harness, not a verdict about the product, and it must never be
+# able to turn the battery red.
+python3 scripts/temp_residue.py --label start --prune --hours 1
+
 pass=0; fail=0; nodata=0
 failed_names=""
 nodata_names=""
@@ -32,7 +42,23 @@ run_check() {
   last="$(printf '%s\n' "$out" | tail -1 | cut -c1-72)"
   names=""
   case "$code" in
-    0) # A python unittest suite that SKIPS a test still exits 0 and prints
+    0) # THE SUMMARY LINE NAMES THE CHECK'S OWN VERDICT, NEVER WHATEVER
+       # PRINTED LAST. The FAIL branch below learned this once already. The
+       # passing branch had not, and it cost three readings of one battery:
+       # on the 1.0.2 cut, product-brothersbe-tests displayed "migrate:
+       # outcomes.jsonl SHRANK while this rewrite held the writer lock",
+       # which is a refusal one of its own tests deliberately provokes
+       # inside a temporary directory, printed to stdout after unittest had
+       # written "OK (skipped=2)" to stderr. Three reviewers in three
+       # verdict rounds read that line as a live concurrency incident on the
+       # operator's machine. The suite was green throughout. A unittest
+       # suite states its own verdict on a line of its own ("OK", or "OK
+       # (skipped=N)"), so prefer that line when the output has one; a check
+       # that is not a unittest suite has no such line and keeps its last
+       # line, which for those checks already is the verdict.
+       ok_line="$(printf '%s\n' "$out" | grep -E '^OK($| \()' | tail -1 | cut -c1-72)"
+       [ -n "$ok_line" ] && last="$ok_line"
+       # A python unittest suite that SKIPS a test still exits 0 and prints
        # "OK (skipped=N)". A skip whose own reason says NO-DATA (this
        # estate's convention for "could not run, not a failure") is not
        # evidence the thing it skipped is healthy, so it is never a PASS.
@@ -161,6 +187,12 @@ run_check "intake-record-diagrams" python3 scripts/intake_score.py --gate --requ
 run_check "readiness-board-self" python3 scripts/test_gen_readiness_board.py -v
 run_check "delivery-tracker-self" python3 scripts/test_track_delivery.py -v
 run_check "delivery-tracking"     python3 scripts/track_delivery.py
+# roadmap_merge.py: the by-row-id merge driver that lets lanes add rows to
+# the readiness roadmap freely instead of colliding on one array slot.
+# Registered beside its readiness-board and delivery-tracker siblings above,
+# per this estate's own recorded lesson that an unregistered tool is
+# invisible to every check the project owns.
+run_check "roadmap-merge-self" python3 scripts/test_roadmap_merge.py -v
 # W4 of the orchestration watchdog. A claim with no expiry cannot retire
 # itself: two such fences held five contended files today and blocked two
 # sessions until a human reaped them. FAILS on a claim that can never expire;
@@ -622,6 +654,11 @@ run_check "fable-authority-self" python3 scripts/test_fable_authority.py -v
 # unregistered suite is invisible to every check the project owns.
 run_check "vault-benchmark-v2-self" python3 -m unittest -v scripts/test_vault_benchmark_v2.py
 run_check "benchmark-bundle-self"   python3 -m unittest -v scripts/test_make_benchmark_bundle.py
+# benchmarks/gauntlets/validate.py: the frozen gauntlet specs are loadable,
+# complete, and cite nothing that is not on disk. Registered beside its
+# benchmark-bundle sibling above, per this estate's own recorded lesson that
+# an unregistered tool is invisible to every check the project owns.
+run_check "gauntlets-validate" python3 benchmarks/gauntlets/validate.py
 run_check "fable-authority"      python3 scripts/fable_authority.py --selftest
 
 # B3 and B4: black-box proofs that VB3-03 (tenancy) and VB3-04 (policy
@@ -712,6 +749,22 @@ run_check "readiness-gate"       python3 scripts/readiness_gate.py
 # is invisible to every check the project owns.
 run_check "release-invariant-self" python3 scripts/test_release_invariant.py -v
 run_check "release-invariant"      python3 scripts/release_invariant.py
+# Row E95: the release note's "Files behind these claims" table, driven
+# rather than read. Every file the note names is broken in place (every
+# function it defines replaced by one that raises when called), its named
+# suite has to go red, and the file is restored and re-hashed byte for byte.
+# The self test drives covered, not-covered, already-red, NO-DATA and a
+# failed restore backwards against a fixture tree under a temp dir, never
+# this one. Registered the same change that lands it, per this estate's own
+# recorded lesson that an unregistered tool is invisible to every check the
+# project owns.
+run_check "release-note-perturb-self" python3 scripts/test_release_note_perturb.py -v
+# HEAVY, and honestly so: this runs one full suite per file row in the note,
+# so its cost is the sum of the cited suites times the files behind them,
+# tens of minutes on this tree. It is the only shape that can tell a table
+# naming a real check apart from one naming a check that cannot fail, which
+# is exactly what shipped in the v1.0.1 note for four of eleven files.
+run_check "release-note-perturb"      python3 scripts/release_note_perturb.py
 # Red-team item 3 / infra persona: the exported content is reproducible from
 # its tested source. The self test drives match, tamper and NO-DATA backwards;
 # the live check needs a --tag and a public checkout, so it is self-test only
@@ -736,6 +789,13 @@ run_check "japanese-threshold-self" python3 -m unittest -v scripts/test_test_jap
 # wiring it in as a normal check would have it summarize a run that has not
 # finished yet. Only its own suite runs here.
 run_check "battery-verdict-self" python3 scripts/test_battery_verdict.py -v
+
+# The summary line this script prints beside each verdict. Registered in
+# the same change that fixes the passing branch's line selection, per this
+# estate's recorded lesson that an unregistered check is invisible to every
+# check the project owns. It lifts run_check out of this file and drives it
+# against fake checks, so the rule is proven by running it.
+run_check "check-all-summary-self" python3 scripts/test_check_all_summary.py
 
 # The closing ceremony law (founder order 2026-08-30): a session close on
 # this estate is FINISHED only when the newest handover pack carries the
@@ -877,6 +937,11 @@ run_check "required-fast-self" python3 scripts/test_required_fast.py -v
 run_check "authority-path-coverage-self" python3 scripts/test_authority_path_coverage.py -v
 run_check "autonomy-dial-self"           python3 scripts/test_autonomy_dial.py -v
 run_check "benchmark-atomic-self"        python3 scripts/test_benchmark_atomic.py -v
+# floor_score.py: G1's own floor comparison against the measured competitors,
+# a fixture-driven suite beside its benchmark-atomic sibling above, per this
+# estate's own recorded lesson that an unregistered tool is invisible to
+# every check the project owns.
+run_check "floor-score-self"             python3 scripts/test_floor_score.py -v
 run_check "brother-run-bare-resume-self" python3 scripts/test_brother_run_bare_resume.py -v
 run_check "brother-run-continue-self"    python3 scripts/test_brother_run_continue.py -v
 run_check "bundle-install-smoke-self"    python3 scripts/test_bundle_install_smoke.py -v
@@ -915,6 +980,12 @@ run_check "reviewer-brief-self"          python3 scripts/test_reviewer_brief.py 
 # rather than a substring search, and removed rather than left running the
 # same 40 tests twice under one name.
 run_check "v3-receipts-self"             python3 scripts/test_v3_receipts.py -v
+# The Delivery Receipt v1 contract (row S8): the field and absence tables of
+# docs/plan/DELIVERY-RECEIPT-V1.md, parsed at run time and asserted against a
+# receipt the engine actually writes. Registered beside its v3-receipts
+# sibling above, per this estate's own recorded lesson that an unregistered
+# tool is invisible to every check the project owns.
+run_check "receipt-contract-v1"          python3 scripts/test_receipt_contract.py -v
 run_check "v3-judge-self"                python3 scripts/test_v3_judge.py -v
 run_check "v3-night-receipts-self"       python3 scripts/test_v3_night_receipts.py -v
 run_check "v3-surfacing-self"            python3 scripts/test_v3_surfacing.py -v
@@ -987,6 +1058,25 @@ run_check "codex-smoke" python3 scripts/codex_smoke.py
 # the state the C7 lane actually hit, and reading it as a pass is the failure
 # this test exists to stop.
 run_check "codex-smoke-self" python3 scripts/test_codex_smoke.py -v
+# E100: the temp pruner's own contract, driven backwards. A pruner nobody
+# drove backwards is a claim: this one proves it removes the stale Brother
+# tree (including a read-only one), keeps the fresh one, never touches a
+# stranger's directory, and reports NO-DATA rather than a pass when the temp
+# root cannot be read.
+run_check "temp-residue-self" python3 scripts/test_temp_residue.py -v
+
+echo
+python3 scripts/temp_residue.py --label end --prune --hours 1
+
+# The post-cut closeout matrix's own table logic and NO-DATA paths (board rows
+# X1 to X8), driven with a fake binary and a throwaway checkout, so this needs
+# no network and no real Codex. The gates themselves do real installs and are
+# run deliberately at a cut (`python3 scripts/release_closeout.py all`), never
+# on every battery: what is registered here is the part that can lie, which is
+# the table. A required gate reporting NO-DATA must leave the matrix red, and
+# that row is driven explicitly, because a population of NO-DATA composing
+# into a PASS is a failure this estate has already paid for once.
+run_check "release-closeout-self" python3 scripts/test_release_closeout.py -v
 
 echo
 echo "pass $pass   fail $fail   no-data $nodata"

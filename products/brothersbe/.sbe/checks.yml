@@ -1,0 +1,132 @@
+# WHICH COMMAND a check is, declared here rather than typed beside the receipt.
+#
+# The gap this closes, in one sentence: `sbe evidence run -- true` produced a
+# clean, sealed, commit-bound receipt, and the only thing naming which
+# obligation it answered was `--kind`, a word the caller supplied, so a command
+# that ran no check could clear one.
+#
+# A receipt minted with `sbe evidence run --check <id>` takes its executable,
+# its exact argument vector, its working directory, its coverage and its runner
+# files FROM THIS FILE. Nothing on that command line can substitute any of them.
+# `sbe evidence verify` then recomputes the specification digest, the runner
+# hashes and the coverage against this file as it stands now, so editing a check
+# here, renaming a runner, or changing an argument invalidates every receipt
+# minted before the edit. Those receipts describe a check that no longer exists.
+#
+# THIS FILE IS PART OF THE PROTECTED CONTROL PLANE. `.sbe/policy.yml` names it
+# in the control-plane rule, so changing it owes control-plane evidence and a
+# protected approval. That is the defence against a false registry (an entry
+# pointing an important-sounding id at a script that exits zero); nothing the
+# evidence wrapper computes can catch that on its own, and this file does not
+# pretend otherwise.
+#
+# ONLY CHECKS THIS REPOSITORY CAN ACTUALLY RUN ARE REGISTERED. A check this
+# repository owes and has not built is listed under `unregistered` with its
+# reason. An entry pointing at a script that does not exist would report a
+# broken command where the truth is that the check does not exist yet, and the
+# policy engine reporting MISSING for it is the honest outcome.
+schemaVersion: "1.0"
+
+checks:
+  control-plane-tests:
+    kind: "ran"
+    why: "the hooks, the guards and the evidence wrapper are the controls every other rule here rests on; a weakened one is the bypass"
+    command:
+      executable: "python3"
+      arguments:
+        - "-m"
+        - "unittest"
+        - "tools/test_sbe_authority_hook.py"
+        - "tools/test_sbe_fence_hook.py"
+        - "tools/test_sbe_bypass.py"
+      cwd: "."
+    covers:
+      - "hooks/**"
+      - "tools/sbe_*hook*.py"
+      - "tools/sbe_*guard*.py"
+      - "src/brothersbe/evidence.py"
+      - "src/brothersbe/checks.py"
+      - "src/brothersbe/policy.py"
+      - ".sbe/policy.yml"
+      - ".sbe/checks.yml"
+    runnerFiles:
+      - "tools/test_sbe_authority_hook.py"
+      - "tools/test_sbe_fence_hook.py"
+      - "tools/test_sbe_bypass.py"
+      - "tools/sbe_authority_hook.py"
+      - "tools/sbe_fence_hook.py"
+    protectedEvidence: true
+
+  contract-compatibility:
+    kind: "contract"
+    why: "the CLI surface and the architecture table are what other people build against, where a compatible-looking edit breaks a caller nobody in the diff can see"
+    command:
+      executable: "python3"
+      arguments:
+        - "-m"
+        - "unittest"
+        - "tools/test_sbe.py"
+        - "tools/test_sbe_interop.py"
+      cwd: "."
+    covers:
+      - "src/brothersbe/cli.py"
+      - "bin/sbe"
+      - "tables/architecture.json"
+    runnerFiles:
+      - "tools/test_sbe.py"
+      - "tools/test_sbe_interop.py"
+    protectedEvidence: true
+
+  infrastructure-plan:
+    kind: "ran"
+    why: "the installer is this repository's production surface: a wrong value in it is live on an adopter's machine before anybody reads the diff"
+    command:
+      executable: "python3"
+      arguments:
+        - "-m"
+        - "unittest"
+        - "tools/test_sbe_install.py"
+      cwd: "."
+    covers:
+      - "install.sh"
+      - "scripts/verify-install.sh"
+      - "scripts/test-install-artifact.sh"
+      - "scripts/test-upgrade-rollback.sh"
+    runnerFiles:
+      - "tools/test_sbe_install.py"
+    protectedEvidence: true
+
+  infrastructure-policy:
+    kind: "ran"
+    why: "the release-control kit and the version it seals are what an adopter receives; the release invariant is the check that they agree"
+    command:
+      executable: "python3"
+      arguments:
+        - "-m"
+        - "unittest"
+        - "tools/test_sbe_release_invariant.py"
+      cwd: "."
+    covers:
+      - "release-control/**"
+      - "VERSION"
+    runnerFiles:
+      - "tools/test_sbe_release_invariant.py"
+      - "tools/sbe_release_invariant.py"
+    protectedEvidence: true
+
+# Checks this repository's policy REQUIRES for some changes and cannot run yet.
+# Listed, with the reason, rather than registered against a runner that does not
+# exist: a registered check nobody can run reports a broken command, and the
+# truth is that the check has not been built. A policy rule naming one of these
+# reports MISSING, which is the correct and blocking answer.
+unregistered:
+  - id: "migration-rehearsal"
+    why: "this repository holds no migrations directory and no rehearsal runner, so there is nothing here to register; an adopter repository registers its own"
+  - id: "migration-reconciliation"
+    why: "same as migration-rehearsal: no migrations and no reconciliation runner exist in this repository"
+  - id: "claude-plugin-e2e"
+    why: "the real Claude Code end to end gate is release blocker 5 and has not been built; registering it now would name a runner that does not exist"
+  - id: "numerical-reconciliation"
+    why: "this repository moves no money and holds no partner data, so no reconciliation runner exists here"
+  - id: "security-policy"
+    why: "no security policy scanner is shipped in this repository yet; the secret scan that exists runs inside the push gates, not as a registered evidence check"

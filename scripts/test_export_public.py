@@ -22,6 +22,21 @@ sys.path.insert(0, HERE)
 import export_public as EP  # noqa: E402
 import edition_guard as EG  # noqa: E402
 
+# E100: one sandbox for every temp tree this process makes, removed at exit.
+import os as _e100_os, sys as _e100_sys  # noqa: E402
+_e100_sys.path.append(_e100_os.path.join(
+    _e100_os.path.dirname(_e100_os.path.abspath(__file__)), '.'))
+try:  # noqa: E402
+    import tmp_sandbox as _e100_tmp
+    _e100_tmp.install()
+except ImportError:
+    # A packager (scripts/export_public.py, make_benchmark_bundle.py)
+    # can copy this test without scripts/tmp_sandbox.py beside it. Say
+    # so rather than dying: the sandbox is hygiene, not the subject.
+    _e100_sys.stderr.write(
+        "tmp_sandbox absent: %s leaves its temp trees behind\n"
+        % _e100_os.path.basename(__file__))
+
 REAL_CLEANSE = os.path.join(EP.ROOT, "scripts", "cleanse.sh")
 EXPORTER_CLI = os.path.join(EP.ROOT, "scripts", "export_public.py")
 #: A real product checksums.sh, borrowed as the fixture's own generator so
@@ -222,6 +237,50 @@ def _seed_tag_time_needs(root, gate=READY_GATE_STUB, readme=None,
         fh.write(readme if readme is not None else
                  "# Fixture\n\nProve it with "
                  "`python3 scripts/test_fixture_prove.py`.\n")
+
+
+def _write_tree_manifest(export_dir, version="9.9.9"):
+    """Row E110, for a test that hands tag_time_checks an export tree it
+    built by hand rather than one the exporter produced: write the manifest
+    that describes exactly this directory. Stable, because the manifest
+    lives under docs/releases/ and that prefix is outside it."""
+    import reproduce_export as RE
+    text = RE.manifest_from_dir(export_dir)
+    releases = os.path.join(export_dir, "docs", "releases")
+    os.makedirs(releases, exist_ok=True)
+    with open(os.path.join(releases, "%s.export-manifest.txt" % version),
+              "w", encoding="utf-8") as fh:
+        fh.write(text)
+    return text
+
+
+def _seed_export_manifest(root, allowlist, version="9.9.9"):
+    """Row E110: from now on a TAGGED export tree must carry
+    docs/releases/<version>.export-manifest.txt describing its own bytes,
+    so every fixture whose tagged push is meant to SUCCEED has to seed one.
+    Built the way a real cut builds it, by running the exporter's own
+    build_export_tree over `root` and hashing the result, never by hand:
+    the export tree regenerates each product's CHECKSUMS.sha256, and a
+    hand-written manifest would be describing a tree the exporter does not
+    produce. Call it LAST, after every other fixture file is written; it
+    tracks `root` on the way in (build_export_tree walks git ls-files) and
+    again on the way out. Writing the manifest does not change the answer,
+    because docs/releases/ is outside the manifest by construction."""
+    import reproduce_export as RE
+    _git_track_all(root)
+    dest = tempfile.mkdtemp(prefix="fixture-export-manifest-")
+    try:
+        EP.build_export_tree(dest, allowlist, root)
+        text = RE.manifest_from_dir(dest)
+    finally:
+        shutil.rmtree(dest, ignore_errors=True)
+    path = os.path.join(root, "docs", "releases",
+                        "%s.export-manifest.txt" % version)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    _git_track_all(root)
+    return text
 
 
 def _gate_exit(stdout, name):
@@ -1058,6 +1117,207 @@ class TheExportedProductManifestDescribesTheExportedBytes(unittest.TestCase):
             self.assertNotEqual(exported["kept.md"], "0" * 64)
 
 
+class ThePublishedFiguresDescribeTheExportedTree(unittest.TestCase):
+    """readiness row E113: a product's docs/CITATIONS.md and the lint counts
+    in its SKILL.md are computed over the WHOLE hub, where design/, program/
+    and the internal docs the allowlist withholds do most of the citing.
+    Copied verbatim into an export carrying a subset, every entry only a
+    withheld document cited becomes a stale entry, and that product's own
+    citation-inventory check FAILs at gate severity in every public clone
+    (measured on the real tree: 87 of 137 entries, and a SKILL.md quoting
+    162 lint-clean files over a tree holding 151). regenerate_published_
+    figures must recompute both over the export tree, with the product's
+    own code, before the manifests are rebuilt over the result."""
+
+    #: The product's own scorer, borrowed whole: these figures must be
+    #: pruned by exactly the code that later reads them, never by a second
+    #: implementation of "which URLs does this tree cite" living here.
+    REAL_SCORER = os.path.join(EP.ROOT, "products", "brothersbe", "tools",
+                               "sbe_score.py")
+
+    KEPT_URL = "https://example.com/kept"
+    WITHHELD_URL = "https://example.com/withheld"
+
+    #: Named individually, exactly as the real EXPORT-ALLOWLIST.txt names
+    #: each kept path under a product and never the product wholesale, so
+    #: products/myproduct/ci is withheld the way products/brothersbe/ci is.
+    ALLOWLIST = ["scripts", "products/myproduct/tools",
+                 "products/myproduct/scripts", "products/myproduct/SKILL.md",
+                 "products/myproduct/kept.md", "products/myproduct/docs",
+                 "products/myproduct/CHECKSUMS.sha256"]
+
+    def _entry(self, url, claim):
+        return ("## %s\n"
+                "- claim: %s\n"
+                "- population: the fixture tree this test builds\n"
+                "- date: captured 2026-09-04\n"
+                "- limit: a fixture, not a measurement of anything real\n\n"
+                % (url, claim))
+
+    def _seed(self, root):
+        """A miniature product: two markdown documents citing one URL each,
+        one of them under the withheld ci/, an inventory covering both, a
+        SKILL.md carrying the lint sentence, and enough Python for the lint
+        to reach its PASS branch (one clean file, one waived hit) on each
+        side of the export boundary."""
+        _make_fake_root(root, {
+            "products/myproduct/kept.md":
+                "The shipped page cites %s for its claim.\n" % self.KEPT_URL,
+            "products/myproduct/ci/internal.md":
+                "Internal QA notes cite %s and ship to nobody.\n"
+                % self.WITHHELD_URL,
+            "products/myproduct/docs/CITATIONS.md":
+                "# Citation inventory\n\nOne entry per external URL this "
+                "fixture's shipped documentation cites.\n\n"
+                + self._entry(self.KEPT_URL, "the shipped page rests on it")
+                + self._entry(self.WITHHELD_URL,
+                              "only the withheld QA note rests on it"),
+            "products/myproduct/SKILL.md":
+                "# Fixture skill\n\nThis repository's own run has 92 waived "
+                "hits and 162 files that were scanned and genuinely found "
+                "clean, both recomputed by an eval.\n",
+            "products/myproduct/tools/clean_helper.py":
+                "def add(a, b):\n    return a + b\n",
+            # One waived hit, because the lint prints the two counts this
+            # sentence quotes only on the branch where a suppression exists.
+            "products/myproduct/tools/waived_helper.py":
+                "def read(path):\n"
+                "    try:\n"
+                "        return open(path).read()\n"
+                "    except:  # sbe: allow-silent fixture, reader only\n"
+                "        return ''\n",
+            "products/myproduct/ci/withheld_helper.py":
+                "def sub(a, b):\n    return a - b\n",
+        })
+        os.makedirs(os.path.join(root, "products", "myproduct", "scripts"),
+                    exist_ok=True)
+        shutil.copy2(REAL_PRODUCT_CHECKSUMS_SH,
+                      os.path.join(root, "products", "myproduct", "scripts",
+                                   "checksums.sh"))
+        shutil.copy2(self.REAL_SCORER,
+                      os.path.join(root, "products", "myproduct", "tools",
+                                   "sbe_score.py"))
+        # Stale on purpose, exactly the shape docs/RELEASE.md step 4 leaves
+        # behind: generated over the whole product, naming the withheld
+        # markdown the export never ships.
+        _write_lines(os.path.join(root, "products", "myproduct",
+                                  "CHECKSUMS.sha256"), [
+            "%s  kept.md" % ("0" * 64),
+            "%s  ci/internal.md" % ("0" * 64),
+            "%s  SKILL.md" % ("0" * 64),
+            "%s  docs/CITATIONS.md" % ("0" * 64),
+        ])
+        _git_track_all(root)
+
+    def _check_inventory(self, module, root):
+        """The product's own citation-inventory check, over `root`."""
+        saved = os.environ.get("SBE_CITATION_ROOT")
+        os.environ["SBE_CITATION_ROOT"] = root
+        try:
+            return module.check_citation_inventory()
+        finally:
+            if saved is None:
+                os.environ.pop("SBE_CITATION_ROOT", None)
+            else:
+                os.environ["SBE_CITATION_ROOT"] = saved
+
+    def test_the_exported_inventory_names_only_urls_the_export_cites(self):
+        with tempfile.TemporaryDirectory() as root, \
+             tempfile.TemporaryDirectory() as dest:
+            self._seed(root)
+            source_inv = os.path.join(root, "products", "myproduct", "docs",
+                                      "CITATIONS.md")
+            with open(source_inv, encoding="utf-8") as fh:
+                source_text = fh.read()
+            self.assertIn(self.WITHHELD_URL, source_text)
+
+            EP.build_export_tree(dest, self.ALLOWLIST, root=root)
+            product = os.path.join(dest, "products", "myproduct")
+            exported_inv = os.path.join(product, "docs", "CITATIONS.md")
+            with open(exported_inv, encoding="utf-8") as fh:
+                exported_text = fh.read()
+            self.assertIn(self.KEPT_URL, exported_text)
+            self.assertNotIn(self.WITHHELD_URL, exported_text)
+            # The hub's own copy is untouched: it describes the hub, which
+            # is the tree it is true about.
+            with open(source_inv, encoding="utf-8") as fh:
+                self.assertEqual(fh.read(), source_text)
+
+            module = EP._load_product_module(
+                os.path.join(product, "tools", "sbe_score.py"),
+                "test_export_scorer")
+            self.assertIsNotNone(module)
+            verdict, evidence = self._check_inventory(module, product)
+            self.assertEqual(verdict, "PASS", evidence)
+
+            # DRIVEN BACKWARDS on the same tree: put the hub's inventory
+            # back, which is exactly what a plain copy shipped before this
+            # step existed, and the product's own gate refuses.
+            with open(exported_inv, "w", encoding="utf-8") as fh:
+                fh.write(source_text)
+            verdict, evidence = self._check_inventory(module, product)
+            self.assertEqual(verdict, "FAIL", evidence)
+            self.assertIn(self.WITHHELD_URL, evidence)
+
+    def test_the_exported_skill_states_the_export_trees_own_lint_run(self):
+        with tempfile.TemporaryDirectory() as root, \
+             tempfile.TemporaryDirectory() as dest:
+            self._seed(root)
+            EP.build_export_tree(dest, self.ALLOWLIST, root=root)
+            product = os.path.join(dest, "products", "myproduct")
+            with open(os.path.join(product, "SKILL.md"), encoding="utf-8") as fh:
+                exported = fh.read()
+            # The export ships one clean file and one waived hit; the hub
+            # tree holds a second clean file under the withheld ci/. The
+            # pinned 162 was a claim about a population this tree is not.
+            self.assertIn("1 waived hits and 1 files that were scanned and "
+                          "genuinely found clean", exported)
+            self.assertNotIn("162 files", exported)
+            with open(os.path.join(root, "products", "myproduct", "SKILL.md"),
+                      encoding="utf-8") as fh:
+                self.assertIn("162 files", fh.read())
+
+    def test_the_regenerated_manifest_hashes_the_pruned_inventory(self):
+        """The manifests are rebuilt AFTER the figures move, or the export
+        ships a manifest that disagrees with the bytes beside it, which is
+        the same defect one level down."""
+        with tempfile.TemporaryDirectory() as root, \
+             tempfile.TemporaryDirectory() as dest:
+            self._seed(root)
+            EP.build_export_tree(dest, self.ALLOWLIST, root=root)
+            product = os.path.join(dest, "products", "myproduct")
+            named = {}
+            with open(os.path.join(product, "CHECKSUMS.sha256"),
+                      encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.rstrip("\n")
+                    if line:
+                        named[line[66:]] = line[:64]
+            for rel in ("docs/CITATIONS.md", "SKILL.md"):
+                digest = hashlib.sha256()
+                with open(os.path.join(product, rel), "rb") as fh:
+                    digest.update(fh.read())
+                self.assertEqual(named.get(rel), digest.hexdigest(), rel)
+
+    def test_an_empty_scan_never_empties_the_inventory(self):
+        """A scan that opened no citing document is not evidence that every
+        entry is stale, and pruning against one would delete scope a reader
+        still needs. The refusal is the whole point of the guard."""
+        with tempfile.TemporaryDirectory() as base:
+            os.makedirs(os.path.join(base, "docs"))
+            body = self._entry(self.KEPT_URL, "cited by nothing here")
+            with open(os.path.join(base, "docs", "CITATIONS.md"), "w",
+                      encoding="utf-8") as fh:
+                fh.write(body)
+            module = EP._load_product_module(self.REAL_SCORER,
+                                             "test_empty_scan_scorer")
+            self.assertIsNotNone(module)
+            self.assertFalse(EP.prune_citation_inventory(base, module))
+            with open(os.path.join(base, "docs", "CITATIONS.md"),
+                      encoding="utf-8") as fh:
+                self.assertEqual(fh.read(), body)
+
+
 class TheCommitIsExactlyTheGatedTree(unittest.TestCase):
     """THE ALLOWLIST AND DENYLIST ARE THE ONLY FILTERS (module docstring).
     Measured 2026-09-02 on the public v1.0.0 tag itself: two tracked CSV
@@ -1233,9 +1493,14 @@ class APushTowardThePublicRemoteFromAnEditionIsRefused(unittest.TestCase):
     case, exercised against the REAL editions/personal in this checkout."""
 
     def test_editions_personal_cannot_push_to_the_public_remote(self):
+        personal_dir = os.path.join(EP.ROOT, "editions", "personal")
+        if not os.path.isdir(personal_dir):
+            self.skipTest(
+                "NO-DATA: no editions/personal in this checkout (a public "
+                "clone ships none) so there is nothing to drive backward")
         code, msg = EG.check_push(
             "https://github.com/khalilmaaouni/Brother",
-            cwd=os.path.join(EP.ROOT, "editions", "personal"), env={})
+            cwd=personal_dir, env={})
         self.assertEqual(code, EG.EXIT_REFUSED)
         self.assertIn("personal", msg)
         self.assertIn("read-only export target", msg)
@@ -1392,7 +1657,7 @@ class ABrandNewRemoteIsStartedOnlyWithBootstrap(unittest.TestCase):
     outgoing range against a remote that has nothing to fetch (g pins that
     shape: origin/HEAD set, origin/main..HEAD exactly one commit)."""
 
-    ALLOWLIST = ["scripts", "clean.md", "README.md"]
+    ALLOWLIST = ["scripts", "clean.md", "README.md", "docs"]
 
     def _export_root(self, root):
         _make_fake_root(root, {"clean.md": "first export, clean\n"})
@@ -1401,6 +1666,8 @@ class ABrandNewRemoteIsStartedOnlyWithBootstrap(unittest.TestCase):
         # command really runs there
         _seed_tag_time_needs(root)
         _git_track_all(root)
+        # row E110: and it must carry a manifest describing its own bytes
+        _seed_export_manifest(root, self.ALLOWLIST)
 
     def _count(self, remote_dir, branch):
         return subprocess.run(
@@ -1646,7 +1913,7 @@ class ATagRefusesAnExportTreeItsOwnProductsCannotVerify(unittest.TestCase):
     root) plus a miniature product borrowing brothersbe's real
     checksums.sh and verify-install.sh, never test-only stand-ins."""
 
-    ALLOWLIST = ["scripts", "products/myproduct", "README.md"]
+    ALLOWLIST = ["scripts", "products/myproduct", "README.md", "docs"]
 
     def _seed_product(self, root, gate=None, readme=None, prove_exit=0):
         _make_fake_root(root, {
@@ -1669,6 +1936,10 @@ class ATagRefusesAnExportTreeItsOwnProductsCannotVerify(unittest.TestCase):
             ["%s  kept.md" % ("0" * 64), "%s  ci/internal.md" % ("0" * 64)])
         _git_track_all(root)  # re-track: scripts/*.sh and CHECKSUMS.sha256
         # were written after _make_fake_root's own tracking pass above
+        # row E110: a tagged export tree must also carry a manifest
+        # describing its own bytes, so the cases here that expect a PASS
+        # need one seeded the way a real cut writes it
+        _seed_export_manifest(root, self.ALLOWLIST)
 
     def _remote_state(self, remote_dir):
         """(commit count on main, [tags]) of the bare remote."""
@@ -1904,6 +2175,7 @@ class ATagRefusesAnExportTreeItsOwnProductsCannotVerify(unittest.TestCase):
                          % (EP.SOURCE_REVISION_HEADER,
                             EP.SOURCE_REVISION_PLACEHOLDER))
             _seed_tag_time_needs(export_dir)
+            _write_tree_manifest(export_dir)  # row E110
             ok, lines = EP.tag_time_checks(export_dir, "9.9.9")
             self.assertTrue(ok, lines)
             # no product, so no verified: line; what this pins is that the
@@ -1948,6 +2220,9 @@ class TheReleaseRecordShipsItsOwnSourceRevision(unittest.TestCase):
                 "docs/releases/9.9.9.md": "# Brother 9.9.9\n\nnotes.\n",
             })
             _seed_tag_time_needs(root)
+            # row E110: a tagged export tree must carry a manifest of its
+            # own bytes, and this case's tagged push is meant to succeed
+            _seed_export_manifest(root, ["scripts", "docs", "README.md"])
             self._git("init", "-q", cwd=root)
             self._git("config", "user.name", "Hub", cwd=root)
             self._git("config", "user.email", "hub@example.com", cwd=root)
@@ -2181,6 +2456,207 @@ class TheRealExportTreeIsWhatTheReadmeSendsAReaderTo(unittest.TestCase):
                          "the README names this as its own proof and it "
                          "fails on the export tree:\n%s"
                          % "\n".join(text.splitlines()[-15:]))
+
+
+class ProofResidueIsNotShippedContent(unittest.TestCase):
+    """Attempt 3 of the 1.0.3 tag: the README proof suites ran inside the
+    staged tree and left __pycache__ entries and a fence store behind, and
+    check_export_manifest, hashing the tree afterwards, refused with 70
+    EXTRA files. The tag ships the staged bytes; a snapshot taken before
+    the proofs is what the check must compare against."""
+
+    def test_a_snapshot_taken_before_the_residue_still_reads_clear(self):
+        import reproduce_export as RE
+        d = tempfile.mkdtemp(prefix="brother-export-residue-")
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        os.makedirs(os.path.join(d, "docs", "releases"))
+        with open(os.path.join(d, "a.py"), "w") as fh:
+            fh.write("x = 1\n")
+        before = RE.manifest_from_dir(d)
+        with open(os.path.join(d, "docs", "releases",
+                               "9.9.9.export-manifest.txt"), "w") as fh:
+            fh.write(before)
+        # the proofs now leave residue behind
+        os.makedirs(os.path.join(d, "__pycache__"))
+        with open(os.path.join(d, "__pycache__", "a.cpython-313.pyc"), "wb") as fh:
+            fh.write(b"\x00")
+        ok_now, lines_now = EP.check_export_manifest(d, "9.9.9")
+        self.assertFalse(ok_now, lines_now)
+        self.assertTrue(any("EXTRA" in l for l in lines_now), lines_now)
+        ok, lines = EP.check_export_manifest(d, "9.9.9", built_text=before)
+        self.assertTrue(ok, lines)
+
+    def test_tag_time_checks_hashes_before_its_own_proofs_run(self):
+        # Attempt 4 of the 1.0.3 tag died with a NameError on the snapshot
+        # line before any check ran; the whole tag-time path must run on a
+        # bare tree and refuse in words, never raise.
+        d = tempfile.mkdtemp(prefix="brother-export-ttc-")
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        with open(os.path.join(d, "README.md"), "w") as fh:
+            fh.write("no prove commands here\n")
+        ok, lines = EP.tag_time_checks(d, "9.9.9")
+        self.assertFalse(ok)
+        self.assertTrue(lines and all(isinstance(l, str) for l in lines))
+
+
+
+class TheManifestDescribesTheTaggedTree(unittest.TestCase):
+    """Row E110, measured on the public tag v1.0.2: it ships a 1198 line
+    docs/releases/1.0.2.export-manifest.txt generated at the cut commit,
+    and 18 of the files it names hash differently in the tag itself (one
+    of them bundle/runtime/worktree_lane.py, fafa0db4... in the tag
+    against 91716f91... in the manifest), plus one file shipped that the
+    manifest never named. Four commits landed on the cut branch after the
+    manifest was written and nothing regenerated it, so the tag's own
+    contents claim described a tree that was never published. Nothing at
+    tag time compared the two. check_export_manifest is that comparison,
+    driven both ways here on a fixture export tree."""
+
+    VERSION = "9.9.9"
+
+    def _tree(self, root, files, manifest_files=None):
+        """An export-shaped tree: `files` on disk, plus the manifest the
+        exporter would ship beside them. The manifest is written over
+        `manifest_files` (defaulting to `files`), so a caller drives
+        staleness by passing a DIFFERENT mapping from the one it wrote to
+        disk, which is exactly what four post-cut commits did to v1.0.2."""
+        import reproduce_export as RE
+        for rel, content in files.items():
+            path = os.path.join(root, *rel.split("/"))
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(content)
+        described = files if manifest_files is None else manifest_files
+        text = RE.manifest_text(
+            (rel, content.encode("utf-8"))
+            for rel, content in described.items())
+        releases = os.path.join(root, "docs", "releases")
+        os.makedirs(releases, exist_ok=True)
+        with open(os.path.join(releases,
+                               "%s.export-manifest.txt" % self.VERSION),
+                  "w", encoding="utf-8") as fh:
+            fh.write(text)
+        return text
+
+    def test_a_a_manifest_that_matches_the_tree_is_clear(self):
+        with tempfile.TemporaryDirectory() as root:
+            self._tree(root, {"README.md": "front page\n",
+                              "scripts/one.py": "print(1)\n"})
+            ok, lines = EP.check_export_manifest(root, self.VERSION)
+            self.assertTrue(ok, "\n".join(lines))
+            self.assertIn("describes all 2 exported file(s)",
+                          "\n".join(lines))
+
+    def test_b_a_file_whose_bytes_moved_after_the_cut_refuses(self):
+        with tempfile.TemporaryDirectory() as root:
+            self._tree(
+                root,
+                {"README.md": "front page\n",
+                 "scripts/one.py": "print(2)  # the commit after the cut\n"},
+                manifest_files={"README.md": "front page\n",
+                                "scripts/one.py": "print(1)\n"})
+            ok, lines = EP.check_export_manifest(root, self.VERSION)
+            self.assertFalse(ok, "\n".join(lines))
+            self.assertTrue(lines[0].startswith("MISMATCH: scripts/one.py"),
+                            "\n".join(lines))
+            self.assertIn("REFUSED: 1 of 2 file(s)", "\n".join(lines))
+
+    def test_c_a_shipped_file_the_manifest_never_named_refuses(self):
+        with tempfile.TemporaryDirectory() as root:
+            self._tree(root,
+                       {"README.md": "front page\n",
+                        "scripts/late.py": "arrived after the cut\n"},
+                       manifest_files={"README.md": "front page\n"})
+            ok, lines = EP.check_export_manifest(root, self.VERSION)
+            self.assertFalse(ok, "\n".join(lines))
+            self.assertIn("EXTRA: scripts/late.py", "\n".join(lines))
+
+    def test_d_a_named_file_the_tree_does_not_ship_refuses(self):
+        with tempfile.TemporaryDirectory() as root:
+            self._tree(root,
+                       {"README.md": "front page\n"},
+                       manifest_files={"README.md": "front page\n",
+                                       "scripts/gone.py": "deleted\n"})
+            ok, lines = EP.check_export_manifest(root, self.VERSION)
+            self.assertFalse(ok, "\n".join(lines))
+            self.assertIn("MISSING: scripts/gone.py", "\n".join(lines))
+
+    def test_e_an_absent_manifest_is_no_data_and_refuses(self):
+        with tempfile.TemporaryDirectory() as root:
+            self._tree(root, {"README.md": "front page\n"})
+            os.remove(os.path.join(root, "docs", "releases",
+                                   "%s.export-manifest.txt" % self.VERSION))
+            ok, lines = EP.check_export_manifest(root, self.VERSION)
+            self.assertFalse(ok, "\n".join(lines))
+            self.assertTrue(lines[0].startswith("NO-DATA:"),
+                            "\n".join(lines))
+
+    def test_f_an_unparseable_manifest_is_no_data_and_refuses(self):
+        with tempfile.TemporaryDirectory() as root:
+            self._tree(root, {"README.md": "front page\n"})
+            with open(os.path.join(root, "docs", "releases",
+                                   "%s.export-manifest.txt" % self.VERSION),
+                      "w", encoding="utf-8") as fh:
+                fh.write("this is not a sha256 line\n")
+            ok, lines = EP.check_export_manifest(root, self.VERSION)
+            self.assertFalse(ok, "\n".join(lines))
+            self.assertTrue(lines[0].startswith("NO-DATA:"),
+                            "\n".join(lines))
+
+    def test_g_tag_time_checks_itself_refuses_a_stale_manifest(self):
+        """Registration, not just the function: a check nobody calls is a
+        claim. This tree clears every other tag-time check (its readiness
+        gate reads READY, its README's prove command really runs), so the
+        only thing left to refuse it is the manifest, and tag_time_checks
+        must be what reaches that verdict."""
+        with tempfile.TemporaryDirectory() as root:
+            _seed_tag_time_needs(root)
+            self._tree(root, {},
+                       manifest_files={"scripts/gone.py": "not shipped\n"})
+            ok, lines = EP.tag_time_checks(root, self.VERSION)
+            self.assertFalse(ok, "\n".join(lines))
+            self.assertTrue(
+                any(l.startswith("prove: ") for l in lines),
+                "tag_time_checks never got as far as the prove commands, so "
+                "this case did not reach the manifest check at all:\n%s"
+                % "\n".join(lines))
+            self.assertTrue(
+                any(l.startswith("REFUSED:") and "export-manifest" in l
+                    for l in lines), "\n".join(lines))
+
+    def test_i_the_refresh_reports_no_data_rather_than_clear(self):
+        """scripts/refresh_cut.py is the operator's half of the same rule.
+        With no allowlist there is no export tree to compare a manifest
+        against, and this estate never reads a NO-DATA as a pass: the
+        refresh must exit 2, not 0."""
+        import refresh_cut
+        with mock.patch.object(EP, "load_allowlist", return_value=None):
+            code, lines = refresh_cut.check(self.VERSION)
+        self.assertEqual(code, refresh_cut.EXIT_NODATA, "\n".join(lines))
+        self.assertTrue(lines[0].startswith("NO-DATA:"), "\n".join(lines))
+class TheAllowlistCarriesEveryTrackedGitattributes(unittest.TestCase):
+    """E114: products/brothersbe/.gitattributes was hub-tracked but absent
+    from EXPORT-ALLOWLIST.txt (found by lane XM2's Windows leg against the
+    public v1.0.2 tag). Without it a Windows clone of the export rewrites
+    the committed line endings, and products/brothersbe/CHECKSUMS.sha256 no
+    longer matches the rewritten bytes. Read the hub's own tracked set with
+    git ls-files (_tracked_files_under, the exporter's own authority),
+    never a filesystem walk that would also see an untracked file."""
+
+    def test_every_tracked_gitattributes_is_allowlisted(self):
+        tracked = [p for p in EP._tracked_files_under(EP.ROOT, ".")
+                   if os.path.basename(p) == ".gitattributes"]
+        self.assertTrue(tracked,
+                        "NO-DATA: no .gitattributes tracked in the hub")
+        allowlist = EP.load_allowlist()
+        self.assertIsNotNone(allowlist, "NO-DATA: no export allowlist")
+        missing = [p for p in tracked if p not in allowlist]
+        self.assertEqual(
+            missing, [],
+            "tracked .gitattributes missing from EXPORT-ALLOWLIST.txt, so "
+            "a Windows clone of the export rewrites its line endings and "
+            "the product's CHECKSUMS.sha256 stops matching: "
+            + ", ".join(missing))
 
 
 if __name__ == "__main__":

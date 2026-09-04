@@ -20,6 +20,21 @@ sys.path.insert(0, HERE)
 
 import codex_hooks_install as chi  # noqa: E402
 
+# E100: one sandbox for every temp tree this process makes, removed at exit.
+import os as _e100_os, sys as _e100_sys  # noqa: E402
+_e100_sys.path.append(_e100_os.path.join(
+    _e100_os.path.dirname(_e100_os.path.abspath(__file__)), '.'))
+try:  # noqa: E402
+    import tmp_sandbox as _e100_tmp
+    _e100_tmp.install()
+except ImportError:
+    # A packager (scripts/export_public.py, make_benchmark_bundle.py)
+    # can copy this test without scripts/tmp_sandbox.py beside it. Say
+    # so rather than dying: the sandbox is hygiene, not the subject.
+    _e100_sys.stderr.write(
+        "tmp_sandbox absent: %s leaves its temp trees behind\n"
+        % _e100_os.path.basename(__file__))
+
 ROOT = os.path.dirname(HERE)
 BROTHERMODE = os.path.join(ROOT, "products", "brothermode")
 BROTHERSBE = os.path.join(ROOT, "products", "brothersbe")
@@ -100,6 +115,22 @@ class TestHomeResolution(unittest.TestCase):
         self.assertIsNotNone(resolved["path"])
         self.assertIsNone(resolved["problem"])
 
+    def test_a_symlinked_home_resolves_the_way_codex_canonicalizes_it(self):
+        """The 2026-09-04 defect: /tmp and /var are symlinks on macOS and
+        Codex canonicalizes CODEX_HOME, so a hooks file written under the
+        un-resolved spelling is read back under the resolved one, matches no
+        sourcePath, and every hook stays untrusted with 0 loaded."""
+        real = tempfile.mkdtemp()
+        link = os.path.join(tempfile.mkdtemp(), "codex-link")
+        os.symlink(real, link)
+        try:
+            resolved = chi.resolve_home(link, False)
+            self.assertIsNone(resolved["problem"])
+            self.assertEqual(resolved["path"], os.path.realpath(real))
+        finally:
+            os.unlink(link)
+            shutil.rmtree(real, ignore_errors=True)
+
     def test_no_home_at_all_is_a_named_failure(self):
         saved = os.environ.pop("CODEX_HOME", None)
         try:
@@ -173,6 +204,101 @@ class TestCheckAndTrust(unittest.TestCase):
             text = handle.read()
         self.assertIn('model = "gpt-5"', text)
         self.assertIn("sha256:aaa", text)
+
+
+class TestUninstall(unittest.TestCase):
+    """--uninstall removes Brother's own commands and nothing else. Release
+    1.0.2 had no uninstall route at all, so the README told a reader to delete
+    the whole Codex hooks file, which takes unrelated hooks with it."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.built = chi.build([BROTHERMODE, BROTHERSBE])
+        self.commands = chi.brother_commands(self.built["document"])
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _write_installed(self, with_foreign=False):
+        document = json.loads(json.dumps(self.built["document"]))
+        if with_foreign:
+            document["hooks"].setdefault("SessionStart", []).append(
+                {"hooks": [{"type": "command", "command": "/opt/other/hi.sh",
+                            "async": False}]})
+        self.assertIsNone(chi.write_hooks_json(self.tmp, document)["problem"])
+        entries = [{"sourcePath": chi.hooks_json_path(self.tmp), "key": "k1",
+                    "currentHash": "sha256:aaa"}]
+        self.assertIsNone(chi.write_trust(
+            self.tmp, chi.trust_block(entries, chi.hooks_json_path(self.tmp))
+        )["problem"])
+
+    def _run(self):
+        buffer = io.StringIO()
+        saved = sys.stdout
+        sys.stdout = buffer
+        try:
+            code = chi.uninstall(self.tmp, self.commands)
+        finally:
+            sys.stdout = saved
+        return code, buffer.getvalue()
+
+    def test_a_foreign_hook_survives_and_brothers_are_gone(self):
+        self._write_installed(with_foreign=True)
+        code, output = self._run()
+        self.assertEqual(code, 0, output)
+        self.assertIn("removed 18 Brother hook command(s)", output)
+        with io.open(chi.hooks_json_path(self.tmp), encoding="utf-8") as handle:
+            left = json.load(handle)
+        remaining = [hook["command"] for blocks in left["hooks"].values()
+                     for block in blocks for hook in block["hooks"]]
+        self.assertEqual(remaining, ["/opt/other/hi.sh"])
+
+    def test_brothers_trust_section_goes_and_other_config_stays(self):
+        self._write_installed()
+        path = os.path.join(self.tmp, "config.toml")
+        with io.open(path, encoding="utf-8") as handle:
+            self.assertIn(chi.TRUST_BEGIN, handle.read())
+        code, output = self._run()
+        self.assertEqual(code, 0, output)
+        self.assertIn("removed Brother's trust section", output)
+        with io.open(path, encoding="utf-8") as handle:
+            text = handle.read()
+        self.assertNotIn(chi.TRUST_BEGIN, text)
+        self.assertNotIn("sha256:aaa", text)
+
+    def test_a_file_holding_only_brothers_hooks_is_removed_outright(self):
+        self._write_installed()
+        code, output = self._run()
+        self.assertEqual(code, 0, output)
+        self.assertFalse(os.path.exists(chi.hooks_json_path(self.tmp)), output)
+
+    def test_a_second_uninstall_is_no_data_never_a_removal(self):
+        self._write_installed(with_foreign=True)
+        self._run()
+        code, output = self._run()
+        self.assertEqual(code, 0, output)
+        self.assertIn("NO-DATA", output)
+        self.assertIn("nothing of Brother's to remove", output)
+
+    def test_an_untouched_home_is_no_data(self):
+        code, output = self._run()
+        self.assertEqual(code, 0, output)
+        self.assertIn("NO-DATA", output)
+
+    def test_uninstall_refuses_the_default_home_like_install_does(self):
+        """The refusal lives in resolve_home, so it must be reached on the
+        uninstall route too: an uninstall in the founder's own ~/.codex is as
+        unasked-for as an install there."""
+        buffer = io.StringIO()
+        saved = sys.stdout
+        sys.stdout = buffer
+        try:
+            code = chi.main(["codex_hooks_install.py", "--uninstall",
+                             "--codex-home", os.path.join("~", ".codex")])
+        finally:
+            sys.stdout = saved
+        self.assertEqual(code, 1)
+        self.assertIn("refusing to write", buffer.getvalue())
 
 
 if __name__ == "__main__":

@@ -1,0 +1,136 @@
+{
+  "id": "long-horizon-recovery",
+  "name": "Long-Horizon Recovery",
+  "frozen_at": "2026-09-05",
+  "status": "SPECIFIED, NOT YET RUN",
+  "source": {
+    "document": "SWITCHING-STRATEGY-2026-09-04.md",
+    "sections": [7, 19, 20],
+    "gauntlet_section": "20.2"
+  },
+  "zone": {
+    "id": 3,
+    "name": "Engineering Continuity",
+    "section": "7, Zone 3",
+    "also_serves": "7, Zone 2, Safe Unwatched Time"
+  },
+  "workload_families": [
+    {"n": 7, "name": "crash during execution"},
+    {"n": 8, "name": "resume after 24-72 hours with repository drift"},
+    {"n": 11, "name": "long unattended task"}
+  ],
+  "seeded_conditions": [
+    "crash",
+    "context loss",
+    "machine/session restart",
+    "branch change",
+    "environment drift"
+  ],
+  "seeded_conditions_note": "The five strings above are section 20.2's own injection list, copied without addition. How each is planted on this estate: a crash is a SIGKILL of the whole run's process group, the shape docs/plan/runs/live-autonomous-adversity-2026-09-04/ already drove; context loss is a bare re-invocation of the same outcome sentence from a session that holds nothing, no --resume and no --continue; a machine or session restart is the same re-invocation under a new pid after the lease has expired; a branch change is a commit landing on the canonical branch between the kill and the resume; environment drift is a changed interpreter path or a changed runs root between the two invocations. The 24 to 72 hour clock of family 8 is the one seed with no harness on this estate, named in metrics below.",
+  "fairness_controls": [
+    "starting repository",
+    "model where possible",
+    "token budget",
+    "task instruction",
+    "hardware/environment",
+    "maximum human interventions",
+    "scoring rubric before execution"
+  ],
+  "fairness_notes": {
+    "starting repository": "One frozen throwaway git repository, created by the harness, plus one recorded drift commit applied at the same point in every arm.",
+    "model where possible": "The same model id across arms. The kill point is measured in run events, never in seconds of model time, so a slower model does not change where the crash lands.",
+    "token budget": "One ceiling per arm. The resumed arm's budget is the remainder, not a fresh allowance, because a resume that gets a second full budget is not the situation being measured.",
+    "task instruction": "The outcome sentence is frozen here and is byte identical between the killed invocation and the resuming one.",
+    "hardware/environment": "One machine. The deliberate environment drift is the only difference allowed between arms and it is recorded.",
+    "maximum human interventions": "One: the operator re-runs the same sentence. Anything else, including naming a run id or passing a resume flag, is counted and named.",
+    "scoring rubric before execution": "scoring_rubric below is frozen with this file."
+  },
+  "metrics": [
+    {
+      "metric": "RECOVERY TIME",
+      "status": "partial",
+      "instrument": "scripts/test_crash_resume.py",
+      "row": "E73",
+      "proved": "The real controller driven as a subprocess and SIGKILLed mid-run, with the resume proven from durable state alone.",
+      "gap": "The test asserts that recovery happens, not how long it took. The seconds exist only in a run record read by hand (row E52 quotes 'run exited 0 after 1295s' and the delivery report's own 'wall_clock_seconds: 1051.319951'). No script reports a recovery-time number, so a trend cannot be plotted."
+    },
+    {
+      "metric": "LOST WORK",
+      "status": "measured",
+      "instrument": "scripts/test_continuity_matrix.py",
+      "row": "E73",
+      "proved": "Thirteen kill points, each asserting nothing lost and nothing duplicated, with the fourteenth named as a real engine window rather than passed."
+    },
+    {
+      "metric": "TIME TO OUTCOME",
+      "status": "measured",
+      "instrument": "scripts/brother_run.py",
+      "row": "E52",
+      "proved": "The delivery report carries wall_clock_seconds for the run; row E52's evidence quotes it verbatim from docs/plan/runs/live-autonomous-adversity-2026-09-04/run.log line 364."
+    },
+    {
+      "metric": "HUMAN INTERVENTIONS",
+      "status": "none",
+      "instrument": "NO INSTRUMENT YET",
+      "row": null,
+      "would_require": "A counter of operator inputs scoped to one run, written into the journal as its own event kind so the count is read off the record rather than remembered. Today the number is recorded by hand in a document, docs/plan/HEAD-TO-HEAD-PROTOCOL-2026-08-30.md, which is a table a person filled in, not an instrument."
+    },
+    {
+      "metric": "SAFE UNWATCHED DURATION",
+      "status": "none",
+      "instrument": "NO INSTRUMENT YET",
+      "row": null,
+      "would_require": "Section 7 Zone 2 defines it as duration AND consequence level a user will delegate without supervision while preserving evidence, scope control, recoverability and human authority. Measuring it needs a run whose unattended stretch is recorded alongside the five preservation properties holding across that stretch, and a stated consequence level per round. scripts/autonomy_dial.py holds the approval axis of that policy and scripts/task_watchdog.py watches a run, but neither emits a duration bound to a consequence level, so no number exists today."
+    },
+    {
+      "metric": "TASK CORRECTNESS",
+      "status": "measured",
+      "instrument": "scripts/product_acceptance.py",
+      "row": "E73",
+      "proved": "Correctness after the resume is read the same way as correctness without one: through the public entry point, from the exit code, the delivery report and the target repository's git log."
+    }
+  ],
+  "scoring_rubric": {
+    "fixed_before_execution": true,
+    "rules": [
+      "Zero silent duplicated work. A unit completed twice, or a second Work document covering the same outcome, fails the arm.",
+      "Zero lost authoritative work. Anything integrated before the kill is present after the resume.",
+      "The resume names what the crash left behind, by unit and by claim, in its own first lines. A silent resume fails even when the result is correct.",
+      "Decisions taken before the kill survive it and are visible in the resumed record.",
+      "Recovery time is reported in seconds from the record, with the measurement point named. An unreported time counts as NO-DATA, never as fast.",
+      "The 24 to 72 hour arm of family 8 is reported NO-DATA until a harness exists for it. It is never scored from the short-crash arm."
+    ]
+  },
+  "win_condition": {
+    "section": "7, Zone 3",
+    "text": "A developer can return after 24 hours, three days, or a crash and recover useful working context in minutes rather than reconstructing it manually.",
+    "reconstructs": [
+      "WHERE WE WERE",
+      "WHY WE WERE THERE",
+      "CANONICAL COMMIT",
+      "CURRENT OBJECTIVE",
+      "ACTIVE / FINISHED WORKTREES",
+      "CHANGED FILES",
+      "IMPORTANT COMMANDS",
+      "EXPECTED SERVICES",
+      "VERIFICATION STATE",
+      "KNOWN FAILURES",
+      "REJECTED APPROACHES",
+      "ENVIRONMENT ASSUMPTIONS",
+      "UNFINISHED WORK",
+      "RELEVANT LESSONS",
+      "SAFE NEXT ACTION"
+    ],
+    "met_when": "The continuity capsule answers every line above from disk after the kill, and the resumed run reaches the same verified result with one operator input."
+  },
+  "raw_artifacts": {
+    "rule": "Publish raw artifacts. Do not publish only a synthetic score.",
+    "root": "docs/plan/runs/gauntlet-long-horizon-recovery-<date>/",
+    "contents": [
+      "RECORD.md in the shape of docs/plan/runs/live-autonomous-adversity-2026-09-04/RECORD.md, which names the pinned harness, the command, the injected fault, the observed recovery and the verdict with its caveats",
+      "the killed run's and the resumed run's own run.log, journal.jsonl and claims.json",
+      "the continuity capsule as printed after the kill",
+      "the driver log carrying the kill timestamps and the pids"
+    ]
+  }
+}

@@ -1,0 +1,206 @@
+# What evidence a change is REQUIRED to carry, declared before the change is
+# written rather than inferred from what somebody remembered to attach.
+#
+# The gap this closes, in one sentence: this project is strong at rejecting
+# broken evidence and was weak at proving evidence should exist, so a gate could
+# report NO-DATA, a receipt directory could be left empty, a dossier input could
+# be omitted, and a strict run then completed without ever proving the change
+# was entitled to have no evidence.
+#
+# READ THIS FILE AS A FLOOR. Every `minimumTier` below is the LOWEST tier a
+# change touching those paths may be classified at. `sbe policy evaluate` may
+# RAISE a declared tier and never silently lowers one; a lowering needs a
+# decision record with a protected approval, and without one the run blocks.
+#
+# NOT-REQUIRED IS A VERDICT HERE, AND MISSING IS A DIFFERENT ONE. A rule that
+# does not match reports NOT-REQUIRED. A rule that matches and finds no evidence
+# reports MISSING and exits nonzero. Neither is NO-DATA: one absence means "this
+# change was entitled to carry nothing" and the other means "the evidence that
+# should exist does not", and collapsing them into one word is the defect.
+#
+# THE PATHS ARE THIS REPOSITORY'S, NOT A TEMPLATE'S. The five categories are
+# fixed. The globs under them were fitted to what actually exists here (there is
+# no migrations/ directory in this repository, and its production surface is the
+# installer and the release-control kit, not a terraform module), and the
+# generic globs are kept beside them so a consumer repository that copies this
+# file, or a directory added here next year, is covered on the day it appears.
+schemaVersion: "1.0"
+
+# When true, evidence that is merely locally generated does not satisfy a
+# requirement: it reports UNPROTECTED and blocks. A receipt anyone's laptop can
+# mint is not the thing a protected control was asking for.
+#
+# FALSE IN THIS RELEASE, deliberately, and here is the whole reason. The label
+# that used to mean "protected" was minted from an environment variable any
+# local process can export, so it was removed rather than left standing above
+# the evidence it could actually carry (BR-1013). With no protected level in
+# existence, leaving this flag true would make every governed change report
+# UNPROTECTED forever: not a strict repository, a stuck one, demanding a proof
+# nothing on earth can currently issue. The mechanism is intact and still
+# bites, which tools/test_sbe_check_registry.py proves by setting this flag
+# true over a CI-CLAIMED receipt and asserting UNPROTECTED. This line flips
+# back to true in the same change that lands cryptographic attestation, and
+# docs/KNOWN-LIMITS.md carries the same statement for a reader who never opens
+# this file.
+protectedEvidenceRequired: false
+
+rules:
+  - id: database-migration
+    why: "a schema change other code, queries and reports depend on, which is not reversible in an hour once it has run"
+    match:
+      paths:
+        - "migrations/**"
+        - "db/migrations/**"
+        - "db/migrate/**"
+        - "schema/**"
+        - "alembic/**"
+        - "flyway/**"
+        - "liquibase/**"
+        - "**/*.sql"
+      contentSignals:
+        - "sql-ddl"
+        - "destructive-schema-change"
+    minimumTier: "T3"
+    requiredChecks:
+      - "migration-rehearsal"
+      - "migration-reconciliation"
+    # requiredApprovals omitted, same reason as the control-plane rule above and
+    # recorded here rather than left as an absence: this repository has ONE
+    # human, and GitHub does not let an author approve their own pull request,
+    # so a required approval from data-owner could never be satisfied and would block
+    # every change of this class forever while proving nothing. The mechanism
+    # is intact and tools/test_sbe_policy.py restores it in its own copy to
+    # prove it still refuses. Restore these two lines the day a second person
+    # joins:
+    #   requiredApprovals:
+    #     - "data-owner"
+    strictWaivers: true
+
+  - id: production-infrastructure
+    why: "what other systems run on; a wrong value here is live before anybody reads the diff"
+    match:
+      paths:
+        - "infra/**"
+        - "terraform/**"
+        - "k8s/**"
+        - "helm/**"
+        - "**/*.tf"
+        - "**/*.tfvars"
+        - "install.sh"
+        - "release-control/**"
+        - "scripts/verify-install.sh"
+        - "scripts/test-install-artifact.sh"
+        - "scripts/test-upgrade-rollback.sh"
+    minimumTier: "T2"
+    requiredChecks:
+      - "infrastructure-plan"
+      - "infrastructure-policy"
+    # requiredApprovals omitted, same reason as the control-plane rule above and
+    # recorded here rather than left as an absence: this repository has ONE
+    # human, and GitHub does not let an author approve their own pull request,
+    # so a required approval from infrastructure-owner could never be satisfied and would block
+    # every change of this class forever while proving nothing. The mechanism
+    # is intact and tools/test_sbe_policy.py restores it in its own copy to
+    # prove it still refuses. Restore these two lines the day a second person
+    # joins:
+    #   requiredApprovals:
+    #     - "infrastructure-owner"
+    strictWaivers: true
+
+  - id: authority-or-control-plane
+    why: "the controls themselves; weakening one before it evaluates the work is the bypass every other rule here depends on not happening"
+    match:
+      paths:
+        - "CLAUDE.md"
+        - ".claude/**"
+        - ".claude-plugin/**"
+        - "hooks/**"
+        - ".github/workflows/**"
+        - ".github/actions/**"
+        - ".github/CODEOWNERS"
+        - "CODEOWNERS"
+        - ".sbe/policy.yml"
+        - ".sbe/checks.yml"
+        # The grant files themselves. Found by a hostile refuter of this very
+        # rule: approvals and waivers are what SATISFY control-plane
+        # requirements, so leaving them unclassified let the thing that grants
+        # permission be edited without the rule that guards permission ever
+        # matching. Anything under .sbe/ that is not a working artifact is
+        # control plane by construction, which is why the last pattern is a
+        # sweep rather than another enumerated name.
+        - ".sbe/break-glass.json"
+        - ".sbe/approvals.json"
+        - ".sbe/waivers.json"
+        - ".sbe/decisions/**"
+        - "src/brothersbe/evidence.py"
+        - "src/brothersbe/policy.py"
+        - "tools/sbe_*guard*.py"
+        - "tools/sbe_*hook*.py"
+        - "tools/sbe_gate.py"
+        - "agents/*.md"
+        - "skills/*/SKILL.md"
+    minimumTier: "T3"
+    requiredChecks:
+      - "control-plane-tests"
+      # claude-plugin-e2e is NOT listed, and the omission is the honest half of
+      # a pair. `.sbe/checks.yml` records it under `unregistered` with its
+      # reason: the real Claude Code end to end gate is not built, so naming it
+      # here would demand a receipt from a runner that does not exist, and this
+      # repository would block its own control-plane changes forever while
+      # proving nothing. It is owed as OWED-10 in program/OWED.json, and it
+      # returns to this list in the same change that registers its runner. A
+      # required check whose registry entry says it cannot exist is a
+      # contradiction, not a control.
+    # requiredApprovals is omitted for the same class of reason, stated rather
+    # than left as a silent gap: this repository has ONE human, and GitHub does
+    # not let an author approve their own pull request, so a required approval
+    # from a control-plane owner could never be satisfied here. The rule returns
+    # the day a second person joins, which docs/KNOWN-LIMITS.md also records.
+    # An adopter repository with two or more people restores the two lines
+    # above and below this comment and gets the full control.
+    strictWaivers: true
+
+  - id: api-or-event-contract
+    why: "a published surface other people build against, where a compatible-looking edit breaks a caller nobody in this diff can see"
+    match:
+      paths:
+        - "openapi/**"
+        - "proto/**"
+        - "schemas/events/**"
+        - "**/*.proto"
+        - "**/*.avsc"
+        - "**/*.graphql"
+        - "src/brothersbe/cli.py"
+        - "bin/sbe"
+        - "tables/architecture.json"
+    minimumTier: "T2"
+    requiredChecks:
+      - "contract-compatibility"
+    strictWaivers: false
+
+  - id: money-personal-or-partner-data
+    why: "money movement, personal data and partner data: the three places where being wrong is not a rollback"
+    match:
+      paths:
+        - "payments/**"
+        - "billing/**"
+        - "pii/**"
+        - "partner-data/**"
+        - "**/*payment*"
+        - "**/*billing*"
+        - "**/*payout*"
+    minimumTier: "T3"
+    requiredChecks:
+      - "numerical-reconciliation"
+      - "security-policy"
+    # requiredApprovals omitted, same reason as the control-plane rule above and
+    # recorded here rather than left as an absence: this repository has ONE
+    # human, and GitHub does not let an author approve their own pull request,
+    # so a required approval from domain-owner could never be satisfied and would block
+    # every change of this class forever while proving nothing. The mechanism
+    # is intact and tools/test_sbe_policy.py restores it in its own copy to
+    # prove it still refuses. Restore these two lines the day a second person
+    # joins:
+    #   requiredApprovals:
+    #     - "domain-owner"
+    strictWaivers: true

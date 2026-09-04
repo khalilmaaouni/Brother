@@ -233,12 +233,16 @@ def install_plugin(dry_run, script_dir):
     # is the report a person needs to fix their remote.
     ok, refusal = check_origin_url(origin_url)
     if not ok:
-        print("install: REFUSED origin remote: this clone's "
-              "remote.origin.url was not used because %s. This installer "
-              "hands that value to git clone and to the plugin CLI, so it "
-              "has to be an ordinary repository address; fix it with "
-              "`git remote set-url origin <repository-url>` and re-run "
-              "install.sh" % refusal)
+        # say(), not print(): `refusal` is built from remote.origin.url,
+        # which is repository-supplied content, and this line is the report a
+        # person reads to decide the remote is bad. An unflattened value there
+        # can open a second line and write a sentence nobody printed.
+        say("install: REFUSED origin remote: this clone's "
+            "remote.origin.url was not used because %s. This installer "
+            "hands that value to git clone and to the plugin CLI, so it "
+            "has to be an ordinary repository address; fix it with "
+            "`git remote set-url origin <repository-url>` and re-run "
+            "install.sh" % refusal)
         sys.exit(1)
 
     # A pipeline's `set -e` only watches the LAST command, so a network

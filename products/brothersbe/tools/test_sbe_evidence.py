@@ -27,6 +27,21 @@ import tempfile
 import time
 import unittest
 
+# E100: one sandbox for every temp tree this process makes, removed at exit.
+import os as _e100_os, sys as _e100_sys  # noqa: E402
+_e100_sys.path.append(_e100_os.path.join(
+    _e100_os.path.dirname(_e100_os.path.abspath(__file__)), '../../../scripts'))
+try:  # noqa: E402
+    import tmp_sandbox as _e100_tmp
+    _e100_tmp.install()
+except ImportError:
+    # A packager (scripts/export_public.py, make_benchmark_bundle.py)
+    # can copy this test without scripts/tmp_sandbox.py beside it. Say
+    # so rather than dying: the sandbox is hygiene, not the subject.
+    _e100_sys.stderr.write(
+        "tmp_sandbox absent: %s leaves its temp trees behind\n"
+        % _e100_os.path.basename(__file__))
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, ".."))
 SBE = os.path.join(ROOT, "bin", "sbe")
@@ -1209,7 +1224,7 @@ class TestReceiptFreshnessAcrossCommitsAndScopes(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.repo, ignore_errors=True)
 
-    def _run_sbe(self, *argv, **kwargs):
+    def _run_sbe_at(self, *argv, **kwargs):
         proc = subprocess.run([sys.executable, SBE] + list(argv), cwd=kwargs.get("cwd",
                               self.repo), capture_output=True, text=True, timeout=180)
         return proc.returncode, proc.stdout + proc.stderr
@@ -1222,7 +1237,7 @@ class TestReceiptFreshnessAcrossCommitsAndScopes(unittest.TestCase):
         cwd = cwd or self.repo
         full = out or os.path.join(self.repo, self.DOSSIER, ".sbe", "evidence",
                                    name + ".json")
-        code, text = self._run_sbe("evidence", "run", "--out", full, "--cwd", cwd,
+        code, text = self._run_sbe_at("evidence", "run", "--out", full, "--cwd", cwd,
                                    "--covers", covers, "--", sys.executable, "-c", "pass")
         self.assertEqual(code, 0, text)
         if out is None:
@@ -1238,7 +1253,7 @@ class TestReceiptFreshnessAcrossCommitsAndScopes(unittest.TestCase):
         receipt = self._mint("design", "01-purpose.md", cwd=os.path.join(self.repo,
                                                                         self.DOSSIER))
         scope = os.path.join(self.repo, self.DOSSIER)
-        code, text = self._run_sbe("evidence", "verify", receipt, "--cwd", scope, cwd=scope)
+        code, text = self._run_sbe_at("evidence", "verify", receipt, "--cwd", scope, cwd=scope)
         self.assertEqual(code, 0, "a receipt read from the dossier it lives in must not be "
                                   "stale: %s" % text)
         self.assertIn("PASS", text)
@@ -1251,7 +1266,7 @@ class TestReceiptFreshnessAcrossCommitsAndScopes(unittest.TestCase):
         touched as one that "no longer exists" and threw the receipt away."""
         receipt = self._mint("design", "docs/dossiers/v1/01-purpose.md")
         scope = os.path.join(self.repo, self.DOSSIER)
-        code, text = self._run_sbe("evidence", "verify", receipt, "--cwd", scope, cwd=scope)
+        code, text = self._run_sbe_at("evidence", "verify", receipt, "--cwd", scope, cwd=scope)
         self.assertNotIn("no longer exists", text)
         self.assertEqual(code, 0, "a root relative covered path must resolve for a scoped "
                                   "reader too: %s" % text)
@@ -1263,7 +1278,7 @@ class TestReceiptFreshnessAcrossCommitsAndScopes(unittest.TestCase):
         receipt = self._mint("design", "docs/dossiers/v1/01-purpose.md")
         os.remove(os.path.join(self.repo, self.DOSSIER, "01-purpose.md"))
         scope = os.path.join(self.repo, self.DOSSIER)
-        code, text = self._run_sbe("evidence", "verify", receipt, "--cwd", scope, cwd=scope)
+        code, text = self._run_sbe_at("evidence", "verify", receipt, "--cwd", scope, cwd=scope)
         self.assertNotEqual(code, 0, "a covered file that exists nowhere must fail: %s" % text)
         self.assertIn("no longer exists", text)
 
@@ -1275,7 +1290,7 @@ class TestReceiptFreshnessAcrossCommitsAndScopes(unittest.TestCase):
         first = self._mint("design", covers)
         self._mint("gate", covers)
         self._mint("score", covers)
-        code, text = self._run_sbe("evidence", "verify", first, "--cwd", self.repo)
+        code, text = self._run_sbe_at("evidence", "verify", first, "--cwd", self.repo)
         self.assertEqual(code, 0, "a sibling receipt's own commit must not stale this "
                                   "one: %s" % text)
         self.assertIn("PASS", text)
@@ -1288,7 +1303,7 @@ class TestReceiptFreshnessAcrossCommitsAndScopes(unittest.TestCase):
         receipt = self._mint("design", "docs/dossiers/v1/01-purpose.md")
         time.sleep(0.01)
         write(self.repo, os.path.join(self.DOSSIER, "01-purpose.md"), "why this exists\n")
-        code, text = self._run_sbe("evidence", "verify", receipt, "--cwd", self.repo)
+        code, text = self._run_sbe_at("evidence", "verify", receipt, "--cwd", self.repo)
         self.assertEqual(code, 0, "identical bytes rewritten after the run are the bytes "
                                   "the receipt recorded: %s" % text)
         self.assertNotIn("was written after the run ended", text)
@@ -1298,7 +1313,7 @@ class TestReceiptFreshnessAcrossCommitsAndScopes(unittest.TestCase):
         speaks for the bytes, and it still refuses."""
         receipt = self._mint("design", "docs/dossiers/v1/01-purpose.md")
         write(self.repo, os.path.join(self.DOSSIER, "01-purpose.md"), "rewritten\n")
-        code, text = self._run_sbe("evidence", "verify", receipt, "--cwd", self.repo)
+        code, text = self._run_sbe_at("evidence", "verify", receipt, "--cwd", self.repo)
         self.assertNotEqual(code, 0, "changed bytes must still fail: %s" % text)
         self.assertIn("the code changed after the evidence was made", text)
 
@@ -1321,7 +1336,7 @@ class TestReceiptFreshnessAcrossCommitsAndScopes(unittest.TestCase):
         write(self.repo, "app.py", "x = 2\n")
         git(self.repo, "add", "-A")
         git(self.repo, "commit", "-qm", "work on the trunk the receipt never saw")
-        code, text = self._run_sbe("evidence", "verify", receipt, "--cwd", self.repo)
+        code, text = self._run_sbe_at("evidence", "verify", receipt, "--cwd", self.repo)
         self.assertNotEqual(code, 0, "a receipt from a history this head never descended "
                                      "from must not carry forward: %s" % text)
         self.assertIn("is not the current head", text)

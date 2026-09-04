@@ -11,7 +11,7 @@
   },
   {
    "path": "brother_run.py",
-   "sha256": "44f9e9e9fbffee985da604e17d35c603000d9f6242827d592bd2c4f1dfd5c659"
+   "sha256": "f5a96e14d6adda78e30eb0cb45b44a8b5dc3d68884bd1cf092626b1e6e1e0803"
   },
   {
    "path": "claim_store.py",
@@ -27,7 +27,7 @@
   },
   {
    "path": "door.py",
-   "sha256": "83841499526d1aeb4f2ce517eabb83fb1e4ad77bc2761bde3a8133682ea21524"
+   "sha256": "cbbb0e2b854d192e645397f53487422d641ebb5c68a697a8994e9a877d778987"
   },
   {
    "path": "graph_loop.py",
@@ -55,7 +55,7 @@
   },
   {
    "path": "model_worker.py",
-   "sha256": "034b5017174de65f9232eadfe7eea8de538e6ce57ceed0897245d5327b831c7c"
+   "sha256": "48d902e9303426f9fc9f4205d5fb74962184d821e14c906ee6a09c31e70a073c"
   },
   {
    "path": "packs/architect.json",
@@ -111,7 +111,7 @@
   },
   {
    "path": "receipt_door.py",
-   "sha256": "b62a73c96133019a913fc4d8758ffb619df35e49c374e33784bc7654c3c25617"
+   "sha256": "b0414040f651106dfbe3eca1469c5bdcb76062153e08bb6102806db15b7beb69"
   },
   {
    "path": "run_heartbeat.py",
@@ -135,6 +135,6 @@
   }
  ],
  "generated_by": "scripts/bundle_runtime.py",
- "source_describe": "v0.9.6-3376-g90da1d26-dirty",
- "source_revision": "90da1d26adf8e05b9c38b0aa5b838e1c67fe7028"
+ "source_describe": "v0.9.6-3551-g4fe35f8d",
+ "source_revision": "4fe35f8d7cdb4149b228ae0e899fe16cfbc475a6"
 }

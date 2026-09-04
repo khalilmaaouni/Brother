@@ -33,6 +33,21 @@ import tempfile
 import shutil
 import unittest
 
+# E100: one sandbox for every temp tree this process makes, removed at exit.
+import os as _e100_os, sys as _e100_sys  # noqa: E402
+_e100_sys.path.append(_e100_os.path.join(
+    _e100_os.path.dirname(_e100_os.path.abspath(__file__)), '../../../scripts'))
+try:  # noqa: E402
+    import tmp_sandbox as _e100_tmp
+    _e100_tmp.install()
+except ImportError:
+    # A packager (scripts/export_public.py, make_benchmark_bundle.py)
+    # can copy this test without scripts/tmp_sandbox.py beside it. Say
+    # so rather than dying: the sandbox is hygiene, not the subject.
+    _e100_sys.stderr.write(
+        "tmp_sandbox absent: %s leaves its temp trees behind\n"
+        % _e100_os.path.basename(__file__))
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, ".."))
 SBE = os.path.join(ROOT, "bin", "sbe")
@@ -176,11 +191,19 @@ class TestNoStores(StatusFixture):
 
 class TestBrokenClaims(StatusFixture):
     def test_a_stale_receipt_is_named_under_broken_claims_and_exits_1(self):
-        # BREAK: generate a sound receipt, then move HEAD, which makes the
-        # receipt's bound commit stale.
+        # BREAK: generate a sound receipt, then move HEAD BY CHANGING A FILE
+        # THE RECEIPT COVERS, which makes the receipt's bound commit stale.
+        #
+        # The covered file matters since d9dd8f569 ("A receipt stops being
+        # stale the moment it is committed", roadmap row E83): a receipt is
+        # fresh when its commit is an ancestor of HEAD with no covered file
+        # changed in between, so advancing HEAD with an unrelated file (what
+        # this fixture used to do) no longer stales anything, correctly. The
+        # assertions below are unchanged; only the fixture now produces the
+        # state they are about.
         out_path = self.run_evidence(".sbe/evidence/r1.json", "score")
-        write(self.repo, "unrelated.txt", "more\n")
-        self.commit("advance head")
+        write(self.repo, "README.md", "base changed after the receipt\n")
+        self.commit("advance head over the covered file")
         code, text, _ = self.status("--base", self.base)
         # RED: the stale receipt must be named, and it must block.
         self.assertNotEqual(code, 0, text)
@@ -208,19 +231,23 @@ class TestEvidenceStoreSelfPoisoning(StatusFixture):
     receipt that merely covered its OLD bytes by diff-range accident must
     never fail because of it: the evidence store must not poison itself.
 
-    Every fixture here leaves the "gate" receipt UNCOMMITTED on purpose. A
-    receipt's `headCommit` is resolved at generation time, before it can be
-    committed, so ANY receipt that is later committed necessarily records a
-    headCommit one commit behind whatever HEAD becomes once that commit
-    lands: `verify` FAILs it for that reason alone, correctly and
-    inconveniently, on every subsequent commit, T6 or not (this is the
-    pre-existing, already-documented limit at docs/KNOWN-LIMITS.md, "The
-    evidence wrapper binds a run to a commit..."; see also
+    Most fixtures here leave the "gate" receipt UNCOMMITTED, which used to be
+    load-bearing and is now merely the simplest shape. It was load-bearing
+    because a receipt's `headCommit` is resolved at generation time, so any
+    receipt later committed recorded a headCommit one commit behind whatever
+    HEAD became, and `verify` FAILed it for that reason alone on every
+    subsequent commit, T6 or not. Committing "gate" would then have buried the
+    covered-file assertion under that unrelated staleness.
+    d9dd8f569 ("A receipt stops being stale the moment it is committed",
+    roadmap row E83) ended that: a receipt is fresh while its commit is an
+    ancestor of HEAD with no covered file changed in between, and the evidence
+    store is exempt from that comparison. The committed shape therefore now
+    reaches the same clean outcome as the uncommitted one, which
+    `test_the_same_scenario_committed_end_to_end_never_shows_a_covered_file_reason`
+    below asserts directly. A receipt whose OWN covered file changes is still
+    stale, which
     `TestBrokenClaims.test_a_stale_receipt_is_named_under_broken_claims_and_exits_1`
-    above, which pins exactly that behavior as correct). Committing "gate"
-    here would bury the covered-file assertion under that unrelated,
-    already-accepted staleness. Leaving it uncommitted isolates the ONE
-    thing this stage changes.
+    above pins.
     """
 
     def _make_design_and_gate(self):
@@ -282,11 +309,20 @@ class TestEvidenceStoreSelfPoisoning(StatusFixture):
 
     def test_the_same_scenario_committed_end_to_end_never_shows_a_covered_file_reason(self):
         # The literal "two receipts committed in sequence" shape: both
-        # design.json and its regenerated successor get committed. gate.json
-        # DOES then pick up the pre-existing, documented headCommit
-        # staleness (every commit after it does that; see the class
-        # docstring), so this checks the ONE thing T6 owns: whichever BROKEN
-        # CLAIMS line names gate.json, it is never for a covered-file reason.
+        # design.json and its regenerated successor get committed.
+        #
+        # This test used to require gate.json to be named at least once, on
+        # the then-true rule that a committed receipt is stale the moment
+        # anything else commits. d9dd8f569 ("A receipt stops being stale the
+        # moment it is committed", roadmap row E83) replaced that rule: a
+        # receipt is fresh while its commit is an ancestor of HEAD with no
+        # covered file changed in between, and the evidence store is exempt
+        # from that comparison. So the committed shape now reaches the same
+        # clean outcome as its uncommitted sibling above, which is the
+        # STRONGER form of exactly what T6 owns: design.json's regeneration
+        # does not reach gate.json's verdict at all, rather than reaching it
+        # as an acceptable headCommit complaint. app.py, the only code
+        # gate.json actually tested, is untouched throughout.
         self._make_design_and_gate()
         self.commit("add gate receipt")
         self.run_evidence(".sbe/evidence/design.json", "design", covers="app.py",
@@ -294,17 +330,14 @@ class TestEvidenceStoreSelfPoisoning(StatusFixture):
         self.commit("regenerate design receipt")
 
         code, text, _ = self.status("--base", self.base)
-        gate_lines = [l for l in text.splitlines()
-                     if ".sbe/evidence/gate.json" in l and "fails verify" in l]
-        self.assertTrue(gate_lines, "gate.json is expected to be named at least once (its own "
-                                    "headCommit is stale the moment anything else commits, by "
-                                    "the pre-existing rule this stage does not change): %r"
-                                    % text)
-        for line in gate_lines:
-            self.assertNotIn("covered file", line,
-                             "gate.json's ONLY acceptable reason here is headCommit staleness; "
-                             "a covered-file complaint means design.json's regeneration leaked "
-                             "into gate.json's verdict: %r" % line)
+        broken_block = text.split("MERGE BLOCKERS:")[0]
+        self.assertNotIn(".sbe/evidence/gate.json", broken_block,
+                         "committing design.json and its regenerated successor must never break "
+                         "gate.json, which never claimed to cover either: %r" % text)
+        # The specific leak this stage exists to catch, asserted over the whole
+        # report rather than only the broken block, so it cannot hide in
+        # another section.
+        self.assertNotIn("covered file .sbe/evidence/design.json", text, text)
 
     def test_a_receipt_covering_only_the_evidence_store_reads_no_data_not_pass(self):
         # The limiting case: EVERY covered file this receipt names sits under
@@ -659,6 +692,11 @@ class TestNextAction(StatusFixture):
     def test_next_action_tracks_broken_claims_first_when_both_are_present(self):
         out_path = self.run_evidence(".sbe/evidence/r1.json", "score")
         write(self.repo, "api/openapi.yaml", "openapi: 3.0.0\n")
+        # README.md is the file the receipt covers, and since d9dd8f569 only a
+        # change to a COVERED file stales it. Both halves this test needs are
+        # then present at once: a broken claim (the stale receipt) and a merge
+        # blocker (the T0 intake disagreeing with the diff-derived T2).
+        write(self.repo, "README.md", "base changed after the receipt\n")
         self.commit()
         self.intake()  # T0, disagrees with the diff-derived T2: a merge blocker too
         code, text, _ = self.status("--base", self.base)
@@ -806,9 +844,12 @@ class TestPositiveSentenceGuard(StatusFixture):
         # A mix: one broken claim present, several sections legitimately
         # empty, so both the item-bearing and the empty-section renderings
         # are exercised in the same run.
+        # The broken claim is produced by changing a file the receipt COVERS
+        # (README.md, run_evidence's default), because since d9dd8f569 a
+        # commit that touches nothing covered leaves the receipt fresh.
         self.run_evidence(".sbe/evidence/r1.json", "score")
-        write(self.repo, "unrelated.txt", "more\n")
-        self.commit("advance head")
+        write(self.repo, "README.md", "base changed after the receipt\n")
+        self.commit("advance head over the covered file")
         code, text, _ = self.status("--base", self.base)
         self.assertNotEqual(code, 0, text)
         candidate_lines = [l for l in text.splitlines()

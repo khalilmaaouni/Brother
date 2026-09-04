@@ -262,6 +262,128 @@ def subject_files(rel_path):
     return sorted(found)
 
 
+def measured_file_rows(claim_suites, perturb=None):
+    """([(claim, source_file, suite_or_None)], problem_or_None), one row per
+    file, with the suite column MEASURED rather than inferred.
+
+    GAP 8, the defect row E95 closes. The previous version of this table put
+    the claim's own suite beside every module that suite imported, under the
+    sentence "Named by reading each suite's own imports". An import is not
+    coverage: an external critic reading a pristine clone at v1.0.1 found four
+    of the eleven files survived a perturbation under the suite named beside
+    them, because test_vault_recall_hook.py writes its own fake bm_vault.py
+    and shells out to that, and test_brother_run.py does not import loom at
+    all. So imports are now only the CANDIDATE list, and every candidate is
+    confirmed by actually breaking the file and requiring the suite to go red
+    (release_note_perturb.covers, which perturbs behaviour rather than import,
+    and restores the file byte-identically).
+
+    A candidate its own claim's suite does not catch falls back to the one
+    convention-named sibling, test_<stem>.py beside it: that is how
+    scripts/loom.py finds scripts/test_loom.py, the suite the old note never
+    named. A file no suite catches reads NO-DATA in the suite column, which
+    the perturbation check then reports as NO-DATA and never as a pass.
+
+    `claim_suites` is [(claim label, suite path)]. Slow on purpose: this runs
+    one full suite per candidate, at release cut time, so that the table is a
+    measurement instead of a paraphrase of the import graph. `perturb` is the
+    seam the self test injects through (resolved here, never as a default
+    argument, so nothing binds at import time); left None it is the real
+    scripts/release_note_perturb.py."""
+    if perturb is None:
+        sys.path.insert(0, HERE)
+        import release_note_perturb as perturb  # noqa: E402
+    PERTURB = perturb
+
+    baselines = {}
+
+    def caught_by(suite, rel):
+        if suite not in baselines:
+            baselines[suite] = PERTURB.run_suite(suite)[0]
+        if baselines[suite] != 0:
+            # A suite that is red, or that could not be run at all, can prove
+            # nothing about any file. Returning here rather than calling
+            # covers() with a None baseline also stops it re-running that
+            # same unrunnable suite once per candidate.
+            return False
+        return PERTURB.covers(suite, rel, baseline=baselines[suite])[0] is True
+
+    rows = []
+    try:
+        for label, suite in claim_suites:
+            for rel in subject_files(suite):
+                if caught_by(suite, rel):
+                    rows.append((label, rel, suite))
+                    continue
+                sibling = PERTURB.sibling_suite(rel)
+                if sibling and sibling != suite and caught_by(sibling, rel):
+                    rows.append((label, rel, sibling))
+                    continue
+                rows.append((label, rel, None))
+        # The last file measured has no next step to be caught by.
+        PERTURB.check_ledger()
+    except PERTURB.RestoreFailed as exc:
+        # A file this run could not put back exactly as it found it is a
+        # refusal of the whole note, never a table row: the tree is dirty and
+        # the reader has to be told that before anything else.
+        return [], ("%s: the files table was abandoned mid-measurement and a "
+                    "file may still be perturbed: %s" % (NODATA, exc))
+    if not rows:
+        return [], ("%s: no source file could be measured behind any cited "
+                    "suite" % NODATA)
+    return rows, None
+
+
+FILES_TABLE_HEADING = "## Files behind these claims"
+
+
+def render_files_table(version, file_rows):
+    """The whole "Files behind these claims" section as a list of lines, from
+    its heading to its trailing blank. One function so build() and
+    --write-table can never render two different tables."""
+    lines = [FILES_TABLE_HEADING, ""]
+    lines.append(
+        "One line per file, and the suite beside it is MEASURED, not "
+        "inferred from an import. Each file was broken in place (every "
+        "function it defines replaced by one that raises when called), the "
+        "suite was run, and the suite had to go red; then the file was "
+        "restored and re-hashed byte for byte. Where a claim's own suite did "
+        "not catch its file, the column names the suite that did. A row "
+        "reading %s is a file no suite here catches, which this script would "
+        "rather print than name a check that cannot fail. This is call level, "
+        "not branch level: a row means breaking the file's functions is "
+        "noticed, never that every branch of it is covered. Re-run the whole "
+        "table with `python3 scripts/release_note_perturb.py --version %s`."
+        % (NODATA, version))
+    lines.append("")
+    lines.append("| Claim | Source file | Goes red when this file breaks |")
+    lines.append("|---|---|---|")
+    for label, rel, suite in file_rows:
+        lines.append("| %s | `%s` | %s |"
+                     % (label, rel, ("`%s`" % suite) if suite else NODATA))
+    lines.append("")
+    return lines
+
+
+def replace_files_table(text, table_lines):
+    """`text` with its files table swapped for `table_lines`, or None when the
+    note carries no such section. Everything else in the note is left byte for
+    byte alone: the digest, the revision and the counts in an already cut note
+    describe a tree that has moved, and re-deriving them here would replace a
+    true claim about the tag with a false one about today."""
+    lines = text.split("\n")
+    try:
+        start = lines.index(FILES_TABLE_HEADING)
+    except ValueError:
+        return None
+    end = len(lines)
+    for i in range(start + 1, len(lines)):
+        if lines[i].startswith("## "):
+            end = i
+            break
+    return "\n".join(lines[:start] + table_lines + lines[end:])
+
+
 def recall_repro_command():
     """The exact command that reproduces the recall hook's live "Recalled N
     lesson(s)..." line, if one exists that needs nothing outside this tree.
@@ -617,6 +739,13 @@ def build(version=None):
     if problems:
         return None, problems
 
+    # Measured LAST, and only once every cheaper claim has held: this is the
+    # expensive step (one full suite run per candidate file), so a note that
+    # was going to be refused anyway is refused before it is paid for.
+    file_rows, table_problem = measured_file_rows(SUITES)
+    if table_problem:
+        return None, [table_problem]
+
     receipt = results["scripts/test_receipt_door.py"]
     brother_run = results["scripts/test_brother_run.py"]
     recall = results["products/brothermode/tools/test_vault_recall_hook.py"]
@@ -710,22 +839,8 @@ def build(version=None):
     A("")
     A("The %d legacy command shims remain in this cut, per decision D2." % shims)
     A("")
-    A("## Files behind these claims")
-    A("")
-    A("Named by parsing each suite's own imports, not typed: every file in "
-      "this column is a module the named suite really imports and that "
-      "really sits beside it on disk. A row reading %s is a suite that "
-      "imports none, usually because it drives its subject as a "
-      "subprocess, and this script would rather show that than name a "
-      "file the suite never loads." % NODATA)
-    A("")
-    A("| Claim | Suite | Source file(s) |")
-    A("|---|---|---|")
-    for label, rel in SUITES:
-        subjects = subject_files(rel)
-        subj_str = ", ".join("`%s`" % s for s in subjects) if subjects else NODATA
-        A("| %s | `%s` | %s |" % (label, rel, subj_str))
-    A("")
+    for line in render_files_table(version, file_rows):
+        A(line)
     return "\n".join(L), []
 
 
@@ -737,8 +852,42 @@ def main(argv=None):
                      help="the release this note describes (default: "
                           ".claude-plugin/marketplace.json's own "
                           "metadata.version)")
+    ap.add_argument("--write-table", action="store_true",
+                     help="re-measure ONLY the files table and swap it into "
+                          "docs/releases/<version>.md, leaving every other "
+                          "claim in an already cut note byte for byte alone")
     args = ap.parse_args(list(sys.argv[1:] if argv is None else argv))
     version = args.version or default_version()
+
+    if args.write_table:
+        # A note that has already been cut states a digest and a revision
+        # about the tree AT ITS TAG. Re-running the whole generator over
+        # today's tree would silently replace those true claims with false
+        # ones, so this mode touches the one section that is a measurement of
+        # the checks rather than of the tag.
+        path = notes_path_for(version)
+        try:
+            with open(path, encoding="utf-8") as fh:
+                text = fh.read()
+        except OSError as exc:
+            print("%s: %s unreadable: %s" % (NODATA, path, exc),
+                  file=sys.stderr)
+            return 2
+        file_rows, problem = measured_file_rows(SUITES)
+        if problem:
+            print(problem, file=sys.stderr)
+            return 2
+        new_text = replace_files_table(text,
+                                       render_files_table(version, file_rows))
+        if new_text is None:
+            print("%s: %s carries no '%s' section to replace"
+                  % (NODATA, path, FILES_TABLE_HEADING), file=sys.stderr)
+            return 2
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(new_text)
+        print("rewrote the files table in %s (%d row(s))"
+              % (path, len(file_rows)))
+        return 0
 
     body, problems = build(version)
     if body is None:

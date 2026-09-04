@@ -38,9 +38,47 @@ import sys
 import tempfile
 import unittest
 
+# E100: one sandbox for every temp tree this process makes, removed at exit.
+import os as _e100_os, sys as _e100_sys  # noqa: E402
+_e100_sys.path.append(_e100_os.path.join(
+    _e100_os.path.dirname(_e100_os.path.abspath(__file__)), '../../../scripts'))
+try:  # noqa: E402
+    import tmp_sandbox as _e100_tmp
+    _e100_tmp.install()
+except ImportError:
+    # A packager (scripts/export_public.py, make_benchmark_bundle.py)
+    # can copy this test without scripts/tmp_sandbox.py beside it. Say
+    # so rather than dying: the sandbox is hygiene, not the subject.
+    _e100_sys.stderr.write(
+        "tmp_sandbox absent: %s leaves its temp trees behind\n"
+        % _e100_os.path.basename(__file__))
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 FACTS_PATH = os.path.join(HERE, "bm_project_facts.py")
+
+# Is this the private hub, or a published subset of it?
+#
+# WHY THIS EXISTS. This suite reads pages and compares them against the tree.
+# Some of the pages it reads are HUB records that the public export
+# deliberately does not carry (an internal design document, a CI wiring file,
+# the product's own private orientation file, the adoption book). In a clone
+# of the published release those checks do not fail, they have nothing to
+# read, and the two are not the same answer. Measured on a fresh clone of the
+# v1.0.2 tag, 2026-09-04: this suite exited 1 with "FAILED (failures=7,
+# errors=26, skipped=4)", and 26 of those errors were FileNotFoundError on
+# pages the export withholds on purpose.
+#
+# WHY THIS MARKER. scripts/export_public.py HARD_EXCLUDEs `editions` in its
+# own code rather than by a list entry, so no export can ever carry that
+# directory, and every hub checkout tracks it.
+#
+# WHAT THIS DELIBERATELY DOES NOT DO. It does not make a missing page a skip
+# everywhere. In the hub every one of these checks still fails on an absent
+# page, because there the page is supposed to be on disk and its
+# disappearance is the exact defect this suite exists to catch.
+IN_PRIVATE_HUB = os.path.isdir(
+    os.path.join(os.path.dirname(os.path.dirname(ROOT)), "editions"))
 
 _spec = importlib.util.spec_from_file_location("bm_project_facts", FACTS_PATH)
 bpf = importlib.util.module_from_spec(_spec)
@@ -189,6 +227,30 @@ def read(rel):
         return fh.read()
 
 
+def absent_here(rels):
+    """The paths among `rels` this tree does not carry, in the order given."""
+    return [r for r in rels if not os.path.exists(os.path.join(ROOT, r))]
+
+
+def no_data_outside_the_hub(case, rels):
+    """Report NO-DATA, rather than fail, for a page this tree does not carry.
+
+    Only outside the private hub. See IN_PRIVATE_HUB at the top of this file
+    for why that condition is the whole point: inside the hub the same absence
+    still fails, so a page someone deletes is still caught. A skip reason is
+    the loudest NO-DATA unittest has; it names every absent page so the run
+    says which claims it could not test, and skipped is never counted as
+    passed."""
+    missing = absent_here(rels)
+    if not missing or IN_PRIVATE_HUB:
+        return
+    case.skipTest(
+        "NO-DATA: this checkout does not carry %s, so this check has nothing "
+        "to read. This is not the private hub, so they are treated as "
+        "withheld by the export rather than deleted. NO-DATA is not a pass."
+        % ", ".join(missing))
+
+
 def dated_docs():
     """Every dated document under docs/, at any depth, repo-relative."""
     out = []
@@ -233,6 +295,8 @@ class TestGeneratedFacts(unittest.TestCase):
         self.assertIn("lexical", FACTS["retrieval_modes"])
 
     def test_every_named_suite_file_exists(self):
+        no_data_outside_the_hub(
+            self, [os.path.join("tools", n) for n in FACTS["test_suite_files"]])
         for name in FACTS["test_suite_files"]:
             self.assertTrue(os.path.exists(os.path.join(HERE, name)), name)
 
@@ -413,6 +477,13 @@ class TestBitbucketPipelinesRunsTheDocumentedGate(unittest.TestCase):
     PIPELINES = "bitbucket-pipelines.yml"
     PROJECT = "PROJECT.md"
     CAP = re.compile(r"BROTHERMODE_SESSION_CAP=(\d+)")
+
+    def setUp(self):
+        # Both files are withheld from the public export on purpose (CI wiring
+        # and the product's own private orientation file, named as excluded in
+        # docs/plan/EXPORT-ALLOWLIST.txt's M6 comment), so a clone of the
+        # release has no drift to measure here.
+        no_data_outside_the_hub(self, [self.PIPELINES, self.PROJECT])
 
     def _documented_gate(self):
         """The full gate command, read out of PROJECT.md's key-commands
@@ -3674,6 +3745,14 @@ class TestTheAdoptionBook(unittest.TestCase):
                "        total += line_total(unit, qty)\n"
                "    return total\n")
 
+    def setUp(self):
+        # docs/book is the product's internal knowledge base and the export
+        # does not carry it (docs/plan/EXPORT-ALLOWLIST.txt's M6 comment
+        # excludes every docs/ subdirectory under either product that is not
+        # named line by line). Whether the book should be published is a
+        # publication decision, not something this suite makes by failing.
+        no_data_outside_the_hub(self, [self.BOOK])
+
     def _mod(self, name, path):
         spec = importlib.util.spec_from_file_location(name, path)
         mod = importlib.util.module_from_spec(spec)
@@ -4142,9 +4221,25 @@ class TestCapabilityRegisterIsHonest(unittest.TestCase):
 
     def test_every_entry_carries_a_valid_state_and_real_evidence(self):
         offenders = capability_offenders(json.loads(read(CAPABILITIES_JSON)))
+        no_data = []
+        if not IN_PRIVATE_HUB:
+            # Eleven of these entries cite hub records the export does not
+            # carry (the CI workflow, a mistakes-ledger page, program design
+            # and evidence files). Outside the hub that is NO-DATA on those
+            # entries, not a dishonest register, so they are separated out and
+            # named. Every OTHER offender still fails here, which is what
+            # keeps this from becoming a blanket amnesty.
+            no_data = [o for o in offenders if o.endswith("is not in the tree")]
+            offenders = [o for o in offenders if o not in no_data]
         self.assertEqual(
             offenders, [],
             "%s: %s" % (CAPABILITIES_JSON, "; ".join(offenders)))
+        if no_data:
+            self.skipTest(
+                "NO-DATA on %d evidence pointer(s) this checkout does not "
+                "carry: %s. Every other honesty check on the register passed "
+                "above. NO-DATA is not a pass."
+                % (len(no_data), "; ".join(no_data)))
 
     def test_the_register_declares_its_own_provenance(self):
         caps = json.loads(read(CAPABILITIES_JSON))
@@ -5422,6 +5517,10 @@ class TestTheVisualRegisterMatchesTheShapes(unittest.TestCase):
         ENTRY BY ENTRY rather than by substring, which is what lets "UML
         fork and join bars" stay banned while the decision fork D4 stays
         drawn: they share a word and are not the same thing."""
+        # The design lives under docs/program, the hub's own program record,
+        # which the export does not carry: a clone of the release has the ban
+        # list nowhere to read it from.
+        no_data_outside_the_hub(self, [VISUAL_DESIGN])
         text = read(VISUAL_DESIGN)
         match = re.search(r"BANNED SHAPES[^:]*:\n\n(.+?)\n\n", text, re.S)
         self.assertTrue(
@@ -5707,12 +5806,29 @@ class TestNoDashes(unittest.TestCase):
         # are verified pure ASCII with hostile fixture characters written as
         # backslash-u escapes, which is what lets this guard and those
         # fixtures hold at once.
+        # Row E111, 2026-09-04. Four of these targets are hub records the
+        # export does not carry (a comparative benchmark page, a feedback
+        # page, the contributor pack's two pages, the program master plan).
+        # The check is per file and independent, so outside the hub it runs
+        # over every target that IS here and reports the rest as NO-DATA by
+        # name, rather than erroring on the first absent one and saying
+        # nothing about any of the pages a reader actually got.
+        no_data = absent_here(targets) if not IN_PRIVATE_HUB else []
         for rel in targets:
+            if rel in no_data:
+                continue
             for i, line in enumerate(read(rel).split("\n"), 1):
                 if "\u2013" in line or "\u2014" in line:
                     offenders.append("%s:%d" % (rel, i))
         self.assertEqual(offenders, [], "em or en dash found at %s"
                          % ", ".join(offenders))
+        if no_data:
+            self.skipTest(
+                "NO-DATA on %d of %d target(s) this checkout does not carry: "
+                "%s. The other %d were checked and carry no em or en dash. "
+                "NO-DATA is not a pass."
+                % (len(no_data), len(targets), ", ".join(no_data),
+                   len(targets) - len(no_data)))
 
 
 class TestTheComparisonPageDoesNotRotSilently(unittest.TestCase):
@@ -5921,6 +6037,206 @@ class TestTheEntraApprovalContractNamesEveryTier(unittest.TestCase):
         doctored = read(self.PAGE).replace(self.NON_CLAIM, "")
         problems = self._problems(doctored)
         self.assertIn("missing the non-claim sentence", problems)
+
+
+class TestTheClaimsACodexPassFoundFalse(unittest.TestCase):
+    """Row E111, 2026-09-04. A Codex pass read the published v1.0.2 tag as a
+    newcomer, ran every command README.md names, and came back with claims the
+    page makes that the commands contradict. One assertion per corrected
+    claim, each anchored to the file that decides the fact rather than to the
+    sentence, so the page cannot drift back into the same error and pass."""
+
+    def test_the_hooks_scope_line_matches_what_the_installer_does(self):
+        """FALSE UNTIL E111: "Hooks run in every supported session on the
+        machine. There is no per-repository opt-out yet." Row E50 landed
+        scoped installation the same week and the page did not move: both of
+        the Codex pass's isolated installs printed `hooks: active in 0
+        repositories (none yet)` and the repository opt-in command."""
+        page = read("README.md")
+        self.assertNotIn(
+            "There is no per-repository opt-out yet", page,
+            "README.md still carries the sentence tools/bm_repo_scope.py "
+            "closed: that module's own docstring names it as closed")
+        installer = read(os.path.join("scripts", "install.py"))
+        self.assertIn(
+            "hooks: active in %d repositor", installer,
+            "scripts/install.py no longer prints a per-repository hook count, "
+            "so README.md's scoped-install sentence has nothing behind it")
+        self.assertIn("--hooks-everywhere", installer)
+        for phrase in (".brother/config", "--hooks-everywhere"):
+            self.assertIn(
+                phrase, page,
+                "README.md's hooks limit must name %s: without it a reader "
+                "cannot tell which of the two installs they have" % phrase)
+
+    def test_the_checksum_guidance_puts_the_verifier_before_the_writer(self):
+        """MISLEADING AND UNSAFE UNTIL E111: the page listed
+        `sh scripts/checksums.sh CHECKSUMS.sha256` and then
+        `bash scripts/verify-install.sh`, in that order, as one block of
+        verification. The first REWRITES the manifest from whatever is on
+        disk, so following the page in order makes the verifier pass by
+        construction. Observed in the Codex pass: the generator rewrote 459
+        hashes and the verifier then matched all 459."""
+        page = read("README.md")
+        verifier = page.index("bash scripts/verify-install.sh")
+        writer = page.index("sh scripts/checksums.sh CHECKSUMS.sha256")
+        self.assertLess(
+            verifier, writer,
+            "README.md names the checksum WRITER before the verifier, which "
+            "is the order that makes verification meaningless")
+        self.assertRegex(
+            page, r"scripts/checksums\.sh[^\n]*\n?[^\n]*(OVERWRITES|rewrites)",
+            "README.md does not say that scripts/checksums.sh overwrites the "
+            "manifest, so a reader has no reason not to run it first")
+
+    def test_the_certified_state_no_longer_claims_this_tree_today(self):
+        """MISLEADING UNTIL E111: "Certified, proven in this tree today by the
+        evidence named", over a register whose own date was 2026-08-10 and a
+        tree the reader has never run anything against. The generator and the
+        register both say it now, so neither can drift alone."""
+        for source in ("README.md", CAPABILITIES_JSON):
+            self.assertNotIn(
+                "proven in this tree today", read(source),
+                "%s still claims certified means proven in this tree today"
+                % source)
+        spec = importlib.util.spec_from_file_location(
+            "bm_docs_for_e111", os.path.join(HERE, "bm_docs.py"))
+        generator = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(generator)
+        meanings = dict((state, meaning) for state, _heading, meaning
+                        in generator.CAPABILITY_STATES)
+        self.assertNotIn(
+            "today", meanings["certified"],
+            "the generator's certified meaning still turns on a day: %r"
+            % meanings["certified"])
+        page = read("README.md")
+        self.assertIn("last edited", page)
+        self.assertIn(
+            "not a check that ran when you opened this page", page,
+            "README.md's generated block does not tell a reader that the "
+            "register's date is an edit date, which is the whole correction")
+
+    def test_the_plugin_validate_claim_names_the_paths_it_needs(self):
+        """MISLEADING UNTIL E111: "claude plugin validate passes both
+        manifests". Run exactly as written the command exits 1 with a missing
+        required argument. It passes only when each manifest path is
+        supplied, and the plugin manifest passes with a warning."""
+        register = read(CAPABILITIES_JSON)
+        self.assertNotIn("claude plugin validate passes both manifests",
+                         register)
+        for manifest in (".claude-plugin/plugin.json",
+                         ".claude-plugin/marketplace.json"):
+            self.assertIn(
+                "claude plugin validate %s" % manifest, register,
+                "the register does not name %s, so a reader still has to "
+                "guess the argument the command refuses to run without"
+                % manifest)
+            self.assertTrue(
+                os.path.exists(os.path.join(ROOT, manifest)),
+                "%s is not in the tree, so the command the register now "
+                "prints cannot be run from a clone" % manifest)
+
+
+class TestTheAbsentPageSeamIsDrivenBothWays(unittest.TestCase):
+    """Row E111. no_data_outside_the_hub and test_all's _discover both turn an
+    absent file into NO-DATA outside the private hub and leave the refusal
+    intact inside it. A seam like that reads correct in one direction and is
+    only a control once something has driven it in both, so both directions
+    are driven here against a forced marker rather than against whichever tree
+    this suite happens to be running in."""
+
+    class _Recorder(object):
+        """The smallest thing no_data_outside_the_hub can talk to: it only
+        ever calls skipTest, so a real TestCase would add nothing except a
+        raised exception this test would then have to catch."""
+
+        def __init__(self):
+            self.reason = None
+
+        def skipTest(self, reason):
+            self.reason = reason
+
+    def _with_marker(self, value, fn):
+        original = globals()["IN_PRIVATE_HUB"]
+        globals()["IN_PRIVATE_HUB"] = value
+        try:
+            return fn()
+        finally:
+            globals()["IN_PRIVATE_HUB"] = original
+
+    def test_outside_the_hub_an_absent_page_is_no_data_naming_it(self):
+        rec = self._Recorder()
+        self._with_marker(
+            False,
+            lambda: no_data_outside_the_hub(rec, ["docs/NO-SUCH-PAGE.md"]))
+        self.assertIsNotNone(rec.reason, "an absent page outside the hub did "
+                                         "not produce NO-DATA")
+        self.assertIn("NO-DATA", rec.reason)
+        self.assertIn("docs/NO-SUCH-PAGE.md", rec.reason,
+                      "the NO-DATA reason does not name the absent page, so "
+                      "a reader cannot tell what was not checked")
+        self.assertIn("not a pass", rec.reason)
+
+    def test_inside_the_hub_the_same_absent_page_is_left_to_fail(self):
+        rec = self._Recorder()
+        self._with_marker(
+            True,
+            lambda: no_data_outside_the_hub(rec, ["docs/NO-SUCH-PAGE.md"]))
+        self.assertIsNone(
+            rec.reason,
+            "the hub skipped over an absent page instead of letting the "
+            "check fail, which is how a deleted page becomes a green run")
+
+    def test_a_page_that_is_present_is_never_no_data(self):
+        for marker in (True, False):
+            rec = self._Recorder()
+            self._with_marker(
+                marker,
+                lambda: no_data_outside_the_hub(rec, ["README.md"]))
+            self.assertIsNone(rec.reason,
+                              "README.md is in the tree and was reported as "
+                              "NO-DATA with IN_PRIVATE_HUB=%r" % marker)
+
+    def _test_all(self):
+        spec = importlib.util.spec_from_file_location(
+            "test_all_for_e111", os.path.join(HERE, "test_all.py"))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_the_gate_still_refuses_an_absent_suite_inside_the_hub(self):
+        mod = self._test_all()
+        mod.IN_PRIVATE_HUB = True
+        mod.SUITES = tuple(list(mod.SUITES) + ["test_bm_no_such_suite.py"])
+        _known, _unlisted, missing = mod._discover()
+        # assertIn, not assertEqual over the whole list: an export tree is
+        # genuinely missing test_bm_vault_contract.py as well, and this test
+        # is about the injected name, not about which other suites the
+        # checkout it runs in happens to carry.
+        self.assertIn(
+            "test_bm_no_such_suite.py", missing,
+            "the hub gate stopped reporting a suite that is named and not on "
+            "disk, so a deleted gate would now run green")
+
+    def test_the_gate_reports_no_data_and_runs_the_rest_outside_the_hub(self):
+        mod = self._test_all()
+        mod.IN_PRIVATE_HUB = False
+        mod.SUITES = tuple(list(mod.SUITES) + ["test_bm_no_such_suite.py"])
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            known, _unlisted, missing = mod._discover()
+        self.assertEqual(missing, [],
+                         "an absent suite outside the hub still refused the "
+                         "whole gate, which is the v1.0.2 defect")
+        self.assertNotIn("test_bm_no_such_suite.py", known,
+                         "the gate kept an absent suite in the runnable set")
+        self.assertIn("test_bm_store.py", known,
+                      "the gate dropped suites that ARE on disk")
+        printed = buffer.getvalue()
+        self.assertIn("NO-DATA", printed)
+        self.assertIn("test_bm_no_such_suite.py", printed,
+                      "the gate did not name the suite it could not run")
+        self.assertIn("NO-DATA is not a pass", printed)
 
 
 if __name__ == "__main__":
