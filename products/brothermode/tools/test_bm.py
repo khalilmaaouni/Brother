@@ -49,6 +49,11 @@ learn_mod = importlib.util.module_from_spec(_learn_spec)
 _learn_spec.loader.exec_module(learn_mod)
 sys.modules["bm_learn"] = learn_mod
 
+_seam_spec = importlib.util.spec_from_file_location(
+    "bm_export_seam", os.path.join(HERE, "bm_export_seam.py"))
+_seam = importlib.util.module_from_spec(_seam_spec)
+_seam_spec.loader.exec_module(_seam)
+
 
 def _read(path):
     with io.open(path, encoding="utf-8") as f:
@@ -6194,6 +6199,8 @@ class TestRf5GateReceiptIsWrittenAndFailsOpen(unittest.TestCase):
                 "a git failure must not produce a partial receipt")
 
     def test_the_receipt_directory_is_gitignored(self):
+        # Same withheld .gitignore as above. See tools/bm_export_seam.py.
+        _seam.no_data_outside_the_hub([".gitignore"])
         text = _read(os.path.join(HERE, "..", ".gitignore"))
         self.assertIn(".brothermode/", text,
                      "the receipt directory must stay out of the tracked tree")
@@ -8202,6 +8209,14 @@ class TestTheSeventhCommandAndTheDeepTourAreWired(unittest.TestCase):
     ROOT = os.path.dirname(HERE)
 
     def _text(self, *parts):
+        # docs/brotherme-explained.html is a HUB record the export withholds,
+        # so in a clone of the published release these four checks have no
+        # page to read and "is missing" is the wrong answer. Guarded here,
+        # once, rather than in each caller: every reader in this class goes
+        # through _text, so a fifth one added later inherits the seam instead
+        # of reintroducing the defect. In the hub a missing page still fails.
+        # See tools/bm_export_seam.py.
+        _seam.no_data_outside_the_hub([os.path.join(*parts)], root=self.ROOT)
         path = os.path.join(self.ROOT, *parts)
         self.assertTrue(os.path.isfile(path),
                         "%s is missing" % os.path.join(*parts))
@@ -8708,6 +8723,11 @@ class TestGitignoreCoversGeneratedProjectViews(unittest.TestCase):
     ROOT = os.path.dirname(HERE)
 
     def test_gitignore_lists_all_four_generated_view_patterns(self):
+        # products/brothermode/.gitignore is a HUB record the export
+        # withholds, so a clone of the published release has no ignore
+        # file to read. In the hub its absence still errors. See
+        # tools/bm_export_seam.py.
+        _seam.no_data_outside_the_hub([".gitignore"], root=self.ROOT)
         with io.open(os.path.join(self.ROOT, ".gitignore"),
                      encoding="utf-8") as fh:
             lines = {line.strip() for line in fh}
@@ -10264,6 +10284,105 @@ class TestBmInstallHookScope(unittest.TestCase):
         self.assertFalse(os.path.exists(marker),
                          "a marker outliving its install would scope a later, "
                          "unrelated Brother installation nobody asked to scope")
+
+
+class TestTheExportSeamIsDrivenBothWays(unittest.TestCase):
+    """tools/bm_export_seam.py decides whether a missing file is a FAILURE or
+    NO-DATA, and seven suites now ask it. A seam nobody drove backwards is a
+    claim: forced the wrong way it would turn every deleted file in this
+    repository into a green skip, which is the worst direction a test guard
+    can fail in. Both answers are driven here against synthetic trees, so
+    neither depends on which checkout the run happens to be in."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="bm-export-seam-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.hub = os.path.join(self.tmp, "hub")
+        self.export = os.path.join(self.tmp, "export")
+        os.makedirs(os.path.join(self.hub, _seam.HUB_MARKER))
+        os.makedirs(self.export)
+
+    def test_the_marker_directory_is_what_tells_the_two_apart(self):
+        self.assertTrue(_seam.in_private_hub(self.hub))
+        self.assertFalse(_seam.in_private_hub(self.export))
+
+    def test_the_marker_is_the_one_the_exporter_can_never_carry(self):
+        # Read from the exporter itself rather than retyped: a test holding
+        # its own copy of the name stops testing the discriminator the moment
+        # the two disagree, which is the whole failure mode.
+        exporter = _read(os.path.join(
+            _seam.REPO_ROOT, "scripts", "export_public.py"))
+        self.assertIn('"%s"' % _seam.HUB_MARKER, exporter,
+                      "scripts/export_public.py no longer names %r, so the "
+                      "seam is keyed on a directory the exporter may now "
+                      "publish" % _seam.HUB_MARKER)
+
+    def test_outside_the_hub_an_absent_path_is_no_data_naming_it(self):
+        with self.assertRaises(unittest.SkipTest) as ctx:
+            _seam.no_data_outside_the_hub(
+                ["docs/NO-SUCH-PAGE.md"], root=self.export,
+                repo_root=self.export)
+        reason = str(ctx.exception)
+        self.assertIn("NO-DATA", reason)
+        self.assertIn("docs/NO-SUCH-PAGE.md", reason,
+                      "the NO-DATA reason does not name the absent path, so a "
+                      "reader cannot tell what was not checked")
+        self.assertIn("not a pass", reason)
+
+    def test_inside_the_hub_the_same_absent_path_is_left_to_fail(self):
+        self.assertEqual(
+            ["docs/NO-SUCH-PAGE.md"],
+            _seam.no_data_outside_the_hub(
+                ["docs/NO-SUCH-PAGE.md"], root=self.hub, repo_root=self.hub),
+            "the hub skipped over an absent path instead of letting the check "
+            "fail, which is how a deleted file becomes a green run")
+
+    def test_a_path_that_is_present_is_never_no_data_either_way(self):
+        with io.open(os.path.join(self.export, "here.md"), "w",
+                     encoding="utf-8") as fh:
+            fh.write("x\n")
+        with io.open(os.path.join(self.hub, "here.md"), "w",
+                     encoding="utf-8") as fh:
+            fh.write("x\n")
+        for root in (self.hub, self.export):
+            self.assertEqual(
+                [], _seam.no_data_outside_the_hub(
+                    ["here.md"], root=root, repo_root=root),
+                "a file that is in the tree was reported as NO-DATA under %s"
+                % root)
+
+    def test_an_absent_name_that_is_not_a_file_reads_the_same_both_ways(self):
+        with self.assertRaises(unittest.SkipTest) as ctx:
+            _seam.no_data_for_absent_names(["refs/tags/v0.0.0-nope"],
+                                           repo_root=self.export)
+        self.assertIn("refs/tags/v0.0.0-nope", str(ctx.exception))
+        self.assertEqual(
+            ["refs/tags/v0.0.0-nope"],
+            _seam.no_data_for_absent_names(["refs/tags/v0.0.0-nope"],
+                                           repo_root=self.hub),
+            "the hub skipped over an unresolvable ref instead of failing")
+
+    def test_the_seam_resolves_the_real_repository_root(self):
+        # The guard on the guard, and the failure it exists for: the marker
+        # is looked for two directories above the product, so a path-
+        # arithmetic slip would point it at a directory that never holds
+        # `editions` and every withheld-file check in seven suites would go
+        # quietly green, in the hub as well as in an export. Asserting the
+        # marker itself would be a tautology and would read the opposite way
+        # in the two trees; asserting the ROOT is true in both.
+        self.assertEqual(os.path.dirname(HERE), _seam.PRODUCT_ROOT)
+        self.assertTrue(
+            os.path.isdir(os.path.join(_seam.REPO_ROOT, "products",
+                                       "brothermode")),
+            "bm_export_seam.REPO_ROOT is %r, which does not contain "
+            "products/brothermode, so it is not the repository root and the "
+            "marker is being looked for in the wrong place"
+            % _seam.REPO_ROOT)
+        self.assertEqual(
+            os.path.isdir(os.path.join(_seam.REPO_ROOT, _seam.HUB_MARKER)),
+            _seam.in_private_hub(),
+            "the seam's verdict disagrees with the marker directory it "
+            "claims to read")
 
 
 if __name__ == "__main__":

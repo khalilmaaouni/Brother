@@ -252,6 +252,76 @@ def git_stage(stage, path):
     return proc.stdout.decode('utf-8')
 
 
+def resolve_merge_head():
+    """The sha MERGE_HEAD names, or None when no merge is in progress.
+
+    Tries the pseudo-ref first (works whenever git itself would resolve
+    it); falls back to reading .git/MERGE_HEAD directly for a caller whose
+    environment does not resolve the ref the normal way.
+    """
+    proc = subprocess.run(['git', 'rev-parse', '--verify', '-q', 'MERGE_HEAD'],
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if proc.returncode == 0:
+        sha = proc.stdout.decode('utf-8').strip()
+        if sha:
+            return sha
+    gp = subprocess.run(['git', 'rev-parse', '--git-path', 'MERGE_HEAD'],
+                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if gp.returncode != 0:
+        return None
+    try:
+        with open(gp.stdout.decode('utf-8').strip(), encoding='utf-8') as fh:
+            sha = fh.read().strip()
+    except OSError:  # sbe: allow-silent documented sentinel: an unreadable MERGE_HEAD reads as no real base, and the caller then keeps the NO-DATA exit 2 rather than merging without a base
+        return None
+    return sha or None
+
+
+def real_base_text(path, log):
+    """On a criss-cross merge git puts a VIRTUAL base in index stage 1, built
+    by merging the two real merge bases and leaving conflict markers where
+    that virtual merge could not resolve. Fall back to a real base: the
+    actual merge-base of HEAD and MERGE_HEAD. Raises NoData if none can be
+    found or read, which keeps today's behaviour rather than guessing.
+    """
+    merge_head = resolve_merge_head()
+    if merge_head is None:
+        raise NoData('stage 1 is a virtual criss-cross base and no '
+                     'MERGE_HEAD is present to find a real one')
+    proc = subprocess.run(['git', 'merge-base', 'HEAD', merge_head],
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if proc.returncode != 0:
+        raise NoData('git merge-base HEAD %s failed: %s'
+                     % (merge_head, proc.stderr.decode('utf-8', 'replace').strip()))
+    base_sha = proc.stdout.decode('utf-8').strip().splitlines()[:1]
+    base_sha = base_sha[0] if base_sha else ''
+    if not base_sha:
+        raise NoData('git merge-base HEAD %s returned no base' % merge_head)
+    show = subprocess.run(['git', 'show', '%s:%s' % (base_sha, path)],
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if show.returncode != 0:
+        raise NoData('cannot read %s at merge base %s: %s'
+                     % (path, base_sha,
+                        show.stderr.decode('utf-8', 'replace').strip()))
+    log('roadmap-merge: stage 1 is a virtual criss-cross base; using '
+        'merge-base %s' % base_sha)
+    return show.stdout.decode('utf-8')
+
+
+def git_base_text(path, log):
+    """Stage 1, unless it is a criss-cross virtual base (invalid JSON, or
+    carrying git's own conflict markers), in which case fall back to the
+    real merge base."""
+    text = git_stage(1, path)
+    if 'Temporary merge branch' in text:
+        return real_base_text(path, log)
+    try:
+        json.loads(text)
+    except ValueError:
+        return real_base_text(path, log)
+    return text
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(
         description='Three way merge of the readiness roadmap JSON, by row id.')
@@ -263,10 +333,11 @@ def main(argv=None):
                     help='read the three stages from the index for PATH '
                          '(git show :1: :2: :3:) and write back to PATH')
     args = ap.parse_args(argv)
+    log = lambda line: print(line)
 
     try:
         if args.git:
-            base_text = git_stage(1, args.git)
+            base_text = git_base_text(args.git, log)
             our_text = git_stage(2, args.git)
             their_text = git_stage(3, args.git)
             out_path = args.out or args.git
@@ -282,7 +353,7 @@ def main(argv=None):
         merged = merge(read_json(base_text, 'base'),
                        read_json(our_text, 'ours'),
                        read_json(their_text, 'theirs'),
-                       lambda line: print(line))
+                       log)
         text = serialise(merged, style)
     except NoData as exc:
         print('roadmap-merge: NO-DATA %s' % exc, file=sys.stderr)

@@ -131,6 +131,36 @@ def load_absent_table(path=None):
     return absent
 
 
+#: The exact phrase the page uses to claim a question has no field. It is
+#: RESERVED for that claim: the page says so itself, and says it without
+#: spelling the phrase, so this marker never matches a sentence merely
+#: describing the mechanism. Contract 1.1 answers every question and the page
+#: therefore carries none of these.
+CLAIM_MARKER = "NOT YET WRITTEN"
+
+
+def claimed_unanswered(path=None):
+    """{question number, as the string the page writes} the page's own prose
+    still claims has no field: for every blank-line paragraph carrying
+    CLAIM_MARKER, the question numbers that paragraph names.
+
+    Whitespace inside a paragraph is collapsed before the marker is looked
+    for, because the page is hard wrapped and the phrase can straddle a line
+    break. A plain `text.count(CLAIM_MARKER)` misses exactly that case, and
+    a claim that hides from its own check is the failure this file exists to
+    prevent."""
+    path = path or DOC_PATH
+    with open(path, encoding="utf-8") as fh:
+        text = fh.read()
+    claimed = set()
+    for para in re.split(r"\n\s*\n", text):
+        flat = " ".join(para.split())
+        if CLAIM_MARKER not in flat:
+            continue
+        claimed.update(re.findall(r"[Qq]uestion (\d+)", flat))
+    return claimed
+
+
 def resolve(doc, path):
     """[(where, value), ...] for every place `path` lands in `doc`, or None
     when the path does not resolve at all. A '[]' segment fans out over an
@@ -175,19 +205,97 @@ class TheDocumentParsesIntoAContract(unittest.TestCase):
             self.assertTrue(question.strip(),
                             "%s names no question it answers" % path)
 
-    def test_every_not_yet_written_question_has_an_absence_row(self):
-        """The page's prose says two questions are NOT YET WRITTEN. Each has
-        to appear in the absence table too, or the claim is prose nobody
-        enforces."""
+    def test_the_prose_claim_and_the_absence_table_agree(self):
+        """The page's prose and its absence table have to say the same thing
+        in both directions: a claimed-unanswered question with no absence row
+        is prose nobody enforces, and an absence row with no claim behind it
+        forbids a field the page never explained.
+
+        AT 1.0 THIS ASSERTED "AT LEAST ONE", which was true only while some
+        question was unanswered. E115 answered the last two, so the honest
+        invariant is agreement, not presence: both sides empty is the state a
+        complete contract is supposed to reach."""
+        claimed = claimed_unanswered()
+        enforced = {q for _f, _c, q in load_absent_table()}
+        self.assertEqual(
+            bool(claimed), bool(enforced),
+            "the page's prose and its absence table disagree: prose claims "
+            "questions %s have no field, the absence table enforces %s"
+            % (sorted(claimed) or "none", sorted(enforced) or "none"))
+
+    def test_no_field_answers_a_question_the_page_calls_unanswered(self):
+        """The durable half of the mechanism, added by E115 after the 1.0
+        absence table failed to catch that row's own change.
+
+        That table refused by FIELD NAME. It forbade `dependency_note`, and
+        the field that answered question 6 is `dependency_check`, so it would
+        have stayed green through E115 on its own; only question 10, whose
+        fields kept their names, turned it red. A question number cannot be
+        renamed, so this refuses on that instead, whatever the field is
+        called."""
+        claimed = claimed_unanswered()
+        answered = {q for _p, _t, _r, q in load_field_table()}
+        both = sorted(claimed & answered)
+        self.assertEqual(
+            [], both,
+            "the field table says question(s) %s are answered and the page's "
+            "prose still claims they have no field" % ", ".join(both))
+
+
+class TheUnansweredClaimIsDrivenBothWays(unittest.TestCase):
+    """The two checks above pass over an EMPTY claim set at contract 1.1,
+    because 1.1 answers every question. A check that can only be observed
+    passing over nothing proves nothing, so both are driven backwards here on
+    a COPY of the page carrying a re-added claim for question 6, which 1.1
+    answers with `evidence[].dependency_check`. RECEIPT_CONTRACT_DOC exists
+    for exactly this and no run reads the copy as its contract."""
+
+    CLAIM = ("**Question 6, did a dependency revert or counterfactual check "
+             "run.** The engine spends it on prose. " + CLAIM_MARKER + ".")
+
+    def _page_with_a_re_added_claim(self, tmp):
         with open(DOC_PATH, encoding="utf-8") as fh:
             text = fh.read()
-        claimed = text.count("NOT YET WRITTEN")
-        self.assertGreaterEqual(claimed, 1,
-                                "the page claims no unanswered question")
-        questions = {q for _f, _c, q in load_absent_table()}
-        self.assertTrue(questions,
-                        "the page claims NOT YET WRITTEN and its absence "
-                        "table is empty, so nothing enforces the claim")
+        path = os.path.join(tmp, "page-with-claim.md")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text + "\n\n" + self.CLAIM + "\n")
+        return path
+
+    def test_the_marker_is_read_off_the_page_even_when_it_wraps(self):
+        """The page is hard wrapped, so the claim phrase can straddle a line
+        break. Written here as two lines on purpose: a detector that only
+        matched the phrase on one line would read this page as claim free,
+        which is the silent-pass this check refuses."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "wrapped.md")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write("**Question 6, a claim.** This one is NOT YET\n"
+                         "WRITTEN as a field.\n")
+            self.assertEqual({"6"}, claimed_unanswered(path))
+
+    def test_a_re_added_claim_is_caught_against_the_field_table(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._page_with_a_re_added_claim(tmp)
+            claimed = claimed_unanswered(path)
+            self.assertIn("6", claimed, "the driver's own claim did not parse")
+            answered = {q for _p, _t, _r, q in load_field_table(path)}
+            self.assertIn("6", answered,
+                          "the page stopped answering question 6, so this "
+                          "driver no longer drives anything")
+            self.assertEqual({"6"}, claimed & answered)
+
+    def test_a_re_added_claim_with_no_absence_row_is_caught(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._page_with_a_re_added_claim(tmp)
+            self.assertTrue(claimed_unanswered(path))
+            self.assertFalse([q for _f, _c, q in load_absent_table(path)])
+
+    def test_the_live_page_leaves_both_sides_empty(self):
+        """The positive control's mirror: on the real page today, both sides
+        are empty and agree. Stated as its own case so the state the two
+        checks above are asserting is visible, never inferred."""
+        self.assertEqual(set(), claimed_unanswered())
+        self.assertEqual([], load_absent_table())
 
 
 class AGeneratedReceiptMatchesTheContract(unittest.TestCase):

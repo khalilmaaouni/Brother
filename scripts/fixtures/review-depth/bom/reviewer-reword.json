@@ -1,0 +1,14 @@
+[
+ {
+  "reviewer": "backend-reviewer",
+  "category": "encoding",
+  "severity": "major",
+  "confidence": "low",
+  "introducedByChange": "yes",
+  "location": "jsonl2csv.py:14",
+  "failure": "The converter opens the input file and reads it line by line, which may not handle every encoding correctly.",
+  "evidence": [
+   "with open(src) as fh:"
+  ]
+ }
+]

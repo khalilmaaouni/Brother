@@ -429,14 +429,6 @@ products/brothersbe/docs/guides/04-teams-and-evolution.md
 # the reader path the three START-HERE and STARTUP-WEEK pages above already
 # open; each of the eight was dropped by the 2026-09-01 narrowing, and the
 # three pages that survived it link straight into them.
-docs/for-engineers/DAY-ONE.md
-docs/for-engineers/A-REAL-RUN.md
-docs/for-engineers/A-WORKED-EXAMPLE.md
-docs/for-engineers/CHEATSHEET.md
-docs/for-engineers/END-TO-END.md
-docs/for-engineers/ADOPTING-ON-YOUR-TEAM.md
-docs/for-analysts/DAY-ONE.md
-docs/for-analysts/A-WORKED-EXAMPLE.md
 # Two generic product pages at the brothermode docs root, both linked from
 # pages already listed above (README.md cites CONTINUITY.md, docs/WORKING-
 # WITH-BROTHERSBE.md cites HANDOVER-BY-HAND.md). Neither is a dated session
@@ -457,4 +449,3 @@ products/brothersbe/docs/guides/05-a-worked-engagement.md
 # The teaching numbers manifest scripts/test_receipt_door.py copies into a
 # temp root; the README names that suite as its own proof, and v1.0.2's
 # first tag attempt was refused because the export tree did not carry it.
-products/brothersbe/docs/for-engineers/examples/data-warehouse/numbers-manifest.json

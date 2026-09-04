@@ -65,8 +65,18 @@ FUNCTIONS.
   segment(text, ...)    Dictionary-longest-match then character-bigram
                          fallback over every contiguous CJK run in text.
   load_dictionary(path) One JSON file (a list of terms, or an object with a
-                         "terms" list) to a term list. Missing, unreadable,
-                         or malformed is [] : NO-DATA, never a crash.
+                         "terms" list) to a SEGMENTATION term list. Missing,
+                         unreadable, or malformed is [] : NO-DATA, never a
+                         crash. An entry written in the alias notation
+                         below contributes its two sides as two terms.
+  parse_alias(term)     (left, right) when TERM is "A=B" or "A=B(reason)"
+                         AND the reason states an identity, else None.
+  alias_links(terms)    {name: (counterpart, ...)} over a term list, both
+                         directions.
+  load_alias_links(v)   The same, read from vault directory v's two
+                         dictionary files. {} for a falsy v.
+  alias_expansions(t,l) The counterpart names text t reaches through links
+                         l, matched as a substring of the analyzed text.
   load_dictionaries(v)  (user_terms, company_terms) for vault directory v,
                          reading v/99-System/dictionaries/{user,company}-
                          dictionary.json. v falsy or absent files degrade to
@@ -88,6 +98,24 @@ FUNCTIONS.
                          is NOT reproduced here; bm_vault.py's existing
                          ``_fts_query`` already tokenizes it and keeps doing
                          so unchanged (see that module's docstring point A).
+
+THE ALIAS NOTATION (E121). A dictionary entry may be written "A=B", with an
+optional parenthesised reason, "A=B(reason)". The shipped analyzer used to
+read such an entry as an ordinary segmentation term, which can never match
+anything (segment() only looks inside a contiguous CJK run, and "=" is a run
+boundary), so a query naming a company by its former name was answered
+lexically and served whichever note happened to share the most generic
+bigrams. It is now read as what it says: A and B are two names for one thing
+whenever the reason states an identity (a rename or a short form: see
+_IDENTITY_REASON_MARKERS), so both sides become segmentation terms and each
+side reaches the other's notes as a match token. A reason stating a
+RELATIONSHIP instead ("A is an affiliate of B") is declined: it is not an
+identity, and serving another company's note is worse than serving nothing.
+Two ceilings, both stated rather than hidden: the reason vocabulary is a
+fixed list, so an unlisted gloss yields a miss and never a wrong note; and
+the expansion is a substring test over the analyzed text, not a token one,
+because a side carrying ASCII (a Latin prefix, a digit in a year) is split
+by segment()'s own run boundary and never appears as a token at all.
 
 NOT FOLDED, on purpose, by normalize(): kanji of any kind, hiragana or
 katakana already in full-width form, circled numerals and ideographs
@@ -182,6 +210,93 @@ _LEGAL_FORMS = sorted((
     "(同)", "（同）",                 # (dou) forms, no circled glyph minted
 ), key=len, reverse=True)
 
+#: JA78: the Hepburn syllable table, romaji to KATAKANA, used by
+#: romaji_to_kana() below. Longest match wins, so the three-letter entries
+#: (sha, chi, tsu, kyo ...) are found before the two-letter ones that are a
+#: prefix of them. A bare consonant is deliberately absent: only "n" stands
+#: alone, as the moraic n, and a word reaching any other single consonant is
+#: DECLINED rather than guessed at.
+#: Written as explicit pairs on purpose. A first draft built this by slicing a
+#: kana string positionally per row, which silently mis-aligned every row
+#: holding a three-letter SINGLE mora (shi, chi, tsu) against the yoon rows
+#: where three letters really are two kana, and produced su -> セ. An explicit
+#: pair cannot drift out of alignment with itself.
+_ROMAJI_SYLLABLES = {
+    u"a": u"ア", u"i": u"イ", u"u": u"ウ", u"e": u"エ", u"o": u"オ",
+    u"ka": u"カ", u"ki": u"キ", u"ku": u"ク", u"ke": u"ケ", u"ko": u"コ",
+    u"sa": u"サ", u"shi": u"シ", u"si": u"シ", u"su": u"ス", u"se": u"セ", u"so": u"ソ",
+    u"ta": u"タ", u"chi": u"チ", u"ti": u"チ", u"tsu": u"ツ", u"tu": u"ツ",
+    u"te": u"テ", u"to": u"ト",
+    u"na": u"ナ", u"ni": u"ニ", u"nu": u"ヌ", u"ne": u"ネ", u"no": u"ノ",
+    u"ha": u"ハ", u"hi": u"ヒ", u"fu": u"フ", u"hu": u"フ", u"he": u"ヘ", u"ho": u"ホ",
+    u"ma": u"マ", u"mi": u"ミ", u"mu": u"ム", u"me": u"メ", u"mo": u"モ",
+    u"ya": u"ヤ", u"yu": u"ユ", u"yo": u"ヨ",
+    u"ra": u"ラ", u"ri": u"リ", u"ru": u"ル", u"re": u"レ", u"ro": u"ロ",
+    u"wa": u"ワ", u"wo": u"ヲ",
+    u"ga": u"ガ", u"gi": u"ギ", u"gu": u"グ", u"ge": u"ゲ", u"go": u"ゴ",
+    u"za": u"ザ", u"ji": u"ジ", u"zi": u"ジ", u"zu": u"ズ", u"ze": u"ゼ", u"zo": u"ゾ",
+    u"da": u"ダ", u"de": u"デ", u"do": u"ド",
+    u"ba": u"バ", u"bi": u"ビ", u"bu": u"ブ", u"be": u"ベ", u"bo": u"ボ",
+    u"pa": u"パ", u"pi": u"ピ", u"pu": u"プ", u"pe": u"ペ", u"po": u"ポ",
+    u"kya": u"キャ", u"kyu": u"キュ", u"kyo": u"キョ",
+    u"sha": u"シャ", u"shu": u"シュ", u"sho": u"ショ",
+    u"cha": u"チャ", u"chu": u"チュ", u"cho": u"チョ",
+    u"nya": u"ニャ", u"nyu": u"ニュ", u"nyo": u"ニョ",
+    u"hya": u"ヒャ", u"hyu": u"ヒュ", u"hyo": u"ヒョ",
+    u"mya": u"ミャ", u"myu": u"ミュ", u"myo": u"ミョ",
+    u"rya": u"リャ", u"ryu": u"リュ", u"ryo": u"リョ",
+    u"gya": u"ギャ", u"gyu": u"ギュ", u"gyo": u"ギョ",
+    u"ja": u"ジャ", u"ju": u"ジュ", u"jo": u"ジョ",
+    u"bya": u"ビャ", u"byu": u"ビュ", u"byo": u"ビョ",
+    u"pya": u"ピャ", u"pyu": u"ピュ", u"pyo": u"ピョ",
+    u"n": u"ン",
+}
+_ROMAJI_SMALL_TSU = u"ッ"
+
+#: The shortest Latin token romaji_to_kana() will read as a reading. THE
+#: CEILING, stated rather than hidden: plenty of short English words parse as
+#: valid Hepburn ("sea" is se + a), so a floor exists to keep accidental
+#: readings out of the match lane. Four is where the frozen blind corpus's own
+#: company names sit ("tanaka", "denki", "fujimi") while the legal-form noise
+#: the same queries carry ("co", "ltd") falls below it. A longer English word
+#: that happens to parse still yields a reading, which adds a CANDIDATE that
+#: matches nothing and never removes or outranks a real one.
+_ROMAJI_MIN_LEN = 4
+
+#: E121: the ALIAS NOTATION a dictionary entry may be written in, "A=B" with
+#: an optional parenthesised reason, "A=B(reason)" (full-width brackets
+#: accepted too, since a Japanese keyboard produces them by default). Group 1
+#: is the left side, group 2 the right side up to the reason, group 3 the
+#: reason itself when one is written. An entry with no "=" never reaches this
+#: pattern and keeps its old meaning: a plain segmentation term.
+_ALIAS_RE = re.compile(u"^([^=]+)=([^(（]+)(?:[(（]([^)）]*)[)）])?[ \t]*$")
+
+#: The reason vocabulary that makes "=" an IDENTITY claim, two names for one
+#: thing: a rename (kyuu-shamei "old company name", kyuu-shou, gen-shamei,
+#: shamei-henkou "company name change", shougou-henkou "trade name change",
+#: kaishou "renamed", kaiso "reorganized") or a short form (ryakushou
+#: "abbreviation", betsumei "another name", tsuushou "common name"). An entry
+#: with NO reason at all is a bare equation, the plainest identity claim
+#: there is, and counts as identity too. Any OTHER reason states a
+#: relationship rather than an identity ("A is an affiliate of B"), and
+#: parse_alias declines it: see that function's own docstring.
+#: THE CEILING, stated rather than hidden: this is a fixed vocabulary, so a
+#: rename glossed with a word not listed here yields no alias. That is a
+#: MISS (the query is answered lexically, exactly as it is today), never a
+#: wrong note, which is the direction a retrieval default should fail in.
+_IDENTITY_REASON_MARKERS = (
+    u"旧社名",      # old company name
+    u"旧称",            # former name
+    u"現社名",      # current company name
+    u"社名変更",  # company name change
+    u"商号変更",  # trade name change
+    u"改称",            # renamed
+    u"改組",            # reorganized
+    u"略称",            # abbreviation
+    u"別名",            # another name
+    u"通称",            # common name
+)
+
 #: Where a vault's declared Japanese-analyzer dictionaries live, relative to
 #: the vault root. Two files, one per audience (VB2-03 deliverable): a
 #: user's own vocabulary, and a company's own product/legal-name vocabulary.
@@ -218,6 +333,72 @@ def kana_alias(text):
     if not text:
         return ""
     return text.translate(_KATA_TO_HIRA)
+
+
+def romaji_to_kana(word):
+    """JA78: the KATAKANA a Latin word reads as, or "" when it is not
+    readable as Hepburn romaji at all.
+
+    WHY: a Japanese company is routinely named in Latin script by its
+    READING ("Tanaka Denki Corporation" for タナカ電機株式会社), and nothing
+    in this analyzer turned a Latin token back into the kana it romanises,
+    so such a query reached the company's own note through no path at all
+    and was decided entirely by whichever note happened to spell the
+    query's generic attribute word. Measured on the frozen blind corpus,
+    case ka06.
+
+    A whole-word parse or nothing: the word is consumed left to right by
+    longest match over _ROMAJI_SYLLABLES, a doubled consonant becomes the
+    small tsu, and ANY position that matches no syllable declines the whole
+    word by returning "". Declining is the right direction to fail in: a
+    partial parse would mint a kana fragment that matches notes at random.
+
+    THE CEILING, stated rather than hidden: this reads a reading, never an
+    identity. Section 7 of the Japanese ranking rules is explicit that the
+    same kana reading does not imply the same entity, so the kana produced
+    here earns a note CANDIDACY and never a rank of its own; long vowels are
+    not reconstructed (a macron-free "Tokyo" reads as トキョ, not トウキョウ),
+    and kanji readings are not resolved at all, both of which yield a miss
+    and never a wrong note."""
+    if not word or len(word) < _ROMAJI_MIN_LEN:
+        return ""
+    w = word.lower()
+    out = []
+    i, n = 0, len(w)
+    while i < n:
+        ch = w[i]
+        # The sokuon: a doubled consonant is the small tsu, never a syllable
+        # of its own. "n" is excluded because "nn" is the moraic n written
+        # twice, not a geminate.
+        if ch not in "aiueon" and i + 1 < n and w[i + 1] == ch:
+            out.append(_ROMAJI_SMALL_TSU)
+            i += 1
+            continue
+        matched = None
+        for size in (3, 2, 1):
+            if i + size <= n and w[i:i + size] in _ROMAJI_SYLLABLES:
+                matched = w[i:i + size]
+                break
+        if matched is None:
+            return ""
+        out.append(_ROMAJI_SYLLABLES[matched])
+        i += len(matched)
+    kana = "".join(out)
+    return kana if len(kana) >= 2 else ""
+
+
+def reading_variants(ascii_tokens):
+    """The katakana readings of ASCII_TOKENS, in order, skipping every token
+    that romaji_to_kana() declines. Deduplicated, so a query naming the same
+    company twice contributes one token and cannot double its own score."""
+    out = []
+    seen = set()
+    for tok in ascii_tokens or []:
+        kana = romaji_to_kana(tok)
+        if kana and kana not in seen:
+            seen.add(kana)
+            out.append(kana)
+    return out
 
 
 def has_cjk(text):
@@ -279,12 +460,59 @@ def segment(text, user_terms=None, company_terms=None):
     return tokens
 
 
-def load_dictionary(path):
-    """The term list at path: a bare JSON list of strings, or a JSON object
-    carrying a "terms" list (the shape the vault-template's starter files
-    use, so a "_comment" key can sit beside "terms" without breaking this
-    reader). [] for a missing file, unreadable file, invalid JSON, or a
-    JSON value that is neither shape: honest NO-DATA, never a crash."""
+def parse_alias(term):
+    """(left, right) when TERM is written in the alias notation AND its
+    reason states an identity, else None (see _ALIAS_RE and
+    _IDENTITY_REASON_MARKERS for the whole rule, and E121's own ceiling
+    note in the module docstring).
+
+    Deliberately conservative on an unrecognized reason: "=" alone does not
+    prove the two sides name one thing (the corpus this was written against
+    also carries an entry whose reason is a RELATIONSHIP, "A is an
+    affiliate of B"), and serving another company's note is a worse failure
+    than serving nothing. An unlisted reason therefore yields None, which
+    is the behavior that shipped before this function existed."""
+    if not term or "=" not in term:
+        return None
+    m = _ALIAS_RE.match(term.strip())
+    if not m:
+        return None
+    left = (m.group(1) or "").strip()
+    right = (m.group(2) or "").strip()
+    reason = (m.group(3) or "").strip()
+    if not left or not right:
+        return None
+    if reason and not any(k in reason for k in _IDENTITY_REASON_MARKERS):
+        return None
+    return left, right
+
+
+def alias_links(terms):
+    """{name: (counterpart, ...)} for every identity alias in TERMS, in
+    BOTH directions: an old name and a current name are two names for one
+    thing, so a query naming either side must be able to reach the other.
+    A name declared in two entries keeps both counterparts, first seen
+    first."""
+    links = {}
+    for term in terms or []:
+        pair = parse_alias(term)
+        if not pair:
+            continue
+        left, right = pair
+        for src, dst in ((left, right), (right, left)):
+            current = links.setdefault(src, [])
+            if dst not in current and dst != src:
+                current.append(dst)
+    return {k: tuple(v) for k, v in links.items() if v}
+
+
+def _read_raw_terms(path):
+    """The raw entry list at path, exactly as written: a bare JSON list of
+    strings, or a JSON object carrying a "terms" list (the shape the
+    vault-template's starter files use, so a "_comment" key can sit beside
+    "terms" without breaking this reader). [] for a missing file,
+    unreadable file, invalid JSON, or a JSON value that is neither shape:
+    honest NO-DATA, never a crash."""
     try:
         with open(path, encoding="utf-8") as fh:
             data = json.load(fh)
@@ -299,6 +527,61 @@ def load_dictionary(path):
     if not isinstance(terms, list):
         return []
     return [t for t in terms if isinstance(t, str) and t]
+
+
+def load_dictionary(path):
+    """The SEGMENTATION terms at path. A plain entry is a term as written.
+    An identity alias entry ("A=B(reason)") contributes its two sides as
+    two terms, so a query naming either side segments that name whole
+    instead of being sliced into bigrams every other note shares. An entry
+    carrying "=" that parse_alias declines contributes nothing, which
+    changes no match: a term carrying "=" can never match anything, since
+    segment() only ever looks inside a contiguous CJK run and "=" is a run
+    boundary."""
+    out = []
+    for raw in _read_raw_terms(path):
+        if "=" in raw:
+            pair = parse_alias(raw)
+            if pair:
+                out.extend(pair)
+            continue
+        out.append(raw)
+    return out
+
+
+def load_alias_links(vault_dir):
+    """{name: (counterpart, ...)} for the identity aliases declared in
+    vault_dir's two dictionary files. {} when vault_dir is falsy or neither
+    file declares one: NO-DATA, never a guess."""
+    if not vault_dir:
+        return {}
+    base = os.path.join(vault_dir, DICT_SUBDIR)
+    raw = (_read_raw_terms(os.path.join(base, USER_DICT_FILENAME))
+           + _read_raw_terms(os.path.join(base, COMPANY_DICT_FILENAME)))
+    return alias_links(raw)
+
+
+def alias_expansions(text, links):
+    """The counterpart names TEXT reaches through LINKS, first seen first.
+
+    Matching is a SUBSTRING test against the analyzed text rather than a
+    token-equality one, because an alias side is not always something
+    segment() can produce: a side carrying an ASCII digit or a Latin prefix
+    ("JA..." , "...6年") is split by the run boundary and never appears as a
+    token at all. Both sides of the comparison are normalized and
+    legal-form stripped, so a query writing the company with 株式会社
+    attached still reaches an entry that omits it."""
+    if not text or not links:
+        return []
+    out = []
+    for name, targets in links.items():
+        key = strip_legal_forms(normalize(name))
+        if not key or key not in text:
+            continue
+        for target in targets:
+            if target not in out:
+                out.append(target)
+    return out
 
 
 def load_dictionaries(vault_dir):
@@ -324,12 +607,25 @@ def analyze(text, vault_dir=None):
     stripped = strip_legal_forms(normalized)
     user_terms, company_terms = load_dictionaries(vault_dir)
     raw_tokens = segment(stripped, user_terms, company_terms)
+    # E121: an identity alias entry reaches the OTHER name's notes. The
+    # counterpart is appended as ONE whole token rather than segmented,
+    # because a name is exactly the high-precision string the LIKE scan in
+    # bm_vault.py's _cjk_hits wants; segmenting it would spray generic
+    # bigrams (会社, 商事) that every company note in a vault shares.
+    raw_tokens = raw_tokens + alias_expansions(
+        stripped, load_alias_links(vault_dir))
     # Width folding can turn a full-width query back into plain ASCII (see
     # _ASCII_TOKEN_RE's own docstring): extract those tokens from the
     # NORMALIZED text too, so a width-variant query still produces
     # something the LIKE scan in bm_vault.py's _cjk_hits can use even when
     # segment() found no CJK run at all.
     ascii_tokens = [t.lower() for t in _ASCII_TOKEN_RE.findall(stripped)]
+    # JA78: a Latin token that reads as Hepburn romaji is the company's own
+    # READING, so it joins raw_tokens and picks up both kana directions from
+    # the loop below, exactly as a segmented kana token does. It is appended
+    # rather than substituted: the Latin form still has to match a note that
+    # writes the name in Latin.
+    raw_tokens = raw_tokens + reading_variants(ascii_tokens)
     seen = set()
     out = []
     for tok in raw_tokens:
@@ -366,6 +662,12 @@ def _demo():
     assert needs_analysis("hello") is False
     assert needs_analysis("Ｂ－０１４") is True   # full-width, no CJK script at all
     assert "014" in analyze("Ｂ－０１４")          # width-fold survives into a token
+    # E121: the alias notation, read rather than treated as a term.
+    assert parse_alias(u"旭興産=北陽商会(旧社名)") == (u"旭興産", u"北陽商会")
+    assert parse_alias(u"東雲物産=東雲商事の関連会社(創業家が同じ)") is None
+    links = alias_links([u"旭興産=北陽商会(旧社名)"])
+    assert links[u"北陽商会"] == (u"旭興産",), links
+    assert alias_expansions(u"旭興産の代表者", links) == [u"北陽商会"]
     print("bm_vault_analyzer: self-check OK")
 
 

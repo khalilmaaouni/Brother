@@ -69,16 +69,21 @@ FACTS_PATH = os.path.join(HERE, "bm_project_facts.py")
 # errors=26, skipped=4)", and 26 of those errors were FileNotFoundError on
 # pages the export withholds on purpose.
 #
-# WHY THIS MARKER. scripts/export_public.py HARD_EXCLUDEs `editions` in its
-# own code rather than by a list entry, so no export can ever carry that
-# directory, and every hub checkout tracks it.
+# The predicate itself used to be a second, hand-copied `os.path.isdir`
+# check, drifting from the one in tools/test_all.py. It now lives once in
+# tools/bm_export_seam.py, and this file imports that module the same way
+# tools/test_bm_e2e_pins.py already does, rather than retyping it a third
+# time.
 #
 # WHAT THIS DELIBERATELY DOES NOT DO. It does not make a missing page a skip
 # everywhere. In the hub every one of these checks still fails on an absent
 # page, because there the page is supposed to be on disk and its
 # disappearance is the exact defect this suite exists to catch.
-IN_PRIVATE_HUB = os.path.isdir(
-    os.path.join(os.path.dirname(os.path.dirname(ROOT)), "editions"))
+_seam_spec = importlib.util.spec_from_file_location(
+    "bm_export_seam", os.path.join(HERE, "bm_export_seam.py"))
+_seam = importlib.util.module_from_spec(_seam_spec)
+_seam_spec.loader.exec_module(_seam)
+IN_PRIVATE_HUB = _seam.in_private_hub()
 
 _spec = importlib.util.spec_from_file_location("bm_project_facts", FACTS_PATH)
 bpf = importlib.util.module_from_spec(_spec)
@@ -1043,8 +1048,19 @@ class TestReleaseTruth(unittest.TestCase):
         """Protects: install_target_tag, the tag every install page pins,
         actually resolves. This is a real check now, not a skip, because
         v2.0.0-rc.9 exists; it holds regardless of whether the current
-        identity is a development one or a released one."""
+        identity is a development one or a released one.
+
+        A rebuilt export tree has fresh orphan history and carries no tags
+        at all, while a real clone of the published repository DOES carry
+        its release tags. So the NO-DATA below is proven true of a rebuild,
+        never of a published clone: outside the private hub, an absent tag
+        is withheld history (see tools/bm_export_seam.py), not a broken
+        pin, and the check reports what it could not test instead of
+        failing on an empty comparison."""
         target = FACTS["install_target_tag"]
+        ref = "refs/tags/%s" % target
+        _seam.no_data_for_absent_names(
+            [] if _tag_exists(target) else [ref])
         self.assertTrue(
             _tag_exists(target),
             "install_target_tag %s does not exist in this repository"

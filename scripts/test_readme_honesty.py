@@ -209,7 +209,7 @@ DUAL_CLIENT_COMMANDS = {
     "Codex install (marketplace)": "codex plugin marketplace add https://github.com/khalilmaaouni/Brother",
     "Codex install (plugin)": "codex plugin add brother@brother --json",
     "Codex start": "python3 scripts/brother_run.py",
-    "Codex upgrade": "codex plugin marketplace add https://github.com/khalilmaaouni/Brother --ref",
+    "Codex upgrade": "codex plugin marketplace remove brother && codex plugin marketplace add https://github.com/khalilmaaouni/Brother --ref",
     "Codex uninstall (plugin)": "codex plugin remove brother@brother",
     "Codex uninstall (marketplace)": "codex plugin marketplace remove brother",
 }

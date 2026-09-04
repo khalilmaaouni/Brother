@@ -358,7 +358,18 @@ def build_export_tree(dest, allowlist, root=ROOT):
                 os.makedirs(parent, exist_ok=True)
             shutil.copy2(os.path.join(root, tracked_rel), dst)
         copied.append(rel)
-    for deny_rel in load_denylist():
+    # The denylist is an INPUT of the tree being built, exactly as the
+    # allowlist is, so it is read from `root` and never from whatever this
+    # checkout carries today. Measured 2026-09-04 by lane X7-FIX: a rebuild
+    # of an older revision (reproduce_export.py --source-rev) took its
+    # allowlist from the revision and its denylist from the current
+    # checkout, so a path denied today was withheld from a rebuild of a
+    # release that shipped it, and the reproduction read a mismatch that
+    # was never in the release. The relative path comes off the module's
+    # own constant rather than being typed again, so when root is ROOT this
+    # is byte for byte the old call.
+    for deny_rel in load_denylist(os.path.join(
+            root, os.path.relpath(DEFAULT_DENYLIST, ROOT))):
         deny_path = os.path.join(dest, deny_rel)
         if os.path.isdir(deny_path):
             shutil.rmtree(deny_path)

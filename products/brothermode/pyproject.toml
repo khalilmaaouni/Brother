@@ -139,6 +139,7 @@ py-modules = [
     "bm_lint_walltime",
     "bm_progress_check",
     "bm_effects",
+    "bm_export_seam",
     "bm_escalate",
     "bm_stall",
     "bm_messages",

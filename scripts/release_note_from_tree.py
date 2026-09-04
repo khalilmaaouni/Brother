@@ -374,7 +374,7 @@ def replace_files_table(text, table_lines):
     lines = text.split("\n")
     try:
         start = lines.index(FILES_TABLE_HEADING)
-    except ValueError:
+    except ValueError:  # sbe: allow-silent documented sentinel, read by main()'s --write-table branch which prints NODATA and returns 2 when this is None
         return None
     end = len(lines)
     for i in range(start + 1, len(lines)):
@@ -475,7 +475,7 @@ def extra_notes(version, releases_dir=None):
     try:
         with open(path, encoding="utf-8") as fh:
             return fh.read().strip()
-    except OSError:
+    except OSError:  # sbe: allow-silent unreadable notes file reads as NO-DATA at build()'s published check, see line 730 above
         return None
 
 

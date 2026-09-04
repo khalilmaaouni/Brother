@@ -11,7 +11,7 @@
   },
   {
    "path": "brother_run.py",
-   "sha256": "f5a96e14d6adda78e30eb0cb45b44a8b5dc3d68884bd1cf092626b1e6e1e0803"
+   "sha256": "f7dd34497f3c83628ca1f150e2efd63025998aa9836078bd895cfe1501c418be"
   },
   {
    "path": "claim_store.py",
@@ -55,7 +55,7 @@
   },
   {
    "path": "model_worker.py",
-   "sha256": "48d902e9303426f9fc9f4205d5fb74962184d821e14c906ee6a09c31e70a073c"
+   "sha256": "8824e46a97ee0106739898a257eea7a2404c292c2f80e7d0ac8b7f5090597850"
   },
   {
    "path": "packs/architect.json",
@@ -111,7 +111,11 @@
   },
   {
    "path": "receipt_door.py",
-   "sha256": "b0414040f651106dfbe3eca1469c5bdcb76062153e08bb6102806db15b7beb69"
+   "sha256": "967274f35476d24bae7347a00646721c3310c1f6a65c7bd025aff87e5b9b2b19"
+  },
+  {
+   "path": "review_pass.py",
+   "sha256": "57c162882b4c92555e3a5b27d4e093e284054cf5872dcf18e840feb27ba031d4"
   },
   {
    "path": "run_heartbeat.py",
@@ -135,6 +139,6 @@
   }
  ],
  "generated_by": "scripts/bundle_runtime.py",
- "source_describe": "v0.9.6-3551-g4fe35f8d",
- "source_revision": "4fe35f8d7cdb4149b228ae0e899fe16cfbc475a6"
+ "source_describe": "v0.9.6-3664-g2e472512-dirty",
+ "source_revision": "2e472512d933ab0e309564ea93f2187ff4be7689"
 }

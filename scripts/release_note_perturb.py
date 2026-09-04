@@ -287,7 +287,7 @@ def run_suite(rel_path, root=ROOT, timeout=None):
                           "could not be killed: %s" % (rel_path, timeout, exc))
         try:
             proc.communicate(timeout=30)
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired:  # sbe: allow-silent documented (None, why) sentinel per this function's own docstring, read by covers() which propagates it as its own NO-DATA verdict
             return None, ("%s did not finish within %ds and did not die when "
                           "its process group was killed" % (rel_path, timeout))
         return None, ("%s did not finish within %ds" % (rel_path, timeout))

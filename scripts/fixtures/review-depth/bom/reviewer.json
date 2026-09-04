@@ -1,0 +1,15 @@
+[
+ {
+  "reviewer": "backend-reviewer",
+  "category": "encoding",
+  "severity": "major",
+  "confidence": "high",
+  "introducedByChange": "yes",
+  "location": "jsonl2csv.py:14",
+  "failure": "A file written by a Windows tool carries a UTF-8 byte order mark, so the first line fails to parse and the converter drops that record without saying so.",
+  "evidence": [
+   "with open(src) as fh:"
+  ],
+  "verification": "python3 check_header.py"
+ }
+]

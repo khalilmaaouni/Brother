@@ -13,6 +13,7 @@ The event stream this module used to test (append_event, read_events,
 _iter_open_stream) is retired, Loop 1 delete-list D3: storage moved to
 tools/bm_store.py schema 12, and this module is shapes and legality only.
 """
+import importlib.util
 import io
 import os
 import re
@@ -22,6 +23,11 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 SPEC = os.path.join(REPO, "docs", "specs", "canonical-project-protocol.md")
+
+_seam_spec = importlib.util.spec_from_file_location(
+    "bm_export_seam", os.path.join(HERE, "bm_export_seam.py"))
+_seam = importlib.util.module_from_spec(_seam_spec)
+_seam_spec.loader.exec_module(_seam)
 if REPO not in sys.path:
     sys.path.insert(0, REPO)
 
@@ -193,6 +199,15 @@ class TestDriftAgainstTheDocument(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
+        # docs/specs/canonical-project-protocol.md is a HUB record the
+        # export withholds, so a clone of the published release has no
+        # document to hold the code to and setUpClass errored for the
+        # whole class. In the hub its absence still errors, because
+        # there the spec is supposed to be on disk. See
+        # tools/bm_export_seam.py.
+        _seam.no_data_outside_the_hub(
+            [os.path.join("docs", "specs",
+                          "canonical-project-protocol.md")])
         with io.open(SPEC, encoding="utf-8") as fh:
             cls.spec = fh.read()
         cls.blocks = re.findall(r"```yaml\n(.*?)```", cls.spec, re.S)

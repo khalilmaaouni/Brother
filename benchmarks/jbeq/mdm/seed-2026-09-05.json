@@ -1,0 +1,1380 @@
+{
+ "id": "jbeq-mdm-seed-2026-09-05",
+ "qualification": "JBEQ",
+ "qualification_name": "Japanese Business Engineering Qualification",
+ "track": "JBEQ-MDM",
+ "frozen_at": "2026-09-05",
+ "frozen": true,
+ "author_note": "Every company, store, person, address and identifier in this file is invented. No real corporation and no client term appears anywhere in it.",
+ "source": {
+  "document": "~/.claude/evidence/MORNING-STEERING-2026-09-05.md",
+  "sections": [
+   10,
+   11,
+   12,
+   13,
+   14,
+   15,
+   16,
+   17,
+   18,
+   19,
+   27,
+   28,
+   46
+  ]
+ },
+ "scoring": {
+  "harness": "scripts/jbeq_mdm.py",
+  "rule": "A case is scored only against an answer file produced by an agent that never saw this seed. Exact string match against expected, one answer per case id.",
+  "critical_rule": "Section 28: a single critical case answered wrong, and in particular a critical case answered with a merge where the expected answer is not a merge, means JBEQ-MDM NOT READY.",
+  "merge_answers": [
+   "AUTO-MERGE",
+   "SUGGEST MERGE"
+  ]
+ },
+ "mix": {
+  "entity-object": 10,
+  "match-or-no-merge": 10,
+  "hierarchy": 10,
+  "survivorship": 10,
+  "temporal": 10,
+  "address": 10,
+  "identifier": 5,
+  "requirements": 5
+ },
+ "critical_classes": [
+  "FALSE MERGE",
+  "WRONG LEGAL ENTITY",
+  "CROSS-CUSTOMER CONTAMINATION",
+  "WRONG TAX IDENTITY",
+  "WRONG PAYER",
+  "WRONG STORE ASSIGNMENT",
+  "HISTORICAL REASSIGNMENT",
+  "HIERARCHY REVERSAL",
+  "SOURCE PRECEDENCE VIOLATION",
+  "CROSS-TENANT DATA LEAK",
+  "UNREVERSIBLE MERGE WITHOUT EVIDENCE"
+ ],
+ "answer_sets": {
+  "decision": [
+   "AUTO-MERGE",
+   "SUGGEST MERGE",
+   "LINK AS RELATED",
+   "KEEP SEPARATE",
+   "REJECT MATCH",
+   "ESCALATE",
+   "NO-DATA"
+  ],
+  "survivorship_source": [
+   "法人登記",
+   "税務当局",
+   "ERP",
+   "CRM",
+   "販売マスタ",
+   "MDM",
+   "手動オーバーライド",
+   "NO-DATA"
+  ],
+  "temporal_record": [
+   "R1",
+   "R2",
+   "R3",
+   "NO-DATA"
+  ],
+  "requirement_status": [
+   "DECIDED",
+   "ASSUMED",
+   "INFERRED",
+   "UNKNOWN"
+  ]
+ },
+ "cases": [
+  {
+   "id": "EO-01",
+   "track": "entity-object",
+   "critical": true,
+   "critical_class": "FALSE MERGE",
+   "input": "取引先マスタ登録依頼。レコードA: 株式会社サクラ野フーズ 本社、得意先コード100001、法人番号7010001234567、請求先は本社。レコードB: 株式会社サクラ野フーズ 仙台支店、得意先コード100002、法人番号7010001234567、支店独自の与信枠と請求先を持つ。",
+   "question": "この2件の得意先レコードをどう扱うべきか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "LINK AS RELATED",
+   "rationale_ja": "法人番号が同一でも支店は独自の与信枠と請求先を持つ別の得意先オブジェクトであり、統合ではなく同一法人としての関連付けが正しい。"
+  },
+  {
+   "id": "EO-02",
+   "track": "entity-object",
+   "critical": true,
+   "critical_class": "WRONG PAYER",
+   "input": "緑川製菓株式会社の受注先(sold-to)レコード200010と、請求先(payer)レコード200011。請求先の名義は親会社の緑川ホールディングス株式会社で、支払条件も別に設定されている。",
+   "question": "この2件を同一の得意先レコードに統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "KEEP SEPARATE",
+   "rationale_ja": "受注先と請求先は異なるマスタ役割であり、統合すると請求書の名義と支払条件が誤った相手に付く。"
+  },
+  {
+   "id": "EO-03",
+   "track": "entity-object",
+   "critical": false,
+   "critical_class": null,
+   "input": "同一の購買部から同じ日に2回登録された得意先レコード。法人番号、住所、担当者、役割がすべて一致し、片方は登録画面の二重送信で作られたもので、受注も請求も1件も紐づいていない。",
+   "question": "この2件をどう扱うべきか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "AUTO-MERGE",
+   "rationale_ja": "同一オブジェクト種別で全属性が一致し、取引履歴を持たない明白な二重登録なので自動統合してよい。"
+  },
+  {
+   "id": "EO-04",
+   "track": "entity-object",
+   "critical": true,
+   "critical_class": "CROSS-CUSTOMER CONTAMINATION",
+   "input": "レコードA: 有限会社ハマノ商会、法人番号3010004567890、所在地は新潟県長岡市。レコードB: 有限会社ハマノ商会、法人番号6010009876543、所在地は静岡県浜松市。両社に資本関係はない。",
+   "question": "この2件は同一の法人として照合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "REJECT MATCH",
+   "rationale_ja": "商号が一致していても法人番号と所在地が異なるため別法人であり、照合そのものを棄却する。"
+  },
+  {
+   "id": "EO-05",
+   "track": "entity-object",
+   "critical": false,
+   "critical_class": null,
+   "input": "株式会社トウカイ物流は当社の得意先レコード(保管料の請求先)であり、同時に仕入先レコード(配送委託先)でもある。法人番号は同一で、担当窓口も同じ。",
+   "question": "得意先レコードと仕入先レコードを1件に統合すべきか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "LINK AS RELATED",
+   "rationale_ja": "同一法人が得意先と仕入先の両方の役割を持つのは正当な状態であり、役割別のレコードを残したまま同一法人として関連付ける。"
+  },
+  {
+   "id": "EO-06",
+   "track": "entity-object",
+   "critical": true,
+   "critical_class": "WRONG STORE ASSIGNMENT",
+   "input": "店舗マスタ「サクラ野フーズ 北浜店」と出荷先マスタ「サクラ野フーズ 北浜センター」。所在地は同一敷地だが、北浜センターは近隣5店舗分の商品をまとめて受け取る共同配送拠点である。",
+   "question": "この2件を同一の拠点レコードに統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "KEEP SEPARATE",
+   "rationale_ja": "共同配送拠点は複数店舗を束ねる別オブジェクトであり、店舗と統合すると他店舗分の出荷先が誤る。"
+  },
+  {
+   "id": "EO-07",
+   "track": "entity-object",
+   "critical": false,
+   "critical_class": null,
+   "input": "レコードAとレコードBは商号も所在地も一致するが、Aの法人番号は空欄、Bは7010002345678。どちらにも直近1年の受注履歴があり、担当営業も異なる。",
+   "question": "この2件をどう扱うべきか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "ESCALATE",
+   "rationale_ja": "決定的な識別子が片方に無く、両方に取引履歴があるため、機械判定ではなくデータスチュワードの判断に上げる。"
+  },
+  {
+   "id": "EO-08",
+   "track": "entity-object",
+   "critical": false,
+   "critical_class": null,
+   "input": "新規取引先の登録依頼に記載されているのは「三笠フードサービス」という名称のみで、住所、法人番号、担当者、電話番号のいずれも空欄。既存マスタには同名候補が3件ある。",
+   "question": "この依頼を既存のどのレコードに紐づけるべきか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "NO-DATA",
+   "rationale_ja": "同一性を判断できる識別属性がひとつも無いため、判定不能として依頼元に差し戻す。"
+  },
+  {
+   "id": "EO-09",
+   "track": "entity-object",
+   "critical": true,
+   "critical_class": "WRONG LEGAL ENTITY",
+   "input": "北都ベーカリー株式会社(法人番号4010003456789)と、北都ベーカリー販売株式会社(法人番号4010003456790)。後者は前者が100パーセント出資する販売子会社で、登記上の本店は同じビルの同じ階にある。",
+   "question": "この2件を同一法人として統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "LINK AS RELATED",
+   "rationale_ja": "本店所在地が同じでも別の法人格であり、親子関係として関連付けるだけにとどめる。"
+  },
+  {
+   "id": "EO-10",
+   "track": "entity-object",
+   "critical": false,
+   "critical_class": null,
+   "input": "同一法人番号、同一の得意先役割、同一の請求先を持つ2件。片方は旧ERP移行時に作られたもので、名称表記が全角と半角で異なるだけ。どちらにも数件ずつ受注履歴がある。",
+   "question": "この2件をどう扱うべきか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "SUGGEST MERGE",
+   "rationale_ja": "同一役割かつ同一識別子の重複だが両方に履歴があるため、自動統合ではなく統合候補として提示し人の確認を得る。"
+  },
+  {
+   "id": "MM-01",
+   "track": "match-or-no-merge",
+   "critical": true,
+   "critical_class": "FALSE MERGE",
+   "input": "名寄せ候補: 法人番号7010001234567を持つ3件のレコード。それぞれ「サクラ野フーズ 天神店」「サクラ野フーズ 大濠店」「サクラ野フーズ 香椎店」で、店舗ごとに納品先、棚割、売上計上先が異なる。",
+   "question": "同一の法人番号を根拠にこの3件を1件へ統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "LINK AS RELATED",
+   "rationale_ja": "同一法人の異なる店舗は別々の店舗レコードとして残し、共通の親法人へ関連付けるのが正しく、統合すると店舗別の納品と売上が失われる。"
+  },
+  {
+   "id": "MM-02",
+   "track": "match-or-no-merge",
+   "critical": true,
+   "critical_class": "WRONG TAX IDENTITY",
+   "input": "レコードAは個人事業主で、適格請求書発行事業者番号はT8012345678901。レコードBは法人で、法人番号は8012345678901。数字13桁が一致している。",
+   "question": "この数字の一致を根拠に同一事業者として照合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "REJECT MATCH",
+   "rationale_ja": "個人事業主の登録番号の数字部分は法人番号ではないため、桁の一致は同一性の根拠にならない。"
+  },
+  {
+   "id": "MM-03",
+   "track": "match-or-no-merge",
+   "critical": true,
+   "critical_class": "CROSS-CUSTOMER CONTAMINATION",
+   "input": "レコードAとレコードBは代表電話番号とビル名が完全に一致する。両社は同じ貸しビルに入居しており、電話は貸主の代表番号を共用している。法人番号は異なる。",
+   "question": "電話番号とビル名の一致を根拠に照合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "REJECT MATCH",
+   "rationale_ja": "共用の代表電話とビル名は同居を示すだけで同一性を示さず、法人番号が異なる以上照合は棄却する。"
+  },
+  {
+   "id": "MM-04",
+   "track": "match-or-no-merge",
+   "critical": false,
+   "critical_class": null,
+   "input": "同一法人番号、同一の得意先役割、同一所在地、同一請求先の2件。片方には取引履歴がまったく無く、作成日は他方の3日後で、作成者コメントに「登録済みか未確認のため再登録」とある。",
+   "question": "この2件をどう扱うべきか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "AUTO-MERGE",
+   "rationale_ja": "識別子と役割が完全に一致し、片方に履歴が無い明白な再登録なので自動統合してよい。"
+  },
+  {
+   "id": "MM-05",
+   "track": "match-or-no-merge",
+   "critical": true,
+   "critical_class": "UNREVERSIBLE MERGE WITHOUT EVIDENCE",
+   "input": "統合処理は劣後レコードを物理削除する実装で、統合解除の手段は無い。今回の候補ペアの根拠は名寄せスコア0.83のみで、法人番号は両方とも空欄。",
+   "question": "この候補をどう扱うべきか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "ESCALATE",
+   "rationale_ja": "取り消せない統合に対して根拠がスコアだけであり、識別子の裏付けが無いため人の判断に上げる。"
+  },
+  {
+   "id": "MM-06",
+   "track": "match-or-no-merge",
+   "critical": true,
+   "critical_class": "FALSE MERGE",
+   "input": "「株式会社アオイ電器」と「株式会社アオイ電機」。読みはどちらもアオイデンキで、所在地は同一市内だが番地が異なる。両方とも法人番号が未取得。",
+   "question": "読みの一致を根拠に統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "KEEP SEPARATE",
+   "rationale_ja": "読みが同じでも表記と番地が異なり法人番号の裏付けが無いため、別レコードのまま保持する。"
+  },
+  {
+   "id": "MM-07",
+   "track": "match-or-no-merge",
+   "critical": false,
+   "critical_class": null,
+   "input": "レコードAの商号は「東雲マテリアル株式会社」、レコードBは「東雲素材株式会社」。法人番号は両方とも5010007654321で、登記情報に2025年4月1日付の商号変更が記録されている。得意先役割と請求先は同一。",
+   "question": "この2件をどう扱うべきか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "AUTO-MERGE",
+   "rationale_ja": "登記に商号変更の記録があり法人番号と役割が一致するため、同一法人の新旧表記として統合してよい。"
+  },
+  {
+   "id": "MM-08",
+   "track": "match-or-no-merge",
+   "critical": true,
+   "critical_class": "CROSS-TENANT DATA LEAK",
+   "input": "名寄せエンジンが提示した候補の片方は、別事業会社のテナントに属する顧客レコードである。両テナントは契約上データを相互に参照できない。",
+   "question": "この候補をどう扱うべきか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "REJECT MATCH",
+   "rationale_ja": "テナント境界を越える統合は契約違反であり、候補そのものを棄却する。"
+  },
+  {
+   "id": "MM-09",
+   "track": "match-or-no-merge",
+   "critical": false,
+   "critical_class": null,
+   "input": "候補ペアのうち片方は権限制御により属性を参照できず、提示されているのは名寄せスコア0.91という数値だけである。",
+   "question": "この候補をどう扱うべきか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "NO-DATA",
+   "rationale_ja": "片方の属性が一切読めずスコアしか無いため、判定不能として記録する。"
+  },
+  {
+   "id": "MM-10",
+   "track": "match-or-no-merge",
+   "critical": true,
+   "critical_class": "WRONG PAYER",
+   "input": "同一法人の請求先レコードが2件ある。片方は本社一括契約(支払条件は月末締め翌月末払い)、もう片方は店舗個別契約(支払条件は月末締め翌々月10日払い)に紐づく。",
+   "question": "この2件を統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "KEEP SEPARATE",
+   "rationale_ja": "契約ごとに支払条件が異なる請求先であり、統合するとどちらかの契約の支払条件が失われる。"
+  },
+  {
+   "id": "HI-01",
+   "track": "hierarchy",
+   "critical": true,
+   "critical_class": "HIERARCHY REVERSAL",
+   "input": "株式会社カワセミ工業について、法人階層の親は資本関係のあるカワセミホールディングス株式会社、商流階層の親は仕入元の株式会社トウカイ物流、レポーティング階層の親は社内の西日本統括部である。マスタの親項目は1つしかない。",
+   "question": "3つの親をどれか1つに統一してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "KEEP SEPARATE",
+   "rationale_ja": "法人、商流、レポーティングの各階層は同時に有効な別々の関係であり、1つに統一するとどの階層かが失われる。"
+  },
+  {
+   "id": "HI-02",
+   "track": "hierarchy",
+   "critical": true,
+   "critical_class": "HIERARCHY REVERSAL",
+   "input": "子会社の株式会社ヒノデ薬品の売上が親会社の日之出ホールディングス株式会社を上回ったため、社内資料に合わせて法人階層でも子会社を親に付け替えたいという依頼が来た。",
+   "question": "法人階層の親子を反転させてよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "REJECT MATCH",
+   "rationale_ja": "法人階層は登記上の資本関係に従うものであり、売上規模を理由に反転させることはできない。"
+  },
+  {
+   "id": "HI-03",
+   "track": "hierarchy",
+   "critical": false,
+   "critical_class": null,
+   "input": "2026年7月1日付の事業譲渡により、3店舗が旧親法人から新親法人の配下へ移管された。移管日より前の期間の売上集計は旧親法人配下で行われている。",
+   "question": "移管前の期間の階層行を旧親法人のまま残してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "KEEP SEPARATE",
+   "rationale_ja": "階層変更は有効日付付きで新しい行として適用し、移管前の期間は旧親法人のまま保持するのが正しい。"
+  },
+  {
+   "id": "HI-04",
+   "track": "hierarchy",
+   "critical": false,
+   "critical_class": null,
+   "input": "営業所の担当替えにより、株式会社アオイ電器の担当が名古屋営業所から浜松営業所へ変わった。依頼は「法人階層の親会社を浜松営業所に変更してほしい」となっている。",
+   "question": "この依頼のとおり法人階層を変更してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "REJECT MATCH",
+   "rationale_ja": "営業所の担当替えは販売組織の割当変更であり、法人階層の親子関係とは別の情報なので依頼を棄却する。"
+  },
+  {
+   "id": "HI-05",
+   "track": "hierarchy",
+   "critical": true,
+   "critical_class": "WRONG LEGAL ENTITY",
+   "input": "北都ベーカリーのフランチャイズ加盟店である有限会社サンライズ商事は、ブランド名と店舗看板を共有しているが、資本関係も役員の兼任も無い独立法人である。",
+   "question": "この加盟店をブランド本部の子会社として法人階層に登録してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "KEEP SEPARATE",
+   "rationale_ja": "ブランドの共有は資本関係を意味せず、加盟店は独立法人として別に保持する。"
+  },
+  {
+   "id": "HI-06",
+   "track": "hierarchy",
+   "critical": false,
+   "critical_class": null,
+   "input": "持株会社化に伴い「日之出ホールディングス株式会社」の下に「日之出事業ホールディングス株式会社」が新設された。名称が似ているため名寄せが両者を候補として提示している。",
+   "question": "この2件をどう扱うべきか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "KEEP SEPARATE",
+   "rationale_ja": "中間持株会社は別の法人番号を持つ新設法人であり、名称の類似だけで既存の親会社と同一視できない。"
+  },
+  {
+   "id": "HI-07",
+   "track": "hierarchy",
+   "critical": false,
+   "critical_class": null,
+   "input": "階層記述には「株式会社カワセミ工業は日之出グループのグループ会社である」とだけ書かれており、資本関係か商流関係かレポーティング上の所属かは記載されていない。",
+   "question": "この記述からどの階層に親子を登録すべきか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "NO-DATA",
+   "rationale_ja": "どの階層の関係かが記述から判別できないため、登録せず判定不能として差し戻す。"
+  },
+  {
+   "id": "HI-08",
+   "track": "hierarchy",
+   "critical": true,
+   "critical_class": "FALSE MERGE",
+   "input": "同一グループ内の2つの事業会社が、それぞれ会社コード別に株式会社トウカイ物流の得意先レコードを持っている。与信枠と価格条件は会社コードごとに異なる。",
+   "question": "この2件をグループ共通の1件へ統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "LINK AS RELATED",
+   "rationale_ja": "会社コード別の与信と価格を保つため個別レコードを残し、共通の法人識別子で関連付ける。"
+  },
+  {
+   "id": "HI-09",
+   "track": "hierarchy",
+   "critical": false,
+   "critical_class": null,
+   "input": "位置階層の「東海エリア」と、組織階層の「東海営業部」が同名で登録されている。管轄する県の範囲は一部しか重ならない。",
+   "question": "この2件を同一ノードとして統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "REJECT MATCH",
+   "rationale_ja": "位置階層と組織階層は別の階層種別であり、名称の一致は同一ノードであることを意味しない。"
+  },
+  {
+   "id": "HI-10",
+   "track": "hierarchy",
+   "critical": true,
+   "critical_class": "HIERARCHY REVERSAL",
+   "input": "サクラ野フーズの各店舗への納品は卸の株式会社トウカイ物流を経由している。担当者から「商流に合わせて店舗の法人親をトウカイ物流に設定してほしい」と依頼が来た。",
+   "question": "この依頼のとおり法人階層を設定してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "KEEP SEPARATE",
+   "rationale_ja": "商流上の経由先は法人階層の親ではなく、商流階層に別途保持すべき関係である。"
+  },
+  {
+   "id": "SV-01",
+   "track": "survivorship",
+   "critical": true,
+   "critical_class": "SOURCE PRECEDENCE VIOLATION",
+   "input": "属性: 正式法人名。法人登記の値は「株式会社サクラ野フーズ」、CRMの値は「サクラ野フーズ(株)」。両方とも同じ法人番号に紐づく。",
+   "question": "この属性はどのソースの値を採用すべきか。",
+   "allowed": [
+    "法人登記",
+    "税務当局",
+    "ERP",
+    "CRM",
+    "販売マスタ",
+    "MDM",
+    "手動オーバーライド",
+    "NO-DATA"
+   ],
+   "expected": "法人登記",
+   "rationale_ja": "正式法人名の権威は登記であり、CRMの表記揺れは表示用の値にすぎない。"
+  },
+  {
+   "id": "SV-02",
+   "track": "survivorship",
+   "critical": true,
+   "critical_class": "WRONG TAX IDENTITY",
+   "input": "属性: 適格請求書発行事業者番号。ERPにはT7010001234560、税務当局の登録情報にはT7010001234567が記録されている。",
+   "question": "この属性はどのソースの値を採用すべきか。",
+   "allowed": [
+    "法人登記",
+    "税務当局",
+    "ERP",
+    "CRM",
+    "販売マスタ",
+    "MDM",
+    "手動オーバーライド",
+    "NO-DATA"
+   ],
+   "expected": "税務当局",
+   "rationale_ja": "税務識別子の権威は税務当局の登録情報であり、ERPの値は入力誤りとして訂正対象になる。"
+  },
+  {
+   "id": "SV-03",
+   "track": "survivorship",
+   "critical": false,
+   "critical_class": null,
+   "input": "属性: 支払条件。ERPには「月末締め翌月末払い」、CRMには「月末締め翌々月10日払い」と登録されている。契約書はERPに添付されている。",
+   "question": "この属性はどのソースの値を採用すべきか。",
+   "allowed": [
+    "法人登記",
+    "税務当局",
+    "ERP",
+    "CRM",
+    "販売マスタ",
+    "MDM",
+    "手動オーバーライド",
+    "NO-DATA"
+   ],
+   "expected": "ERP",
+   "rationale_ja": "支払条件は契約と請求を実行するERPが権威であり、CRMの値は営業の見込み値にすぎない。"
+  },
+  {
+   "id": "SV-04",
+   "track": "survivorship",
+   "critical": false,
+   "critical_class": null,
+   "input": "属性: 営業担当者。CRMには「三浦涼太」、ERPには前任者の「森下由紀」が残っている。CRMの更新日はERPより新しい。",
+   "question": "この属性はどのソースの値を採用すべきか。",
+   "allowed": [
+    "法人登記",
+    "税務当局",
+    "ERP",
+    "CRM",
+    "販売マスタ",
+    "MDM",
+    "手動オーバーライド",
+    "NO-DATA"
+   ],
+   "expected": "CRM",
+   "rationale_ja": "営業担当の権威はCRMであり、ERPに残る前任者名は同期漏れである。"
+  },
+  {
+   "id": "SV-05",
+   "track": "survivorship",
+   "critical": false,
+   "critical_class": null,
+   "input": "属性: 商用表示名。データスチュワードが2026年8月1日に手動オーバーライドを設定し、有効期限は2026年12月31日。現在は2026年9月5日で、販売マスタの値と異なる。",
+   "question": "この属性はどのソースの値を採用すべきか。",
+   "allowed": [
+    "法人登記",
+    "税務当局",
+    "ERP",
+    "CRM",
+    "販売マスタ",
+    "MDM",
+    "手動オーバーライド",
+    "NO-DATA"
+   ],
+   "expected": "手動オーバーライド",
+   "rationale_ja": "有効期限内の手動オーバーライドは通常ソースに優先する。"
+  },
+  {
+   "id": "SV-06",
+   "track": "survivorship",
+   "critical": true,
+   "critical_class": "SOURCE PRECEDENCE VIOLATION",
+   "input": "属性: 正式法人名。手動オーバーライドが2026年3月31日に失効している。現在は2026年9月5日で、法人登記には2026年4月1日付の商号変更が反映されている。",
+   "question": "この属性はどのソースの値を採用すべきか。",
+   "allowed": [
+    "法人登記",
+    "税務当局",
+    "ERP",
+    "CRM",
+    "販売マスタ",
+    "MDM",
+    "手動オーバーライド",
+    "NO-DATA"
+   ],
+   "expected": "法人登記",
+   "rationale_ja": "失効したオーバーライドは効力を失い、より上位の権威である登記の最新値が採用される。"
+  },
+  {
+   "id": "SV-07",
+   "track": "survivorship",
+   "critical": false,
+   "critical_class": null,
+   "input": "属性: ゴールデンID。MDMが採番した値と、CRM側で独自に付与された内部管理番号が競合している。",
+   "question": "この属性はどのソースの値を採用すべきか。",
+   "allowed": [
+    "法人登記",
+    "税務当局",
+    "ERP",
+    "CRM",
+    "販売マスタ",
+    "MDM",
+    "手動オーバーライド",
+    "NO-DATA"
+   ],
+   "expected": "MDM",
+   "rationale_ja": "ゴールデンIDの採番権はMDMにあり、CRMの内部番号は参照値にすぎない。"
+  },
+  {
+   "id": "SV-08",
+   "track": "survivorship",
+   "critical": true,
+   "critical_class": "SOURCE PRECEDENCE VIOLATION",
+   "input": "属性: 正式法人名。ERPからの更新が本日到着したが、その source_timestamp は2026年2月10日である。法人登記からは2026年4月1日付の商号変更がすでに反映済み。",
+   "question": "この属性はどのソースの値を採用すべきか。",
+   "allowed": [
+    "法人登記",
+    "税務当局",
+    "ERP",
+    "CRM",
+    "販売マスタ",
+    "MDM",
+    "手動オーバーライド",
+    "NO-DATA"
+   ],
+   "expected": "法人登記",
+   "rationale_ja": "遅れて到着した古いタイムスタンプの更新は、より新しい上位権威の値を上書きしてはならない。"
+  },
+  {
+   "id": "SV-09",
+   "track": "survivorship",
+   "critical": false,
+   "critical_class": null,
+   "input": "属性: 商用表示名。販売マスタには「サクラ野フーズ天神」、CRMには空値が入っている。CRMの空値は未入力を意味し、削除指示ではない。",
+   "question": "この属性はどのソースの値を採用すべきか。",
+   "allowed": [
+    "法人登記",
+    "税務当局",
+    "ERP",
+    "CRM",
+    "販売マスタ",
+    "MDM",
+    "手動オーバーライド",
+    "NO-DATA"
+   ],
+   "expected": "販売マスタ",
+   "rationale_ja": "空値は未入力であって明示的削除ではないため、値を持つ販売マスタが採用される。"
+  },
+  {
+   "id": "SV-10",
+   "track": "survivorship",
+   "critical": false,
+   "critical_class": null,
+   "input": "属性: 請求先住所。2件の値が競合しているが、どちらのレコードにもソース種別、更新者、タイムスタンプが記録されていない。",
+   "question": "この属性はどのソースの値を採用すべきか。",
+   "allowed": [
+    "法人登記",
+    "税務当局",
+    "ERP",
+    "CRM",
+    "販売マスタ",
+    "MDM",
+    "手動オーバーライド",
+    "NO-DATA"
+   ],
+   "expected": "NO-DATA",
+   "rationale_ja": "ソースの種別も時刻も不明では権威を比較できないため、判定不能とする。"
+  },
+  {
+   "id": "TM-01",
+   "track": "temporal",
+   "critical": true,
+   "critical_class": "HISTORICAL REASSIGNMENT",
+   "input": "レコードR1: サクラ野フーズ 港南店、valid_from 2019-04-01、valid_to 2024-03-31(閉店)。レコードR2: サクラ野フーズ 港南中央店、valid_from 2024-06-01、住所はR1から徒歩2分の別番地。",
+   "question": "2024年2月に計上された売上は、どちらの店舗レコードに帰属するか。",
+   "allowed": [
+    "R1",
+    "R2",
+    "NO-DATA"
+   ],
+   "expected": "R1",
+   "rationale_ja": "2024年2月時点で有効だったのはR1であり、閉店後に開店した別店舗へ過去の取引を付け替えてはならない。"
+  },
+  {
+   "id": "TM-02",
+   "track": "temporal",
+   "critical": false,
+   "critical_class": null,
+   "input": "レコードR1: 商号「東雲素材株式会社」、valid_from 2011-06-01、valid_to 2025-03-31。レコードR2: 商号「東雲マテリアル株式会社」、valid_from 2025-04-01。",
+   "question": "2025年2月10日時点の正式法人名として権威あるレコードはどれか。",
+   "allowed": [
+    "R1",
+    "R2",
+    "NO-DATA"
+   ],
+   "expected": "R1",
+   "rationale_ja": "商号変更の効力は2025年4月1日からであり、2025年2月10日時点ではR1が有効である。"
+  },
+  {
+   "id": "TM-03",
+   "track": "temporal",
+   "critical": false,
+   "critical_class": null,
+   "input": "レコードR1: 本店所在地 静岡県富士市、valid_to 2026-01-14。レコードR2: 本店所在地 静岡県沼津市、valid_from 2026-01-15。",
+   "question": "2026年9月5日時点で権威あるレコードはどれか。",
+   "allowed": [
+    "R1",
+    "R2",
+    "NO-DATA"
+   ],
+   "expected": "R2",
+   "rationale_ja": "移転日以降の現在時点ではR2が有効である。"
+  },
+  {
+   "id": "TM-04",
+   "track": "temporal",
+   "critical": true,
+   "critical_class": "HISTORICAL REASSIGNMENT",
+   "input": "レコードR1とR2は2026年5月1日に統合され、統合結果としてR3が作られた。2026年6月10日に統合の誤りが判明し統合解除が実施され、R1とR2が復元されR3は無効化された。問い合わせ対象の取引はR2に紐づいていたものである。",
+   "question": "2026年7月1日時点でその取引の権威あるレコードはどれか。",
+   "allowed": [
+    "R1",
+    "R2",
+    "R3",
+    "NO-DATA"
+   ],
+   "expected": "R2",
+   "rationale_ja": "統合解除により2026年6月10日以降はR2が復元されており、無効化されたR3は権威を持たない。"
+  },
+  {
+   "id": "TM-05",
+   "track": "temporal",
+   "critical": false,
+   "critical_class": null,
+   "input": "レコードR1: 支払条件「月末締め翌月末払い」、valid_from 2023-04-01。レコードR2: 支払条件「月末締め翌々月10日払い」、valid_from 2026-12-01(将来日付で登録済み)。",
+   "question": "2026年9月5日時点で権威あるレコードはどれか。",
+   "allowed": [
+    "R1",
+    "R2",
+    "NO-DATA"
+   ],
+   "expected": "R1",
+   "rationale_ja": "R2の有効開始日はまだ到来していないため、現時点ではR1が有効である。"
+  },
+  {
+   "id": "TM-06",
+   "track": "temporal",
+   "critical": false,
+   "critical_class": null,
+   "input": "レコードR1とR2はどちらも valid_from、valid_to、source_timestamp、created_at がすべて空欄で、更新順序を示す情報が一切ない。",
+   "question": "2026年6月1日時点で権威あるレコードはどれか。",
+   "allowed": [
+    "R1",
+    "R2",
+    "NO-DATA"
+   ],
+   "expected": "NO-DATA",
+   "rationale_ja": "時系列の手掛かりが一切無いため、どちらが当時有効だったかを判定できない。"
+  },
+  {
+   "id": "TM-07",
+   "track": "temporal",
+   "critical": true,
+   "critical_class": "HISTORICAL REASSIGNMENT",
+   "input": "得意先コード400123は、株式会社カワセミ工業(R1、2018-04-01から2023-09-30まで)に割り当てられていたが、解約後の2023年10月1日に有限会社サンライズ商事(R2)へ再利用された。",
+   "question": "2023年5月20日付の請求はどちらのレコードに帰属するか。",
+   "allowed": [
+    "R1",
+    "R2",
+    "NO-DATA"
+   ],
+   "expected": "R1",
+   "rationale_ja": "コードの再利用前の期間であり、当時そのコードを保持していたR1に帰属する。"
+  },
+  {
+   "id": "TM-08",
+   "track": "temporal",
+   "critical": false,
+   "critical_class": null,
+   "input": "レコードR1は superseded フラグが立っており、後継としてR2が valid_from 2026-07-01 で登録されている。R1の valid_to は2026-06-30。",
+   "question": "2026年8月1日時点で権威あるレコードはどれか。",
+   "allowed": [
+    "R1",
+    "R2",
+    "NO-DATA"
+   ],
+   "expected": "R2",
+   "rationale_ja": "2026年7月1日以降は後継のR2が有効であり、R1は失効している。"
+  },
+  {
+   "id": "TM-09",
+   "track": "temporal",
+   "critical": false,
+   "critical_class": null,
+   "input": "店舗レコードR1は2025年12月31日に休止となり valid_to が設定された。同一店舗が2026年4月1日に営業を再開し、レコードR2が valid_from 2026-04-01 で登録された。",
+   "question": "2026年3月15日時点で権威あるレコードはどれか。",
+   "allowed": [
+    "R1",
+    "R2",
+    "NO-DATA"
+   ],
+   "expected": "NO-DATA",
+   "rationale_ja": "休止期間中はどのレコードも有効ではないため、その時点の権威レコードは存在しない。"
+  },
+  {
+   "id": "TM-10",
+   "track": "temporal",
+   "critical": true,
+   "critical_class": "HISTORICAL REASSIGNMENT",
+   "input": "請求先住所のレコードR1は2024-04-01から2025-11-30まで有効、R2は2025-12-01から有効。2025年8月分の請求書を再発行する依頼が来ている。",
+   "question": "再発行する請求書に記載すべき住所はどちらのレコードか。",
+   "allowed": [
+    "R1",
+    "R2",
+    "NO-DATA"
+   ],
+   "expected": "R1",
+   "rationale_ja": "再発行は当時の請求内容を再現するものであり、2025年8月時点で有効だったR1の住所を用いる。"
+  },
+  {
+   "id": "AD-01",
+   "track": "address",
+   "critical": false,
+   "critical_class": null,
+   "input": "住所A: 「東京都中央区日本橋１丁目３番２号」(全角数字)。住所B: 「東京都中央区日本橋1-3-2」(半角、ハイフン表記)。郵便番号はどちらも103-0027。",
+   "question": "この2件を同一の物理拠点として統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "AUTO-MERGE",
+   "rationale_ja": "全角半角とハイフンの表記差だけで、示している地番も郵便番号も同一である。"
+  },
+  {
+   "id": "AD-02",
+   "track": "address",
+   "critical": false,
+   "critical_class": null,
+   "input": "住所A: 「大阪府大阪市北区梅田一丁目2番3号」。住所B: 「大阪府大阪市北区梅田1-2-3」。建物名と部屋番号はどちらも記載なし。",
+   "question": "この2件を同一の物理拠点として統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "AUTO-MERGE",
+   "rationale_ja": "漢数字と算用数字、丁目番地号とハイフンの表記差にすぎず、同一の地番を指している。"
+  },
+  {
+   "id": "AD-03",
+   "track": "address",
+   "critical": true,
+   "critical_class": "WRONG STORE ASSIGNMENT",
+   "input": "住所A: 「神奈川県横浜市中区本町1-2-3」。住所B: 「神奈川県川崎市川崎区本町1-2-3」。町名と地番は一致するが市区が異なる。",
+   "question": "この2件を同一の物理拠点として統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "REJECT MATCH",
+   "rationale_ja": "同じ町名と地番が別の自治体に存在するだけで、物理的には別の場所である。"
+  },
+  {
+   "id": "AD-04",
+   "track": "address",
+   "critical": true,
+   "critical_class": "WRONG STORE ASSIGNMENT",
+   "input": "住所A: 「愛知県名古屋市中区栄2-4-6 サカエ第一ビル3階」。住所B: 「愛知県名古屋市中区栄2-4-6 サカエ第一ビル8階」。3階と8階は別のテナントが入居している。",
+   "question": "この2件を同一の拠点として統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "KEEP SEPARATE",
+   "rationale_ja": "同一ビルでも階が異なれば別テナントの拠点であり、部屋番号まで含めて別の場所である。"
+  },
+  {
+   "id": "AD-05",
+   "track": "address",
+   "critical": false,
+   "critical_class": null,
+   "input": "住所A: 「埼玉県北足立郡吹上町大字前砂123番地」(合併前の旧町名、郵便番号は旧番号のまま)。住所B: 「埼玉県鴻巣市前砂123番地」(合併後の新市名、郵便番号は新番号)。同一の地番である。",
+   "question": "この2件をどう扱うべきか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "SUGGEST MERGE",
+   "rationale_ja": "市町村合併による新旧表記で地番は同一だが、郵便番号が食い違うため自動ではなく候補として提示する。"
+  },
+  {
+   "id": "AD-06",
+   "track": "address",
+   "critical": true,
+   "critical_class": "WRONG STORE ASSIGNMENT",
+   "input": "登録された住所は「福岡県福岡市博多区博多駅前2-1-1」だが、同じレコードの郵便番号は札幌市中央区を示す060-0001である。",
+   "question": "このレコードの拠点をどう扱うべきか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "ESCALATE",
+   "rationale_ja": "郵便番号と住所文字列が別の都道府県を指しており、どちらが誤りか機械では決められないため人の確認に上げる。"
+  },
+  {
+   "id": "AD-07",
+   "track": "address",
+   "critical": false,
+   "critical_class": null,
+   "input": "住所A: 「東京都渋谷区千駄ヶ谷5-24-2」。住所B: 「東京都渋谷区千駄ケ谷5-24-2」。差異は「ヶ」と「ケ」のみ。",
+   "question": "この2件を同一の物理拠点として統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "AUTO-MERGE",
+   "rationale_ja": "「ヶ」と「ケ」は同一地名の表記揺れであり、地番も一致している。"
+  },
+  {
+   "id": "AD-08",
+   "track": "address",
+   "critical": false,
+   "critical_class": null,
+   "input": "住所A: 「府中市宮西町2-24」(都道府県欄は空欄)。住所B: 「東京都府中市宮西町2-24」。府中市は東京都と広島県の両方に存在する。",
+   "question": "この2件をどう扱うべきか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "ESCALATE",
+   "rationale_ja": "都道府県が欠落しており同名市が複数県にあるため、確定できず人の確認に上げる。"
+  },
+  {
+   "id": "AD-09",
+   "track": "address",
+   "critical": false,
+   "critical_class": null,
+   "input": "出荷先の住所欄に記載されているのは「本社」の二文字のみで、都道府県、市区町村、地番、郵便番号のいずれも空欄である。",
+   "question": "この住所をどの拠点に紐づけるべきか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "NO-DATA",
+   "rationale_ja": "住所として解釈できる情報が無いため、判定不能として差し戻す。"
+  },
+  {
+   "id": "AD-10",
+   "track": "address",
+   "critical": true,
+   "critical_class": "CROSS-CUSTOMER CONTAMINATION",
+   "input": "住所A: 「東京都港区芝浦3-1-1 シーサイドオフィス7階」、法人番号1010001111111。住所B: 同一住所同一階、法人番号1010002222222。当該階はシェアオフィスで、登記上の本店を置く法人が複数ある。",
+   "question": "住所の一致を根拠にこの2件を照合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "REJECT MATCH",
+   "rationale_ja": "シェアオフィスでは同一住所に複数法人が存在し、住所の一致は同一法人であることを示さない。"
+  },
+  {
+   "id": "ID-01",
+   "track": "identifier",
+   "critical": true,
+   "critical_class": "FALSE MERGE",
+   "input": "レコードAの内部顧客番号は7010001234567、レコードBの法人番号は7010001234567。内部顧客番号は自社で連番採番した13桁の値で、法人番号とは体系が異なる。",
+   "question": "この数値の一致を根拠に統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "REJECT MATCH",
+   "rationale_ja": "採番体系の異なる番号どうしの数値一致は偶然であり、同一性の根拠にならない。"
+  },
+  {
+   "id": "ID-02",
+   "track": "identifier",
+   "critical": true,
+   "critical_class": "WRONG TAX IDENTITY",
+   "input": "請求先の適格請求書発行事業者番号T3010005555555は2026年6月30日に登録が失効している。現在は2026年9月5日で、新しい番号は未取得。",
+   "question": "この失効した番号を用いて請求先を確定してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "ESCALATE",
+   "rationale_ja": "失効した登録番号では適格請求書を発行できないため、確定せず税務と業務の担当に上げる。"
+  },
+  {
+   "id": "ID-03",
+   "track": "identifier",
+   "critical": false,
+   "critical_class": null,
+   "input": "旧ERPの顧客ID「C-04412」とCRMのGUID「9f2c1a70」の対応が移行対応表に記載されており、両レコードの法人番号は7010002345678で一致、得意先役割も同一である。",
+   "question": "この2件をどう扱うべきか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "SUGGEST MERGE",
+   "rationale_ja": "対応表と法人番号の両方が一致するため統合候補として提示するが、移行対応表の妥当性確認を経てから確定する。"
+  },
+  {
+   "id": "ID-04",
+   "track": "identifier",
+   "critical": true,
+   "critical_class": "FALSE MERGE",
+   "input": "店舗IDとサイトIDが同じ6桁の採番体系を使っており、店舗ID「100234」とサイトID「100234」が別の対象を指している。名寄せがこの一致を検出した。",
+   "question": "この一致を根拠に統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "REJECT MATCH",
+   "rationale_ja": "IDの種別が異なるため値の一致は無意味であり、店舗とサイトは別のオブジェクトである。"
+  },
+  {
+   "id": "ID-05",
+   "track": "identifier",
+   "critical": true,
+   "critical_class": "CROSS-CUSTOMER CONTAMINATION",
+   "input": "得意先コード400123は2023年10月1日に別法人へ再利用されている。名寄せはこのコードの一致を根拠に、再利用前後の2レコードを候補として提示した。",
+   "question": "この候補をどう扱うべきか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "KEEP SEPARATE",
+   "rationale_ja": "再利用されたコードは異なる法人を指しており、統合すると過去の取引が別法人に混入する。"
+  },
+  {
+   "id": "RQ-01",
+   "track": "requirements",
+   "critical": false,
+   "critical_class": null,
+   "input": "2026年8月20日のデータガバナンス会議の議事録に「名寄せスコア0.95以上を自動統合の対象とすることを承認した。反対なし」と記載されている。抽出された規則: 「自動統合のしきい値は0.95である」",
+   "question": "この抽出規則の状態はどれか。",
+   "allowed": [
+    "DECIDED",
+    "ASSUMED",
+    "INFERRED",
+    "UNKNOWN"
+   ],
+   "expected": "DECIDED",
+   "rationale_ja": "議事録に承認の事実が明記されているため確定した決定である。"
+  },
+  {
+   "id": "RQ-02",
+   "track": "requirements",
+   "critical": false,
+   "critical_class": null,
+   "input": "移行チケットに「移行時は既存の支払条件をそのまま引き継ぐこと。支払条件は契約書とともにERPで管理している」と記載されている。抽出された規則: 「支払条件の権威ソースはERPである」",
+   "question": "この抽出規則の状態はどれか。",
+   "allowed": [
+    "DECIDED",
+    "ASSUMED",
+    "INFERRED",
+    "UNKNOWN"
+   ],
+   "expected": "INFERRED",
+   "rationale_ja": "権威ソースという言葉は無いが、記載内容から論理的に導ける推論である。"
+  },
+  {
+   "id": "RQ-03",
+   "track": "requirements",
+   "critical": false,
+   "critical_class": null,
+   "input": "要件書には「同一法人番号を持つレコードは統合する」とだけ記載され、店舗レコードの扱いには触れていない。抽出された規則: 「同一法人番号の店舗レコードも統合する」",
+   "question": "この抽出規則の状態はどれか。",
+   "allowed": [
+    "DECIDED",
+    "ASSUMED",
+    "INFERRED",
+    "UNKNOWN"
+   ],
+   "expected": "ASSUMED",
+   "rationale_ja": "記載の無い範囲を根拠なく補って広げているため仮定である。"
+  },
+  {
+   "id": "RQ-04",
+   "track": "requirements",
+   "critical": false,
+   "critical_class": null,
+   "input": "BRDに「住所の正規化ルールは別途決定する」と記載されており、決定の記録は存在しない。抽出された規則: 「住所は全角に統一して正規化する」",
+   "question": "この抽出規則の状態はどれか。",
+   "allowed": [
+    "DECIDED",
+    "ASSUMED",
+    "INFERRED",
+    "UNKNOWN"
+   ],
+   "expected": "UNKNOWN",
+   "rationale_ja": "元の文書が未決と明記しており、規則の内容は未知である。"
+  },
+  {
+   "id": "RQ-05",
+   "track": "requirements",
+   "critical": false,
+   "critical_class": null,
+   "input": "2026年9月1日付の意思決定記録に「支払条件のソースをERPに確定する。承認者は業務部長」と記載されている。抽出された規則: 「支払条件のソースはERPである」",
+   "question": "この抽出規則の状態はどれか。",
+   "allowed": [
+    "DECIDED",
+    "ASSUMED",
+    "INFERRED",
+    "UNKNOWN"
+   ],
+   "expected": "DECIDED",
+   "rationale_ja": "承認者付きの意思決定記録があるため確定した決定である。"
+  }
+ ]
+}

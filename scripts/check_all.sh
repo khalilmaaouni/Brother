@@ -156,6 +156,7 @@ run_check "gen-board-self" python3 scripts/test_gen_command_center.py -v
 run_check "repeat-guard"   python3 tools/repeat-guard/test_repeat_guard.py
 run_check "wisdom-capture" /usr/bin/python3 scripts/test_wisdom_capture.py -v
 run_check "handover-ceremony" /usr/bin/python3 scripts/test_handover_ceremony.py -v
+run_check "vault-correct"     /usr/bin/python3 scripts/test_vault_correct.py -v
 # R25.1/R25.3: the limit watcher (classifies a transcript's last record
 # into NORMAL or one of four measured limit classes, arms the restart
 # flag) and the dynamic restart scheduler (rewrites the launchd plist to
@@ -659,6 +660,13 @@ run_check "benchmark-bundle-self"   python3 -m unittest -v scripts/test_make_ben
 # benchmark-bundle sibling above, per this estate's own recorded lesson that
 # an unregistered tool is invisible to every check the project owns.
 run_check "gauntlets-validate" python3 benchmarks/gauntlets/validate.py
+# J1: the JBEQ-MDM seed suite (benchmarks/jbeq/) and its scorer. It proves the
+# seed is 70 cases in the directive's mix, that every critical case names a
+# critical class, that no expected answer reaches a blind prompt file, and that
+# the section 28 verdict and the NO-DATA exit both fire. Registered beside its
+# gauntlet sibling above, per this estate's own recorded lesson that an
+# unregistered tool is invisible to every check the project owns.
+run_check "jbeq-mdm-seed" python3 scripts/test_jbeq_mdm.py
 run_check "fable-authority"      python3 scripts/fable_authority.py --selftest
 
 # B3 and B4: black-box proofs that VB3-03 (tenancy) and VB3-04 (policy
@@ -764,7 +772,32 @@ run_check "release-note-perturb-self" python3 scripts/test_release_note_perturb.
 # tens of minutes on this tree. It is the only shape that can tell a table
 # naming a real check apart from one naming a check that cannot fail, which
 # is exactly what shipped in the v1.0.1 note for four of eleven files.
+#
+# E116: a LONG check now. An ordinary battery round skips it and reads
+# NO-DATA (never PASS, per rule 3 at the top of this file: a check nobody ran
+# has not said the thing is healthy), instead of paying ninety minutes and
+# racing a peer round on the very source files this rewrites in place. The
+# measurement itself is unchanged and stays a deliberate release cut step:
+# scripts/cut_v1.0.0.sh runs it directly, and a battery round can too with
+# BROTHER_LONG_CHECKS=1, which prints the expected duration before it starts.
+#
+# The gate is written out here rather than wrapped in a run_long_check
+# helper, and that is deliberate: scripts/system_doc.py builds "What the
+# battery actually runs" by matching lines shaped `run_check "name" cmd`, so
+# a helper would delete this check from the living record while ALSO
+# registering the helper's own internal `run_check "$name" "$@"` line as a
+# check called $name. One long step does not need an abstraction anyway; a
+# second one copies these six lines.
+# E116-LONG-CHECK-BEGIN release-note-perturb
+if [ "${BROTHER_LONG_CHECKS:-0}" = "1" ]; then
+  printf 'RUNNING release-note-perturb: expected about %s minute(s) on this tree\n' 90
 run_check "release-note-perturb"      python3 scripts/release_note_perturb.py
+else
+  nodata=$((nodata+1)); nodata_names="$nodata_names release-note-perturb"
+  printf '%-7s exit %-3s %-34s %s\n' "NO-DATA" "-" "release-note-perturb" \
+    "long check (about 90 min) not run: set BROTHER_LONG_CHECKS=1"
+fi
+# E116-LONG-CHECK-END
 # Red-team item 3 / infra persona: the exported content is reproducible from
 # its tested source. The self test drives match, tamper and NO-DATA backwards;
 # the live check needs a --tag and a public checkout, so it is self-test only
@@ -986,6 +1019,12 @@ run_check "v3-receipts-self"             python3 scripts/test_v3_receipts.py -v
 # sibling above, per this estate's own recorded lesson that an unregistered
 # tool is invisible to every check the project owns.
 run_check "receipt-contract-v1"          python3 scripts/test_receipt_contract.py -v
+# The review pass (row S32): the seeded review-depth fixtures, driven
+# both ways, plus the reading-order line a confirmed finding earns.
+# Registered beside its receipt siblings above, per this estate's own
+# recorded lesson that an unregistered tool is invisible to every check
+# the project owns.
+run_check "review-depth-self"            python3 scripts/test_review_pass.py -v
 run_check "v3-judge-self"                python3 scripts/test_v3_judge.py -v
 run_check "v3-night-receipts-self"       python3 scripts/test_v3_night_receipts.py -v
 run_check "v3-surfacing-self"            python3 scripts/test_v3_surfacing.py -v

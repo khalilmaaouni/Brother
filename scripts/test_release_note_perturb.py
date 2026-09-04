@@ -18,6 +18,7 @@ directory. Nothing here runs a suite from the real repository, so this test
 can never perturb a tracked file.
 """
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -484,6 +485,131 @@ class TheSiblingFallback(unittest.TestCase):
             fixture_tree(tmp, [])
             self.assertIsNone(P.sibling_suite("scripts/mod_imported.py",
                                               root=tmp))
+
+
+class E116TheRealPerturbationIsALongCheckTheBatterySkips(unittest.TestCase):
+    """This tool runs one full suite per file row in the release note, tens of
+    minutes on this tree, and it rewrites tracked source files in place while
+    it does. scripts/check_all.sh registered it as an ordinary step, so every
+    battery round paid that and two concurrent rounds raced on those files.
+
+    It is gated now: skipped unless BROTHER_LONG_CHECKS=1, which the release
+    cut sets. Driven both ways here, because a gate nobody drove backwards is
+    a claim. The gate's own lines are read out of check_all.sh between its
+    markers and run VERBATIM, so this proves the shipped text rather than a
+    paraphrase of it; only run_check() and the counters come with it, and the
+    real battery is never started.
+    """
+
+    CHECK_ALL = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             "check_all.sh")
+    BEGIN = "# E116-LONG-CHECK-BEGIN release-note-perturb"
+    END = "# E116-LONG-CHECK-END"
+
+    def check_all_lines(self):
+        with open(self.CHECK_ALL, encoding="utf-8") as fh:
+            return fh.readlines()
+
+    def shell_function(self, name):
+        """The literal text of `<name>() { ... }` from check_all.sh, matched
+        by its own opening and closing braces so a later edit that moves the
+        function still gets the current body."""
+        lines = self.check_all_lines()
+        opener = "%s() {" % name
+        start = next((i for i, l in enumerate(lines)
+                      if l.startswith(opener)), None)
+        self.assertIsNotNone(start, "%s is not defined in check_all.sh" % name)
+        end = next(i for i in range(start, len(lines))
+                   if lines[i].rstrip("\n") == "}")
+        return "".join(lines[start:end + 1])
+
+    def gate_block(self):
+        """The shipped gate, verbatim, between its own markers."""
+        lines = self.check_all_lines()
+        start = next((i for i, l in enumerate(lines)
+                      if l.strip() == self.BEGIN), None)
+        self.assertIsNotNone(start, "the gate's BEGIN marker is gone")
+        end = next((i for i in range(start, len(lines))
+                    if lines[i].strip() == self.END), None)
+        self.assertIsNotNone(end, "the gate's END marker is gone")
+        return "".join(lines[start + 1:end])
+
+    def drive(self, env_value):
+        """Runs the shipped gate against a fake scripts/release_note_perturb.py
+        in a temp tree, so whether the real command line ran is a fact on disk
+        rather than an inference from the printed line. The gate's own text is
+        not edited: the fake sits at the path the gate names.
+
+        Returns (stdout, ran, exit)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            os.mkdir(os.path.join(tmp, "scripts"))
+            marker = os.path.join(tmp, "it-ran")
+            fake = os.path.join(tmp, "scripts", "release_note_perturb.py")
+            with open(fake, "w", encoding="utf-8") as fh:
+                fh.write("with open(%r, 'w') as m:\n    m.write('ran')\n"
+                         "print('fake step done')\n" % marker)
+            harness = os.path.join(tmp, "harness.sh")
+            with open(harness, "w", encoding="utf-8") as fh:
+                fh.write("#!/bin/sh\n"
+                         "pass=0; fail=0; nodata=0\n"
+                         'failed_names=""; nodata_names=""\n'
+                         + self.shell_function("run_check")
+                         + "\n"
+                         + self.gate_block()
+                         + '\necho "counters pass=$pass fail=$fail '
+                           'nodata=$nodata names:$nodata_names"\n')
+            os.chmod(harness, 0o755)
+            env = dict(os.environ)
+            if env_value is None:
+                env.pop("BROTHER_LONG_CHECKS", None)
+            else:
+                env["BROTHER_LONG_CHECKS"] = env_value
+            proc = subprocess.run(["sh", harness], cwd=tmp, env=env,
+                                  capture_output=True, text=True, timeout=60)
+            return proc.stdout, os.path.exists(marker), proc.returncode
+
+    def test_the_registration_is_inside_the_gate_not_beside_it(self):
+        """The command line itself is unchanged, so scripts/system_doc.py's
+        battery parser still finds it; what changed is that it now sits
+        between the gate's markers."""
+        block = self.gate_block()
+        self.assertIn('run_check "release-note-perturb"', block)
+        self.assertIn("python3 scripts/release_note_perturb.py", block)
+        self.assertIn('"${BROTHER_LONG_CHECKS:-0}" = "1"', block)
+        lines = [l for l in self.check_all_lines()
+                 if l.startswith('run_check "release-note-perturb"')]
+        self.assertEqual(len(lines), 1, lines)
+
+    def test_unset_skips_the_command_and_reads_no_data_never_pass(self):
+        out, ran, code = self.drive(None)
+        self.assertFalse(ran, "the long command ran without being asked to")
+        self.assertIn("NO-DATA", out)
+        self.assertNotIn("PASS", out)
+        self.assertIn("BROTHER_LONG_CHECKS=1", out)
+        self.assertIn("nodata=1", out)
+        self.assertIn("names: release-note-perturb", out)
+        self.assertEqual(code, 0)
+
+    def test_the_expected_duration_is_printed_before_it_starts(self):
+        out, ran, _code = self.drive("1")
+        self.assertTrue(ran, "the long command did not run when asked to")
+        self.assertIn("expected about 90 minute(s)", out)
+        self.assertLess(out.index("expected about 90 minute(s)"),
+                        out.index("fake step done"),
+                        "the duration was printed after the step, not before")
+
+    def test_set_to_one_runs_it_and_it_counts_as_a_pass(self):
+        out, ran, _code = self.drive("1")
+        self.assertTrue(ran)
+        self.assertIn("PASS", out)
+        self.assertIn("pass=1", out)
+        self.assertIn("nodata=0", out)
+
+    def test_any_other_value_does_not_turn_it_on(self):
+        for value in ("0", "yes", "true", ""):
+            out, ran, _code = self.drive(value)
+            self.assertFalse(ran, "BROTHER_LONG_CHECKS=%r ran it" % value)
+            self.assertIn("NO-DATA", out)
 
 
 if __name__ == "__main__":

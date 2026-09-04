@@ -102,8 +102,8 @@ than trusting the directory name.
 
 Everything it writes goes to your vault folder, which you choose with
 `BROTHERSBE_VAULT` (default `~/BrotherSBEVault`). You can verify both claims
-yourself; the tools are standard-library Python and shell: 72,395 lines measured
-2026-08-21 by `wc -l tools/*.py tools/*.sh`, a figure stated here rather
+yourself; the tools are standard-library Python and shell: 83,642 lines measured
+2026-09-05 by `wc -l tools/*.py tools/*.sh`, a figure stated here rather
 than left for you to discover, and a test in `tools/test_sbe.py` fails if it
 drifts more than 15 percent, so the auditability claim degrades loudly
 instead of quietly. This is a wide net for a person to read with judgment,

@@ -1,0 +1,15 @@
+[
+ {
+  "reviewer": "backend-reviewer",
+  "category": "error-handling",
+  "severity": "major",
+  "confidence": "high",
+  "introducedByChange": "yes",
+  "location": "jsonl2csv.py:13",
+  "failure": "A line carrying a byte that is not valid UTF-8 raises out of the read, so the tool dies with a traceback instead of a named failure and a nonzero exit a caller can act on.",
+  "evidence": [
+   "with open(src) as fh:"
+  ],
+  "verification": "python3 check_exit.py"
+ }
+]

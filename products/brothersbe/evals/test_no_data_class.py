@@ -752,6 +752,24 @@ NOT_A_VERDICT = {
         "captures stdout around run_budget_report and returns (its return code, the captured "
         "text), process-shaped output; the report's own verdict lines live inside that text "
         "and this helper neither forms nor alters one",
+
+    # ---------------------------------------------------------------------
+    # Added 2026-09-05 (row PBT-3). Two more of shape (2) above, both in
+    # tools/test_sbe_install.py, both landed on main after the E82b battery
+    # was captured: _verify with PR 216 (row E97) and _citation_line with the
+    # E29 manifest fix. Each was read before being listed, and neither forms
+    # a verdict: they hand back what a subprocess printed, and the test beside
+    # them is what reads a verdict word out of that text.
+    ("test_sbe_install.py", "_verify"):
+        "this suite's own fixture helper; runs scripts/verify-install.sh in a subprocess and "
+        "returns (exit code, stdout plus stderr), so the PASSED and FAILED words its callers "
+        "assert on are the shell script's own output and this helper neither forms nor alters "
+        "one",
+    ("test_sbe_install.py", "_citation_line"):
+        "this suite's own fixture helper; runs sbe_score.py in a subprocess and returns (the "
+        "one citation-inventory line found in that output, the full stdout plus stderr), so "
+        "the verdict word inside that line is the scorer's, selected here and never formed "
+        "here; the same shape as test_sbe_design_fingerprint.py's run_check",
 }
 
 

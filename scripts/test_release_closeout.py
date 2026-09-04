@@ -503,6 +503,168 @@ class ThePlatformLegs(unittest.TestCase):
             self.assertIn("exited 5", why)
 
 
+class TheInvariantLegsSubject(unittest.TestCase):
+    """X6 read FAIL because it measured the WRONG TREE.
+
+    The leg ran the hub's own release_invariant.py, whose ROOT is the hub,
+    against the tag: so the first post-tag merge that touched bundle/runtime
+    turned X6 red while the released artifact was perfectly consistent with
+    itself (measured on 1.0.3, "2 of 34 shipped runtime file(s) differ", every
+    other leg green). Both directions are driven here: a hub that has drifted
+    must not decide the gate, and a tag that contradicts ITSELF still must.
+
+    The invariant tool is stubbed on purpose. What a wrong answer would make
+    look right is not the tool's arithmetic (that is release_invariant.py's
+    own suite) but WHICH COPY runs and WHERE, so the stub records its own cwd
+    and argv and the tests read them back.
+    """
+
+    #: Records the cwd and the arguments it was handed, then exits with the
+    #: code the fixture chose. Written into <tree>/scripts/, so a leg that
+    #: reached for the hub's copy instead leaves this file untouched.
+    STUB = ("import os\n"
+            "import sys\n"
+            "here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))\n"
+            "with open(os.path.join(here, 'ran.txt'), 'w', encoding='utf-8') as fh:\n"
+            "    fh.write(os.getcwd() + '\\n' + ' '.join(sys.argv[1:]) + '\\n')\n"
+            "print('stub release_invariant, tree ' + here)\n"
+            "sys.exit({code})\n")
+
+    def _tree(self, root, code):
+        """A tree that ships its own release_invariant.py exiting `code`."""
+        scripts = os.path.join(root, "scripts")
+        os.makedirs(scripts, exist_ok=True)
+        with open(os.path.join(scripts, "release_invariant.py"), "w",
+                  encoding="utf-8") as fh:
+            fh.write(self.STUB.replace("{code}", str(code)))
+        return root
+
+    def _ran(self, root):
+        """(cwd, argv) the stub in `root` recorded, or (None, None)."""
+        path = os.path.join(root, "ran.txt")
+        if not os.path.isfile(path):
+            return None, None
+        with open(path, encoding="utf-8") as fh:
+            lines = fh.read().splitlines()
+        return (lines[0] if lines else None), (lines[1] if len(lines) > 1
+                                               else "")
+
+    def _gate(self, work):
+        return (rc.Gate("X6", "claude-side", "the Claude side"),
+                rc.Evidence(os.path.join(work, "evidence")))
+
+    def _line(self, gate, needle):
+        for line in gate.lines:
+            if needle in line:
+                return line
+        return ""
+
+    def test_a_drifted_hub_leaves_the_tag_passing_and_says_so_beside_it(self):
+        # THE REGRESSION. The hub disagrees with the tag; the tag agrees with
+        # itself. X6's leg is PASS and the drift is printed, not counted.
+        with tempfile.TemporaryDirectory() as work:
+            gate, ev = self._gate(work)
+            tag = self._tree(os.path.join(work, "tag"), 0)
+            hub = self._tree(os.path.join(work, "hub"), 1)
+            real = rc.REPO
+            rc.REPO = hub
+            try:
+                verdict, why = rc.invariant_leg(gate, ev, tag)
+            finally:
+                rc.REPO = real
+            self.assertEqual(verdict, "PASS", why)
+            self.assertIn(tag, why)
+            drift = self._line(gate, "hub main versus the tag:")
+            self.assertIn("DRIFTED", drift)
+            self.assertIn("INFORMATIONAL ONLY", drift)
+
+    def test_a_tag_that_contradicts_itself_is_still_a_fail(self):
+        # The positive control for the test above: moving the subject must
+        # not have made the leg unable to say FAIL about anything.
+        with tempfile.TemporaryDirectory() as work:
+            gate, ev = self._gate(work)
+            tag = self._tree(os.path.join(work, "tag"), 1)
+            hub = self._tree(os.path.join(work, "hub"), 0)
+            real = rc.REPO
+            rc.REPO = hub
+            try:
+                verdict, why = rc.invariant_leg(gate, ev, tag)
+            finally:
+                rc.REPO = real
+            self.assertEqual(verdict, "FAIL", why)
+            self.assertIn("contradicts", why)
+            self.assertIn("agrees", self._line(gate, "hub main versus the "
+                                                     "tag:"))
+
+    def test_the_tags_own_copy_runs_inside_the_tag(self):
+        # Names the bad state the two verdicts above would ALSO reach if the
+        # leg still ran the hub's copy against the tag: only the tag's stub
+        # may have run, and it must have run with the tag as its cwd and as
+        # its --public-checkout.
+        with tempfile.TemporaryDirectory() as work:
+            gate, ev = self._gate(work)
+            tag = self._tree(os.path.join(work, "tag"), 0)
+            hub = self._tree(os.path.join(work, "hub"), 0)
+            real = rc.REPO
+            rc.REPO = hub
+            try:
+                rc.invariant_leg(gate, ev, tag)
+            finally:
+                rc.REPO = real
+            cwd, argv = self._ran(tag)
+            self.assertIsNotNone(cwd, "the tag's own copy never ran")
+            self.assertEqual(os.path.realpath(cwd), os.path.realpath(tag))
+            self.assertIn(tag, argv)
+            hub_cwd, _ = self._ran(hub)
+            self.assertIsNotNone(hub_cwd, "the informational line never ran")
+            self.assertEqual(os.path.realpath(hub_cwd),
+                             os.path.realpath(hub))
+
+    def test_a_tree_shipping_no_invariant_tool_is_no_data_never_a_pass(self):
+        with tempfile.TemporaryDirectory() as work:
+            gate, ev = self._gate(work)
+            bare = os.path.join(work, "tag")
+            os.makedirs(bare)
+            hub = self._tree(os.path.join(work, "hub"), 0)
+            real = rc.REPO
+            rc.REPO = hub
+            try:
+                verdict, why = rc.invariant_leg(gate, ev, bare)
+            finally:
+                rc.REPO = real
+            self.assertEqual(verdict, "NO-DATA")
+            self.assertIn("release_invariant.py", why)
+
+    def test_an_exit_two_from_the_tag_is_no_data_not_a_fail(self):
+        with tempfile.TemporaryDirectory() as work:
+            gate, ev = self._gate(work)
+            tag = self._tree(os.path.join(work, "tag"), 2)
+            hub = self._tree(os.path.join(work, "hub"), 0)
+            real = rc.REPO
+            rc.REPO = hub
+            try:
+                verdict, _why = rc.invariant_leg(gate, ev, tag)
+            finally:
+                rc.REPO = real
+            self.assertEqual(verdict, "NO-DATA")
+
+    def test_the_informational_line_has_nothing_to_compare_against_itself(self):
+        with tempfile.TemporaryDirectory() as work:
+            gate, ev = self._gate(work)
+            hub = self._tree(os.path.join(work, "hub"), 1)
+            real = rc.REPO
+            rc.REPO = hub
+            try:
+                rc.hub_versus_tag(gate, ev, hub)
+            finally:
+                rc.REPO = real
+            line = self._line(gate, "hub main versus the tag:")
+            self.assertIn("NO-DATA", line)
+            cwd, _argv = self._ran(hub)
+            self.assertIsNone(cwd, "it ran a comparison of a tree with "
+                                   "itself")
+
+
 class ThePublicArtifactsSecondSide(unittest.TestCase):
     """X7 said the release note carried no digest to compare against. It
     carries one, under another name, and the tag ships its reader."""
@@ -617,6 +779,76 @@ class ThePublicArtifactsSecondSide(unittest.TestCase):
             self.assertEqual(verdict, "NO-DATA")
             self.assertIn("does not resolve", why)
             self.assertIn("private hub", why)
+
+
+class TheUpgradeRouteTheRunnerRunsIsTheOneTheReadmeDocuments(unittest.TestCase):
+    """2026-09-05, row X2: the README told a reader to upgrade by adding the
+    marketplace again at the new ref, and Codex refuses that: "marketplace
+    'brother' is already added from a different source; remove it before
+    adding this source", exit 1, measured against the app-bundled codex in an
+    isolated home. The route that works removes the configured marketplace
+    first. Both sides are pinned here so the page a reader copies and the leg
+    the closeout runs can never drift apart again."""
+
+    SOURCE = "https://github.com/khalilmaaouni/Brother"
+    PLACEHOLDER = "<new ref>"
+
+    def _readme_upgrade_block(self):
+        path = os.path.join(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))), "README.md")
+        try:
+            with open(path, encoding="utf-8") as fh:
+                text = fh.read()
+        except OSError as exc:
+            self.fail("could not read README.md: %s" % exc)
+        blocks, keep, current = [], False, []
+        for line in text.splitlines():
+            if line.startswith("```"):
+                if keep:
+                    blocks.append("\n".join(current).strip())
+                    current = []
+                keep = not keep
+                continue
+            if keep:
+                current.append(line)
+        found = [b for b in blocks
+                 if "codex plugin marketplace" in b and self.PLACEHOLDER in b]
+        self.assertEqual(
+            len(found), 1,
+            "README.md must carry exactly one fenced Codex upgrade block "
+            "naming %r; found %d" % (self.PLACEHOLDER, len(found)))
+        return found[0]
+
+    def test_the_readme_block_is_the_runners_route_verbatim(self):
+        self.assertEqual(
+            self._readme_upgrade_block(),
+            rc.upgrade_route_shell(self.SOURCE, self.PLACEHOLDER),
+            "README.md's Codex upgrade block and release_closeout.py's "
+            "UPGRADE_ROUTE disagree. They are the same route: fix both.")
+
+    def test_the_v1_0_3_wording_would_be_refused_by_codex(self):
+        """The positive control: the exact line the public 1.0.3 page handed
+        a reader, which exits 1 against an installed previous release."""
+        refused = ("codex plugin marketplace add %s --ref %s && "
+                   "codex plugin add brother@brother --json"
+                   % (self.SOURCE, self.PLACEHOLDER))
+        self.assertNotEqual(
+            self._readme_upgrade_block(), refused,
+            "README.md still documents the upgrade Codex refuses.")
+
+    def test_the_route_removes_before_it_adds(self):
+        """`codex plugin marketplace upgrade brother` exits 0 and leaves the
+        installed version where it was (1.0.2 to 1.0.2, hashes identical,
+        measured 2026-09-05), so a route that does not remove first cannot
+        move anything."""
+        steps = rc.upgrade_route_steps(self.SOURCE, "v1.0.3")
+        self.assertEqual(steps[0],
+                         ["plugin", "marketplace", "remove", "brother"])
+        self.assertEqual(steps[1], ["plugin", "marketplace", "add",
+                                    self.SOURCE, "--ref", "v1.0.3"])
+        self.assertEqual(steps[2],
+                         ["plugin", "add", "brother@brother", "--json"])
+        self.assertEqual(len(steps), len(rc.UPGRADE_ROUTE_LABELS))
 
 
 if __name__ == "__main__":

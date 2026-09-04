@@ -190,6 +190,24 @@ def build_prompt(brief):
 #: which drops sandboxing entirely and is never what a lane worker needs.
 CLAUDE_ARGV = ["claude", "-p", "--output-format", "json", "--permission-mode",
                "acceptEdits"]
+#:
+#: NO writable-roots GRANT HERE, and that is a measurement rather than an
+#: oversight (2026-09-05, codex-cli 0.153.0-alpha.5, driven three ways in
+#: test_model_worker.TheCodexTurnsSandbox against a worktree sitting under
+#: none of workspace-write's own roots [workdir, /tmp, $TMPDIR]):
+#:   * a plain write inside the unit worktree LANDS with no grant, and that
+#:     is every write this turn makes, since the model edits source files;
+#:   * a `git commit` inside the turn is dropped, silently, with the turn
+#:     still exiting 0, so no caller may read this turn's exit code as
+#:     evidence that anything was written;
+#:   * codex_smoke.GIT_GRANT, which names `<workspace>/.git`, does NOT fix
+#:     that commit in a worktree, because `.git` is a FILE there; only a
+#:     grant on the resolved `git rev-parse --git-common-dir` does.
+#: The lane worker never commits inside this turn anyway: commit_unit_changes
+#: runs git in THIS process after the model command returns, so a flag added
+#: here could not govern it. The sandbox that does govern it is the one
+#: around whatever started Brother, which is the documented C7 command's
+#: grant, recorded in docs/codex/SMOKE-RUNBOOK.md.
 CODEX_ARGV = ["codex", "exec", "--json", "--sandbox", "workspace-write"]
 
 #: The explicit override for which adapter runs, ahead of brother_paths'

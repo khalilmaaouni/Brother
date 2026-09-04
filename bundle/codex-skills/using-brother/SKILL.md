@@ -11,7 +11,8 @@ of the way.
 
 ## Bare `/brother`: the authoritative decision order
 
-The one order for bare `/brother` and for "continue" or "resume" alone.
+The one order for bare `/brother`, for a bare request naming Brother under a
+client with no slash commands, and for "continue" or "resume" alone.
 Other files carry its intent; a session finding a competing version follows
 this one and fixes the other. Evaluate in order, stop at the first match:
 
@@ -26,6 +27,40 @@ this one and fixes the other. Evaluate in order, stop at the first match:
 3. **Explicit words.** "continue"/"resume": row 1's path. An implementation
    outcome: the execution spine, never accidentally resuming old work. An
    assurance ask (verify, review, migration, a number): BrotherSBE.
+
+## Any task that names Brother: run the engine, then read the receipt
+
+Codex has no slash commands, so under Codex a task that names Brother is done
+by running the engine. Four steps, in this order. Writing the patch by hand
+instead is the one failure this section exists to stop: a turn that edits
+files and prints no receipt has not used Brother at all.
+
+1. **Write the unit or units, each with a real done check.** A done check is
+   a command a machine runs that FAILS when the change is wrong. A test you
+   added, run with `python3 -m unittest`, counts. "It looks right" does not.
+2. **Run the engine, never a slash command:**
+
+       python3 "$BROTHER_PLUGIN_ROOT/runtime/brother_run.py" "<outcome>" --cwd <repo>
+
+   Inside a checkout of the Brother repository the same engine is
+   `python3 scripts/brother_run.py "<outcome>" --cwd <repo>`. Under Claude
+   Code the plugin root is `$CLAUDE_PLUGIN_ROOT`. The engine needs a
+   configured model worker and refuses the run when none answers.
+3. **Print the receipt line, then read the receipt back.** The engine's last
+   line is `brother_run: receipt: <path>`. Print that line, open the file it
+   names, and report every per-file entry: the file, the check command, and
+   the exit code that decided it.
+4. **Never claim done without the receipt.** A turn's exit code proves
+   nothing about writes: a write outside a granted sandbox root is dropped
+   silently at exit 0. No receipt, or a receipt whose entries are refused, is
+   a NOT DONE report naming what refused, never a done.
+
+Codex defaults to the read only sandbox, which refuses every write, and plain
+`workspace-write` still refuses the `.git` write unit isolation needs, so the
+turn needs `-s workspace-write` and a writable roots grant on the
+repository's git directory. In a git worktree that directory is NOT
+`<repo>/.git`, which is a file there: it is what `git rev-parse
+--git-common-dir` prints.
 
 ## First, do nothing
 
@@ -53,7 +88,11 @@ together. Nothing forces all three.
 
 ## One grammar, six verbs
 
-| Verb | BrotherMode | BrotherSBE |
+Slash commands are Claude Code's surface. Codex has none, so under Codex
+every row below is reached by running the engine as above, and typing one of
+these strings runs nothing at all.
+
+| Verb | BrotherMode (Claude Code) | BrotherSBE (Claude Code) |
 |---|---|---|
 | start | `/brothermode:brotherme-start` | `/brothersbe:start` |
 | status | `/brothermode:status` | `/brothersbe:status` |

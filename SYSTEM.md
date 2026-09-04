@@ -13,10 +13,10 @@ to run the battery.
 
 | | |
 |---|---:|
-| Parts | 131 |
-| Parts with a purpose written in the file | 131 |
-| Parts with a suite wired into the battery | 110 |
-| Checks in the battery | 183 |
+| Parts | 134 |
+| Parts with a purpose written in the file | 134 |
+| Parts with a suite wired into the battery | 113 |
+| Checks in the battery | 186 |
 
 ## Every part, what it is for, and what proves it
 
@@ -82,6 +82,7 @@ to run the battery.
 | `identity_guard` | refuse NEW commits whose author or committer email domain | `export-public-self`, `identity-guard`, `identity-guard-self` |
 | `intake_score` | Scoring harness for the Intake 9.5 rubric (docs/plan/INTAKE-9.5-DESIGN.md | `intake-record-diagrams`, `intake-score-self` |
 | `integrate` | workers parallel, truth serial. | `integrate-self` |
+| `jbeq_mdm` | JBEQ-MDM seed suite: write the blind prompts, score a blind answer file. | `jbeq-mdm-seed` |
 | `journal` | one append-only causal log per run, fed by the writers that | `journal-self` |
 | `journal_projection` | the delivery report, receipts-bound and a live | `journal-projection-self` |
 | `laws_audit` | R28.1, the law auditor (docs/plan/READINESS-ROADMAP-2026-08-29.json). | `laws-audit`, `laws-audit-self` |
@@ -127,6 +128,7 @@ to run the battery.
 | `resource_gate` | refuse admission when the MACHINE is short, not the code. | `resource-gate-self` |
 | `restart_schedule` | R25.3: the dynamic restart scheduler. Generalizes the existing launchd | **NO-DATA**, nothing in the battery runs it |
 | `restore_drill_enterprise` | a real, populated, multi-tenant restore drill | **NO-DATA**, nothing in the battery runs it |
+| `review_pass` | S32, the review pass: one existing reviewer per high-tier unit, and every | `review-depth-self` |
 | `reviewer_brief` | Generate a one-page reviewer brief from a git ref range. SR-09. | `reviewer-brief-self` |
 | `roadmap_merge` | Three way merge driver for the readiness roadmap JSON, keyed by row id. | `roadmap-merge-self` |
 | `run_evidence` | never destroy the evidence you are about to need. | `run-evidence-self` |
@@ -146,6 +148,7 @@ to run the battery.
 | `v3_surfacing` | replay the machine's PreToolUse repeat guard to find which recorded lessons it | `v3-surfacing-self` |
 | `vault_benchmark_v2` | Atomic Enterprise Benchmark V2, dimension D: Vault institutional memory. | `benchmark-bundle-self`, `vault-benchmark-v2-self` |
 | `vault_clock_backfill` | VB4-03: backfill verified_at on vault notes that have never declared it. | **NO-DATA**, nothing in the battery runs it |
+| `vault_correct` | Vault correction: fix a wrong vault note with one sentence (row V13, | `vault-correct` |
 | `verify_advisor` | a local page for checking work before a commit. | `verify-advisor-self` |
 | `verify_task_estate` | Run every task's OWN verifyCommand and produce real verdicts. | **NO-DATA**, nothing in the battery runs it |
 | `wbs` | The decomposition standard: no node may be dispatched that nobody broke down. | `wbs-granularity`, `wbs-self` |
@@ -173,6 +176,7 @@ to run the battery.
 - `repeat-guard`: `python3 tools/repeat-guard/test_repeat_guard.py`
 - `wisdom-capture`: `/usr/bin/python3 scripts/test_wisdom_capture.py -v`
 - `handover-ceremony`: `/usr/bin/python3 scripts/test_handover_ceremony.py -v`
+- `vault-correct`: `/usr/bin/python3 scripts/test_vault_correct.py -v`
 - `limit-watch-self`: `python3 scripts/test_limit_watch.py -v`
 - `intake-score-self`: `python3 scripts/test_intake_score.py -v`
 - `intake-record-diagrams`: `python3 scripts/intake_score.py --gate --require-weighted-options`
@@ -268,6 +272,7 @@ to run the battery.
 - `vault-benchmark-v2-self`: `python3 -m unittest -v scripts/test_vault_benchmark_v2.py`
 - `benchmark-bundle-self`: `python3 -m unittest -v scripts/test_make_benchmark_bundle.py`
 - `gauntlets-validate`: `python3 benchmarks/gauntlets/validate.py`
+- `jbeq-mdm-seed`: `python3 scripts/test_jbeq_mdm.py`
 - `fable-authority`: `python3 scripts/fable_authority.py --selftest`
 - `tenancy-isolation`: `python3 scripts/test_tenancy_isolation.py`
 - `policy-fail-closed`: `python3 scripts/test_policy_fail_closed.py`
@@ -325,6 +330,7 @@ to run the battery.
 - `reviewer-brief-self`: `python3 scripts/test_reviewer_brief.py -v`
 - `v3-receipts-self`: `python3 scripts/test_v3_receipts.py -v`
 - `receipt-contract-v1`: `python3 scripts/test_receipt_contract.py -v`
+- `review-depth-self`: `python3 scripts/test_review_pass.py -v`
 - `v3-judge-self`: `python3 scripts/test_v3_judge.py -v`
 - `v3-night-receipts-self`: `python3 scripts/test_v3_night_receipts.py -v`
 - `v3-surfacing-self`: `python3 scripts/test_v3_surfacing.py -v`

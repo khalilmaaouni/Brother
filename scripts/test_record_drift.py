@@ -314,6 +314,25 @@ class ACommitOnlyASecondKnownRepositoryHoldsStillResolves(unittest.TestCase):
             D.KNOWN_REPOS = old
 
 
+class AFileDigestLabelIsNotACommitClaim(unittest.TestCase):
+    """The eighth false-positive class: row E96's evidence reads 'corpus
+    sha1 f3920b31b83f, unchanged' and read DRIFT because 'sha' is itself a
+    substring of the label word 'sha1', so the checker's own commit
+    vocabulary matched a digest label. Found 2026-09-04 the same way as the
+    other seven: by reading what it flagged."""
+
+    def test_a_sha1_labelled_digest_reads_nothing(self):
+        self.assertEqual(
+            D.commit_shas("corpus sha1 f3920b31b83f, unchanged"), [])
+
+    def test_a_bare_hex_token_with_no_label_still_drifts(self):
+        """Same shape, no digest label this time: an unlabelled hex token
+        next to an ordinary commit word must still be caught, so this fix
+        narrows the false positive without weakening the check."""
+        self.assertEqual(
+            D.commit_shas("committed f3920b31b83f"), ["f3920b31b83f"])
+
+
 class TheResolverSeesLinkedWorktrees(unittest.TestCase):
     """In a linked worktree .git is a FILE, and the resolver's isdir guard
     skipped that repository entirely, so every commit made there read as

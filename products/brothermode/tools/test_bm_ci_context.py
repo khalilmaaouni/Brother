@@ -66,6 +66,11 @@ _spec = importlib.util.spec_from_file_location("bm_ci_context", TOOL)
 ctx = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(ctx)
 
+_seam_spec = importlib.util.spec_from_file_location(
+    "bm_export_seam", os.path.join(HERE, "bm_export_seam.py"))
+_seam = importlib.util.module_from_spec(_seam_spec)
+_seam_spec.loader.exec_module(_seam)
+
 
 def _read(path):
     with io.open(path, encoding="utf-8") as fh:
@@ -264,6 +269,12 @@ class TestThePullRequestPipeline(unittest.TestCase):
     benefits from, and this is the file that decides whether it runs."""
 
     def setUp(self):
+        # bitbucket-pipelines.yml is a HUB record: docs/plan/EXPORT-ALLOWLIST
+        # .txt withholds it, so a clone of the published release has nothing
+        # to read here and three FileNotFoundErrors are the wrong answer. In
+        # the hub its absence still fails, because there the file is supposed
+        # to be on disk. See tools/bm_export_seam.py.
+        _seam.no_data_outside_the_hub(["bitbucket-pipelines.yml"])
         self.text = _read(PIPELINES)
 
     def test_the_pipeline_defines_a_pull_requests_section(self):
