@@ -338,6 +338,24 @@ def _load_bm_vault_staleness():
     return mod
 
 
+def _load_bm_vault_contradiction():
+    """Dynamic import by path, the same defensive pattern as
+    _load_bm_vault_staleness right above. (Founder steering 2026-09-05,
+    sections 6 to 11: the precedence resolver for two contradictory
+    lessons.) The contract module (bm_vault_contradiction.py) is the ONE
+    owner of the precedence law; this file only calls recall_verdict, so
+    retrieval can never grow a second opinion about which lesson wins.
+    Guarded at the caller: an ABSENT module means a contradiction is
+    printed exactly as before (the plain CONTRADICTS annotation, no
+    withholding), stated on stderr, never a crash -- the same degradation
+    every sibling contract module here already keeps."""
+    spec = importlib.util.spec_from_file_location(
+        "bm_vault_contradiction", os.path.join(_TOOLS_DIR, "bm_vault_contradiction.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def _load_bm_vault_decay():
     """Dynamic import by path, the same pattern _load_bm_vault_staleness uses right
     above. (E57 mechanism 2, borrowed from MemoryBank, https://arxiv.org/abs/2305.10250.)
@@ -1967,6 +1985,13 @@ def _print_hits(con, fused, why, header, roots=None, ledger_hits=None, withheld_
         print("NOTE: D12 lifecycle contract unavailable (%s); candidate "
               "withholding is off for this run, every hit is served exactly "
               "as before" % e, file=sys.stderr)
+    try:
+        contradiction = _load_bm_vault_contradiction()
+    except Exception as e:
+        contradiction = None
+        print("NOTE: contradiction resolver unavailable (%s); a CONTRADICTS "
+              "pair is served exactly as before, annotated but not "
+              "withheld" % e, file=sys.stderr)
     enrich = _load_enrichment()
     fresh_roots = roots if roots else freshness._default_roots()
     state_con = freshness._state_connect(freshness.STATE_DB)
@@ -2031,6 +2056,47 @@ def _print_hits(con, fused, why, header, roots=None, ledger_hits=None, withheld_
                 print("    reason: %s" % reason)
                 print("    %s" % row["path"])
                 continue
+            # THE PRECEDENCE LAW (founder steering 2026-09-05, sections 6 to
+            # 11): current direct evidence beats current authoritative
+            # project state beats current verified vault knowledge beats
+            # valid historical knowledge beats unverified recall, and an
+            # unresolved contradiction is never applied automatically.
+            # Checked BEFORE this hit is printed, the same withhold-first
+            # placement as the superseded/candidate/stale checks right
+            # above, so an unresolved or losing side of a contradiction
+            # never reads as settled advice.
+            resolved_note = None
+            conflicting = _contradicted_by(con, row["path"])
+            if conflicting and contradiction is not None:
+                try:
+                    verdict, winner_title, why_line = contradiction.recall_verdict(
+                        con, row, conflicting)
+                except Exception as e:
+                    # An exception degrades to NO_DATA, never a withhold: a
+                    # resolver that broke is a reason to serve the old plain
+                    # annotation, exactly the same posture every sibling
+                    # contract module here keeps when it cannot load at all.
+                    verdict, winner_title, why_line = "NO_DATA", None, (
+                        "resolver error: %s" % e)
+                if verdict == "APPLY" and winner_title == row["title"]:
+                    resolved_note = why_line
+                elif verdict != "NO_DATA":
+                    withheld += 1
+                    label = ("contradicted, current evidence favors %s" % winner_title
+                              if verdict == "APPLY" else
+                              ("contradiction unresolved" if verdict == "WITHHOLD" else
+                               "contradiction escalated"))
+                    print("\n  WITHHELD (%s)  %s vs %s  [%s, %s]" % (
+                        label, row["title"], ", ".join(conflicting), row["kind"], row["source"]))
+                    print("    reason: %s" % (why_line or "no current evidence resolves "
+                                                "this conflict"))
+                    print("    %s" % row["path"])
+                    continue
+                # else verdict == "NO_DATA": neither side of this conflict
+                # opted into the resolver's metadata, so it falls through
+                # to the plain CONTRADICTS annotation below, exactly the
+                # pre-existing behavior for a note that never declared into
+                # this law.
             print("\n  %s  [%s, %s]" % (row["title"], row["kind"], row["source"]))
             if row["descr"]:
                 print("    %s" % row["descr"][:160])
@@ -2042,8 +2108,9 @@ def _print_hits(con, fused, why, header, roots=None, ledger_hits=None, withheld_
                     "content_sha256": hashlib.sha256(
                         (row["body"] or "").encode("utf-8")).hexdigest(),
                 })
-            conflicting = _contradicted_by(con, row["path"])
-            if conflicting:
+            if conflicting and resolved_note is not None:
+                print("    RESOLVED (applies): %s" % resolved_note)
+            elif conflicting:
                 print("    CONTRADICTS: %s (see both before treating this as settled)"
                       % ", ".join(conflicting))
             print("    matched on: %s" % ", ".join(sorted(set(why.get(nid, ["wording"])))))

@@ -1,0 +1,18 @@
+address              8 of 10
+entity-object        9 of 10
+hierarchy            9 of 10
+identifier           2 of 5
+match-or-no-merge    7 of 10
+requirements         5 of 5
+survivorship         10 of 10
+temporal             10 of 10
+critical WRONG MM-02 [WRONG TAX IDENTITY] expected REJECT MATCH, answered LINK AS RELATED
+critical WRONG MM-05 [UNREVERSIBLE MERGE WITHOUT EVIDENCE] expected ESCALATE, answered SUGGEST MERGE  FALSE MERGE
+critical WRONG MM-08 [CROSS-TENANT DATA LEAK] expected REJECT MATCH, answered KEEP SEPARATE
+critical WRONG HI-01 [HIERARCHY REVERSAL] expected KEEP SEPARATE, answered ESCALATE  CONSERVATIVE
+critical WRONG ID-01 [FALSE MERGE] expected REJECT MATCH, answered KEEP SEPARATE
+critical WRONG ID-02 [WRONG TAX IDENTITY] expected ESCALATE, answered NO-DATA
+critical false merges: 1 of 33 (MM-05)
+critical wrong: 6 of 33 (MM-02, MM-05, MM-08, HI-01, ID-01, ID-02)
+conservative wrongs: 1 (HI-01)
+JBEQ-MDM NOT READY

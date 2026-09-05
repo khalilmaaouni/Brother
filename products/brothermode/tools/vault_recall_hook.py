@@ -55,6 +55,15 @@ try:
 except ImportError:  # pragma: no cover, exercised only by a broken install
     brother_paths = None
 
+# Row V8: the heat counter is advisory only, never on the path that decides
+# whether a lesson is shown. Guarded the same way brother_paths is above, so
+# a broken or missing sibling degrades to "no counter today", never a
+# traceback in front of every edit.
+try:
+    import bm_vault_heat_temporal  # noqa: E402
+except ImportError:  # pragma: no cover, exercised only by a broken install
+    bm_vault_heat_temporal = None
+
 
 def _config_dir():
     """brother_paths' answer, or the pre-C3 literal when the helper is absent."""
@@ -704,8 +713,9 @@ def cmd_check():
     # text (out, unchanged), same as every other failure path in this hook
     # -- never a crash, never a delayed edit.
     tree = payload.get("cwd") or os.getcwd()
+    records = []
     try:
-        _records, out = lesson_states(out, tree)
+        records, out = lesson_states(out, tree)
     except Exception:  # sbe: allow-silent revalidation must never break recall itself
         pass
     titles = _note_titles(out)
@@ -735,6 +745,18 @@ def cmd_check():
         # under the same condition as the marker above, so the log can never
         # claim a recall the model was not shown.
         _append_outcome(session, len(titles), len(context))
+        # Row V8: the heat counter, incremented only for a note that was
+        # actually shown (this exact branch), one call per note, never a
+        # model's opinion. Guarded: a broken counter must never turn a
+        # working recall into a failed edit.
+        if bm_vault_heat_temporal is not None:
+            for record in records:
+                slug = record.get("slug")
+                if slug and slug != "unknown":
+                    try:
+                        bm_vault_heat_temporal.record_recall(slug)
+                    except Exception:  # sbe: allow-silent counter must never break recall
+                        pass
     return 0
 
 

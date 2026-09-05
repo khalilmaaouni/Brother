@@ -1,0 +1,8 @@
+run: 2026-09-05 17:33 JST, blind round 3
+model: claude sonnet (Agent tool, general-purpose, effort high)
+answering agent read only: /Users/khalil.maaouni/.claude/evidence/session-2026-09-05-evening/jbeq-blind-round3/ (70 prompts + RULES-decision-rules-addendum.md)
+seed sha256 872b7eec479fe006 (benchmarks/jbeq/mdm/seed-2026-09-05.json at 05c836e9)
+rules addendum sha256 2db9869f99db16fe
+scorer sha256 ff785ee5e39dc7ff (scripts/jbeq_mdm.py at 05c836e9)
+prompt dir sha256 93268bbcf53015c1
+answers sha256 a706d29cab210dbf

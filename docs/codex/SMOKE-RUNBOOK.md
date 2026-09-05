@@ -322,9 +322,17 @@ Step 6, the task:
          Error: failed to initialize in-process app-server client:
                 Operation not permitted (os error 1)
 
-     So no supported path is rescued by granting the network, and granting a
-     whole turn network access to rescue a call that cannot be made either
-     way would be a widening bought with nothing.
+     So the seam route below is the documented one, and it is documented
+     because it needs no whole-turn widening and no second vendor
+     credential. The network-plus-`claude` route in point 2 is measured, not
+     chosen: `scripts/model_worker.py` exposes `BROTHER_MODEL_CLIENT` to
+     select the `claude` adapter over the `codex` one, so with the network
+     grant a nested `claude -p` DOES answer inside the turn and the engine's
+     own worker can run that way, but only by widening the whole turn's
+     network access and by holding a second vendor's credential, which is a
+     deliberate trade rather than a default. `danger-full-access` against a
+     nested `codex exec` has not been measured at all, so it stays
+     unmeasured, not impossible.
 
   THE ROUTE THAT DOES WORK, and the one the skill tells the model to take:
   hand the engine the units through its documented seam, which makes no model
@@ -336,8 +344,16 @@ Step 6, the task:
   `done_check`, `writes` and `deps`. The engine still isolates every unit,
   still runs every `done_check`, and still writes the receipt; only the
   decomposition came from the agent driving the turn rather than from a
-  nested model. The per-unit worker takes the same treatment through
-  `MODEL_WORKER_CMD`.
+  nested model. `writes` must name EVERY file the unit will change or
+  create, both `mathlib.py` and `test_mathlib.py` for the toy task; a file
+  changed outside `writes` fails the scope audit and the whole unit reads
+  QUARANTINE, never integrated. The per-unit worker takes the same
+  treatment through `MODEL_WORKER_CMD`, and that worker script must exit 0
+  once it is done editing: a non-zero exit, whether a stray traceback or a
+  `set -e` trip firing after the writes already landed, makes
+  `model_worker.py`'s `main()` return 3 before `collect_artifacts` or
+  `commit_changes` ever run, so the edit is lost before anything is
+  committed and the unit's receipt reads NO-DATA.
 
   `--runs-root` is the third thing this step needs, and its absence is the
   2026-09-05 signed-in failure. The engine keeps its records OUTSIDE the
@@ -375,6 +391,65 @@ Step 6, the task:
 
   A run that changes the files but leaves no receipt is a FAIL of this gate,
   not a partial pass: the receipt is the deliverable.
+
+  THE 2026-09-05 18:02 JST SIGNED-IN FAILURE, and the three rules it produced.
+  The founder's own signed-in Codex turn ran this exact step 6 command against
+  Brother v1.0.6 (row X8). It correctly wrote no STATE.md and no `.sbe/`, used
+  `--runs-root /tmp/brother-add-runs`, and reran with `DOOR_MODEL_CMD='cat
+  /tmp/brother-add-plan.json'` after the expected door refusal. The one unit's
+  `done_check` was `python3 -m unittest`, which already passed on the
+  untouched toy before any work happened. The engine's intent screen printed
+  its own warning and proceeded on the recorded default, and the per-unit
+  worker ran with no `MODEL_WORKER_CMD` set, so it fell back to its own
+  default argv, a nested `codex exec`, which cannot start inside a Codex turn
+  and finished in about a second having changed nothing. Because the check
+  was already green, the unit read integrated anyway. Verbatim from that run's
+  own receipt and report:
+
+      files changed (0): none
+      the check already passed before the work began, so it cannot prove the work
+
+  Codex then ended the turn with a question instead of a verdict, verbatim:
+
+      May I retry Brother with a check that requires the new rejection test?
+
+  THE MASKING LESSON, found while writing the fix: `scripts/test_codex_smoke.py`'s
+  own `TheDocumentedCommand` sets `MODEL_WORKER_CMD` in its own test
+  environment before ever invoking the engine, so it proved a seam the
+  documented turn never used. The founder's real turn named no worker command
+  at all, which is exactly the gap that produced the 18:02 failure. The
+  regression this fix adds, `TheSignedInShape` in the same file, runs the
+  exact signed-in shape: no `MODEL_WORKER_CMD` override in one case, and both
+  seams set from the start in the other, so the harness can no longer be
+  green on a seam nobody in the documented command actually sets.
+
+  THE THREE RULES, now also carried in `bundle/skills/using-brother/SKILL.md`:
+
+  1. Each unit's `done_check` must fail BEFORE any work happens. Run it
+     yourself against the untouched repository first; a check already exiting
+     0 is what produced "files changed (0): none" above, and no worker can
+     fix a check that was never able to fail. Never write a bare-path check
+     either: a done check must be runnable on the untouched tree and judged
+     on its RESULT, never on a missing file. `python3 test_add_rejects.py`
+     for a file that does not exist yet just prints "No such file or
+     directory", which the engine treats as a broken check and refuses
+     before any worker starts, and under `cat plan.json` there is no
+     planner left to hand back a replacement check, so the unit is pulled
+     out instead. Use `python3 -m unittest` plus the import based one-liner
+     instead, the shape shown at "What a passing receipt looks like" above.
+  2. Set both `DOOR_MODEL_CMD` and `MODEL_WORKER_CMD` from the first attempt,
+     never only after a door refusal. Under Codex neither seam has a live
+     model to fall back to (a nested `codex exec` cannot start inside a Codex
+     turn), so an unset `MODEL_WORKER_CMD` is not a smaller failure than an
+     unset `DOOR_MODEL_CMD`: it is the same failure, one step later, and it is
+     the one this run actually hit.
+  3. A NO-DATA receipt (the check already passed before the work began, or
+     the files changed read none) means the agent's own check or script was
+     wrong. It is never a stated-versus-observed contradiction and never a
+     forcing condition under any injected law, L6 included: the agent
+     rewrites the check, fixes the script, and reruns the engine in the
+     same turn, without asking anyone. Ending a turn with a question instead
+     of a receipt, the way this run did, is the failure these rules close.
 
 When that passes, row C7's credentialled half closes, and the evidence to file
 is the transcript of step 6 plus the receipt file it names.

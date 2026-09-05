@@ -64,7 +64,7 @@ class PreparationWritesNinePackets(unittest.TestCase):
                 capture_output=True, text=True, timeout=120)
             self.assertEqual(result.returncode, 0, result.stderr)
             written = result.stdout.strip().splitlines()
-            self.assertEqual(len(written), 9, written)
+            self.assertEqual(len(written), 11, written)
             for change_id in ("medium-feature", "auth-security",
                               "schema-migration"):
                 for name in ("raw_diff.txt", "ordinary_summary.txt",
@@ -74,6 +74,22 @@ class PreparationWritesNinePackets(unittest.TestCase):
                     with open(path, encoding="utf-8") as fh:
                         content = fh.read()
                     self.assertTrue(content.strip(), path)
+            instructions_path = os.path.join(tmp, "INSTRUCTIONS.md")
+            self.assertTrue(os.path.isfile(instructions_path),
+                            instructions_path)
+            with open(instructions_path, encoding="utf-8") as fh:
+                instructions_text = fh.read()
+            self.assertIn("ACCEPT", instructions_text)
+            self.assertIn("REJECT", instructions_text)
+            self.assertIn("ASK", instructions_text)
+            founder_path = os.path.join(tmp, "INSTRUCTIONS-FOUNDER.md")
+            self.assertTrue(os.path.isfile(founder_path), founder_path)
+            with open(founder_path, encoding="utf-8") as fh:
+                founder_text = fh.read()
+            self.assertIn("acceptance_trial_assign.py assign", founder_text)
+            self.assertIn("acceptance_trial_assign.py validate",
+                         founder_text)
+            self.assertIn("acceptance_time.py score", founder_text)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 

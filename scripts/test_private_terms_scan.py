@@ -147,22 +147,40 @@ class ItScansWhatAPushWouldSend(unittest.TestCase):
         self.assertIsNone(found)
         self.assertIn("no such ref", err)
 
-    def test_a_branch_the_remote_has_never_seen_scans_the_WHOLE_branch(self):
-        """The first push is the one that matters most, and there is no
-        remote-side base to diff against."""
+    def test_outgoing_range_is_branch_not_remotes(self):
+        """CORRECTED 2026-09-05: outgoing_range no longer probes for
+        origin/<branch> and falls back to scanning the whole branch when
+        that name is absent. It now always returns the same shape, a list
+        of git revision arguments meaning "every commit reachable from the
+        branch that is not reachable from any ref the remote already has",
+        which covers a branch origin already has and one it has never seen
+        in a single path."""
         def runner(cmd):
-            if "--abbrev-ref" in cmd:
-                return Proc(stdout="feature\n")
-            return Proc(returncode=1, stdout="")     # remote does not have it
-        self.assertEqual(P.outgoing_range("origin", runner=runner), "feature")
-
-    def test_a_branch_the_remote_HAS_scans_only_what_is_new(self):
-        def runner(cmd):
-            if "--abbrev-ref" in cmd:
-                return Proc(stdout="feature\n")
-            return Proc(stdout="deadbeef\n")
+            self.assertIn("--abbrev-ref", cmd)
+            return Proc(stdout="feature\n")
         self.assertEqual(P.outgoing_range("origin", runner=runner),
-                         "origin/feature..feature")
+                         ["feature", "--not", "--remotes=origin"])
+
+    def test_scan_range_builds_the_command_from_a_list(self):
+        captured = {}
+
+        def runner(cmd):
+            captured["cmd"] = cmd
+            return Proc(stdout="")
+        P.scan_range(["feature", "--not", "--remotes=origin"], ["ACME"],
+                     runner=runner)
+        self.assertEqual(captured["cmd"],
+                         ["git", "log", "-p", "--no-color", "feature",
+                          "--not", "--remotes=origin"])
+
+    def test_scan_range_still_accepts_a_plain_string_range(self):
+        captured = {}
+
+        def runner(cmd):
+            captured["cmd"] = cmd
+            return Proc(stdout="")
+        P.scan_range("HEAD~1..HEAD", ["ACME"], runner=runner)
+        self.assertEqual(captured["cmd"][-1], "HEAD~1..HEAD")
 
 
 class ItNeverPrintsTheTermItFound(unittest.TestCase):
@@ -288,6 +306,108 @@ class ItRunsAsASubprocessOverAScratchGitRepo(unittest.TestCase):
         self.assertNotIn(LONG_TERM.lower(), combined)
         self.assertIn("term(s)", combined,
                        msg="the count line must still be present")
+
+
+class ItScansOnlyWhatAPushWouldActuallySend(unittest.TestCase):
+    """Acceptance-level tests for the 2026-09-05 fix: a new branch cut off an
+    already-pushed commit must not re-scan history that already reached
+    origin. Mirrors ItRunsAsASubprocessOverAScratchGitRepo's setUp/tearDown
+    and terms-file helper, extended with a bare remote so there is something
+    for the branch to already have been pushed to."""
+
+    def setUp(self):
+        fd, self.terms_path = tempfile.mkstemp()
+        with os.fdopen(fd, "w") as fh:
+            fh.write(SHORT_TERM + "\n" + LONG_TERM + "\n")
+        self.roots = []
+
+    def tearDown(self):
+        os.remove(self.terms_path)
+        for root in self.roots:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def make_repo_with_remote(self):
+        """A bare 'origin' plus a working repo on branch main, with
+        SHORT_TERM already committed and pushed to origin (today's actual
+        situation: the violating blob is ALREADY on origin), then a new
+        'feature' branch checked out off that same commit."""
+        remote_root = tempfile.mkdtemp()
+        work_root = tempfile.mkdtemp()
+        self.roots.append(remote_root)
+        self.roots.append(work_root)
+        subprocess.run(["git", "init", "-q", "--bare", remote_root],
+                       check=True, capture_output=True, text=True)
+        run = lambda cmd: subprocess.run(cmd, cwd=work_root, check=True,
+                                          capture_output=True, text=True)
+        run(["git", "init", "-q"])
+        run(["git", "symbolic-ref", "HEAD", "refs/heads/main"])
+        run(["git", "config", "user.email", "test@example.invalid"])
+        run(["git", "config", "user.name", "Test"])
+        note = os.path.join(work_root, "note.txt")
+        with open(note, "w") as fh:
+            fh.write("start\n")
+        run(["git", "add", "note.txt"])
+        run(["git", "commit", "-q", "-m", "base"])
+        run(["git", "remote", "add", "origin", remote_root])
+        run(["git", "push", "-q", "origin", "HEAD:main"])
+        # A SECOND commit, already published: introduces SHORT_TERM.
+        with open(note, "w") as fh:
+            fh.write("the record mentions %s in passing\n" % SHORT_TERM.lower())
+        run(["git", "add", "note.txt"])
+        run(["git", "commit", "-q", "-m", "already published"])
+        run(["git", "push", "-q", "origin", "HEAD:main"])
+        run(["git", "checkout", "-q", "-b", "feature"])
+        return work_root, run
+
+    def run_scan(self, root):
+        proc = subprocess.run(
+            [sys.executable, TOOL, "--terms", self.terms_path],
+            cwd=root, capture_output=True, text=True)
+        return proc.returncode, proc.stdout, proc.stderr
+
+    def test_a_new_branch_off_an_already_pushed_commit_with_no_new_commits_scores_PASS(self):
+        """The exact defect this fix closes: the term sits in history that
+        already reached origin, and re-refusing it on every new branch
+        blocks all work while protecting nothing new."""
+        root, _run = self.make_repo_with_remote()
+        code, out, err = self.run_scan(root)
+        self.assertEqual(code, P.EXIT_CLEAN, msg=out + err)
+        self.assertTrue(out.startswith("PASS:"), msg=out + err)
+
+    def test_a_genuinely_new_commit_introducing_a_term_on_the_new_branch_still_FAILS(self):
+        root, run = self.make_repo_with_remote()
+        note = os.path.join(root, "note.txt")
+        with open(note, "w") as fh:
+            fh.write("the contract cites %s as the party\n" % LONG_TERM.lower())
+        run(["git", "add", "note.txt"])
+        run(["git", "commit", "-q", "-m", "new leak"])
+        code, out, err = self.run_scan(root)
+        self.assertEqual(code, P.EXIT_FOUND, msg=out + err)
+        self.assertIn("REFUSED", err)
+        combined = out + err
+        self.assertNotIn(SHORT_TERM, combined)
+        self.assertNotIn(SHORT_TERM.lower(), combined)
+        self.assertNotIn(LONG_TERM, combined)
+        self.assertNotIn(LONG_TERM.lower(), combined)
+
+    def test_a_repo_with_no_remote_refs_at_all_scans_the_whole_branch(self):
+        """The first-push case must still be caught: with no remote at all,
+        --not --remotes=origin excludes nothing, so the whole branch scans."""
+        root = tempfile.mkdtemp()
+        self.roots.append(root)
+        run = lambda cmd: subprocess.run(cmd, cwd=root, check=True,
+                                          capture_output=True, text=True)
+        run(["git", "init", "-q"])
+        run(["git", "config", "user.email", "test@example.invalid"])
+        run(["git", "config", "user.name", "Test"])
+        note = os.path.join(root, "note.txt")
+        with open(note, "w") as fh:
+            fh.write("the record mentions %s in passing\n" % SHORT_TERM.lower())
+        run(["git", "add", "note.txt"])
+        run(["git", "commit", "-q", "-m", "only commit"])
+        code, out, err = self.run_scan(root)
+        self.assertEqual(code, P.EXIT_FOUND, msg=out + err)
+        self.assertIn("REFUSED", err)
 
 
 if __name__ == "__main__":

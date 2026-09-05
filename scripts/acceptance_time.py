@@ -223,9 +223,91 @@ CHANGES = [
 ]
 
 
+#: E2. One plain-language instruction sheet, written once per prepared
+#: directory, never per packet. A reviewer reads this before opening any
+#: packet.
+INSTRUCTIONS_TEXT = """\
+Acceptance Compression: reviewer instructions
+
+You have been given three changes. For each one, you were assigned exactly
+one presentation: a raw diff, an ordinary agent summary, or a Brother
+receipt. You will never see the same change twice.
+
+What to do, for each change:
+
+1. Note the time before you open the packet.
+2. Open the ONE file you were assigned for that change. Do not open the
+   other two presentations of the same change, and do not look at the
+   other reviewers' packets.
+3. Decide one of three things: ACCEPT (ship this change as is), REJECT
+   (do not ship this change as written), or ASK (you would need to ask
+   the author a question before deciding).
+4. Note the time the moment you have made your decision.
+5. Write down, in your own words, which lines or parts of the change you
+   actually looked at before deciding.
+
+Record all of this in the results CSV you were given: your start time,
+your end time (or the elapsed seconds), and your decision, on the row for
+that change.
+
+Do not use any tool, search, or outside help beyond what is in the packet
+itself. Do not discuss the changes with another reviewer before every
+reviewer has finished. There are no trick questions and no reward for
+speed over correctness; take the time you actually need.
+"""
+
+
+#: E3. The founder is the one who recruits reviewers, hands out packets,
+#: and collects the results CSV, so the exact commands for the two steps
+#: this harness does NOT do by itself live beside the packets, not only in
+#: a doc nobody opens mid trial.
+INSTRUCTIONS_FOUNDER_TEXT = """\
+Acceptance Compression: commands for when results arrive
+
+This directory already holds the nine packets (three changes times three
+conditions) and INSTRUCTIONS.md for reviewers. The two steps left are
+yours: assigning reviewers and, once they finish, checking and scoring
+their results. Run these from the repository root.
+
+1. Print the counterbalanced assignment table for your reviewer count
+   (five or more; fewer is refused) and write the blank results CSV they
+   fill in:
+
+     python3 scripts/acceptance_trial_assign.py assign <N> --seed <SEED> \\
+         --out-csv <this directory>/results.csv
+
+   Hand each reviewer only the one packet the table names for them, per
+   change, plus INSTRUCTIONS.md. Never let one reviewer see the same
+   change under a second condition.
+
+2. Once every reviewer has filled in their rows (seconds, decision) in
+   results.csv, validate it before scoring:
+
+     python3 scripts/acceptance_trial_assign.py validate <this
+         directory>/results.csv
+
+   Fix whatever it names (a missing time, an impossible time, a reviewer
+   seeing a change twice) and validate again until it prints "clean".
+
+3. Only once validate prints clean, score it:
+
+     python3 scripts/acceptance_time.py score <this directory>/results.csv
+
+   Fewer than five distinct reviewers in the CSV prints NO-DATA and exits
+   3: that is not a bug, it is the honest floor
+   (benchmarks/ACCEPTANCE-TIME.md) refusing to publish a comparison too
+   small to mean anything.
+
+4. Read the result against the frozen rule, not against a hunch:
+   benchmarks/gauntlets/acceptance-compression/SUCCESS-RULE-FROZEN.md.
+   That file is not edited to fit whatever score() prints.
+"""
+
+
 def prepare(out_dir):
-    """Write the nine packets (three changes times three conditions) into
-    out_dir. Returns the list of paths written."""
+    """Write the nine packets (three changes times three conditions) plus
+    INSTRUCTIONS.md and INSTRUCTIONS-FOUNDER.md into out_dir. Returns the
+    list of paths written."""
     os.makedirs(out_dir, exist_ok=True)
     written = []
     for change in CHANGES:
@@ -241,6 +323,13 @@ def prepare(out_dir):
             with open(path, "w", encoding="utf-8") as fh:
                 fh.write(content)
             written.append(path)
+    for name, text in (("INSTRUCTIONS.md", INSTRUCTIONS_TEXT),
+                       ("INSTRUCTIONS-FOUNDER.md",
+                        INSTRUCTIONS_FOUNDER_TEXT)):
+        path = os.path.join(out_dir, name)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        written.append(path)
     return written
 
 

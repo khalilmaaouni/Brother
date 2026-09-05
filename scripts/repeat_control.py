@@ -49,36 +49,70 @@ have no session id to key on. .vault_recall_seen is the hook's own record of its
 own firing, keyed by the same real session id repeat-guard already uses, so it
 is what this script reads instead.
 
-THE ARM. A session (one repeat-guard file) is "recall on" when .vault_recall_seen
-holds a real (non-sentinel) entry for its session id, "recall off" when it does
-not. --start names the date row E53's own design (assigned by session parity of
-the day, for two weeks) actually begins: a session whose repeat-guard file was
-last written before that date is classified by presence as above, regardless of
-the flag, because the parity design has not started for it; a session on or after
-that date is classified by day parity instead (even days since --start: on; odd:
-off). As of this build no real session has ever run on or after a plausible
---start, so the parity branch is exercised only by the tests below, never by the
-driven run.
+THE ARM. A session (one repeat-guard file) is "recall on" when the recall hook
+actually showed at least one lesson IN IT, never by the calendar. FIX 2026-09-05
+(evidence audit, lane E53 instrument-honest): the previous build classified any
+session on or after --start by (day minus start).days modulo 2 "regardless of
+the flag", which made the arm label a coin flip on the calendar date rather than
+a read of what happened, of 22 real lesson-shown sessions, 21 landed in the arm
+that flip called "off". The mechanism is the only source of truth now, for every
+session regardless of its date: a real (non-sentinel) entry in
+.vault_recall_seen for that session id, OR a "vault_recall" row in the shared
+hook-outcomes log naming that session with lessons_shown > 0 (see
+merge_shown_sessions). --start's day-parity SCHEDULE is still computed and
+printed as its own "scheduled arm by parity" line, because it is the design's
+stated intent and worth seeing, but it decides nothing.
 
-A REPEAT. Ordering sessions by their repeat-guard file's own mtime, a repeat is:
-a failing sig (ok is False) in session E, the SAME sig failing again (ok is
-False) in a strictly later session L, with no failure of that sig in between
-attributed elsewhere -- pairwise, so three failures of one sig across three
-sessions count as two repeats, one charged to each earlier session of the pair.
-It is charged to arm(E): for an "on" session E this is exactly row E53's own
-wording ("the same failure class recurring in a later session after the lesson
-was shown"), since E being "on" means a lesson was shown in it by construction;
-an "off" session E never had a lesson shown, so its repeat rate is the baseline
-this whole experiment exists to compare against. A second failure of the same
-sig inside ONE session never counts: only distinct, later session files do.
+WINDOWING. FIX 2026-09-05 (same audit): --start used to accept every session
+ever recorded, regardless of date, so 435 of 553 guard files (spanning
+2026-08-24 to 2026-09-05, before any plausible --start) were counted into an arm
+the design had not started for. A session whose repeat-guard file's own mtime
+falls before --start is now excluded from BOTH arms entirely (not classified
+into either), reported as its own "excluded: N session(s) before <date>" line,
+and --min-sessions is checked AFTER exclusion.
+
+A REPEAT, the SECONDARY signal (same-sig cross-session collision). Ordering
+sessions by their repeat-guard file's own mtime, a repeat is: a failing sig (ok
+is False) in session E, the SAME sig failing again (ok is False) in a strictly
+later session L, with no failure of that sig in between attributed elsewhere,
+pairwise, so three failures of one sig across three sessions count as two
+repeats, one charged to each earlier session of the pair. It is charged to
+arm(E): for an "on" session E this is exactly row E53's own wording ("the same
+failure class recurring in a later session after the lesson was shown"), since E
+being "on" means a lesson was shown in it by construction; an "off" session E
+never had a lesson shown, so its repeat rate is the baseline this whole
+experiment exists to compare against. A second failure of the same sig inside
+ONE session never counts: only distinct, later session files do.
+
+FIX 2026-09-05 (same audit): this detector has never once fired on this
+machine's real corpus, 90,873 rows, 465 with ok is False, 440 distinct sigs,
+ZERO sigs failing in more than one session. When the whole corpus (the sessions
+actually in scope, after windowing) shows zero cross-session collisions, the
+rate line says so by name rather than printing a trustworthy-looking "0.00
+repeat(s) per hundred attempts": a detector that has never fired even once
+cannot yet be told apart from a detector that is broken, and 0.00 reads exactly
+like the first when it might be the second.
+
+THE PRIMARY signal, added the same fix: the E53.5 subtask
+(scripts/lesson_repeat_trial.py) already built and ran a different, working
+repeat detector, a REPLAY of the estate's own run_evidence captures through
+repeat_guard's real matcher, asking per real failure whether the lesson that
+describes it was already recorded at that moment (SHOWN) or not (SILENT), and it
+fires: 4 of 4 on the one real run so far. That module's own build_log,
+read_lessons and replay functions are imported and reused here verbatim (never a
+second implementation of the same rule) as read_e53_5_signal's primary line,
+printed once, corpus-wide: the run_evidence store carries no session id, so this
+signal cannot be split into the on/off arms the way the secondary signal is.
 
 NO-DATA is never a zero. An absent guard directory, an absent recall-seen file,
-or an absent ledger file each print their own NO-DATA line naming the path they
-looked for, and an arm short of --min-sessions prints its own NO-DATA line
-rather than a computed rate nobody should trust.
+an absent ledger file, an absent evidence store, or an absent lesson store each
+print their own NO-DATA line naming the path they looked for, and an arm short
+of --min-sessions (after windowing) prints its own NO-DATA line rather than a
+computed rate nobody should trust.
 
 Python 3.9, standard library only. Read-only: this script never writes to any of
-the three paths above.
+the paths it reads, including the two the primary signal adds (the run_evidence
+store and repeat_guard's own lesson store).
 """
 import argparse
 import datetime
@@ -92,6 +126,9 @@ sys.path.insert(0, HERE)
 # that knows which coding client is running (docs/codex/HOOKS-MAPPING.md).
 import brother_paths  # noqa: E402
 import attempt_ledger  # noqa: E402
+# The E53.5 primary signal, reused rather than reimplemented (see THE
+# PRIMARY signal in the module docstring above).
+import lesson_repeat_trial  # noqa: E402
 
 # NOT routed through brother_paths on purpose: this directory is written
 # by ~/.claude/hooks/repeat_guard.py, a MACHINE-LEVEL hook this product
@@ -101,6 +138,12 @@ DEFAULT_GUARD_DIR = os.path.join(os.path.expanduser("~"), ".claude", "repeat-gua
 DEFAULT_RECALL_LOG = brother_paths.config_path(".vault_recall_seen")
 DEFAULT_LEDGER = str(attempt_ledger.STORE)
 DEFAULT_MIN_SESSIONS = 5
+
+# The primary signal's own two sources, lesson_repeat_trial's own defaults
+# (its run_evidence store and repeat_guard's own lesson store), never a
+# second copy of either path typed by hand here.
+DEFAULT_EVIDENCE_STORE = lesson_repeat_trial.DEFAULT_STORE
+DEFAULT_REPEAT_LESSONS = str(lesson_repeat_trial.repeat_guard.LESSONS)
 
 UNCONFIGURED_SENTINEL = "__unconfigured__"
 
@@ -245,21 +288,43 @@ def outcome_lines(rows, path):
     return lines
 
 
-def classify_session(session_id, mtime, shown_map, start_date):
-    """('on'|'off'). shown_map may be None (recall log absent -> every
-    session classifies 'off' by presence, honestly reflecting that nothing
-    was ever recorded as shown)."""
-    if start_date is not None:
-        day = datetime.date.fromtimestamp(mtime)
-        if day >= start_date:
-            parity = (day.toordinal() - start_date.toordinal()) % 2
-            return "on" if parity == 0 else "off"
-    return "on" if (shown_map and shown_map.get(session_id)) else "off"
+def merge_shown_sessions(shown_map, outcome_rows):
+    """dict session_id -> True, the MECHANISM: the union of both real
+    firing records (defect 1 fix). shown_map (from .vault_recall_seen) may
+    be None; outcome_rows (the shared hook-outcome log) may be None. Never
+    consults --start or any calendar date -- that is the whole fix."""
+    merged = dict(shown_map) if shown_map else {}
+    if outcome_rows:
+        for r in outcome_rows:
+            if r.get("hook") != "vault_recall":
+                continue
+            session = r.get("session")
+            if session and int(r.get("lessons_shown") or 0) > 0:
+                merged[session] = True
+    return merged
+
+
+def classify_session(session_id, merged_shown):
+    """('on'|'off') by mechanism alone: did the recall hook actually show a
+    lesson in this session. merged_shown is merge_shown_sessions's output;
+    an absent or empty map classifies every session 'off', honestly
+    reflecting that nothing was ever recorded as shown."""
+    return "on" if merged_shown.get(session_id) else "off"
+
+
+def parity_schedule(mtime, start_date):
+    """('on'|'off'), the row E53 day-parity SCHEDULE: informational only,
+    printed so the design's stated intent is visible, never used to decide
+    an arm (see defect 1 in the module docstring)."""
+    day = datetime.date.fromtimestamp(mtime)
+    parity = (day.toordinal() - start_date.toordinal()) % 2
+    return "on" if parity == 0 else "off"
 
 
 def compute_repeats(sessions):
     """dict session_id -> repeat count charged to it, per the pairwise,
-    chronological definition in the module docstring."""
+    chronological definition in the module docstring (the SECONDARY
+    signal)."""
     ordered = sorted(sessions.items(), key=lambda kv: kv[1]["mtime"])
     last_fail_session = {}
     repeats_by_session = {}
@@ -274,8 +339,14 @@ def compute_repeats(sessions):
     return repeats_by_session
 
 
-def arm_report(label, session_ids, sessions, shown_map, repeats_by_session, min_sessions):
-    """(line, stats-or-None). stats is None exactly when this arm is NO-DATA."""
+def arm_report(label, session_ids, sessions, shown_map, repeats_by_session,
+               min_sessions, corpus_zero_collisions):
+    """(line, stats-or-None). stats is None exactly when this arm is
+    NO-DATA for lack of sessions. When corpus_zero_collisions is True (the
+    secondary detector has not collided anywhere in the sessions actually
+    in scope), the rate portion of the line is NO-DATA rather than a
+    printed 0.00 (defect 2 fix); stats["rate"] is then None too, so the
+    comparison line downstream can tell the difference from a real zero."""
     n = len(session_ids)
     if n < min_sessions:
         return ("NO-DATA: %s has %d session(s), fewer than %d" % (label, n, min_sessions),
@@ -283,6 +354,13 @@ def arm_report(label, session_ids, sessions, shown_map, repeats_by_session, min_
     attempts = sum(len(sessions[s]["rows"]) for s in session_ids)
     lessons_shown = sum(1 for s in session_ids if shown_map and shown_map.get(s))
     repeats = sum(repeats_by_session.get(s, 0) for s in session_ids)
+    if corpus_zero_collisions:
+        line = ("%s: %d session(s), %d tool call(s), %d lesson(s) shown, "
+                "NO-DATA: repeat signal never collided across sessions: the "
+                "fingerprint cannot be told from a detector that cannot fire"
+                % (label, n, attempts, lessons_shown))
+        return line, {"sessions": n, "attempts": attempts, "lessons_shown": lessons_shown,
+                       "repeats": repeats, "rate": None}
     rate = (100.0 * repeats / attempts) if attempts else 0.0
     line = ("%s: %d session(s), %d tool call(s), %d lesson(s) shown, %d repeat(s), "
             "%.2f repeat(s) per hundred attempts" % (label, n, attempts, lessons_shown,
@@ -291,10 +369,52 @@ def arm_report(label, session_ids, sessions, shown_map, repeats_by_session, min_
                    "repeats": repeats, "rate": rate}
 
 
+def read_e53_5_signal(store, lessons_path):
+    """(line, stats-or-None), the PRIMARY signal. Reuses
+    lesson_repeat_trial's own build_log, read_lessons and replay verbatim
+    (never a second implementation of the same rule); see THE PRIMARY
+    signal in the module docstring. stats is None exactly when this signal
+    is NO-DATA (an absent store, an absent lesson file, or a corpus with
+    no failure any lesson describes)."""
+    result = lesson_repeat_trial.build_log(store)
+    if result is None:
+        return ("NO-DATA: no evidence store at %s for the primary repeat "
+                "signal (E53.5 replay)" % store, None)
+    rows, unreadable = result
+    if not rows:
+        return ("NO-DATA: %s holds no run_evidence capture for the primary "
+                "repeat signal (E53.5 replay)" % store, None)
+    lessons = lesson_repeat_trial.read_lessons(lessons_path)
+    if lessons is None:
+        return ("NO-DATA: no lesson store at %s for the primary repeat "
+                "signal (E53.5 replay)" % lessons_path, None)
+    arm_a = lesson_repeat_trial.replay(rows, lessons)
+    arm_b = lesson_repeat_trial.replay(rows, [])  # memory off: the floor
+    n = len(arm_a)
+    if n == 0:
+        return ("NO-DATA: %d command(s) replayed from %s, none of the "
+                "failures matched any of the %d lesson(s) in %s for the "
+                "primary repeat signal (E53.5 replay)"
+                % (len(rows), store, len(lessons), lessons_path), None)
+    shown_a = sum(1 for r in arm_a if r["lesson"])
+    shown_b = sum(1 for r in arm_b if r["lesson"])
+    line = ("primary repeat signal (E53.5 replay, reused from "
+            "lesson_repeat_trial.py): shown before the repeat: %d of %d "
+            "failure(s) with recall as it happened, %d of %d with memory "
+            "off, replayed from %d command(s) in %s against %d lesson(s) "
+            "in %s" % (shown_a, n, shown_b, n, len(rows), store, len(lessons),
+                       lessons_path))
+    return line, {"n": n, "shown_a": shown_a, "shown_b": shown_b}
+
+
 def run(guard_dir=DEFAULT_GUARD_DIR, recall_log=DEFAULT_RECALL_LOG,
         ledger=DEFAULT_LEDGER, min_sessions=DEFAULT_MIN_SESSIONS, start=None,
-        out=sys.stdout, outcomes=None):
-    """Returns the process exit code: 0 when both arms report, 2 otherwise."""
+        out=sys.stdout, outcomes=None, evidence_store=DEFAULT_EVIDENCE_STORE,
+        repeat_lessons=DEFAULT_REPEAT_LESSONS):
+    """Returns the process exit code: 0 when both arms report (by session
+    count), 2 otherwise. Exit code reflects the secondary (arm) signal's
+    session coverage only, unchanged from before this fix; both signals'
+    own NO-DATA lines are printed regardless of the exit code."""
     start_date = None
     if start:
         start_date = datetime.date.fromisoformat(start)
@@ -327,25 +447,61 @@ def run(guard_dir=DEFAULT_GUARD_DIR, recall_log=DEFAULT_RECALL_LOG,
     for line in outcome_lines(outcome_rows, outcomes_path):
         print(line, file=out)
 
-    repeats_by_session = compute_repeats(sessions)
+    # C3 fix: window by --start, excluding pre-start sessions from BOTH
+    # arms entirely rather than folding them into whichever arm presence
+    # happens to classify them as.
+    included = sessions
+    if start_date is not None:
+        excluded_ids = [sid for sid, data in sessions.items()
+                         if datetime.date.fromtimestamp(data["mtime"]) < start_date]
+        if excluded_ids:
+            included = {sid: data for sid, data in sessions.items()
+                        if sid not in excluded_ids}
+        print("excluded: %d session(s) before %s"
+              % (len(excluded_ids), start_date.isoformat()), file=out)
+
+        scheduled = {"on": 0, "off": 0}
+        for sid, data in included.items():
+            scheduled[parity_schedule(data["mtime"], start_date)] += 1
+        print("scheduled arm by parity (design intent, not used for the "
+              "comparison): %d on-day session(s), %d off-day session(s)"
+              % (scheduled["on"], scheduled["off"]), file=out)
+
+    # C1 fix: the arm is decided by the mechanism (a lesson actually
+    # shown), corroborated across both real logs, never by the calendar.
+    merged_shown = merge_shown_sessions(shown_map, outcome_rows)
+
+    repeats_by_session = compute_repeats(included)
+    corpus_zero_collisions = (sum(repeats_by_session.values()) == 0)
 
     arms = {"on": [], "off": []}
-    for session_id, data in sessions.items():
-        arm = classify_session(session_id, data["mtime"], shown_map, start_date)
-        arms[arm].append(session_id)
+    for session_id in included:
+        arms[classify_session(session_id, merged_shown)].append(session_id)
 
+    primary_line, primary_stats = read_e53_5_signal(evidence_store, repeat_lessons)
+    print(primary_line, file=out)
+
+    print("secondary repeat signal (same-sig cross-session collision detector):",
+          file=out)
     stats = {}
     for key, label in (("on", "recall on"), ("off", "recall off")):
-        line, s = arm_report(label, arms[key], sessions, shown_map,
-                              repeats_by_session, min_sessions)
+        line, s = arm_report(label, arms[key], included, merged_shown,
+                              repeats_by_session, min_sessions, corpus_zero_collisions)
         print(line, file=out)
         stats[key] = s
 
     if stats["on"] and stats["off"]:
-        on_rate, off_rate = stats["on"]["rate"], stats["off"]["rate"]
-        print("comparison: recall on repeats at %.2f per hundred attempts, "
-              "recall off at %.2f, difference %.2f"
-              % (on_rate, off_rate, on_rate - off_rate), file=out)
+        if corpus_zero_collisions:
+            print("comparison: NO-DATA: repeat signal never collided across "
+                  "sessions: the fingerprint cannot be told from a detector "
+                  "that cannot fire (secondary signal, same-sig cross-session "
+                  "collision detector)", file=out)
+        else:
+            on_rate, off_rate = stats["on"]["rate"], stats["off"]["rate"]
+            print("comparison: recall on repeats at %.2f per hundred attempts, "
+                  "recall off at %.2f, difference %.2f (secondary signal, "
+                  "same-sig cross-session collision detector)"
+                  % (on_rate, off_rate, on_rate - off_rate), file=out)
         return 0
     print("NO-DATA: the comparison needs both arms", file=out)
     return 2
@@ -354,7 +510,8 @@ def run(guard_dir=DEFAULT_GUARD_DIR, recall_log=DEFAULT_RECALL_LOG,
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--start", default=None,
-                     help="YYYY-MM-DD the row E53 day-parity design begins")
+                     help="YYYY-MM-DD the row E53 day-parity design begins; "
+                          "sessions before this date are excluded from both arms")
     ap.add_argument("--recall-log", default=DEFAULT_RECALL_LOG)
     ap.add_argument("--ledger", default=DEFAULT_LEDGER)
     ap.add_argument("--guard-log", dest="guard_log", default=DEFAULT_GUARD_DIR)
@@ -363,10 +520,19 @@ def main(argv=None):
     ap.add_argument("--outcomes", default=DEFAULT_OUTCOMES,
                      help="the shared hook-outcome log both hooks append to "
                           "(lessons shown, recall cost, refusals)")
+    ap.add_argument("--evidence-store", dest="evidence_store",
+                     default=DEFAULT_EVIDENCE_STORE,
+                     help="run_evidence capture store for the E53.5 replay "
+                          "primary signal")
+    ap.add_argument("--repeat-lessons", dest="repeat_lessons",
+                     default=DEFAULT_REPEAT_LESSONS,
+                     help="repeat_guard's own lessons.jsonl for the E53.5 "
+                          "replay primary signal")
     args = ap.parse_args(list(sys.argv[1:] if argv is None else argv))
     return run(guard_dir=args.guard_log, recall_log=args.recall_log,
                ledger=args.ledger, min_sessions=args.min_sessions, start=args.start,
-               outcomes=args.outcomes)
+               outcomes=args.outcomes, evidence_store=args.evidence_store,
+               repeat_lessons=args.repeat_lessons)
 
 
 if __name__ == "__main__":

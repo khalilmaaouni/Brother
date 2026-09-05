@@ -1,8 +1,8 @@
 {
   "gauntlet": "memory-recurrence",
   "spec": "benchmarks/gauntlets/memory-recurrence.json",
-  "run_at": "2026-09-05T08:45:33",
-  "revision": "8fc7acc9b5073b4546dddf30288e7463b17e3e65",
+  "run_at": "2026-09-05T18:01:35",
+  "revision": "43bed654bf8d66b7b483fdd118db477b4c78c3b0",
   "fixture": {
     "target_file": "widget_parser.py",
     "workload_family": "1, tiny bug fix. One family, not three: this is a mechanism run and says so.",
@@ -13,12 +13,10 @@
     ]
   },
   "summary": {
-    "prevented": 3,
-    "conditions_counted": 4,
-    "line": "recurrence prevented: 3 of 4 conditions",
-    "no_data": [
-      "contradictory memory"
-    ]
+    "prevented": 4,
+    "conditions_counted": 5,
+    "line": "recurrence prevented: 4 of 5 conditions",
+    "no_data": []
   },
   "conditions": [
     {
@@ -51,7 +49,7 @@
       "id": "stale memory",
       "expected": "validate-before-return",
       "result": "surfaced",
-      "detail": "applied exactly [validate-before-return]; refused old-lexer-rule: recall: STALE old-lexer-rule: anchor gone_lexer.py not found in /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/gauntlet-memory-recurrence-fqdk4m68/tree; not applied",
+      "detail": "applied exactly [validate-before-return]; refused old-lexer-rule: recall: STALE old-lexer-rule: anchor gone_lexer.py not found in /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/gauntlet-memory-recurrence-_q2fetc2/tree; not applied",
       "note": "a second lesson names a path that no longer exists; it must be refused BY NAME and the current one still applied.",
       "applied": [
         "validate-before-return"
@@ -59,7 +57,7 @@
       "stale": [
         {
           "slug": "old-lexer-rule",
-          "line": "recall: STALE old-lexer-rule: anchor gone_lexer.py not found in /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/gauntlet-memory-recurrence-fqdk4m68/tree; not applied"
+          "line": "recall: STALE old-lexer-rule: anchor gone_lexer.py not found in /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/gauntlet-memory-recurrence-_q2fetc2/tree; not applied"
         }
       ],
       "unverified": [],
@@ -69,20 +67,16 @@
     {
       "id": "contradictory memory",
       "expected": "validate-before-return",
-      "result": "NO-DATA",
-      "detail": "no field expresses which side of a contradiction current source supports: bm_vault.py serves both and flags each with CONTRADICTS, and vault_recall_hook.py's lesson_states has no branch for the contradictions table, so neither a note field (there is nothing like verified_against:) nor the recall path ranks the two",
+      "result": "surfaced",
+      "detail": "applied exactly [validate-before-return]",
       "note": "two retrievable lessons assert the opposite of each other about the same current source.",
       "applied": [
-        "never-validate",
         "validate-before-return"
       ],
       "stale": [],
       "unverified": [],
       "withheld_superseded": [],
-      "contradicts_flagged": [
-        "never validate",
-        "validate before return"
-      ]
+      "contradicts_flagged": []
     },
     {
       "id": "superseded memory",
@@ -100,5 +94,11 @@
       ],
       "contradicts_flagged": []
     }
-  ]
+  ],
+  "contradiction_evidence_absent_check": {
+    "id": "contradictory memory (evidence absent)",
+    "result": "withheld",
+    "detail": "both sides withheld: no current evidence resolves this conflict",
+    "applied": []
+  }
 }

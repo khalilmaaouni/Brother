@@ -1574,7 +1574,17 @@ class TestProjectSecurityClaims(unittest.TestCase):
                    # only to a base_url the caller names (127.0.0.1 by
                    # default in its own --base-url flag). SECURITY.md
                    # carries the same admission.
-                   "vault_client.py": {"urllib"}}
+                   "vault_client.py": {"urllib"},
+                   # bm_vault_contradiction.py (founder steering 2026-09-05,
+                   # the vault contradiction resolver) runs a lesson's own
+                   # `test:<path>` evidence_locator as a LOCAL subprocess
+                   # (this same interpreter against a file inside the same
+                   # tree), exactly bm_controller.py's own posture running a
+                   # unit's deterministic done-check. No remote, no push, no
+                   # fetch: it either runs a local script and reads its exit
+                   # code, or the path is absent and evidence FAILS without
+                   # ever spawning anything.
+                   "bm_vault_contradiction.py": {"subprocess"}}
         for n in sorted(os.listdir(tools)):
             if not n.endswith(".py") or n.startswith("test_"):
                 continue

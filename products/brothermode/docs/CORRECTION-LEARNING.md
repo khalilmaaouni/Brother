@@ -146,6 +146,27 @@ was exercised by hand for this document.
   a conflict by hand with `bm_learn.py link a contradicts b`, and a declared
   conflict counts the same as a detected one everywhere downstream.
 
+  Detecting a conflict is not the same as deciding which side of it drives
+  engineering, and until 2026-09-05 nothing did: two contradictory lessons
+  were both surfaced at recall, each annotated CONTRADICTS, with no rule for
+  which one a session should act on. `tools/bm_vault_contradiction.py`
+  (founder steering 2026-09-05, sections 6 to 11) is that rule, wired into
+  `bm_vault.py`'s own recall path. Its precedence law is an explicit
+  invariant, never inferred from a timestamp, a similarity score, or how
+  often a lesson was recalled: CURRENT DIRECT EVIDENCE beats CURRENT
+  AUTHORITATIVE PROJECT STATE beats CURRENT VERIFIED VAULT KNOWLEDGE beats
+  VALID HISTORICAL KNOWLEDGE beats UNVERIFIED RECALL. It checks each side's
+  own `evidence_locator` (a path, a grep against current code, a passing
+  test, or a current decision record) and, only where evidence is silent,
+  falls back to the vault's own `status` field (verified beats unverified,
+  current beats superseded). Where nothing above resolves it, THE
+  CONTRADICTION IS NEVER APPLIED: both lessons are withheld, or the
+  conflict is escalated when the evidence is not merely silent but actively
+  ambiguous, never a silent pick on recency or similarity. A note carrying
+  none of this resolver's own metadata (no `evidence_locator`, no `status`)
+  never opted into the law and is served exactly as it always was, the
+  plain CONTRADICTS annotation above.
+
 - **Retrieval and application outcomes (Loop 7).** Every rule shown to a
   session can be marked followed, ignored, not relevant, or unknown, so the
   store can answer "was the rule actually followed" rather than only "was it
