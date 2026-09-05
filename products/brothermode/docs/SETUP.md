@@ -78,7 +78,7 @@ the clone lands in a source checkout, not the skill directory itself, and
 this product's own installer (Step 2 below) copies it the rest of the way:
 
 ```bash
-git clone --branch v1.0.4 --depth 1 https://github.com/khalilmaaouni/Brother.git ~/.claude/skills/brothermode-src
+git clone --branch v1.0.5 --depth 1 https://github.com/khalilmaaouni/Brother.git ~/.claude/skills/brothermode-src
 cd ~/.claude/skills/brothermode-src/products/brothermode
 ```
 
