@@ -169,6 +169,24 @@ def documented_shell_command():
     return " ".join(words)
 
 
+#: THE RUNS ROOT, DEFINED ONCE, for the skill, the runbook and this script.
+#: $TMPDIR and NOT `$PWD/.brother-runs`, and the reason is measured twice
+#: over. A workspace-write turn prints its own writable roots, "workdir,
+#: /tmp, $TMPDIR", so the temp root is granted and reachable. Inside the
+#: repository the records are untracked files in the tree integration checks
+#: for cleanliness: pointed there once, on 2026-08-30, a run spun 11 rounds
+#: of live worker calls against a permanently dirty canonical and had to be
+#: killed by hand.
+DOCUMENTED_RUNS_ROOT = "$TMPDIR/brother-runs"
+
+
+def documented_runs_root_flag():
+    """The `--runs-root` words the runbook and the skill both print, built
+    here so the page and the code cannot say different things (the same rule
+    documented_shell_command already lives by)."""
+    return '--runs-root "%s"' % DOCUMENTED_RUNS_ROOT
+
+
 def printf_line(body, path):
     """The `printf ... > path` line the runbook uses to lay one toy file
     down, rendered from the constant above so the page and the code cannot

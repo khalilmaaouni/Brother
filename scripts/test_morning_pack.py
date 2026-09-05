@@ -13,6 +13,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import morning_pack as MP  # noqa: E402
+import tempfile
 
 
 def _base_flags(**overrides):
@@ -72,6 +73,37 @@ class ComputeVerdictTests(unittest.TestCase):
         flags = _base_flags(ruleset_required=False, required_fast_wired=False)
         self.assertEqual(MP.compute_verdict(flags),
                          "JAPANESE MDM ENGINEERING QUALIFIED")
+
+
+
+
+class GatherJbeqTests(unittest.TestCase):
+    """Test that gather_jbeq() output contains no absolute paths."""
+
+    def test_no_absolute_paths_in_jbeq_output(self):
+        """Verify that generated JBEQ pack lines do not contain /Users/ or ~/ paths."""
+        # Create a temp directory with a fake answer file
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create a mock answer file
+            answer_file = os.path.join(tmpdir, "answers-arm-B-rules.json")
+            with open(answer_file, 'w') as f:
+                f.write('{}')  # Minimal JSON
+            
+            # Call gather_jbeq with the temp directory (returns tuple of lines, flags)
+            lines, flags = MP.gather_jbeq(tmpdir)
+            
+            # Join all lines and check for absolute paths
+            output = "\n".join(lines)
+            
+            # Assert no /Users/ or ~/ paths in output
+            self.assertNotIn("/Users/", output,
+                           msg="JBEQ output contains absolute /Users/ path")
+            self.assertNotRegex(output, r"~/",
+                              msg="JBEQ output contains ~/ path")
+
+
+if __name__ == "__main__":
+    unittest.main()
 
 
 if __name__ == "__main__":

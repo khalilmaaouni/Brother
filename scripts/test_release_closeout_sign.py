@@ -75,6 +75,16 @@ def _repo_with_commit(root):
                    check=True)
     subprocess.run(["git", "-C", root, "config", "user.email",
                     "test@example.invalid"], check=True)
+    # THE FIXTURE PINS ITS OWN SIGNING, and this is not decoration. On a
+    # machine whose global config sets tag.gpgSign true (this one, measured
+    # 2026-09-05), the "unsigned" tag below is SIGNED, so the unsigned leg
+    # read PASS instead of NO-DATA and the lightweight leg died outright
+    # with "fatal: no tag message?" because gpgSign forces an annotation.
+    # Local config wins over global, so these two fixtures mean what their
+    # names say on any machine, not only on one without a signing key.
+    for key in ("tag.gpgSign", "commit.gpgsign"):
+        subprocess.run(["git", "-C", root, "config", key, "false"],
+                       check=True)
     with open(os.path.join(root, "f.txt"), "w", encoding="utf-8") as fh:
         fh.write("hi\n")
     subprocess.run(["git", "-C", root, "add", "-A"], check=True)

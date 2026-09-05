@@ -348,10 +348,19 @@ def gather_jbeq(jbeq_scores_dir):
             lines.append("JBEQ-MDM SEED: %s of %s" % (seed_m.group(1), seed_m.group(2)))
             flags["jbeq_mdm_seed_ready"] = True
         elif "JBEQ-MDM NOT READY" in out:
-            lines.append("JBEQ-MDM SEED: NOT READY (scored %s)" % answer_file)
+            # Extract arm from filename and format without absolute path
+            basename = os.path.basename(answer_file)
+            arm_match = re.search(r"answers-arm-([^.]+)", basename)
+            arm_label = arm_match.group(1).replace("-", " ") if arm_match else "unknown"
+            if fm_m:
+                msg = "scored arm %s answers, critical false merges %s of %s" % (
+                    arm_label, fm_m.group(1), fm_m.group(2))
+            else:
+                msg = "scored arm %s answers" % arm_label
+            lines.append("JBEQ-MDM SEED: NOT READY (%s)" % msg)
         else:
             lines.append("JBEQ-MDM SEED: %s (unreadable jbeq_mdm.py score output "
-                         "for %s; exit %s)" % (NO_DATA, answer_file, rc))
+                         "for %s; exit %s)" % (NO_DATA, os.path.basename(answer_file), rc))
         if fm_m:
             lines.append("CRITICAL FALSE MERGES: %s / %s" % (fm_m.group(1), fm_m.group(2)))
             flags["jbeq_mdm_zero_false_merges"] = (fm_m.group(1) == "0")

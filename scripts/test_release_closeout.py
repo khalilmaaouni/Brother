@@ -166,6 +166,14 @@ class TheUpgradesHonestNoData(unittest.TestCase):
         _git(repo, "init", "-q", ".")
         _git(repo, "config", "user.name", "Khalil Maaouni")
         _git(repo, "config", "user.email", "khalil@example.invalid")
+        # PIN THE SIGNING, or this fixture measures the machine. With a
+        # global tag.gpgSign true (this one, measured 2026-09-05) every
+        # lightweight tag below dies with "fatal: no tag message?", because
+        # signing forces an annotation, and all seven tests in this class go
+        # red for a reason that has nothing to do with the gate under test.
+        # Local config wins over global.
+        for key in ("tag.gpgSign", "commit.gpgsign"):
+            _git(repo, "config", key, "false")
         with open(os.path.join(repo, "README.md"), "w",
                   encoding="utf-8") as fh:
             fh.write("old\n")
@@ -257,6 +265,51 @@ class TheUpgradesHonestNoData(unittest.TestCase):
         with tempfile.TemporaryDirectory() as work:
             gate = self._no_package_gate(work, None)
             self.assertIn("v2.0.0", gate.revision)
+
+
+class TheSignatureIsNotALegOfX7(unittest.TestCase):
+    """1.0.5's whole matrix. Tag signing was folded into X7 as a required
+    leg, and because the signing key is the founder's alone (row S5) that
+    leg could only ever answer NO-DATA, so X7 settled NO-DATA and the
+    release read NOT COMPLETE with every other gate PASS. X7's subject is
+    REPRODUCTION of the published tree, and a founder-gated key cannot
+    decide it. The signature is still read and still printed; it just does
+    not vote."""
+
+    def test_the_settle_never_sees_the_signature_verdict(self):
+        # Read off the source, because the alternative is a live tag fetch
+        # against the public remote inside a unit test. The assertion is
+        # positional and would go red the moment the call is appended to
+        # `verdicts` again, which is exactly the regression.
+        import inspect
+        body = inspect.getsource(rc.gate_public_artifact)
+        self.assertNotIn("verdicts.append(tag_signature_verified", body)
+        self.assertIn("tag_signature_verified(gate, ev, checkout, tag)", body)
+        self.assertIn("INFORMATIONAL ONLY", body)
+
+    def test_an_unsigned_tag_still_reads_no_data_naming_s5(self):
+        """The reading itself is unchanged: NO-DATA, never a FAIL, and it
+        names the founder's own row so a reader knows whose step is open."""
+        with tempfile.TemporaryDirectory() as work:
+            checkout = os.path.join(work, "tag")
+            os.makedirs(checkout)
+            _git(checkout, "init", "-q", ".")
+            _git(checkout, "config", "user.name", "Khalil Maaouni")
+            _git(checkout, "config", "user.email", "khalil@example.invalid")
+            for key in ("tag.gpgSign", "commit.gpgsign"):
+                _git(checkout, "config", key, "false")
+            with open(os.path.join(checkout, "f.txt"), "w",
+                      encoding="utf-8") as fh:
+                fh.write("hi\n")
+            _git(checkout, "add", "-A")
+            _git(checkout, "commit", "-q", "-m", "init")
+            _git(checkout, "tag", "-a", "v9.9.9", "-m", "unsigned")
+            gate = rc.Gate("X7", "public-artifact", "the published tag")
+            ev = rc.Evidence(os.path.join(work, "evidence"))
+            verdict, why = rc.tag_signature_verified(gate, ev, checkout,
+                                                     "v9.9.9")
+            self.assertEqual(verdict, "NO-DATA", why)
+            self.assertIn("S5, founder", why)
 
 
 class TheHashesAndTheReaders(unittest.TestCase):
@@ -373,6 +426,8 @@ class TheNegativesLocalBase(unittest.TestCase):
             _git(repo, "init", "-q", ".")
             _git(repo, "config", "user.name", "Khalil Maaouni")
             _git(repo, "config", "user.email", "khalil@example.invalid")
+            for key in ("tag.gpgSign", "commit.gpgsign"):
+                _git(repo, "config", key, "false")
             path = os.path.join(repo, "bundle", ".codex-plugin", "plugin.json")
             os.makedirs(os.path.dirname(path))
             with open(path, "w", encoding="utf-8") as fh:

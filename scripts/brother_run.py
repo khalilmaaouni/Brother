@@ -310,6 +310,44 @@ def run_dir_for(outcome, runs_root, clock=None):
                         "%s-%s" % (stamp, slugify(outcome)))
 
 
+#: Where the default runs root goes when this tool's own repository cannot be
+#: written. NOT `<cwd>/.brother-runs`: records inside the target are exactly
+#: what makes it dirty, and a run pointed there once spun 11 rounds of live
+#: worker calls against a permanently dirty canonical before a person killed
+#: it (vault, 2026-08-30). The temp root is a granted writable root under a
+#: Codex workspace-write turn, which is the install this fallback exists for.
+FALLBACK_RUNS_DIR = "brother-runs"
+
+
+def _resolve_runs_root(requested, default=None, probe=None):
+    """The runs root to use, plus the line to print when it is not the one
+    asked for. An EXPLICIT --runs-root is honored as given and never moved:
+    a path the caller named that cannot be written is the caller's error and
+    has to surface as itself.
+
+    THE DEFAULT IS PROBED BY DOING, not by asking. A plugin install puts
+    this tool under a read-only root, and on the founder's 2026-09-05 public
+    run the first engine call died with an uncaught PermissionError deep in
+    work_record.create's own os.makedirs, naming the installed plugin's docs
+    path. os.access would have answered True there: the refusal came from
+    the sandbox, not from a mode bit, so the only honest probe is the same
+    makedirs the run will do."""
+    if requested:
+        return os.path.abspath(requested)
+    root = os.path.abspath(default or REPO_ROOT)
+    probe = probe or (lambda path: os.makedirs(path, exist_ok=True))
+    try:
+        probe(os.path.join(root, "docs", "plan", "runs"))
+        return root
+    except OSError as exc:
+        fallback = os.path.join(tempfile.gettempdir(), FALLBACK_RUNS_DIR)
+        print("brother_run: the default run directory under %s cannot be "
+              "written (%s), so this run's records go to %s instead. Pass "
+              "--runs-root to choose your own; keep it outside the "
+              "repository being worked on." % (root, exc, fallback))
+        return fallback
+
+
 def run_door(outcome, store, dry_run=False, cwd=None):
     """door.py, exactly as its own test suite drives it. Returns
     (ok, record_or_none, text): text is door's own combined stdout+stderr,
@@ -3055,17 +3093,21 @@ def _dirty_tree_lines(cwd, rows):
     it "a setup tax on the first try"); checked here before anything is
     claimed, once the door has said which paths this run will write.
 
-    TWO KINDS OF DIRT, and only one is refused. A dirty path INSIDE the
-    run's write set (it overlaps a not-DONE unit's `owns`) is somebody's
-    uncommitted work a merge of that unit would bury: refused in one line
-    naming the count, the first three paths with the unit that owns each,
-    and what to do; exit 1 is the caller's. Dirt OUTSIDE the write set (the
-    acceptance harness's area 6: an unrelated uncommitted edit that must
-    survive) is left exactly where it is: the run proceeds and this only
-    says so, because integrate.py still refuses to merge over a dirty tree
-    and names it, so the person's own edit is never touched and the run
-    can be resumed once they commit it. A tree git cannot read is refused,
-    never guessed clean."""
+    EVERY KIND OF DIRT IS REFUSED HERE, and the second kind was not until
+    the founder's 2026-09-05 public run paid for it. Dirt INSIDE the run's
+    write set (it overlaps a not-DONE unit's `owns`) is somebody's
+    uncommitted work a merge of that unit would bury, and its line names the
+    unit that owns each path. Dirt OUTSIDE the write set used to be a NOTICE
+    and the run proceeded, on the reasoning that integrate.py would refuse
+    the merge later and name it. It does, and that is the defect: later is
+    after every worker has spent its attempts. Measured on the public 1.0.5
+    run, where two setup files no unit owned let three worker attempts run
+    and pass their own done checks before integration refused every one of
+    them, and the receipt reported changed=[] with nothing touched. Nobody's
+    edit is buried either way: this refuses before anything is claimed and
+    writes no path. A tree status cannot be read for is refused, never
+    guessed clean. Both branches return the refusal, and the notice slot
+    stays empty rather than changing every caller's shape."""
     paths = integrate.dirty_paths(cwd)
     if paths is None:
         return ("brother_run: git status could not read the repository at "
@@ -3092,10 +3134,15 @@ def _dirty_tree_lines(cwd, rows):
                 "never does"
                 % (cwd, len(hits), shown)), ""
     shown = ", ".join(paths[:3]) + (", ..." if len(paths) > 3 else "")
-    return "", ("brother_run: the repository at %s is dirty on %d "
-                "uncommitted path(s) outside this run's write set (%s); "
-                "they are left untouched, and nothing merges into the tree "
-                "until they are committed" % (cwd, len(paths), shown))
+    return ("brother_run: the repository at %s is dirty on %d uncommitted "
+            "path(s) outside this run's write set (%s); commit or remove "
+            "them first, nothing was claimed or run. They are left "
+            "untouched. Integration refuses to merge over a dirty tree, so "
+            "a run started here spends every worker attempt and then "
+            "refuses every unit. A tracked modification and an untracked "
+            "file both count here; only interpreter bytecode "
+            "(__pycache__/, .pyc, .pyo) never does"
+            % (cwd, len(paths), shown)), ""
 
 
 def _restore_refused_precheck_units(record_path, refused, order):
@@ -3578,8 +3625,10 @@ def main(argv=None):
     ap.add_argument("--runs-root",
                     help="where the run's Work document and claim store live "
                          "(under docs/plan/runs); defaults to this tool's own "
-                         "repository, never the target --cwd, which "
-                         "integration requires to stay clean. WHAT CLEAN "
+                         "repository, and to a brother-runs directory under "
+                         "the temp root when that one cannot be written (a "
+                         "read-only plugin install), never the target --cwd, "
+                         "which integration requires to stay clean. WHAT CLEAN "
                          "MEANS HERE, exactly: every path git status reports "
                          "in the target counts, a tracked modification and "
                          "an untracked file alike, EXCEPT interpreter "
@@ -3587,13 +3636,13 @@ def main(argv=None):
                          "counts, so an untracked __pycache__/ does not stop "
                          "a run. Of the paths that do count, only one kind "
                          "refuses the run: a path inside this run's own "
-                         "write set. Dirt outside that write set is reported "
-                         "and left untouched, and the merge refuses later "
-                         "rather than the door refusing now")
+                         "write set, and a path outside it, which is the "
+                         "same refusal the merge would give later after "
+                         "every worker had spent its attempts")
     args = ap.parse_args(list(sys.argv[1:] if argv is None else argv))
 
     cwd = os.path.abspath(args.cwd)
-    runs_root = os.path.abspath(args.runs_root) if args.runs_root else REPO_ROOT
+    runs_root = _resolve_runs_root(args.runs_root)
     log = RunLog()
     # I3, THE LIVE RESOLVER: built once, at most, and only when asked (the
     # flag or the env var, read fresh here rather than at import time so a
