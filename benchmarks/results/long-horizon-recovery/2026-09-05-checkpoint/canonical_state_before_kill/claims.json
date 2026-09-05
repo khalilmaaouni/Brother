@@ -1,0 +1,39 @@
+{
+ "A1": {
+  "attempt": 1,
+  "claimed_at": 1788556961.288634,
+  "evidence": {
+   "canonical_rev": "031a8412d126b6b84fcc6b573f295830b65805bd",
+   "check_command": "test -f one.txt",
+   "exit_code": 0,
+   "files_changed": [
+    "one.txt"
+   ],
+   "output": "",
+   "output_truncated": false
+  },
+  "expires_at": 0,
+  "hostname": "<HOSTNAME>",
+  "owner": "brother-run-46598",
+  "pid": 46598,
+  "reclaimed_from": null,
+  "released_at": 1788556962.8049788,
+  "state": "done",
+  "unit_id": "A1",
+  "work_id": "",
+  "worker_id": "brother-run-46598/A1/1"
+ },
+ "A2": {
+  "attempt": 1,
+  "claimed_at": 1788556963.1517582,
+  "expires_at": 1788558163.1517582,
+  "hostname": "<HOSTNAME>",
+  "owner": "brother-run-46598",
+  "pid": 46598,
+  "reclaimed_from": null,
+  "state": "claimed",
+  "unit_id": "A2",
+  "work_id": "",
+  "worker_id": "brother-run-46598/A2/1"
+ }
+}

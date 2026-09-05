@@ -1,0 +1,33 @@
+{
+ "outcome": "two files exist, the second after the first",
+ "started_at": 1788556959.23513,
+ "kill_time": 1788556963.165798,
+ "pid": 46598,
+ "pgid": 46598,
+ "tmp": "<SCRATCH_ROOT>",
+ "repo": "<THROWAWAY_REPO>",
+ "run_dir": "<KILLED_RUN_DIR>",
+ "a2_claim_after_kill": {
+  "attempt": 1,
+  "claimed_at": 1788556963.1517582,
+  "expires_at": 1788558163.1517582,
+  "hostname": "<HOSTNAME>",
+  "owner": "brother-run-46598",
+  "pid": 46598,
+  "reclaimed_from": null,
+  "state": "claimed",
+  "unit_id": "A2",
+  "work_id": "",
+  "worker_id": "brother-run-46598/A2/1"
+ },
+ "landed_mid_unit": true,
+ "resume_command": [
+  "<PYTHON3>",
+  "<BROTHER_SCRIPTS>/brother_run.py",
+  "two files exist, the second after the first",
+  "--cwd",
+  "<THROWAWAY_REPO>",
+  "--runs-root",
+  "<SCRATCH_ROOT>"
+ ]
+}

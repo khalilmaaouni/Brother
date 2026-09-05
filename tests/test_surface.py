@@ -203,6 +203,17 @@ class TestCoordinationIsCurrent(unittest.TestCase):
     """The umbrella must point at the architecture of record, not compete."""
 
     def test_names_the_adr(self):
+        if not os.path.isfile(_p("COORDINATION.md")):
+            # docs/plan/EXPORT-DENYLIST.txt withholds COORDINATION.md from
+            # the public export on purpose (2026-09-03: an internal hub
+            # process document, not linked from README.md). A public clone
+            # cannot check its wording here; that is a limit of the clone,
+            # not a pass.
+            self.skipTest(
+                "NO-DATA: this checkout does not carry COORDINATION.md, so "
+                "it cannot be checked for the ADR's name here; NO-DATA is "
+                "not a pass"
+            )
         with open(_p("COORDINATION.md")) as fh:
             text = fh.read()
         self.assertIn(

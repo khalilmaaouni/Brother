@@ -1,0 +1,104 @@
+{
+  "gauntlet": "memory-recurrence",
+  "spec": "benchmarks/gauntlets/memory-recurrence.json",
+  "run_at": "2026-09-05T06:18:51",
+  "revision": "a4f55007e4c6a0ee9183f86f9d99362bfa0ed276",
+  "fixture": {
+    "target_file": "widget_parser.py",
+    "workload_family": "1, tiny bug fix. One family, not three: this is a mechanism run and says so.",
+    "instruments": [
+      "products/brothermode/tools/bm_vault.py check --paths",
+      "products/brothermode/tools/vault_recall_hook.py lesson_states",
+      "scripts/receipt_door.py applied_memory"
+    ]
+  },
+  "summary": {
+    "prevented": 3,
+    "conditions_counted": 4,
+    "line": "recurrence prevented: 3 of 4 conditions",
+    "no_data": [
+      "contradictory memory"
+    ]
+  },
+  "conditions": [
+    {
+      "id": "memory off",
+      "expected": "validate-before-return",
+      "result": "silent",
+      "detail": "no lesson reached the model",
+      "note": "the control arm: nothing is stored, so the lesson cannot be applied and this arm counts zero by construction. A surfaced result here would mean the arms are not isolated.",
+      "applied": [],
+      "stale": [],
+      "unverified": [],
+      "withheld_superseded": [],
+      "contradicts_flagged": []
+    },
+    {
+      "id": "memory on",
+      "expected": "validate-before-return",
+      "result": "surfaced",
+      "detail": "applied exactly [validate-before-return]",
+      "note": "the lesson is stored and the same edit is attempted again.",
+      "applied": [
+        "validate-before-return"
+      ],
+      "stale": [],
+      "unverified": [],
+      "withheld_superseded": [],
+      "contradicts_flagged": []
+    },
+    {
+      "id": "stale memory",
+      "expected": "validate-before-return",
+      "result": "surfaced",
+      "detail": "applied exactly [validate-before-return]; refused old-lexer-rule: recall: STALE old-lexer-rule: anchor gone_lexer.py not found in /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/gauntlet-memory-recurrence-mtk0eol3/tree; not applied",
+      "note": "a second lesson names a path that no longer exists; it must be refused BY NAME and the current one still applied.",
+      "applied": [
+        "validate-before-return"
+      ],
+      "stale": [
+        {
+          "slug": "old-lexer-rule",
+          "line": "recall: STALE old-lexer-rule: anchor gone_lexer.py not found in /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/gauntlet-memory-recurrence-mtk0eol3/tree; not applied"
+        }
+      ],
+      "unverified": [],
+      "withheld_superseded": [],
+      "contradicts_flagged": []
+    },
+    {
+      "id": "contradictory memory",
+      "expected": "validate-before-return",
+      "result": "NO-DATA",
+      "detail": "no field expresses which side of a contradiction current source supports: bm_vault.py serves both and flags each with CONTRADICTS, and vault_recall_hook.py's lesson_states has no branch for the contradictions table, so neither a note field (there is nothing like verified_against:) nor the recall path ranks the two",
+      "note": "two retrievable lessons assert the opposite of each other about the same current source.",
+      "applied": [
+        "never-validate",
+        "validate-before-return"
+      ],
+      "stale": [],
+      "unverified": [],
+      "withheld_superseded": [],
+      "contradicts_flagged": [
+        "never validate",
+        "validate before return"
+      ]
+    },
+    {
+      "id": "superseded memory",
+      "expected": "current-parse-rule",
+      "result": "surfaced",
+      "detail": "applied exactly [current-parse-rule]; withheld as superseded: old parse rule",
+      "note": "an older lesson and the newer one that supersedes it are both retrievable; the newer must be the one applied.",
+      "applied": [
+        "current-parse-rule"
+      ],
+      "stale": [],
+      "unverified": [],
+      "withheld_superseded": [
+        "old parse rule"
+      ],
+      "contradicts_flagged": []
+    }
+  ]
+}

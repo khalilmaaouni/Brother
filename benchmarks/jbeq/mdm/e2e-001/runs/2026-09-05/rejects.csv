@@ -1,0 +1,2 @@
+customer_id,reason_code,reason_ja,source_value
+C008,MERGE_FORBIDDEN_STORE_LEVEL,店舗単位の取引先は法人番号が一致しても自動統合しない,MERGE_INTO:C001

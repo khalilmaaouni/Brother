@@ -1,0 +1,1787 @@
+<title>Brother Roadmap</title>
+<style>
+:root{--paper:#F7F8F6;--raised:#FFF;--ink:#141B22;--soft:#4A5763;--faint:#7C8894;
+--petrol:#0E7A6F;--psoft:#E3F0EE;--rule:#DDE3E1;--rsoft:#EAEEEC;--fail:#A32C22;
+--fsoft:#F7E5E3;--nodata:#9A6B12;--nsoft:#F7EEDC;--bar:#D6DCDA;--flight:#1D6FA5;--flsoft:#E1EEF7}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+--paper:#10161B;--raised:#171F26;--ink:#E8EDEA;--soft:#A5B2B8;--faint:#77858D;
+--petrol:#3AA893;--psoft:#16302D;--rule:#28333A;--rsoft:#1E282E;--fail:#E0776A;
+--fsoft:#33201D;--nodata:#D9A441;--nsoft:#2E2617;--bar:#2A343B;--flight:#63AEDC;--flsoft:#132631}}
+:root[data-theme="dark"]{--paper:#10161B;--raised:#171F26;--ink:#E8EDEA;--soft:#A5B2B8;--faint:#77858D;
+--petrol:#3AA893;--psoft:#16302D;--rule:#28333A;--rsoft:#1E282E;--fail:#E0776A;
+--fsoft:#33201D;--nodata:#D9A441;--nsoft:#2E2617;--bar:#2A343B;--flight:#63AEDC;--flsoft:#132631}
+*{box-sizing:border-box}
+:root{--shadow:0 1px 3px rgba(20,27,34,.07)}
+:root:not([data-theme="light"]){}
+body{background:var(--paper);color:var(--ink);margin:0;font-family:"Seravek","Avenir Next",ui-sans-serif,system-ui,sans-serif;font-size:16px;line-height:1.6}
+.wrap{max-width:1040px;margin:0 auto;padding:48px 26px 90px}
+h1,h2,h3,h4{font-family:"Iowan Old Style",Palatino,Georgia,serif;font-weight:600;text-wrap:balance}
+h1{font-size:2.5rem;line-height:1.12;margin:.1em 0 .35em}
+h2{font-size:1.6rem;margin:52px 0 .5em}
+h3{font-size:1.1rem;margin:30px 0 .5em;color:var(--faint);letter-spacing:.02em}
+h4{font-size:1.08rem;margin:0 0 .3em}
+.eyebrow{font-size:.72rem;letter-spacing:.14em;text-transform:uppercase;color:var(--petrol);font-weight:600;margin:0 0 .8em}
+.lede{font-size:1.1rem;color:var(--soft);max-width:64ch}
+.stamp{font-size:.79rem;color:var(--faint);border-top:1px solid var(--rule);padding-top:13px;margin-top:24px;line-height:1.5}
+.note{font-size:.9rem;color:var(--soft);max-width:64ch}
+.strip{display:flex;flex-wrap:wrap;gap:30px;margin:26px 0;padding:20px 24px;background:var(--raised);border:1px solid var(--rule);border-radius:10px}
+.strip .v{font-family:"Iowan Old Style",Palatino,Georgia,serif;font-size:2rem;line-height:1;display:block;font-variant-numeric:tabular-nums}
+.strip .l{font-size:.69rem;letter-spacing:.09em;text-transform:uppercase;color:var(--faint);font-weight:600;margin-top:6px;display:block}
+.vault-strip code{display:block;margin-top:6px;font-size:.66rem;white-space:normal;word-break:break-all}
+.scroll{overflow-x:auto;border:1px solid var(--rule);border-radius:8px;background:var(--raised);margin:20px 0}
+table{border-collapse:collapse;width:100%;font-size:.87rem;min-width:640px}
+th,td{text-align:left;padding:10px 14px;border-bottom:1px solid var(--rsoft);vertical-align:top}
+th{font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);background:var(--paper)}
+tbody tr:last-child td{border-bottom:0}
+td.who{max-width:280px}
+.tag{display:inline-block;font-size:.65rem;letter-spacing:.07em;text-transform:uppercase;font-weight:700;padding:3px 7px;border-radius:3px;white-space:nowrap}
+.st-done{background:var(--psoft);color:var(--petrol)}
+.st-flight{background:var(--flsoft);color:var(--flight)}
+.st-sched{background:var(--rsoft);color:var(--faint)}
+.st-blocked,.st-open{background:var(--fsoft);color:var(--fail)}
+.st-partial,.st-nodata{background:var(--nsoft);color:var(--nodata)}
+.st-founder{background:var(--nsoft);color:var(--nodata)}
+.bar-row{margin:11px 0;padding:11px 14px;background:var(--raised);border:1px solid var(--rule);border-radius:8px}
+.bar-lab{font-size:.9rem;margin-bottom:7px}
+.bar-lab b{color:var(--petrol);font-family:"Iowan Old Style",Palatino,Georgia,serif}
+.bar-track{height:10px;background:var(--bar);border-radius:5px;overflow:hidden;margin-bottom:7px}
+.bar{height:100%;border-radius:5px}
+.bar.st-done{background:var(--petrol)}
+.bar.st-flight{background:var(--flight)}
+.bar.st-sched{background:var(--faint);opacity:.45}
+.bar.st-blocked,.bar.st-open{background:var(--fail)}
+.bar.st-partial,.bar.st-nodata,.bar.st-founder{background:var(--nodata)}
+.bar-meta{font-size:.75rem;color:var(--faint);display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.ready{background:var(--psoft);color:var(--petrol);font-size:.63rem;letter-spacing:.08em;font-weight:700;padding:2px 6px;border-radius:3px}
+.dep{color:var(--faint);font-size:.8rem}
+.when{color:var(--faint);font-size:.74rem;font-variant-numeric:tabular-nums}
+.late{color:var(--fail);font-size:.74rem;font-weight:600}
+.ontime{color:var(--petrol);font-size:.74rem;font-weight:600}
+.ship{background:var(--psoft);border-left:3px solid var(--petrol);padding:18px 22px;border-radius:0 6px 6px 0;margin:20px 0}
+.ship .k{font-family:"Iowan Old Style",Palatino,Georgia,serif;font-size:1.25rem;margin:0 0 .5em;font-weight:600}
+.ship p{font-size:.92rem;margin:0 0 .7em}
+.ship ul.oos{font-size:.88rem;margin:0;color:var(--soft)}
+.ship p.oos{margin-bottom:.3em}
+.fq{margin:16px 0;padding:14px 20px;border-left:3px solid var(--petrol);background:var(--psoft);font-style:italic;color:var(--ink);font-size:.94rem;border-radius:0 6px 6px 0}
+.laws{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;margin:20px 0}
+.law{background:var(--raised);border:1px solid var(--rule);border-radius:9px;padding:16px 18px}
+.law h4{margin:0 0 6px;font-size:.98rem;color:var(--petrol);text-transform:capitalize}
+.law p{margin:0;font-size:.86rem;color:var(--soft)}
+.norow{background:var(--raised);border:1px solid var(--rule);border-left:3px solid var(--nodata);border-radius:0 9px 9px 0;padding:16px 20px;margin:12px 0}
+.nohead{display:flex;flex-wrap:wrap;gap:10px;align-items:baseline;margin-bottom:8px;font-size:.95rem}
+.noid{font-family:"Iowan Old Style",Palatino,Georgia,serif;font-size:1.05rem;color:var(--nodata)}
+.nohrs{margin-left:auto;font-size:.72rem;letter-spacing:.06em;text-transform:uppercase;color:var(--nodata);font-weight:700}
+.brem b{color:var(--petrol)} .bphys b{color:var(--faint)}
+.dc.weight b{color:var(--nodata)}
+.pgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px;margin:20px 0}
+.pcard{background:var(--raised);border:1px solid var(--rule);border-radius:9px;padding:16px 18px;font-size:.86rem}
+.pcard h4{margin:0 0 2px;font-size:1.02rem}
+.pcard .pid{font-size:.64rem;letter-spacing:.1em;color:var(--faint);font-weight:700;margin:0 0 9px}
+.pcard p{margin:0 0 7px;color:var(--soft)}
+.pcard b{color:var(--ink)}
+.pcard .pv{color:var(--petrol);font-size:.8rem;margin:0}
+.note.small{font-size:.82rem;color:var(--faint)}
+.feat{background:var(--raised);border:1px solid var(--rule);border-radius:10px;padding:22px 26px;margin:16px 0;box-shadow:var(--shadow)}
+.fhead{display:flex;flex-wrap:wrap;gap:10px;align-items:baseline;margin-bottom:8px}
+.fhead h3{margin:0;font-size:1.2rem}
+.fid{font-family:"Iowan Old Style",Palatino,Georgia,serif;font-size:1.15rem;color:var(--petrol)}
+.fmeta{margin-left:auto;font-size:.72rem;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);font-weight:600}
+.fwhat{font-size:.95rem;margin:0 0 12px}
+.fpers{background:var(--psoft);border-radius:6px;padding:11px 14px;margin:10px 0;font-size:.88rem}
+.fpers .pl{font-weight:700;color:var(--petrol);margin-right:9px}
+.fpers .pm{color:var(--soft)}
+.fsees{background:var(--paper);border:1px solid var(--rsoft);border-radius:6px;padding:11px 14px;margin:9px 0;font-size:.88rem}
+.fsees b{font-family:"Iowan Old Style",Palatino,Georgia,serif;display:block;font-size:.66rem;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);margin-bottom:4px;font-weight:600}
+.fborrow{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:12px 0 4px}
+.fborrow>div{background:var(--paper);border:1px solid var(--rsoft);border-radius:6px;padding:11px 14px;font-size:.85rem;color:var(--soft)}
+.fborrow b{font-family:"Iowan Old Style",Palatino,Georgia,serif;display:block;font-size:.66rem;letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px;font-weight:600}
+.bfrom b{color:var(--faint)} .badapt b{color:var(--petrol)}
+@media(max-width:640px){.fborrow{grid-template-columns:1fr}}
+.contract{margin:14px 0 4px;border-top:1px solid var(--rsoft);padding-top:12px}
+.cr{display:grid;grid-template-columns:150px 1fr;gap:14px;margin-bottom:9px;font-size:.87rem}
+.crl{font-family:"Iowan Old Style",Palatino,Georgia,serif;font-size:.68rem;letter-spacing:.09em;text-transform:uppercase;color:var(--petrol);font-weight:600;padding-top:2px}
+.crv{color:var(--soft)}
+@media(max-width:640px){.cr{grid-template-columns:1fr;gap:2px}}
+.oostag{background:var(--nsoft);color:var(--nodata);font-size:.62rem;letter-spacing:.07em;font-weight:700;padding:2px 6px;border-radius:3px}
+.card{background:var(--raised);border:1px solid var(--rule);border-radius:9px;padding:20px 24px;margin:14px 0}
+.chead{display:flex;gap:10px;align-items:center;margin-bottom:7px;flex-wrap:wrap}
+.cid{font-family:"Iowan Old Style",Palatino,Georgia,serif;font-size:1.1rem;color:var(--petrol)}
+.gate,.owner{font-size:.7rem;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);font-weight:600}
+.detail{font-size:.9rem;color:var(--soft);margin:0 0 12px}
+.dc{background:var(--paper);border:1px solid var(--rsoft);border-radius:6px;padding:11px 14px;margin-top:9px;font-size:.86rem}
+.progress{background:var(--raised);border:1px solid var(--rule);border-radius:10px;
+  padding:18px 24px;margin:0 0 22px}
+.parity{background:var(--raised);border:1.5px solid var(--fail);border-radius:10px;
+  padding:18px 24px;margin:0 0 22px}
+.lv0,.lv1{color:var(--fail);font-weight:600}
+.lv2{color:var(--flight);font-weight:600}
+.lv3,.lv4{color:var(--petrol);font-weight:600}
+.teamasks{background:var(--raised);border:1px solid var(--rule);border-radius:10px;
+  padding:18px 24px;margin:0 0 22px}
+.pgtrack{position:relative}
+.pgpart{position:absolute;top:0;left:0;height:100%;background:var(--flight);opacity:.35}
+.v-addressed{color:var(--petrol);font-weight:600}
+.v-partial{color:var(--flight);font-weight:600}
+.v-not-addressed{color:var(--fail);font-weight:600}
+.pgrow{display:grid;grid-template-columns:9.5rem 1fr 3rem;gap:10px;align-items:center;
+  margin:9px 0}
+.pglab{font-size:.86rem;font-weight:600}
+.pgtrack{height:11px;background:var(--paper);border:1px solid var(--rsoft);
+  border-radius:6px;overflow:hidden}
+.pgfill{height:100%;background:var(--petrol);border-radius:5px}
+.pgnum{text-align:right;font-variant-numeric:tabular-nums;font-size:.84rem;font-weight:600}
+.pgmeta{grid-column:2 / -1;font-size:.75rem;opacity:.7;margin-top:-4px}
+.fstat{border-radius:6px;padding:8px 12px;margin:8px 0;font-size:.84rem;
+  border:1px solid var(--rsoft);background:var(--paper)}
+.fstat b{display:inline-block;min-width:5.5rem;letter-spacing:.05em;font-size:.72rem;
+  text-transform:uppercase}
+.fstat.s-done{border-color:var(--petrol)}
+.fstat.s-claimed{border-color:var(--fail)}
+.fstat.s-in-flight{border-color:var(--flight)}
+.learn{background:var(--raised);border:1.5px solid var(--petrol);box-shadow:var(--shadow); border-radius:4px;
+  padding:1.3rem 1.5rem; margin:0 0 2rem;}
+.lfind{font-size:1.04rem; margin:.6rem 0 1.2rem;}
+.lex{border-left:3px solid var(--petrol); padding:.2rem 0 .2rem 1rem;
+  margin:1rem 0 1.4rem;}
+.lmode{border-top:1px solid var(--rule); padding:.9rem 0;}
+.lstate{margin-left:auto; font-size:.7rem; text-transform:uppercase;
+  letter-spacing:.08em; font-weight:600; opacity:.75;}
+.lborrow{border-top:1px solid var(--rule); padding:.7rem 0;}
+.lborrow h4,.lmode h4{margin:.1rem 0 .35rem; font-size:1rem;}
+.lborrow a{word-break:break-all;}
+.dc b{font-family:"Iowan Old Style",Palatino,Georgia,serif;display:block;font-size:.66rem;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);margin-bottom:4px;font-weight:600}
+code{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:.86em;background:var(--rsoft);padding:1px 5px;border-radius:3px}
+@media(max-width:640px){h1{font-size:1.9rem}.wrap{padding:32px 18px 60px}}
+details.wbs{margin:14px 0 2px;border:1px solid var(--rule);border-radius:8px;background:var(--paper);overflow:hidden}
+details.wbs>summary{cursor:pointer;padding:10px 14px;font:600 12px/1.4 inherit;letter-spacing:.06em;text-transform:uppercase;color:var(--petrol);list-style:none;user-select:none}
+details.wbs>summary::-webkit-details-marker{display:none}
+details.wbs>summary::before{content:"B8";display:inline-block;margin-right:8px;transition:transform .15s ease}
+details.wbs[open]>summary::before{transform:rotate(90deg)}
+details.wbs>summary:hover{background:var(--raised)}
+details.wbs>summary:focus-visible{outline:2px solid var(--petrol);outline-offset:-2px}
+details.wbs.undec{border-color:var(--fail)}
+details.wbs.undec>summary{color:var(--fail)}
+.wbsbody{padding:4px 14px 14px;border-top:1px solid var(--rule)}
+.wp{padding:10px 0;border-bottom:1px dashed var(--rule)}
+.wp:last-child{border-bottom:none}
+.wp.over{border-left:3px solid var(--fail);padding-left:10px}
+.wphead{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+.wpid{font:700 11px/1 inherit;color:var(--petrol);letter-spacing:.08em}
+.wpname{font-weight:600;flex:1;min-width:180px}
+.wph{font:600 11px/1 inherit;color:var(--soft);font-variant-numeric:tabular-nums}
+.wpk{font-size:13px;color:var(--soft);margin-top:5px}
+.wpk b{color:var(--ink);font-weight:600;margin-right:7px}
+.warn{color:var(--fail)}
+.northstar{background:var(--raised);border:2px solid var(--petrol);border-radius:10px;padding:22px 26px;margin:22px 0}
+.northstar h2{margin-top:0;color:var(--petrol)}
+.nsmetric{font-family:"Iowan Old Style",Palatino,Georgia,serif;font-size:1.3rem;margin:0 0 .4em;font-weight:600}
+.nsvalue{font-size:1.05rem;color:var(--fail);font-weight:600;margin:0 0 .8em}
+.nswhy{color:var(--soft);max-width:70ch}
+</style>
+<div class="wrap">
+<p class="eyebrow">Brother &middot; public roadmap</p>
+<h1>What is done, what is next, and how each row closes</h1>
+<p class="lede">All six gates GREEN, each closed on its own done_check having been run after the last edit, with the output quoted. A gate closed on an adjacent green is not closed. That substitution is what produced the founder&#x27;s 0 of 5 on the diagram rule: WBS row INTAKE-02 was marked DONE on a merged pull request while its own evidence field said the live driven run stayed OWED.</p>
+<p class="stamp">Generated by <code>python3 scripts/gen_readiness_board.py --public</code> from the same roadmap record the team works from, measured 2026-08-29. Never hand edited. Each row shows its own done-check: the command that has to run, after the last edit, before the row may tick.</p>
+<p class="note small">This page carries a row's id, title, status, gate, section, done-check and dates. It does not carry evidence bodies, resume points, owner session ids or any path on the machine the work ran on: those are read from fields this page never opens. The reason column is withheld from every row on this build, because the scan found at least one reason naming a file path on one machine.</p>
+<div class="strip">
+<div><span class="v">206/259</span><span class="l">rows done</span></div>
+<div><span class="v">20</span><span class="l">in-flight</span></div>
+<div><span class="v">32</span><span class="l">open</span></div>
+</div>
+<section class="progress">
+<h2>What is actually done</h2>
+<p class="note">Counted, never asserted. A thing counts as done only when it says done AND carries evidence in the record. Anything claiming done without evidence is excluded from these bars.</p>
+<div class="pgrow">
+<div class="pglab">Features</div>
+<div class="pgtrack"><div class="pgfill" style="width:100.0%"></div></div>
+<div class="pgnum">100%</div>
+<div class="pgmeta">19 done &middot; 0 in flight &middot; 0 open</div>
+</div>
+<div class="pgrow">
+<div class="pglab">Readiness rows</div>
+<div class="pgtrack"><div class="pgfill" style="width:79.5%"></div></div>
+<div class="pgnum">80%</div>
+<div class="pgmeta">206 done &middot; 20 in flight &middot; 33 open</div>
+</div>
+<div class="pgrow">
+<div class="pglab">Gates</div>
+<div class="pgtrack"><div class="pgfill" style="width:0.0%"></div></div>
+<div class="pgnum">0%</div>
+<div class="pgmeta">0 done &middot; 0 in flight &middot; 6 open</div>
+</div>
+<div class="pgrow">
+<div class="pglab">The team&#x27;s asks</div>
+<div class="pgtrack"><div class="pgfill" style="width:100.0%"></div></div>
+<div class="pgnum">100%</div>
+<div class="pgmeta">28 done &middot; 0 in flight &middot; 0 open</div>
+</div>
+<div class="pgrow">
+<div class="pglab">The learning loop</div>
+<div class="pgtrack"><div class="pgfill" style="width:60.0%"></div></div>
+<div class="pgnum">60%</div>
+<div class="pgmeta">3 done &middot; 0 in flight &middot; 2 open</div>
+</div>
+</section>
+<h2>Immediate &middot; 13 row(s)</h2>
+<div class="card">
+<div class="chead"><span class="cid">R1</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>Benchmark subjects moved to a durable path and repopulated</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/benchmark_atomic.py reports 0 subjects at NO-DATA, exit code captured before any pipe</div>
+<div class="bar-meta"><span class="gate">Immediate</span><span class="when">due 2026-08-29 18:00, delivered 2026-08-29 16:05</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">R14</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>BrotherSBE local checkout is 6 commits behind origin/main</h4>
+<div class="dc"><b>Done-check</b>withheld: this text names a path on the machine it was written on, which does not belong on a public page</div>
+<div class="bar-meta"><span class="gate">Immediate</span><span class="when">due 2026-08-29 16:00, delivered 2026-08-29 15:40</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">R2</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>At least three parity criteria converted from documentation greps to behavioural checks</h4>
+<div class="dc"><b>Done-check</b>at least 5 of 9 criteria name the command they ran in their evidence line, and each has a test proving it goes red as well as green</div>
+<div class="bar-meta"><span class="gate">Immediate</span><span class="when">due 2026-08-29 21:00, delivered 2026-08-29 16:05</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">R3</span><span class="tag st-done">DONE</span><span class="gate">G6 Vault active retrieval and error repetition avoidance</span></div>
+<h4>Prevented-recurrence counter built, with the receipt contract</h4>
+<div class="dc"><b>Done-check</b>report on an EMPTY store prints NO-DATA and no percentage; report after fixtures exceeding the threshold prints a real rate; both exit codes captured before any pipe</div>
+<div class="bar-meta"><span class="gate">Immediate</span><span class="when">due 2026-08-29 15:00, delivered 2026-08-29 19:35</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">R4</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>Surface inventory and overlap map produced, with the blocker per move</h4>
+<div class="dc"><b>Done-check</b>a written map naming every cluster, its members, what survives, and the blocker for each move, with each count quoting the command that produced it</div>
+<div class="bar-meta"><span class="gate">Immediate</span><span class="when">due 2026-08-29 15:00, delivered 2026-08-29 14:35</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">R15</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>Populate the three comparison subjects, a supply-chain decision</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/benchmark_atomic.py reports 0 subjects at NO-DATA</div>
+<div class="bar-meta"><span class="gate">Immediate</span><span class="when">due 2026-08-30 12:00, delivered 2026-08-30 17:40</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">R18</span><span class="tag st-done">DONE</span><span class="gate">G5 Intake: detailed options, mermaid diagrams, weighted pros and cons</span></div>
+<h4>The decision screen: no blocker reaches a human as a wall of prose</h4>
+<div class="dc"><b>Done-check</b>scripts/decide.py renders a decision spec to a self contained HTML screen; scripts/test_decide.py proves the score is computed, an unmarked criterion contributes nothing and is named, a close call is flagged, a rotted code anchor is NO-DATA rather than a stale paste, and every outside link carries the date it was resolved</div>
+<div class="bar-meta"><span class="gate">Immediate</span><span class="when">due 2026-08-30 12:00, delivered 2026-08-29 21:05</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">R19</span><span class="tag st-done">DONE</span><span class="gate">G5 Intake: detailed options, mermaid diagrams, weighted pros and cons</span></div>
+<h4>Gates at the boundaries: the founder&#x27;s chosen watchdog design, wired</h4>
+<div class="dc"><b>Done-check</b>sh scripts/install_gate_hook.sh --check reports INSTALLED, and scripts/pre_push_hook.sh returns 0 on a clean range and 1 with a seeded offender</div>
+<div class="bar-meta"><span class="gate">Immediate</span><span class="when">due 2026-08-30 12:00, delivered 2026-08-29 22:10</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">R20</span><span class="tag st-done">DONE</span><span class="gate">G5 Intake: detailed options, mermaid diagrams, weighted pros and cons</span></div>
+<h4>The merge deadlock reaches the founder as a screen, not a wall</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/decide.py docs/decisions/sbe-merge-deadlock-2026-08-29.json renders, and scripts/test_decide.py walks every spec in docs/decisions rather than one named file</div>
+<div class="bar-meta"><span class="gate">Immediate</span><span class="when">due 2026-08-30 12:00, delivered 2026-08-29 23:15</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">R21</span><span class="tag st-done">DONE</span><span class="gate">G5 Intake: detailed options, mermaid diagrams, weighted pros and cons</span></div>
+<h4>The memory fix measured on real payloads: 0 matches became 56</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/memory_lift.py &lt;session transcript&gt; prints the before and after counts, and reports NO-DATA rather than zero when the guard cannot load or no write exists</div>
+<div class="bar-meta"><span class="gate">Immediate</span><span class="when">due 2026-08-30 12:00, delivered 2026-08-29 23:45</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">R5</span><span class="tag st-done">DONE</span><span class="gate">G6 Vault active retrieval and error repetition avoidance</span></div>
+<h4>Memory freshness: citations, revalidation and a 28 day expiry</h4>
+<div class="dc"><b>Done-check</b>a note whose citation no longer resolves against the current branch stops being returned by recall, proven by driving it both ways</div>
+<div class="bar-meta"><span class="gate">Immediate</span><span class="when">due 2026-08-30 18:00, delivered 2026-08-29 17:20</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">R6</span><span class="tag st-done">DONE</span><span class="gate">G5 Intake: detailed options, mermaid diagrams, weighted pros and cons</span></div>
+<h4>Weighted options added to the intake rubric as a new criterion</h4>
+<div class="dc"><b>Done-check</b>scripts/intake_score.py scores a weighted-options criterion, calibrated both ways, and the gate fails a record whose options carry no weights</div>
+<div class="bar-meta"><span class="gate">Immediate</span><span class="when">due 2026-08-30 18:00, delivered 2026-08-29 17:05</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">R13</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>The opening condition, decided in advance and in writing</h4>
+<div class="dc"><b>Done-check</b>this row&#x27;s own text names a threshold and a hold period; clause 3 is verified by SELECT count(*) FROM controller_dispatches WHERE resulted_at IS NOT NULL, which must show at least 3 founder-driven units on distinct days</div>
+<div class="bar-meta"><span class="gate">Immediate</span><span class="when">due 2026-08-29 20:00, delivered 2026-08-29 16:10</span></div>
+</div>
+<h2>Days &middot; 8 row(s)</h2>
+<div class="card">
+<div class="chead"><span class="cid">G1-M2</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>G1 milestone 2: parity MEASURED, not parity achieved</h4>
+<div class="dc"><b>Done-check</b>docs/BENCHMARKS.md carries the current run&#x27;s verbatim summary, every uncovered cell named NO-DATA with its reason, and a line separating behavioural criteria from documentation ones</div>
+<div class="bar-meta"><span class="gate">Days</span><span class="when">due 2026-09-04 18:00, delivered 2026-08-29 19:20</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">R16</span><span class="tag st-done">DONE</span><span class="gate">G5 Intake: detailed options, mermaid diagrams, weighted pros and cons</span></div>
+<h4>The six shipped intake records carry no weighted options</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/intake_score.py --gate --require-weighted-options exits 0, and the clause is then made non-optional in check_all.sh in the same change, or it reverts</div>
+<div class="bar-meta"><span class="gate">Days</span><span class="when">due 2026-08-31 18:00, delivered 2026-08-29 18:10</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">R17</span><span class="tag st-done">DONE</span><span class="gate">G6 Vault active retrieval and error repetition avoidance</span></div>
+<h4>Wire freshness into the live recall path, and widen the roots</h4>
+<div class="dc"><b>Done-check</b>a recall for a symptom whose only matching note is stale returns that note WITHHELD with its reason, proven by driving the same query before and after the citation is broken</div>
+<div class="bar-meta"><span class="gate">Days</span><span class="when">due 2026-08-31 18:00, delivered 2026-08-29 18:35</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">R7</span><span class="tag st-done">DONE</span><span class="gate">G5 Intake: detailed options, mermaid diagrams, weighted pros and cons</span></div>
+<h4>The controller invariant: an incomplete option cannot be approved</h4>
+<div class="dc"><b>Done-check</b>a deliberately incomplete option record is REFUSED by the controller, exit code proving it, and a complete one proceeds</div>
+<div class="bar-meta"><span class="gate">Days</span><span class="when">due 2026-09-01 18:00, delivered 2026-08-29 19:05</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">R8</span><span class="tag st-done">DONE</span><span class="gate">G5 Intake: detailed options, mermaid diagrams, weighted pros and cons</span></div>
+<h4>Views replace personas: Outcome, Data, Code, Balanced</h4>
+<div class="dc"><b>Done-check</b>one canonical record renders in all four views with IDENTICAL risk class, checks and conclusions, proven by diffing the invariant fields across renderings</div>
+<div class="bar-meta"><span class="gate">Days</span><span class="when">due 2026-09-01 18:00, delivered 2026-08-29 18:40</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">R9</span><span class="tag st-done">DONE</span><span class="gate">G2 Differentiation</span></div>
+<h4>The differentiation claim written, with the command behind it</h4>
+<div class="dc"><b>Done-check</b>the claim sentence, the command, and its output, with the structural reason each competitor cannot compute it</div>
+<div class="bar-meta"><span class="gate">Days</span><span class="when">due 2026-09-02 12:00, delivered 2026-08-29 19:38</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">R10</span><span class="tag st-done">DONE</span><span class="gate">G4 Simplifying the invocation</span></div>
+<h4>Surface reduced to a named target, with a test that fails above it</h4>
+<div class="dc"><b>Done-check</b>a test that FAILS when the shipped surface exceeds the target, driven red before it is driven green</div>
+<div class="bar-meta"><span class="gate">Days</span><span class="when">due 2026-09-03 18:00, delivered 2026-08-29 20:15</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">R11</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>One install command produces one product</h4>
+<div class="dc"><b>Done-check</b>sh scripts/bundle-install-smoke.sh from a clean environment, exit 0, and the installed surface matches the target count</div>
+<div class="bar-meta"><span class="gate">Days</span><span class="when">due 2026-09-04 18:00, delivered 2026-08-29 20:10</span></div>
+</div>
+<h2>Near term &middot; 28 row(s)</h2>
+<div class="card">
+<div class="chead"><span class="cid">R22</span><span class="tag st-done">DONE</span><span class="gate">G5 Intake: detailed options, mermaid diagrams, weighted pros and cons</span></div>
+<h4>The Daybook: one calm decision feed across the three repositories</h4>
+<div class="dc"><b>Done-check</b>a generator script exists, sweeps all three repositories&#x27; decision stores, and renders one stable page; running it twice with no new decisions produces byte-identical output; a decision added to any repo appears after regeneration</div>
+<div class="bar-meta"><span class="gate">Near term</span><span class="when">due 2026-08-31 18:00, delivered 2026-08-30 04:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">R23</span><span class="tag st-done">DONE</span><span class="gate">G5 Intake: detailed options, mermaid diagrams, weighted pros and cons</span></div>
+<h4>Intake options render as a published page, never as terminal text</h4>
+<div class="dc"><b>Done-check</b>BrotherModeUp PR 74 is merged and the four files it carries are on that main: references/visual-surface.md, references/kickoff.md, references/intake-artifact-template.md, references/assets/intake-artifact-skeleton.html</div>
+<div class="bar-meta"><span class="gate">Near term</span><span class="when">due 2026-08-31 18:00, delivered 2026-08-30 17:21</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">R24</span><span class="tag st-done">DONE</span><span class="gate">G5 Intake: detailed options, mermaid diagrams, weighted pros and cons</span></div>
+<h4>BrotherMode&#x27;s guided kickoff stops refusing to run from the umbrella</h4>
+<div class="dc"><b>Done-check</b>withheld: this text names a path on the machine it was written on, which does not belong on a public page</div>
+<div class="bar-meta"><span class="gate">Near term</span><span class="when">due 2026-08-31 18:00, delivered 2026-09-02</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">R25</span><span class="tag st-flight">IN-FLIGHT</span><span class="gate">G5 Intake: detailed options, mermaid diagrams, weighted pros and cons</span></div>
+<h4>Limit-aware pause, ceremony, and seamless restart</h4>
+<div class="dc"><b>Done-check</b>a session driven into each of the three limit classes (session ceiling, daily ceiling, simulated account limit) pauses itself, runs the ceremony, and the restart resumes the same work with zero re-decomposition, driven backwards: a limit that never fires leaves no pause artifacts</div>
+<div class="bar-meta"><span class="gate">Near term</span><span class="when">due 2026-09-01 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">H6</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>BM_FENCE_MODE=enforced: the proven mode switched on</h4>
+<div class="dc"><b>Done-check</b>BM_FENCE_MODE=enforced set machine-wide in a quiet window the founder names; a fenced write outside a claim is refused at the hub root (quoted) and the same write succeeds under a claim (quoted); scripts/fence_enforced_drill.py re-run reads 19 PASS and 1 NO-DATA with the positive control firing</div>
+<div class="bar-meta"><span class="gate">Near term</span><span class="when">due 2026-09-05 18:00, delivered 2026-09-02 23:30</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">V1</span><span class="tag st-done">DONE</span><span class="gate">G6 Vault active retrieval and error repetition avoidance</span></div>
+<h4>Ship the point-of-need recall hook in the plugin</h4>
+<div class="dc"><b>Done-check</b>vault_recall_hook.py resolves its index tool from CLAUDE_PLUGIN_ROOT when BM_TOOLS and the config key are absent (test driven both ways); its recalled text reaches the model on the channel docs/HOOKS.md names, proven by a live Edit in a fresh session that shows the framed note; grep -c vault products/brothermode/hooks/hooks.json prints a number above 0; python3 products/brothermode/tools/test_vault_recall_hook.py exits 0; the hooks.json dependents pass after the change (CHECKSUMS.sha256 regenerated, test_bm_plugin_install parity, bm_hookbench, test_bm_hooks) with their lines quoted; and the hook prints one inline line naming how many lessons were recalled and from which file, the evidenced value moment (docs/plan/RESEARCH-V1-2026-09-02.md section 7)</div>
+<div class="bar-meta"><span class="gate">Near term</span><span class="when">due 2026-09-02 18:00, delivered 2026-09-02</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">V2</span><span class="tag st-open">OPEN</span><span class="gate">G6 Vault active retrieval and error repetition avoidance</span></div>
+<h4>The vault door: first run binds a vault and the vault verbs reach the user</h4>
+<div class="dc"><b>Done-check</b>a scripted first run choosing a non-default folder ends with BROTHERMODE_VAULT (or the config file) pointing at that folder with no manual step (grep quoted); bm_vault_cli.py doctor and census reach the user through one documented surface, and the same command through the skill prints the same output as the script called directly</div>
+<div class="bar-meta"><span class="gate">Near term</span><span class="when">due 2026-09-04 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">V3</span><span class="tag st-flight">IN-FLIGHT</span><span class="gate">G2 Differentiation</span></div>
+<h4>The denominator: enough real units that five enter the application rate, judged independently</h4>
+<div class="dc"><b>Done-check</b>python3 products/brothermode/tools/bm_recurrence.py report prints a rate with denominator &gt;= 5, where a unit enters the denominator only when its receipt moves a surfaced lesson into applied or declined (five filed receipts are not five applicable units); applicability judged by a reader shown only the diff and the lesson text (verdicts quoted); the number is quoted as pre-action application, never as prevention; the work was accepted by the owning project&#x27;s own battery (green output quoted)</div>
+<div class="bar-meta"><span class="gate">Near term</span><span class="when">due 2026-09-06 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">V6</span><span class="tag st-done">DONE</span><span class="gate">G6 Vault active retrieval and error repetition avoidance</span></div>
+<h4>Separation of duties on promotion</h4>
+<div class="dc"><b>Done-check</b>SEPARATION_OF_DUTIES_ENFORCED is True and a test where the same actor authors and approves a promotion fails after the flip and passes clean before, quoted</div>
+<div class="bar-meta"><span class="gate">Near term</span><span class="when">due 2026-09-05 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">D1</span><span class="tag st-flight">IN-FLIGHT</span><span class="gate">G4 Simplifying the invocation</span></div>
+<h4>The public pages move through Codex on change briefs, and the twelve waiting pages are named</h4>
+<div class="dc"><b>Done-check</b>every public-page change this plan implies (the six-verb door, the Vault&#x27;s role, the intake) has a change brief under governance/ addressed to Codex; the founder&#x27;s approval is recorded for any change to the product definition or the Vault&#x27;s public role; the twelve canonical pages waiting on his export are listed with their status; no public page was authored by Fable (git log on docs/ and README.md shows the Codex path)</div>
+<div class="bar-meta"><span class="gate">Near term</span><span class="when">due 2026-09-05 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">I0</span><span class="tag st-done">DONE</span><span class="gate">G5 Intake: detailed options, mermaid diagrams, weighted pros and cons</span></div>
+<h4>The intake page: the door drawn into the whole loop</h4>
+<div class="dc"><b>Done-check</b>docs/diagrams/brother-intake.html exists, its text extraction contains the five beats, the vault profile read point and the word receipt (grep counts quoted), it carries no em or en dash and no private term, and it is published as an artifact whose url resolves and is recorded in PROJECT.md</div>
+<div class="bar-meta"><span class="gate">Near term</span><span class="when">due 2026-09-02 14:00, delivered 2026-09-02 10:20</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">I1</span><span class="tag st-done">DONE</span><span class="gate">G5 Intake: detailed options, mermaid diagrams, weighted pros and cons</span></div>
+<h4>The receipt door: every delivery report speaks in outcomes and carries its receipt</h4>
+<div class="dc"><b>Done-check</b>a real run&#x27;s final report contains the honest sentence (exit 0 means no check failed, not that everything is proven), the receipt&#x27;s command, exit code and output, and two computed screens, with machinery moved to a log; the report is quoted from a live run and the same run&#x27;s engine record matches it</div>
+<div class="bar-meta"><span class="gate">Near term</span><span class="when">due 2026-09-03 18:00, delivered 2026-09-02 17:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">I2</span><span class="tag st-flight">IN-FLIGHT</span><span class="gate">G5 Intake: detailed options, mermaid diagrams, weighted pros and cons</span></div>
+<h4>Live emission proven: one real record passes the weighted-options gate, two proxy runs scored</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/intake_score.py --gate --require-weighted-options &lt;record from a real session&gt; exits 0 with the record path quoted and the session named; then two newcomer proxy runs (an analyst ask and a developer ask) are scored on all eight criteria with --turns, --process-questions and --receipt-verified fed from their transcripts, and no criterion reads below 8 (score tables quoted); a hand-authored record does not count</div>
+<div class="bar-meta"><span class="gate">Near term</span><span class="when">due 2026-09-06 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">I3</span><span class="tag st-flight">IN-FLIGHT</span><span class="gate">G5 Intake: detailed options, mermaid diagrams, weighted pros and cons</span></div>
+<h4>The screen loom: the engine emits a weighted screen at the four human moments</h4>
+<div class="dc"><b>Done-check</b>a real run pauses at intent, at a forcing condition, at release and at acceptance with a decide.py screen whose options are weighted and computed, recommended first, and does not proceed until the person chooses (event order quoted from the session record); machinery goes to a log, one echo line and one proof line reach the chat</div>
+<div class="bar-meta"><span class="gate">Near term</span><span class="when">due 2026-09-12 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">I5</span><span class="tag st-open">OPEN</span><span class="gate">G5 Intake: detailed options, mermaid diagrams, weighted pros and cons</span></div>
+<h4>Convergence measured: the intake gets quieter for a known person</h4>
+<div class="dc"><b>Done-check</b>over the proxy runs and real intakes the override rate of stated assumptions and the count of questions repeated across sessions are quoted; the bar is under 10 percent and zero repeats once a profile exists</div>
+<div class="bar-meta"><span class="gate">Near term</span><span class="when">due 2026-09-19 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">I6</span><span class="tag st-done">DONE</span><span class="gate">G5 Intake: detailed options, mermaid diagrams, weighted pros and cons</span></div>
+<h4>The question budget made countable</h4>
+<div class="dc"><b>Done-check</b>every intake logs questions asked and overrides of stated assumptions to its record; a script sums them per tier (one line fix, routine, irreversible) and prints the counts; routine work drawing more than one question is flagged (quoted)</div>
+<div class="bar-meta"><span class="gate">Near term</span><span class="when">due 2026-09-06 18:00, delivered 2026-09-02 23:30</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">I7</span><span class="tag st-open">OPEN</span><span class="gate">G5 Intake: detailed options, mermaid diagrams, weighted pros and cons</span></div>
+<h4>The skills emit the weighted table</h4>
+<div class="dc"><b>Done-check</b>kickoff and the brothermode start flow instruct a machine-readable weight table beside the two or three options and the one diagram; a record produced by following the skill as written, not hand-authored, passes python3 scripts/intake_score.py --gate --require-weighted-options at exit 0 (the record path and the session named)</div>
+<div class="bar-meta"><span class="gate">Near term</span><span class="when">due 2026-09-05 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">L1</span><span class="tag st-done">DONE</span><span class="gate">G2 Differentiation</span></div>
+<h4>v1.0 on September 6: the receipt and the recall, cut through the release gates</h4>
+<div class="dc"><b>Done-check</b>release_invariant.py and reproduce_export.py both exit 0 on the v1.0 tag; the export gates read CLEAR; an installed user updates across v1.0 with a working door (driven on this machine); the board is republished with this row&#x27;s evidence; the launch page carries the three numbers with NO-DATA named where honest</div>
+<div class="bar-meta"><span class="gate">Near term</span><span class="when">due 2026-09-06 18:00, delivered 2026-09-03 20:47</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">L2</span><span class="tag st-flight">IN-FLIGHT</span><span class="gate">G4 Simplifying the invocation</span></div>
+<h4>The launch page and the Vault pages, through Codex on a change brief</h4>
+<div class="dc"><b>Done-check</b>governance/DOC-CHANGE-BRIEF-2026-09-02-v1-launch.md exists naming every public page change (the README launch sentence with its proof command, the Vault pages naming Obsidian-native format and first-run consent, the benchmark page with the three numbers and NO-DATA cells named); Codex applies it; the founder&#x27;s approval of the product sentence is recorded; no public page authored by Fable</div>
+<div class="bar-meta"><span class="gate">Near term</span><span class="when">due 2026-09-05 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">V11</span><span class="tag st-open">OPEN</span><span class="gate">G2 Differentiation</span></div>
+<h4>The G2 script: three numbers for both tools on the same tasks on the same day</h4>
+<div class="dc"><b>Done-check</b>one command prints, for Brother and for GSD on the five fixed tasks run the same day: deliveries ending in a rerunnable receipt bound to the claim, autonomous completions without a human unpause, and the application rate or NO-DATA; each cell names its command; a subject whose shipped text makes a cell unscorable prints NO-DATA naming why</div>
+<div class="bar-meta"><span class="gate">Near term</span><span class="when">due 2026-09-12 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">V4</span><span class="tag st-done">DONE</span><span class="gate">G6 Vault active retrieval and error repetition avoidance</span></div>
+<h4>Capture what worked: pattern notes fire on a green close</h4>
+<div class="dc"><b>Done-check</b>a green close writes one note typed pattern into the vault through the same gate admit uses, with the receipt it came from linked; grep -rl &#x27;^type: pattern&#x27; over the vault prints at least one note created by the trigger and not by hand; test_pattern_note.py stays green</div>
+<div class="bar-meta"><span class="gate">Near term</span><span class="when">due 2026-09-10 18:00, delivered 2026-09-02 23:30</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">V5</span><span class="tag st-done">DONE</span><span class="gate">G6 Vault active retrieval and error repetition avoidance</span></div>
+<h4>Research when stuck: the third refused attempt invokes a research step</h4>
+<div class="dc"><b>Done-check</b>a scripted refusal from attempt_ledger.py invokes a research step that returns a citation or a finding (a re-read of the literal ask, a named reference, another project&#x27;s solution), quoted, instead of a message telling a human to go read; driven backwards: two attempts trigger nothing</div>
+<div class="bar-meta"><span class="gate">Near term</span><span class="when">due 2026-09-11 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">V9</span><span class="tag st-done">DONE</span><span class="gate">G2 Differentiation</span></div>
+<h4>The rate gets a judge: a judge field and an ordering witness in bm_recurrence</h4>
+<div class="dc"><b>Done-check</b>the receipt schema carries a judge verdict per surfaced id and an ordering witness for before_first_write that the filer cannot set by hand; a receipt whose applied list disagrees with the judge is refused (driven both ways); report prints the judged rate beside the self-filed one</div>
+<div class="bar-meta"><span class="gate">Near term</span><span class="when">due 2026-09-12 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">H4</span><span class="tag st-open">OPEN</span><span class="gate">G4 Simplifying the invocation</span></div>
+<h4>The door becomes six verbs: a six-part migration, then the fifteen shims come out</h4>
+<div class="dc"><b>Done-check</b>the front door&#x27;s start and deliver rows (bundle/commands/brother.md, bundle/skills/using-brother/SKILL.md, bundle/MANIFEST.json) route to the skills and not to the shims; scripts/setup.py teaches the new verb; capabilities.status.json cites skills not shims; bm_view.py OFFERED_COMMANDS and its test name the six verbs; the fifteen-file pin in test_bm.py and the ACTIVE_DOCS pins in test_bm_docs.py are rewritten; then claude plugin validate passes and grep -rn &#x27;brotherme-&#x27; products bundle docs README.md prints no live consumer outside the shims (quoted); then ls products/brothermode/commands prints nothing, the plugin suite is green, and an installed 3.4.4 user updates across the release with a working door, driven on this machine</div>
+<div class="bar-meta"><span class="gate">Near term</span><span class="when">due 2026-09-10 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">T1</span><span class="tag st-done">DONE</span><span class="gate">G2 Differentiation</span></div>
+<h4>Every receipt carries a cost block and the harness version</h4>
+<div class="dc"><b>Done-check</b>a delivery record names tokens in, out and cached, turns, wall clock, cache hit rate, a failure category, and the harness version (git describe of the tree that ran); a test fails when any field is absent; driven both ways</div>
+<div class="bar-meta"><span class="gate">Near term</span><span class="when">due 2026-09-11 18:00, delivered 2026-09-02 23:30</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">T2</span><span class="tag st-done">DONE</span><span class="gate">G6 Vault active retrieval and error repetition avoidance</span></div>
+<h4>Failed attempts keep their traces, greppable on disk</h4>
+<div class="dc"><b>Done-check</b>a unit that failed and was retried leaves its full per-attempt trace (tool calls, outputs, model output, state change) under the run directory beside the passing attempt; grep over the run directory finds the failed attempt&#x27;s check output; a test drives a seeded failure and asserts the trace survives the retry</div>
+<div class="bar-meta"><span class="gate">Near term</span><span class="when">due 2026-09-12 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">V12</span><span class="tag st-done">DONE</span><span class="gate">G6 Vault active retrieval and error repetition avoidance</span></div>
+<h4>The Vault counter on the board: lessons recalled, receipts bound, notes written</h4>
+<div class="dc"><b>Done-check</b>the board carries a strip with three counts read from the store and the vault, not typed (lessons recalled this week, receipts bound, notes written), each with the command that produced it; NO-DATA when a source is missing</div>
+<div class="bar-meta"><span class="gate">Near term</span><span class="when">due 2026-09-11 18:00, delivered 2026-09-02 23:30</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">V13</span><span class="tag st-open">OPEN</span><span class="gate">G6 Vault active retrieval and error repetition avoidance</span></div>
+<h4>Correction in one line: a wrong Vault note is fixed by one sentence</h4>
+<div class="dc"><b>Done-check</b>saying &#x27;that lesson is wrong because X&#x27; in a session writes a superseding note through the admission gate linked to the old one, never editing the old one; driven both ways with a test; the old note is withheld from recall with its reason</div>
+<div class="bar-meta"><span class="gate">Near term</span><span class="when">due 2026-09-12 18:00</span></div>
+</div>
+<h2>Weeks &middot; 6 row(s)</h2>
+<div class="card">
+<div class="chead"><span class="cid">G1-M3</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>G1 milestone 3: each of the eleven capability areas gets an acceptance test</h4>
+<div class="dc"><b>Done-check</b>eleven scripted tests exist and each reports PASS, FAIL or NO-DATA with its own evidence</div>
+<div class="bar-meta"><span class="gate">Weeks</span><span class="when">due 2026-09-27 18:00, delivered 2026-08-30 07:40</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">H5</span><span class="tag st-open">OPEN</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>The kernel wave under the absorption ruling: the journal as schema 23 merges the two engines</h4>
+<div class="dc"><b>Done-check</b>P1.1: the directive&#x27;s module inventory carries a bm_store.py row and its entity table is rewritten against it (file quoted). P1.2: a deletion gate is observed RED before the first journal event is written, then schema 23 adds tables additively, the spine&#x27;s claims.json, Work document and worktree sidecar read and write through the store, and the crash-and-resume fault lab passes on the merged path with the unit not re-dispatched (attempt counter quoted)</div>
+<div class="bar-meta"><span class="gate">Weeks</span><span class="when">due 2026-09-12 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">I4</span><span class="tag st-done">DONE</span><span class="gate">G5 Intake: detailed options, mermaid diagrams, weighted pros and cons</span></div>
+<h4>The scorer stops being gameable</h4>
+<div class="dc"><b>Done-check</b>citations are resolved against the repository root (a backticked path that does not exist scores uncited), options are compared for distinctness and the recommendation must name one of them, Mermaid fences are parsed, the sequencing and level proxies no longer trigger on ordinary English; each hole from the 9.5 design appendix has a test that fails before and passes after, quoted</div>
+<div class="bar-meta"><span class="gate">Weeks</span><span class="when">due 2026-09-16 18:00, delivered 2026-09-02 23:30</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">V10</span><span class="tag st-done">DONE</span><span class="gate">G6 Vault active retrieval and error repetition avoidance</span></div>
+<h4>The prevention control arm, designed before the word is used</h4>
+<div class="dc"><b>Done-check</b>a design document names the later per-unit observation (did the known failure signature recur) and the memory-off control arm, with the arithmetic that subtracts one from the other, reviewed adversarially; no gate uses the word prevented until a run of that design prints a number</div>
+<div class="bar-meta"><span class="gate">Weeks</span><span class="when">due 2026-09-19 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">V7</span><span class="tag st-open">OPEN</span><span class="gate">G5 Intake: detailed options, mermaid diagrams, weighted pros and cons</span></div>
+<h4>The vault profile at intake: role, level and standing preferences read before the first question</h4>
+<div class="dc"><b>Done-check</b>a second session for the same person and project reads a prior-session profile line and skips a previously asked question, proven by a test exiting 0; the profile is plain text the person can read and correct; a preference is promoted to a default after three repeats and not before (driven both ways)</div>
+<div class="bar-meta"><span class="gate">Weeks</span><span class="when">due 2026-09-19 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">V8</span><span class="tag st-open">OPEN</span><span class="gate">G6 Vault active retrieval and error repetition avoidance</span></div>
+<h4>Heat-scored promotion and bi-temporal fields</h4>
+<div class="dc"><b>Done-check</b>a memory earns advisory recall by a mechanical counter (quoted before and after), never by a model&#x27;s opinion; four frontmatter fields carry valid-from, valid-to, recorded-at and superseded-by, and a query as of a past date returns the note that was true then (driven both ways)</div>
+<div class="bar-meta"><span class="gate">Weeks</span><span class="when">due 2026-09-19 18:00</span></div>
+</div>
+<h2>Months &middot; 2 row(s)</h2>
+<div class="card">
+<div class="chead"><span class="cid">R12</span><span class="tag st-nodata">SUPERSEDED</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>G1 parity capability (SUPERSEDED by milestones G1-M3 and G1-M4)</h4>
+<div class="dc"><b>Done-check</b>each of the eleven areas has one scripted acceptance test on a real repository, and the benchmark reports parity or better on the behavioural criteria</div>
+<div class="bar-meta"><span class="gate">Months</span><span class="when">due 2026-12-19 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">G1-M4</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>G1 milestone 4: close the areas that would actually stop a contributor</h4>
+<div class="dc"><b>Done-check</b>the areas M3 marked blocking now pass their acceptance tests on a real repository</div>
+<div class="bar-meta"><span class="gate">Months</span><span class="when">due 2026-11-28 18:00, delivered 2026-08-30 09:20</span></div>
+</div>
+<h2>Unscheduled &middot; 202 row(s)</h2>
+<div class="card">
+<div class="chead"><span class="cid">M1</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>One repo, feasibility spike: BrotherDS subtree on a throwaway branch</h4>
+<div class="dc"><b>Done-check</b>on a throwaway hub branch, git log --oneline -- products/brotherds shows BrotherDS&#x27;s own history, one pre-merge BrotherDS SHA resolves with git cat-file -t, and its nearest test suite runs from products/brotherds with its own exit code quoted; the branch is then deleted, nothing lands on main</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-08-31 13:00, delivered 2026-08-31 13:05</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">M2</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>BrotherDS lands at products/brotherds with full history</h4>
+<div class="dc"><b>Done-check</b>products/brotherds exists on hub main via a subtree merge whose log preserves BrotherDS history (an old BrotherDS SHA resolves in the one repo), and sh scripts/check_all.sh on the merged main shows no NEW undeclared red beside the declared expectations</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-08-31 18:00, delivered 2026-08-31 13:40</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">R26</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>Privacy as an edition boundary: the filtering spec and the five editions</h4>
+<div class="dc"><b>Done-check</b>driven backwards: a fixture private term in a private-edition worktree is refused at the public remote by the guard; the filtering spec classifies every content class the estate has actually produced this week; the founder&#x27;s edition-architecture choice is recorded on its decision screen with his words</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-06 00:00, delivered 2026-08-30 22:40</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">R27</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>The hardening program: observers the builders did not write</h4>
+<div class="dc"><b>Done-check</b>the fault lab drives the four seeded fault sequences against a clean installed artifact through the public CLI only and all four invariants hold, driven backwards by reintroducing each of the four fixed defects and watching the lab catch it</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-06 00:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">M3</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>BrotherSBE lands at products/brothersbe, its battery delegated</h4>
+<div class="dc"><b>Done-check</b>products/brothersbe exists on hub main with full history, one delegated line in scripts/check_all.sh runs the product&#x27;s own battery from its new path with its own exit code, and the public BrotherSBE repo still ships the plugin untouched (marketplace source unchanged, claude plugin list still resolves it)</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-01 18:00, delivered 2026-08-31 10:31</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">M4</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>BrotherModeUp lands at products/brothermode, the vault workstream with it</h4>
+<div class="dc"><b>Done-check</b>products/brothermode exists on hub main with full history, its test_all wired as a delegated suite with its own exit code, the vault modules present under the subtree, and the public BrotherModeUp repo still ships the plugin untouched</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-02 18:00, delivered 2026-08-31</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">R28</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>The enforcement act: laws and learnings stop being optional</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/laws_audit.py prints one line per law in the global and project law books with ENFORCED plus its proving command run, or UNENFORCED plus its named candidate control; a law naming a missing enforcer file FAILS by name; driven backwards with a fixture law claiming a nonexistent enforcer</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-06 00:00, delivered 2026-08-30 22:20</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">M5</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>Guards and path lists recognize the one repo as home</h4>
+<div class="dc"><b>Done-check</b>the SBE write guard and every KNOWN_REPOS-style list treat the one repo as home, driven both ways: the guided kickoff runs from the one repo without the cross-project refusal, AND a genuinely foreign cwd is still refused; R24 closes on this evidence</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-02 22:00, delivered 2026-09-02</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">M6</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>The cutover release: one repo ships everything, old repos archived</h4>
+<div class="dc"><b>Done-check</b>one release re-points every marketplace source to the one repo and release_invariant.py plus reproduce_export.py both exit 0 on it; the old repositories carry a successor pointer and read archived=true via gh repo view; an installed user updates across the cutover without breakage, driven on this machine</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-03 18:00, delivered 2026-09-02 23:30</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E1</span><span class="tag st-done">DONE</span><span class="gate">G2 Differentiation</span></div>
+<h4>The delivery record carries the check itself, not a sentence about it</h4>
+<div class="dc"><b>Done-check</b>a delivery record names, per unit, the check command, its captured exit code and its output; a run whose artifacts are not present in the repo the record describes REFUSES to mark integrated; every recorded canonical hash resolves via git cat-file -t; driven backwards by a unit whose check fails, which must not produce an integrated record</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-04 18:00, delivered 2026-08-31 17:02</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E2</span><span class="tag st-done">DONE</span><span class="gate">G4 Simplifying the invocation</span></div>
+<h4>First contact needs no internal noun and no broken escape hatch</h4>
+<div class="dc"><b>Done-check</b>on a fresh machine the documented first command either runs or prints a refusal whose named escape is driven and works; sbe verify&#x27;s default scope opens the user&#x27;s changed files and names them; no absolute vendor path appears in any user-facing output, proven by a grep over a captured first-run transcript</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-04 18:00, delivered 2026-08-31 19:39</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E3</span><span class="tag st-done">DONE</span><span class="gate">G4 Simplifying the invocation</span></div>
+<h4>The README&#x27;s own proof command passes verbatim, and one version is true</h4>
+<div class="dc"><b>Done-check</b>sh scripts/bundle-install-smoke.sh --github exits 0 from a fresh clone and its output matches the README verbatim; a test fails when any shipped version string disagrees with the marketplace manifest; no doc quotes a transcript from a path outside the repo</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-04 18:00, delivered 2026-08-31 16:26</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E4</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>Japanese confusable-entity disambiguation reaches the blind bar</h4>
+<div class="dc"><b>Done-check</b>the blind corpus at benchmarks/ja-adversarial scores negative class at or above 90 percent with 78 of 78 cases intact, run after the fix is merged and re-synced, and the 245-case team benchmark is unchanged</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-04 18:00, delivered 2026-08-31 15:36</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E5</span><span class="tag st-done">DONE</span><span class="gate">G2 Differentiation</span></div>
+<h4>Every export gate&#x27;s verdict is individually load-bearing</h4>
+<div class="dc"><b>Done-check</b>for each gate in export_public.run_gates, a test seeds a violation only that gate detects and fails when that gate&#x27;s verdict is dropped from all_ok, driven backwards one gate at a time</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-04 18:00, delivered 2026-08-31 16:20</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E6</span><span class="tag st-done">DONE</span><span class="gate">G2 Differentiation</span></div>
+<h4>A release ships the pin its own reproduction needs</h4>
+<div class="dc"><b>Done-check</b>the release record names the exact source revision and reproduce_export.py run with only that record&#x27;s values exits 0; release_invariant.py accepts its public-checkout and install-cache paths as flags and runs green from a foreign checkout</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-04 18:00, delivered 2026-08-31 19:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E7</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>A small task costs small overhead, and never lands half done</h4>
+<div class="dc"><b>Done-check</b>the same two-part task through the documented engine exits 0 inside 210 seconds on a fresh repository with both the function and its passing test present in the target repo, verified by the runner independently</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-04 18:00, delivered 2026-08-31 17:47</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">M7</span><span class="tag st-open">OPEN</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>Retire the old checkouts: the pre-rename checklist runs</h4>
+<div class="dc"><b>Done-check</b>the four checklist items are each shown done (no live session in the old checkouts, the vb210 advisor stopped or repaired, restart.sh repointed, peers messaged), the old checkouts are renamed aside, git worktree repair leaves zero broken worktrees, and one full battery runs in the one repo</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-06 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">M8</span><span class="tag st-open">OPEN</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>One battery, one board, one door: G3 and G4 close</h4>
+<div class="dc"><b>Done-check</b>the umbrella battery includes every product&#x27;s delegated suite in one run, the board counts all products, /brother is the single documented surface, and gates G3 and G4 flip on that evidence</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-04 12:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E10</span><span class="tag st-done">DONE</span><span class="gate">G4 Simplifying the invocation</span></div>
+<h4>bundle-install-smoke fails its composed verdict on internal NO-DATA</h4>
+<div class="dc"><b>Done-check</b>seeding a NO-DATA into any smoke stage ends the composed verdict non-zero naming that stage; sh scripts/bundle-install-smoke.sh exit 0 on the honest tree with zero NO-DATA lines</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-03 18:00, delivered 2026-09-03 12:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E11</span><span class="tag st-done">DONE</span><span class="gate">G4 Simplifying the invocation</span></div>
+<h4>Every shipped version text agrees with the manifest</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/test_version_truth.py fails when any of the five named texts disagrees with the marketplace manifest, and exits 0 after regeneration</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-03 18:00, delivered 2026-09-03 12:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E8</span><span class="tag st-done">DONE</span><span class="gate">G2 Differentiation</span></div>
+<h4>brother_run&#x27;s exit code derives from the verifier&#x27;s refusal, not the claim state</h4>
+<div class="dc"><b>Done-check</b>a unit whose verifier refuses (driven with a do-nothing unit and a vacuous check, the gauntlet&#x27;s own fixture) ends brother_run non-zero with the refusal in the report; python3 scripts/test_brother_run.py exit 0</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-03 18:00, delivered 2026-09-03 12:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E9</span><span class="tag st-done">DONE</span><span class="gate">G2 Differentiation</span></div>
+<h4>loop_bridge recognises a real versioned install</h4>
+<div class="dc"><b>Done-check</b>a test pins the versioned layout the installer writes and fails when INSTALLED_CANDIDATES cannot match it; python3 scripts/test_loop_bridge.py exit 0</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-03 18:00, delivered 2026-09-03 12:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">V14</span><span class="tag st-done">DONE</span><span class="gate">G6 Vault active retrieval and error repetition avoidance</span></div>
+<h4>Separation of duties reaches the promote path and the click pane</h4>
+<div class="dc"><b>Done-check</b>a candidate note written by bm_vault_intake or bm_vault_enrich carries an author-of-record line (quoted from a note written the documented way); cmd_promote with by equal to that author is REFUSED naming the rule and exits non-zero (quoted); cmd_promote with a different by succeeds (quoted); the pane&#x27;s POST /act approve with principal equal to the author is rejected (quoted); a note with no author of record is NO-DATA and is refused under the default policy, never silently allowed; the promotions, pane, lifecycle and the three enrich suites all pass with their exit codes quoted</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-05 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E12</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>The parity self-check runs its 22 tests instead of exiting 0 on nothing</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/test_parity_gate.py prints Ran N tests OK with N above 0</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-04 18:00, delivered 2026-09-03 05:26</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E13</span><span class="tag st-done">DONE</span><span class="gate">G2 Differentiation</span></div>
+<h4>Raw critic output stays outside the repository</h4>
+<div class="dc"><b>Done-check</b>bash scripts/cleanse.sh exits 0</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-04 18:00, delivered 2026-09-03 05:26</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E14</span><span class="tag st-done">DONE</span><span class="gate">G4 Simplifying the invocation</span></div>
+<h4>The exporter stamps its own placeholder with the real revision</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/test_export_public.py OK</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-04 18:00, delivered 2026-09-03 05:26</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E15</span><span class="tag st-done">DONE</span><span class="gate">G4 Simplifying the invocation</span></div>
+<h4>The release note is generated from the tree, never typed</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/release_note_from_tree.py exits 0 and python3 scripts/test_release_note_from_tree.py OK</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-04 18:00, delivered 2026-09-03 05:26</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E16</span><span class="tag st-done">DONE</span><span class="gate">G2 Differentiation</span></div>
+<h4>A NO-DATA skip reads NO-DATA in the battery, and every battery log names its commit</h4>
+<div class="dc"><b>Done-check</b>sh -n scripts/check_all.sh exits 0 and python3 scripts/test_battery_verdict.py OK</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-04 18:00, delivered 2026-09-03 05:26</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E17</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>Product suites run hermetic under the machine&#x27;s enforced fence</h4>
+<div class="dc"><b>Done-check</b>with BM_FENCE_MODE=enforced exported, python3 products/brothermode/tools/test_bm_fence_hook.py and test_install.py print OK</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-04 18:00, delivered 2026-09-03 05:26</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E18</span><span class="tag st-done">DONE</span><span class="gate">G2 Differentiation</span></div>
+<h4>The delivery report prints the three verdicts the README promises</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/test_brother_run.py OK</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-04 18:00, delivered 2026-09-03 05:26</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E19</span><span class="tag st-done">DONE</span><span class="gate">G2 Differentiation</span></div>
+<h4>Claims that survived their subject&#x27;s removal now fail</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/test_receipt_door.py and python3 products/brothermode/tools/test_vault_recall_hook.py print OK</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-04 18:00, delivered 2026-09-03 05:26</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E20</span><span class="tag st-done">DONE</span><span class="gate">G4 Simplifying the invocation</span></div>
+<h4>The README names what it assumed</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/prevented_word_gate.py products/brothermode/README.md CLEAN and the dash scan over README.md empty</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-04 18:00, delivered 2026-09-03 05:26</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E21</span><span class="tag st-done">DONE</span><span class="gate">G4 Simplifying the invocation</span></div>
+<h4>The shipped command carries no internal governance prose</h4>
+<div class="dc"><b>Done-check</b>grep -ciE founder|directive|ruling bundle/commands/brother.md prints 0</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-04 18:00, delivered 2026-09-03 05:26</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E22</span><span class="tag st-done">DONE</span><span class="gate">G2 Differentiation</span></div>
+<h4>The receipts counter sees the runs real users make</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/board_status.py --vault-counters names both run roots</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-04 18:00, delivered 2026-09-03 05:26</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E23</span><span class="tag st-done">DONE</span><span class="gate">G2 Differentiation</span></div>
+<h4>Who authors the check a receipt reruns is decided</h4>
+<div class="dc"><b>Done-check</b>docs/decisions/check-authorship-v1-2026-09-03.json carries a ruling and python3 scripts/test_decide.py OK</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-04 18:00, delivered 2026-09-03 05:26</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E24</span><span class="tag st-done">DONE</span><span class="gate">G2 Differentiation</span></div>
+<h4>The intent screen shows every check, the receipt names its author, and a check that already passes before the work reads NO-DATA</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/test_brother_run.py and python3 scripts/test_receipt_door.py print OK with tests for the refuse option, the author phrase, the check-passed-before rule and the zero-change rule</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-04 18:00, delivered 2026-09-03 05:33</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E25</span><span class="tag st-done">DONE</span><span class="gate">G2 Differentiation</span></div>
+<h4>One real end-to-end run on record, and its delivery refuted by audit</h4>
+<div class="dc"><b>Done-check</b>withheld: this text names a path on the machine it was written on, which does not belong on a public page</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-04 18:00, delivered 2026-09-03 05:26</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E26</span><span class="tag st-done">DONE</span><span class="gate">G4 Simplifying the invocation</span></div>
+<h4>The README shows one real run whose receipt survives audit</h4>
+<div class="dc"><b>Done-check</b>the README quick start carries a transcript quoted verbatim from a run on a pinned worktree whose delivery the evidence auditor did not refute, with the check author named on the receipt line</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-04 18:00, delivered 2026-09-03 07:48</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E27</span><span class="tag st-done">DONE</span><span class="gate">G2 Differentiation</span></div>
+<h4>The night&#x27;s ten silent-failure lint hits are handled or visibly exempted</h4>
+<div class="dc"><b>Done-check</b>the silent-failure lint over the hub names none of the four files (every hit listed with the truncation lifted, quoted), each script&#x27;s own test exits 0, the 26 inherited hits remain and are named as such</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-03 18:00, delivered 2026-09-03 08:51</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E28</span><span class="tag st-done">DONE</span><span class="gate">G2 Differentiation</span></div>
+<h4>The inherited silent-failure hits are closed and the assurance lint joins the battery</h4>
+<div class="dc"><b>Done-check</b>the lint over the hub reads PASS or NO-DATA with zero unexempted hits (every hit listed), check_all.sh carries the line and quotes its own PASS in a real run, and the seam fixtures still pass their own tests</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-10 18:00, delivered 2026-09-03 11:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E29</span><span class="tag st-done">DONE</span><span class="gate">G4 Simplifying the invocation</span></div>
+<h4>The installed plugin&#x27;s manifest names files the install does not carry</h4>
+<div class="dc"><b>Done-check</b>sbe score --strict over a clean repository shows no citation-inventory FAIL caused by the install, and a manifest entry with no file reads NO-DATA naming the install, driven both ways</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-10 18:00, delivered 2026-09-04 22:10</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E30</span><span class="tag st-done">DONE</span><span class="gate">G5 Intake: detailed options, mermaid diagrams, weighted pros and cons</span></div>
+<h4>sbe status discovers the dossiers under docs/dossiers</h4>
+<div class="dc"><b>Done-check</b>sbe status --json shows scope.storesInspected.dossiers naming docs/dossiers/v1.0-release, and a dossier moved out of the configured roots is not found, driven both ways</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-10 18:00, delivered 2026-09-03 09:16</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E31</span><span class="tag st-done">DONE</span><span class="gate">G2 Differentiation</span></div>
+<h4>The pre-push gate reads the same range on a pinned worktree as on the checkout it protects</h4>
+<div class="dc"><b>Done-check</b>the gate on a detached worktree at a pushed commit reads the same verdict as on the checkout, driven both ways: a seeded offender in the outgoing range still refuses, and a detached head with no resolvable base prints NO-DATA naming it</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-10 18:00, delivered 2026-09-03 09:35</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E32</span><span class="tag st-done">DONE</span><span class="gate">G4 Simplifying the invocation</span></div>
+<h4>The shipped plugin manifest names the repository it actually ships from</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/test_version_truth.py fails when the shipped plugin.json repository field disagrees with the marketplace source url, and exits 0 after the field is corrected; both quoted</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-10 18:00, delivered 2026-09-03 10:40</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E33</span><span class="tag st-done">DONE</span><span class="gate">G2 Differentiation</span></div>
+<h4>The assurance product&#x27;s own test file runs green, and the battery runs it</h4>
+<div class="dc"><b>Done-check</b>python3 products/brothersbe/tools/test_sbe.py exits 0 (147 or more tests, 0 failures) and scripts/check_all.sh carries a line running it, its PASS quoted from a real battery run</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-10 18:00, delivered 2026-09-03 10:40</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E34</span><span class="tag st-done">DONE</span><span class="gate">G2 Differentiation</span></div>
+<h4>Short private terms match as whole words in any case, in every gate</h4>
+<div class="dc"><b>Done-check</b>each gate refuses a fixture carrying a lowercase short term and allows a fixture carrying only the ordinary word that contains its letters, driven both ways with the outputs quoted; the skill text states the same rule</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-06 18:00, delivered 2026-09-03 11:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E35</span><span class="tag st-done">DONE</span><span class="gate">G2 Differentiation</span></div>
+<h4>The handover packs on this machine carry no private term</h4>
+<div class="dc"><b>Done-check</b>the strict scan over the handovers directory reads 0 term-bearing files (file names included), and python3 scripts/close_ceremony_check.py FAILS on a fixture pack carrying a term in a zip or a file name, driven both ways</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-10 18:00, delivered 2026-09-03 12:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E36</span><span class="tag st-done">DONE</span><span class="gate">G2 Differentiation</span></div>
+<h4>The mixed-remote checkout at the old Brother path cannot publish hub history</h4>
+<div class="dc"><b>Done-check</b>withheld: this text names a path on the machine it was written on, which does not belong on a public page</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-10 18:00, delivered 2026-09-04 22:30</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E37</span><span class="tag st-done">DONE</span><span class="gate">G2 Differentiation</span></div>
+<h4>One private-term list, one whole-word definition, and no environment variable that narrows a gate</h4>
+<div class="dc"><b>Done-check</b>one list file with a test naming its count; each gate driven with an empty list reads NO-DATA; the underscore-adjacent fixture is refused by all four scanners; the exporter&#x27;s help text matches what the dry run does, all quoted</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-10 18:00, delivered 2026-09-03 11:45</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E38</span><span class="tag st-done">DONE</span><span class="gate">G2 Differentiation</span></div>
+<h4>Mutation at receipt: a check that survives its dependency&#x27;s reversal reads NO-DATA from the engine</h4>
+<div class="dc"><b>Done-check</b>the archived run 5 replayed through the engine reads the test unit NO-DATA (the check still passes with the guard&#x27;s change to mathlib.py reverted) and the guard unit PASS, summary verdicts 1 PASS, 0 FAIL, 1 NO-DATA; test_receipt_door and test_brother_run green with the new classes</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-10 18:00, delivered 2026-09-03 11:33</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E39</span><span class="tag st-done">DONE</span><span class="gate">G2 Differentiation</span></div>
+<h4>The run record tells the truth about cost, resumption, refusal, a dirty target and the time bound</h4>
+<div class="dc"><b>Done-check</b>test_brother_run green with a test per finding driven both ways; a real or fixture run&#x27;s intent screen shows the time bound and the clean-tree check, its cost block sums real usage or states why not, a resumed run re-runs the abandoned claim and its receipt names both harness revisions</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-10 18:00, delivered 2026-09-03 12:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E100</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>required_fast.sh writes its failure file under the shared $TMPDIR so two worktrees collide</h4>
+<div class="dc"><b>Done-check</b>running scripts/required_fast.sh from two worktrees at once collides on the same scratch path; today it does (fails)</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-04 22:20</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E101</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>the public export remote was found by the NAME origin, so one commit read public in the hub checkout and private in a lane worktree</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/test_receipt_door.py builds both checkout shapes as real repositories (origin the public repo plus a hub remote, and the reverse naming) and refuses when they label one commit differently, or when a checkout with no public remote reads anything but NO-DATA</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-04 18:40</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E105</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>the pre-push gate read the checkout&#x27;s HEAD instead of the refs git hands it on stdin, so a detached-HEAD push landed unscanned</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/test_pre_push_gate.py, whose new class ADetachedPushIsScannedFromTheRefsOnStdin drives a real git push from a detached HEAD to a local bare remote both ways: a commit carrying an em dash or an attribution trailer is refused, a clean one is allowed, and an empty stdin stays a no-op</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-04 23:30</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E107</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>A critical readiness record bound to a hub commit can never pass in the public export&#x27;s orphan history; every record item binds by commit plus content</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/test_readiness_gate.py passes 48 tests including the 6 new cases in EveryRecordItemIsBoundNotOnlyTheOneThatOptedIn, and those cases fail against the pre-change gate; a rebuilt export tree committed as an orphan history runs scripts/readiness_gate.py at exit 0 with the restore drill line reading bound by content</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-04 21:45</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E108</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>the fence refusal prints a store path that resolves only from the product root</h4>
+<div class="dc"><b>Done-check</b>python3 products/brothermode/tools/test_bm_fence_hook.py passes CalibratedFailOpen.test_calibrated_4b_the_printed_init_command_runs_from_the_project_root, which extracts the exact command the refusal printed and executes it from a scratch project root, asserting exit 0; the same test fails before the fix with the Errno 2 line quoted in evidence. No print site in the product&#x27;s code still emits a bare `tools/bm_store.py` fix-it command (verified by grep -rn against every remaining hit).</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-04 19:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E109</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>the public README&#x27;s install, update and uninstall commands were wrong in four places and the Codex hooks installer wrote to an unresolved symlinked home</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/test_readme_honesty.py and python3 scripts/test_codex_hooks_install.py both OK, the corrected honesty assertions failing on the pre-change README; a live install on a symlinked isolated CODEX_HOME printing the 18 trusted line, then --uninstall printing what it removed with a foreign hook surviving, then a second --uninstall printing NO-DATA; python3 scripts/codex_smoke.py PASS</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-04 23:55</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E110</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>the v1.0.2 tag ships an export manifest that describes the cut commit, not the tagged tree (18 of 1198 files differ)</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/test_export_public.py drives check_export_manifest both ways on a fixture export tree (clear, moved bytes, unnamed file, missing file, absent manifest, unparseable manifest) and proves tag_time_checks itself reaches it; the scratch-branch proof runs the refresh and reads CLEAR at exit 0, then lands one change on a shipped file, skips the refresh, and reads REFUSED at exit 1</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-04 15:45</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E111</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>the public export does not carry files the BrotherMode product&#x27;s own gate names, and its README carries three false or stale claims</h4>
+<div class="dc"><b>Done-check</b>in a rebuilt export tree, python3 tools/test_all.py runs the suites instead of exiting 2, and python3 tools/test_bm_docs.py exits 0; in the hub the same suite still exits 0 with its original skip count, and the seam is driven both ways by tests that fail when the marker is forced the other way</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-04 23:55</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E112</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>the public export does not carry files the BrotherSBE product&#x27;s own suites and evals name, and its README names the checksum writer before the verifier</h4>
+<div class="dc"><b>Done-check</b>in a rebuilt export tree, python3 tools/test_sbe.py and python3 evals/run_evals.py from products/brothersbe each report zero failures and zero regressions, or name each remaining one with its reason</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-04 23:10</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E113</span><span class="tag st-flight">IN-FLIGHT</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>the export ships citation and lint figures computed over the hub, so the product&#x27;s strict gate fails in every public clone</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/test_export_public.py Ran 70 tests OK, the two new build-tree tests failing with the regeneration step disabled; on a rebuilt export tree, python3 tools/sbe_score.py . --repo-only --strict exit 0 with citation-inventory PASS, python3 tools/test_sbe.py TestStrictMode OK, and python3 evals/run_evals.py --only the-lint-numbers consistent; python3 scripts/export_public.py --dry-run CLEAR</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E114</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>Export allowlist: products/brothersbe/.gitattributes missing, Windows line ending drift</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/test_export_public.py Ran 59 tests OK; python3 products/brothersbe/tools/test_sbe_windows_sim.py from the built export tree Ran 30 tests with only the deliberate bitbucket-pipelines.yml exclusion failing; python3 scripts/export_public.py --dry-run CLEAR</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-05 00:30</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E115</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>the receipt could not say whether the dependency revert ran or which engine revision ran it</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/test_receipt_door.py drives all three fields both ways, nine new cases in TheReceiptSaysWhetherTheRevertRanAndWhichEngineRanIt, each failing against the pre-change receipt_door.py; python3 scripts/test_receipt_contract.py parses the moved page and asserts a receipt the engine generates through the stubbed seam against it, having failed before the page moved</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-05 01:55</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E116</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>the release-note test suite reran eleven real suites and took ninety minutes; it now proves its rules on a fixture tree</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/test_release_note_from_tree.py runs green in under 120 seconds; python3 scripts/test_release_note_perturb.py the same; each of the eight rules is driven backwards once by breaking it in place and quoting the failure</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-05 04:30</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E117</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>test_bm_docs.py&#x27;s own copy of the public-clone predicate kept the release-tag test failing in a rebuilt export</h4>
+<div class="dc"><b>Done-check</b>in the hub python3 products/brothermode/tools/test_bm_docs.py exits 0 with the same skip count as before; in a rebuilt export tree (scripts/export_public.build_export_tree, git init, git add -A -f, git commit, no tag) the same suite exits 0 and the release-tag test reports NO-DATA naming the absent ref</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-05 09:00, delivered 2026-09-05 00:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E40</span><span class="tag st-done">DONE</span><span class="gate">G2 Differentiation</span></div>
+<h4>The dependency-gap rule rests on the planner&#x27;s own declaration, and the intent screen never shows it</h4>
+<div class="dc"><b>Done-check</b>a stub-model run with a test-only unit declaring no dependency is refused at the intent screen, quoted; test_receipt_door and test_brother_run green; grep -c depends_on on the intent screen of a real run prints 1 or more</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-03 15:34</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E41</span><span class="tag st-done">DONE</span><span class="gate">G2 Differentiation</span></div>
+<h4>A receipt&#x27;s changed-file list is the round&#x27;s diff, not the unit&#x27;s</h4>
+<div class="dc"><b>Done-check</b>a two-unit stub run stamps different lists on the two units, quoted from the Work document; a unit that changed no file in a round where its sibling did reads NO-DATA no file changed; test_brother_run green</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-03 15:34</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E42</span><span class="tag st-done">DONE</span><span class="gate">G2 Differentiation</span></div>
+<h4>Any non-zero exit on the dependency revert is read as coverage</h4>
+<div class="dc"><b>Done-check</b>test_receipt_door gains a case where the revert stamp carries exit 2 and a SyntaxError line and the row reads NO-DATA, quoted; the existing exit 1 case still reads verified</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-03 16:12</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E43</span><span class="tag st-done">DONE</span><span class="gate">G2 Differentiation</span></div>
+<h4>The shipped skill carries a machine-specific vault path and a founder-order block</h4>
+<div class="dc"><b>Done-check</b>grep -c &#x27;vault-tools\|FOUNDER ORDER&#x27; bundle/skills/using-brother/SKILL.md prints 0; python3 scripts/bundle_runtime.py --check green; battery green</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-04 14:40</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E44</span><span class="tag st-done">DONE</span><span class="gate">G2 Differentiation</span></div>
+<h4>The shipped /brother command loads two hundred and fifty lines of maintainer verbs into every user&#x27;s context</h4>
+<div class="dc"><b>Done-check</b>wc -l bundle/commands/brother.md under 120; grep -c &#x27;only work inside a checkout&#x27; bundle/commands/brother.md prints 0; the hub-only file exists and is excluded by the export allowlist, quoted from a dry run</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-04 13:40</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E45</span><span class="tag st-done">DONE</span><span class="gate">G2 Differentiation</span></div>
+<h4>Machine-made integration merges are indistinguishable from human ones in the history</h4>
+<div class="dc"><b>Done-check</b>test_integrate gains a case asserting the trailer on the merge commit, quoted; a stub run&#x27;s git log --format=%B shows the trailer</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-03 16:12</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E46</span><span class="tag st-done">DONE</span><span class="gate">G2 Differentiation</span></div>
+<h4>The run is silent for eight to thirty-seven minutes</h4>
+<div class="dc"><b>Done-check</b>a stub run with a slow worker prints at least one progress line, quoted; the intent screen of a run after two earlier runs shows their durations; test_brother_run green</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-04 14:05</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E47</span><span class="tag st-done">DONE</span><span class="gate">G2 Differentiation</span></div>
+<h4>The charter names an architecture record that is not in the tree</h4>
+<div class="dc"><b>Done-check</b>test -f docs/plan/ADR-2026-08-23-one-brother-repository.md; tests/test_surface.py asserts the file opens and names the decision; quoted</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-04 08:10</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E48</span><span class="tag st-done">DONE</span><span class="gate">G2 Differentiation</span></div>
+<h4>The decision page loads its diagram renderer from a third-party CDN at view time</h4>
+<div class="dc"><b>Done-check</b>grep -c &#x27;cdn&#x27; bundle/runtime/decide.py prints 0; a generated page contains no external script src, quoted from grep</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-03 16:12</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E49</span><span class="tag st-done">DONE</span><span class="gate">G2 Differentiation</span></div>
+<h4>An acceptance record cannot tell a person from an agent typing the person&#x27;s name</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/accept_delivery.py --list shows recorded_by on the existing record after a migration, quoted; test_accept_delivery gains the field; README names docs/deliveries</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-03 15:44</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E50</span><span class="tag st-flight">IN-FLIGHT</span><span class="gate">G2 Differentiation</span></div>
+<h4>The install wires hooks into every session and every edit in every repository on the machine</h4>
+<div class="dc"><b>Done-check</b>a decision record under docs/decisions with the founder&#x27;s ruling; a hook invoked in a repository without the marker exits 0 in under 50 ms having read nothing, quoted from a timed run</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E51</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>The root contracts directory the charter promises does not exist</h4>
+<div class="dc"><b>Done-check</b>withheld: this text names a path on the machine it was written on, which does not belong on a public page</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-03 18:13</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E52</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>Six parity capabilities wait for one adversity run each at the current tip</h4>
+<div class="dc"><b>Done-check</b>withheld: this text names a path on the machine it was written on, which does not belong on a public page</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-04 13:30</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E53</span><span class="tag st-open">OPEN</span><span class="gate">G6 Vault active retrieval and error repetition avoidance</span></div>
+<h4>Prove a shown lesson prevents a repeat: the controlled comparison</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/repeat_control.py prints both arms with at least five sessions each and a repeat rate per arm, quoted into learning_loop.priority item 5; the item reads DONE only with that output, whichever way the comparison goes</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-19 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E54</span><span class="tag st-done">DONE</span><span class="gate">G6 Vault active retrieval and error repetition avoidance</span></div>
+<h4>Nothing refreshes the vault index the recall hook serves from</h4>
+<div class="dc"><b>Done-check</b>write a note into a temp vault, start a session (or drive the SessionStart hook with the hooks JSON), and bm_vault.py status reads last indexed under one hour with the note counted; quoted</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-03 23:21</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E55</span><span class="tag st-done">DONE</span><span class="gate">G6 Vault active retrieval and error repetition avoidance</span></div>
+<h4>The vault linter&#x27;s fix cannot supply a created date or an id, so 188 notes stay in violation</h4>
+<div class="dc"><b>Done-check</b>python3 products/brothermode/tools/bm_vault_lint.py check --vault &lt;the vault&gt; prints 0 violations after fix --apply, quoted, and the fix&#x27;s output names each derived field</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-03 23:01</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E56</span><span class="tag st-done">DONE</span><span class="gate">G6 Vault active retrieval and error repetition avoidance</span></div>
+<h4>The parity file has no memory-and-learning capability, so Brother has never scored its loop against GSD by its own gate</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/parity_gate.py prints the new capability with its level and evidence path; the parity file names the incumbent mechanism with its URL</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-19 18:00, delivered 2026-09-03 23:45</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E57</span><span class="tag st-done">DONE</span><span class="gate">G6 Vault active retrieval and error repetition avoidance</span></div>
+<h4>Three mechanisms to borrow: an outcome metric beside the mechanism, time decay on old notes, a sliding-window loop detector</h4>
+<div class="dc"><b>Done-check</b>the three tests named above fail before and pass after; one real session&#x27;s hook log carries the outcome numbers; quoted</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-19 18:00, delivered 2026-09-04 09:05</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E58</span><span class="tag st-done">DONE</span><span class="gate">G2 Differentiation</span></div>
+<h4>The v1.0.0 tag&#x27;s brothermode manifest names two fixture files the tag does not carry</h4>
+<div class="dc"><b>Done-check</b>in a fresh clone of the 1.0.1 tag both products&#x27; verify-install print PASSED; python3 scripts/reproduce_export.py against 1.0.1 exits 0; the exporter&#x27;s new test fails at 5e58ffe7 and passes after; quoted</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-03 23:00, delivered 2026-09-03 20:41</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E63</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>reproduce_export read NO-DATA on the real v1.0.1 proof because it archived the source without a git index</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/test_reproduce_export.py OK with the new test failing on the old source; python3 scripts/reproduce_export.py --source-rev &lt;hub rev&gt; --tag v1.0.1 --public &lt;fresh clone&gt; exits 0 with every allowlisted file reproduced; git worktree list shows no reproduce-src entry afterwards</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-03 20:43</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E64</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>The public main has no branch protection and no ruleset; a direct push lands</h4>
+<div class="dc"><b>Done-check</b>gh api repos/khalilmaaouni/Brother/rules/branches/main lists a pull_request rule; a direct push to main is refused by GitHub with the rule violation text quoted</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-03 21:15</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E65</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>No GitHub Release object exists for any public tag</h4>
+<div class="dc"><b>Done-check</b>gh release view v&lt;version&gt; --repo khalilmaaouni/Brother prints isDraft false, isPrerelease false and the tag name; gh api releases/latest names the same tag</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-03 21:11</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E66</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>release_invariant.py never asks GitHub anything: no Release link, no protection link</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/test_release_invariant.py OK with the eight new cases; python3 scripts/release_invariant.py prints the four new link lines OK against the live public repository</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-03 21:21</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E67</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>The public tag&#x27;s own readiness gate prints NOT READY: the export never ships the restore-drill evidence, and no tag-time check ran the gate on the export tree; the exporter also pushes main directly</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/test_export_public.py OK with the new cases; a fresh clone of the next tag runs python3 scripts/readiness_gate.py and prints READY with every critical item proven; the exporter&#x27;s output carries PULL-REQUEST:, MERGED: and readiness: lines</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-03 23:45</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E68</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>No cheap mandatory pre-merge contract exists; the only contract is the 35 minute battery</h4>
+<div class="dc"><b>Done-check</b>sh scripts/required_fast.sh exits 0 on main within five minutes with every line quoted; python3 scripts/test_required_fast.py OK; the workflow file carries workflow_dispatch as its only trigger</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-03 21:34</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E69</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>The hub main cannot be protected on GitHub: private repository on the free plan</h4>
+<div class="dc"><b>Done-check</b>this row states the gap; nothing to run</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-03 21:13</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E70</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>The export leaves docs/plan behind, so the public tag cannot run the README&#x27;s own prove command and three of the README&#x27;s six relative links are dead</h4>
+<div class="dc"><b>Done-check</b>in a fresh clone of the next tag every README relative link resolves and python3 scripts/test_battery_verdict.py exits 0; the exporter prints the links and prove lines; test_export_public.py OK</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-03 23:45</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E71</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>The restore-drill record passes the critical readiness row on one boolean, bound to no commit and with no freshness bar</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/readiness_gate.py prints the restore-drill row with the commit and age it read; a record with a foreign commit reads NO-DATA in test_readiness_gate.py</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-04 00:28</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E72</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>Delivery receipt 2.0: one stable artifact that answers what changed, why, what proves it, what has no proof, what was repaired, what memory influenced the run, what to review first, and whether the run stayed contained</h4>
+<div class="dc"><b>Done-check</b>a reviewer given only the receipt of a stub run answers the eight questions in docs/plan/STEERING-TRUSTED-DELEGATION-2026-09-03.md section 16 Workstream A, each answer traceable to a receipt field; test_receipt_door covers the schema; a zero-change unit reads NO-DATA on the receipt</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-04 08:10</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E73</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>Continuity capsule and a hostile resume matrix: a killed run resumes from disk without duplicate or lost authoritative work</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/test_continuity_matrix.py passes every kill point with the four answers asserted; a real run killed after integration resumes and prints the capsule; quoted</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-04 02:16</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E74</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>Stale-memory defense: a recalled lesson is revalidated against current truth before it is applied, and a stale one is refused by name</h4>
+<div class="dc"><b>Done-check</b>a seeded lesson naming a path that no longer exists is recalled, refused with the line quoted, and absent from the applied-memory section of the receipt; a current lesson is applied; both in test_recall_revalidation.py</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-03 23:53</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E75</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>Acceptance compression: the receipt orders reviewer attention and names cognitive debt signals</h4>
+<div class="dc"><b>Done-check</b>on a seeded diff mixing a middleware change, a generated file and a new dependency, the receipt lists the middleware and the dependency under REVIEW FIRST and the generated file under mechanical; test_acceptance_compression.py</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-04 09:20</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E76</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>Per-repository hook scoping: a developer can keep Brother active in one repository and inactive in another without uninstalling it</h4>
+<div class="dc"><b>Done-check</b>with the off line present, every hook in both products exits 0 without acting and a status line names the repository as inactive; with it absent, behavior is unchanged; test in each product</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-04 04:02</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E77</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>Virgin install as a release requirement (founder-gated): Actions enabled on the public repository for the dispatch-only workflow, one run per release candidate</h4>
+<div class="dc"><b>Done-check</b>gh api repos/khalilmaaouni/Brother/actions/runs lists a successful virgin-install run for the candidate tag; python3 scripts/release_invariant.py prints the virgin-install link OK</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-04 22:40</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E78</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>The engine runs a model-rewritten done-check through the shell with only an interpreter rename between them</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/test_brother_run.py and python3 scripts/test_product_acceptance.py OK (the acceptance contract must survive, an engine rule read off one run broke it once); a seeded plan whose rewritten check is rm -rf or a chained command is refused with the line quoted; a plain python3 scripts/test_x.py rewrite is adopted; bundle identity check green</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-04 00:28</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E79</span><span class="tag st-done">DONE</span><span class="gate">G6 Vault active retrieval and error repetition avoidance</span></div>
+<h4>The README delivery report and the stored delivery record name no check per changed file, so a skeptic cannot re-run or perturb the proof</h4>
+<div class="dc"><b>Done-check</b>in a fresh clone of the next tag, the README delivery excerpt names a check per changed file and each check runs there; scripts/test_receipt_door.py refuses a record with no per-file check; quoted</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-04 03:06</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E80</span><span class="tag st-done">DONE</span><span class="gate">G6 Vault active retrieval and error repetition avoidance</span></div>
+<h4>The public tag cannot reproduce its own release: the release note names a hub commit the clone cannot resolve and the export allowlist is not shipped</h4>
+<div class="dc"><b>Done-check</b>in a fresh clone of the next tag, the release note reproduction command runs and prints byte-identical or names the diff; a one-byte tamper in a shipped runtime file is caught by release_invariant.py; quoted</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-04 14:20</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E81</span><span class="tag st-done">DONE</span><span class="gate">G6 Vault active retrieval and error repetition avoidance</span></div>
+<h4>A first run that edits files directly and returns exit 0 with a newline, with no receipt findable and no documented next step after a refusal</h4>
+<div class="dc"><b>Done-check</b>a fresh install on a temp home runs the README first command and prints either the receipt path or a refusal with the next command; scripts/test_brother_run_continue.py covers continuation after a refusal; quoted</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-04 22:20</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E82</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>The assurance product&#x27;s own battery, run by the hub for the first time, fails eight of its ninety-four steps</h4>
+<div class="dc"><b>Done-check</b>sh products/brothersbe/release-control/baseline/run-battery.sh from the product directory: 94 steps, 0 failing, quoted; the eight entries removed from BATTERY-EXPECTATIONS.json; battery_verdict.py reads product-brothersbe-battery PASS</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-11 18:00, delivered 2026-09-05 00:15</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E83</span><span class="tag st-done">DONE</span><span class="gate">G6 Vault active retrieval and error repetition avoidance</span></div>
+<h4>The assurance product reads its own freshly minted evidence receipts as stale: a dossier-scoped status never lets a receipt exempt itself, and a sibling receipt&#x27;s commit invalidates the others</h4>
+<div class="dc"><b>Done-check</b>bin/sbe status docs/dossiers/v1.0-release --json prints an empty missingEvidence; bin/sbe verify . prints ran PASS; the new test in products/brothersbe/tools/test_sbe_evidence.py fails on the old code and passes on the new; quoted</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-04 09:05</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E84</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>The virgin install on a clean Linux machine fails: the loop never finds the worker adapter under a relocated config directory</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/test_loop_bridge.py OK with test_a_relocated_CLAUDE_CONFIG_DIR_install_is_matched; a virgin-shaped smoke on a fresh export prints bundle-install-smoke: PASSED; the next public tag&#x27;s virgin-install run is green; quoted</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-04 00:28</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E85</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>claim_store.reconcile() states a false, negative-second reason when a claim is reclaimed for a dead pid, not an expired lease</h4>
+<div class="dc"><b>Done-check</b>a driven repro (acquire ttl=3600, kill the owning pid, call reconcile()) shows detail naming the pid-death cause rather than a negative &#x27;expired Ns ago&#x27;; today it prints &#x27;the lease expired -3600s ago&#x27; (fails)</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-04 17:20</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E86</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>worktree_lane.py classifies a claim&#x27;s liveness by time alone, disagreeing with claim_store.live()&#x27;s time-or-dead-pid rule in the same run</h4>
+<div class="dc"><b>Done-check</b>worktree_lane.py&#x27;s status line for a pid-dead, time-unexpired claim reads abandoned, matching reconcile(); today docs/plan/runs/live-autonomous-adversity-2026-09-04/run.log:172-173 shows the same claim reported abandoned then still-leased two lines apart (fails)</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-04 17:20</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E87</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>a test unit integrated CLEAN under --slots 2 still reads no metric recorded, unlike every --slots 1 run</h4>
+<div class="dc"><b>Done-check</b>a second --slots 2 adversity run (or a targeted repro) shows every integrated unit&#x27;s evidence file present; today docs/plan/runs/parallel-scheduling-adversity-2026-09-04/run.log:402 prints &#x27;verdicts: 2 PASS, 0 FAIL, 2 NO-DATA&#x27; for two integrated units (fails)</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-04 21:55</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E88</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>the planner&#x27;s once-only replacement done_check is accepted with no shell-safety check, and a &#x27;;&#x27; in it refuses every unit before any worker starts</h4>
+<div class="dc"><b>Done-check</b>a &#x27;raises X with a clear message&#x27; outcome no longer produces an unrunnable done_check on both the first attempt and the once-only replacement; today two independent trials (decomposition trial1, live-autonomous trial1) both refuse every unit before any worker starts on this exact outcome shape (fails)</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-04 23:05</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E89</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>the Crash recovery L4 sentence in PARITY-2026-08-29.json still cites only a unit-test pid-death reclaim, not today&#x27;s product-path one</h4>
+<div class="dc"><b>Done-check</b>the Crash recovery capability&#x27;s evidence field in docs/plan/PARITY-2026-08-29.json names docs/plan/runs/live-autonomous-adversity-2026-09-04; today it does not (fails)</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-04 23:05</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E90</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>the door has no light path for a small obvious change</h4>
+<div class="dc"><b>Done-check</b>a one-file one-check outcome run through scripts/door.py still spends a decomposition pass before any unit is claimed; today it does (fails)</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-05 01:45</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E91</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>the intent screen is dumped as raw HTML and CSS into stdout and run.log</h4>
+<div class="dc"><b>Done-check</b>run.log for a fresh run still contains a &lt;title&gt; or :root{ line from the intent screen; today it does (fails)</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-04 21:55</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E92</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>the cost block cannot compute a cache rate</h4>
+<div class="dc"><b>Done-check</b>the run&#x27;s cost block cache rate divides tokens_cached by tokens_in and produces a nonsense ratio (over 40000x) rather than a percent; today it does (fails)</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-04 21:55</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E93</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>--runs-root help says the target must stay clean but an untracked dir does not block the run</h4>
+<div class="dc"><b>Done-check</b>--runs-root --help&#x27;s stay-clean line does not mention untracked files being ignored; today it does not (fails)</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-04 21:55</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E94</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>a shipped delivery record names no changed file and no check, and points at an unshipped run directory</h4>
+<div class="dc"><b>Done-check</b>a delivery record under docs/deliveries lacks a changed-file list and a verifying command; today it does (fails)</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-04 21:40</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E95</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>the release note&#x27;s Files behind these claims table is wrong for 4 of 11 files</h4>
+<div class="dc"><b>Done-check</b>the release note&#x27;s Files table names a suite for bm_vault.py and loom.py that does not actually cover them when perturbed; today it does (fails)</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-05 00:30</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E96</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>the JA adversarial result document declares 1/13 while the shipped harness scores 12/13 on the same frozen corpus</h4>
+<div class="dc"><b>Done-check</b>benchmarks/ja-adversarial/ADVERSARIAL-JA-RESULT-2026-08-31.md&#x27;s declared score does not match a fresh run of the shipped harness on the frozen corpus; today it does not match (fails)</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-04 15:30</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E97</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>the checksum verifier&#x27;s hash comparison has no test that notices when it is gutted</h4>
+<div class="dc"><b>Done-check</b>forcing products/brothersbe/scripts/verify-install.sh line 153 or products/brothermode/scripts/verify-install.sh line 195&#x27;s compare to always-true passes every suite unchanged; today it does (fails)</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-04 21:50</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E98</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>test_export_public.py expects editions/personal to exist and fails on a public clone that ships no editions/</h4>
+<div class="dc"><b>Done-check</b>running scripts/test_export_public.py on a tree with no editions/ directory raises AssertionError instead of skipping; today it does (fails)</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-04 21:50</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E99</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>the README names eight proof suites and omits four that cover behaviours its own Limits section describes</h4>
+<div class="dc"><b>Done-check</b>grep for test_claim_store, test_lifecycle_hooks, test_private_terms_scan and test_pre_push_gate in README.md&#x27;s proof-suite list finds none of the four; today it finds none (fails)</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-12 18:00, delivered 2026-09-04 15:30</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">C4</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>Durable Codex project instructions, and every shipped skill readable by a second client</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/test_skills_portable.py exits 0 over every shipped SKILL.md, having failed on the same tree before the work; AGENTS.md carries the Codex door, the receipt contract, the hard gates, the laws and a pointer to each shipped skill; AGENTS.md is on docs/plan/EXPORT-ALLOWLIST.txt; CLAUDE.md is byte identical to hub/main</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-04 23:00, delivered 2026-09-04 17:10</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E59</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>One append-only journal per run, written by every existing writer at twenty transaction sites</h4>
+<div class="dc"><b>Done-check</b>a stub-model run produces journal.jsonl whose events chain by parent id from run opened to acceptance screened, quoted; test_journal.py pins the atomic append, the torn-line skip and the id scheme; test_brother_run, test_integrate, test_claim_store, test_product_acceptance OK; bundle_runtime --check</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-10 18:00, delivered 2026-09-03 20:43</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E60</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>The delivery report, the board&#x27;s row states and the live status line rebuild from the journal, proven byte for byte</h4>
+<div class="dc"><b>Done-check</b>the byte diff prints nothing on every run under the runs root; test_board_status and test_brother_run OK; quoted</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-10 18:00, delivered 2026-09-04 00:28</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E61</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>The plan document&#x27;s eight writers write atomically through one helper</h4>
+<div class="dc"><b>Done-check</b>no plain rewrite of the record path remains in brother_run.py (grep quoted); the kill test passes; test_brother_run OK</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-10 18:00, delivered 2026-09-04 09:40</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">E62</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>A long unit renews its claim; claim_store.renew has no caller</h4>
+<div class="dc"><b>Done-check</b>a stub run with a 4 second lease and a 6 second worker integrates instead of reading abandoned, quoted; test_claim_store and test_brother_run OK</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-10 18:00, delivered 2026-09-04 00:28</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">P1</span><span class="tag st-done">DONE</span><span class="gate">G2 Differentiation</span></div>
+<h4>Every unit&#x27;s check names its evidence family, oracle source and independence, so a receipt says what kind of proof passed</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/test_receipt_door.py -v must show a new test where a unit with oracle_source generated_from_impl renders &#x27;circular_risk&#x27; in its receipt sentence and a unit with independent_query renders &#x27;independent&#x27;; python3 scripts/test_door.py -v OK; both exit 0 quoted</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-19 18:00, delivered 2026-09-04 01:05</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">P10</span><span class="tag st-done">DONE</span><span class="gate">G2 Differentiation</span></div>
+<h4>The forcing-condition moment knows the data-science classes: model promotion, threshold change, training-data refresh</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/test_receipt_door.py -v must show &#x27;promote the model to production&#x27;, &#x27;raise the churn threshold to 0.6&#x27; and &#x27;retrain on the refreshed dataset&#x27; each hitting exactly one new class and &#x27;rename the helper&#x27; hitting none; exit 0 quoted</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-19 18:00, delivered 2026-09-04 03:34</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">P11</span><span class="tag st-done">DONE</span><span class="gate">G6 Vault active retrieval and error repetition avoidance</span></div>
+<h4>Vault notes gain two types, data_semantic and test_oracle, and two fields, source_receipt and human_approved, on the existing frontmatter</h4>
+<div class="dc"><b>Done-check</b>python3 products/brothermode/tools/test_vault_recall_hook.py -v must show a test_oracle note with human_approved true applied and one with false reading unverified with the reason; python3 scripts/test_receipt_door.py -v must show the type in the applied-memory section; exit 0 quoted</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-19 18:00, delivered 2026-09-04 04:31</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">P12</span><span class="tag st-done">DONE</span><span class="gate">G6 Vault active retrieval and error repetition avoidance</span></div>
+<h4>The loop closes: a run files a recurrence receipt for every unit and drafts a failure case from every refused or NO-DATA unit</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/test_brother_run.py -v must show a seeded run with one refused unit producing one recurrence receipt per unit in a temp db and one drafted lesson file naming the run; python3 products/brothermode/tools/bm_recurrence.py report over that db must print a rate; exit 0 quoted</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-19 18:00, delivered 2026-09-04 03:34</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">P13</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>Two data-science golden fixtures drive the engine through a leakage trap and a seed trap and must end in refusal or NO-DATA</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/fault_lab.py --scenario ds-leakage and --scenario ds-seed must each print the expected verdict line and exit 0; quoted with the receipt lines</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-19 18:00, delivered 2026-09-04 04:08</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">P14</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>A data-scientist role file and a model-promotion dossier join the assurance product&#x27;s four worked examples</h4>
+<div class="dc"><b>Done-check</b>python3 products/brothersbe/tools/sbe_design.py --strict products/brothersbe/docs/for-engineers/examples/model-promotion and python3 products/brothersbe/tools/sbe_gate.py --strict the same directory must both PASS; quoted</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-19 18:00, delivered 2026-09-04 03:34</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">P15</span><span class="tag st-done">DONE</span><span class="gate">G5 Intake: detailed options, mermaid diagrams, weighted pros and cons</span></div>
+<h4>The intake scorer gains a data overlay (cutoff and split, leakage, primary metric and baseline, reproducibility) that never inflates the base score</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/test_intake_score.py -v must show the overlay rows rendered and the universal total identical with and without the flag; exit 0 quoted</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-19 18:00, delivered 2026-09-04 02:48</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">P16</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>Three data-science metrics counted from receipts: reproducible experiment rate, leakage catches, promotions parked</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/evad_score.py --personas over a temp runs root with two E18 units (one with full identity fields) must print &#x27;reproducible 1 of 2&#x27;, and over an empty root must print NO-DATA; exit 0 quoted</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-19 18:00, delivered 2026-09-04 03:34</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">P17</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>Compositional lens selection: infer_lens returns every matching pack, the challenge composes, receipt fields and evidence families union</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/test_packs.py OK and a two-lens fixture returns both</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-19 18:00, delivered 2026-09-04 17:05</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">P18</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>Pack: backend-senior</h4>
+<div class="dc"><b>Done-check</b>python3 -c &quot;import sys; sys.path.insert(0,&#x27;scripts&#x27;); import door; print(sorted(door.load_pack(&#x27;backend-senior&#x27;)))&quot; prints the keys and python3 scripts/test_packs.py reads OK with the pack&#x27;s fixture inferring it</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-19 18:00, delivered 2026-09-04 17:05</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">P19</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>Pack: data-engineer-senior</h4>
+<div class="dc"><b>Done-check</b>python3 -c &quot;import sys; sys.path.insert(0,&#x27;scripts&#x27;); import door; print(sorted(door.load_pack(&#x27;data-engineer-senior&#x27;)))&quot; prints the keys and python3 scripts/test_packs.py reads OK with the pack&#x27;s fixture inferring it</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-19 18:00, delivered 2026-09-04 17:05</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">P2</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>Two pack manifests as data, core and data-science, read by the door and the receipt, with no new command</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/test_door.py -v must show test_pack_manifests_carry_every_required_key passing over both files and test_a_manifest_missing_a_key_is_refused_by_name; exit 0 quoted</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-19 18:00, delivered 2026-09-04 01:17</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">P20</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>Pack: infrastructure-senior</h4>
+<div class="dc"><b>Done-check</b>python3 -c &quot;import sys; sys.path.insert(0,&#x27;scripts&#x27;); import door; print(sorted(door.load_pack(&#x27;infrastructure-senior&#x27;)))&quot; prints the keys and python3 scripts/test_packs.py reads OK with the pack&#x27;s fixture inferring it</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-19 18:00, delivered 2026-09-04 17:05</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">P21</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>Pack: architect</h4>
+<div class="dc"><b>Done-check</b>python3 -c &quot;import sys; sys.path.insert(0,&#x27;scripts&#x27;); import door; print(sorted(door.load_pack(&#x27;architect&#x27;)))&quot; prints the keys and python3 scripts/test_packs.py reads OK with the pack&#x27;s fixture inferring it</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-19 18:00, delivered 2026-09-04 17:05</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">P22</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>Pack: data-analyst</h4>
+<div class="dc"><b>Done-check</b>python3 -c &quot;import sys; sys.path.insert(0,&#x27;scripts&#x27;); import door; print(sorted(door.load_pack(&#x27;data-analyst&#x27;)))&quot; prints the keys and python3 scripts/test_packs.py reads OK with the pack&#x27;s fixture inferring it</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-19 18:00, delivered 2026-09-04 17:05</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">P23</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>Pack: business-analyst</h4>
+<div class="dc"><b>Done-check</b>python3 -c &quot;import sys; sys.path.insert(0,&#x27;scripts&#x27;); import door; print(sorted(door.load_pack(&#x27;business-analyst&#x27;)))&quot; prints the keys and python3 scripts/test_packs.py reads OK with the pack&#x27;s fixture inferring it</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-19 18:00, delivered 2026-09-04 17:05</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">P24</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>Pack: technical-business-analyst</h4>
+<div class="dc"><b>Done-check</b>python3 -c &quot;import sys; sys.path.insert(0,&#x27;scripts&#x27;); import door; print(sorted(door.load_pack(&#x27;technical-business-analyst&#x27;)))&quot; prints the keys and python3 scripts/test_packs.py reads OK with the pack&#x27;s fixture inferring it</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-19 18:00, delivered 2026-09-04 17:05</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">P25</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>Pack: qa-engineer</h4>
+<div class="dc"><b>Done-check</b>python3 -c &quot;import sys; sys.path.insert(0,&#x27;scripts&#x27;); import door; print(sorted(door.load_pack(&#x27;qa-engineer&#x27;)))&quot; prints the keys and python3 scripts/test_packs.py reads OK with the pack&#x27;s fixture inferring it</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-19 18:00, delivered 2026-09-04 17:05</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">P26</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>Pack: qa-manual</h4>
+<div class="dc"><b>Done-check</b>python3 -c &quot;import sys; sys.path.insert(0,&#x27;scripts&#x27;); import door; print(sorted(door.load_pack(&#x27;qa-manual&#x27;)))&quot; prints the keys and python3 scripts/test_packs.py reads OK with the pack&#x27;s fixture inferring it</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-19 18:00, delivered 2026-09-04 17:05</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">P27</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>Pack: solo-founder-technical</h4>
+<div class="dc"><b>Done-check</b>python3 -c &quot;import sys; sys.path.insert(0,&#x27;scripts&#x27;); import door; print(sorted(door.load_pack(&#x27;solo-founder-technical&#x27;)))&quot; prints the keys and python3 scripts/test_packs.py reads OK with the pack&#x27;s fixture inferring it</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-19 18:00, delivered 2026-09-04 17:05</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">P28</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>Pack: solo-founder-nontechnical</h4>
+<div class="dc"><b>Done-check</b>python3 -c &quot;import sys; sys.path.insert(0,&#x27;scripts&#x27;); import door; print(sorted(door.load_pack(&#x27;solo-founder-nontechnical&#x27;)))&quot; prints the keys and python3 scripts/test_packs.py reads OK with the pack&#x27;s fixture inferring it</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-19 18:00, delivered 2026-09-04 17:05</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">P3</span><span class="tag st-done">DONE</span><span class="gate">G4 Simplifying the invocation</span></div>
+<h4>The lens is inferred from the target tree and stated on the intent screen as an assumption the person can correct in one word</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/test_door.py -v must show a temp tree with two .ipynb files and an mlruns/ directory inferring data-science and a plain tree inferring none; python3 scripts/test_brother_run.py -v must show the assumption line on the intent screen; both exit 0 quoted</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-19 18:00, delivered 2026-09-04 01:49</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">P4</span><span class="tag st-done">DONE</span><span class="gate">G5 Intake: detailed options, mermaid diagrams, weighted pros and cons</span></div>
+<h4>The intent screen carries assumptions, risk and blast radius, rollback and the evidence plan by family, not only the unit list</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/test_brother_run.py -v must show the intent screen text containing &#x27;Risk:&#x27;, &#x27;Rollback: &lt;sha&gt;&#x27; and one family per unit for a seeded two-unit record; exit 0 quoted</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-19 18:00, delivered 2026-09-04 02:16</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">P5</span><span class="tag st-done">DONE</span><span class="gate">G5 Intake: detailed options, mermaid diagrams, weighted pros and cons</span></div>
+<h4>One profession-aware question with a budget: the pre-registered metric and holdout rule are asked only when the tree cannot answer, and recorded as a human decision</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/test_brother_run.py -v must show a seeded data-science record with no metric in the tree asking exactly one question in interactive mode and zero in unattended mode, the answer landing in the record and the receipt; exit 0 quoted</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-19 18:00, delivered 2026-09-04 02:38</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">P6</span><span class="tag st-done">DONE</span><span class="gate">G2 Differentiation</span></div>
+<h4>Statistical evidence on the receipt: a metric, its baseline, the seed and the holdout identity, or NO-DATA naming which is missing</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/test_receipt_door.py -v must show an E18 unit whose evidence file carries all five fields rendering as verified with its metric in the sentence, and one with the file missing rendering as no-data &#x27;no metric recorded&#x27;; exit 0 quoted</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-19 18:00, delivered 2026-09-04 01:49</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">P7</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>The assurance product&#x27;s numbers manifest becomes a unit&#x27;s evidence in a run: a second derivation re-run to zero drift, read by the receipt</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/test_receipt_door.py -v must show the data-warehouse example manifest rendering &#x27;zero drift&#x27; in a unit&#x27;s receipt and a manifest with snapshot_id TODO rendering no-data with the gate&#x27;s line; python3 products/brothersbe/tools/test_sbe_gate.py unchanged and green; exit 0 quoted</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-19 18:00, delivered 2026-09-04 02:38</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">P8</span><span class="tag st-done">DONE</span><span class="gate">G2 Differentiation</span></div>
+<h4>A split and leakage check pattern: one script that refuses an entity in both train and test or a feature dated after the cutoff</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/test_split_check.py -v must drive overlap FAIL, leakage FAIL, a clean pair PASS and a missing column NO-DATA at exit 2; bash scripts/check_all.sh must show the split-check-self line; exit 0 quoted</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-19 18:00, delivered 2026-09-04 02:38</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">P9</span><span class="tag st-done">DONE</span><span class="gate">G2 Differentiation</span></div>
+<h4>The receipt stamps the target&#x27;s revision, the environment lock hash and the declared data identity beside the harness revision</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/test_brother_run.py -v must show a temp target with a requirements.txt yielding a 64-character env_lock and one without yielding NO-DATA; python3 scripts/test_receipt_door.py -v must show the three fields rendered; exit 0 quoted</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-19 18:00, delivered 2026-09-04 04:02</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">C0</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>The release cut waits behind C1 to C8</h4>
+<div class="dc"><b>Done-check</b>the tag</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-06 18:00, delivered 2026-09-04 22:40</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">C1</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>A native Codex plugin package ships beside the Claude package</h4>
+<div class="dc"><b>Done-check</b>the two manifests exist and Claude&#x27;s marketplace is byte-identical to main&#x27;s</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-06 18:00, delivered 2026-09-04 17:05</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">C2</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>The Codex package validates clean against the canonical validator</h4>
+<div class="dc"><b>Done-check</b>the validator command prints its pass line</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-06 18:00, delivered 2026-09-04 17:05</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">C3</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>Claude-only assumptions are removed from shared runtime paths</h4>
+<div class="dc"><b>Done-check</b>withheld: this text names a path on the machine it was written on, which does not belong on a public page</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-06 18:00, delivered 2026-09-04 18:15</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">C5</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>The README carries install, start, upgrade and uninstall for both clients</h4>
+<div class="dc"><b>Done-check</b>README carries both clients&#x27; install, start, upgrade, uninstall</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-06 18:00, delivered 2026-09-04 17:05</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">C6</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>Export allowlists, checksums, manifests and portability tests cover the Codex artifacts</h4>
+<div class="dc"><b>Done-check</b>the export dry run lists .codex-plugin, .agents and AGENTS.md and the private-terms scan is clean</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-06 18:00, delivered 2026-09-04 17:10</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">C7</span><span class="tag st-flight">IN-FLIGHT</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>A clean-install Codex smoke test proves a real task end to end</h4>
+<div class="dc"><b>Done-check</b>the isolated smoke test log shows the four codex plugin commands at exit 0 and a receipt from a real codex task</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-06 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">C8</span><span class="tag st-flight">IN-FLIGHT</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>Both clients&#x27; gates are green before anything is tagged</h4>
+<div class="dc"><b>Done-check</b>both clients&#x27; gates green, quoted</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-06 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">S29</span><span class="tag st-open">OPEN</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>a fixed release cadence: the cut runs on a named weekday with the closeout matrix and a changelog from commits</h4>
+<div class="dc"><b>Done-check</b>docs/plan/RELEASE-POLICY.md names the cadence section and one cut lands on the named weekday with a changelog generated from commits, quoted</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-10-03 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">S30</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>the readiness board is exported as the public dated roadmap page</h4>
+<div class="dc"><b>Done-check</b>the allowlist carries the generated board and a fresh public clone opens it, quoted</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-10-03 18:00, delivered 2026-09-05 02:20</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">S31</span><span class="tag st-open">OPEN</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>good-first-issue onboarding: labelled issues and a CONTRIBUTING page a stranger can act on</h4>
+<div class="dc"><b>Done-check</b>three labelled issues exist and the page names the first command, quoted</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-10-03 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">X0</span><span class="tag st-flight">IN-FLIGHT</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>Release status stays BLOCKED until X1 to X8 each carry command, exit code, output and revision</h4>
+<div class="dc"><b>Done-check</b>X1 through X8 all read status DONE with evidence holding a command, an exit code, an output line and a revision; grep the roadmap for the eight ids and quote each evidence field</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-05 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">X1</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>Virgin Codex install from the public marketplace URL in an isolated temporary HOME and config</h4>
+<div class="dc"><b>Done-check</b>a scripted run under an isolated temp HOME/config prints the marketplace add, plugin add, plugin list (with version), skill discovery and the invocation&#x27;s own receipt, each command&#x27;s exit code and decisive output line quoted, against the post-tag revision</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-05 18:00, delivered 2026-09-05 00:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">X2</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>Codex upgrade from the immediately previous public Brother release to v1.0.2</h4>
+<div class="dc"><b>Done-check</b>a scripted run seeds state on the prior public tag, upgrades to v1.0.2, and prints the surviving state, the pre and post installed version strings, and the pre and post artifact hashes, each command&#x27;s exit code quoted, against the post-tag revision</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-05 18:00, delivered 2026-09-05 00:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">X3</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>Idempotent reinstall and update at v1.0.2</h4>
+<div class="dc"><b>Done-check</b>a scripted run installs at v1.0.2 twice and updates twice, printing that the second run of each is a no-op or converges to the same state as the first, exit codes and decisive lines quoted, against the post-tag revision</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-05 18:00, delivered 2026-09-05 00:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">X4</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>Uninstall and reinstall recovery</h4>
+<div class="dc"><b>Done-check</b>a scripted run uninstalls then reinstalls at v1.0.2 and prints a working plugin list, version and one successful invocation after reinstall, exit codes and decisive lines quoted, against the post-tag revision</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-05 18:00, delivered 2026-09-05 00:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">X5</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>Negative tests: missing marketplace, malformed manifest, unsupported hook semantics, offline behaviour</h4>
+<div class="dc"><b>Done-check</b>a scripted run of all four negative cases prints, for each, FAIL or NO-DATA (never PASS) with the decisive line, exit codes quoted, against the post-tag revision</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-05 18:00, delivered 2026-09-05 00:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">X6</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>The existing Claude gates repeated after the final tag</h4>
+<div class="dc"><b>Done-check</b>each of the ten named Claude gates is re-run after the final tag and its own decisive output line is quoted here with the tag&#x27;s revision SHA</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-05 18:00, delivered 2026-09-05 00:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">X7</span><span class="tag st-done">DONE</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>Inspect the actual public tarball or clone, not only the source worktree</h4>
+<div class="dc"><b>Done-check</b>a fresh clone or downloaded tarball of the public repository at the tag is inspected and its file list, checksums and version strings are printed and compared against the worktree&#x27;s claims, quoted here</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-05 18:00, delivered 2026-09-05 00:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">X8</span><span class="tag st-flight">IN-FLIGHT</span><span class="gate">G3 Merging under one Brother</span></div>
+<h4>One fresh signed-in Codex task against the installed public plugin, end to end</h4>
+<div class="dc"><b>Done-check</b>a fresh signed-in Codex session installs the public v1.0.2 plugin and completes one real task end to end; the transcript&#x27;s decisive lines and exit status are quoted here</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-05 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">S1</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>Reproducible v1.0.3: the tag exists publicly and reproduces itself</h4>
+<div class="dc"><b>Done-check</b>git ls-remote --tags https://github.com/khalilmaaouni/Brother.git prints refs/tags/v1.0.3, and in a fresh clone of that tag python3 scripts/release_invariant.py exits 0 with no declared exception standing; both exit codes captured before any pipe</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-06 18:00, delivered 2026-09-05 00:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">S10</span><span class="tag st-open">OPEN</span><span class="gate">G2 Differentiation</span></div>
+<h4>The Safe Unwatched Time benchmark, a Brother-owned metric</h4>
+<div class="dc"><b>Done-check</b>a benchmark run reports a Safe Unwatched Time figure per workload family together with the four preservation checks (false greens, scope drift, unrecoverable state, repeated mistakes), and refuses to report a duration for any family where one of the four is unmeasured</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-16 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">S11</span><span class="tag st-open">OPEN</span><span class="gate">G2 Differentiation</span></div>
+<h4>The Acceptance Time benchmark: raw diff against ordinary summary against Brother receipt</h4>
+<div class="dc"><b>Done-check</b>a benchmark run reports, for each of the three arms, reviewer time, correct accept or reject, defects found and unnecessary lines inspected, on the same seeded diff; a missing arm reads NO-DATA and the run refuses to report a comparison</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-17 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">S12</span><span class="tag st-open">OPEN</span><span class="gate">G2 Differentiation</span></div>
+<h4>The memory recurrence benchmark: memory off, on, stale, contradictory, superseded</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/repeat_control.py prints both arms with at least five sessions each and a repeat rate per arm, and the three adversarial arms (stale, contradictory, superseded) each report their own rate; the output quoted into learning_loop.priority item 5</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-18 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">S13</span><span class="tag st-flight">IN-FLIGHT</span><span class="gate">G2 Differentiation</span></div>
+<h4>Strengthen the Continuity Capsule to the fifteen items zone 3 names</h4>
+<div class="dc"><b>Done-check</b>the capsule printed after a killed run names all fifteen zone 3 items or reads NO-DATA for each it cannot fill, and python3 scripts/test_continuity_matrix.py passes every kill point with the four answers asserted; both exit codes captured</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-19 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">S14</span><span class="tag st-flight">IN-FLIGHT</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>Finish the Japanese hostile qualification: five bars, not one</h4>
+<div class="dc"><b>Done-check</b>the five bars each reported from a fresh run of the shipped harness on its own corpus, the negative class at 100 percent, and benchmarks/ja-adversarial/ADVERSARIAL-JA-RESULT-2026-08-31.md agreeing with that run rather than contradicting it; a mutation of the disambiguation rule drops the score, quoted</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-19 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">S15</span><span class="tag st-open">OPEN</span><span class="gate">G4 Simplifying the invocation</span></div>
+<h4>One door: six verbs, and the fifteen shims come out</h4>
+<div class="dc"><b>Done-check</b>the front door rows (bundle/commands/brother.md, bundle/skills/using-brother/SKILL.md, bundle/MANIFEST.json) route to the skills and not to the shims, and no shim remains in the shipped surface; python3 scripts/test_door_routing_prose.py and python3 scripts/test_door.py both OK, each exit code captured</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-20 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">S16</span><span class="tag st-flight">IN-FLIGHT</span><span class="gate">G4 Simplifying the invocation</span></div>
+<h4>One install, and what it names is what it carries</h4>
+<div class="dc"><b>Done-check</b>a fresh install on a throwaway home runs the README first command and prints either the receipt path or a refusal naming the next command, and sbe score --strict over a clean repository shows no citation-inventory FAIL caused by the install; python3 scripts/test_readme_honesty.py and python3 scripts/test_codex_hooks_install.py both OK, each exit code captured</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-20 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">S17</span><span class="tag st-flight">IN-FLIGHT</span><span class="gate">G4 Simplifying the invocation</span></div>
+<h4>No architecture knowledge required at first use: the README first screen</h4>
+<div class="dc"><b>Done-check</b>the README first screen names no internal noun (BrotherMode, SBE, Vault, gate, mode) above its first command, python3 scripts/test_readme_honesty.py is OK, and the README proof-suite list matches the suites its own Limits section describes; each exit code captured</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-21 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">S18</span><span class="tag st-flight">IN-FLIGHT</span><span class="gate">G4 Simplifying the invocation</span></div>
+<h4>Proportional rigor: say the price of the ceremony a small change pays</h4>
+<div class="dc"><b>Done-check</b>a one-file one-check outcome driven through scripts/door.py either claims its unit without a decomposition pass, or the front page and the intent screen both state the wait before it starts; the wait figure quoted from a timed run and the exit code captured</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-21 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">S19</span><span class="tag st-open">OPEN</span><span class="gate">G4 Simplifying the invocation</span></div>
+<h4>Migration guide from GSD (EARN FIRST: publishable only when its floor is met)</h4>
+<div class="dc"><b>Done-check</b>rows S1, S2, S3 and S6 all read DONE (reproducible tag, correct manifest, mandatory required-fast, no critical readiness exception), row S13 reads DONE (recovery comparable), and at least one of S9, S11 or S12 reads DONE with its measured figure quoted; until then the guide exists as a draft carrying the EARN FIRST banner and is not published</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-25 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">S2</span><span class="tag st-done">DONE</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>A correct export manifest: what the manifest names is what the tag carries</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/release_invariant.py exits 0 on a fresh clone of the candidate tag with no declared exception in docs/plan, and python3 scripts/test_release_invariant.py plus python3 scripts/test_export_public.py both print OK; each exit code captured on its own</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-06 18:00, delivered 2026-09-05 00:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">S20</span><span class="tag st-open">OPEN</span><span class="gate">G4 Simplifying the invocation</span></div>
+<h4>Migration guide from Superpowers (EARN FIRST: publishable only when its floor is met)</h4>
+<div class="dc"><b>Done-check</b>rows S15, S16, S17 and S18 all read DONE (one door, one install, no architecture vocabulary, the price of the ceremony stated) and row S10 reads DONE with a Safe Unwatched Time figure quoted; until then the guide stays a draft carrying the EARN FIRST banner</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-25 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">S21</span><span class="tag st-open">OPEN</span><span class="gate">G4 Simplifying the invocation</span></div>
+<h4>Migration guide from Compound (EARN FIRST: publishable only when its floor is met)</h4>
+<div class="dc"><b>Done-check</b>row S9 reads DONE with a comparable seeded-defect detection figure against Compound quoted, and rows S8, S11 and S12 read DONE; until then the guide stays a draft carrying the EARN FIRST banner</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-25 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">S22</span><span class="tag st-open">OPEN</span><span class="gate">G4 Simplifying the invocation</span></div>
+<h4>Migration guide from BMAD (EARN FIRST: publishable only when its floor is met)</h4>
+<div class="dc"><b>Done-check</b>rows S15 and S17 read DONE (one door, no methodology vocabulary at first use) and row S8 reads DONE, with a requirement-fidelity and decision-traceability comparison against BMAD quoted; until then the guide stays a draft carrying the EARN FIRST banner</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-25 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">S23</span><span class="tag st-open">OPEN</span><span class="gate">G4 Simplifying the invocation</span></div>
+<h4>The &quot;use Brother with Claude Code&quot; guide</h4>
+<div class="dc"><b>Done-check</b>the guide&#x27;s every command runs verbatim on a throwaway home against the published plugin and each exit code is quoted in the guide, and python3 scripts/test_readme_honesty.py stays OK</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-22 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">S24</span><span class="tag st-open">OPEN</span><span class="gate">G4 Simplifying the invocation</span></div>
+<h4>The &quot;use Brother with Codex&quot; guide (EARN FIRST, after C7.2 and X8)</h4>
+<div class="dc"><b>Done-check</b>rows C7 (with subtask C7.2) and X8 both read DONE on this board with their own transcripts quoted, and only then is the guide published; before that the guide may exist as a draft whose banner says Codex packaging exists and full compatibility remains qualification work</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-27 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">S25</span><span class="tag st-open">OPEN</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>The Competitive Floor Score instrument: 26 capabilities, MUST MATCH or DOMINATE</h4>
+<div class="dc"><b>Done-check</b>the instrument scores each of the 26 section 16 capabilities as MUST MATCH or DOMINATE, refuses to grant a level without an evidence record that resolves on disk, and FAILS naming any capability more than 0.15 behind the best competitor; driven backwards by removing one evidence record and seeing that capability drop, both exit codes captured</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-15 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">S26</span><span class="tag st-flight">IN-FLIGHT</span><span class="gate">G2 Differentiation</span></div>
+<h4>Positioning copy with its EARN FIRST claims gated by name</h4>
+<div class="dc"><b>Done-check</b>every claim in docs/marketing/POSITIONING.md that section 23 restricts either has no EARN FIRST marker or names the roadmap rows that must read DONE before it is published, and a scan of the file finds no forbidden sentence from the section 23 list</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-06 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">S27</span><span class="tag st-open">OPEN</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>The five Brother-owned gauntlets, frozen as benchmark specifications</h4>
+<div class="dc"><b>Done-check</b>each of the five gauntlets has a specification naming its seeds, its frozen corpus, its fairness controls (starting repository, model, token budget, task instruction, environment, maximum human interventions) and its scoring rubric written BEFORE any run, and a runner refuses to score against a corpus whose hash has changed since the specification was frozen</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-24 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">S28</span><span class="tag st-open">OPEN</span><span class="gate">G2 Differentiation</span></div>
+<h4>The skeptical developer second-use test (founder gated: it needs people outside)</h4>
+<div class="dc"><b>Done-check</b>developers who actively prefer each of GSD, Superpowers, Compound and BMAD each answer the five section 27 questions after a real task, and the count who choose Brother for a SECOND task is recorded with their stated reason; a run with no second use recorded reads NO-DATA and never a pass</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-30 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">S3</span><span class="tag st-flight">IN-FLIGHT</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>required-fast becomes mandatory at the push seam, not merely available</h4>
+<div class="dc"><b>Done-check</b>grep -n required_fast scripts/pre_push_gate.py names the call, and a push carrying a seeded required-fast failure is refused by the hook with that failure quoted while the same push with the seed removed proceeds; driven both ways, both exit codes captured</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-08 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">S4</span><span class="tag st-open">OPEN</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>Virgin-install qualification per release, run by the post-cut closeout, never on push</h4>
+<div class="dc"><b>Done-check</b>for the candidate tag, gh api repos/khalilmaaouni/Brother/actions/runs lists one successful virgin-install run of the dispatch-only workflow, and python3 scripts/release_invariant.py prints the virgin-install link OK; the closeout row X6 quotes that run beside the tag revision SHA</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-10 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">S5</span><span class="tag st-open">OPEN</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>Signed release tags (founder gated: the signing key is his and only his)</h4>
+<div class="dc"><b>Done-check</b>git verify-tag v1.0.3 exits 0 in a fresh clone and prints a good signature, and the tag shows Verified on the public release page; the exit code captured before any pipe</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-10 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">S6</span><span class="tag st-flight">IN-FLIGHT</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>No critical readiness item resting on NO-DATA or on a renewed exception</h4>
+<div class="dc"><b>Done-check</b>python3 scripts/readiness_gate.py prints every critical item at PASS, the Reproducible release artifact line reads PASS rather than EXCEPTED, and no declared exception appears in its output; the exit code captured before any pipe</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-11 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">S7</span><span class="tag st-open">OPEN</span><span class="gate">G1 Parity or superiority against the other main tools</span></div>
+<h4>Close the plugin hook-scoping gap: no installer writes the scope marker</h4>
+<div class="dc"><b>Done-check</b>an install of the published plugin into a throwaway home writes the scope marker, and in a repository with no .brother/config every registered hook of both products exits 0 having read no file of its own and written none; driven both ways, the byte counts of stdout with and without the marker quoted</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-09 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">S8</span><span class="tag st-open">OPEN</span><span class="gate">G2 Differentiation</span></div>
+<h4>Freeze the Delivery Receipt v1 contract: a schema document and a test that pins its fields</h4>
+<div class="dc"><b>Done-check</b>docs/contracts/DELIVERY-RECEIPT-V1.md names every required field, and a test asserts that a receipt missing any one of them is refused; the test fails when a field is deleted from the schema and passes with it restored, both exit codes captured</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-13 18:00</span></div>
+</div>
+<div class="card">
+<div class="chead"><span class="cid">S9</span><span class="tag st-open">OPEN</span><span class="gate">G2 Differentiation</span></div>
+<h4>Measure the false-green rate: the Delegation Truth gauntlet as a running number</h4>
+<div class="dc"><b>Done-check</b>a gauntlet run over the seeded corpus (weak test, missing check, tempting scope drift, partial success) prints a false PASS count and a NO-DATA count per case, and refuses to report a rate when any case produced no verdict; the seeded weak-test case reads NO-DATA rather than PASS, quoted</div>
+<div class="bar-meta"><span class="gate">Unscheduled</span><span class="when">due 2026-09-15 18:00</span></div>
+</div>
+<p class="stamp">Tick contract, verbatim: a box ticks ONLY when its done-check ran after the last edit and the output is quoted beside it. Percentages are counts of records, never impressions.</p>
+</div>

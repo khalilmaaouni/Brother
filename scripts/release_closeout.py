@@ -1423,6 +1423,29 @@ def manifest_against_source(args, ev, gate, checkout):
                     "names" % (rev, args.version))
 
 
+def tag_signature_verified(gate, ev, checkout, tag):
+    """(verdict, why): does the published tag carry a GPG signature that
+    verifies? Row S5 (roadmap) is founder gated: the signing key is his
+    alone, so a tag with no signature at all is NO-DATA, never a FAIL. FAIL
+    is reserved for a signature that IS present but does not check out,
+    which is the only shape that means something actually went wrong."""
+    proc = step(gate, ev, "tag signature", ["git", "tag", "-v", tag],
+                cwd=checkout, timeout=120,
+                needles=("gpg", "Good signature", "BAD", "error",
+                         "no signature"))
+    combined = ((proc.stdout or "") + "\n" + (proc.stderr or "")).lower()
+    if proc.returncode == 0:
+        return ("PASS", "git tag -v %s verifies a good signature" % tag)
+    if "bad signature" in combined:
+        return ("FAIL", "git tag -v %s reports a BAD signature, not "
+                        "merely an absent one" % tag)
+    last = combined.strip().splitlines()[-1] if combined.strip() else \
+        "no output"
+    return ("NO-DATA", "tag signing: NO-DATA: no signing key configured "
+                       "(S5, founder); git tag -v %s found no signature "
+                       "(%s)" % (tag, last))
+
+
 def gate_public_artifact(args, ev, gate):
     tag = "v%s" % args.version
     url = args.public_url
@@ -1486,6 +1509,7 @@ def gate_public_artifact(args, ev, gate):
 
     verdicts.append(manifest_self_consistency(args, ev, gate, checkout))
     verdicts.append(manifest_against_source(args, ev, gate, checkout))
+    verdicts.append(tag_signature_verified(gate, ev, checkout, tag))
 
     for verdict, why in verdicts:
         gate.say("  %-8s %s" % (verdict, why))

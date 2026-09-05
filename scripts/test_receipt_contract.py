@@ -48,6 +48,17 @@ DOC_PATH = os.environ.get(
     os.path.join(os.path.dirname(HERE), "docs", "plan",
                  "DELIVERY-RECEIPT-V1.md"))
 
+#: The frozen field list (S8): a JSON sibling of the document above,
+#: checked against it by TheSchemaIsFrozenAndMatchesTheDocument below
+#: so the two cannot drift apart. RECEIPT_CONTRACT_SCHEMA overrides it
+#: the same way RECEIPT_CONTRACT_DOC overrides the document: to drive
+#: the check backwards against a copy, never to point a real run at a
+#: friendlier file.
+SCHEMA_PATH = os.environ.get(
+    "RECEIPT_CONTRACT_SCHEMA",
+    os.path.join(os.path.dirname(HERE), "docs", "plan",
+                 "delivery-receipt-v1.schema.json"))
+
 #: The type words the document is allowed to use, and what each accepts. A
 #: word outside this table is a documentation defect, not a silent pass:
 #: _check_type refuses it by name.
@@ -159,6 +170,22 @@ def claimed_unanswered(path=None):
             continue
         claimed.update(re.findall(r"[Qq]uestion (\d+)", flat))
     return claimed
+
+
+def load_schema(path=None):
+    """The parsed docs/plan/delivery-receipt-v1.schema.json: a dict
+    with a frozen_fields list of dicts, each carrying path, type,
+    required and cardinality. Raises OSError or ValueError rather
+    than returning something empty, for the same reason
+    load_field_table does."""
+    path = path or SCHEMA_PATH
+    with open(path, encoding="utf-8") as fh:
+        schema = json.load(fh)
+    fields = schema.get("frozen_fields")
+    if not fields:
+        raise ValueError("%s names no frozen_fields; an empty schema "
+                         "asserts nothing" % path)
+    return schema
 
 
 def resolve(doc, path):
@@ -298,6 +325,49 @@ class TheUnansweredClaimIsDrivenBothWays(unittest.TestCase):
         self.assertEqual([], load_absent_table())
 
 
+class TheSchemaIsFrozenAndMatchesTheDocument(unittest.TestCase):
+    """Row S8's freeze mechanism: docs/plan/delivery-receipt-v1.
+    schema.json names the same fields as the document's field table,
+    in both directions, so a field can be added to one without
+    silently drifting from the other."""
+
+    def test_every_document_field_is_in_the_schema(self):
+        doc_paths = set(path for path, _t, _r, _q
+                        in load_field_table())
+        schema = load_schema()
+        schema_paths = set(entry["path"]
+                           for entry in schema["frozen_fields"])
+        missing = sorted(doc_paths - schema_paths)
+        self.assertEqual([], missing,
+                         "the document names fields the schema does "
+                         "not freeze: %s" % ", ".join(missing))
+
+    def test_every_schema_field_is_in_the_document(self):
+        doc_paths = set(path for path, _t, _r, _q
+                        in load_field_table())
+        schema = load_schema()
+        schema_paths = set(entry["path"]
+                           for entry in schema["frozen_fields"])
+        extra = sorted(schema_paths - doc_paths)
+        self.assertEqual([], extra,
+                         "the schema freezes a field the document no "
+                         "longer names, a shrink the freeze forbids: "
+                         "%s" % ", ".join(extra))
+
+    def test_schema_types_match_the_document(self):
+        doc_types = dict((path, type_word) for path, type_word, _r, _q
+                         in load_field_table())
+        schema = load_schema()
+        wrong = []
+        for entry in schema["frozen_fields"]:
+            doc_type = doc_types.get(entry["path"])
+            if doc_type is not None and doc_type != entry["type"]:
+                wrong.append("%s is %s in the schema, %s in the "
+                             "document" % (entry["path"], entry["type"],
+                                          doc_type))
+        self.assertEqual([], wrong, "; ".join(wrong))
+
+
 class AGeneratedReceiptMatchesTheContract(unittest.TestCase):
     """One real run of the engine, its receipt read off disk, asserted field
     by field against the page. The run is the README's own toy delivery: two
@@ -364,8 +434,8 @@ class AGeneratedReceiptMatchesTheContract(unittest.TestCase):
 
     def setUp(self):
         if self.setup_error:
-            self.fail("no receipt was generated, so nothing here could be "
-                      "checked: %s" % self.setup_error)
+            self.fail("NO-DATA: no receipt was generated, so nothing "
+                      "here could be checked: %s" % self.setup_error)
 
     def test_the_run_produced_the_three_non_empty_lists(self):
         """Guard on the guard: if this toy run ever stopped producing a
@@ -409,6 +479,21 @@ class AGeneratedReceiptMatchesTheContract(unittest.TestCase):
                                    "still says NOT YET WRITTEN"
                                    % (where or ".", field, question))
         self.assertEqual([], present, "; ".join(present))
+
+    def test_every_frozen_schema_field_is_present_in_the_receipt(self):
+        """Independent of the document parse above: walks the schema
+        file itself, so a schema that drifted from the document
+        (caught by TheSchemaIsFrozenAndMatchesTheDocument) would also
+        be caught here against the real receipt."""
+        schema = load_schema()
+        missing = []
+        for entry in schema["frozen_fields"]:
+            places = resolve(self.receipt, entry["path"])
+            if places is None:
+                missing.append(entry["path"])
+        self.assertEqual([], missing,
+                         "the frozen schema names fields this receipt "
+                         "does not carry: %s" % ", ".join(missing))
 
 
 if __name__ == "__main__":

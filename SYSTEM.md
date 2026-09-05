@@ -13,10 +13,10 @@ to run the battery.
 
 | | |
 |---|---:|
-| Parts | 134 |
-| Parts with a purpose written in the file | 134 |
-| Parts with a suite wired into the battery | 113 |
-| Checks in the battery | 186 |
+| Parts | 143 |
+| Parts with a purpose written in the file | 143 |
+| Parts with a suite wired into the battery | 120 |
+| Checks in the battery | 194 |
 
 ## Every part, what it is for, and what proves it
 
@@ -35,6 +35,7 @@ to run the battery.
 | `acceptance_7` | Acceptance test for capability area 7: choosing the right tests and | `acceptance`, `acceptance-self`, `system-doc-current`, `system-doc-self` |
 | `acceptance_8` | Acceptance test for capability area 8: safety without approval fatigue | `acceptance`, `acceptance-self`, `system-doc-current`, `system-doc-self` |
 | `acceptance_9` | Acceptance test for capability area 9: crash recovery and resumable | `acceptance`, `acceptance-self`, `system-doc-current`, `system-doc-self` |
+| `acceptance_time` | The Acceptance Time benchmark harness (S11, roadmap row S11; protocol | `acceptance`, `acceptance-self`, `acceptance-time`, `system-doc-current`, `system-doc-self` |
 | `attempt_hook` | a PostToolUse hook on Bash that writes to scripts/attempt_ledger.py | `attempt-hook-tests` |
 | `attempt_ledger` | stop the third attempt at a technique that failed twice. | `attempt-ledger-self` |
 | `authority_path_coverage` | R1: does one event receive two independent enforcing decisions? | `authority-path-coverage-self` |
@@ -44,7 +45,7 @@ to run the battery.
 | `blocker_freshness` | Re-measure every release blocker's own done-check, cheaply, on demand. | `blocker-fresh` |
 | `board_status` | what is ACTUALLY done, counted from evidence. | `board-status-self` |
 | `brother_paths` | C3: the one place Brother resolves its plugin root, its config directory, | **NO-DATA**, nothing in the battery runs it |
-| `brother_run` | a plain outcome in, a verified delivery report out. | `brother-run-self`, `bundle-runtime-self`, `codex-smoke`, `codex-smoke-self`, `fault-lab-self`, `limit-watch-self`, `product-acceptance-self`, `release-closeout-self`, `release-invariant`, `release-invariant-self` |
+| `brother_run` | a plain outcome in, a verified delivery report out. | `brother-run-self`, `bundle-runtime-self`, `codex-smoke`, `codex-smoke-self`, `fault-lab-self`, `limit-watch-self`, `product-acceptance-self`, `release-closeout-self`, `release-invariant`, `release-invariant-self`, `tiny-task-cost-self` |
 | `bundle_runtime` | package brother_run.py's own execution engine into | `bundle-runtime-self` |
 | `capability_probe` | what this machine can actually do, measured not remembered. | **NO-DATA**, nothing in the battery runs it |
 | `charter_paths` | every repository path docs/CHARTER.md names must exist here. | `charter-paths`, `charter-paths-self` |
@@ -73,8 +74,12 @@ to run the battery.
 | `find_out` | .py: the research step attempt_ledger's refusal names by command. | `find-out-tests` |
 | `floor_score` | is Brother behind on the ordinary mechanics, measured where anyone measured. | `floor-score-self` |
 | `forecast` | how long, from a base rate this estate actually produced. | `forecast-self` |
+| `gauntlet_delegation_truth` | the false-green rate as a running number. | `delegation-truth-self` |
+| `gauntlet_hostile_ja` | EXECUTE the frozen Hostile Japanese Identity gauntlet. | **NO-DATA**, nothing in the battery runs it |
+| `gauntlet_memory_recurrence` | The memory recurrence gauntlet: five seeded conditions against the real recall path. | `memory-recurrence-self` |
 | `gen_command_center` | Render GANTT.html, the Brother command center, from the plan data files. | `gen-board-self` |
-| `gen_readiness_board` | Render the readiness board from docs/plan/READINESS-ROADMAP-2026-08-29.json. | `readiness-board-self` |
+| `gen_readiness_board` | Render the readiness board from docs/plan/READINESS-ROADMAP-2026-08-29.json. | `readiness-board-self`, `roadmap-public-clean` |
+| `gen_receipt_schema` | One-shot generator for docs/plan/delivery-receipt-v1.schema.json from the | **NO-DATA**, nothing in the battery runs it |
 | `graph_loop` | The graph loop: which nodes may run RIGHT NOW, and which may run TOGETHER. | `graph-loop`, `graph-loop-self` |
 | `graph_value_experiment` | VB-15 / D15: is multi-hop graph retrieval worth anything here, measured. | **NO-DATA**, nothing in the battery runs it |
 | `handover_ceremony` | Handover ceremony: collects a session's closing state and emits it as | `handover-ceremony` |
@@ -82,11 +87,13 @@ to run the battery.
 | `identity_guard` | refuse NEW commits whose author or committer email domain | `export-public-self`, `identity-guard`, `identity-guard-self` |
 | `intake_score` | Scoring harness for the Intake 9.5 rubric (docs/plan/INTAKE-9.5-DESIGN.md | `intake-record-diagrams`, `intake-score-self` |
 | `integrate` | workers parallel, truth serial. | `integrate-self` |
+| `jbeq_e2e_check` | Checker for the JBEQ-MDM end to end scenario (benchmarks/jbeq/mdm/e2e-001). | `jbeq-e2e-check-self` |
 | `jbeq_mdm` | JBEQ-MDM seed suite: write the blind prompts, score a blind answer file. | `jbeq-mdm-seed` |
 | `journal` | one append-only causal log per run, fed by the writers that | `journal-self` |
 | `journal_projection` | the delivery report, receipts-bound and a live | `journal-projection-self` |
 | `laws_audit` | R28.1, the law auditor (docs/plan/READINESS-ROADMAP-2026-08-29.json). | `laws-audit`, `laws-audit-self` |
 | `leaf_pin_check` | Does the umbrella promise the release tag the leaf actually published? | `leaf-pins`, `leaf-pins-self` |
+| `lesson_repeat_trial` | was the lesson SHOWN before the failure it describes. | `lesson-repeat-trial-tests` |
 | `lesson_severity` | how bad was it, decided by criteria rather than by feeling. | **NO-DATA**, nothing in the battery runs it |
 | `lifecycle_hooks` | the undeclared-write refusal, at the layer that can stop it. | `lifecycle-hooks-self` |
 | `limit_drill` | R25 as a runnable harness: drive a session into each of the three limit | `limit-drill` |
@@ -133,12 +140,14 @@ to run the battery.
 | `roadmap_merge` | Three way merge driver for the readiness roadmap JSON, keyed by row id. | `roadmap-merge-self` |
 | `run_evidence` | never destroy the evidence you are about to need. | `run-evidence-self` |
 | `run_heartbeat` | E46: the wait is never silent again. | **NO-DATA**, nothing in the battery runs it |
+| `safe_unwatched_time` | Safe Unwatched Time (SUT) for one run directory, read off the run's own records. | `safe-unwatched-time-self` |
 | `scope_audit` | what a run actually changed, against what it said it would. | `scope-audit-self` |
 | `split_check` | Does a train/test split leak: the same entity in both sides, or a row | `evad-score`, `evad-score-personas`, `evad-score-self`, `fault-lab-self`, `split-check-self` |
 | `surface_budget` | ROW R10: a ceiling on the estate's whole user-invocable surface. | `surface-budget`, `surface-budget-self` |
 | `system_doc` | a description of this system that cannot drift, because it is generated. | `system-doc-current`, `system-doc-self` |
 | `task_watchdog` | Task watchdog: per-task drift and block detection with the unlock printed. | `task-watchdog-self` |
 | `temp_residue` | Report, and optionally prune, this estate's leftover temp trees. | `temp-residue-self` |
+| `tiny_task_cost` | Tiny-task cost: what a one line change really costs through the door. | `tiny-task-cost-self` |
 | `tmp_sandbox` | One call that makes a test process delete every temporary tree it creates. | **NO-DATA**, nothing in the battery runs it |
 | `tool_bypass_test` | Measure what tool containment ACTUALLY holds, and refuse a claim that exceeds it. | `tool-bypass` |
 | `track_delivery` | Delivery tracking for the readiness roadmap, and the blocker learning behind it. | `delivery-tracker-self`, `delivery-tracking` |
@@ -181,10 +190,12 @@ to run the battery.
 - `intake-score-self`: `python3 scripts/test_intake_score.py -v`
 - `intake-record-diagrams`: `python3 scripts/intake_score.py --gate --require-weighted-options`
 - `readiness-board-self`: `python3 scripts/test_gen_readiness_board.py -v`
+- `roadmap-public-clean`: `python3 scripts/gen_readiness_board.py --public --check`
 - `delivery-tracker-self`: `python3 scripts/test_track_delivery.py -v`
 - `delivery-tracking`: `python3 scripts/track_delivery.py`
 - `roadmap-merge-self`: `python3 scripts/test_roadmap_merge.py -v`
 - `fence-expiry-self`: `python3 scripts/test_fence_expiry.py -v`
+- `safe-unwatched-time-self`: `python3 scripts/test_safe_unwatched_time.py -v`
 - `fence-expiry`: `python3 scripts/fence_expiry.py`
 - `graph-loop-self`: `python3 scripts/test_graph_loop.py -v`
 - `graph-loop`: `python3 scripts/graph_loop.py`
@@ -248,6 +259,7 @@ to run the battery.
 - `journal-self`: `python3 scripts/test_journal.py -v`
 - `receipt-door-self`: `python3 scripts/test_receipt_door.py -v`
 - `acceptance-compression`: `python3 scripts/test_acceptance_compression.py -v`
+- `acceptance-time`: `python3 scripts/test_acceptance_time.py -v`
 - `bundle-runtime-self`: `python3 scripts/test_bundle_runtime.py -v`
 - `product-acceptance-self`: `python3 scripts/test_product_acceptance.py -v`
 - `clean-install-e2e-self`: `python3 scripts/test_clean_install_e2e.py -v`
@@ -272,6 +284,8 @@ to run the battery.
 - `vault-benchmark-v2-self`: `python3 -m unittest -v scripts/test_vault_benchmark_v2.py`
 - `benchmark-bundle-self`: `python3 -m unittest -v scripts/test_make_benchmark_bundle.py`
 - `gauntlets-validate`: `python3 benchmarks/gauntlets/validate.py`
+- `memory-recurrence-self`: `python3 scripts/test_gauntlet_memory_recurrence.py`
+- `delegation-truth-self`: `python3 scripts/test_gauntlet_delegation_truth.py`
 - `jbeq-mdm-seed`: `python3 scripts/test_jbeq_mdm.py`
 - `fable-authority`: `python3 scripts/fable_authority.py --selftest`
 - `tenancy-isolation`: `python3 scripts/test_tenancy_isolation.py`
@@ -297,6 +311,7 @@ to run the battery.
 - `attempt-hook-tests`: `python3 scripts/test_attempt_hook.py`
 - `find-out-tests`: `python3 scripts/test_find_out.py`
 - `repeat-control-tests`: `python3 scripts/test_repeat_control.py`
+- `lesson-repeat-trial-tests`: `python3 scripts/test_lesson_repeat_trial.py`
 - `product-brothersbe`: `sh -c 'cd products/brothersbe && python3 evals/run_evals.py'`
 - `product-brothersbe-tests`: `sh -c 'cd products/brothersbe && python3 tools/test_sbe.py'`
 - `product-brothersbe-battery`: `sh -c 'cd products/brothersbe && d=$(mktemp -d) && sh release-control/baseline/run-battery.sh "$d" >/dev/null 2>&1; if [ ! -f "$d/summary.txt" ]; then echo "no summary.txt at $d, battery did not run to completion"; exit 1; fi; bad=$(grep -E "exit=[1-9][0-9]*$" "$d/summary.txt"); if [ -n "$bad" ]; then printf "%s\n" "$bad"; echo "battery output: $d"; exit 1; fi; echo "battery clean: $d"'`
@@ -331,6 +346,7 @@ to run the battery.
 - `v3-receipts-self`: `python3 scripts/test_v3_receipts.py -v`
 - `receipt-contract-v1`: `python3 scripts/test_receipt_contract.py -v`
 - `review-depth-self`: `python3 scripts/test_review_pass.py -v`
+- `tiny-task-cost-self`: `python3 scripts/test_tiny_task_cost.py -v`
 - `v3-judge-self`: `python3 scripts/test_v3_judge.py -v`
 - `v3-night-receipts-self`: `python3 scripts/test_v3_night_receipts.py -v`
 - `v3-surfacing-self`: `python3 scripts/test_v3_surfacing.py -v`
@@ -339,6 +355,7 @@ to run the battery.
 - `prevented-word-gate`: `python3 scripts/prevented_word_gate.py README.md --strict`
 - `sbe-proof-gate`: `python3 products/brothersbe/tools/sbe_gate.py . --strict`
 - `split-check-self`: `python3 scripts/test_split_check.py -v`
+- `jbeq-e2e-check-self`: `python3 scripts/test_jbeq_e2e_check.py -v`
 - `skills-portable`: `python3 scripts/test_skills_portable.py`
 - `codex-package-self`: `python3 scripts/test_codex_package.py -v`
 - `codex-smoke`: `python3 scripts/codex_smoke.py`

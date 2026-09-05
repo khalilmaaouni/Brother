@@ -26,3 +26,6 @@ STATE.md.bak-*
 # Microsoft Office lock files (~$ prefix): created while a document is open, never content
 ~$*
 **/~$*
+
+# JBEQ fixtures and run outputs are data, not residue (2026-09-05)
+!benchmarks/jbeq/**/*.csv

@@ -45,27 +45,12 @@
       "review_by": "2026-09-12",
       "removal_condition": "sh scripts/cut_v1.0.0.sh <next version> deletes this entry (its step 2) and that tag lands; a battery on the tagged tree reads release-invariant OK."
     },
-    "repair-drain-self": {
-      "class": "expected_unavailable",
-      "reason": "Registered in the battery for the first time 2026-09-04 (QA reviewer finding 3, 107 unrun checkers). scripts/test_repair_drain.py's own second-attempt scenario now collides with a rule that landed after this test was written: receipt_door.py's 'the check already passed before the work' handling (memory: a-check-that-already-passes-before-the-work-proves-nothing.md). test_second_attempt_repairs_after_a_failed_first drives brother_run through a failing first attempt and a repairing second attempt, and asserts the second attempt exits 0 (PASS). Because the fixture's check already reads true before the second attempt's own work runs, brother_run now correctly refuses to credit it as a proof and reports the piece NO-DATA instead, so the run exits 2, not 0, verbatim: 'brother_run: exit 2: nothing in this run was verified (0 PASS, 1 NO-DATA); a run that refused nothing but proved nothing is not the same thing as success' and 'F1 is NO-DATA: the check already passed before the work began, so it cannot prove the work.' This is the newer rule working as designed against an older test's assumption, not a product regression; the test's assertion is stale, not the code, and is left failing rather than weakened per this estate's rule that a failing test is never softened to get green.",
-      "recorded": "2026-09-04",
-      "review_by": "2026-09-18",
-      "removal_condition": "test_second_attempt_repairs_after_a_failed_first's fixture is rewritten so the second attempt's check is not already-true before the work runs (or the test's own expected exit code is updated to 2/NO-DATA to match the now-correct already-passed rule), and scripts/test_repair_drain.py exits 0; then this entry is deleted",
-      "failing_tests": {
-        "test_repair_drain.py": {
-          "test_second_attempt_repairs_after_a_failed_first": {
-            "reason": "AssertionError: 2 != 0, because the second attempt's check already reads true before that attempt's own work runs, so receipt_door.py scores it NO-DATA ('the check already passed before the work began, so it cannot prove the work') rather than PASS, and brother_run exits 2. The test predates this rule and still asserts exit 0.",
-            "removal_condition": "the fixture is changed so the second attempt's check is genuinely false until the repair lands (a true proof), or the test is updated to assert the NO-DATA/exit-2 verdict this rule now produces; then scripts/test_repair_drain.py exits 0 and this name is deleted with it"
-          }
-        }
-      }
-    },
     "evad-score": {
       "class": "expected_unavailable",
-      "reason": "the codex series of 2026-09-04 measured t1 FAIL after a Claude-reviewer PASS on 2026-09-01; the regression is real and carried by rows E79 to E81",
+      "reason": "the codex series of 2026-09-04 measured t1 FAIL after a Claude-reviewer PASS on 2026-09-01; the regression is real and carried by rows E79 to E81. AMENDED 2026-09-05 (BAT-103), because the entry named only the regression while the score line it shelters reads '1/3 (33%), 4 trial(s) NO-DATA': four of the seven gauntlet trials were never run, and the run record says why in its own words. t5 'codex workspace out of credits after 418 s, two of four steps done, no report', t6 'codex workspace out of credits after 315 s, no report', t7 'codex workspace out of credits at start', and t3 'the sandbox refused the tamper cleanup (rm style commands not permitted) so the one-byte tamper was not completed'. None of the four is a moved document or a broken script: the trials are driven by an external, credit metered agent workspace and a sandbox that refuses part of one trial's own teardown, so no session can re-measure them from this tree, and a score is never asserted by hand. They are recorded here so a reader of this entry cannot mistake 1/3 for a measured three trial series.",
       "recorded": "2026-09-04",
       "review_by": "2026-09-18",
-      "removal_condition": "a re-measured series records t1 PASS or the rows close and the next series holds",
+      "removal_condition": "a re-measured series records t1 PASS or the rows close and the next series holds; the four NO-DATA trials need a credited external workspace (t5, t6, t7) and a sandbox that permits t3's own tamper cleanup, and each one that runs is recorded through scripts/evad_score.py --record, never written in by hand",
       "failing_tests": "none: the check runs scripts/evad_score.py, which is not a unittest suite; its FAIL output names gauntlet trial ids (t1..t7) rather than test names, and exits 1 by design whenever a trial regresses PASS to FAIL against the previous stored run"
     },
     "sbe-proof-gate": {
@@ -75,6 +60,14 @@
       "review_by": "2026-09-11",
       "removal_condition": "E83 lands and sbe_gate.py --strict over the repository root exits 0 with ran PASS; then delete this entry",
       "failing_tests": "none: the check is one script with five gates, not a unittest suite; the failing gate is named in the reason"
+    },
+    "release-note-perturb": {
+      "class": "known_no_data",
+      "reason": "PR 260 (row E116) put the real perturbation behind BROTHER_LONG_CHECKS because the run takes about 90 minutes on this tree, so an ordinary battery prints NO-DATA for it by design and says so in its own output line: 'long check (about 90 min) not run: set BROTHER_LONG_CHECKS=1'. The check itself is not broken and its self test (release-note-perturb-self) runs in every battery and reads PASS; what is undeclared here is only the deliberate skip. A real FAIL from scripts/release_note_perturb.py is not covered by this entry and still blocks.",
+      "recorded": "2026-09-05",
+      "review_by": "2026-09-12",
+      "removal_condition": "the battery sets BROTHER_LONG_CHECKS=1 on release cuts and the check reads PASS there",
+      "failing_tests": "none: the check is one script, not a unittest suite, and it is not run at all in the default battery, so its NO-DATA line names no test"
     }
   }
 }

@@ -1,0 +1,165 @@
+<title>Proceed with this outcome</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+:root{
+  --paper:#F7F8F6; --ink:#141B22; --muted:#5A6570; --line:#DDE2DE;
+  --petrol:#0E7A6F; --petrol-soft:#E4F1EE; --card:#FFFFFF;
+  --good:#0E7A6F; --warn:#8A5A00; --warn-soft:#FBF2DE;
+}
+:root:not([data-theme="light"]){}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --paper:#10161B; --ink:#E8EDEA; --muted:#96A2A8; --line:#26313A;
+  --petrol:#3AA893; --petrol-soft:#152A28; --card:#161E25;
+  --good:#3AA893; --warn:#D6A44A; --warn-soft:#241D10;
+}}
+:root[data-theme="dark"]{
+  --paper:#10161B; --ink:#E8EDEA; --muted:#96A2A8; --line:#26313A;
+  --petrol:#3AA893; --petrol-soft:#152A28; --card:#161E25;
+  --good:#3AA893; --warn:#D6A44A; --warn-soft:#241D10;
+}
+*{box-sizing:border-box}
+body{background:var(--paper); color:var(--ink); margin:0;
+  font-family:Seravek,"Gill Sans Nova",Ubuntu,Calibri,"DejaVu Sans",source-sans-pro,sans-serif;
+  font-size:16.5px; line-height:1.62; padding:0 20px 80px;}
+.top,section,footer{max-width:53rem; margin:0 auto;}
+h1,h2,h3{font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+  font-weight:600; text-wrap:balance; letter-spacing:-.01em;}
+h1{font-size:2.35rem; line-height:1.15; margin:.1rem 0 .4rem;}
+h2{font-size:1.5rem; margin:0 0 .6rem;}
+h3{font-size:1.08rem; margin:1.4rem 0 .4rem;}
+.top{padding:3rem 0 1.2rem; border-bottom:1px solid var(--line); margin-bottom:2rem;}
+.eyebrow{text-transform:uppercase; letter-spacing:.14em; font-size:.72rem;
+  color:var(--petrol); font-weight:600; margin:0;}
+.stamp{color:var(--muted); font-size:.82rem; margin:.3rem 0 0;}
+section{margin:0 auto 2.6rem;}
+.lede{font-size:1.06rem;}
+.plain{background:var(--petrol-soft); border-left:3px solid var(--petrol);
+  padding:1.1rem 1.3rem; border-radius:2px; max-width:53rem;}
+.plain h2{font-size:1.15rem;}
+.question{margin-bottom:0;}
+.auto{background:var(--warn-soft); border-left:3px solid var(--warn);
+  padding:1rem 1.3rem; border-radius:2px;}
+.scroller{overflow-x:auto; -webkit-overflow-scrolling:touch;}
+table{border-collapse:collapse; width:100%; font-size:.93rem; min-width:34rem;}
+th,td{text-align:left; padding:.5rem .7rem; border-bottom:1px solid var(--line);
+  vertical-align:top;}
+thead th{font-size:.74rem; text-transform:uppercase; letter-spacing:.09em;
+  color:var(--muted); font-weight:600;}
+.num{text-align:right; font-variant-numeric:tabular-nums;}
+.big{font-weight:600; font-size:1.02rem;}
+tr.lead th,tr.lead td{background:var(--petrol-soft);}
+tfoot th,tfoot td{border-bottom:none; border-top:2px solid var(--line);}
+.pill{display:inline-block; font-size:.66rem; text-transform:uppercase;
+  letter-spacing:.08em; padding:.1rem .45rem; border-radius:2px;
+  border:1px solid var(--line); color:var(--muted); vertical-align:middle;}
+.pill.good{color:var(--good); border-color:var(--good);}
+.pill.chosen{color:#fff; background:var(--petrol); border-color:var(--petrol);}
+.decided{background:var(--petrol); color:#fff; padding:1.2rem 1.4rem;
+  border-radius:3px;}
+.decided h2,.decided a{color:#fff;} .decided .lede{margin-top:0;}
+.decided blockquote{margin:.7rem 0; padding-left:1rem;
+  border-left:2px solid rgba(255,255,255,.5); font-style:italic;}
+h4{font-family:"Iowan Old Style",Georgia,serif; font-size:1rem; margin:1rem 0 .3rem;}
+ul.links li{margin:.55rem 0;}
+.checked{font-size:.78rem; color:var(--muted); font-variant-numeric:tabular-nums;}
+details.eng{border-top:2px solid var(--petrol); padding-top:.6rem;}
+.rec,.note,.warn{padding:.8rem 1rem; border-radius:2px; font-size:.95rem;}
+.rec{background:var(--petrol-soft); border-left:3px solid var(--petrol);}
+.note{color:var(--muted); padding-left:0;}
+.warn{background:var(--warn-soft); border-left:3px solid var(--warn);}
+.option{border:1px solid var(--line); background:var(--card);
+  border-radius:3px; padding:1.4rem 1.5rem;}
+.option.lead{border-color:var(--petrol); border-width:1.5px;}
+.ohead{display:flex; align-items:baseline; justify-content:space-between; gap:1rem;}
+.ohead h2{margin:0;}
+.total{font-family:"Iowan Old Style",Georgia,serif; font-size:1.9rem;
+  color:var(--petrol); font-variant-numeric:tabular-nums;}
+.two{display:grid; grid-template-columns:1fr 1fr; gap:1.2rem;}
+@media (max-width:640px){.two{grid-template-columns:1fr;}}
+.pros h3{color:var(--good);} .cons h3{color:var(--warn);}
+ul{padding-left:1.1rem; margin:.3rem 0;} li{margin:.3rem 0;}
+ul.sources li{margin:.7rem 0;} .where{color:var(--muted); font-size:.9rem;}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.85em;}
+pre.code{background:var(--paper); border:1px solid var(--line);
+  padding:.8rem 1rem; border-radius:2px; font-size:.8rem; line-height:1.5;
+  overflow-x:auto; margin:.5rem 0;}
+pre.mermaid{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-size:.8rem; line-height:1.5; background:var(--paper);
+  border:1px solid var(--line); padding:.8rem 1rem; border-radius:2px;
+  overflow-x:auto; text-align:left; margin:.5rem 0;}
+details{margin:.7rem 0; border-top:1px solid var(--line); padding-top:.5rem;}
+summary{cursor:pointer; font-size:.92rem; color:var(--petrol); font-weight:600;}
+summary:focus-visible{outline:2px solid var(--petrol); outline-offset:2px;}
+footer{border-top:1px solid var(--line); padding-top:1.2rem; margin-top:3rem;
+  color:var(--muted); font-size:.88rem;}
+a{color:var(--petrol);}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+<header class="top">
+<p class="eyebrow">Intent</p>
+<h1>Proceed with this outcome</h1>
+<p class="stamp"></p>
+</header>
+<section class="plain">
+<h2>In plain words</h2>
+<p class="lede">This is what this run is about to act on before anything is claimed or run, one line per piece of work, exactly as the planning model wrote it:
+
+A1: create file one. done_check: `test -f one.txt`. depends on: none. evidence family: NO-DATA, oracle: NO-DATA, independence: unverified
+A2: create file two. done_check: `test -f two.txt`. depends on: A1. evidence family: NO-DATA, oracle: NO-DATA, independence: unverified
+
+Bounds, before any work starts: each piece of work gets at most 3 attempt(s), and one attempt&#x27;s worker is stopped after 900 seconds.
+
+Price, before anything is claimed or run: this run opens 3 model session(s), one to plan the work and one for each of the 2 piece(s) of work in the plan. The expected wall clock reads NO-DATA: no earlier run against this target left a measured one, and this estate will not invent a duration. What the same edit would cost you by hand is not measured here, and nothing below claims to beat it: the run proves what it does.
+
+Rollback: d0cad991dcb584afd1cdb55d5cbb6e8a0bf4af30</p>
+<p class="question"><strong>The question:</strong> Is this the outcome you meant, and are these the checks that should decide it?</p>
+</section>
+<section><h2>The options, ranked</h2>
+<div class="scroller"><table class="rankings">
+<thead><tr><th>Option</th><th>What it is</th><th class="num">Weighted score</th><th>Cost</th><th>Reversible</th></tr></thead><tbody>
+<tr class="lead"><th scope="row"><a href="#opt-proceed">Proceed as decomposed</a> <span class="pill good">highest</span></th><td>&#x27;two files exist, the second after the first&#x27;, 2 piece(s) of work</td><td class="num big">5.00</td><td>NO-DATA</td><td>NO-DATA</td></tr>
+<tr><th scope="row"><a href="#opt-refuse">Refuse: nothing is claimed</a></th><td>stop here, before any unit is claimed or run</td><td class="num big">0.00</td><td>none: nothing has started</td><td>moot: nothing happened</td></tr>
+</tbody></table></div>
+<p class="rec"><strong>The arithmetic favours Proceed as decomposed</strong>, by 5.00 over the next. A score ranks options against criteria somebody chose; it does not know what you know. The choice is yours.</p>
+</section>
+<section><h2>What was being measured, and why it counts for that much</h2>
+<div class="scroller"><table><thead><tr><th>Criterion</th><th class="num">Weight</th><th>Why it carries that weight</th></tr></thead><tbody>
+<tr><th scope="row">matches the settled outcome</th><td class="num">50%</td><td>the outcome named here is copied verbatim from what this run resolved to act on</td></tr>
+<tr><th scope="row">already progressed</th><td class="num">50%</td><td>0 of 2 piece(s) already carry a verified DONE status on this run&#x27;s own Work document</td></tr>
+</tbody></table></div></section>
+<section class="option lead" id="opt-proceed">
+<div class="ohead"><h2>Proceed as decomposed</h2><span class="total">5.00</span></div>
+<p class="lede">&#x27;two files exist, the second after the first&#x27;, 2 piece(s) of work</p>
+<div class="two">
+<div class="pros"><h3>For</h3><ul>
+</ul></div>
+<div class="cons"><h3>Against</h3><ul>
+</ul></div>
+</div>
+<details><summary>The score, multiplied out</summary>
+<div class="scroller"><table><thead><tr><th>Criterion</th><th class="num">Weight</th><th class="num">Mark</th><th class="num">Contributes</th><th>Why that mark</th></tr></thead><tbody>
+<tr><th scope="row">matches the settled outcome</th><td class="num">50%</td><td class="num">10</td><td class="num">5.00</td><td>the outcome named here is copied verbatim from what this run resolved to act on</td></tr>
+<tr><th scope="row">already progressed</th><td class="num">50%</td><td class="num">0</td><td class="num">0.00</td><td>0 of 2 piece(s) already carry a verified DONE status on this run&#x27;s own Work document</td></tr>
+</tbody><tfoot><tr><th scope="row">Total</th><td></td><td></td><td class="num big">5.00</td><td></td></tr></tfoot></table></div>
+</details>
+</section>
+<section class="option" id="opt-refuse">
+<div class="ohead"><h2>Refuse: nothing is claimed</h2><span class="total">0.00</span></div>
+<p class="lede">stop here, before any unit is claimed or run</p>
+<div class="two">
+<div class="pros"><h3>For</h3><ul>
+<li>nothing is claimed, run, or written until you say so</li>
+</ul></div>
+<div class="cons"><h3>Against</h3><ul>
+<li>the outcome goes unattempted</li>
+</ul></div>
+</div>
+<details><summary>The score, multiplied out</summary>
+<div class="scroller"><table><thead><tr><th>Criterion</th><th class="num">Weight</th><th class="num">Mark</th><th class="num">Contributes</th><th>Why that mark</th></tr></thead><tbody>
+<tr><th scope="row">matches the settled outcome</th><td class="num">50%</td><td class="num">NO-DATA</td><td class="num">0.00</td><td></td></tr>
+<tr><th scope="row">already progressed</th><td class="num">50%</td><td class="num">NO-DATA</td><td class="num">0.00</td><td></td></tr>
+</tbody><tfoot><tr><th scope="row">Total</th><td></td><td></td><td class="num big">0.00</td><td></td></tr></tfoot></table></div>
+<p class="warn">NO-DATA: this option was never marked on matches the settled outcome, already progressed, so those criteria contribute nothing. An unmarked criterion is not a zero and is not a middling score, and pretending otherwise would invent an opinion nobody held.</p>
+</details>
+</section>
+<footer><p></p><p class="stamp"></p></footer>

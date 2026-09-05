@@ -476,6 +476,29 @@ def previous_runs_line(durations):
 PRICE_FIELDS = ("model_sessions", "previous_runs_measured",
                 "wall_clock_seconds_expected", "wall_clock_seconds_range")
 
+#: THE TWO FIGURES THE NO-HISTORY BRANCH QUOTES, and why quoting them is not
+#: the invented duration this file refuses everywhere else. Row S18 asks the
+#: intent screen to state THE WAIT before the wait starts, and a first run
+#: against a fresh target has no history of its own to derive one from, which
+#: is exactly the situation a person with a one line change is in. So the
+#: sentence stops guessing about THIS target and quotes what this estate
+#: actually timed, each with its instrument beside it:
+#:   * under 5 seconds of ENGINE wall clock for a tiny task driven through
+#:     this same entry point, measured by scripts/tiny_task_cost.py (two
+#:     cases, a one line docs fix and a one line code fix with an existing
+#:     test; six readings on 2026-09-05 spanned 1.61s to 3.86s, the last
+#:     pair recorded under benchmarks/results/tiny-task-2026-09-05.json).
+#:     A BOUND AND NOT A POINT ESTIMATE, deliberately: the spread above is
+#:     the same code on the same machine minutes apart, so a single figure
+#:     would read as a precision this measurement does not have;
+#:   * 568.03 seconds END TO END for the one tiny task this estate ever timed
+#:     against a real model, the t7 report of 2026-09-04 that README.md's
+#:     limits section already quotes.
+#: Both are measurements with a named instrument, neither is a prediction for
+#: the run in front of you, and the sentence says so in those words.
+MEASURED_TINY_TASK_ENGINE_SECONDS = 5
+MEASURED_TINY_TASK_REAL_MODEL_SECONDS = 568.03
+
 
 def build_price_block(model_sessions, durations):
     """What this run is about to cost, built before any worker starts.
@@ -516,6 +539,20 @@ def price_paragraph(block):
     counted = ("this run opens %d model session(s), one to plan the work and "
                "one for each of the %d piece(s) of work in the plan."
                % (sessions, max(0, sessions - 1)))
+    # S18's other half, said in the same breath as the price: WHICH ceremony
+    # a one piece plan already skips, so nobody braces for a cost this run is
+    # not charging. Measured, not asserted: a one unit run's own
+    # run.log carries "was not reviewed: NO-DATA: this unit crossed no risk
+    # boundary" and "no release screen: a plain change", and its drain runs a
+    # single round with no dependency wait. The planning pass is NOT skipped
+    # and the sentence says so, because the founder's ruling of 2026-09-04
+    # kept the door's shape and asked it to state the price instead.
+    if sessions - 1 == 1:
+        counted += (" This plan holds one piece of work, so the run already "
+                    "skips what a larger one pays for: no dependency round, "
+                    "no reviewer unless the piece crosses a risk boundary, "
+                    "and no release screen. It still runs the planning pass, "
+                    "deliberately.")
     measured = block.get("previous_runs_measured") or 0
     if measured:
         wait = ("The last %d run(s) against this target really took %s "
@@ -527,7 +564,16 @@ def price_paragraph(block):
     else:
         wait = ("The expected wall clock reads %s: no earlier run against "
                 "this target left a measured one, and this estate will not "
-                "invent a duration." % NODATA)
+                "invent a duration. What it has timed, elsewhere and with an "
+                "instrument named beside each figure: a genuinely tiny task "
+                "driven through this same entry point cost the engine itself "
+                "under %d seconds of wall clock (scripts/tiny_task_cost.py), "
+                "and the one tiny task ever timed end to end against a real "
+                "model took %.2f seconds on 2026-09-04, nearly all of it the "
+                "model answering rather than this code. Neither figure is a "
+                "prediction for this run: they are what the wait has been."
+                % (NODATA, MEASURED_TINY_TASK_ENGINE_SECONDS,
+                   MEASURED_TINY_TASK_REAL_MODEL_SECONDS))
     return ("Price, before anything is claimed or run: %s %s What the same "
             "edit would cost you by hand is not measured here, and nothing "
             "below claims to beat it: the run proves what it does."

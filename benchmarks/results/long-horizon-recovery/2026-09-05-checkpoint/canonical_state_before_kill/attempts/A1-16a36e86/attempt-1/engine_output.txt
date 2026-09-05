@@ -1,0 +1,7 @@
+brother_run: this round's engine output (loop_bridge stdout+stderr), covering every unit claimed this round, not only A1
+
+CLAIMED (1): brother-run-46598/A1/1
+  lane-cleanup A1         removed lane lane/A1 removed
+  integrate A1         INTEGRATED                 applied to d0cad991d and its own check passed ON canonical at 031a8412d
+  A1         done     scope=CLEAN      integrated=True
+isolation: per-writer worktrees

@@ -436,5 +436,71 @@ class TheFourLimitsControlsAreNamedAndActuallyRun(unittest.TestCase):
                         proc.stdout.decode("utf-8", "replace")))
 
 
+
+#: S17: the first screen, title through the end of Install (the first
+#: `## ` heading that follows it), must get a stranger to a first command
+#: without teaching them a single internal noun. Reused verbatim from the
+#: brief that closed this row. Matched whole-word (and as a whole phrase
+#: for the two-word entry) and case-insensitively, so "receipt contract"
+#: is caught as a phrase while ordinary prose like "a rerunnable receipt"
+#: is not.
+FIRST_SCREEN_BANNED_WORDS = [
+    "kernel", "journal", "loom", "fence", "canonical", "capsule",
+    "door", "unit", "receipt contract",
+]
+
+FIRST_SCREEN_BANNED_RE = re.compile(
+    r"\b(?:%s)\b" % "|".join(re.escape(w) for w in FIRST_SCREEN_BANNED_WORDS),
+    re.IGNORECASE)
+
+
+def first_screen_text():
+    """README.md from its title through the end of the Install section:
+    everything before the second `## ` heading (`## What success looks
+    like`). What a stranger sees before scrolling past install."""
+    lines = readme_text().splitlines()
+    headings = [i for i, line in enumerate(lines) if line.startswith("## ")]
+    assert len(headings) >= 2, "README.md carries fewer than two ## headings"
+    return "\n".join(lines[:headings[1]])
+
+
+class TheFirstScreenTeachesNoInternalArchitecture(unittest.TestCase):
+    """S17. Before this row's fix, the Install section explained the
+    single-writer fence and the BrotherMode store, by name, before either
+    client's first command. Each test here is written to go RED on that
+    wording and GREEN on the current one."""
+
+    def test_the_pre_fix_install_paragraph_would_be_refused(self):
+        stale = ("One prerequisite is easy to miss because nothing creates "
+                 "it for you. Brother's single-writer fence reads a "
+                 "per-repository store")
+        self.assertNotIn(stale, first_screen_text())
+
+    def test_no_banned_architecture_word_appears_on_the_first_screen(self):
+        text = first_screen_text()
+        hits = sorted(set(m.group(0).lower()
+                          for m in FIRST_SCREEN_BANNED_RE.finditer(text)))
+        self.assertFalse(
+            hits,
+            "README.md's first screen (title through the end of Install) "
+            "names internal architecture word(s) a newcomer does not need "
+            "yet: %s. Move the explanation below the first screen instead "
+            "of deleting it." % hits)
+
+    def test_the_signature_sentence_is_on_the_first_screen(self):
+        self.assertIn("When AI says done, Brother gives you proof.",
+                     first_screen_text())
+
+    def test_the_moved_explanation_still_lives_below_the_first_screen(self):
+        """"Move it down," not "delete it": the store-setup explanation
+        this fix removed from the first screen must still be somewhere in
+        the document, past the first screen."""
+        text = readme_text()
+        moved = ("Brother's single-writer fence reads a per-repository "
+                 "store")
+        self.assertIn(moved, text)
+        self.assertNotIn(moved, first_screen_text())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

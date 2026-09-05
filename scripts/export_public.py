@@ -255,6 +255,30 @@ def _run(cmd, cwd, env=None, timeout=120):
         return _Fake()
 
 
+def signing_configured(cwd, run=None):
+    """(signed, key_id): whether this checkout is ready for `git tag -s`.
+    user.signingkey must be non-empty, and either gpg.format is set (an ssh
+    key, or an explicit declaration) or a gpg secret key matching it is
+    actually present, so a leftover signingkey line with no working key
+    behind it does not read as ready. Row S5 (roadmap) is founder gated: no
+    session sets any of this, it only reads what is already there."""
+    run = run or _run
+    key = run(["git", "config", "--get", "user.signingkey"], cwd)
+    key_id = (key.stdout or "").strip()
+    if key.returncode != 0 or not key_id:
+        return False, ""
+    fmt = run(["git", "config", "--get", "gpg.format"], cwd)
+    if (fmt.stdout or "").strip():
+        return True, key_id
+    gpg_bin = shutil.which("gpg") or shutil.which("gpg2")
+    if not gpg_bin:
+        return False, key_id
+    have = run([gpg_bin, "--list-secret-keys", key_id], cwd)
+    if have.returncode == 0 and (have.stdout or "").strip():
+        return True, key_id
+    return False, key_id
+
+
 def hub_head_rev(root=ROOT):
     """The hub's own current commit: the exact source revision an export
     built from `root` right now is cut from. None when this checkout has
@@ -1071,7 +1095,7 @@ def release_branch_name(tag, export_rev):
 
 
 def push_appended(allowlist, remote, branch, root=ROOT, tag=None,
-                   bootstrap=False, run=None):
+                   bootstrap=False, run=None, require_signed=False):
     """The real push path, kept separate from gating (see module docstring:
     ORPHAN ON PURPOSE). Fetches `remote`'s current tip, rebuilds the same
     allowlisted content as a new commit ON TOP of it (an honest append),
@@ -1099,7 +1123,12 @@ def push_appended(allowlist, remote, branch, root=ROOT, tag=None,
     _run and takes (cmd, cwd, env=None, timeout=...) returning an object
     with returncode, stdout and stderr, so a test can drive the whole
     release route against a local bare repository and a stand-in gh
-    without a network. Returns (exit_code, [lines])."""
+    without a network. Returns (exit_code, [lines]).
+
+    `require_signed`, with `tag` only: refuse rather than create an
+    unsigned tag when no signing key is configured (S5, roadmap; founder
+    gated, see signing_configured above). Without it an unsigned tag is
+    still created, and the returned lines say so."""
     run = run or _run
     lines = []
     with tempfile.TemporaryDirectory(prefix="brother-export-push-") as d:
@@ -1295,7 +1324,21 @@ def push_appended(allowlist, remote, branch, root=ROOT, tag=None,
                                      (fetch_merged.stderr or "").strip()))
                     return EXIT_REFUSED, lines
                 target_rev = "FETCH_HEAD"
-            tagged = run(["git", "tag", "-a", tag, "-m",
+            signed, key_id = signing_configured(d, run)
+            if signed:
+                lines.append("tag signing: git tag -s using key %s "
+                              "(user.signingkey configured)" % key_id)
+                sign_flag = "-s"
+            else:
+                lines.append("tag signing: NO-DATA: no signing key "
+                              "configured (S5, founder)")
+                if require_signed:
+                    lines.append("REFUSED: --require-signed set and no "
+                                  "signing key is configured; refusing to "
+                                  "create an unsigned tag")
+                    return EXIT_REFUSED, lines
+                sign_flag = "-a"
+            tagged = run(["git", "tag", sign_flag, tag, "-m",
                            "Brother %s" % tag.lstrip("v"), target_rev], d)
             if tagged.returncode != 0:
                 lines.append("REFUSED: could not create tag %s locally (%s)"
@@ -1418,6 +1461,45 @@ def _readiness_failing_items(text):
         if after_verdict and line.strip().startswith("- "):
             items.append("  gate item: %s" % line.strip()[2:].strip())
     return items
+
+
+def check_required_fast(export_dir):
+    """The public repository's own required-fast contract must read fail 0
+    on the export tree, not only in the hub. required-fast is becoming a
+    mandatory GitHub check on the public repository's release pull
+    requests, so a tag whose export tree cannot clear its own required
+    check has certified nothing: the very first real pull request would
+    fail the check this exporter just tagged past. Runs
+    scripts/required_fast.sh in export_dir exactly as a fresh clone would
+    (same working directory, no flags), and reads its own summary line
+    rather than only its exit code, so the refusal names which check(s)
+    failed. NO-DATA lines are named but never treated as a failure, the
+    same rule required_fast.sh applies to itself. Returns (ok, [lines])."""
+    script = os.path.join(export_dir, "scripts", "required_fast.sh")
+    if not os.path.isfile(script):
+        return False, ["NO-DATA: the export tree carries no "
+                       "scripts/required_fast.sh, so its own required "
+                       "check could not be run on it"]
+    proc = _run(["sh", script], export_dir, timeout=600)
+    text = ((proc.stdout or "") + (proc.stderr or "")).strip()
+    summary = re.search(r"^pass\s+(\d+)\s+fail\s+(\d+)\s+no-data\s+(\d+)",
+                        text, re.M)
+    if not summary:
+        last = text.splitlines()[-1] if text else "(no output)"
+        return False, ["NO-DATA: scripts/required_fast.sh printed no "
+                       "summary line on the export tree (exit %s, %s)"
+                       % (proc.returncode, last)]
+    fails = int(summary.group(2))
+    if fails > 0 or proc.returncode != 0:
+        lines = ["REFUSED: scripts/required_fast.sh does not read fail 0 "
+                "on the export tree (exit %s): %s"
+                % (proc.returncode, summary.group(0))]
+        failed = next((l for l in text.splitlines()
+                      if l.startswith("FAILED:")), None)
+        if failed:
+            lines.append(failed)
+        return False, lines
+    return True, ["required-fast: %s" % summary.group(0)]
 
 
 def check_markdown_links(export_dir):
@@ -1744,6 +1826,15 @@ def main(argv=None):
     ap.add_argument("--dry-run", action="store_true",
                      help="accepted for readability; this is already the "
                           "default whenever --push is absent")
+    ap.add_argument("--prove-required-fast", action="store_true",
+                     help="after the candidate export tree's other gates "
+                          "clear, also run scripts/required_fast.sh inside "
+                          "it and refuse unless it reads fail 0. Off by "
+                          "default so a plain dry run stays fast "
+                          "(required_fast.sh is itself a multi-minute "
+                          "battery); a release cut passes this so the "
+                          "public repository's own required check cannot "
+                          "regress unnoticed. Works with or without --push.")
     ap.add_argument("--tag", default=None,
                      help="with --push only: after the export commit lands, "
                           "create an annotated tag of this name pointing at "
@@ -1766,6 +1857,13 @@ def main(argv=None):
                           "of the 2026-09-03 decision); refused when the "
                           "remote has any branch, and refused without "
                           "--push")
+    ap.add_argument("--require-signed", action="store_true",
+                     help="with --tag only: refuse the cut rather than "
+                          "create an unsigned tag when no signing key is "
+                          "configured (git config user.signingkey plus "
+                          "gpg.format or a matching gpg secret key). S5, "
+                          "roadmap: the key is the founder's, this only "
+                          "reads what he has already set up.")
     args = ap.parse_args(list(sys.argv[1:] if argv is None else argv))
 
     allowlist = load_allowlist(args.allowlist)
@@ -1811,6 +1909,25 @@ def main(argv=None):
               "(%d file/path entr%s)"
               % (len(copied), "y" if len(copied) == 1 else "ies"))
 
+        if args.prove_required_fast:
+            # required_fast.sh expects a real git tree under it (several of
+            # its own checks shell out to git); the orphan candidate above
+            # was only ever committed for the secret/identity gates, so
+            # give required_fast.sh the same fresh-clone state tag_time_
+            # checks gives readiness_gate.py and its siblings.
+            git_ok, git_lines = _ensure_git_tree(export_dir)
+            for line in git_lines:
+                print(line)
+            if not git_ok:
+                return EXIT_REFUSED
+            rf_ok, rf_lines = check_required_fast(export_dir)
+            for line in rf_lines:
+                print(line)
+            if not rf_ok:
+                print("REFUSED: the candidate export tree does not clear "
+                      "its own required-fast check. Nothing was pushed.")
+                return EXIT_REFUSED
+
     if not args.push:
         if args.tag:
             print("REFUSED: --tag only means something with --push; a "
@@ -1818,6 +1935,10 @@ def main(argv=None):
             return EXIT_REFUSED
         if args.bootstrap:
             print("REFUSED: --bootstrap only means something with --push")
+            return EXIT_REFUSED
+        if args.require_signed:
+            print("REFUSED: --require-signed only means something with "
+                  "--tag and --push")
             return EXIT_REFUSED
         print("DRY-RUN: no push performed. Pass --push (with --remote) "
               "to push for real.")
@@ -1827,9 +1948,14 @@ def main(argv=None):
         print("NO-DATA: --push requires --remote")
         return EXIT_NODATA
 
+    if args.require_signed and not args.tag:
+        print("REFUSED: --require-signed only means something with --tag")
+        return EXIT_REFUSED
+
     code, lines = push_appended(allowlist, args.remote, args.branch,
                                 args.root, tag=args.tag,
-                                bootstrap=args.bootstrap)
+                                bootstrap=args.bootstrap,
+                                require_signed=args.require_signed)
     for line in lines:
         print(line)
     return code

@@ -1531,6 +1531,81 @@ class TheCommitIsExactlyTheGatedTree(unittest.TestCase):
                 clone_dir, "products", "myproduct", "tracked.csv")))
 
 
+class _FakeRun(object):
+    """A stand-in for push_appended's `run` seam (see its own docstring:
+    "run is the seam every external command goes through"), used here to
+    drive signing_configured's three-way branch without a real git config
+    or a real gpg keyring."""
+
+    def __init__(self, answers):
+        # answers: {tuple(cmd[:2] or cmd[0] for gpg): (returncode, stdout)}
+        self.answers = answers
+        self.calls = []
+
+    def __call__(self, cmd, cwd, env=None, timeout=120):
+        self.calls.append(cmd)
+        for key, (code, out) in self.answers.items():
+            if list(cmd[:len(key)]) == list(key):
+                class _R:
+                    pass
+                r = _R()
+                r.returncode = code
+                r.stdout = out
+                r.stderr = ""
+                return r
+        class _Miss:
+            returncode = 1
+            stdout = ""
+            stderr = "unexpected command in test: %r" % (cmd,)
+        return _Miss()
+
+
+class SigningConfiguredReadsWhatIsAlreadyThereNeverSetsIt(unittest.TestCase):
+    """Row S5: the signing key is the founder's alone, so this only reads
+    git config and an optional gpg keyring, driven here with a fake `run`
+    so no real signing key or gpg binary is needed to prove the logic."""
+
+    def test_no_signingkey_at_all_is_not_signed(self):
+        run = _FakeRun({
+            ("git", "config", "--get", "user.signingkey"): (1, ""),
+        })
+        signed, key_id = EP.signing_configured("/tmp", run=run)
+        self.assertFalse(signed)
+        self.assertEqual(key_id, "")
+
+    def test_signingkey_with_gpg_format_is_signed_without_touching_gpg(self):
+        run = _FakeRun({
+            ("git", "config", "--get", "user.signingkey"): (0, "ABC123\n"),
+            ("git", "config", "--get", "gpg.format"): (0, "ssh\n"),
+        })
+        signed, key_id = EP.signing_configured("/tmp", run=run)
+        self.assertTrue(signed)
+        self.assertEqual(key_id, "ABC123")
+        # gpg.format alone settles it: no gpg lookup was needed or made
+        self.assertFalse(any(c[0] in ("gpg", "gpg2") for c in run.calls))
+
+    def test_signingkey_with_no_format_and_no_matching_gpg_key_is_not_signed(self):
+        run = _FakeRun({
+            ("git", "config", "--get", "user.signingkey"): (0, "ABC123\n"),
+            ("git", "config", "--get", "gpg.format"): (1, ""),
+        })
+        with mock.patch.object(EP.shutil, "which", return_value=None):
+            signed, key_id = EP.signing_configured("/tmp", run=run)
+        self.assertFalse(signed)
+        self.assertEqual(key_id, "ABC123")
+
+    def test_signingkey_with_a_present_gpg_secret_key_is_signed(self):
+        run = _FakeRun({
+            ("git", "config", "--get", "user.signingkey"): (0, "ABC123\n"),
+            ("git", "config", "--get", "gpg.format"): (1, ""),
+            ("/usr/bin/gpg", "--list-secret-keys", "ABC123"):
+                (0, "sec   rsa4096/ABC123\n"),
+        })
+        with mock.patch.object(EP.shutil, "which",
+                               return_value="/usr/bin/gpg"):
+            signed, key_id = EP.signing_configured("/tmp", run=run)
+        self.assertTrue(signed)
+        self.assertEqual(key_id, "ABC123")
 class E118TheDenylistComesFromTheTreeBeingExported(unittest.TestCase):
     """Row E118, measured by lane X7-FIX: build_export_tree read the
     allowlist from the tree it was handed and the denylist from whatever
@@ -1913,6 +1988,32 @@ class ABrandNewRemoteIsStartedOnlyWithBootstrap(unittest.TestCase):
             # neither dry run touched the seeded remote
             self.assertEqual(self._count(remote_dir, "main"), "1")
 
+    def test_d2_require_signed_without_tag_or_push_is_refused(self):
+        with tempfile.TemporaryDirectory() as remote_dir, \
+             tempfile.TemporaryDirectory() as root:
+            _seed_bare_remote(remote_dir)
+            self._export_root(root)
+            allowlist_path = _write_lines(
+                os.path.join(root, "ALLOWLIST.txt"), self.ALLOWLIST)
+            terms_path = _write_lines(
+                os.path.join(root, "terms.txt"), ["FAKETERM-NEVER-PRESENT"])
+            env = dict(os.environ)
+            env["BROTHER_PRIVATE_TERMS"] = terms_path
+            common = ["--allowlist", allowlist_path, "--root", root,
+                      "--remote", remote_dir, "--branch", "main"]
+            dry = _run_cli(common + ["--require-signed"], env)
+            self.assertEqual(dry.returncode, EP.EXIT_REFUSED,
+                              dry.stdout + dry.stderr)
+            self.assertIn("REFUSED: --require-signed only means something "
+                          "with --tag and --push", dry.stdout)
+            pushed_no_tag = _run_cli(
+                common + ["--push", "--require-signed"], env)
+            self.assertEqual(pushed_no_tag.returncode, EP.EXIT_REFUSED,
+                              pushed_no_tag.stdout + pushed_no_tag.stderr)
+            self.assertIn("REFUSED: --require-signed only means something "
+                          "with --tag", pushed_no_tag.stdout)
+            self.assertEqual(self._count(remote_dir, "main"), "1")
+
 
     def _cli(self, root, remote_dir):
         """(env, common args) for _run_cli against the fixture root and the
@@ -2137,6 +2238,60 @@ class ATagRefusesAnExportTreeItsOwnProductsCannotVerify(unittest.TestCase):
             self.assertTrue(any(l.startswith("TAGGED") for l in lines), lines)
             self.assertEqual(self._remote_state(remote_dir), ("2", ["v9.9.9"]))
 
+    def test_j_an_unsigned_environment_tags_plainly_and_says_no_data(self):
+        """Row S5: the signing key is the founder's alone, so a machine
+        that has configured none still succeeds, creates a plain annotated
+        tag, and prints the NO-DATA line rather than staying quiet about
+        it. GIT_CONFIG_GLOBAL and GIT_CONFIG_SYSTEM point at files that do
+        not exist, so this proves the unsigned case regardless of whatever
+        signing key the machine actually running this test may carry."""
+        with tempfile.TemporaryDirectory() as remote_dir, \
+             tempfile.TemporaryDirectory() as root, \
+             tempfile.TemporaryDirectory() as isolate:
+            _seed_bare_remote(remote_dir)
+            self._seed_product(root)
+            with _fake_gh(
+                    GIT_CONFIG_GLOBAL=os.path.join(isolate, "no-global"),
+                    GIT_CONFIG_SYSTEM=os.path.join(isolate, "no-system")):
+                code, lines = EP.push_appended(
+                    self.ALLOWLIST, remote_dir, "main", root=root,
+                    tag="v9.9.9")
+            self.assertEqual(code, EP.EXIT_OK, lines)
+            self.assertIn("tag signing: NO-DATA: no signing key configured "
+                          "(S5, founder)", lines)
+            tag_obj = subprocess.run(
+                ["git", "-C", remote_dir, "cat-file", "-p", "v9.9.9"],
+                capture_output=True, text=True, check=True).stdout
+            self.assertNotIn("BEGIN PGP SIGNATURE", tag_obj)
+
+    def test_k_require_signed_refuses_the_unsigned_tag(self):
+        """--require-signed turns the same NO-DATA line into a refusal.
+        The tag itself is what a signing key names (its target is the
+        MERGED tip, fetched back after the merge, per push_appended's own
+        docstring), so this refusal lands after the commit is merged onto
+        main exactly like any other post-merge tag failure this module
+        already has (a local `git tag` failure below reads the same way);
+        what require_signed guarantees is that no TAG is ever created
+        without one."""
+        with tempfile.TemporaryDirectory() as remote_dir, \
+             tempfile.TemporaryDirectory() as root, \
+             tempfile.TemporaryDirectory() as isolate:
+            _seed_bare_remote(remote_dir)
+            self._seed_product(root)
+            with _fake_gh(
+                    GIT_CONFIG_GLOBAL=os.path.join(isolate, "no-global"),
+                    GIT_CONFIG_SYSTEM=os.path.join(isolate, "no-system")):
+                code, lines = EP.push_appended(
+                    self.ALLOWLIST, remote_dir, "main", root=root,
+                    tag="v9.9.9", require_signed=True)
+            self.assertEqual(code, EP.EXIT_REFUSED, lines)
+            self.assertTrue(any(l.startswith(
+                "REFUSED: --require-signed set") for l in lines), lines)
+            self.assertFalse(any(l.startswith("TAGGED") for l in lines),
+                             lines)
+            count, tags = self._remote_state(remote_dir)
+            self.assertEqual(tags, [])
+
     def _refused_tag(self, remote_dir, root):
         """A tagged push of the seeded fixture, asserted to have refused and
         to have written nothing: the seed commit stands alone and no tag
@@ -2301,6 +2456,75 @@ class ATagRefusesAnExportTreeItsOwnProductsCannotVerify(unittest.TestCase):
                              lines)
             self.assertFalse(any(l.startswith("verified:") for l in lines),
                              lines)
+
+
+class TheExportTreeMustClearItsOwnRequiredFastCheck(unittest.TestCase):
+    """required-fast is becoming a mandatory GitHub check on the public
+    repository's release pull requests (docs/plan/EXPORT-ALLOWLIST.txt,
+    2026-09-05: version-truth, charter-paths and surface were all failing
+    on a fresh public clone before that row). check_required_fast runs
+    scripts/required_fast.sh inside the candidate export tree so a
+    regression there refuses the tag rather than shipping a public repo
+    that fails its own required check on the very next pull request. A
+    fake required_fast.sh, never the real multi-minute battery, keeps this
+    fast and deterministic: what is under test is the parsing of the
+    summary line, not required_fast.sh itself."""
+
+    def _write_fake(self, export_dir, summary, exit_code=0):
+        scripts = os.path.join(export_dir, "scripts")
+        os.makedirs(scripts, exist_ok=True)
+        with open(os.path.join(scripts, "required_fast.sh"), "w",
+                  encoding="utf-8") as fh:
+            fh.write("#!/bin/sh\necho '%s'\nexit %d\n" % (summary, exit_code))
+
+    def test_fail_0_clears(self):
+        with tempfile.TemporaryDirectory() as export_dir:
+            self._write_fake(export_dir, "pass 15   fail 0   no-data 0")
+            ok, lines = EP.check_required_fast(export_dir)
+            self.assertTrue(ok, lines)
+            self.assertTrue(any("pass 15   fail 0   no-data 0" in l
+                                for l in lines), lines)
+
+    def test_a_named_failure_refuses_and_names_the_check(self):
+        with tempfile.TemporaryDirectory() as export_dir:
+            scripts = os.path.join(export_dir, "scripts")
+            os.makedirs(scripts, exist_ok=True)
+            with open(os.path.join(scripts, "required_fast.sh"), "w",
+                      encoding="utf-8") as fh:
+                fh.write("#!/bin/sh\n"
+                         "echo 'pass 14   fail 1   no-data 0'\n"
+                         "echo 'FAILED: readiness-gate'\n"
+                         "exit 1\n")
+            ok, lines = EP.check_required_fast(export_dir)
+            self.assertFalse(ok, lines)
+            self.assertTrue(any(l.startswith("REFUSED:") for l in lines),
+                            lines)
+            self.assertIn("FAILED: readiness-gate", lines)
+
+    def test_no_data_is_never_read_as_a_failure(self):
+        with tempfile.TemporaryDirectory() as export_dir:
+            self._write_fake(export_dir, "pass 13   fail 0   no-data 2")
+            ok, lines = EP.check_required_fast(export_dir)
+            self.assertTrue(ok, lines)
+
+    def test_a_missing_script_is_no_data_not_a_pass(self):
+        with tempfile.TemporaryDirectory() as export_dir:
+            ok, lines = EP.check_required_fast(export_dir)
+            self.assertFalse(ok, lines)
+            self.assertTrue(any(l.startswith("NO-DATA:") for l in lines),
+                            lines)
+
+    def test_no_summary_line_is_no_data_not_a_pass(self):
+        with tempfile.TemporaryDirectory() as export_dir:
+            scripts = os.path.join(export_dir, "scripts")
+            os.makedirs(scripts, exist_ok=True)
+            with open(os.path.join(scripts, "required_fast.sh"), "w",
+                      encoding="utf-8") as fh:
+                fh.write("#!/bin/sh\necho 'nothing shaped like a summary'\n")
+            ok, lines = EP.check_required_fast(export_dir)
+            self.assertFalse(ok, lines)
+            self.assertTrue(any(l.startswith("NO-DATA:") for l in lines),
+                            lines)
 
 
 class TheReleaseRecordShipsItsOwnSourceRevision(unittest.TestCase):

@@ -1,0 +1,53 @@
+{
+  "generated": "2026-09-05",
+  "log": "/Users/khalil.maaouni/.claude/evidence/lane-e53-real-command-log.jsonl",
+  "lessons": "/Users/khalil.maaouni/.claude/repeat-guard/lessons.jsonl",
+  "commands": 1157,
+  "failures": 772,
+  "described_failures": 4,
+  "arm_a_shown": 4,
+  "arm_b_shown": 0,
+  "undated_lessons": 5,
+  "detail": [
+    {
+      "command": "python3 -m unittest tools.test_bm",
+      "at": "2026-08-29",
+      "exit_code": 1,
+      "lesson": "L09",
+      "trigger": "unittest",
+      "described_by": [
+        "L09"
+      ]
+    },
+    {
+      "command": "python3 -m unittest tools.test_bm.TestP17PackagingManifestMatchesTheRepository tools.test_bm.TestPreWriteGate tools.test_bm.TestProjectSecurityClaims",
+      "at": "2026-08-29",
+      "exit_code": 1,
+      "lesson": "L09",
+      "trigger": "unittest",
+      "described_by": [
+        "L09"
+      ]
+    },
+    {
+      "command": "python3 -m unittest tools.test_bm",
+      "at": "2026-08-30",
+      "exit_code": 1,
+      "lesson": "L09",
+      "trigger": "unittest",
+      "described_by": [
+        "L09"
+      ]
+    },
+    {
+      "command": "python3 -m unittest tools.test_bm.TestLoopP9GateCiInventoryCountsExecutionNotMentions tools.test_bm.TestP17PackagingManifestMatchesTheRepository",
+      "at": "2026-08-30",
+      "exit_code": 1,
+      "lesson": "L09",
+      "trigger": "unittest",
+      "described_by": [
+        "L09"
+      ]
+    }
+  ]
+}

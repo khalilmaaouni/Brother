@@ -1,0 +1,114 @@
+{
+ "scenario": "jbeq-mdm-e2e-001",
+ "target_object": "golden_customer",
+ "fields": [
+  {
+   "target_field": "customer_id",
+   "source_field": "sales_master.customer_id",
+   "transformation": "copy",
+   "authority": "sales_master",
+   "null_handling": "reject the row, a customer without an id cannot be keyed",
+   "effective_date_behaviour": "not dated, the key is stable for the life of the record",
+   "reconciliation_rule": "every accepted source customer_id appears exactly once in golden.csv"
+  },
+  {
+   "target_field": "houjin_bangou",
+   "source_field": "sales_master.houjin_bangou",
+   "transformation": "strip spaces and hyphens, keep 13 digits",
+   "authority": "registry for existence, sales_master for assignment",
+   "null_handling": "keep the customer, mark it unmatched, never guess a number",
+   "effective_date_behaviour": "not dated in this scenario",
+   "reconciliation_rule": "every non empty houjin_bangou in golden.csv exists in registry.csv"
+  },
+  {
+   "target_field": "legal_name",
+   "source_field": "registry.registered_name",
+   "transformation": "copy the registered name for the row's houjin_bangou",
+   "authority": "registry, the requirement makes the register authoritative for the legal name",
+   "null_handling": "no registry row means no legal name, the field stays empty and the row counts as unmatched",
+   "effective_date_behaviour": "UNKNOWN, the requirement does not say whether a corrected legal name applies from the registry update date or from the migration date",
+   "reconciliation_rule": "all golden rows sharing one houjin_bangou carry the same legal_name, and that name equals registry.registered_name"
+  },
+  {
+   "target_field": "commercial_name",
+   "source_field": "sales_master.torihikisaki_name",
+   "transformation": "copy verbatim, no normalization, no registry substitution",
+   "authority": "sales_master, the requirement preserves the existing sales facing name",
+   "null_handling": "reject the row, a customer with no sales facing name cannot be used by sales",
+   "effective_date_behaviour": "not dated, the existing name is carried forward as is",
+   "reconciliation_rule": "commercial_name in golden.csv equals the source name for the same customer_id and is never overwritten by legal_name"
+  },
+  {
+   "target_field": "record_type",
+   "source_field": "sales_master.store_id",
+   "transformation": "STORE when store_id is present, CORPORATE when it is empty",
+   "authority": "sales_master",
+   "null_handling": "an empty store_id means CORPORATE, never a missing value",
+   "effective_date_behaviour": "not dated",
+   "reconciliation_rule": "one CORPORATE row per houjin_bangou group that has a corporate source row"
+  },
+  {
+   "target_field": "store_id",
+   "source_field": "sales_master.store_id joined to stores.store_id",
+   "transformation": "copy, and require the store to exist in stores.csv",
+   "authority": "stores",
+   "null_handling": "empty for a corporate record",
+   "effective_date_behaviour": "the store record carries its own validity, see valid_from and valid_to",
+   "reconciliation_rule": "every non empty store_id in golden.csv exists in stores.csv, orphan count 0"
+  },
+  {
+   "target_field": "parent_customer_id",
+   "source_field": "sales_master.parent_customer_id",
+   "transformation": "copy, and require the parent to be a CORPORATE record carrying the same houjin_bangou",
+   "authority": "sales_master, constrained by the requirement that the hierarchy is kept rather than merged",
+   "null_handling": "empty for a corporate record",
+   "effective_date_behaviour": "the link carries the child store validity, see links.csv",
+   "reconciliation_rule": "no cycle, no store parent, relationship_mismatch 0"
+  },
+  {
+   "target_field": "payment_terms_days",
+   "source_field": "sales_master.payment_terms_days",
+   "transformation": "copy as an integer",
+   "authority": "UNKNOWN, the requirement does not rule between the sales system and CRM, the sales master value is carried forward unchanged and the question is escalated",
+   "null_handling": "keep the row, leave the field empty, never default to a number nobody agreed",
+   "effective_date_behaviour": "UNKNOWN for the same reason",
+   "reconciliation_rule": "payment_terms_days in golden.csv equals the sales master value for the same customer_id, attribute_mismatch 0"
+  },
+  {
+   "target_field": "valid_from",
+   "source_field": "stores.valid_from for a store record, registry.registered_from for a corporate record",
+   "transformation": "copy the date",
+   "authority": "stores for a store record, registry for a corporate record",
+   "null_handling": "reject the store row, a store with no opening date cannot be dated",
+   "effective_date_behaviour": "this field is the effective date of the record itself",
+   "reconciliation_rule": "valid_from is not later than valid_to where both are present"
+  },
+  {
+   "target_field": "valid_to",
+   "source_field": "stores.valid_to",
+   "transformation": "copy the date, empty when the store is open",
+   "authority": "stores",
+   "null_handling": "empty means still valid, never a far future sentinel date",
+   "effective_date_behaviour": "a closed store keeps its own closing date, the record is retained and never redirected to a newer store",
+   "reconciliation_rule": "the closed store record is still present in golden.csv with its own valid_to, historical_mismatch 0"
+  },
+  {
+   "target_field": "status",
+   "source_field": "stores.status",
+   "transformation": "OPEN maps to ACTIVE, CLOSED maps to CLOSED, a corporate record is ACTIVE",
+   "authority": "stores",
+   "null_handling": "reject an unknown status word rather than mapping it to ACTIVE",
+   "effective_date_behaviour": "follows valid_to",
+   "reconciliation_rule": "the count of CLOSED rows equals the count of closed stores in stores.csv"
+  },
+  {
+   "target_field": "merged_from",
+   "source_field": "sales_master.merge_directive",
+   "transformation": "always empty, this scenario performs no merge",
+   "authority": "the requirement, which forbids automatic merge of store level customers on a shared houjin_bangou",
+   "null_handling": "empty is the only valid value",
+   "effective_date_behaviour": "not dated",
+   "reconciliation_rule": "merged count is 0 and every merge directive is counted as rejected"
+  }
+ ]
+}

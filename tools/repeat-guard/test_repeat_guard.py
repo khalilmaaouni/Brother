@@ -95,6 +95,33 @@ def post(cmd, code, err=""):
             "tool_response": {"stdout": "", "stderr": err,
                               "exit_code": code, "timed_out": False}}
 
+def post_noexit(cmd, stdout="", stderr=""):
+    """A Bash PostToolUse payload exactly as the harness reports the
+    overwhelming majority of real calls: no exit_code key at all.
+    Measured on this machine (lane E53, PR 279): 84,659 of 86,907
+    recorded outcomes carried no exit_code, and not one of the recorded
+    outcomes ever carried a nonzero value."""
+    return {"hook_event_name": "PostToolUse", "session_id": "s1",
+            "tool_name": "Bash", "tool_input": {"command": cmd},
+            "tool_response": {"stdout": stdout, "stderr": stderr,
+                              "timed_out": False}}
+
+
+def last_row(home, payload):
+    """The most recently recorded row for payload's own signature, or
+    None. Reads the state file directly rather than through the hook, so
+    the test can see fields (exit_code, err) the hook's own exit status
+    never surfaces."""
+    p = state_dir(home) / "s1.jsonl"
+    if not p.exists():
+        return None
+    sig = signature_of(payload)
+    rows = [json.loads(line) for line in p.read_text(encoding="utf-8").splitlines() if line.strip()]
+    for row in reversed(rows):
+        if row.get("sig") == sig:
+            return row
+    return None
+
 
 def main():
     with tempfile.TemporaryDirectory() as home:
@@ -249,6 +276,67 @@ def main():
                 }) + "\n")
         code, _, _ = run(pre_edit("/tmp/genuine_target.md"), home)
         check("12 four GENUINE failures still refuse a fifth attempt", code, 2)
+
+        # 13. THE LEDGER ROW ITSELF NAMES WHAT IT KNOWS. lane E53 / PR 279:
+        #     a payload carrying a real exit code writes that number; a
+        #     payload carrying none writes exit_code None and SAYS SO in
+        #     the stored row, rather than silently guessing a pass the way
+        #     the old `rec.get("success") is not False` default did.
+        ledger_cmd = "pytest tests/test_ledger_naming.py"
+        run(post(ledger_cmd, 1, "boom"), home)
+        row = last_row(home, pre(ledger_cmd))
+        check("13a exit 1 writes exit_code 1", row.get("exit_code"), 1)
+
+        run(post(ledger_cmd, 0), home)
+        row = last_row(home, pre(ledger_cmd))
+        check("13b exit 0 writes exit_code 0", row.get("exit_code"), 0)
+
+        run(post_noexit(ledger_cmd, stdout="nothing conclusive here"), home)
+        row = last_row(home, pre(ledger_cmd))
+        check("13c a payload without an exit writes exit_code None",
+              row.get("exit_code"), None)
+        check("13c and says so instead of silently guessing a pass",
+              row.get("err"),
+              "no exit code and no failure signature in output")
+
+        # 14. THE FIX ITSELF. A Bash call that reports no exit_code but whose
+        #     output plainly failed must be counted as a failure, not
+        #     defaulted to a pass. Three such calls, then the fourth attempt
+        #     is refused: the same shape as case 2, but with the exit_code
+        #     the harness actually supplies for almost every real call --
+        #     none at all.
+        broken = "run_missing_tool.sh"
+        for _ in range(3):
+            run(post_noexit(broken,
+                            stderr="bash: run_missing_tool.sh: command not found"),
+                home)
+        row = last_row(home, pre(broken))
+        check("14a an output-inferred failure still writes exit_code None",
+              row.get("exit_code"), None)
+        code, _, _ = run(pre(broken), home)
+        check("14b three output-inferred failures block the fourth attempt",
+              code, 2)
+
+        # 15. A GENUINELY UNKNOWN OUTCOME IS NEITHER A PASS NOR A FAILURE.
+        #     No exit_code, no failure signature: ten of these must never
+        #     trip the guard (it is not a counted failure) and must never
+        #     mask a real failure streak either (unlike an actual success,
+        #     it does not reset the counter).
+        vague = "some_tool --quiet"
+        for _ in range(10):
+            run(post_noexit(vague, stdout="working on it"), home)
+        code, _, _ = run(pre(vague), home)
+        check("15a ten unknown outcomes never block", code, 0)
+
+        mixed = "flaky_tool.sh"
+        run(post_noexit(mixed, stderr="fatal: could not do the thing"), home)
+        run(post_noexit(mixed, stdout="working on it"), home)  # unknown
+        run(post_noexit(mixed, stderr="fatal: could not do the thing"), home)
+        run(post_noexit(mixed, stdout="working on it"), home)  # unknown
+        run(post_noexit(mixed, stderr="fatal: could not do the thing"), home)
+        code, _, _ = run(pre(mixed), home)
+        check("15b an unknown outcome between failures does not reset the streak",
+              code, 2)
 
     bad = results.count(False)
     print(f"\n{len(results)} cases, {bad} failures")

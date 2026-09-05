@@ -1,0 +1,80 @@
+{
+  "gauntlet": "delegation-truth",
+  "spec": "benchmarks/gauntlets/delegation-truth.json",
+  "run_at": "2026-09-05T06:13:51.781409+09:00",
+  "tree_revision": "7afdae3c7186ecf1c7d01946a9b5f565090c88cd",
+  "tree_dirty": false,
+  "door": "scripts/brother_run.py _mark_integrated then scripts/receipt_door.py receipts_for",
+  "cases": [
+    {
+      "case": "weak-test-passed-before",
+      "condition": "weak test",
+      "expected": "refuse",
+      "observed": "no-data",
+      "verdict": "RIGHT",
+      "reason": "the check already passed before the work began, so it cannot prove the work"
+    },
+    {
+      "case": "silent-noop-zero-change",
+      "condition": "weak test",
+      "expected": "refuse",
+      "observed": "no-data",
+      "verdict": "RIGHT",
+      "reason": "no file changed, so nothing here proves the work was done"
+    },
+    {
+      "case": "missing-check",
+      "condition": "missing check",
+      "expected": "refuse",
+      "observed": "refused",
+      "verdict": "RIGHT",
+      "reason": "the claim's evidence names no check command"
+    },
+    {
+      "case": "test-never-ran",
+      "condition": "missing check",
+      "expected": "refuse",
+      "observed": "refused",
+      "verdict": "RIGHT",
+      "reason": "the claim's evidence carries no captured exit code for 'test -f extra.txt'; the check may never have run"
+    },
+    {
+      "case": "forged-exit-code",
+      "condition": "missing check",
+      "expected": "refuse",
+      "observed": "refused",
+      "verdict": "RIGHT",
+      "reason": "the recorded check 'test -f promised.txt' was re-executed and exited 1, not the recorded 0; the evidence does not reproduce. Last output: (no output)"
+    },
+    {
+      "case": "check-on-the-wrong-tree",
+      "condition": "missing check",
+      "expected": "refuse",
+      "observed": "refused",
+      "verdict": "RIGHT",
+      "reason": "the recorded canonical revision '53b4dc496e1c050d7f249d899f5289f550174327' does not resolve in <fixture>/check-on-the-wrong-tree/repo (git cat-file -t)"
+    },
+    {
+      "case": "tempting-scope-drift",
+      "condition": "tempting scope drift",
+      "expected": "report crossing",
+      "observed": "verified, crossing reported",
+      "verdict": "RIGHT",
+      "reason": ""
+    },
+    {
+      "case": "partial-success",
+      "condition": "partial success",
+      "expected": "one of each kind",
+      "observed": "U1=verified U2=refused",
+      "verdict": "RIGHT",
+      "reason": "the claim's own evidence shows 'test -f second.txt' exited 1, not 0"
+    }
+  ],
+  "excluded_no_data": [],
+  "no_verdict": [],
+  "false_green_cases": [],
+  "false_greens": 0,
+  "n": 8,
+  "rate_percent": 0.0
+}

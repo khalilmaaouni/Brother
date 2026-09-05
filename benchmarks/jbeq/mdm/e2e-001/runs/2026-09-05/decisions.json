@@ -1,0 +1,100 @@
+{
+ "scenario": "jbeq-mdm-e2e-001",
+ "source": "requirement.ja.md section 1, with section 2 naming what the text leaves open",
+ "rules": [
+  {
+   "id": "R1",
+   "name": "legal_name_authority",
+   "status": "DECIDED",
+   "statement": "The legal name comes from the register, not from the sales master.",
+   "evidence": "法人名称については登記情報を正とする",
+   "open_question": ""
+  },
+  {
+   "id": "R2",
+   "name": "commercial_name_preserved",
+   "status": "DECIDED",
+   "statement": "The sales facing customer name is carried forward unchanged.",
+   "evidence": "営業側で使用する取引先名称については既存名称を維持する",
+   "open_question": ""
+  },
+  {
+   "id": "R3",
+   "name": "no_auto_merge_on_shared_houjin_bangou",
+   "status": "DECIDED",
+   "statement": "Two customers sharing one corporate number are not merged automatically when either is managed at store level.",
+   "evidence": "法人番号が一致する場合でも、店舗単位で管理している取引先は自動統合せず",
+   "open_question": ""
+  },
+  {
+   "id": "R4",
+   "name": "hierarchy_retained",
+   "status": "DECIDED",
+   "statement": "The relationship between the corporate customer and its store customers is kept explicitly.",
+   "evidence": "親子関係として保持する",
+   "open_question": ""
+  },
+  {
+   "id": "R5",
+   "name": "closed_store_history_retained",
+   "status": "DECIDED",
+   "statement": "A closed store keeps its own record and its own validity period.",
+   "evidence": "閉店済店舗については履歴を保持し",
+   "open_question": ""
+  },
+  {
+   "id": "R6",
+   "name": "no_auto_reassignment_to_new_store",
+   "status": "DECIDED",
+   "statement": "A closed store is not automatically substituted by a new store, however similar the address.",
+   "evidence": "新規店舗への自動付替えは行わない",
+   "open_question": ""
+  },
+  {
+   "id": "R7",
+   "name": "houjin_bangou_is_identity_evidence_not_a_merge_key",
+   "status": "INFERRED",
+   "statement": "The corporate number is strong identity evidence and is used to link, but it is never on its own sufficient to merge two customer records.",
+   "evidence": "Follows from 法人番号が一致する場合でも ... 自動統合せず, which presumes the number is meaningful yet insufficient. The text never says this in one sentence.",
+   "open_question": ""
+  },
+  {
+   "id": "R8",
+   "name": "historical_transactions_stay_with_the_historical_store",
+   "status": "INFERRED",
+   "statement": "Transactions booked against a store that has since closed remain pointed at that store.",
+   "evidence": "Follows from 履歴を保持 combined with 自動付替えは行わない. The text does not name transactions at all.",
+   "open_question": ""
+  },
+  {
+   "id": "R9",
+   "name": "corporate_record_is_the_parent",
+   "status": "ASSUMED",
+   "statement": "In the retained hierarchy the corporate customer is the parent and the store customer is the child.",
+   "evidence": "The text says 親子関係として保持する but never says which side is the parent. The assumption follows the sales master parent_customer_id column, which already points from store to corporate.",
+   "open_question": "Confirm with the business that the direction in the sales master is the direction they mean."
+  },
+  {
+   "id": "R10",
+   "name": "payment_terms_precedence",
+   "status": "UNKNOWN",
+   "statement": "Which system wins for payment terms when the sales system and CRM disagree is not decided.",
+   "evidence": "requirement.ja.md section 2 states the disagreement exists and states no rule. Section 1 is silent on 支払条件.",
+   "open_question": "支払条件が営業システムとCRMで異なる場合、どちらを正とするか。移行時点の値を凍結するのか、CRM側を追随させるのか。"
+  },
+  {
+   "id": "R11",
+   "name": "legal_name_correction_effective_date",
+   "status": "UNKNOWN",
+   "statement": "The date from which a corrected legal name applies is not decided, and neither is the display name on past documents.",
+   "evidence": "requirement.ja.md section 2 states both options and picks neither. Section 1 makes the register authoritative without dating the correction.",
+   "open_question": "法人名称の訂正は登記更新日から反映するのか、移行実施日から反映するのか。過去伝票の表示名称は当時の名称のままとするのか。"
+  }
+ ],
+ "counts": {
+  "DECIDED": 6,
+  "ASSUMED": 1,
+  "INFERRED": 2,
+  "UNKNOWN": 2
+ }
+}

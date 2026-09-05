@@ -1,0 +1,24 @@
+{
+ "scenario": "jbeq-mdm-e2e-001",
+ "note": "Counts describe the executed run, which includes the one contradictory row injected at run time (requirement.ja.md section 4). Computed by a second script that counts from the outputs, never by the transformation that produced them.",
+ "source_count": 8,
+ "target_count": 7,
+ "matched": 7,
+ "unmatched": 0,
+ "merged": 0,
+ "linked": 4,
+ "rejected": 1,
+ "duplicate": 0,
+ "orphan": 0,
+ "attribute_mismatch": 0,
+ "relationship_mismatch": 0,
+ "historical_mismatch": 0,
+ "transaction_rows": 5,
+ "transaction_rows_reassigned": 0,
+ "transactions_by_store": {
+  "S001": 1,
+  "S002": 3,
+  "S003": 1
+ },
+ "critical_integrity_pct": 100
+}

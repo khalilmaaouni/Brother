@@ -43,6 +43,22 @@ _GENERIC_ENTRIES = [
     (("plugins", "brotherds"),
      "named by the charter as one that must NOT exist yet: the claims product "
      "joins the marketplace only once its context is separated out"),
+    (("products", "brothermode", "docs", "plan",
+      "ADR-2026-08-23-one-brother-repository.md"),
+     "the private deciding record this ADR was written from: the founder's "
+     "own words, an internal effort/token table and a private archive path "
+     "(docs/plan/EXPORT-ALLOWLIST.txt, 2026-09-05). It exists in the hub, "
+     "so this exemption only matters in a public export tree, which never "
+     "carries it; docs/plan/ADR-2026-08-23-one-brother-repository.md is the "
+     "public sibling that reads the same decision back off the tree, and "
+     "that one IS exported"),
+    (("COORDINATION.md",),
+     "withheld from the public export on purpose "
+     "(docs/plan/EXPORT-DENYLIST.txt, 2026-09-03): an internal hub process "
+     "document, not linked from README.md. It exists in the hub, so this "
+     "exemption only matters in a public export tree, which never carries "
+     "it; tests/test_surface.py reports NO-DATA there rather than passing "
+     "quietly"),
 ]
 GENERIC = dict((os.path.join(*seg), why) for seg, why in _GENERIC_ENTRIES)
 
