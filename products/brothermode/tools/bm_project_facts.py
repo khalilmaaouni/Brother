@@ -124,7 +124,7 @@ GATE_EXPECTATION = "ALL GREEN"
 # private and archived, so a tag cut there can never again be what a reader
 # clones. This now names the hub's own tag, the same ref
 # .claude-plugin/marketplace.json's git-subdir plugins[] source pins.
-PUBLIC_INSTALL_TAG = "v1.0.3"
+PUBLIC_INSTALL_TAG = "v1.0.4"
 
 
 class FactError(Exception):

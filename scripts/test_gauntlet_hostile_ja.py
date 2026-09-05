@@ -17,9 +17,14 @@ Exit contract: 0 every assertion held, 1 an assertion failed.
 
 No em or en dashes anywhere in this file.
 """
+import contextlib
 import importlib.util
+import io
+import json
 import os
+import shutil
 import sys
+import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -184,6 +189,69 @@ class TheBarsReportWhatTheyActuallyMeasured(unittest.TestCase):
             G.MUTATION_PATH = original
         self.assertEqual(bar["verdict"], "NO-DATA")
         self.assertIn("no_such_file.py", bar["detail"])
+
+
+class TheFrozenCorpusGuardRefusesAMovedSpec(unittest.TestCase):
+    """gauntlet_frozen.check() runs on the spec before the harness is ever
+    called. Driven against a temp copy of the real spec (never the tree's
+    own file): unmutated scores for real (the harness is the real, shipped
+    one, proving the guard's own wiring rather than a stand-in), mutated
+    refuses before a single case is scored."""
+
+    def setUp(self):
+        fd, self.spec_path = tempfile.mkstemp(suffix=".json")
+        os.close(fd)
+        shutil.copyfile(G.SPEC_PATH, self.spec_path)
+        self._real_spec_path = G.SPEC_PATH
+        G.SPEC_PATH = self.spec_path
+
+    def tearDown(self):
+        G.SPEC_PATH = self._real_spec_path
+        os.unlink(self.spec_path)
+
+    def test_unmutated_copy_scores_for_real(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = G.main(["--no-record", "--quiet"])
+        printed = out.getvalue()
+        self.assertIn("frozen: OK", printed)
+        self.assertNotIn("REFUSED", printed)
+        self.assertIn(code, (0, 1), "a real scoring run must complete")
+
+    def test_a_mutated_corpus_file_is_refused_before_the_harness_runs(self):
+        """hostile-japanese-identity.json freezes a REAL corpus file (not
+        the "none: ..." seed-hash kind), so the moved-hash case has to
+        mutate that file, never the spec text, mirroring
+        TestRealCorpusFile in test_gauntlet_frozen.py."""
+        corpus_rel = os.path.join("benchmarks", "ja-adversarial",
+                                  "adversarial-ja-corpus.json")
+        fake_root = tempfile.mkdtemp()
+        fake_corpus = os.path.join(fake_root, corpus_rel)
+        os.makedirs(os.path.dirname(fake_corpus), exist_ok=True)
+        shutil.copyfile(os.path.join(G.ROOT, corpus_rel), fake_corpus)
+        with open(fake_corpus, "r+b") as fh:
+            first = fh.read(1)
+            fh.seek(0)
+            fh.write(bytes([first[0] ^ 0xFF]))
+
+        def _must_not_run(*_a, **_k):
+            raise AssertionError(
+                "real_harness must not run when the guard refuses")
+        original_harness = G.real_harness
+        original_gf_root = G.gauntlet_frozen.ROOT
+        G.real_harness = _must_not_run
+        G.gauntlet_frozen.ROOT = fake_root
+        try:
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = G.main(["--no-record", "--quiet"])
+        finally:
+            G.real_harness = original_harness
+            G.gauntlet_frozen.ROOT = original_gf_root
+            shutil.rmtree(fake_root, ignore_errors=True)
+        self.assertIn("REFUSED: corpus hash moved", out.getvalue())
+        self.assertNotIn("frozen: OK", out.getvalue())
+        self.assertEqual(code, 1)
 
 
 class TheSummaryLineCarriesItsProvenance(unittest.TestCase):

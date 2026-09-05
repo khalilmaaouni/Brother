@@ -385,14 +385,17 @@ class BatteryVerdictTest(unittest.TestCase):
                         out["granularity_violations"])
         self.assertIn("product-suite", out["blocking_failures"])
 
-    def run_schema_check(self, checks, check_all_text=CHECK_ALL_FIXTURE):
+    def run_schema_check(self, checks, check_all_text=CHECK_ALL_FIXTURE,
+                         today=None):
         exp_path = os.path.join(self.tmpdir, "schema-expectations.json")
         with open(exp_path, "w", encoding="utf-8") as fh:
             json.dump({"checks": checks}, fh)
         ca_path = self.write_check_all("check_all.sh", check_all_text)
-        return subprocess.run([sys.executable, SCRIPT, "--check-expectations",
-                               exp_path, "--check-all", ca_path],
-                              capture_output=True, text=True), ca_path
+        args = [sys.executable, SCRIPT, "--check-expectations",
+                exp_path, "--check-all", ca_path]
+        if today:
+            args += ["--today", today]
+        return subprocess.run(args, capture_output=True, text=True), ca_path
 
     def test_the_schema_check_accepts_names_and_rejects_a_count(self):
         checks = dict(EXPECTATIONS["checks"])
@@ -425,6 +428,33 @@ class BatteryVerdictTest(unittest.TestCase):
         proc, _ = self.run_schema_check(checks)
         self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
         self.assertIn("declare at test granularity", proc.stdout)
+
+    def test_the_schema_check_rejects_a_review_by_already_past(self):
+        # S6 / the estate's own lesson (a standing exception often excuses a
+        # stale test): a renewal that leaves review_by behind today's date is
+        # refused at schema time, not only discovered on the next real run.
+        checks = {"stale-thing": {
+            "class": "known_no_data",
+            "reason": "test fixture: an exception nobody re-reviewed",
+            "recorded": "2020-01-01", "review_by": "2020-01-02"}}
+        proc, _ = self.run_schema_check(checks, check_all_text="#!/bin/sh\n",
+                                        today="2026-09-05")
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        self.assertIn("stale-thing", proc.stdout)
+        self.assertIn("already passed", proc.stdout)
+
+    def test_the_schema_check_still_accepts_a_review_by_not_yet_past(self):
+        # The other side of the same test: an entry whose review_by has not
+        # arrived yet keeps its contract, so the new rule only catches the
+        # actually-expired case.
+        checks = {"fresh-thing": {
+            "class": "known_no_data",
+            "reason": "test fixture: an exception still within its window",
+            "recorded": "2020-01-01", "review_by": "2099-01-01"}}
+        proc, _ = self.run_schema_check(checks, check_all_text="#!/bin/sh\n",
+                                        today="2026-09-05")
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("OK:", proc.stdout)
 
     def test_a_verdict_refuses_an_expectations_file_that_fails_its_schema(self):
         # count-only-suite runs "-m unittest" in the fixture check_all.sh, so

@@ -38,8 +38,10 @@ classify() diffs the log's failing names against that set:
                                           (the log cannot prove which failed)
 --check-expectations PATH applies the schema without a log: an entry that
 declares only a count or a suite for a check that runs a unittest suite is
-rejected with a line saying declare at test granularity, and a verdict run
-refuses (NO-DATA) an expectations file that fails its own schema.
+rejected with a line saying declare at test granularity, an entry whose
+review_by has already passed is rejected the same way (S6: a standing
+exception often excuses a stale test), and a verdict run refuses (NO-DATA)
+an expectations file that fails its own schema.
 
 Exit codes, this estate's convention: 0 PASS (product and release_candidate
 both clean), 1 FAIL (a blocking or unexpected failure exists), 2 NO-DATA
@@ -292,13 +294,20 @@ def classify(results, expectations, today=None):
     return out
 
 
-def check_expectations(checks, commands):
+def check_expectations(checks, commands, today=None):
     """Every problem with the expectations file, one line each; empty when
     the file keeps its contract. `commands` is {check: command} read from
     check_all.sh: it decides whether a check's FAIL output names its failing
     tests, and so whether an expected_unavailable entry must declare them
     by name (or state, as the string "none: <why>", that the output names
-    no tests, which a log that does name some then contradicts)."""
+    no tests, which a log that does name some then contradicts). `today`
+    (ISO date, default the real date) is compared against each entry's
+    review_by exactly as classify()'s _expired() does: S6's own lesson is
+    that a standing exception often excuses a stale test, so a renewal that
+    quietly leaves review_by in the past is refused here, at schema time,
+    rather than only discovered the next time a real battery log is
+    classified."""
+    effective_today = today or _today()
     problems = []
     for name, entry in checks.items():
         if not isinstance(entry, dict):
@@ -313,10 +322,16 @@ def check_expectations(checks, commands):
                             "exception nobody can review" % name)
         if not entry.get("recorded"):
             problems.append("%s: has no recorded date" % name)
-        if cls in ("expected_unavailable", "known_no_data") and \
-                not entry.get("review_by"):
-            problems.append("%s: has no review_by, so the verdict already "
-                            "treats it as expired" % name)
+        if cls in ("expected_unavailable", "known_no_data"):
+            if not entry.get("review_by"):
+                problems.append("%s: has no review_by, so the verdict already "
+                                "treats it as expired" % name)
+            elif _expired(entry, effective_today):
+                problems.append(
+                    "%s: review_by %s has already passed (today %s); a "
+                    "standing exception is retired or genuinely re-reviewed "
+                    "with a later date, never left to renew itself silently"
+                    % (name, entry.get("review_by"), effective_today))
         if cls != "expected_unavailable":
             continue
         failing_tests = entry.get("failing_tests")
@@ -374,7 +389,7 @@ def check_expectations(checks, commands):
     return problems
 
 
-def check_expectations_cli(path, check_all_path):
+def check_expectations_cli(path, check_all_path, today=None):
     try:
         checks = load_expectations(path)
     except OSError as exc:
@@ -388,7 +403,7 @@ def check_expectations_cli(path, check_all_path):
     except OSError as exc:
         print("NO-DATA: could not read %s: %s" % (check_all_path, exc))
         return 2
-    problems = check_expectations(checks, commands)
+    problems = check_expectations(checks, commands, today=today)
     for problem in problems:
         print("FAIL " + problem)
     if problems:
@@ -424,7 +439,8 @@ def main(argv=None):
     args = ap.parse_args(argv)
 
     if args.check_expectations:
-        return check_expectations_cli(args.check_expectations, args.check_all)
+        return check_expectations_cli(args.check_expectations, args.check_all,
+                                       today=args.today)
 
     if args.run:
         proc = subprocess.run(["sh", CHECK_ALL], cwd=ROOT,

@@ -88,6 +88,22 @@ def _decided_word_is_subpart_scoped_everywhere(word_lower, text_lower):
         start = idx + 1
 
 
+#: The ninth false-positive class, found the same way as the other eight:
+#: rows S6, S10 and S14 each explain, in so many words, that the status
+#: STAYS what it already reads ("the status stays OPEN on purpose", "THE
+#: ROW STAYS IN-FLIGHT"), then go on for paragraphs describing sub-work that
+#: DID land or close, in prose this checker's own word list also catches
+#: ("fail-closed policy", "a unit closed", "(E105, landed ...)", "closed the
+#: last two positive misses"). An author who explicitly reaffirms the
+#: current status in the same evidence has already answered the question
+#: this check exists to ask; matching an incidental "closed" or "landed"
+#: elsewhere in the same text and overruling that explicit sentence is the
+#: checker inventing a violation the evidence already refutes.
+def _status_is_explicitly_reaffirmed(status_lower, text_lower):
+    return re.search(r"\bstays\s+%s\b" % re.escape(status_lower),
+                      text_lower) is not None
+
+
 def nodes(doc):
     return list(doc.get("rows", [])) + list(doc.get("features", []))
 
@@ -246,6 +262,8 @@ def check_status_against_evidence(doc):
             # "the work shipped last night" read clean while "SHIPPED" drifted.
             # A record written in ordinary prose is still a record.
             low = text.lower()
+            if _status_is_explicitly_reaffirmed(status.lower(), low):
+                continue
             said = [w for w in DECIDED_WORDS
                     if w.lower() in low
                     and not _decided_word_is_subpart_scoped_everywhere(

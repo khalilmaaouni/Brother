@@ -166,16 +166,33 @@ def client(env=None):
     BROTHER_CLIENT (validated, an unrecognised value is ignored rather than
     trusted), then the host's own marker variables, then the plugin manifest
     beside the resolved plugin root. "" means unknown, and unknown is never a
-    pass in any checker that reads it."""
+    pass in any checker that reads it.
+
+    THE NEAREST HOST WINS, and that ordering is measured rather than
+    preferred (2026-09-05, codex-cli 0.153.0-alpha.5, evidence
+    ~/.claude/evidence/lane-codex-door-env-probe.log). A `codex exec` turn
+    exports its own markers to every command its model runs, verbatim from a
+    probe inside one:
+        CODEXVARS ['CODEX_CI', 'CODEX_HOME', 'CODEX_SANDBOX',
+                   'CODEX_SESSION_ID', 'CODEX_THREAD_ID']
+    but a Codex turn started from inside a Claude Code session ALSO inherits
+    that session's CLAUDECODE, and with Claude's markers read first this
+    function answered 'claude' inside a real Codex turn, so every caller that
+    picks a client's argv from it picked the wrong one. Codex's markers are
+    per-TURN and cannot outlive the turn that set them; CLAUDECODE is
+    per-SESSION and is inherited by everything that session starts. The Codex
+    marker is therefore the more specific evidence and is read first.
+    CODEX_HOME is deliberately not one of them, for the reason in the module
+    docstring: it is a variable people leave in a shell profile."""
     named = _get(env, CLIENT_ENV).lower()
     if named in (CLAUDE, CODEX):
         return named
-    for var in CLAUDE_MARKER_VARS:
-        if _get(env, var):
-            return CLAUDE
     for var in CODEX_MARKER_VARS:
         if _get(env, var):
             return CODEX
+    for var in CLAUDE_MARKER_VARS:
+        if _get(env, var):
+            return CLAUDE
     try:
         return _manifest_client(plugin_root(env))
     except OSError:

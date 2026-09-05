@@ -13,10 +13,10 @@ to run the battery.
 
 | | |
 |---|---:|
-| Parts | 143 |
-| Parts with a purpose written in the file | 143 |
-| Parts with a suite wired into the battery | 120 |
-| Checks in the battery | 194 |
+| Parts | 149 |
+| Parts with a purpose written in the file | 149 |
+| Parts with a suite wired into the battery | 127 |
+| Checks in the battery | 208 |
 
 ## Every part, what it is for, and what proves it
 
@@ -64,6 +64,7 @@ to run the battery.
 | `door` | a plain English outcome becomes a canonical Work document. | `brother-run-self`, `bundle-runtime-self`, `door-self`, `mutation-gate`, `mutation-gate-self` |
 | `e53_lesson_ab` | does a lesson SHOWN at the moment of action change the action. | **NO-DATA**, nothing in the battery runs it |
 | `e80_release_reproduction_drive` | E80's done check, run end to end against a fixture release. | **NO-DATA**, nothing in the battery runs it |
+| `earn_first` | is a switching or positioning claim allowed to publish yet. | `earn-first-self` |
 | `edition_guard` | bind a directory to its nearest .brother-edition, and | `edition-guard-self` |
 | `evad_score` | the EVAD gauntlet becomes an instrument with a trend, not a one-off review. | `evad-score`, `evad-score-personas`, `evad-score-self` |
 | `export_public` | the single route from the private hub to the public | `edition-guard-self`, `export-public-self`, `release-closeout-self` |
@@ -71,11 +72,13 @@ to run the battery.
 | `fault_lab` | R27.1, the installed-artifact lifecycle fault lab. | `fault-lab-self` |
 | `fence_enforced_drill` | Drive tools/bm_fence_hook.py in BOTH modes against real fixtures and prove | `fence-enforced` |
 | `fence_expiry` | W4 of the orchestration watchdog: no claim may outlive the session that made it. | `fence-expiry`, `fence-expiry-self` |
+| `filed_runs_check` | Reproduces every filed benchmark run's committed verdict from a clean | `filed-runs`, `filed-runs-self` |
 | `find_out` | .py: the research step attempt_ledger's refusal names by command. | `find-out-tests` |
 | `floor_score` | is Brother behind on the ordinary mechanics, measured where anyone measured. | `floor-score-self` |
 | `forecast` | how long, from a base rate this estate actually produced. | `forecast-self` |
 | `gauntlet_delegation_truth` | the false-green rate as a running number. | `delegation-truth-self` |
-| `gauntlet_hostile_ja` | EXECUTE the frozen Hostile Japanese Identity gauntlet. | **NO-DATA**, nothing in the battery runs it |
+| `gauntlet_frozen` | refuse to score a corpus whose hash moved since the | `gauntlet-frozen-self` |
+| `gauntlet_hostile_ja` | EXECUTE the frozen Hostile Japanese Identity gauntlet. | `gauntlet-hostile-ja`, `gauntlet-hostile-ja-self` |
 | `gauntlet_memory_recurrence` | The memory recurrence gauntlet: five seeded conditions against the real recall path. | `memory-recurrence-self` |
 | `gen_command_center` | Render GANTT.html, the Brother command center, from the plan data files. | `gen-board-self` |
 | `gen_readiness_board` | Render the readiness board from docs/plan/READINESS-ROADMAP-2026-08-29.json. | `readiness-board-self`, `roadmap-public-clean` |
@@ -106,8 +109,10 @@ to run the battery.
 | `memory_lift` | did the memory fix actually change anything, measured on real work. | `memory-lift-self` |
 | `merge_queue` | conflict-aware batching for the one-integrator merge queue (W8). | `merge-queue`, `merge-queue-self` |
 | `model_worker` | NIGHT-01: the real coding-model worker for the graph loop. | `bundle-runtime-self`, `loop-bridge-self`, `model-worker` |
+| `morning_pack` | .py: fills docs/plan/MORNING-STEERING-2026-09-05.md section | `morning-pack-self` |
 | `mutation_gate` | R27.3, the assurance mutation gate. | `mutation-gate`, `mutation-gate-self` |
 | `negative_space_audit` | R27.2, the generated negative-space contract audit. | `negative-space-audit`, `negative-space-audit-self` |
+| `next_cut` | Print the next release cut: the date, the version it would be, and the | `next-cut-self` |
 | `night_tick` | The durable half of the night watch. | **NO-DATA**, nothing in the battery runs it |
 | `parity_gate` | is Brother yet worth a teammate's time, measured at the level the evidence supports. | `parity-gate-self` |
 | `pattern_note` | write down what WORKED, and make it findable by the problem. | `pattern-note-self` |
@@ -119,6 +124,7 @@ to run the battery.
 | `probe_repeat_guard_classification` | Probe: does the repeat guard count a SUCCESSFUL tool call as a failure? | **NO-DATA**, nothing in the battery runs it |
 | `product_acceptance` | P0.4 of docs/plan/P0-COMPOSITION-WAVE-2026-08-30.md. | `product-acceptance-self` |
 | `progress_deadline` | alive is not advancing, and output is not progress. | `progress-deadline-self` |
+| `prove_guide_claude` | S23's real done_check: prove docs/how-to/USE-WITH-CLAUDE-CODE.md runs | `prove-guide-claude-self` |
 | `readiness_gate` | the review's enterprise readiness gate as a checkable surface. | `export-public-self`, `readiness-gate`, `readiness-gate-self` |
 | `readme_receipt_sample` | the README's per-file receipt sample, rendered by | **NO-DATA**, nothing in the battery runs it |
 | `recall_coverage` | R28.3, learnings at the point of need, measured | **NO-DATA**, nothing in the battery runs it |
@@ -275,6 +281,7 @@ to run the battery.
 - `filtering-spec-self`: `python3 scripts/test_check_filtering_spec.py -v`
 - `accept-delivery-self`: `python3 scripts/test_accept_delivery.py -v`
 - `readme-honesty`: `python3 scripts/test_readme_honesty.py -v`
+- `prove-guide-claude-self`: `python3 scripts/test_prove_guide_claude.py -v`
 - `edition-guard-self`: `python3 scripts/test_edition_guard.py -v`
 - `export-public-self`: `python3 scripts/test_export_public.py -v`
 - `export-links`: `python3 scripts/test_export_links.py -v`
@@ -284,6 +291,9 @@ to run the battery.
 - `vault-benchmark-v2-self`: `python3 -m unittest -v scripts/test_vault_benchmark_v2.py`
 - `benchmark-bundle-self`: `python3 -m unittest -v scripts/test_make_benchmark_bundle.py`
 - `gauntlets-validate`: `python3 benchmarks/gauntlets/validate.py`
+- `gauntlet-frozen-self`: `python3 scripts/test_gauntlet_frozen.py -v`
+- `gauntlet-hostile-ja`: `python3 scripts/gauntlet_hostile_ja.py --quiet`
+- `gauntlet-hostile-ja-self`: `python3 scripts/test_gauntlet_hostile_ja.py -v`
 - `memory-recurrence-self`: `python3 scripts/test_gauntlet_memory_recurrence.py`
 - `delegation-truth-self`: `python3 scripts/test_gauntlet_delegation_truth.py`
 - `jbeq-mdm-seed`: `python3 scripts/test_jbeq_mdm.py`
@@ -304,6 +314,7 @@ to run the battery.
 - `reproduce-export-self`: `python3 scripts/test_reproduce_export.py -v`
 - `japanese-threshold`: `python3 scripts/test_japanese_threshold.py`
 - `japanese-threshold-self`: `python3 -m unittest -v scripts/test_test_japanese_threshold.py`
+- `japanese-mutations`: `python3 scripts/test_ja_mutations.py`
 - `battery-verdict-self`: `python3 scripts/test_battery_verdict.py -v`
 - `check-all-summary-self`: `python3 scripts/test_check_all_summary.py`
 - `close-ceremony`: `python3 scripts/close_ceremony_check.py`
@@ -330,6 +341,7 @@ to run the battery.
 - `autonomy-dial-self`: `python3 scripts/test_autonomy_dial.py -v`
 - `benchmark-atomic-self`: `python3 scripts/test_benchmark_atomic.py -v`
 - `floor-score-self`: `python3 scripts/test_floor_score.py -v`
+- `earn-first-self`: `python3 scripts/test_earn_first.py -v`
 - `brother-run-bare-resume-self`: `python3 scripts/test_brother_run_bare_resume.py -v`
 - `brother-run-continue-self`: `python3 scripts/test_brother_run_continue.py -v`
 - `bundle-install-smoke-self`: `python3 scripts/test_bundle_install_smoke.py -v`
@@ -337,6 +349,8 @@ to run the battery.
 - `journal-projection-self`: `python3 scripts/test_journal_projection.py -v`
 - `continuity-self`: `python3 scripts/test_continuity.py -v`
 - `continuity-matrix-self`: `python3 scripts/test_continuity_matrix.py -v`
+- `capsule-items-self`: `python3 scripts/test_capsule_items.py -v`
+- `lhr-checkpoint-self`: `python3 scripts/test_lhr_checkpoint.py`
 - `cleanse-self`: `python3 scripts/test_cleanse.py -v`
 - `gen-command-center-md-self`: `python3 scripts/test_gen_command_center_md.py -v`
 - `identity-guard-self`: `python3 scripts/test_identity_guard.py -v`
@@ -362,4 +376,10 @@ to run the battery.
 - `codex-smoke-self`: `python3 scripts/test_codex_smoke.py -v`
 - `temp-residue-self`: `python3 scripts/test_temp_residue.py -v`
 - `release-closeout-self`: `python3 scripts/test_release_closeout.py -v`
+- `release-closeout-sign-self`: `python3 scripts/test_release_closeout_sign.py -v`
+- `release-closeout-virgin-self`: `python3 scripts/test_release_closeout_virgin.py -v`
+- `next-cut-self`: `python3 scripts/test_next_cut.py`
+- `filed-runs-self`: `python3 scripts/test_filed_runs_check.py -v`
+- `filed-runs`: `python3 scripts/filed_runs_check.py`
+- `morning-pack-self`: `python3 scripts/test_morning_pack.py -v`
 

@@ -55,6 +55,8 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
+sys.path.insert(0, HERE)
+import gauntlet_frozen  # noqa: E402
 
 SPEC_PATH = os.path.join(
     ROOT, "benchmarks", "gauntlets", "hostile-japanese-identity.json")
@@ -334,6 +336,17 @@ def main(argv=None):
         print("NO-DATA: the frozen corpus is not on disk at %s" % CORPUS_PATH)
         print("gauntlet hostile-japanese-identity: n=0 cases -> NO-DATA")
         return 3
+
+    try:
+        frozen_result = gauntlet_frozen.check(SPEC_PATH)
+    except ValueError as exc:
+        print(str(exc))
+        return 1
+    if frozen_result.startswith("NO-DATA"):
+        print(frozen_result)
+        print("gauntlet hostile-japanese-identity: n=0 cases -> NO-DATA")
+        return 3
+    print("frozen: OK %s" % frozen_result)
 
     print("gauntlet: %s (%s), frozen %s"
           % (spec.get("name"), spec.get("id"), spec.get("frozen_at")))

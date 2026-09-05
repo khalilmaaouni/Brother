@@ -13,8 +13,11 @@ Structure mirrors scripts/test_recall_revalidation.py, the closest sibling: one
 class per behaviour, named for what it asserts, unittest, and any file this
 suite writes goes to a temp directory, never the real tree.
 """
+import contextlib
+import io
 import json
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -157,6 +160,57 @@ class TheFiveConditionsAreTheSpecsOwnArmList(unittest.TestCase):
             spec = json.load(fh)
         self.assertEqual([c["id"] for c in G.CONDITIONS],
                          spec["seeded_conditions"])
+
+
+class TheFrozenCorpusGuardRefusesAMovedSpec(unittest.TestCase):
+    """gauntlet_frozen.check() runs on the spec before any condition is
+    observed. Drives it against a temp copy of the real spec (never the
+    tree's own file), both ways, with run_conditions stubbed the same way
+    TheExitCodeCarriesTheVerdictNotOnlyThePrint below drives main(), so this
+    proves the guard's own wiring rather than the vault mechanism under it."""
+
+    def setUp(self):
+        fd, self.spec_path = tempfile.mkstemp(suffix=".json")
+        os.close(fd)
+        shutil.copyfile(G.SPEC_PATH, self.spec_path)
+        self._real_spec_path = G.SPEC_PATH
+        G.SPEC_PATH = self.spec_path
+
+    def tearDown(self):
+        G.SPEC_PATH = self._real_spec_path
+        os.unlink(self.spec_path)
+
+    def _drive(self, rows):
+        original = G.run_conditions
+        G.run_conditions = lambda *a, **k: rows
+        try:
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                with tempfile.TemporaryDirectory() as tmp:
+                    code = G.main(["--out", os.path.join(tmp, "record.json")])
+            return code, out.getvalue()
+        finally:
+            G.run_conditions = original
+
+    def test_unmutated_copy_lets_scoring_proceed(self):
+        rows = G.run_conditions(recall=surfaced_observation)
+        code, printed = self._drive(rows)
+        self.assertIn("frozen: OK", printed)
+        self.assertNotIn("REFUSED", printed)
+        self.assertEqual(code, 0)
+
+    def test_a_mutated_seed_definition_is_refused_before_any_condition_runs(
+            self):
+        with open(self.spec_path, encoding="utf-8") as fh:
+            spec = json.load(fh)
+        spec["seeded_conditions_note"] = (
+            spec.get("seeded_conditions_note", "") + " (mutated)")
+        with open(self.spec_path, "w", encoding="utf-8") as fh:
+            json.dump(spec, fh)
+        code, printed = self._drive([])
+        self.assertIn("REFUSED: corpus hash moved", printed)
+        self.assertNotIn("frozen: OK", printed)
+        self.assertEqual(code, 1)
 
 
 class TheExitCodeCarriesTheVerdictNotOnlyThePrint(unittest.TestCase):

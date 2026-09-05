@@ -1,12 +1,12 @@
 {
  "gauntlet": "hostile-japanese-identity",
  "spec": "benchmarks/gauntlets/hostile-japanese-identity.json",
- "run_at": "2026-09-05T07:24:35.752471+09:00",
+ "run_at": "2026-09-05T10:39:02.393226+09:00",
  "provenance": {
-  "tree_revision": "75b20008f39fb98c53a9af9d86af5674e3475072",
-  "tree_dirty": false,
+  "tree_revision": "8187ee41970bca6f3680c86498549804ab5d87ec",
+  "tree_dirty": true,
   "corpus_path": "benchmarks/ja-adversarial/adversarial-ja-corpus.json",
-  "corpus_commit": "df64b628",
+  "corpus_commit": "df64b6285",
   "corpus_sha1": "f3920b31b83f"
  },
  "n": 78,
@@ -178,5 +178,5 @@
   }
  ],
  "exit_code": 0,
- "summary": "gauntlet hostile-japanese-identity: n=78 cases, 78 hit, 0 miss, 0 NO-DATA class(es); classes 6 OK 0 below floor; bars 4 of 5 MET 1 NO-DATA; tree 75b20008 corpus f3920b31b83f@df64b628 -> PASS"
+ "summary": "gauntlet hostile-japanese-identity: n=78 cases, 78 hit, 0 miss, 0 NO-DATA class(es); classes 6 OK 0 below floor; bars 4 of 5 MET 1 NO-DATA; tree 8187ee41 (dirty) corpus f3920b31b83f@df64b6285 -> PASS"
 }

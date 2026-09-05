@@ -8,9 +8,11 @@ from n, never counted as RIGHT), plus one real case through the real door so
 the harness is known to be wired to the product and not only to its own
 stubs.
 """
+import contextlib
 import io
 import json
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -142,6 +144,47 @@ class TheExitCodeSaysTheSameThingAsThePrintedTable(unittest.TestCase):
             (case("b", build=unbuildable),), door_that_refuses_everything)), 3)
         self.assertEqual(G.exit_code(self._record(
             (case("a"),), lambda ctx: [])), 3)
+
+
+class TheFrozenCorpusGuardRefusesAMovedSpec(unittest.TestCase):
+    """gauntlet_frozen.check() runs on the spec before any case is scored.
+    Row S27's guard must actually be wired in here, not only present in its
+    own module, so this drives it against a temp copy of the real spec
+    (never the tree's own file) both ways: unmutated scores normally,
+    mutated refuses before a single case is built."""
+
+    def setUp(self):
+        fd, self.spec_path = tempfile.mkstemp(suffix=".json")
+        os.close(fd)
+        shutil.copyfile(G.SPEC_PATH, self.spec_path)
+        self._real_spec_path = G.SPEC_PATH
+        G.SPEC_PATH = self.spec_path
+
+    def tearDown(self):
+        G.SPEC_PATH = self._real_spec_path
+        os.unlink(self.spec_path)
+
+    def test_unmutated_copy_scores_normally(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = G.main(["--no-write"])
+        self.assertIn("frozen: OK", out.getvalue())
+        self.assertNotIn("REFUSED", out.getvalue())
+        self.assertEqual(code, 0)
+
+    def test_a_mutated_seed_definition_is_refused_before_scoring(self):
+        with open(self.spec_path, encoding="utf-8") as fh:
+            spec = json.load(fh)
+        spec["seeded_conditions_note"] = (
+            spec.get("seeded_conditions_note", "") + " (mutated)")
+        with open(self.spec_path, "w", encoding="utf-8") as fh:
+            json.dump(spec, fh)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = G.main(["--no-write"])
+        self.assertIn("REFUSED: corpus hash moved", out.getvalue())
+        self.assertNotIn("frozen: OK", out.getvalue())
+        self.assertEqual(code, 1)
 
 
 class TheRealDoorOnARealSeededCase(unittest.TestCase):

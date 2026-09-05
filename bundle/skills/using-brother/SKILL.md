@@ -42,10 +42,20 @@ files and prints no receipt has not used Brother at all.
 
        python3 "$BROTHER_PLUGIN_ROOT/runtime/brother_run.py" "<outcome>" --cwd <repo>
 
-   Inside a checkout of the Brother repository the same engine is
-   `python3 scripts/brother_run.py "<outcome>" --cwd <repo>`. Under Claude
-   Code the plugin root is `$CLAUDE_PLUGIN_ROOT`. The engine needs a
-   configured model worker and refuses the run when none answers.
+   Under Claude Code the plugin root is `$CLAUDE_PLUGIN_ROOT`. The engine
+   needs a configured model worker and refuses the run when none answers.
+
+   If it refuses with `door: refused after N attempt(s), store untouched`,
+   hand it the units you wrote in step 1 instead of leaving it to ask a
+   model it cannot reach:
+
+       DOOR_MODEL_CMD="cat plan.json" python3 "$BROTHER_PLUGIN_ROOT/runtime/brother_run.py" "<outcome>" --cwd <repo>
+
+   `plan.json` is a JSON list of units, each with `id`, `objective`,
+   `done_check`, `writes` and `deps`. The engine still isolates every unit,
+   still runs every `done_check`, and still writes the receipt; only the
+   decomposition came from you. This is a documented seam, not a way round
+   the engine, and writing the patch by hand is still the failure above.
 3. **Print the receipt line, then read the receipt back.** The engine's last
    line is `brother_run: receipt: <path>`. Print that line, open the file it
    names, and report every per-file entry: the file, the check command, and
@@ -86,73 +96,12 @@ reality. Experimental, not in the bundle.
 The routes compose. A risky change usually wants provenance and assurance
 together. Nothing forces all three.
 
-## One grammar, six verbs
+## More detail: verbs, boundaries, handback, closing
 
-Slash commands are Claude Code's surface. Codex has none, so under Codex
-every row below is reached by running the engine as above, and typing one of
-these strings runs nothing at all.
-
-| Verb | BrotherMode (Claude Code) | BrotherSBE (Claude Code) |
-|---|---|---|
-| start | `/brothermode:brotherme-start` | `/brothersbe:start` |
-| status | `/brothermode:status` | `/brothersbe:status` |
-| next | `/brothermode:next` | `/brothersbe:next` |
-| review | `/brothermode:review` | `/brothersbe:review` |
-| deliver | `/brothermode:brotherme-deliver` | `/brothersbe:verify` |
-| help | `/brothermode:help` | `/brothersbe:help` |
-
-The long `brotherme-` names are the landed forms; never promise a short
-form that does not exist.
-
-## What this router must never do
-
-It holds no state. Specifically:
-
-- no second task registry, and no second idea of who owns a file
-- no PASS, FAIL or NO-DATA of its own; those belong to the capability that
-  gathered the evidence
-- no assurance logic and no claim arithmetic, which live in their own products
-- no release decision, no tag, no merge; a person decides those, always
-- no menu recited at someone who did not ask for one
-- no asking the person to choose between BrotherMode, BrotherSBE or BrotherDS;
-  the router reads the work and decides, silently, which one applies
-- no invoking a capability merely to demonstrate that it exists
-
-## Handback, not a push to main
-
-A sub-session, chip session, or lane finishing work never pushes the default
-branch. It commits on its own branch, pushes that branch at most, and reports
-back to its dispatcher (or leaves the pull request open unmerged). Merging is
-the reviewing session's act after the gates, so every merge carries a review
-and an attribution. Where a repository installs Brother's pre-push gate,
-`check_handback` refuses the push mechanically and `BROTHER_MAIN_PUSH=allow`
-lifts it once, loudly. Where it does not, the rule still holds.
-
-## Closing a session: the handover ceremony
-
-Four steps, in this order. The order is load bearing.
-
-**1. Decide the queue, do not drain it.** Every open pull request gets a
-decision. "Parked", with its reason and flip condition written into the pull
-request, counts. A row nobody mentioned does not.
-
-**2. Write lessons as data.** Add them to the wisdom lessons file in the
-Brother repository; an install ships no copy. Each needs
-a `symptom` phrased as what a reader would OBSERVE. "every check is green and
-the change still cannot reach a user" is findable; naming the cause is only
-findable by someone who already knows.
-
-**3. Commit the notes, then re-index the vault.** The vault is whichever
-root this install is configured with: `BM_VAULT_ROOT`, else
-`BROTHERMODE_VAULT`, else the vault recorded in Brother's own config. With
-none of them set there is no vault, the tools report NO-DATA and index
-nothing, and that is the correct answer rather than a failure.
-
-Commit the notes BEFORE indexing. The index reads committed state, so an
-uncommitted note is invisible to it and the resulting empty index reads
-exactly like the tool having failed.
-
-**4. Hand over one zip** holding every file it refers to.
+The verb-to-slash-command table, what this router must never do, the
+handback rule, and the four-step closing ceremony are in
+references/router-details.md, next to this file. Load it when one of
+those situations applies.
 
 ## The one thing worth remembering
 

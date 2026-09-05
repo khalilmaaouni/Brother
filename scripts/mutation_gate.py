@@ -154,13 +154,7 @@ MUTANTS = {
                   "placeholder \"never asked\" instead of the real, "
                   "recorded diagnostic",
         "target": "door.py",
-        "anchor_old": "        except ValueError as exc:\n"
-                      '            last_problems = ["the decomposer\'s answer '
-                      'could not be read as "\n'
-                      '                             "JSON: %s" % exc]\n'
-                      "            refusal = refusal_text(last_problems)\n"
-                      "            print(refusal, file=sys.stderr)\n"
-                      "            continue\n",
+        "anchor_old": '        except ValueError as exc:\n            # THE EXIT CODE IS THE FIRST FACT, and until 2026-09-05 it was\n            # thrown away: a decomposer that failed and wrote nothing was\n            # reported as though it had answered badly, which is what made\n            # the Codex finding take four probes to diagnose instead of one.\n            detail = "the decomposer\'s answer could not be read as JSON: %s" % exc\n            if proc.returncode != 0:\n                detail += (" (the decomposer command %r exited %d; %s)"\n                           % (cmd[0], proc.returncode, stderr_tail(proc.stderr)))\n                if is_codex_cmd(cmd) or MW.model_client() == brother_paths.CODEX:\n                    detail += ". %s" % CODEX_SANDBOX_HINT\n            last_problems = [detail]\n            refusal = refusal_text(last_problems)\n            print(refusal, file=sys.stderr)\n            continue\n',
         "anchor_new": "        except ValueError as exc:\n"
                       "            continue\n",
         "killer": "test_door_adversarial.py",

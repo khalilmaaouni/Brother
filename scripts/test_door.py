@@ -17,6 +17,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 DOOR = os.path.join(HERE, "door.py")
 import door as door_mod  # noqa: E402
+import model_worker  # noqa: E402
 
 # E100: one sandbox for every temp tree this process makes, removed at exit.
 import os as _e100_os, sys as _e100_sys  # noqa: E402
@@ -268,6 +269,93 @@ class NoData(unittest.TestCase):
         self.assertEqual(proc.returncode, 44, proc.stdout + proc.stderr)
         self.assertTrue(any(l.startswith("NO-DATA")
                             for l in (proc.stdout + proc.stderr).splitlines()))
+        self.assertFalse(os.path.exists(store))
+
+
+class FailingDecomposer(unittest.TestCase):
+    """D2, found by the Codex lane on 2026-09-05: door.py never looked at the
+    child's exit code, so a decomposer that failed and wrote nothing was
+    reported as though it had answered badly. Exit 7 appeared nowhere."""
+
+    def test_a_decomposer_that_exits_7_is_reported_with_its_exit_code(self):
+        tmp = tempfile.mkdtemp(prefix="door-exit7-")
+        stub = os.path.join(tmp, "stub.py")
+        write_stub(stub, (
+            "import sys\n"
+            "sys.stdin.read()\n"
+            "sys.stderr.write('the child could not reach its service\\n')\n"
+            "sys.exit(7)\n"
+        ))
+        store = os.path.join(tmp, "store")
+
+        proc = sh([sys.executable, DOOR, "make a.txt uppercase",
+                   "--max-retries", "0", "--store", store,
+                   "--model-cmd", "%s %s" % (sys.executable, stub)])
+        out = proc.stdout + proc.stderr
+        self.assertNotEqual(proc.returncode, 0, out)
+        self.assertIn("exited 7", out)
+        self.assertIn("the child could not reach its service", out)
+        self.assertFalse(os.path.exists(store))
+
+    def test_a_decomposer_that_answers_badly_at_exit_0_names_no_exit_code(self):
+        """The other side of the same fence: a healthy decomposer that simply
+        answers nonsense must not grow an exit-code clause it did not earn."""
+        tmp = tempfile.mkdtemp(prefix="door-exit0-")
+        stub = os.path.join(tmp, "stub.py")
+        write_stub(stub, "import sys\nsys.stdin.read()\nprint('not json')\n")
+        store = os.path.join(tmp, "store")
+
+        proc = sh([sys.executable, DOOR, "make a.txt uppercase",
+                   "--max-retries", "0", "--store", store,
+                   "--model-cmd", "%s %s" % (sys.executable, stub)])
+        out = proc.stdout + proc.stderr
+        self.assertNotEqual(proc.returncode, 0, out)
+        self.assertIn("could not be read as JSON", out)
+        self.assertNotIn("exited", out)
+
+
+class TheHostsOwnDecomposer(unittest.TestCase):
+    """Under Codex the default decomposer is Codex's own headless exec, never
+    `claude -p`: a Codex-only machine has no claude binary, and inside a
+    codex turn the sandbox blocks every socket either of them would open."""
+
+    def test_a_claude_host_still_defaults_to_the_claude_cli(self):
+        self.assertEqual(door_mod.default_model_cmd({"CLAUDECODE": "1"}),
+                         ["claude", "-p"])
+
+    def test_a_codex_host_defaults_to_the_codex_argv_model_worker_ships(self):
+        cmd = door_mod.default_model_cmd({"BROTHER_CLIENT": "codex"})
+        self.assertEqual(cmd, list(model_worker.CODEX_ARGV))
+        self.assertNotIn("claude", cmd)
+
+    def test_the_codex_answer_is_read_out_of_its_jsonl_events(self):
+        events = "\n".join([
+            json.dumps({"type": "response.created"}),
+            json.dumps({"type": "item.completed.agent_message",
+                        "text": '[{"id": "U1"}]'}),
+        ])
+        self.assertEqual(
+            door_mod.decomposer_text(list(model_worker.CODEX_ARGV), events),
+            '[{"id": "U1"}]')
+
+    def test_a_plain_command_s_stdout_is_returned_unchanged(self):
+        self.assertEqual(door_mod.decomposer_text(["cat", "plan.json"], "[]"),
+                         "[]")
+
+    def test_a_missing_decomposer_under_codex_names_the_sandbox_and_the_fix(self):
+        tmp = tempfile.mkdtemp(prefix="door-codex-nodata-")
+        store = os.path.join(tmp, "store")
+        env = dict(os.environ)
+        env["BROTHER_CLIENT"] = "codex"
+        env["DOOR_MODEL_CMD"] = "/no/such/decomposer --flag"
+
+        proc = sh([sys.executable, DOOR, "an outcome", "--store", store],
+                  env=env)
+        out = proc.stdout + proc.stderr
+        self.assertEqual(proc.returncode, 44, out)
+        self.assertIn("sandboxed turn", out)
+        self.assertIn("app-server", out)
+        self.assertIn("DOOR_MODEL_CMD", out)
         self.assertFalse(os.path.exists(store))
 
 

@@ -88,11 +88,13 @@ class TheRealCheckpointIsHonest(unittest.TestCase):
         for root, _dirs, files in os.walk(CHECKPOINT):
             for name in files:
                 p = os.path.join(root, name)
-                try:
-                    with open(p, encoding="utf-8") as fh:
-                        text = fh.read()
-                except UnicodeDecodeError:
-                    continue
+                # errors="replace" instead of a bare UnicodeDecodeError skip:
+                # a binary or non-UTF-8 file used to be dropped from the scan
+                # entirely, so a leaked path sitting in it would never be
+                # found. Replacing invalid bytes still leaves every ASCII
+                # forbidden term intact and readable.
+                with open(p, encoding="utf-8", errors="replace") as fh:
+                    text = fh.read()
                 for term in forbidden:
                     if term in text:
                         hits.append("%s contains %r" % (p, term))

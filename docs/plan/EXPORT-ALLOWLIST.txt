@@ -47,6 +47,7 @@
 .sbe/break-glass.json
 .sbe/team-profile.json
 AGENTS.md
+CONTRIBUTING.md
 COORDINATION.md
 # GANTT.html removed 2026-09-01 (E11): its stamp is a 2026-08-28 session and it is
 # generated from superseded plan JSONs; the live board is READINESS-BOARD.html and

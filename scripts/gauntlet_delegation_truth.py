@@ -54,6 +54,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 
 import brother_run  # noqa: E402
+import gauntlet_frozen  # noqa: E402
 import receipt_door  # noqa: E402
 import work_record  # noqa: E402
 
@@ -545,6 +546,16 @@ def main(argv=None):
         print("%s: the frozen specification %s is not in this tree"
               % (NODATA, SPEC_PATH))
         return 3
+
+    try:
+        frozen_result = gauntlet_frozen.check(SPEC_PATH)
+    except ValueError as exc:
+        print(str(exc))
+        return 1
+    if frozen_result.startswith(NODATA):
+        print(frozen_result)
+        return 3
+    print("frozen: OK %s" % frozen_result)
 
     revision, dirty = tree_revision()
     results, excluded, no_verdict = run_gauntlet()

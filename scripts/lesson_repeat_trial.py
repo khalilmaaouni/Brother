@@ -75,14 +75,27 @@ DEFAULT_RESULTS_DIR = os.path.join(ROOT, "benchmarks", "results")
 # ---------------------------------------------------------------- the log
 
 
+class _CaptureUnreadable(Exception):
+    """read_capture's path exists but could not be opened or timestamped.
+
+    Distinct from the ordinary None return (a file that is simply not a
+    capture: wrong first line, no exit marker), so build_log can count and
+    report a real read failure instead of folding it into the same silent
+    skip a non-capture file gets."""
+
+
 def read_capture(path):
-    """One run_evidence capture as a log row, or None when it is not one."""
+    """One run_evidence capture as a log row, or None when it is not one.
+
+    Raises _CaptureUnreadable when the file could not be opened or stat'd at
+    all, so the caller can count and report that instead of losing it inside
+    an ordinary "not a capture" skip."""
     try:
         with open(path, encoding="utf-8", errors="replace") as fh:
             first = fh.readline().rstrip("\n")
             second = fh.readline().rstrip("\n")
-    except OSError:
-        return None
+    except OSError as exc:
+        raise _CaptureUnreadable("%s (%s)" % (path, exc)) from exc
     m = CAPTURE_EXIT.match(second)
     if not first.startswith("$ ") or not m:
         return None
@@ -93,27 +106,33 @@ def read_capture(path):
     except (ValueError, OSError, OverflowError):
         try:
             at = datetime.date.fromtimestamp(os.path.getmtime(path))
-        except OSError:
-            return None
+        except OSError as exc:
+            raise _CaptureUnreadable("%s (%s)" % (path, exc)) from exc
     return {"command": first[2:], "exit_code": int(m.group(1)),
             "at": at.isoformat(), "source": name}
 
 
 def build_log(store):
-    """Every parseable capture in the store, oldest first. None when absent."""
+    """(rows, unreadable): every parseable capture, oldest first, and the
+    paths that existed but could not be read. None when the store is absent."""
     if not os.path.isdir(store):
         return None
-    rows = []
+    rows, unreadable = [], []
     for path in sorted(glob.glob(os.path.join(store, "*.txt"))):
-        row = read_capture(path)
+        try:
+            row = read_capture(path)
+        except _CaptureUnreadable as exc:
+            unreadable.append(str(exc))
+            continue
         if row is not None:
             rows.append(row)
     rows.sort(key=lambda r: (r["at"], r["source"]))
-    return rows
+    return rows, unreadable
 
 
 def read_log(path):
     rows = []
+    torn = 0
     with open(path, encoding="utf-8") as fh:
         for line in fh:
             line = line.strip()
@@ -122,9 +141,16 @@ def read_log(path):
             try:
                 rec = json.loads(line)
             except ValueError:
-                continue  # a torn line is not a reason to abandon the log
+                torn += 1
+                continue
             if isinstance(rec, dict) and rec.get("command"):
                 rows.append(rec)
+    if torn:
+        # A torn line is not a reason to abandon the log, but dropping it
+        # without a word is the exact silent-swallow class this trial exists
+        # to measure; report it instead of hiding it the same way.
+        print("lesson_repeat_trial: dropped %d torn line(s) in %s (not "
+              "parseable as JSON)" % (torn, path), file=sys.stderr)
     return rows
 
 
@@ -140,11 +166,13 @@ def read_lessons(path):
     if not os.path.exists(path):
         return None
     out = []
+    torn = 0
     with open(path, encoding="utf-8") as fh:
         for line in fh:
             try:
                 rec = json.loads(line)
             except ValueError:
+                torn += 1
                 continue
             trigger = str(rec.get("trigger", "")).lower().strip()
             if not trigger:
@@ -156,6 +184,9 @@ def read_lessons(path):
                 at = None
             out.append({"id": "L%02d" % (len(out) + 1), "trigger": trigger,
                         "recorded": recorded, "recorded_date": at})
+    if torn:
+        print("lesson_repeat_trial: dropped %d torn line(s) in %s (not "
+              "parseable as JSON)" % (torn, path), file=sys.stderr)
     return out
 
 
@@ -203,11 +234,12 @@ def replay(rows, lessons):
 
 
 def cmd_log(args):
-    rows = build_log(args.store)
-    if rows is None:
+    result = build_log(args.store)
+    if result is None:
         print("NO-DATA: no evidence store at %s, so there is no real command log "
               "to replay" % args.store)
         return 2
+    rows, unreadable = result
     if not rows:
         print("NO-DATA: %s holds no run_evidence capture (a capture is a file "
               "whose first line is $ <command> and whose second is [exit N ...])"
@@ -219,6 +251,13 @@ def cmd_log(args):
     fails = sum(1 for r in rows if failed(r))
     print("log: %d command(s), %d failure(s), %s to %s"
           % (len(rows), fails, rows[0]["at"], rows[-1]["at"]))
+    if unreadable:
+        # A file that exists but could not be opened or stat'd is dropped
+        # from the log; that drop is now named instead of silent.
+        shown = "; ".join(unreadable[:5])
+        more = "" if len(unreadable) <= 5 else "; and %d more" % (len(unreadable) - 5)
+        print("dropped %d capture(s) that could not be read: %s%s"
+              % (len(unreadable), shown, more))
     print("wrote %s" % args.out)
     return 0
 

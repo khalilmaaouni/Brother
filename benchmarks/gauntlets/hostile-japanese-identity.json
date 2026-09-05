@@ -161,5 +161,11 @@
       "the per case rank diagnostic output",
       "the vault revision and the corpus commit, in the same file as the score"
     ]
+  },
+  "frozen": {
+    "corpus": "benchmarks/ja-adversarial/adversarial-ja-corpus.json",
+    "corpus_sha1": "f3920b31b83fe59f6a9252db303d61b788a838bc",
+    "frozen_at": "2026-09-05",
+    "frozen_by": "the S27 lane, 2026-09-05"
   }
 }

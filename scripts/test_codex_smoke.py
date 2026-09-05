@@ -99,6 +99,32 @@ class TheRunbookMatchesTheCode(unittest.TestCase):
                       codex_smoke.documented_shell_command().replace(
                           '\\"', '"'))
 
+    def test_the_network_grant_is_named_but_never_in_the_command(self):
+        # Driven both ways on 2026-09-05. The sandbox does block every socket
+        # a model-generated command opens, and this switch does lift that, but
+        # a nested `codex exec` cannot start inside a codex turn either way
+        # ("failed to initialize in-process app-server client"), so no
+        # supported path is rescued by granting a whole turn the network. The
+        # page explains it so nobody proposes it again; the command stays
+        # narrow.
+        self.assertNotIn(codex_smoke.NETWORK_GRANT,
+                         codex_smoke.documented_shell_command())
+        self.assertIn(codex_smoke.NETWORK_GRANT, self.page)
+        self.assertIn("app-server client", self.page)
+
+    def test_the_page_names_the_seam_that_reaches_a_receipt(self):
+        # The route the signed-in run of 2026-09-05 actually took, after the
+        # door refused its nested decomposer and named this in its refusal.
+        self.assertIn("DOOR_MODEL_CMD", self.page)
+        self.assertIn("MODEL_WORKER_CMD", self.page)
+
+    def test_every_documented_flag_is_built_from_sandbox_flags(self):
+        # The page and the automation cannot say different things while the
+        # shell line is rendered from the same list the argv is.
+        for word in codex_smoke.sandbox_flags("$PWD"):
+            self.assertIn(word.replace('"', '\\"'),
+                          codex_smoke.documented_shell_command())
+
     def test_the_page_lays_down_the_toy_the_code_builds(self):
         for body, name in ((codex_smoke.TOY_MATHLIB, "mathlib.py"),
                            (codex_smoke.TOY_TEST, "test_mathlib.py")):
