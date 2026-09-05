@@ -116,7 +116,7 @@ not the skill directory itself, and the second line below moves into this
 product's own subdirectory before anything else runs.
 
 ```bash
-git clone --branch v1.0.6 --depth 1 https://github.com/khalilmaaouni/Brother.git ~/.claude/skills/brothermode-src
+git clone --branch v1.0.7 --depth 1 https://github.com/khalilmaaouni/Brother.git ~/.claude/skills/brothermode-src
 cd ~/.claude/skills/brothermode-src/products/brothermode
 ```
 

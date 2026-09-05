@@ -128,10 +128,10 @@ NO-DATA
    EN: Answer LINK AS RELATED when the input itself states a relation. Answer KEEP SEPARATE when it states none.
 2. KEEP SEPARATE か REJECT MATCH か。同一性または提示された階層を否定する事実が入力にあれば REJECT MATCH、単に裏付けが無いだけなら KEEP SEPARATE。
    EN: Answer REJECT MATCH when the input carries a fact that refutes the proposed identity or the proposed hierarchy. Answer KEEP SEPARATE when the match is merely unsupported.
-3. ESCALATE か NO-DATA か。判断材料はあるが規則で決着しないなら ESCALATE、材料そのものが無いなら NO-DATA。
-   EN: Answer ESCALATE when there is something to judge but the rules cannot close it. Answer NO-DATA when there is nothing to judge.
-4. AUTO-MERGE か SUGGEST MERGE か。取引履歴があるか処理が取り消せず人が見るべきなら SUGGEST MERGE、それが無く識別子と役割が一致するなら AUTO-MERGE。
-   EN: Answer SUGGEST MERGE when history or an irreversible step means a person should look. Answer AUTO-MERGE when identifiers and roles agree and nothing needs a person.
+3. ESCALATE か NO-DATA か。一項目が空欄でも他の事実が裏付けるなら判断材料はあるとみなし ESCALATE、どの事実も裏付けないなら NO-DATA。
+   EN: Answer ESCALATE when there is something to judge, including when one field is blank but another stated fact corroborates without confirming. Answer NO-DATA only when nothing corroborates.
+4. AUTO-MERGE か SUGGEST MERGE か ESCALATE か。証拠が弱い(名寄せスコアのみ、または識別子の欠落)なら取引履歴や処理の不可逆性の有無にかかわらず ESCALATE。証拠が強いか中程度で、取引履歴があるか処理が取り消せないなら SUGGEST MERGE。証拠が強く、それが無く識別子と役割が一致するなら AUTO-MERGE。
+   EN: Answer ESCALATE when the evidence is weak (a match score alone, or a missing identifier), whatever the history or irreversibility. Answer SUGGEST MERGE when the evidence is strong or medium and history or an irreversible step means a person should look. Answer AUTO-MERGE when the evidence is strong, identifiers and roles agree, and nothing needs a person.
 
 上の語彙に無い回答(出典名、R1/R2/R3、DECIDED/ASSUMED/INFERRED/UNKNOWN など)は、その設問の許容回答欄の表記どおりに答える。
 
@@ -234,6 +234,95 @@ remain are the ones where the seed was right and the answerer was not: EO-06
 read a delivery hub the input never links to the store as a related record,
 MM-06 rejected a match the input only fails to support, and HI-08 kept two
 records apart that the input places under one legal entity.
+
+## The generalization rules (2026-09-05, boundary rules 5 to 7)
+
+Reading the rationale behind those three misses across both blind rounds
+showed a pattern, not three unrelated errors: the rules arm read a shared
+physical address as if it were a stated business relation, read weak or
+merely unsupported match evidence as if it were a fact that refutes identity,
+and read an operational split (separate credit and pricing terms kept under
+separate company codes) as erasing a relation the input had already stated.
+The existing boundary rules 1 to 4 were the right rules in the abstract; they
+were under-specified exactly at those three decision points.
+
+`benchmarks/jbeq/mdm/decision-rules-addendum.md` adds three general boundary
+rules, numbered 5 to 7, continuing the existing numbering, in the same
+bilingual style. None of the three names a case id, a case phrase, or an
+answer set from the frozen seed: each is written to decide every case of its
+class, and the seed itself is never touched or rescored by this addendum.
+
+The rules are proven against 9 INVENTED cases in
+`benchmarks/jbeq/mdm/generalization-cases-2026-09-05.json` (3 per rule),
+none of which is in the frozen seed. `scripts/test_jbeq_mdm_generalization.py`
+checks the file's shape and runs `scripts/jbeq_mdm.py` unmodified against it
+with `--seed`, including a swap test that confirms each rule actually
+discriminates (the single most tempting wrong label scores a critical wrong).
+A fresh agent, given only the vocabulary and boundary rules 1 to 7 and the 9
+blind case prompts, no expected answers and no access to this file, answered
+all 9 correctly:
+
+```
+critical false merges: 0 of 9
+critical wrong: 0 of 9
+conservative wrongs: 0
+JBEQ-MDM SEED: 9 of 9
+```
+
+This is not a JBEQ-MDM score and does not change the JBEQ-MDM NOT READY
+verdict above: it is a generalization proof that the three new rules resolve
+their class of mistake on cases the rules were never written against. Whether
+they also resolve the three seed misses can only be shown by a fresh blind
+run of the frozen seed itself, which this addendum does not perform.
+
+## The second round of generalization rules (2026-09-05, boundary rules 8 to 11)
+
+A third blind round against the frozen seed made a fourth kind of mistake
+beside the three rules 5 to 7 close: it read rules 5 and 7's own language, an
+operational reason does not erase the relation, as if it also covered a case
+where the input states a fact that refutes identity outright, which collapses
+the distinction rule 6 already draws. Reading that round's misses whole also
+surfaced three more general gaps: the ESCALATE versus NO-DATA boundary
+stalling on one blank field even when another fact corroborates, the merge
+boundary letting history or irreversibility alone license a merge with no
+evidence floor beneath it, and a record legitimately carrying more than one
+valid parent because capital, trade flow and reporting are not one hierarchy.
+
+`benchmarks/jbeq/mdm/decision-rules-addendum.md` now also carries a short note
+right after rule 7 that names the two axes explicitly (LINK AS RELATED versus
+KEEP SEPARATE for rules 5 and 7, KEEP SEPARATE versus REJECT MATCH for rule 6)
+so the three are distinguishable in one read, plus four more general boundary
+rules, numbered 8 to 11, in the same bilingual style. None of the four names a
+case id, a case phrase, or an answer set from the frozen seed. Rules 3 and 4 in
+the decision vocabulary itself were also under-specified at exactly the two
+points rules 8 and 9 close (a blank field read as no material at all, and
+AUTO-MERGE or SUGGEST MERGE offered with no ESCALATE floor for weak evidence),
+so both are corrected in place, in `scripts/jbeq_mdm.py` and here, identically.
+
+The four new rules are proven against 8 more INVENTED cases in
+`benchmarks/jbeq/mdm/generalization-cases-2026-09-05-rules-8-to-11.json`
+(2 per rule), a sibling to the rules 5 to 7 file kept separate so neither
+file's fixed case count or mix has to change for the other. None of the 8 is
+in the frozen seed or reuses a rules 5 to 7 case id.
+`scripts/test_jbeq_mdm_generalization.py` runs the same shape and scoring
+checks against this second file, including a swap test with the single most
+tempting wrong label named in the round 3 diagnosis for each mistake. The
+gold answer file (the file's own expected values, the scorer's mechanical
+self-check, not a blind model run) scores:
+
+```
+critical false merges: 0 of 6
+critical wrong: 0 of 6
+conservative wrongs: 0
+JBEQ-MDM SEED: 8 of 8
+```
+
+A genuinely blind model run of these 8 cases (an agent given only the
+vocabulary, boundary rules 5 to 11, and the 8 blind case prompts, no expected
+answers) is NOT recorded here: the session that wrote this addendum reached
+its own dispatch ceiling before that run could be started. The self-check
+above is the mechanical floor only; it is not evidence that a fresh reader
+resolves these 8 cases correctly.
 
 ## Reproduce
 

@@ -9,6 +9,18 @@ too. Every test here failed before scripts/repeat_control.py existed: there was
 no module to import and no script to invoke, so every one of these assertions
 was an ImportError or a "No such file" from subprocess. Trivially true, stated
 because the brief asked for it stated rather than assumed.
+
+EXTENDED 2026-09-05 (evidence audit, lane E53 instrument-honest), three classes
+added below to drive the three fixed defects, none of the original 9 changed:
+MechanismOverridesParitySchedule (defect 1: the arm is the mechanism, never the
+calendar, both ways), ZeroCollisionsReadsNoData (defect 2: a corpus with no
+cross-session collision anywhere reads NO-DATA rather than 0.00; the existing
+TwoFullArmsKnownRates class above already covers the "one real collision reads
+a rate" half), PreStartSessionIsExcluded (defect 3: a session before --start is
+excluded from both arms and counted on its own line). All three point the new
+--evidence-store/--repeat-lessons flags at empty tmp paths so the primary
+signal reads a deterministic NO-DATA and never touches this machine's real
+evidence store.
 """
 import io
 import json
@@ -242,6 +254,153 @@ class RealLogsStayReadOnly(unittest.TestCase):
         for path, mtime in before.items():
             self.assertEqual(os.path.getmtime(path), mtime,
                              "%s was modified by a read-only run" % path)
+
+
+def _mtime_for(year, month, day):
+    """Noon local time on the given date, as an epoch float, so
+    date.fromtimestamp never lands on the wrong side of a day boundary."""
+    import datetime as _dt
+    return time.mktime(_dt.datetime(year, month, day, 12, 0, 0).timetuple())
+
+
+class MechanismOverridesParitySchedule(unittest.TestCase):
+    """Defect 1. A real lesson-shown session is 'on' even when its own date
+    would have scored 'off' under the retired day-parity coin flip, and a
+    session with no real shown record is 'off' even on a parity 'on' day.
+    --start 2026-01-01: day offset 0 (2026-01-01) is parity 'on', offset 1
+    (2026-01-02) is parity 'off' -- the two sessions below are placed
+    exactly backwards from what the mechanism must report."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="repeat-control-test-")
+        self.guard_dir = os.path.join(self.tmp, "repeat-guard")
+        os.makedirs(self.guard_dir)
+        self.seen_path = os.path.join(self.tmp, ".vault_recall_seen")
+        self.ledger_path = os.path.join(self.tmp, "no-ledger.jsonl")
+        self.no_evidence = os.path.join(self.tmp, "no-evidence")
+        self.no_lessons = os.path.join(self.tmp, "no-lessons.jsonl")
+
+        # Parity 'off' day, but a real recall-seen entry: mechanism says on.
+        _write_session(self.guard_dir, "shown-on-off-day", [_row("k1", True)],
+                        mtime=_mtime_for(2026, 1, 2))
+        # Parity 'on' day, but no recall-seen entry at all: mechanism says off.
+        _write_session(self.guard_dir, "silent-on-on-day", [_row("k2", True)],
+                        mtime=_mtime_for(2026, 1, 1))
+        _write_seen(self.seen_path, [("shown-on-off-day", "f.py")])
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_shown_session_is_on_regardless_of_parity_day(self):
+        buf = io.StringIO()
+        R.run(guard_dir=self.guard_dir, recall_log=self.seen_path,
+              ledger=self.ledger_path, start="2026-01-01", min_sessions=1,
+              out=buf, evidence_store=self.no_evidence, repeat_lessons=self.no_lessons)
+        out = buf.getvalue()
+        # The parity SCHEDULE (informational) says one session lands on each
+        # day, exactly the reverse of the mechanism's own verdict below.
+        self.assertIn("scheduled arm by parity (design intent, not used for "
+                       "the comparison): 1 on-day session(s), 1 off-day "
+                       "session(s)", out)
+        self.assertIn("recall on: 1 session(s), 1 tool call(s), 1 lesson(s) shown", out)
+        # The off arm's one session is the SILENT one, never the shown one:
+        # 0 lessons shown in the off arm proves the shown session did not
+        # leak in there by parity.
+        self.assertIn("recall off: 1 session(s), 1 tool call(s), 0 lesson(s) shown", out)
+
+
+class ZeroCollisionsReadsNoData(unittest.TestCase):
+    """Defect 2. Five sessions each arm, every sig distinct across every
+    session (no sig ever fails twice anywhere): the secondary detector has
+    zero cross-session collisions in the whole corpus, so both arm lines
+    and the comparison line must say NO-DATA by name, never 0.00. (The
+    "one real collision reads a rate" half is already covered by
+    TwoFullArmsKnownRates above.)"""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="repeat-control-test-")
+        self.guard_dir = os.path.join(self.tmp, "repeat-guard")
+        os.makedirs(self.guard_dir)
+        self.seen_path = os.path.join(self.tmp, ".vault_recall_seen")
+        self.no_evidence = os.path.join(self.tmp, "no-evidence")
+        self.no_lessons = os.path.join(self.tmp, "no-lessons.jsonl")
+        base_t = time.time() - 100000
+        for i in range(1, 6):
+            # Every failing sig is unique to its own session: no sig ever
+            # recurs, so compute_repeats charges zero repeats anywhere.
+            _write_session(self.guard_dir, "on%d" % i,
+                            [_row("only-on-%d" % i, False)], mtime=base_t + i * 10)
+        for i in range(1, 6):
+            _write_session(self.guard_dir, "off%d" % i,
+                            [_row("only-off-%d" % i, False)], mtime=base_t + 100 + i * 10)
+        _write_seen(self.seen_path, [("on%d" % i, "f.py") for i in range(1, 6)])
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_zero_corpus_collisions_is_no_data_not_zero(self):
+        buf = io.StringIO()
+        code = R.run(guard_dir=self.guard_dir, recall_log=self.seen_path,
+                      ledger=os.path.join(self.tmp, "no-ledger.jsonl"), out=buf,
+                      evidence_store=self.no_evidence, repeat_lessons=self.no_lessons)
+        out = buf.getvalue()
+        self.assertNotIn("0.00 repeat(s) per hundred attempts", out)
+        self.assertIn(
+            "recall on: 5 session(s), 5 tool call(s), 5 lesson(s) shown, "
+            "NO-DATA: repeat signal never collided across sessions: the "
+            "fingerprint cannot be told from a detector that cannot fire", out)
+        self.assertIn(
+            "recall off: 5 session(s), 5 tool call(s), 0 lesson(s) shown, "
+            "NO-DATA: repeat signal never collided across sessions: the "
+            "fingerprint cannot be told from a detector that cannot fire", out)
+        self.assertIn(
+            "comparison: NO-DATA: repeat signal never collided across "
+            "sessions: the fingerprint cannot be told from a detector that "
+            "cannot fire", out)
+        self.assertEqual(code, 0)  # both arms still had enough sessions
+
+
+class PreStartSessionIsExcluded(unittest.TestCase):
+    """Defect 3. A session whose guard file predates --start is excluded
+    from BOTH arms, never folded into whichever one presence would pick,
+    and the exclusion is counted on its own line."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="repeat-control-test-")
+        self.guard_dir = os.path.join(self.tmp, "repeat-guard")
+        os.makedirs(self.guard_dir)
+        self.seen_path = os.path.join(self.tmp, ".vault_recall_seen")
+        self.no_evidence = os.path.join(self.tmp, "no-evidence")
+        self.no_lessons = os.path.join(self.tmp, "no-lessons.jsonl")
+
+        # Before --start, WITH a real shown entry: if this leaked into the
+        # "on" arm instead of being excluded, the on arm would read 1
+        # session instead of the NO-DATA-below-minimum this test expects.
+        _write_session(self.guard_dir, "pre-start-shown", [_row("k1", True)],
+                        mtime=_mtime_for(2025, 12, 31))
+        # On/after --start, no shown entry: the one real "off" session.
+        _write_session(self.guard_dir, "post-start-silent", [_row("k2", True)],
+                        mtime=_mtime_for(2026, 1, 1))
+        _write_seen(self.seen_path, [("pre-start-shown", "f.py")])
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_pre_start_session_excluded_from_both_arms(self):
+        buf = io.StringIO()
+        R.run(guard_dir=self.guard_dir, recall_log=self.seen_path,
+              ledger=os.path.join(self.tmp, "no-ledger.jsonl"),
+              start="2026-01-01", min_sessions=1, out=buf,
+              evidence_store=self.no_evidence, repeat_lessons=self.no_lessons)
+        out = buf.getvalue()
+        self.assertIn("excluded: 1 session(s) before 2026-01-01", out)
+        # The excluded session had a real shown entry; if it were not
+        # excluded it would fill the "on" arm instead of leaving it short.
+        self.assertIn("NO-DATA: recall on has 0 session(s), fewer than 1", out)
+        self.assertIn("recall off: 1 session(s), 1 tool call(s), 0 lesson(s) shown", out)
 
 
 if __name__ == "__main__":

@@ -9,6 +9,18 @@ harness that prepares and scores it. It does not run the trial: nothing on
 this estate times a human, and the trial itself needs real reviewers, which
 is the founder's own work.
 
+## The frozen success rule (E1)
+
+`benchmarks/gauntlets/acceptance-compression/SUCCESS-RULE-FROZEN.md`, dated
+2026-09-05, is the pre-registered rule this trial is scored against: it was
+written before any packet was assigned to a reviewer, and it is not edited
+after the trial starts. `scripts/test_acceptance_trial_assign.py` checks
+this file's own SHA-256 so a later silent edit is detectable. Until at
+least five distinct reviewers complete the trial and
+`scripts/acceptance_time.py score` runs against their results: ACCEPTANCE
+TIME IS NO-DATA. Nobody, human or model, estimates or invents a reviewer's
+decision or time to fill that gap.
+
 ## The three conditions
 
 For the SAME delivered change, one reviewer sees exactly one of:
@@ -85,7 +97,12 @@ NO-DATA and exits 3, never a comparison built on too few readings.
 
 - `prepare <out dir>`: writes the three condition packets for each of the
   three fixed changes into `<out dir>/<change id>/{raw_diff,
-  ordinary_summary, brother_receipt}.txt`. The raw diff comes from a real
+  ordinary_summary, brother_receipt}.txt`, plus `INSTRUCTIONS.md` (the
+  plain language reviewer instructions: accept, reject or ask; record
+  start and end time; do not consult the other packets) and
+  `INSTRUCTIONS-FOUNDER.md` (the exact commands for assigning reviewers,
+  validating their results, and scoring, once results arrive) once per
+  directory, never once per packet. The raw diff comes from a real
   fixture commit (a throwaway git repository built and torn down for the
   purpose); the Brother receipt is generated through
   `scripts/receipt_door.py`'s own `receipts_for` / `reading_order` /
@@ -98,13 +115,36 @@ NO-DATA and exits 3, never a comparison built on too few readings.
   correctness rate. Fewer than five distinct reviewers prints NO-DATA and
   exits 3.
 
+`scripts/acceptance_trial_assign.py` has the two verbs the founder runs
+once packets exist (E3):
+
+- `assign <n reviewers> [--seed N] [--out-csv PATH]`: prints the
+  counterbalanced assignment table (the same rotation this document's
+  Counterbalancing section names) for the given reviewer count, refusing
+  below the five reviewer floor. `--out-csv` also writes the blank results
+  template CSV in the exact columns `score` expects, one row per
+  reviewer per change, `seconds` and `decision` left for the reviewer to
+  fill in.
+- `validate <results csv>`: refuses a completed results CSV that is
+  missing a time, carries an impossible time (zero, negative, non
+  numeric, or over a four hour plausibility ceiling), has an
+  unrecognized decision, or lets one reviewer see the same change twice.
+  Prints every problem found; `score` should only ever run against a CSV
+  this prints clean on.
+
 ## Reproduce
 
 ```
 python3 scripts/acceptance_time.py prepare /tmp/acceptance-time-packets
-# -> 9 files, 3 per change, under /tmp/acceptance-time-packets/<change id>/
+# -> 11 files: 9 packets (3 per change) plus INSTRUCTIONS.md and
+#    INSTRUCTIONS-FOUNDER.md, under /tmp/acceptance-time-packets/
+
+python3 scripts/acceptance_trial_assign.py assign 5 --seed 0 \
+    --out-csv /tmp/acceptance-time-packets/results.csv
+# -> the assignment table, plus a blank results template CSV
 
 python3 scripts/test_acceptance_time.py -v
+python3 scripts/test_acceptance_trial_assign.py -v
 ```
 
 ## What this does not measure

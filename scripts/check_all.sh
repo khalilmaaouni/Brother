@@ -20,6 +20,15 @@
 # Exit 0 when every check passes or reports NO-DATA. Exit 1 if any check FAILS.
 
 cd "$(dirname "$0")/.." || exit 1
+# ROOT, captured once, right after the one cd this script performs on its own
+# behalf. run_check below re-anchors every check to this exact directory
+# before running it, so a check registered earlier that leaves the shell's
+# cwd anywhere else (a `cd` outside a subshell, a concurrent process sharing
+# this same checkout, or a future check nobody has written yet) can never
+# make a LATER check's relative path resolve from the wrong place. Cheaper
+# than auditing every run_check call for a stray `cd`: one fix, at the one
+# place every check already routes through.
+ROOT="$(pwd)"
 
 # E100. The battery's own temp footprint, read at the start and again at the
 # end, so a run that leaves residue behind says so in its own output rather
@@ -37,7 +46,11 @@ nodata_names=""
 
 run_check() {
   name="$1"; shift
-  out="$("$@" 2>&1)"
+  # cd "$ROOT" runs INSIDE the same command-substitution subshell as "$@", so
+  # it can never change this script's own cwd; it only guarantees the check
+  # itself starts from the repository root, however the shell got wherever
+  # it was.
+  out="$(cd "$ROOT" && "$@" 2>&1)"
   code=$?                      # the COMMAND's code, captured before anything else
   last="$(printf '%s\n' "$out" | tail -1 | cut -c1-72)"
   names=""
@@ -330,6 +343,7 @@ run_check "reporting-adversarial-self" python3 scripts/test_reporting_adversaria
 # longer than it takes to run the battery.
 run_check "system-doc-self"        python3 scripts/test_system_doc.py -v
 run_check "release-note-self"      python3 scripts/test_release_note_from_tree.py -v
+run_check "refresh-cut-self"       python3 scripts/test_refresh_cut.py -v
 run_check "system-doc-current"     python3 scripts/system_doc.py --check
 
 # The parity gate's own tests only. The GATE ITSELF is deliberately NOT a
@@ -793,6 +807,9 @@ run_check "wire-dual-principal"      python3 scripts/test_wire_dual_principal.py
 # true second physical machine is available tonight, named honestly in the
 # result's own "limit" field; this proves environment isolation on one host.
 run_check "clean-env-restore"        python3 scripts/test_clean_env_restore.py
+# restore_drill_enterprise.py --help printed the drill result instead of
+# usage until 2026-09-05; this pins usage at exit 0 without running the drill.
+run_check "restore-drill-self"         python3 scripts/test_restore_drill_enterprise.py
 
 # VB3-12: the enterprise readiness gate (six review items) and the
 # fifteen-question PR bar as checkable surfaces. The GATE ITSELF is

@@ -40,32 +40,68 @@ repository first: no STATE.md, no `.sbe/`, no fence file, nothing a unit did
 not declare. Every such file makes the tree dirty, and the engine refuses the
 run before the first unit is claimed.
 
-1. **Write the unit or units, each with a real done check.** A done check is
-   a command a machine runs that FAILS when the change is wrong. A test you
-   added, run with `python3 -m unittest`, counts. "It looks right" does not.
-2. **Run the engine, never a slash command:**
+1. **Make each unit's done check fail right now.** A done check is a
+   command a machine runs that FAILS when the change is wrong, and it
+   must fail BEFORE any work happens: run it yourself, in the repository,
+   before the engine ever sees it, and confirm it exits with a code other
+   than 0. A check that already exits 0 on the untouched tree cannot
+   prove the work: the engine runs it, marks the unit NO-DATA, and a
+   worker that changed nothing still reads integrated. For a behaviour
+   change the check names the new behaviour. On the runbook's toy the
+   starting shape is:
 
-       python3 "$BROTHER_PLUGIN_ROOT/runtime/brother_run.py" "<outcome>" \
+       python3 -c "import mathlib, unittest; t = unittest.TestCase(); t.assertRaises(TypeError, mathlib.add, 'a', 'b')" && python3 -m unittest
+
+   Adjust only if that exact line does not behave: red on the untouched toy,
+   green once the guard is written. Never write a bare-path check either: a
+   done check must be runnable on the untouched tree and judged on its
+   RESULT, never on a missing file. `python3 test_add_rejects.py` for a file
+   that does not exist yet just prints "No such file or directory", which
+   the engine treats as a broken check and refuses before any worker starts,
+   and under `cat plan.json` there is no planner left to hand back a
+   replacement check, so the unit is pulled out instead. Use
+   `python3 -m unittest` plus the import based one-liner above instead.
+2. **Set both seams from the start, then run the engine.** Under Codex no
+   model call can be made from inside the turn at all: a nested `codex exec`
+   cannot start ("failed to initialize in-process app-server client"), and
+   every socket the sandbox lets a command open still leads nowhere for
+   reaching one. So DOOR_MODEL_CMD (which units to write) and MODEL_WORKER_CMD
+   (how to make the change) are BOTH the agent's from the first attempt,
+   never something reached for only after a door refusal. DOOR_MODEL_CMD
+   prints the plan; MODEL_WORKER_CMD is a script that edits only the files
+   the unit declares in `writes`, in the current directory, and nothing
+   wider. The engine runs that script inside the unit's own isolated
+   worktree, passes the unit brief as its last argument (ignore it, the
+   script already knows what to write), then commits whatever changed, runs
+   the done check there, audits scope, and writes the receipt. The worker
+   script must exit 0 once it is done editing: a non-zero exit, whether a
+   stray traceback or a `set -e` trip firing after the writes already
+   landed, makes `model_worker.py`'s `main()` return 3 before
+   `collect_artifacts` or `commit_changes` ever run, so the edit is lost
+   before anything is committed and the unit's receipt reads NO-DATA.
+
+       DOOR_MODEL_CMD="cat plan.json" MODEL_WORKER_CMD="python3 write_the_change.py" \
+           python3 "$BROTHER_PLUGIN_ROOT/runtime/brother_run.py" "<outcome>" \
            --cwd <repo> --runs-root "$TMPDIR/brother-runs"
 
-   Under Claude Code the plugin root is `$CLAUDE_PLUGIN_ROOT`. The engine
-   needs a configured model worker and refuses the run when none answers.
+   Under Claude Code the plugin root is `$CLAUDE_PLUGIN_ROOT`. `plan.json` is
+   a JSON list of units, each with `id`, `objective`, `done_check`, `writes`
+   and `deps`; the engine still isolates every unit, still runs every
+   `done_check`, and still writes the receipt, only the decomposition came
+   from you. `writes` must name EVERY file the unit will change or create,
+   both `mathlib.py` and `test_mathlib.py` for the toy task; a file changed
+   outside `writes` fails the scope audit and the whole unit reads
+   QUARANTINE, never integrated. `--runs-root` holds the engine's own
+   records: keep it OUTSIDE the repository, because inside, the records make
+   the tree dirty, and the default under a read-only plugin install cannot
+   be written at all.
 
-   `--runs-root` holds the engine's own records. Keep it OUTSIDE the
-   repository: inside, the records make the tree dirty, and the default under
-   a read-only plugin install cannot be written at all.
-
-   If it refuses with `door: refused after N attempt(s), store untouched`,
-   hand it the units you wrote in step 1 instead of leaving it to ask a
-   model it cannot reach:
-
-       DOOR_MODEL_CMD="cat plan.json" python3 "$BROTHER_PLUGIN_ROOT/runtime/brother_run.py" \
-           "<outcome>" --cwd <repo> --runs-root "$TMPDIR/brother-runs"
-
-   `plan.json` is a JSON list of units, each with `id`, `objective`,
-   `done_check`, `writes` and `deps`. The engine still isolates every unit,
-   still runs every `done_check`, and still writes the receipt; only the
-   decomposition came from you.
+   Running the engine with either seam unset costs three refused door
+   attempts and, worse than a refusal, a worker that changes nothing in
+   about a second: the default worker argv is that same unreachable nested
+   `codex exec`, so it exits having touched no file, and a unit whose check
+   was already green (the failure step 1 exists to rule out) then reads
+   integrated with nothing done.
 3. **Print the receipt line, then read the receipt back.** The engine's last
    line is `brother_run: receipt: <path>`. Print that line, open the file it
    names, and report every per-file entry: the file, the check command, and
@@ -73,7 +109,16 @@ run before the first unit is claimed.
 4. **Never claim done without the receipt.** A turn's exit code proves
    nothing about writes: a write outside a granted sandbox root is dropped
    silently at exit 0. No receipt, or a receipt whose entries are refused, is
-   a NOT DONE report naming what refused, never a done.
+   a NOT DONE report naming what refused, never a done. A receipt whose unit
+   reads NO-DATA because the check already passed before the work began, or
+   whose files changed reads none, means the agent's own check or script was
+   wrong. It is NOT a stated-versus-observed contradiction and NOT a
+   forcing condition under any injected law (BrotherSBE's own hooks inject
+   rule L6 into Codex, which pauses on exactly that shape): rewrite the check
+   so it fails before the work, fix the script, and rerun the engine in the
+   same turn, without asking anyone. The turn ends with a receipt whose entries
+   carry exit codes and changed files, or with NOT DONE naming what refused,
+   never with a question and never with a request for permission to retry.
 
 Codex defaults to the read only sandbox, which refuses every write, and plain
 `workspace-write` still refuses the `.git` write unit isolation needs, so the

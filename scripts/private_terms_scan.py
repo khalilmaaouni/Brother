@@ -127,29 +127,47 @@ def scan_text(text, terms):
 
 
 def outgoing_range(remote="origin", branch=None, runner=None):
-    """What a push would actually send: the commits on this branch that the
-    remote does not have. Falls back to the whole branch when the remote has no
-    copy of it yet, which is the first push and the one that matters most."""
+    """What a push would actually send, as a list of git revision arguments:
+    ``[branch, "--not", "--remotes=<remote>"]``, meaning every commit reachable
+    from the branch that is not reachable from any ref the remote already has.
+
+    CORRECTED 2026-09-05: the earlier version probed for ``origin/<branch>``
+    and, when absent, scanned the WHOLE branch with ``git log -p <branch>``.
+    That treated "the remote has never seen THIS branch name" as "the remote
+    has none of these commits", so a brand new branch cut off an
+    already-pushed commit re-scanned all of that ancestor history, including
+    old, already-published commits, and got refused on a stale blob fixed
+    forward years ago. The ``--not --remotes`` form covers both cases in one
+    path: a branch the remote already has under its own name (only the new
+    commits) and a branch it has never seen (only commits not already on
+    origin under some OTHER ref); on a repository with no remote refs at all
+    it degrades to the whole branch, which is the genuine first-push case.
+    """
+    # ponytail: a stale remote-tracking ref (a branch origin has since
+    # deleted, but this clone has not pruned) still counts as "the remote has
+    # it" here, because those objects did reach origin at some point. Upgrade
+    # path if that ever under-scans: `git fetch --prune` before the call.
     runner = runner or (lambda cmd: subprocess.run(
         cmd, capture_output=True, text=True))
     branch = branch or runner(
         ["git", "rev-parse", "--abbrev-ref", "HEAD"]).stdout.strip()
-    probe = runner(["git", "rev-parse", "--verify", "--quiet",
-                    "%s/%s" % (remote, branch)])
-    if probe.returncode != 0 or not probe.stdout.strip():
-        return branch          # remote has never seen this branch
-    return "%s/%s..%s" % (remote, branch, branch)
+    return [branch, "--not", "--remotes=%s" % remote]
 
 
 def scan_range(rev_range, terms, runner=None):
     """The patch text of every commit in the range, which is what a push sends.
+
+    rev_range is either a string (a plain ``git log`` range like the CLI's
+    ``--range`` value) or a list of git revision arguments (what
+    outgoing_range returns).
 
     Reads the diff rather than the tree on purpose: a term deleted in the last
     commit is still in the objects, and this control exists precisely because
     deleting the file does not remove it."""
     runner = runner or (lambda cmd: subprocess.run(
         cmd, capture_output=True, text=True))
-    proc = runner(["git", "log", "-p", "--no-color", rev_range])
+    range_args = [rev_range] if isinstance(rev_range, str) else list(rev_range)
+    proc = runner(["git", "log", "-p", "--no-color"] + range_args)
     if proc.returncode != 0:
         return None, (proc.stderr or "").strip()
     return scan_text(proc.stdout, terms), ""
@@ -182,20 +200,21 @@ def main(argv=None):
 
     rev_range = args.rev_range or outgoing_range(args.remote, args.branch)
     found, err = scan_range(rev_range, terms)
+    range_display = " ".join(rev_range) if not isinstance(rev_range, str) else rev_range
     if found is None:
-        print("NO-DATA: could not read %s: %s" % (rev_range, err), file=sys.stderr)
+        print("NO-DATA: could not read %s: %s" % (range_display, err), file=sys.stderr)
         return EXIT_NO_DATA
     if found:
         print("REFUSED: %d private term(s) appear in what this push would send "
               "(%s). The fix is NEVER a scrub of this repository, because the "
               "objects keep it: extract the shippable part into a fresh "
               "repository instead."
-              % (len(found), rev_range), file=sys.stderr)
+              % (len(found), range_display), file=sys.stderr)
         # The terms themselves are NOT printed. Printing them would put them in
         # a terminal, a CI log and a transcript, which is the thing being
         # prevented. The count and the range are enough to act on.
         return EXIT_FOUND
-    print("PASS: %d term(s) checked against %s, none present" % (len(terms), rev_range))
+    print("PASS: %d term(s) checked against %s, none present" % (len(terms), range_display))
     return EXIT_CLEAN
 
 

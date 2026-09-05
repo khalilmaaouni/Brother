@@ -1,0 +1,196 @@
+{
+ "id": "jbeq-mdm-generalization-cases-2026-09-05-rules-8-to-11",
+ "qualification": "JBEQ",
+ "qualification_name": "Japanese Business Engineering Qualification",
+ "track": "JBEQ-MDM",
+ "frozen": false,
+ "author_note": "Every company, store, person and address in this file is invented. No real corporation and no client term appears anywhere in it. These 8 cases are not part of the frozen seed at seed-2026-09-05.json and are never scored as a JBEQ-MDM result: they exist only to prove boundary rules 8 to 11 in decision-rules-addendum.md against cases those rules were not written against. They are a sibling to generalization-cases-2026-09-05.json (rules 5 to 7), kept separate so neither file's fixed case count or mix has to change for the other.",
+ "source": {
+  "document": "benchmarks/jbeq/mdm/decision-rules-addendum.md",
+  "purpose": "generalization proof for boundary rules 8 to 11, added after the JBEQ-MDM round 3 rules-arm misses and the rule 5/6/7 collision"
+ },
+ "scoring": {
+  "harness": "scripts/jbeq_mdm.py",
+  "rule": "Same rule as the frozen seed: a case is scored only against an answer file produced by an agent that never saw this file. Exact string match against expected, one answer per case id.",
+  "merge_answers": [
+   "AUTO-MERGE",
+   "SUGGEST MERGE"
+  ]
+ },
+ "mix": {
+  "address": 1,
+  "identifier": 3,
+  "match-or-no-merge": 2,
+  "hierarchy": 2
+ },
+ "critical_classes": [
+  "UNREVERSIBLE MERGE WITHOUT EVIDENCE",
+  "FALSE MERGE",
+  "WRONG TAX IDENTITY",
+  "CROSS-TENANT DATA LEAK",
+  "HIERARCHY REVERSAL"
+ ],
+ "answer_sets": {
+  "decision": [
+   "AUTO-MERGE",
+   "SUGGEST MERGE",
+   "LINK AS RELATED",
+   "KEEP SEPARATE",
+   "REJECT MATCH",
+   "ESCALATE",
+   "NO-DATA"
+  ]
+ },
+ "cases": [
+  {
+   "id": "G8-01",
+   "track": "address",
+   "critical": false,
+   "input": "甲物産の住所マスタは都道府県欄が空欄である。番地と郵便番号は乙倉庫の登録と完全に一致しており、同名の市区町村は他の都道府県には存在しない。",
+   "question": "都道府県欄が空欄であることを理由に NO-DATA と答えてよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "ESCALATE",
+   "rationale_ja": "都道府県欄は空欄でも番地と郵便番号が一致し裏付けとなっており、判断材料が無いわけではないため NO-DATA ではなく ESCALATE と答える。"
+  },
+  {
+   "id": "G8-02",
+   "track": "identifier",
+   "critical": false,
+   "input": "丙商会の適格請求書発行事業者番号は先月失効し、再登録は未申請である。ただし丙商会の法人番号と本店所在地は登録情報のまま変わっておらず、取引先マスタの他の項目と一致している。",
+   "question": "適格請求書番号が失効していることを理由に NO-DATA と答えてよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "ESCALATE",
+   "rationale_ja": "適格請求書番号は失効しているが法人番号と所在地が一致し裏付けとなっているため、材料が無いのではなく規則で決着しないだけであり ESCALATE と答える。"
+  },
+  {
+   "id": "G9-01",
+   "track": "match-or-no-merge",
+   "critical": true,
+   "critical_class": "UNREVERSIBLE MERGE WITHOUT EVIDENCE",
+   "input": "丁商事とA商会の名寄せスコアは0.83のみで、両者とも法人番号欄は空欄、一致する識別子は無い。この統合は復元不能な物理削除を伴う処理である。",
+   "question": "名寄せスコアと処理の不可逆性を根拠に SUGGEST MERGE と答えてよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "ESCALATE",
+   "rationale_ja": "識別子が無くスコアのみの弱い証拠であり、処理が復元不能な不可逆であることは弱い証拠を統合の根拠に格上げしないため、SUGGEST MERGE ではなく ESCALATE と答える。"
+  },
+  {
+   "id": "G9-02",
+   "track": "identifier",
+   "critical": true,
+   "critical_class": "FALSE MERGE",
+   "input": "戊工業の旧所在地は市町村合併により郵便番号のみ変更され、地番は同一である。ただし新旧の地番対応表はシステム移行時に作成されたが検証記録が無く、対応が正しいかは未確認である。",
+   "question": "地番が同一であることを根拠に AUTO-MERGE と答えてよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "SUGGEST MERGE",
+   "rationale_ja": "地番一致は未検証の移行対応表を介した中程度の証拠であり、対応の未検証という確認理由が加わるため、AUTO-MERGE ではなく人が確認する SUGGEST MERGE と答える。"
+  },
+  {
+   "id": "G10-01",
+   "track": "identifier",
+   "critical": true,
+   "critical_class": "WRONG TAX IDENTITY",
+   "input": "己運輸の社内管理番号と庚商店の法人番号は数字として一致するが、入力には己運輸の番号が自社連番であり法人番号体系に属さないと明記されている。",
+   "question": "番号が数字として一致することを根拠に LINK AS RELATED と答えてよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "REJECT MATCH",
+   "rationale_ja": "一致した数字は社内連番と法人番号という別の識別子体系に属すると明記されており、その一致自体が無効であるため REJECT MATCH と答える。"
+  },
+  {
+   "id": "G10-02",
+   "track": "match-or-no-merge",
+   "critical": true,
+   "critical_class": "CROSS-TENANT DATA LEAK",
+   "input": "辛物産の候補レコードは別の子会社テナントに属しており、契約上双方が互いのデータを参照してはならないと入力に明記されている。",
+   "question": "運用上の理由として KEEP SEPARATE と答えてよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "REJECT MATCH",
+   "rationale_ja": "契約上参照してはならないという明言された境界であり、運用上の理由で分けて保持する規則6、7の対象ではなく、規則10により REJECT MATCH と答える。"
+  },
+  {
+   "id": "G11-01",
+   "track": "hierarchy",
+   "critical": true,
+   "critical_class": "HIERARCHY REVERSAL",
+   "input": "壬製作所は資本上の親が癸ホールディングス、商流上の親は子丑物産、レポーティング上の親は東日本統括部であり、いずれも有効な記載である。親レコードの欄は1件しか登録できない。",
+   "question": "3つの親のうちどれか1つを選び、残りは無いものとして ESCALATE と答えてよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "KEEP SEPARATE",
+   "rationale_ja": "資本、商流、レポーティングは互いに独立した階層であり、1つの親欄しか無いのは実装上の制約に過ぎない。各階層の親とレコードをそのまま保持するため KEEP SEPARATE と答える。"
+  },
+  {
+   "id": "G11-02",
+   "track": "hierarchy",
+   "critical": true,
+   "critical_class": "HIERARCHY REVERSAL",
+   "input": "寅興業は資本関係の親を持たないが、商流上の卸元は卯商事であり、レポーティング上の上位部門は経営企画部である。両方とも有効な記載である。",
+   "question": "資本上の親が無いことを理由に、商流上とレポーティング上の親を1つにまとめて ESCALATE と答えてよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "KEEP SEPARATE",
+   "rationale_ja": "資本上の親を持たないことは商流とレポーティングという別の階層の親を1つに集約する理由にならず、それぞれの階層をそのまま保持するため KEEP SEPARATE と答える。"
+  }
+ ]
+}

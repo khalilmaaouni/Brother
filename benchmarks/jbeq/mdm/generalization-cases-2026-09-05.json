@@ -1,0 +1,213 @@
+{
+ "id": "jbeq-mdm-generalization-cases-2026-09-05",
+ "qualification": "JBEQ",
+ "qualification_name": "Japanese Business Engineering Qualification",
+ "track": "JBEQ-MDM",
+ "frozen": false,
+ "author_note": "Every company, store, person and address in this file is invented. No real corporation and no client term appears anywhere in it. These 9 cases are not part of the frozen seed at seed-2026-09-05.json and are never scored as a JBEQ-MDM result: they exist only to prove boundary rules 5 to 7 in decision-rules-addendum.md against cases the rules were not written against.",
+ "source": {
+  "document": "benchmarks/jbeq/mdm/decision-rules-addendum.md",
+  "purpose": "generalization proof for the three boundary rules added after the JBEQ-MDM round 2 rules-arm misses"
+ },
+ "scoring": {
+  "harness": "scripts/jbeq_mdm.py",
+  "rule": "Same rule as the frozen seed: a case is scored only against an answer file produced by an agent that never saw this file. Exact string match against expected, one answer per case id.",
+  "merge_answers": [
+   "AUTO-MERGE",
+   "SUGGEST MERGE"
+  ]
+ },
+ "mix": {
+  "entity-object": 3,
+  "match-or-no-merge": 3,
+  "hierarchy": 3
+ },
+ "critical_classes": [
+  "WRONG STORE ASSIGNMENT",
+  "FALSE MERGE"
+ ],
+ "answer_sets": {
+  "decision": [
+   "AUTO-MERGE",
+   "SUGGEST MERGE",
+   "LINK AS RELATED",
+   "KEEP SEPARATE",
+   "REJECT MATCH",
+   "ESCALATE",
+   "NO-DATA"
+  ]
+ },
+ "cases": [
+  {
+   "id": "G5-01",
+   "track": "entity-object",
+   "critical": true,
+   "critical_class": "WRONG STORE ASSIGNMENT",
+   "input": "店舗マスタ「フクロウ書店 若葉台店」と出荷先マスタ「フクロウ書店 若葉台配送センター」。所在地は同一敷地だが、若葉台配送センターは近隣4店舗分の商品を一括で受け取る共同物流拠点である。",
+   "question": "この2件を同一の拠点レコードに統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "KEEP SEPARATE",
+   "rationale_ja": "所在地が同一というだけで関係は述べられておらず、配送センターは複数店舗を束ねる一対多の別オブジェクトであるため統合すると他店舗分の出荷先が誤る。"
+  },
+  {
+   "id": "G5-02",
+   "track": "entity-object",
+   "critical": true,
+   "critical_class": "WRONG STORE ASSIGNMENT",
+   "input": "事業所マスタ「みちのく製菓 盛岡工場」と施設マスタ「みちのく製菓 盛岡技術センター」。所在地は同一敷地だが、盛岡技術センターは県内3工場の品質検査を一括で担う共有機能拠点である。所在地以外に共通する法人番号や役割の記載は無い。",
+   "question": "この2件を同一の拠点レコードに統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "KEEP SEPARATE",
+   "rationale_ja": "共有される事実は所在地のみで法人番号や役割の対の記載が無く、技術センターは複数工場を担う一対多のオブジェクトであるため統合してはならない。"
+  },
+  {
+   "id": "G5-03",
+   "track": "entity-object",
+   "critical": true,
+   "critical_class": "WRONG STORE ASSIGNMENT",
+   "input": "小売店舗マスタ「はなみずき薬局 緑ヶ丘店」と拠点マスタ「はなみずき薬局 緑ヶ丘コールセンター」。所在地は同一ビル内だが、コールセンターは全国の店舗からの問い合わせを一括で受ける共有窓口である。",
+   "question": "この2件を同一の拠点レコードに統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "KEEP SEPARATE",
+   "rationale_ja": "同一ビルという所在地の一致だけでは関係を記録する根拠にならず、コールセンターは全店舗を担う一対多の別オブジェクトである。"
+  },
+  {
+   "id": "G6-01",
+   "track": "match-or-no-merge",
+   "critical": true,
+   "critical_class": "FALSE MERGE",
+   "input": "「有限会社ハヤシ商店」と「有限会社林商店」。読みはどちらもハヤシショウテンで、所在地は同一市内だが番地が異なる。両方とも法人番号は未登録。",
+   "question": "読みの一致を根拠に統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "KEEP SEPARATE",
+   "rationale_ja": "読みが同じでも表記と番地が異なり、同一性を否定する事実も無ければ法人番号による裏付けも無いため、統合も棄却もせず別レコードのまま保持する。"
+  },
+  {
+   "id": "G6-02",
+   "track": "match-or-no-merge",
+   "critical": true,
+   "critical_class": "FALSE MERGE",
+   "input": "「株式会社タナカ精工」と「株式会社田中精工」。読みは同じタナカセイコウで、電話番号の市外局番も一致するが、担当部署名が一方は「本社営業部」、他方は「支店営業課」と異なる。法人番号はどちらも空欄。",
+   "question": "読みと市外局番の一致を根拠に統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "KEEP SEPARATE",
+   "rationale_ja": "部署名の相違は別の実体であることを明言する事実ではなく、法人番号の裏付けも無いため、統合せず別レコードのまま保持する。"
+  },
+  {
+   "id": "G6-03",
+   "track": "match-or-no-merge",
+   "critical": true,
+   "critical_class": "FALSE MERGE",
+   "input": "「みなみ運輸株式会社」と「南運輸株式会社」。読みは同じミナミウンユで、所在地の番地が1桁違いだが、法人番号はどちらも未取得で、他に相違を示す記載も無い。",
+   "question": "読みの一致を根拠に統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "KEEP SEPARATE",
+   "rationale_ja": "番地の1桁違いは同一性を否定する明言された事実ではなく単なる裏付けの欠如であり、法人番号も無いため統合せず別レコードのまま保持する。"
+  },
+  {
+   "id": "G7-01",
+   "track": "hierarchy",
+   "critical": true,
+   "critical_class": "FALSE MERGE",
+   "input": "同一グループ内の2つの事業会社が、それぞれ会社コード別に株式会社ヒバリ商事の得意先レコードを持っている。支払条件と与信枠は会社コードごとに異なる。",
+   "question": "この2件をグループ共通の1件へ統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "LINK AS RELATED",
+   "rationale_ja": "会社コード別の支払条件と与信枠を保つため個別レコードは残すが、同一の外部取引先を指すという事実は関係であり、関連付けて記録する。"
+  },
+  {
+   "id": "G7-02",
+   "track": "hierarchy",
+   "critical": true,
+   "critical_class": "FALSE MERGE",
+   "input": "同一グループの3つの現地法人が、それぞれ独自の会社コードで株式会社ワタリ物産の仕入先レコードを個別に保持している。品質評価スコアと支払サイトは法人ごとに異なる。",
+   "question": "この3件をグループ共通の1件へ統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "LINK AS RELATED",
+   "rationale_ja": "法人ごとの品質評価スコアと支払サイトを保つため個別レコードは残すが、同一の外部仕入先を指す事実は関係であり、統合せず関連付ける。"
+  },
+  {
+   "id": "G7-03",
+   "track": "hierarchy",
+   "critical": true,
+   "critical_class": "FALSE MERGE",
+   "input": "持株会社傘下の2つの子会社が、それぞれの基幹システムで株式会社セキノ工業の外注先マスタを個別に保持しており、単価契約と検収条件は子会社ごとに異なる。",
+   "question": "この2件を持株会社共通の1件へ統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "LINK AS RELATED",
+   "rationale_ja": "子会社ごとの単価契約と検収条件を保つため個別レコードは残すが、同一の外注先を指す事実は関係であり、統合せず関連付けて記録する。"
+  }
+ ]
+}

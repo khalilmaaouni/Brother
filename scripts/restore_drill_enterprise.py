@@ -51,6 +51,7 @@ tools directory is missing).
 
 No em or en dashes anywhere in this file.
 """
+import argparse
 import datetime
 import hashlib
 import importlib.util
@@ -677,7 +678,13 @@ def run_one_tenant(tools_dir, root, tenant, canary_self, canary_other):
     return checks, timings, detail
 
 
-def main():
+def main(argv=None):
+    # --help must print usage and exit 0 without running the drill (two temp
+    # tenants, about 7 seconds). The drill takes no arguments.
+    parser = argparse.ArgumentParser(
+        prog="restore_drill_enterprise.py", description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.parse_args(argv)
     tools_dir, err = find_tools_dir()
     if err:
         print(err, file=sys.stderr)

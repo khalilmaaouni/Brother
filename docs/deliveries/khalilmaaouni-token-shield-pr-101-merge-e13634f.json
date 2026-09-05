@@ -1,0 +1,11 @@
+{
+  "accepted_at": "2026-09-05T08:01:54Z",
+  "accepted_by": "Khalil Maaouni",
+  "checks": "NO-DATA",
+  "checks_reason": "no run receipt was given to accept-delivery (--run-dir or --checks-file), so this record names no changed file and no command a reader could re-run",
+  "delegation": "go ahead",
+  "name": "Stop a verdict reaching VERIFIED without ever comparing the move to the noise (D27), on the token-shield repository",
+  "recorded_by": "agent",
+  "ref": "khalilmaaouni-token-shield-pr-101-merge-e13634f",
+  "words": "Accepted by delegation: on 2026-09-05 at about 17:05 JST, shown that PR 101's five review findings were answered and verified in a fresh clone (52 passed, exit 0, no trailers, no dashes), the founder wrote: go ahead. The orchestrating session then merged khalilmaaouni/token-shield PR 101 with a merge commit (e13634f) and re-ran the documented test on main in a fresh clone: 52 passed. The delivery was produced by a direct builder lane after the engine's own attempt looped past its budget (hub run 20260905T134314), so no engine receipt exists for it and its checks field reads NO-DATA."
+}

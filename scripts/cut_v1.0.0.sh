@@ -146,8 +146,30 @@ else:
     print('release-invariant exception already absent')
 PY
 
-echo "== 2b. regenerate the release note from the tree (manifests now say $VERSION) =="
-python3 scripts/release_note_from_tree.py --write --version "$VERSION"
+echo "== 2r. regenerate what the bump above may have gone stale (SYSTEM.md, bundle/runtime, product checksums) =="
+# Row measured on 1.0.4: these three landed in a commit AFTER the release
+# note had already stamped an earlier HEAD, so the note named a revision
+# whose export was short exactly these files (X7 FAIL). Running them here,
+# before the bump is committed, means the commit below carries all of it
+# together, and refresh_cut.py's own dirty-tree refusal (2s onward) is the
+# backstop if a caller ever skips straight to 2b anyway.
+python3 scripts/system_doc.py
+python3 scripts/bundle_runtime.py
+# checksums.sh cd's into its OWN product root by $0's location before it
+# reads its argument, so the argument is that product's own relative path
+# (CHECKSUMS.sha256), never prefixed with the product directory again.
+sh products/brothermode/scripts/checksums.sh CHECKSUMS.sha256
+sh products/brothersbe/scripts/checksums.sh CHECKSUMS.sha256
+
+echo "== 2s. commit the bump and the regeneration together =="
+BUMP_MSG="$VERSION: the version bump and the regenerated manifests"
+echo "git add -A && git commit -q -m \"$BUMP_MSG\""
+git add -A
+git commit -q -m "$BUMP_MSG"
+git log -1 --oneline
+
+echo "== 2b. refresh the release note and export manifest (tree is clean now, so the note's stamped revision covers everything above) =="
+python3 scripts/refresh_cut.py --version "$VERSION"
 
 echo "== 2c. refuse if any release note the export ships still carries the placeholder stamp =="
 python3 scripts/release_notes_stamped.py
@@ -162,6 +184,13 @@ echo "== 2d. drive the note's own files table: every file it names must go red =
 # the release, so this one stops the cut.
 python3 scripts/release_note_perturb.py --version "$VERSION"
 
+echo "== 2t. commit the note and the manifest that describes it (the second, self-naming commit) =="
+NOTE_MSG="$VERSION: the export manifest that describes the tree and the note it ships"
+echo "git add -A && git commit -q -m \"$NOTE_MSG\""
+git add -A
+git commit -q -m "$NOTE_MSG"
+git log -1 --oneline
+
 echo "== 3. validate the manifests =="
 claude plugin validate bundle
 claude plugin validate .
@@ -172,11 +201,11 @@ python3 scripts/export_public.py --dry-run
 
 echo
 echo "== STOP. Review the output above. The dry run must read CLEAR. =="
-echo "When it does, commit the bump on a branch, push through the four gates,"
-echo "then run the one irreversible line below by hand (it pushes and tags the"
-echo "PUBLIC repository, which cannot be undone cleanly):"
+echo "Both commits above are already made (the bump plus regeneration, then the"
+echo "note plus manifest); nothing here is left to commit. Push the branch through"
+echo "the four gates, then run the one irreversible line below by hand (it pushes"
+echo "and tags the PUBLIC repository, which cannot be undone cleanly):"
 echo
-echo "  git add -A && git commit -m '$VERSION: the receipt and the recall'"
 echo "  python3 scripts/export_public.py --push --remote $PUBLIC_REMOTE --tag $TAG"
 echo
 echo "Then reinstall from the tag and re-run doctor:"

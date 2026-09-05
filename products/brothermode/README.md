@@ -146,7 +146,7 @@ claude plugin install brothermode@brother
 The pinned clone, for anyone who wants the bytes of one release on disk and a checksum they can run themselves:
 
 ```bash
-git clone --branch v1.0.6 --depth 1 https://github.com/khalilmaaouni/Brother.git ~/.claude/skills/brothermode-src
+git clone --branch v1.0.7 --depth 1 https://github.com/khalilmaaouni/Brother.git ~/.claude/skills/brothermode-src
 cd ~/.claude/skills/brothermode-src/products/brothermode
 python3 scripts/install.py
 ```

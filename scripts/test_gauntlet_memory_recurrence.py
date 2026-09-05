@@ -40,14 +40,34 @@ def silent_observation(condition):
     return G.empty_observation()
 
 
+def healthy_withheld_row():
+    """A passing row for the evidence-absent second-run check, used to stub
+    out G.run_contradictory_withheld_check in tests that drive main() to
+    prove an unrelated arithmetic point: without this stub main() would call
+    the real one, which shells out for real, the exact thing this suite's
+    own docstring says is the wrong way to prove arithmetic."""
+    return {"id": "contradictory memory (evidence absent)", "result": "withheld",
+            "detail": "both sides withheld: no current evidence resolves this conflict",
+            "applied": []}
+
+
 def contradiction_observation(condition):
     """Both sides of a declared contradiction applied, each flagged as
-    contradicting the other: the shape the real contradictory arm produces
-    today, and the one contradiction_unresolved() reads as NO-DATA."""
+    contradicting the other: the shape a pair with NEITHER evidence_locator
+    nor status produces (recall_verdict's own NO_DATA branch, the plain
+    CONTRADICTS annotation with no RESOLVED or WITHHELD verdict line beside
+    it), and the one contradiction_unresolved() still reads as NO-DATA after
+    the fix, as a regression guard."""
     obs = G.empty_observation()
     obs["applied"] = sorted([condition["expected"], "never-validate"])
     obs["contradicts_flagged"] = ["never validate", "validate before return"]
     obs["recall_said_nothing"] = False
+    obs["raw"] = (
+        "\n  validate before return  [project, gauntlet]\n"
+        "    CONTRADICTS: never validate (see both before treating this as settled)\n"
+        "\n  never validate  [project, gauntlet]\n"
+        "    CONTRADICTS: validate before return (see both before treating this as settled)\n"
+    )
     return obs
 
 
@@ -182,7 +202,9 @@ class TheFrozenCorpusGuardRefusesAMovedSpec(unittest.TestCase):
 
     def _drive(self, rows):
         original = G.run_conditions
+        original_withheld = G.run_contradictory_withheld_check
         G.run_conditions = lambda *a, **k: rows
+        G.run_contradictory_withheld_check = lambda *a, **k: healthy_withheld_row()
         try:
             out = io.StringIO()
             with contextlib.redirect_stdout(out):
@@ -191,6 +213,7 @@ class TheFrozenCorpusGuardRefusesAMovedSpec(unittest.TestCase):
             return code, out.getvalue()
         finally:
             G.run_conditions = original
+            G.run_contradictory_withheld_check = original_withheld
 
     def test_unmutated_copy_lets_scoring_proceed(self):
         rows = G.run_conditions(recall=surfaced_observation)
@@ -221,12 +244,15 @@ class TheExitCodeCarriesTheVerdictNotOnlyThePrint(unittest.TestCase):
 
     def drive(self, rows):
         original = G.run_conditions
+        original_withheld = G.run_contradictory_withheld_check
         G.run_conditions = lambda *a, **k: rows
+        G.run_contradictory_withheld_check = lambda *a, **k: healthy_withheld_row()
         try:
             with tempfile.TemporaryDirectory() as tmp:
                 return G.main(["--out", os.path.join(tmp, "record.json")])
         finally:
             G.run_conditions = original
+            G.run_contradictory_withheld_check = original_withheld
 
     def test_every_condition_observed_exits_zero(self):
         rows = G.run_conditions(recall=surfaced_observation)
@@ -242,6 +268,52 @@ class TheExitCodeCarriesTheVerdictNotOnlyThePrint(unittest.TestCase):
 
         rows = G.run_conditions(recall=broken)
         self.assertEqual(self.drive(rows), 2)
+
+
+class TheContradictoryArmResolvesAgainstRealEvidence(unittest.TestCase):
+    """Real mechanism, not a fake: drives real_recall() over the actual
+    seed_contradictory fixture (bm_vault.py index/check, vault_recall_hook's
+    lesson_states, receipt_door's applied_memory), through a fresh temp
+    vault and temp tree every time, never the developer's own vault. Proves
+    the fix rather than a fake shaped to match it: LESSON_SLUG's
+    evidence_locator holds against the fixture's own current source, so the
+    resolver's tier 1 applies it and withholds OPPOSITE_SLUG, and the arm no
+    longer reports NO-DATA."""
+
+    def setUp(self):
+        by_id = {c["id"]: c for c in G.CONDITIONS}
+        self.condition = by_id["contradictory memory"]
+
+    def test_evidence_resolves_to_the_correct_lesson(self):
+        obs = G.real_recall(self.condition)
+        self.assertEqual(obs["applied"], [G.LESSON_SLUG])
+        result, detail = G.classify(self.condition, obs)
+        self.assertEqual(result, "surfaced", detail)
+
+    def test_the_losing_lesson_is_never_applied(self):
+        obs = G.real_recall(self.condition)
+        self.assertNotIn(G.OPPOSITE_SLUG, obs["applied"])
+
+    def test_the_arm_no_longer_reports_no_data(self):
+        rows = G.run_conditions(conditions=[self.condition])
+        self.assertEqual(rows[0]["result"], "surfaced")
+
+
+class TheEvidenceAbsentVariantWithholdsBothSides(unittest.TestCase):
+    """The second acceptable outcome, driven for real the same way: neither
+    lesson's evidence_locator holds against the fixture's own current
+    source, so the resolver withholds both rather than picking one, and
+    neither slug reaches the applied section."""
+
+    def test_both_sides_are_withheld_when_evidence_resolves_neither(self):
+        row = G.run_contradictory_withheld_check()
+        self.assertEqual(row["result"], "withheld", row["detail"])
+        self.assertEqual(row["applied"], [])
+
+    def test_neither_slug_reaches_the_applied_section(self):
+        obs = G.real_recall(G.contradictory_withheld_condition())
+        self.assertEqual(obs["applied"], [])
+        self.assertIn("WITHHELD (contradiction", obs["raw"])
 
 
 if __name__ == "__main__":

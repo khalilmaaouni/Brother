@@ -116,13 +116,16 @@ def load_hook():
 
 
 def write_note(vault, stem, title, body, applies_to=None, supersedes=None,
-               contradicts=None):
+               contradicts=None, evidence_locator=None, status=None,
+               scope=None):
     """One vault note in a TEMP vault directory. The frontmatter fields are the
     ones bm_vault.py and vault_recall_hook.py actually read: name and
     description (title and summary), applies_to (E74's curator declared
     anchors), supersedes: [[stem]] and contradicts: [[stem]] (bm_vault.py's own
     single line wikilink lists, matched by FRONT_SUPERSEDES and
-    FRONT_CONTRADICTS)."""
+    FRONT_CONTRADICTS). evidence_locator, status and scope are the fields
+    bm_vault_contradiction.py's own resolver reads (its FIELDS tuple) to
+    decide a same-scope contradiction rather than only annotate it."""
     lines = ["---", "name: %s" % title, "description: %s" % title,
              "type: project"]
     if applies_to:
@@ -132,6 +135,12 @@ def write_note(vault, stem, title, body, applies_to=None, supersedes=None,
         lines.append("supersedes: [[%s]]" % supersedes)
     if contradicts:
         lines.append("contradicts: [[%s]]" % contradicts)
+    if evidence_locator:
+        lines.append("evidence_locator: %s" % evidence_locator)
+    if status:
+        lines.append("status: %s" % status)
+    if scope:
+        lines.append("scope: %s" % scope)
     lines += ["---", body, ""]
     path = os.path.join(vault, stem + ".md")
     with open(path, "w", encoding="utf-8") as fh:
@@ -139,34 +148,79 @@ def write_note(vault, stem, title, body, applies_to=None, supersedes=None,
     return path
 
 
-def seed_off(vault):
+#: Grep patterns checked against TARGET_FILE's own CURRENT text inside this
+#: run's temp tree (never a claim taken on faith): EVIDENCE_HOLD_PATTERN is a
+#: literal substring of TARGET_SOURCE, so a "grep:<target>:<pattern>" locator
+#: on it HOLDS; EVIDENCE_FAIL_PATTERN is not, so the same locator shape on it
+#: FAILS. Used by seed_contradictory (one holds, one fails: current evidence
+#: resolves the pair) and seed_contradictory_absent_evidence (both fail:
+#: current evidence resolves neither).
+EVIDENCE_HOLD_PATTERN = "raw.split"
+EVIDENCE_FAIL_PATTERN = "if raw is None"
+
+
+def seed_off(vault, tree):
     """The control arm: the estate has learned nothing about this file."""
     return
 
 
-def seed_on(vault):
+def seed_on(vault, tree):
     write_note(vault, LESSON_SLUG, LESSON_TITLE, LESSON_BODY,
                applies_to=TARGET_FILE)
 
 
-def seed_stale(vault):
+def seed_stale(vault, tree):
     """The current lesson beside one whose declared anchor no longer exists in
     the tree, the exact shape scripts/test_recall_revalidation.py drives."""
-    seed_on(vault)
+    seed_on(vault, tree)
     write_note(vault, STALE_SLUG, "old lexer rule", STALE_BODY,
                applies_to="gone_lexer.py")
 
 
-def seed_contradictory(vault):
-    """Two retrievable lessons that assert the opposite of each other about the
-    same current source, each declaring the other in contradicts:."""
+def seed_contradictory(vault, tree):
+    """Two retrievable lessons that assert the opposite of each other about
+    the same current source, each declaring the other in contradicts:, now
+    also carrying the resolver's own fields (bm_vault_contradiction.py,
+    landed in PR 346) so THE LAW can engage rather than only annotate:
+    LESSON_SLUG's evidence_locator points at TARGET_FILE's own current text
+    and HOLDS (the file genuinely has no validation right now, which is
+    exactly what this lesson asserts); OPPOSITE_SLUG's evidence_locator
+    points at the same current file for a pattern that is NOT there, so it
+    FAILS. Exactly one side's evidence holds, so the resolver's tier 1
+    (current direct evidence) applies LESSON_SLUG and withholds the other,
+    never picked on recency or wording."""
+    target_path = os.path.join(tree, TARGET_FILE)
     write_note(vault, LESSON_SLUG, LESSON_TITLE, LESSON_BODY,
-               applies_to=TARGET_FILE, contradicts=OPPOSITE_SLUG)
+               applies_to=TARGET_FILE, contradicts=OPPOSITE_SLUG,
+               scope=TARGET_FILE,
+               evidence_locator="grep:%s:%s" % (target_path, EVIDENCE_HOLD_PATTERN))
     write_note(vault, OPPOSITE_SLUG, "never validate", OPPOSITE_BODY,
-               applies_to=TARGET_FILE, contradicts=LESSON_SLUG)
+               applies_to=TARGET_FILE, contradicts=LESSON_SLUG,
+               scope=TARGET_FILE,
+               evidence_locator="grep:%s:%s" % (target_path, EVIDENCE_FAIL_PATTERN))
 
 
-def seed_superseded(vault):
+def seed_contradictory_absent_evidence(vault, tree):
+    """The sibling outcome the frozen 'contradictory memory' arm cannot
+    exercise on its own (founder steering 2026-09-05, section 11): both
+    sides' evidence_locator point at TARGET_FILE's current text for a
+    pattern that is NOT there, so BOTH fail and current evidence resolves
+    neither. The resolver's own law then withholds both rather than picking
+    one on recency or wording -- the second acceptable outcome, driven as a
+    second run of the same arm rather than a sixth frozen condition, so the
+    spec's own five-entry seeded_conditions list stays untouched."""
+    target_path = os.path.join(tree, TARGET_FILE)
+    write_note(vault, LESSON_SLUG, LESSON_TITLE, LESSON_BODY,
+               applies_to=TARGET_FILE, contradicts=OPPOSITE_SLUG,
+               scope=TARGET_FILE,
+               evidence_locator="grep:%s:%s" % (target_path, EVIDENCE_FAIL_PATTERN))
+    write_note(vault, OPPOSITE_SLUG, "never validate", OPPOSITE_BODY,
+               applies_to=TARGET_FILE, contradicts=LESSON_SLUG,
+               scope=TARGET_FILE,
+               evidence_locator="grep:%s:%s" % (target_path, EVIDENCE_FAIL_PATTERN))
+
+
+def seed_superseded(vault, tree):
     """An older lesson and the newer one that declares it superseded, both
     retrievable, so the run must apply the newer."""
     write_note(vault, OLD_SLUG, "old parse rule", OLD_BODY,
@@ -176,13 +230,26 @@ def seed_superseded(vault):
 
 
 def contradiction_unresolved(obs):
-    """True when the mechanism served both sides of a declared contradiction
-    and applied both. That is the measured absence of the field this arm needs:
-    nothing in a note, in bm_vault.py's retrieval, or in vault_recall_hook.py's
-    lesson_states records which side current source supports, so the run cannot
-    be observed choosing. Measured, not assumed: one applied lesson here scores
-    like any other arm."""
-    return len(obs["applied"]) > 1 and len(obs["contradicts_flagged"]) > 1
+    """True only when the resolver could not engage the pair at all:
+    bm_vault_contradiction.py's own recall_verdict falls back to "NO_DATA"
+    (the plain CONTRADICTS annotation, neither side withheld nor resolved)
+    exactly when neither lesson in the pair carries evidence_locator or
+    status (see bm_vault_contradiction.py's _has_signal). Read off the
+    resolver's own printed verdict line in the raw recall text, never
+    inferred from counting how many lessons ended up applied: a RESOLVED
+    (applies) line or a WITHHELD (contradiction ...) / WITHHELD
+    (contradicted, ...) line both mean the resolver DID engage, whatever it
+    decided, so this reads False for them. This is now a regression guard
+    for the day the fixture forgets these fields, not the everyday path:
+    seed_contradictory below always supplies evidence_locator, so this
+    condition's own arm no longer reports NO-DATA."""
+    raw = obs.get("raw", "")
+    if not CONTRADICTS_RE.search(raw):
+        return False
+    engaged = ("RESOLVED (applies):" in raw
+               or "WITHHELD (contradiction" in raw
+               or "WITHHELD (contradicted," in raw)
+    return not engaged
 
 
 CONTRADICTION_MISSING_FIELD = (
@@ -256,7 +323,7 @@ def real_recall(condition):
         os.makedirs(os.path.join(tmp, ".claude"))
         with open(os.path.join(tree, TARGET_FILE), "w", encoding="utf-8") as fh:
             fh.write(TARGET_SOURCE)
-        condition["seed"](vault)
+        condition["seed"](vault, tree)
 
         env = dict(os.environ)
         env["HOME"] = tmp
@@ -384,6 +451,64 @@ def summary_line(rows):
     return "recurrence prevented: %d of %d conditions" % (prevented, counted)
 
 
+def contradictory_withheld_condition():
+    """The condition dict for the second acceptable outcome named in founder
+    steering section 11: current evidence resolving a contradiction to the
+    correct lesson is one acceptable outcome (the 'contradictory memory'
+    condition above, now resolved via seed_contradictory's evidence_locator
+    fields); current evidence resolving NEITHER side, so both are withheld,
+    is the other. This is a second run of the SAME arm shape rather than a
+    sixth entry in CONDITIONS, so the spec's own five-entry seeded_conditions
+    list (TheFiveConditionsAreTheSpecsOwnArmList in the test suite) stays
+    byte for byte what it was."""
+    return {
+        "id": "contradictory memory (evidence absent)",
+        "seed": seed_contradictory_absent_evidence,
+        "expected": None,
+    }
+
+
+def classify_withheld(obs):
+    """(result, detail) for the evidence-absent variant. Passes only when
+    NEITHER lesson reached the applied section AND the resolver's own
+    WITHHELD (contradiction ...) verdict line is present in the raw recall
+    text -- read off the resolver's actual output line, per founder steering
+    section 11, never assumed from silence: an arm that recalled nothing at
+    all would look the same as a correctly-withheld one by applied-count
+    alone, and only the verdict line tells them apart."""
+    raw = obs.get("raw", "")
+    withheld_line = ("WITHHELD (contradiction unresolved)" in raw
+                      or "WITHHELD (contradiction escalated)" in raw)
+    if not obs["applied"] and withheld_line:
+        return ("withheld",
+                "both sides withheld: no current evidence resolves this conflict")
+    if obs["applied"]:
+        return "wrong", ("applied [%s] despite absent evidence on both sides"
+                          % ", ".join(obs["applied"]))
+    return "wrong", ("nothing applied but no WITHHELD (contradiction ...) verdict "
+                      "line appears either; the resolver did not visibly engage")
+
+
+def run_contradictory_withheld_check(recall=None):
+    """Runs the evidence-absent variant and returns one row shaped like
+    run_conditions()'s own rows. Never folded into run_conditions()/
+    summarize(): this is not one of the frozen five, it is the second
+    acceptable outcome of the fourth one, checked separately so the
+    'recurrence prevented: N of M conditions' line keeps measuring exactly
+    what the spec named."""
+    recall = recall or real_recall
+    condition = contradictory_withheld_condition()
+    try:
+        obs = recall(condition)
+    except Exception as exc:  # noqa: BLE001
+        return {"id": condition["id"], "result": NODATA,
+                "detail": "%s: the arm could not be observed: %s" % (NODATA, exc),
+                "unobservable": True, "applied": []}
+    result, detail = classify_withheld(obs)
+    return {"id": condition["id"], "result": result, "detail": detail,
+            "applied": obs["applied"]}
+
+
 def _revision():
     """The commit sha of this checkout, or a NO-DATA string naming why. Never a
     fabricated value, the same posture scripts/brother_run.py's own
@@ -402,7 +527,7 @@ def _revision():
     return out or "%s: the revision command printed nothing" % NODATA
 
 
-def record(rows, path):
+def record(rows, path, withheld_check=None):
     prevented, counted = summarize(rows)
     doc = {
         "gauntlet": "memory-recurrence",
@@ -426,6 +551,9 @@ def record(rows, path):
             "no_data": [r["id"] for r in rows if r["result"] == NODATA],
         },
         "conditions": rows,
+        "contradiction_evidence_absent_check": (
+            withheld_check if withheld_check is not None else
+            "NO-DATA: run_contradictory_withheld_check() was not passed to record()"),
     }
     directory = os.path.dirname(path)
     if directory and not os.path.isdir(directory):
@@ -465,17 +593,29 @@ def main(argv=None):
         print("%-*s  %-8s  %s" % (width, row["id"], row["result"], row["detail"]))
     print(summary_line(rows))
 
+    # The second acceptable outcome (founder steering section 11): a second
+    # run of the same arm shape, evidence absent from both sides this time,
+    # never folded into rows/summarize() so the frozen five-entry count above
+    # stays exactly what the spec named.
+    withheld_row = run_contradictory_withheld_check()
+    print("%s  %-8s  %s" % (withheld_row["id"], withheld_row["result"],
+                            withheld_row["detail"]))
+
     out = args.out or default_record_path()
-    record(rows, out)
+    record(rows, out, withheld_check=withheld_row)
     shown = os.path.relpath(out, REPO_ROOT) if out.startswith(REPO_ROOT) else out
     print("record: %s" % shown)
 
     unobservable = [r for r in rows if r.get("unobservable")]
+    if withheld_row.get("unobservable"):
+        unobservable = unobservable + [withheld_row]
     if unobservable:
         print("%s: %d condition(s) could not be observed at all; this is not a "
               "pass" % (NODATA, len(unobservable)))
         return 2
     failed = [r for r in rows if r["result"] == "wrong"]
+    if withheld_row["result"] == "wrong":
+        failed = failed + [withheld_row]
     if failed:
         print("FAILED the frozen rubric: %s"
               % ", ".join("%s (%s)" % (r["id"], r["detail"]) for r in failed))

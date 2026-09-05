@@ -13,10 +13,10 @@ to run the battery.
 
 | | |
 |---|---:|
-| Parts | 149 |
-| Parts with a purpose written in the file | 149 |
-| Parts with a suite wired into the battery | 127 |
-| Checks in the battery | 208 |
+| Parts | 152 |
+| Parts with a purpose written in the file | 152 |
+| Parts with a suite wired into the battery | 129 |
+| Checks in the battery | 210 |
 
 ## Every part, what it is for, and what proves it
 
@@ -36,6 +36,7 @@ to run the battery.
 | `acceptance_8` | Acceptance test for capability area 8: safety without approval fatigue | `acceptance`, `acceptance-self`, `system-doc-current`, `system-doc-self` |
 | `acceptance_9` | Acceptance test for capability area 9: crash recovery and resumable | `acceptance`, `acceptance-self`, `system-doc-current`, `system-doc-self` |
 | `acceptance_time` | The Acceptance Time benchmark harness (S11, roadmap row S11; protocol | `acceptance`, `acceptance-self`, `acceptance-time`, `system-doc-current`, `system-doc-self` |
+| `acceptance_trial_assign` | Acceptance Compression trial: reviewer assignment and results validation | **NO-DATA**, nothing in the battery runs it |
 | `attempt_hook` | a PostToolUse hook on Bash that writes to scripts/attempt_ledger.py | `attempt-hook-tests` |
 | `attempt_ledger` | stop the third attempt at a technique that failed twice. | `attempt-ledger-self` |
 | `authority_path_coverage` | R1: does one event receive two independent enforcing decisions? | `authority-path-coverage-self` |
@@ -79,6 +80,7 @@ to run the battery.
 | `gauntlet_delegation_truth` | the false-green rate as a running number. | `delegation-truth-self` |
 | `gauntlet_frozen` | refuse to score a corpus whose hash moved since the | `gauntlet-frozen-self` |
 | `gauntlet_hostile_ja` | EXECUTE the frozen Hostile Japanese Identity gauntlet. | `gauntlet-hostile-ja`, `gauntlet-hostile-ja-self` |
+| `gauntlet_memory_poisoning` | The memory poisoning gauntlet: twelve planted lessons against the real | **NO-DATA**, nothing in the battery runs it |
 | `gauntlet_memory_recurrence` | The memory recurrence gauntlet: five seeded conditions against the real recall path. | `memory-recurrence-self` |
 | `gen_command_center` | Render GANTT.html, the Brother command center, from the plan data files. | `gen-board-self` |
 | `gen_readiness_board` | Render the readiness board from docs/plan/READINESS-ROADMAP-2026-08-29.json. | `readiness-board-self`, `roadmap-public-clean` |
@@ -90,6 +92,7 @@ to run the battery.
 | `identity_guard` | refuse NEW commits whose author or committer email domain | `export-public-self`, `identity-guard`, `identity-guard-self` |
 | `intake_score` | Scoring harness for the Intake 9.5 rubric (docs/plan/INTAKE-9.5-DESIGN.md | `intake-record-diagrams`, `intake-score-self` |
 | `integrate` | workers parallel, truth serial. | `integrate-self` |
+| `jbeq_decide` | JBEQ-MDM decision module: a deterministic engine that decides once a | **NO-DATA**, nothing in the battery runs it |
 | `jbeq_e2e_check` | Checker for the JBEQ-MDM end to end scenario (benchmarks/jbeq/mdm/e2e-001). | `jbeq-e2e-check-self` |
 | `jbeq_mdm` | JBEQ-MDM seed suite: write the blind prompts, score a blind answer file. | `jbeq-mdm-seed` |
 | `journal` | one append-only causal log per run, fed by the writers that | `journal-self` |
@@ -130,17 +133,17 @@ to run the battery.
 | `recall_coverage` | R28.3, learnings at the point of need, measured | **NO-DATA**, nothing in the battery runs it |
 | `receipt_door` | the facts a delivery can prove, and the screens showing them. | `receipt-door-self` |
 | `record_drift` | does the record still match reality after the work landed? | `pre-push-gate`, `pre-push-gate-self`, `record-drift`, `record-drift-self` |
-| `refresh_cut` | Refresh a cut: rewrite the export manifest and the release note that | **NO-DATA**, nothing in the battery runs it |
+| `refresh_cut` | Refresh a cut: rewrite the export manifest and the release note that | `refresh-cut-self` |
 | `release_closeout` | the post-cut closeout matrix, one gate per subcommand. | `release-closeout-self` |
 | `release_invariant` | one release identity, or say exactly which link broke. | `readiness-gate`, `readiness-gate-self`, `release-closeout-self`, `release-invariant`, `release-invariant-self` |
-| `release_note_from_tree` | .py: the release note's checkable claims, measured, never typed. | `release-note-self` |
+| `release_note_from_tree` | .py: the release note's checkable claims, measured, never typed. | `refresh-cut-self`, `release-note-self` |
 | `release_note_perturb` | every file the release note names really goes red. | `release-note-perturb`, `release-note-perturb-self` |
 | `release_notes_stamped` | .py: refuses while any shipped release note still | **NO-DATA**, nothing in the battery runs it |
 | `repeat_control` | does a shown lesson actually stop the same failure happening again. | `repeat-control-tests` |
 | `reproduce_export` | prove a released public tag was generated from a pinned | `release-closeout-self`, `reproduce-export-self` |
 | `resource_gate` | refuse admission when the MACHINE is short, not the code. | `resource-gate-self` |
 | `restart_schedule` | R25.3: the dynamic restart scheduler. Generalizes the existing launchd | **NO-DATA**, nothing in the battery runs it |
-| `restore_drill_enterprise` | a real, populated, multi-tenant restore drill | **NO-DATA**, nothing in the battery runs it |
+| `restore_drill_enterprise` | a real, populated, multi-tenant restore drill | `restore-drill-self` |
 | `review_pass` | S32, the review pass: one existing reviewer per high-tier unit, and every | `review-depth-self` |
 | `reviewer_brief` | Generate a one-page reviewer brief from a git ref range. SR-09. | `reviewer-brief-self` |
 | `roadmap_merge` | Three way merge driver for the readiness roadmap JSON, keyed by row id. | `roadmap-merge-self` |
@@ -231,6 +234,7 @@ to run the battery.
 - `reporting-adversarial-self`: `python3 scripts/test_reporting_adversarial.py -v`
 - `system-doc-self`: `python3 scripts/test_system_doc.py -v`
 - `release-note-self`: `python3 scripts/test_release_note_from_tree.py -v`
+- `refresh-cut-self`: `python3 scripts/test_refresh_cut.py -v`
 - `system-doc-current`: `python3 scripts/system_doc.py --check`
 - `parity-gate-self`: `python3 scripts/test_parity_gate.py -v`
 - `worktree-lane-self`: `python3 scripts/test_worktree_lane.py -v`
@@ -305,6 +309,7 @@ to run the battery.
 - `tenancy-routing-mutation`: `python3 scripts/test_tenancy_routing_mutation.py`
 - `wire-dual-principal`: `python3 scripts/test_wire_dual_principal.py`
 - `clean-env-restore`: `python3 scripts/test_clean_env_restore.py`
+- `restore-drill-self`: `python3 scripts/test_restore_drill_enterprise.py`
 - `readiness-gate-self`: `python3 -m unittest -v scripts/test_readiness_gate.py`
 - `readiness-gate`: `python3 scripts/readiness_gate.py`
 - `release-invariant-self`: `python3 scripts/test_release_invariant.py -v`

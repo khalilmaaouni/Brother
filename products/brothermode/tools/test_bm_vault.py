@@ -439,6 +439,73 @@ class ASupersededLessonIsNotServedAsCurrent(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(self.vault, "old-quibblewax.md")))
 
 
+CITED_OLD_LESSON = """---
+type: failure
+status: open
+created: 2026-01-01
+description: "the old ruling about widget handling"
+---
+
+# the old widget ruling
+
+Always flarn the widget before serving. See WidgetV13.swift.
+"""
+
+
+class ACorrectionWrittenByVaultCorrectIsWithheldTheSameWay(unittest.TestCase):
+    """Row V13 (docs/plan/READINESS-ROADMAP-2026-08-29.json): the note above
+    proves the WITHHELD (superseded) mechanism works on a hand-authored
+    `supersedes:` frontmatter line. This class proves the same mechanism
+    fires on a note actually produced by scripts/vault_correct.py, so the
+    two halves (the writer and this reader) are proven together rather than
+    each proven only against its own fixtures."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp(prefix="bm-vault-correct-recall-")
+        cls.vault = os.path.join(cls.tmp, "vault")
+        cls.failures = os.path.join(cls.vault, "40-Failures")
+        os.makedirs(cls.failures)
+        with open(os.path.join(cls.failures, "old-widget.md"), "w") as f:
+            f.write(CITED_OLD_LESSON)
+        cls.code = os.path.join(cls.tmp, "code")
+        os.makedirs(cls.code)
+        with open(os.path.join(cls.code, "WidgetV13.swift"), "w") as f:
+            f.write("// stub so the citation resolves and freshness is not the variable\n")
+        cls.env = dict(os.environ)
+        cls.env["HOME"] = cls.tmp
+        cls.env["BROTHERMODE_ROOT"] = cls.tmp
+        cls.env["BM_FRESHNESS_ROOTS"] = cls.code
+        cls.env["BM_FRESHNESS_STATE"] = os.path.join(cls.tmp, "freshness_state.sqlite3")
+        os.makedirs(os.path.join(cls.tmp, ".claude"))
+
+        vault_correct = os.path.join(HERE, "..", "..", "..", "scripts", "vault_correct.py")
+        p = subprocess.run(
+            [sys.executable, vault_correct, "--vault", cls.vault, "--note", "old-widget",
+             "the old widget ruling was measured wrong"],
+            env=cls.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        cls.correct_code = p.returncode
+        cls.correct_out = (p.stdout + p.stderr).decode("utf-8", "replace")
+        cls.index_code, cls.index_out = run(["index", "--vault", cls.vault], cls.env)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_01_vault_correct_ran_clean_and_the_corpus_indexed(self):
+        self.assertEqual(self.correct_code, 0, self.correct_out)
+        self.assertEqual(self.index_code, 0, self.index_out)
+
+    def test_02_the_note_vault_correct_supersedes_is_withheld(self):
+        code, out = run(["check", "--paths", "WidgetV13.swift", "--limit", "5"], self.env)
+        self.assertEqual(code, 0, out)
+        self.assertIn("WITHHELD (superseded)", out,
+                      "a note produced by vault_correct.py's own superseding "
+                      "note was served as ordinary current instead of "
+                      "withheld:\n%s" % out[:900])
+        self.assertIn("superseded by", out)
+
+
 RECORD_NOTE = """---
 name: grumbleflux-retention-ruling
 description: the approved ruling on grumbleflux retention
