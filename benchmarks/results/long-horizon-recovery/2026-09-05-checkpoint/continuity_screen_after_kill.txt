@@ -1,0 +1,12 @@
+objective: two files exist, the second after the first
+canonical revision: 031a8412d126b6b84fcc6b573f295830b65805bd
+environment:
+  runs root:     <SCRATCH_ROOT>
+  target cwd:    <THROWAWAY_REPO>
+  slots:         3
+  model adapter: the product's own worker adapter
+units (2):
+  A1                       integrated  attempt=1
+  A2                       abandoned   attempt=1 -- owner pid 46598 is dead on this host, with 1200s still left on the lease while still in state claimed, so the owner did not finish and did not release. Whether this unit may be retried depends on whether its side effects are safe to repeat, which this cannot decide
+
+next action: resume: A2's claim expired while still marked claimed (owner pid 46598 is dead on this host, with 1200s still left on the lease while still in state claimed, so the owner did not finish and did not release. Whether this unit may be retried depends on whether its side effects are safe to repeat, which this cannot decide); a resume can safely re-run it

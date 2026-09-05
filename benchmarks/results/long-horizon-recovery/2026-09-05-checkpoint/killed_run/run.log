@@ -1,0 +1,32 @@
+Work W-two-files-exist-the-second-after-the-fir created with 2 unit(s)
+  A1: create file one
+  A2: create file two
+door: asking the decomposer (attempt 1 of 3): <PYTHON3> <SCRATCH_ROOT>/decomposer.py
+---- intent screen ----
+Proceed with this outcome
+This is what this run is about to act on before anything is claimed or run, one line per piece of work, exactly as the planning model wrote it:
+
+A1: create file one. done_check: `test -f one.txt`. depends on: none. evidence family: NO-DATA, oracle: NO-DATA, independence: unverified
+A2: create file two. done_check: `test -f two.txt`. depends on: A1. evidence family: NO-DATA, oracle: NO-DATA, independence: unverified
+
+Bounds, before any work starts: each piece of work gets at most 3 attempt(s), and one attempt's worker is stopped after 900 seconds.
+
+Price, before anything is claimed or run: this run opens 3 model session(s), one to plan the work and one for each of the 2 piece(s) of work in the plan. The expected wall clock reads NO-DATA: no earlier run against this target left a measured one, and this estate will not invent a duration. What the same edit would cost you by hand is not measured here, and nothing below claims to beat it: the run proves what it does.
+
+Rollback: d0cad991dcb584afd1cdb55d5cbb6e8a0bf4af30
+Is this the outcome you meant, and are these the checks that should decide it?
+   5.00/10  Proceed as decomposed: 'two files exist, the second after the first', 2 piece(s) of work
+   0.00/10  Refuse: nothing is claimed: stop here, before any unit is claimed or run
+  the full screen: <KILLED_RUN_DIR>/screens/intent-screen.html
+brother_run: intent: 2 option(s) considered, Proceed as decomposed recommended at 5.00/10
+brother_run: intent resolved: chose 'Proceed as decomposed', recorded by brother_run (recorded default: the top-ranked option)
+brother_run: intent resolution, depends_on per unit: A1: none; A2: A1
+brother_run: 2 piece(s) of work, none finished yet. How long this takes is not knowable in advance, so no estimate is given; each piece reports as it lands. Each piece gets at most 3 attempt(s), and one attempt's worker is stopped after 900 seconds.
+brother_run: waiting on A1, A2 since 06:22:41; nothing else is running
+CLAIMED (1): brother-run-46598/A1/1
+  lane-cleanup A1         removed lane lane/A1 removed
+  integrate A1         INTEGRATED                 applied to d0cad991d and its own check passed ON canonical at 031a8412d
+  A1         done     scope=CLEAN      integrated=True
+isolation: per-writer worktrees
+brother_run: loop_bridge round 1 exited 0
+brother_run: round 1 done, 1 of 2 piece(s) finished, 1 to go

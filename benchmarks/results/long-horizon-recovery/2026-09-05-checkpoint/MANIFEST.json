@@ -1,0 +1,134 @@
+{
+ "gauntlet": "long-horizon-recovery",
+ "spec": "benchmarks/gauntlets/long-horizon-recovery.json",
+ "revision": "wbs/lhr-start off hub/main a4f55007e",
+ "started_at": "2026-09-04T21:22:39.235130Z",
+ "interrupted_at": "2026-09-04T21:22:43.165798Z",
+ "phase_completed": [
+  "started run through the real engine (brother_run.py/door.py/loop_bridge.py/integrate.py)",
+  "captured canonical state before interruption",
+  "performed the first integration (unit A1 reached DONE)",
+  "injected the interruption named by the spec's seeded_conditions_note: SIGKILL of the whole run's process group, mid unit A2",
+  "recorded the recovery artefacts a resume needs"
+ ],
+ "phase_not_attempted": [
+  "the temporal arm (workload family 8, resume after 24-72 hours with repository drift): the clock gap cannot be honored this morning",
+  "any resume of the killed run: resuming now would not exercise the temporal arm and the scoring rubric forbids scoring family 8 from the short-crash arm"
+ ],
+ "artefacts": [
+  {
+   "path": "RECORD.md",
+   "sha256": "2d0c76b7e34bb5c81c05babe655e204eb370045f0080e090983d236072f90681"
+  },
+  {
+   "path": "canonical_state_before_kill/W-two-files-exist-the-second-after-the-fir.json",
+   "sha256": "efc6706f3b06dde9dddd64775f7264c2b663bd31fac3d8ddfc7976dfd03443ac"
+  },
+  {
+   "path": "canonical_state_before_kill/attempts/A1-16a36e86/attempt-1/claim.json",
+   "sha256": "304d61376423aa03a64f40273abda604d68faccd185781cd3b411499386f594d"
+  },
+  {
+   "path": "canonical_state_before_kill/attempts/A1-16a36e86/attempt-1/engine_output.txt",
+   "sha256": "85e4ca3c57b060ad968d19a8802d11820bc2a15f76703ef830f9500dacda0f1f"
+  },
+  {
+   "path": "canonical_state_before_kill/attempts/A1-16a36e86/attempt-1/tree_state.txt",
+   "sha256": "a7130f0c6d0cf215fc0d8835c903c4af60c172f7bdfb616fa0168a617eb39a1d"
+  },
+  {
+   "path": "canonical_state_before_kill/capsule.json",
+   "sha256": "45dc7177ad46b9b207043090e0049a0da31ed55eec6f74484a658e23e07ebada"
+  },
+  {
+   "path": "canonical_state_before_kill/claims.json",
+   "sha256": "e6ac3b86db9e0027d4044bd508372a66f36507c37a6dbefe5cd20c7a2c056f0a"
+  },
+  {
+   "path": "canonical_state_before_kill/target.json",
+   "sha256": "8d1d63a781dd2b52f17ac8693372b89800cc284b693dc21d7d9df6d599cfae21"
+  },
+  {
+   "path": "continuity_capsule_after_kill.json",
+   "sha256": "6b9530eb11728793df86ef1f9ffb930d19d8ec7791a6a6280e4c02da95e809e2"
+  },
+  {
+   "path": "continuity_screen_after_kill.txt",
+   "sha256": "8feb2f15a96246fe837b058c51cdc2992b8d8ab2ea5e57242ea55284007b30c3"
+  },
+  {
+   "path": "driver.log",
+   "sha256": "6292159ba4b589be3b8f923d49663cf48f410b68557f8ec595ff1eef75efe42a"
+  },
+  {
+   "path": "driver.py",
+   "sha256": "34f6c0d5ef813a45b65b48fc8ffce43c14602964d443eb50bb6d273768ddd8c2"
+  },
+  {
+   "path": "killed_run/W-two-files-exist-the-second-after-the-fir.json",
+   "sha256": "efc6706f3b06dde9dddd64775f7264c2b663bd31fac3d8ddfc7976dfd03443ac"
+  },
+  {
+   "path": "killed_run/attempts/A1-16a36e86/attempt-1/claim.json",
+   "sha256": "304d61376423aa03a64f40273abda604d68faccd185781cd3b411499386f594d"
+  },
+  {
+   "path": "killed_run/attempts/A1-16a36e86/attempt-1/engine_output.txt",
+   "sha256": "85e4ca3c57b060ad968d19a8802d11820bc2a15f76703ef830f9500dacda0f1f"
+  },
+  {
+   "path": "killed_run/attempts/A1-16a36e86/attempt-1/tree_state.txt",
+   "sha256": "a7130f0c6d0cf215fc0d8835c903c4af60c172f7bdfb616fa0168a617eb39a1d"
+  },
+  {
+   "path": "killed_run/capsule.json",
+   "sha256": "45dc7177ad46b9b207043090e0049a0da31ed55eec6f74484a658e23e07ebada"
+  },
+  {
+   "path": "killed_run/claims.json",
+   "sha256": "e6ac3b86db9e0027d4044bd508372a66f36507c37a6dbefe5cd20c7a2c056f0a"
+  },
+  {
+   "path": "killed_run/journal.jsonl",
+   "sha256": "06d29a6a6f862355b39f294b522407a3e0f3a6e183c991f2de361ee92e2abf39"
+  },
+  {
+   "path": "killed_run/run.log",
+   "sha256": "13d25cbcbb1d0048888d127a5ec234824ed6d6477bfdce47b854e39f9d9b8f8a"
+  },
+  {
+   "path": "killed_run/screens/intent-screen.html",
+   "sha256": "d44374de10ff5a340974e9b46c072e7145e872f1d87730735702a0fa2ad7129c"
+  },
+  {
+   "path": "killed_run/screens/intent-screen.json",
+   "sha256": "1212746204373125cb6c8acc2bb6c0172bdfcdc37b3eac57f520cc9f2201c57a"
+  },
+  {
+   "path": "killed_run/target.json",
+   "sha256": "8d1d63a781dd2b52f17ac8693372b89800cc284b693dc21d7d9df6d599cfae21"
+  },
+  {
+   "path": "result.json",
+   "sha256": "f70bb106621be945f24ca0cd1896093dff343e8702dfefc9cc4198e8d7072a55"
+  }
+ ],
+ "resume_command": [
+  "<PYTHON3>",
+  "<BROTHER_SCRIPTS>/brother_run.py",
+  "two files exist, the second after the first",
+  "--cwd",
+  "<THROWAWAY_REPO>",
+  "--runs-root",
+  "<SCRATCH_ROOT>"
+ ],
+ "resume_command_note": "bare re-invocation, same outcome sentence, no --resume flag: the spec's own fairness_notes count anything else (naming a run id, passing --resume) as an extra human intervention beyond the one allowed. --resume <killed_run_dir> is the explicit equivalent if the operator prefers naming the run, and is itself counted as named per the spec.",
+ "no_instrument": [
+  "HUMAN INTERVENTIONS: NO INSTRUMENT YET (spec metrics, status none)",
+  "SAFE UNWATCHED DURATION: NO INSTRUMENT YET (spec metrics, status none)",
+  "RECOVERY TIME as a reported number: spec metrics status partial; scripts/test_crash_resume.py proves recovery happens but no script reports seconds",
+  "repository drift commit: not applied; no second arm exists yet to apply it against"
+ ],
+ "roadmap_row": "none: docs/plan/READINESS-ROADMAP-2026-08-29.json has no S or E row scoped to benchmarks/gauntlets/long-horizon-recovery.json itself (S9/S11/S12/S14 cover the other four gauntlets by name; S10 covers the related Safe Unwatched Time metric; S13 covers the continuity capsule item list this run's capsule output is evidence toward, but is scoped to the capsule mechanism, not this gauntlet)",
+ "verdict": "PARTIAL, PENDING TEMPORAL ARM, resume not before 2026-09-05T21:22:39Z"
+}

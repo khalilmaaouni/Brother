@@ -1,0 +1,41 @@
+{
+ "buckets": {
+  "abandoned": [
+   "A2"
+  ],
+  "active": [],
+  "integrated": [
+   "A1"
+  ],
+  "pending": [],
+  "unclear": []
+ },
+ "canonical_revision": "031a8412d126b6b84fcc6b573f295830b65805bd",
+ "environment": {
+  "model_adapter": "the product's own worker adapter",
+  "runs_root": "<SCRATCH_ROOT>",
+  "slots": 3,
+  "target_cwd": "<THROWAWAY_REPO>"
+ },
+ "next_action": "resume: A2's claim expired while still marked claimed (owner pid 46598 is dead on this host, with 1200s still left on the lease while still in state claimed, so the owner did not finish and did not release. Whether this unit may be retried depends on whether its side effects are safe to repeat, which this cannot decide); a resume can safely re-run it",
+ "objective": "two files exist, the second after the first",
+ "run_dir": "<KILLED_RUN_DIR>",
+ "units": [
+  {
+   "attempt": 1,
+   "bucket": "integrated",
+   "claim_state": "done",
+   "detail": "",
+   "id": "A1",
+   "title": "create file one"
+  },
+  {
+   "attempt": 1,
+   "bucket": "abandoned",
+   "claim_state": "claimed",
+   "detail": "owner pid 46598 is dead on this host, with 1200s still left on the lease while still in state claimed, so the owner did not finish and did not release. Whether this unit may be retried depends on whether its side effects are safe to repeat, which this cannot decide",
+   "id": "A2",
+   "title": "create file two"
+  }
+ ]
+}

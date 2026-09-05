@@ -1,0 +1,49 @@
+{
+ "title": "Proceed with this outcome",
+ "eyebrow": "Intent",
+ "plain_summary": "This is what this run is about to act on before anything is claimed or run, one line per piece of work, exactly as the planning model wrote it:\n\nA1: create file one. done_check: `test -f one.txt`. depends on: none. evidence family: NO-DATA, oracle: NO-DATA, independence: unverified\nA2: create file two. done_check: `test -f two.txt`. depends on: A1. evidence family: NO-DATA, oracle: NO-DATA, independence: unverified\n\nBounds, before any work starts: each piece of work gets at most 3 attempt(s), and one attempt's worker is stopped after 900 seconds.\n\nPrice, before anything is claimed or run: this run opens 3 model session(s), one to plan the work and one for each of the 2 piece(s) of work in the plan. The expected wall clock reads NO-DATA: no earlier run against this target left a measured one, and this estate will not invent a duration. What the same edit would cost you by hand is not measured here, and nothing below claims to beat it: the run proves what it does.\n\nRollback: d0cad991dcb584afd1cdb55d5cbb6e8a0bf4af30",
+ "question": "Is this the outcome you meant, and are these the checks that should decide it?",
+ "criteria": [
+  {
+   "key": "matches_the_settled_outcome",
+   "label": "matches the settled outcome",
+   "weight": 0.5,
+   "why": "the outcome named here is copied verbatim from what this run resolved to act on"
+  },
+  {
+   "key": "already_progressed",
+   "label": "already progressed",
+   "weight": 0.5,
+   "why": "0 of 2 piece(s) already carry a verified DONE status on this run's own Work document"
+  }
+ ],
+ "options": [
+  {
+   "id": "proceed",
+   "name": "Proceed as decomposed",
+   "one_liner": "'two files exist, the second after the first', 2 piece(s) of work",
+   "scores": {
+    "matches_the_settled_outcome": 10.0,
+    "already_progressed": 0.0
+   },
+   "score_basis": {
+    "matches_the_settled_outcome": "the outcome named here is copied verbatim from what this run resolved to act on",
+    "already_progressed": "0 of 2 piece(s) already carry a verified DONE status on this run's own Work document"
+   }
+  },
+  {
+   "id": "refuse",
+   "name": "Refuse: nothing is claimed",
+   "one_liner": "stop here, before any unit is claimed or run",
+   "cost": "none: nothing has started",
+   "reversible": "moot: nothing happened",
+   "pros": [
+    "nothing is claimed, run, or written until you say so"
+   ],
+   "cons": [
+    "the outcome goes unattempted"
+   ]
+  }
+ ],
+ "footer": ""
+}

@@ -4,6 +4,8 @@ Proves the validator FAILS as well as passes. A board that renders whatever it
 is given is not a control, and this estate has shipped three checks this week
 that could only go green.
 """
+import contextlib
+import io
 import json
 import os
 import subprocess
@@ -499,6 +501,113 @@ class TheVaultStrip(unittest.TestCase):
         section = self._vault_section(html)
         self.assertIn('<span class="v">42</span>', section)
         self.assertNotIn('NO-DATA', section)
+
+
+class PublicPage(unittest.TestCase):
+    """Row S30. The public page must be missing the private half BY
+    CONSTRUCTION: it reads a declared field list, so a test that only proves
+    the output is clean would still pass over a filter that happens to work
+    today. These drive both directions."""
+
+    def public_doc(self, **row):
+        base = dict(doc()['rows'][0])
+        base.update(row)
+        d = doc(rows=[base])
+        return d
+
+    def test_the_real_public_page_renders_and_carries_no_machine_path(self):
+        d = board.load()
+        page = board.render_public(d)
+        for token in ('/Users/', '~/', '/var/folders', '/private/'):
+            self.assertNotIn(token, page,
+                             'public page carries %r' % token)
+
+    def test_no_evidence_text_from_a_row_reaches_the_public_page(self):
+        d = self.public_doc(evidence='EVIDENCEMARKER ran at 2026-09-05, exit 0',
+                            resume_from='RESUMEMARKER halfway',
+                            owner='cli-0199-OWNERMARKER',
+                            watchdog_verify='WATCHMARKER --check')
+        page = board.render_public(d)
+        for marker in ('EVIDENCEMARKER', 'RESUMEMARKER', 'OWNERMARKER',
+                       'WATCHMARKER', 'cli-'):
+            self.assertNotIn(marker, page,
+                             'public page carries %r' % marker)
+
+    def test_a_carried_field_naming_a_machine_path_is_withheld_whole(self):
+        """Withheld, not redacted: the row still appears, its done-check does
+        not, and the page says so rather than shipping a rewritten string."""
+        d = self.public_doc(done_check='run it in ~/Brother and quote the tail')
+        page = board.render_public(d)
+        self.assertNotIn('~/Brother', page)
+        self.assertIn('withheld', page)
+        self.assertIn('R1', page)
+
+    def test_a_row_with_a_path_in_why_makes_the_public_build_refuse_the_reason(self):
+        """The scan is over the WHOLE roadmap and it names the row id. It must
+        never print the offending text: that is the string it exists to keep
+        off a public page."""
+        d = self.public_doc(why='settled in ~/.claude/evidence/secret-note.md')
+        self.assertEqual(board.why_leak_rows(d), ['R1'])
+        saved_src, saved_out = board.SOURCE, board.PUBLIC_OUTPUT
+        fh = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
+        json.dump(d, fh)
+        fh.close()
+        out = tempfile.NamedTemporaryFile(suffix='.html', delete=False)
+        out.close()
+        err = io.StringIO()
+        try:
+            board.SOURCE = fh.name
+            board.PUBLIC_OUTPUT = out.name
+            with contextlib.redirect_stderr(err):
+                code = board.main(['--public'])
+            self.assertEqual(code, 0)
+            with open(out.name, encoding='utf-8') as got:
+                page = got.read()
+        finally:
+            board.SOURCE, board.PUBLIC_OUTPUT = saved_src, saved_out
+            os.unlink(fh.name)
+            os.unlink(out.name)
+        self.assertIn('REFUSED', err.getvalue())
+        self.assertIn('R1', err.getvalue())
+        self.assertNotIn('secret-note', err.getvalue())
+        self.assertNotIn('secret-note', page)
+        self.assertNotIn('~/.claude', page)
+
+    def test_a_clean_why_IS_carried(self):
+        """The other direction. A gate that can only withhold is not a gate."""
+        d = self.public_doc(why='because the page nobody can open proves nothing')
+        self.assertEqual(board.why_leak_rows(d), [])
+        page = board.render_public(d)
+        self.assertIn('because the page nobody can open proves nothing', page)
+
+    def test_public_check_is_a_verdict_and_writes_nothing(self):
+        saved = board.PUBLIC_OUTPUT
+        missing = os.path.join(tempfile.gettempdir(), 'no-such-public-page-xyz.html')
+        buf = io.StringIO()
+        try:
+            board.PUBLIC_OUTPUT = missing
+            with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(io.StringIO()):
+                code = board.main(['--public', '--check'])
+        finally:
+            board.PUBLIC_OUTPUT = saved
+        self.assertEqual(code, 0)
+        self.assertIn('PASS', buf.getvalue())
+        self.assertFalse(os.path.exists(missing))
+
+    def test_an_undeclared_field_cannot_be_read_as_public(self):
+        """The construction itself, asserted. public_field refuses a field
+        nobody put on the list, so widening the public surface is an edit to
+        PUBLIC_ROW_FIELDS and never an accident in a template."""
+        with self.assertRaises(KeyError):
+            board.public_field({'evidence': 'x'}, 'evidence')
+
+    def test_a_slash_command_in_a_title_is_not_treated_as_a_path(self):
+        """'/brother' is this product's own name for itself and appears in row
+        titles. A scanner that calls every leading slash a path withholds the
+        product's name from its own public page."""
+        self.assertFalse(board.leaks('the /brother door and /act'))
+        self.assertTrue(board.leaks('/usr/bin/python3'))
+        self.assertTrue(board.leaks('someone@example.com'))
 
 
 if __name__ == '__main__':

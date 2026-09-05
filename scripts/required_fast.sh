@@ -68,6 +68,7 @@ run_check "brother-run"         python3 scripts/test_brother_run.py -v
 run_check "integrate"           python3 scripts/test_integrate.py -v
 run_check "worktree-lane"       python3 scripts/test_worktree_lane.py -v
 run_check "receipt-door"        python3 scripts/test_receipt_door.py -v
+run_check "receipt-contract-v1"  python3 scripts/test_receipt_contract.py -v
 # Every persona pack, generically (enumerates scripts/packs, runs each
 # pack's own detection fixture through the real inference). 0.9s wall on
 # this machine, so it belongs in the fast slice.

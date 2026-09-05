@@ -1,0 +1,49 @@
+{
+ "work_id": "W-two-files-exist-the-second-after-the-fir",
+ "outcome": "two files exist, the second after the first",
+ "lens_inferred": null,
+ "challenge_assumption": null,
+ "pending_challenge": null,
+ "human_decision": null,
+ "rows": [
+  {
+   "id": "A1",
+   "title": "create file one",
+   "status": "DONE",
+   "depends_on": [],
+   "owns": [
+    "one.txt"
+   ],
+   "done_check": "test -f one.txt",
+   "evidence": "integrated on canonical at 031a8412d126b6b84fcc6b573f295830b65805bd; check 'test -f one.txt' exited 0. output: (the check printed nothing)",
+   "evidence_family": "",
+   "oracle_source": "",
+   "independence": "unverified",
+   "check_passed_before": false,
+   "check_exit_before": 1,
+   "files_changed_by_unit": [
+    "one.txt"
+   ]
+  },
+  {
+   "id": "A2",
+   "title": "create file two",
+   "status": "SCHEDULED",
+   "depends_on": [
+    "A1"
+   ],
+   "owns": [
+    "two.txt"
+   ],
+   "done_check": "test -f two.txt",
+   "evidence": "",
+   "evidence_family": "",
+   "oracle_source": "",
+   "independence": "unverified",
+   "check_passed_before": false,
+   "check_exit_before": 1
+  }
+ ],
+ "features": [],
+ "harness_revision": "a4f55007e4c6a0ee9183f86f9d99362bfa0ed276"
+}

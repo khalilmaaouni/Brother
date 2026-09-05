@@ -1,0 +1,459 @@
+{
+ "scope": {
+  "changed": [
+   {
+    "file": "src/field_map.json",
+    "unit": "U1",
+    "check_command": "python3 checks/check_module.py",
+    "exit_code": 0,
+    "output_location": "<run root>/docs/plan/runs/20260905T064151-\u53d6\u5f15\u5148\u30de\u30b9\u30bf\u3092\u8981\u4ef6\u3069\u304a\u308a\u306b\u79fb\u884c\u3057-\u72ec\u7acb\u7167\u5408\u3068\u65e5\u672c\u8a9e\u306e\u5f15\u304d\u7d99\u304e\u66f8\u307e\u3067\u51fa\u3059/run.log",
+    "check_passed_before": false,
+    "state": "verified",
+    "reason": ""
+   },
+   {
+    "file": "src/mdm_transform.py",
+    "unit": "U1",
+    "check_command": "python3 checks/check_module.py",
+    "exit_code": 0,
+    "output_location": "<run root>/docs/plan/runs/20260905T064151-\u53d6\u5f15\u5148\u30de\u30b9\u30bf\u3092\u8981\u4ef6\u3069\u304a\u308a\u306b\u79fb\u884c\u3057-\u72ec\u7acb\u7167\u5408\u3068\u65e5\u672c\u8a9e\u306e\u5f15\u304d\u7d99\u304e\u66f8\u307e\u3067\u51fa\u3059/run.log",
+    "check_passed_before": false,
+    "state": "verified",
+    "reason": ""
+   },
+   {
+    "file": "src/rule_book.json",
+    "unit": "U1",
+    "check_command": "python3 checks/check_module.py",
+    "exit_code": 0,
+    "output_location": "<run root>/docs/plan/runs/20260905T064151-\u53d6\u5f15\u5148\u30de\u30b9\u30bf\u3092\u8981\u4ef6\u3069\u304a\u308a\u306b\u79fb\u884c\u3057-\u72ec\u7acb\u7167\u5408\u3068\u65e5\u672c\u8a9e\u306e\u5f15\u304d\u7d99\u304e\u66f8\u307e\u3067\u51fa\u3059/run.log",
+    "check_passed_before": false,
+    "state": "verified",
+    "reason": ""
+   },
+   {
+    "file": "tests/test_mdm_transform.py",
+    "unit": "U2",
+    "check_command": "python3 checks/check_tests.py",
+    "exit_code": 0,
+    "output_location": "<run root>/docs/plan/runs/20260905T064151-\u53d6\u5f15\u5148\u30de\u30b9\u30bf\u3092\u8981\u4ef6\u3069\u304a\u308a\u306b\u79fb\u884c\u3057-\u72ec\u7acb\u7167\u5408\u3068\u65e5\u672c\u8a9e\u306e\u5f15\u304d\u7d99\u304e\u66f8\u307e\u3067\u51fa\u3059/run.log",
+    "check_passed_before": false,
+    "state": "verified",
+    "reason": ""
+   },
+   {
+    "file": "recon/reconcile.py",
+    "unit": "U3",
+    "check_command": "python3 checks/check_reconcile.py",
+    "exit_code": 0,
+    "output_location": "<run root>/docs/plan/runs/20260905T064151-\u53d6\u5f15\u5148\u30de\u30b9\u30bf\u3092\u8981\u4ef6\u3069\u304a\u308a\u306b\u79fb\u884c\u3057-\u72ec\u7acb\u7167\u5408\u3068\u65e5\u672c\u8a9e\u306e\u5f15\u304d\u7d99\u304e\u66f8\u307e\u3067\u51fa\u3059/run.log",
+    "check_passed_before": false,
+    "state": "verified",
+    "reason": ""
+   },
+   {
+    "file": "out/decisions.json",
+    "unit": "U4",
+    "check_command": "python3 checks/check_outputs.py",
+    "exit_code": 0,
+    "output_location": "<run root>/docs/plan/runs/20260905T064151-\u53d6\u5f15\u5148\u30de\u30b9\u30bf\u3092\u8981\u4ef6\u3069\u304a\u308a\u306b\u79fb\u884c\u3057-\u72ec\u7acb\u7167\u5408\u3068\u65e5\u672c\u8a9e\u306e\u5f15\u304d\u7d99\u304e\u66f8\u307e\u3067\u51fa\u3059/run.log",
+    "check_passed_before": false,
+    "state": "verified",
+    "reason": ""
+   },
+   {
+    "file": "out/golden.csv",
+    "unit": "U4",
+    "check_command": "python3 checks/check_outputs.py",
+    "exit_code": 0,
+    "output_location": "<run root>/docs/plan/runs/20260905T064151-\u53d6\u5f15\u5148\u30de\u30b9\u30bf\u3092\u8981\u4ef6\u3069\u304a\u308a\u306b\u79fb\u884c\u3057-\u72ec\u7acb\u7167\u5408\u3068\u65e5\u672c\u8a9e\u306e\u5f15\u304d\u7d99\u304e\u66f8\u307e\u3067\u51fa\u3059/run.log",
+    "check_passed_before": false,
+    "state": "verified",
+    "reason": ""
+   },
+   {
+    "file": "out/links.csv",
+    "unit": "U4",
+    "check_command": "python3 checks/check_outputs.py",
+    "exit_code": 0,
+    "output_location": "<run root>/docs/plan/runs/20260905T064151-\u53d6\u5f15\u5148\u30de\u30b9\u30bf\u3092\u8981\u4ef6\u3069\u304a\u308a\u306b\u79fb\u884c\u3057-\u72ec\u7acb\u7167\u5408\u3068\u65e5\u672c\u8a9e\u306e\u5f15\u304d\u7d99\u304e\u66f8\u307e\u3067\u51fa\u3059/run.log",
+    "check_passed_before": false,
+    "state": "verified",
+    "reason": ""
+   },
+   {
+    "file": "out/mapping.json",
+    "unit": "U4",
+    "check_command": "python3 checks/check_outputs.py",
+    "exit_code": 0,
+    "output_location": "<run root>/docs/plan/runs/20260905T064151-\u53d6\u5f15\u5148\u30de\u30b9\u30bf\u3092\u8981\u4ef6\u3069\u304a\u308a\u306b\u79fb\u884c\u3057-\u72ec\u7acb\u7167\u5408\u3068\u65e5\u672c\u8a9e\u306e\u5f15\u304d\u7d99\u304e\u66f8\u307e\u3067\u51fa\u3059/run.log",
+    "check_passed_before": false,
+    "state": "verified",
+    "reason": ""
+   },
+   {
+    "file": "out/rejects.csv",
+    "unit": "U4",
+    "check_command": "python3 checks/check_outputs.py",
+    "exit_code": 0,
+    "output_location": "<run root>/docs/plan/runs/20260905T064151-\u53d6\u5f15\u5148\u30de\u30b9\u30bf\u3092\u8981\u4ef6\u3069\u304a\u308a\u306b\u79fb\u884c\u3057-\u72ec\u7acb\u7167\u5408\u3068\u65e5\u672c\u8a9e\u306e\u5f15\u304d\u7d99\u304e\u66f8\u307e\u3067\u51fa\u3059/run.log",
+    "check_passed_before": false,
+    "state": "verified",
+    "reason": ""
+   },
+   {
+    "file": "out/source_customers.csv",
+    "unit": "U4",
+    "check_command": "python3 checks/check_outputs.py",
+    "exit_code": 0,
+    "output_location": "<run root>/docs/plan/runs/20260905T064151-\u53d6\u5f15\u5148\u30de\u30b9\u30bf\u3092\u8981\u4ef6\u3069\u304a\u308a\u306b\u79fb\u884c\u3057-\u72ec\u7acb\u7167\u5408\u3068\u65e5\u672c\u8a9e\u306e\u5f15\u304d\u7d99\u304e\u66f8\u307e\u3067\u51fa\u3059/run.log",
+    "check_passed_before": false,
+    "state": "verified",
+    "reason": ""
+   },
+   {
+    "file": "out/transactions_out.csv",
+    "unit": "U4",
+    "check_command": "python3 checks/check_outputs.py",
+    "exit_code": 0,
+    "output_location": "<run root>/docs/plan/runs/20260905T064151-\u53d6\u5f15\u5148\u30de\u30b9\u30bf\u3092\u8981\u4ef6\u3069\u304a\u308a\u306b\u79fb\u884c\u3057-\u72ec\u7acb\u7167\u5408\u3068\u65e5\u672c\u8a9e\u306e\u5f15\u304d\u7d99\u304e\u66f8\u307e\u3067\u51fa\u3059/run.log",
+    "check_passed_before": false,
+    "state": "verified",
+    "reason": ""
+   },
+   {
+    "file": "out/reconciliation.json",
+    "unit": "U5",
+    "check_command": "python3 checks/check_reconciliation.py",
+    "exit_code": 0,
+    "output_location": "<run root>/docs/plan/runs/20260905T064151-\u53d6\u5f15\u5148\u30de\u30b9\u30bf\u3092\u8981\u4ef6\u3069\u304a\u308a\u306b\u79fb\u884c\u3057-\u72ec\u7acb\u7167\u5408\u3068\u65e5\u672c\u8a9e\u306e\u5f15\u304d\u7d99\u304e\u66f8\u307e\u3067\u51fa\u3059/run.log",
+    "check_passed_before": false,
+    "state": "verified",
+    "reason": ""
+   },
+   {
+    "file": "out/handover.ja.md",
+    "unit": "U6",
+    "check_command": "python3 checks/check_handover.py",
+    "exit_code": 0,
+    "output_location": "<run root>/docs/plan/runs/20260905T064151-\u53d6\u5f15\u5148\u30de\u30b9\u30bf\u3092\u8981\u4ef6\u3069\u304a\u308a\u306b\u79fb\u884c\u3057-\u72ec\u7acb\u7167\u5408\u3068\u65e5\u672c\u8a9e\u306e\u5f15\u304d\u7d99\u304e\u66f8\u307e\u3067\u51fa\u3059/run.log",
+    "check_passed_before": false,
+    "state": "verified",
+    "reason": ""
+   }
+  ],
+  "declared_untouched": []
+ },
+ "intent": {
+  "outcome": "\u53d6\u5f15\u5148\u30de\u30b9\u30bf\u3092\u8981\u4ef6\u3069\u304a\u308a\u306b\u79fb\u884c\u3057\u3001\u72ec\u7acb\u7167\u5408\u3068\u65e5\u672c\u8a9e\u306e\u5f15\u304d\u7d99\u304e\u66f8\u307e\u3067\u51fa\u3059",
+  "units": [
+   {
+    "id": "U1",
+    "objective": "write the migration module: normalization, crosswalk, matching that links on a shared corporate number and never merges a store level customer, survivorship, effective dating, and the rule book it emits"
+   },
+   {
+    "id": "U2",
+    "objective": "write the tests for the migration module, one per sentence of the requirement"
+   },
+   {
+    "id": "U3",
+    "objective": "write the independent reconciliation script, which counts from the source files and the outputs without importing the migration module"
+   },
+   {
+    "id": "U4",
+    "objective": "run the migration with the contradictory row injected and produce the golden records, the links, the rejects, the carried transactions, the mapping and the decisions"
+   },
+   {
+    "id": "U5",
+    "objective": "reconcile the run independently and write the counts"
+   },
+   {
+    "id": "U6",
+    "objective": "write the Japanese handover another engineer can continue from"
+   }
+  ]
+ },
+ "evidence": [
+  {
+   "id": "U1",
+   "state": "verified",
+   "mark": 10.0,
+   "command": "python3 checks/check_module.py",
+   "exit_code": 0,
+   "check_passed_before": false,
+   "author": "the planning model",
+   "evidence_family": "NO-DATA",
+   "independence": "unverified",
+   "output_location": "<run root>/docs/plan/runs/20260905T064151-\u53d6\u5f15\u5148\u30de\u30b9\u30bf\u3092\u8981\u4ef6\u3069\u304a\u308a\u306b\u79fb\u884c\u3057-\u72ec\u7acb\u7167\u5408\u3068\u65e5\u672c\u8a9e\u306e\u5f15\u304d\u7d99\u304e\u66f8\u307e\u3067\u51fa\u3059/run.log",
+   "dependency_check": "no dependency declared: this check proves its own change only",
+   "why": "the recorded check exited 0 when it was re-executed at delivery, which the fixed table marks 10"
+  },
+  {
+   "id": "U2",
+   "state": "verified",
+   "mark": 10.0,
+   "command": "python3 checks/check_tests.py",
+   "exit_code": 0,
+   "check_passed_before": false,
+   "author": "the planning model",
+   "evidence_family": "NO-DATA",
+   "independence": "unverified",
+   "output_location": "<run root>/docs/plan/runs/20260905T064151-\u53d6\u5f15\u5148\u30de\u30b9\u30bf\u3092\u8981\u4ef6\u3069\u304a\u308a\u306b\u79fb\u884c\u3057-\u72ec\u7acb\u7167\u5408\u3068\u65e5\u672c\u8a9e\u306e\u5f15\u304d\u7d99\u304e\u66f8\u307e\u3067\u51fa\u3059/run.log",
+   "dependency_check": "re-run with U1's files reverted: exit 1",
+   "why": "the recorded check exited 0 when it was re-executed at delivery, which the fixed table marks 10"
+  },
+  {
+   "id": "U3",
+   "state": "verified",
+   "mark": 10.0,
+   "command": "python3 checks/check_reconcile.py",
+   "exit_code": 0,
+   "check_passed_before": false,
+   "author": "the planning model",
+   "evidence_family": "NO-DATA",
+   "independence": "unverified",
+   "output_location": "<run root>/docs/plan/runs/20260905T064151-\u53d6\u5f15\u5148\u30de\u30b9\u30bf\u3092\u8981\u4ef6\u3069\u304a\u308a\u306b\u79fb\u884c\u3057-\u72ec\u7acb\u7167\u5408\u3068\u65e5\u672c\u8a9e\u306e\u5f15\u304d\u7d99\u304e\u66f8\u307e\u3067\u51fa\u3059/run.log",
+   "dependency_check": "no dependency declared: this check proves its own change only",
+   "why": "the recorded check exited 0 when it was re-executed at delivery, which the fixed table marks 10"
+  },
+  {
+   "id": "U4",
+   "state": "verified",
+   "mark": 10.0,
+   "command": "python3 checks/check_outputs.py",
+   "exit_code": 0,
+   "check_passed_before": false,
+   "author": "the planning model",
+   "evidence_family": "NO-DATA",
+   "independence": "unverified",
+   "output_location": "<run root>/docs/plan/runs/20260905T064151-\u53d6\u5f15\u5148\u30de\u30b9\u30bf\u3092\u8981\u4ef6\u3069\u304a\u308a\u306b\u79fb\u884c\u3057-\u72ec\u7acb\u7167\u5408\u3068\u65e5\u672c\u8a9e\u306e\u5f15\u304d\u7d99\u304e\u66f8\u307e\u3067\u51fa\u3059/run.log",
+   "dependency_check": "re-run with U1's files reverted: exit 1",
+   "why": "the recorded check exited 0 when it was re-executed at delivery, which the fixed table marks 10"
+  },
+  {
+   "id": "U5",
+   "state": "verified",
+   "mark": 10.0,
+   "command": "python3 checks/check_reconciliation.py",
+   "exit_code": 0,
+   "check_passed_before": false,
+   "author": "the planning model",
+   "evidence_family": "NO-DATA",
+   "independence": "unverified",
+   "output_location": "<run root>/docs/plan/runs/20260905T064151-\u53d6\u5f15\u5148\u30de\u30b9\u30bf\u3092\u8981\u4ef6\u3069\u304a\u308a\u306b\u79fb\u884c\u3057-\u72ec\u7acb\u7167\u5408\u3068\u65e5\u672c\u8a9e\u306e\u5f15\u304d\u7d99\u304e\u66f8\u307e\u3067\u51fa\u3059/run.log",
+   "dependency_check": "re-run with U3's files reverted: exit 1; re-run with U4's files reverted: exit 1",
+   "why": "the recorded check exited 0 when it was re-executed at delivery, which the fixed table marks 10"
+  },
+  {
+   "id": "U6",
+   "state": "verified",
+   "mark": 10.0,
+   "command": "python3 checks/check_handover.py",
+   "exit_code": 0,
+   "check_passed_before": false,
+   "author": "the planning model",
+   "evidence_family": "NO-DATA",
+   "independence": "unverified",
+   "output_location": "<run root>/docs/plan/runs/20260905T064151-\u53d6\u5f15\u5148\u30de\u30b9\u30bf\u3092\u8981\u4ef6\u3069\u304a\u308a\u306b\u79fb\u884c\u3057-\u72ec\u7acb\u7167\u5408\u3068\u65e5\u672c\u8a9e\u306e\u5f15\u304d\u7d99\u304e\u66f8\u307e\u3067\u51fa\u3059/run.log",
+   "dependency_check": "re-run with U5's files reverted: exit 1",
+   "why": "the recorded check exited 0 when it was re-executed at delivery, which the fixed table marks 10"
+  }
+ ],
+ "unproven": [],
+ "repair_history": [],
+ "attention": {
+  "risk_triggers": [
+   {
+    "class": "migration",
+    "unit": "U1",
+    "words": "migration"
+   },
+   {
+    "class": "migration",
+    "unit": "U2",
+    "words": "migration"
+   },
+   {
+    "class": "migration",
+    "unit": "U3",
+    "words": "migration"
+   },
+   {
+    "class": "migration",
+    "unit": "U4",
+    "words": "migration"
+   }
+  ],
+  "unproven_units": [],
+  "reading_order": {
+   "REVIEW FIRST": [],
+   "LOW-RISK MECHANICAL": [
+    {
+     "path": "src/field_map.json",
+     "unit": "U1",
+     "why": "no risk class in the path, and the check that decided it exited 0"
+    },
+    {
+     "path": "src/mdm_transform.py",
+     "unit": "U1",
+     "why": "no risk class in the path, and the check that decided it exited 0"
+    },
+    {
+     "path": "src/rule_book.json",
+     "unit": "U1",
+     "why": "no risk class in the path, and the check that decided it exited 0"
+    },
+    {
+     "path": "tests/test_mdm_transform.py",
+     "unit": "U2",
+     "why": "no risk class in the path, and the check that decided it exited 0"
+    },
+    {
+     "path": "recon/reconcile.py",
+     "unit": "U3",
+     "why": "no risk class in the path, and the check that decided it exited 0"
+    },
+    {
+     "path": "out/decisions.json",
+     "unit": "U4",
+     "why": "no risk class in the path, and the check that decided it exited 0"
+    },
+    {
+     "path": "out/golden.csv",
+     "unit": "U4",
+     "why": "no risk class in the path, and the check that decided it exited 0"
+    },
+    {
+     "path": "out/links.csv",
+     "unit": "U4",
+     "why": "no risk class in the path, and the check that decided it exited 0"
+    },
+    {
+     "path": "out/mapping.json",
+     "unit": "U4",
+     "why": "no risk class in the path, and the check that decided it exited 0"
+    },
+    {
+     "path": "out/rejects.csv",
+     "unit": "U4",
+     "why": "no risk class in the path, and the check that decided it exited 0"
+    },
+    {
+     "path": "out/source_customers.csv",
+     "unit": "U4",
+     "why": "no risk class in the path, and the check that decided it exited 0"
+    },
+    {
+     "path": "out/transactions_out.csv",
+     "unit": "U4",
+     "why": "no risk class in the path, and the check that decided it exited 0"
+    },
+    {
+     "path": "out/reconciliation.json",
+     "unit": "U5",
+     "why": "no risk class in the path, and the check that decided it exited 0"
+    },
+    {
+     "path": "out/handover.ja.md",
+     "unit": "U6",
+     "why": "no risk class in the path, and the check that decided it exited 0"
+    }
+   ],
+   "NOT PROVEN": [],
+   "NO NEED TO RE-READ": []
+  },
+  "cognitive_debt": {
+   "count": 0,
+   "signals": []
+  }
+ },
+ "containment": {
+  "boundary_crossings": [],
+  "undeclared_scope_units": [],
+  "contained": true
+ },
+ "continuity": {
+  "capsule": {
+   "run_dir": "<run root>/docs/plan/runs/20260905T064151-\u53d6\u5f15\u5148\u30de\u30b9\u30bf\u3092\u8981\u4ef6\u3069\u304a\u308a\u306b\u79fb\u884c\u3057-\u72ec\u7acb\u7167\u5408\u3068\u65e5\u672c\u8a9e\u306e\u5f15\u304d\u7d99\u304e\u66f8\u307e\u3067\u51fa\u3059",
+   "objective": "\u53d6\u5f15\u5148\u30de\u30b9\u30bf\u3092\u8981\u4ef6\u3069\u304a\u308a\u306b\u79fb\u884c\u3057\u3001\u72ec\u7acb\u7167\u5408\u3068\u65e5\u672c\u8a9e\u306e\u5f15\u304d\u7d99\u304e\u66f8\u307e\u3067\u51fa\u3059",
+   "canonical_revision": "ee7153c18d6f9b979b833bc42d421e036b7773b4",
+   "environment": {
+    "runs_root": "<run root>",
+    "target_cwd": "<scenario repo>",
+    "slots": 2,
+    "model_adapter": "the product's own worker adapter"
+   },
+   "units": [
+    {
+     "id": "U1",
+     "title": "write the migration module: normalization, crosswalk, matching that links on a shared corporate number and never merges a store level customer, survivorship, effective dating, and the rule book it emits",
+     "bucket": "integrated",
+     "claim_state": "not-started",
+     "attempt": null,
+     "detail": ""
+    },
+    {
+     "id": "U2",
+     "title": "write the tests for the migration module, one per sentence of the requirement",
+     "bucket": "integrated",
+     "claim_state": "not-started",
+     "attempt": null,
+     "detail": ""
+    },
+    {
+     "id": "U3",
+     "title": "write the independent reconciliation script, which counts from the source files and the outputs without importing the migration module",
+     "bucket": "integrated",
+     "claim_state": "not-started",
+     "attempt": null,
+     "detail": ""
+    },
+    {
+     "id": "U4",
+     "title": "run the migration with the contradictory row injected and produce the golden records, the links, the rejects, the carried transactions, the mapping and the decisions",
+     "bucket": "integrated",
+     "claim_state": "not-started",
+     "attempt": null,
+     "detail": ""
+    },
+    {
+     "id": "U5",
+     "title": "reconcile the run independently and write the counts",
+     "bucket": "integrated",
+     "claim_state": "not-started",
+     "attempt": null,
+     "detail": ""
+    },
+    {
+     "id": "U6",
+     "title": "write the Japanese handover another engineer can continue from",
+     "bucket": "integrated",
+     "claim_state": "not-started",
+     "attempt": null,
+     "detail": ""
+    }
+   ],
+   "buckets": {
+    "integrated": [
+     "U1",
+     "U2",
+     "U3",
+     "U4",
+     "U5",
+     "U6"
+    ],
+    "active": [],
+    "pending": [],
+    "abandoned": [],
+    "unclear": []
+   },
+   "next_action": "done: every unit in this run is integrated; nothing is left to resume"
+  },
+  "problem": "",
+  "target_revision": "NO-DATA",
+  "env_lock": "NO-DATA"
+ },
+ "harness_version": "v3.4.2-3570-ga4f55007-dirty",
+ "harness_revision": "a4f55007e4c6a0ee9183f86f9d99362bfa0ed276",
+ "report": "brother_run: delivery report for '\u53d6\u5f15\u5148\u30de\u30b9\u30bf\u3092\u8981\u4ef6\u3069\u304a\u308a\u306b\u79fb\u884c\u3057\u3001\u72ec\u7acb\u7167\u5408\u3068\u65e5\u672c\u8a9e\u306e\u5f15\u304d\u7d99\u304e\u66f8\u307e\u3067\u51fa\u3059'\n  work_id: W-\u53d6\u5f15\u5148\u30de\u30b9\u30bf\u3092\u8981\u4ef6\u3069\u304a\u308a\u306b\u79fb\u884c\u3057\u72ec\u7acb\u7167\u5408\u3068\u65e5\u672c\u8a9e\u306e\u5f15\u304d\u7d99\u304e\u66f8\u307e\u3067\u51fa\u3059\n  canonical revision before: e6352fd6457a6117a1455bc71dfc84f1530fc901\n  canonical revision after:  ee7153c18d6f9b979b833bc42d421e036b7773b4\n  files changed (14): out/decisions.json, out/golden.csv, out/handover.ja.md, out/links.csv, out/mapping.json, out/reconciliation.json, out/rejects.csv, out/source_customers.csv, out/transactions_out.csv, recon/reconcile.py, src/field_map.json, src/mdm_transform.py, src/rule_book.json, tests/test_mdm_transform.py\n  integrated (6):\n    U1         verified by: python3 checks/check_module.py\n    U2         verified by: python3 checks/check_tests.py\n    U3         verified by: python3 checks/check_reconcile.py\n    U4         verified by: python3 checks/check_outputs.py\n    U5         verified by: python3 checks/check_reconciliation.py\n    U6         verified by: python3 checks/check_handover.py\n  refused (0):\n\n  what this run proved, one line per piece of work:\n    U1 delivered: the check python3 checks/check_module.py was run and exited 0 (no dependency declared: this check proves its own change only), and its full output is in <run root>/docs/plan/runs/20260905T064151-\u53d6\u5f15\u5148\u30de\u30b9\u30bf\u3092\u8981\u4ef6\u3069\u304a\u308a\u306b\u79fb\u884c\u3057-\u72ec\u7acb\u7167\u5408\u3068\u65e5\u672c\u8a9e\u306e\u5f15\u304d\u7d99\u304e\u66f8\u307e\u3067\u51fa\u3059/run.log. Evidence family NO-DATA, oracle NO-DATA, independence unverified. Target revision ee7153c18d6f9b979b833bc42d421e036b7773b4, environment lock NO-DATA: none of requirements.txt, uv.lock, poetry.lock, environment.yml exist in the target, data identity NO-DATA: this unit declares no data_inputs. Check written by the planning model, harness a4f55007e4c6 (private hub revision). verdict: PASS\n    U2 delivered: the check python3 checks/check_tests.py was run and exited 0 (re-run with U1's files reverted: exit 1), and its full output is in <run root>/docs/plan/runs/20260905T064151-\u53d6\u5f15\u5148\u30de\u30b9\u30bf\u3092\u8981\u4ef6\u3069\u304a\u308a\u306b\u79fb\u884c\u3057-\u72ec\u7acb\u7167\u5408\u3068\u65e5\u672c\u8a9e\u306e\u5f15\u304d\u7d99\u304e\u66f8\u307e\u3067\u51fa\u3059/run.log. Evidence family NO-DATA, oracle NO-DATA, independence unverified. Target revision ee7153c18d6f9b979b833bc42d421e036b7773b4, environment lock NO-DATA: none of requirements.txt, uv.lock, poetry.lock, environment.yml exist in the target, data identity NO-DATA: this unit declares no data_inputs. Check written by the planning model, harness a4f55007e4c6 (private hub revision). verdict: PASS\n    U3 delivered: the check python3 checks/check_reconcile.py was run and exited 0 (no dependency declared: this check proves its own change only), and its full output is in <run root>/docs/plan/runs/20260905T064151-\u53d6\u5f15\u5148\u30de\u30b9\u30bf\u3092\u8981\u4ef6\u3069\u304a\u308a\u306b\u79fb\u884c\u3057-\u72ec\u7acb\u7167\u5408\u3068\u65e5\u672c\u8a9e\u306e\u5f15\u304d\u7d99\u304e\u66f8\u307e\u3067\u51fa\u3059/run.log. Evidence family NO-DATA, oracle NO-DATA, independence unverified. Target revision ee7153c18d6f9b979b833bc42d421e036b7773b4, environment lock NO-DATA: none of requirements.txt, uv.lock, poetry.lock, environment.yml exist in the target, data identity NO-DATA: this unit declares no data_inputs. Check written by the planning model, harness a4f55007e4c6 (private hub revision). verdict: PASS\n    U4 delivered: the check python3 checks/check_outputs.py was run and exited 0 (re-run with U1's files reverted: exit 1), and its full output is in <run root>/docs/plan/runs/20260905T064151-\u53d6\u5f15\u5148\u30de\u30b9\u30bf\u3092\u8981\u4ef6\u3069\u304a\u308a\u306b\u79fb\u884c\u3057-\u72ec\u7acb\u7167\u5408\u3068\u65e5\u672c\u8a9e\u306e\u5f15\u304d\u7d99\u304e\u66f8\u307e\u3067\u51fa\u3059/run.log. Evidence family NO-DATA, oracle NO-DATA, independence unverified. Target revision ee7153c18d6f9b979b833bc42d421e036b7773b4, environment lock NO-DATA: none of requirements.txt, uv.lock, poetry.lock, environment.yml exist in the target, data identity NO-DATA: this unit declares no data_inputs. Check written by the planning model, harness a4f55007e4c6 (private hub revision). verdict: PASS\n    U5 delivered: the check python3 checks/check_reconciliation.py was run and exited 0 (re-run with U3's files reverted: exit 1; re-run with U4's files reverted: exit 1), and its full output is in <run root>/docs/plan/runs/20260905T064151-\u53d6\u5f15\u5148\u30de\u30b9\u30bf\u3092\u8981\u4ef6\u3069\u304a\u308a\u306b\u79fb\u884c\u3057-\u72ec\u7acb\u7167\u5408\u3068\u65e5\u672c\u8a9e\u306e\u5f15\u304d\u7d99\u304e\u66f8\u307e\u3067\u51fa\u3059/run.log. Evidence family NO-DATA, oracle NO-DATA, independence unverified. Target revision ee7153c18d6f9b979b833bc42d421e036b7773b4, environment lock NO-DATA: none of requirements.txt, uv.lock, poetry.lock, environment.yml exist in the target, data identity NO-DATA: this unit declares no data_inputs. Check written by the planning model, harness a4f55007e4c6 (private hub revision). verdict: PASS\n    U6 delivered: the check python3 checks/check_handover.py was run and exited 0 (re-run with U5's files reverted: exit 1), and its full output is in <run root>/docs/plan/runs/20260905T064151-\u53d6\u5f15\u5148\u30de\u30b9\u30bf\u3092\u8981\u4ef6\u3069\u304a\u308a\u306b\u79fb\u884c\u3057-\u72ec\u7acb\u7167\u5408\u3068\u65e5\u672c\u8a9e\u306e\u5f15\u304d\u7d99\u304e\u66f8\u307e\u3067\u51fa\u3059/run.log. Evidence family NO-DATA, oracle NO-DATA, independence unverified. Target revision ee7153c18d6f9b979b833bc42d421e036b7773b4, environment lock NO-DATA: none of requirements.txt, uv.lock, poetry.lock, environment.yml exist in the target, data identity NO-DATA: this unit declares no data_inputs. Check written by the planning model, harness a4f55007e4c6 (private hub revision). verdict: PASS\n\n  exit 0 means no check failed. It does not mean everything is proven: only the checks named above ran, and a check nobody wrote cannot fail.\n\n  price (said before the run):\n    model_sessions: 7\n    previous_runs_measured: 0\n    wall_clock_seconds_expected: NO-DATA: no earlier run against this target left a measured wall clock, and none is guessed\n    wall_clock_seconds_range: NO-DATA: nothing measured to take a range from\n\n  cost:\n    tokens_in: NO-DATA: no worker in this run recorded tokens_in; the adapter at <brother checkout>/products/brothermode/tools/bm_worker_spawn.py forwards usage, so the worker's own answer carried none: a model command whose stdout is not the claude CLI's --output-format json object (a stub, another CLI) reports no token counts\n    tokens_out: NO-DATA: no worker in this run recorded tokens_out; the adapter at <brother checkout>/products/brothermode/tools/bm_worker_spawn.py forwards usage, so the worker's own answer carried none: a model command whose stdout is not the claude CLI's --output-format json object (a stub, another CLI) reports no token counts\n    tokens_cached: NO-DATA: no worker in this run recorded tokens_cached; the adapter at <brother checkout>/products/brothermode/tools/bm_worker_spawn.py forwards usage, so the worker's own answer carried none: a model command whose stdout is not the claude CLI's --output-format json object (a stub, another CLI) reports no token counts\n    tokens_cache_write: NO-DATA: no worker in this run recorded tokens_cache_write; the adapter at <brother checkout>/products/brothermode/tools/bm_worker_spawn.py forwards usage, so the worker's own answer carried none: a model command whose stdout is not the claude CLI's --output-format json object (a stub, another CLI) reports no token counts\n    turns: 6\n    wall_clock_seconds: 10.812395\n    cache_hit_rate: NO-DATA: cannot compute a cache hit rate without real tokens_in and tokens_cached, which this run did not record; the adapter at <brother checkout>/products/brothermode/tools/bm_worker_spawn.py forwards usage, so the worker's own answer carried none: a model command whose stdout is not the claude CLI's --output-format json object (a stub, another CLI) reports no token counts\n    failure_category: none\n    harness_version: v3.4.2-3570-ga4f55007-dirty\n    harness_revision: a4f55007e4c6a0ee9183f86f9d99362bfa0ed276\n\n  verdicts: 6 PASS, 0 FAIL, 0 NO-DATA\n  your acceptance screen: <run root>/docs/plan/runs/20260905T064151-\u53d6\u5f15\u5148\u30de\u30b9\u30bf\u3092\u8981\u4ef6\u3069\u304a\u308a\u306b\u79fb\u884c\u3057-\u72ec\u7acb\u7167\u5408\u3068\u65e5\u672c\u8a9e\u306e\u5f15\u304d\u7d99\u304e\u66f8\u307e\u3067\u51fa\u3059/screens/acceptance-screen.html\n  release screen: <run root>/docs/plan/runs/20260905T064151-\u53d6\u5f15\u5148\u30de\u30b9\u30bf\u3092\u8981\u4ef6\u3069\u304a\u308a\u306b\u79fb\u884c\u3057-\u72ec\u7acb\u7167\u5408\u3068\u65e5\u672c\u8a9e\u306e\u5f15\u304d\u7d99\u304e\u66f8\u307e\u3067\u51fa\u3059/screens/release-screen.html\n  the receipt for this delivery, in eight answers:\n    What changed? 14 file(s) changed by 6 unit(s): out/decisions.json, out/golden.csv, out/handover.ja.md, out/links.csv, out/mapping.json, out/reconciliation.json, out/rejects.csv, out/source_customers.csv, out/transactions_out.csv, recon/reconcile.py, src/field_map.json, src/mdm_transform.py, src/rule_book.json, tests/test_mdm_transform.py. 0 declared path(s) were left untouched on purpose: none\n    Why was this run made? \u53d6\u5f15\u5148\u30de\u30b9\u30bf\u3092\u8981\u4ef6\u3069\u304a\u308a\u306b\u79fb\u884c\u3057\u3001\u72ec\u7acb\u7167\u5408\u3068\u65e5\u672c\u8a9e\u306e\u5f15\u304d\u7d99\u304e\u66f8\u307e\u3067\u51fa\u3059. The units asked for: U1 (write the migration module: normalization, crosswalk, matching that links on a shared corporate number and never merges a store level customer, survivorship, effective dating, and the rule book it emits); U2 (write the tests for the migration module, one per sentence of the requirement); U3 (write the independent reconciliation script, which counts from the source files and the outputs without importing the migration module); U4 (run the migration with the contradictory row injected and produce the golden records, the links, the rejects, the carried transactions, the mapping and the decisions); U5 (reconcile the run independently and write the counts); U6 (write the Japanese handover another engineer can continue from)\n    What proves it? 6 unit(s) proved by their own re-executed check: U1 ran 'python3 checks/check_module.py', exit 0, author the planning model, family NO-DATA, independence unverified; U2 ran 'python3 checks/check_tests.py', exit 0, author the planning model, family NO-DATA, independence unverified; U3 ran 'python3 checks/check_reconcile.py', exit 0, author the planning model, family NO-DATA, independence unverified; U4 ran 'python3 checks/check_outputs.py', exit 0, author the planning model, family NO-DATA, independence unverified; U5 ran 'python3 checks/check_reconciliation.py', exit 0, author the planning model, family NO-DATA, independence unverified; U6 ran 'python3 checks/check_handover.py', exit 0, author the planning model, family NO-DATA, independence unverified\n    What does not have proof? every unit of this run carries proof; nothing is unproven\n    What failed and was repaired? nothing in this run needed a second attempt or a rewritten check\n    What should I inspect first? risk classes named by the units themselves: migration (unit U1, on the words: migration); migration (unit U2, on the words: migration); migration (unit U3, on the words: migration); migration (unit U4, on the words: migration). Units without proof, worth a first look by definition: none\n    Was the run contained? yes: every changed file sits inside the scope the unit that changed it declared\n    Can I reproduce this, or continue it? the run's own capsule is on disk, target revision NO-DATA, environment lock NO-DATA, integrated units: U1, U2, U3, U4, U5, U6\n    Which engine version ran this? git describe of the engine's own checkout: v3.4.2-3570-ga4f55007-dirty\n    Which exact engine commit ran this? the exact commit of the engine that ran this: a4f55007e4c6a0ee9183f86f9d99362bfa0ed276\n    the page: <run root>/docs/plan/runs/20260905T064151-\u53d6\u5f15\u5148\u30de\u30b9\u30bf\u3092\u8981\u4ef6\u3069\u304a\u308a\u306b\u79fb\u884c\u3057-\u72ec\u7acb\u7167\u5408\u3068\u65e5\u672c\u8a9e\u306e\u5f15\u304d\u7d99\u304e\u66f8\u307e\u3067\u51fa\u3059/screens/delivery-receipt.html"
+}

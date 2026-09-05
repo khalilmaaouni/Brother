@@ -1,0 +1,630 @@
+{
+  "contract_version": "1.1",
+  "source_document": "docs/plan/DELIVERY-RECEIPT-V1.md",
+  "frozen_fields": [
+    {
+      "path": "scope",
+      "type": "object",
+      "required": true,
+      "cardinality": "single",
+      "question": "2"
+    },
+    {
+      "path": "scope.changed",
+      "type": "array",
+      "required": true,
+      "cardinality": "single",
+      "question": "2"
+    },
+    {
+      "path": "scope.changed[].file",
+      "type": "string",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "2"
+    },
+    {
+      "path": "scope.changed[].unit",
+      "type": "string",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "2"
+    },
+    {
+      "path": "scope.changed[].check_command",
+      "type": "string",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "4"
+    },
+    {
+      "path": "scope.changed[].exit_code",
+      "type": "integer or null",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "4"
+    },
+    {
+      "path": "scope.changed[].output_location",
+      "type": "string",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "4"
+    },
+    {
+      "path": "scope.changed[].check_passed_before",
+      "type": "boolean or null",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "5"
+    },
+    {
+      "path": "scope.changed[].state",
+      "type": "string",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "7"
+    },
+    {
+      "path": "scope.changed[].reason",
+      "type": "string",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "7"
+    },
+    {
+      "path": "scope.declared_untouched",
+      "type": "array",
+      "required": true,
+      "cardinality": "single",
+      "question": "3"
+    },
+    {
+      "path": "intent",
+      "type": "object",
+      "required": true,
+      "cardinality": "single",
+      "question": "1"
+    },
+    {
+      "path": "intent.outcome",
+      "type": "string",
+      "required": true,
+      "cardinality": "single",
+      "question": "1"
+    },
+    {
+      "path": "intent.units",
+      "type": "array",
+      "required": true,
+      "cardinality": "single",
+      "question": "1"
+    },
+    {
+      "path": "intent.units[].id",
+      "type": "string",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "1"
+    },
+    {
+      "path": "intent.units[].objective",
+      "type": "string",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "1"
+    },
+    {
+      "path": "evidence",
+      "type": "array",
+      "required": true,
+      "cardinality": "single",
+      "question": "4"
+    },
+    {
+      "path": "evidence[].id",
+      "type": "string",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "4"
+    },
+    {
+      "path": "evidence[].state",
+      "type": "string",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "4"
+    },
+    {
+      "path": "evidence[].mark",
+      "type": "number or null",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "4"
+    },
+    {
+      "path": "evidence[].command",
+      "type": "string",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "4"
+    },
+    {
+      "path": "evidence[].exit_code",
+      "type": "integer or null",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "4"
+    },
+    {
+      "path": "evidence[].check_passed_before",
+      "type": "boolean or null",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "5"
+    },
+    {
+      "path": "evidence[].author",
+      "type": "string",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "9"
+    },
+    {
+      "path": "evidence[].evidence_family",
+      "type": "string",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "4"
+    },
+    {
+      "path": "evidence[].independence",
+      "type": "string",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "4"
+    },
+    {
+      "path": "evidence[].output_location",
+      "type": "string",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "4"
+    },
+    {
+      "path": "evidence[].why",
+      "type": "string",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "4"
+    },
+    {
+      "path": "evidence[].dependency_check",
+      "type": "string",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "6"
+    },
+    {
+      "path": "unproven",
+      "type": "array",
+      "required": true,
+      "cardinality": "single",
+      "question": "7"
+    },
+    {
+      "path": "unproven[].id",
+      "type": "string",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "7"
+    },
+    {
+      "path": "unproven[].state",
+      "type": "string",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "7"
+    },
+    {
+      "path": "unproven[].mark",
+      "type": "number or null",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "7"
+    },
+    {
+      "path": "unproven[].command",
+      "type": "string",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "7"
+    },
+    {
+      "path": "unproven[].exit_code",
+      "type": "integer or null",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "7"
+    },
+    {
+      "path": "unproven[].check_passed_before",
+      "type": "boolean or null",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "5"
+    },
+    {
+      "path": "unproven[].author",
+      "type": "string",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "9"
+    },
+    {
+      "path": "unproven[].evidence_family",
+      "type": "string",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "7"
+    },
+    {
+      "path": "unproven[].independence",
+      "type": "string",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "7"
+    },
+    {
+      "path": "unproven[].output_location",
+      "type": "string",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "7"
+    },
+    {
+      "path": "unproven[].why",
+      "type": "string",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "7"
+    },
+    {
+      "path": "unproven[].reason",
+      "type": "string",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "7"
+    },
+    {
+      "path": "unproven[].dependency_check",
+      "type": "string",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "6"
+    },
+    {
+      "path": "repair_history",
+      "type": "array",
+      "required": true,
+      "cardinality": "single",
+      "question": "7"
+    },
+    {
+      "path": "attention",
+      "type": "object",
+      "required": true,
+      "cardinality": "single",
+      "question": "11"
+    },
+    {
+      "path": "attention.risk_triggers",
+      "type": "array",
+      "required": true,
+      "cardinality": "single",
+      "question": "11"
+    },
+    {
+      "path": "attention.risk_triggers[].class",
+      "type": "string",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "11"
+    },
+    {
+      "path": "attention.risk_triggers[].unit",
+      "type": "string",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "11"
+    },
+    {
+      "path": "attention.risk_triggers[].words",
+      "type": "array",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "11"
+    },
+    {
+      "path": "attention.unproven_units",
+      "type": "array",
+      "required": true,
+      "cardinality": "single",
+      "question": "7"
+    },
+    {
+      "path": "attention.reading_order",
+      "type": "object",
+      "required": true,
+      "cardinality": "single",
+      "question": "11"
+    },
+    {
+      "path": "attention.reading_order.REVIEW FIRST",
+      "type": "array",
+      "required": true,
+      "cardinality": "single",
+      "question": "11"
+    },
+    {
+      "path": "attention.reading_order.NOT PROVEN",
+      "type": "array",
+      "required": true,
+      "cardinality": "single",
+      "question": "11"
+    },
+    {
+      "path": "attention.reading_order.LOW-RISK MECHANICAL",
+      "type": "array",
+      "required": true,
+      "cardinality": "single",
+      "question": "11"
+    },
+    {
+      "path": "attention.reading_order.NO NEED TO RE-READ",
+      "type": "array",
+      "required": true,
+      "cardinality": "single",
+      "question": "11"
+    },
+    {
+      "path": "attention.cognitive_debt",
+      "type": "object",
+      "required": true,
+      "cardinality": "single",
+      "question": "11"
+    },
+    {
+      "path": "attention.cognitive_debt.count",
+      "type": "integer",
+      "required": true,
+      "cardinality": "single",
+      "question": "11"
+    },
+    {
+      "path": "attention.cognitive_debt.signals",
+      "type": "array",
+      "required": true,
+      "cardinality": "single",
+      "question": "11"
+    },
+    {
+      "path": "attention.review",
+      "type": "object",
+      "required": true,
+      "cardinality": "single",
+      "question": "12"
+    },
+    {
+      "path": "attention.review.pass_state",
+      "type": "string",
+      "required": true,
+      "cardinality": "single",
+      "question": "12"
+    },
+    {
+      "path": "attention.review.units_reviewed",
+      "type": "array",
+      "required": true,
+      "cardinality": "single",
+      "question": "12"
+    },
+    {
+      "path": "attention.review.units_reviewed[].unit",
+      "type": "string",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "12"
+    },
+    {
+      "path": "attention.review.units_reviewed[].tier",
+      "type": "string",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "12"
+    },
+    {
+      "path": "attention.review.units_reviewed[].class",
+      "type": "string",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "12"
+    },
+    {
+      "path": "attention.review.units_reviewed[].reviewer",
+      "type": "string",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "12"
+    },
+    {
+      "path": "attention.review.units_reviewed[].unmeasured_classes",
+      "type": "array",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "12"
+    },
+    {
+      "path": "attention.review.findings",
+      "type": "array",
+      "required": true,
+      "cardinality": "single",
+      "question": "12"
+    },
+    {
+      "path": "attention.review.findings[].id",
+      "type": "string",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "12"
+    },
+    {
+      "path": "attention.review.findings[].unit",
+      "type": "string",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "12"
+    },
+    {
+      "path": "attention.review.findings[].file",
+      "type": "string",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "12"
+    },
+    {
+      "path": "attention.review.findings[].reviewer",
+      "type": "string",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "12"
+    },
+    {
+      "path": "attention.review.findings[].severity",
+      "type": "string",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "12"
+    },
+    {
+      "path": "attention.review.findings[].failure",
+      "type": "string",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "12"
+    },
+    {
+      "path": "attention.review.findings[].check_command",
+      "type": "string",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "12"
+    },
+    {
+      "path": "attention.review.findings[].check_exit_code",
+      "type": "integer or null",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "12"
+    },
+    {
+      "path": "attention.review.findings[].state",
+      "type": "string",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "12"
+    },
+    {
+      "path": "attention.review.findings[].repaired",
+      "type": "boolean or null",
+      "required": true,
+      "cardinality": "per_element",
+      "question": "12"
+    },
+    {
+      "path": "containment",
+      "type": "object",
+      "required": true,
+      "cardinality": "single",
+      "question": "8"
+    },
+    {
+      "path": "containment.boundary_crossings",
+      "type": "array",
+      "required": true,
+      "cardinality": "single",
+      "question": "8"
+    },
+    {
+      "path": "containment.undeclared_scope_units",
+      "type": "array",
+      "required": true,
+      "cardinality": "single",
+      "question": "8"
+    },
+    {
+      "path": "containment.contained",
+      "type": "boolean",
+      "required": true,
+      "cardinality": "single",
+      "question": "8"
+    },
+    {
+      "path": "continuity",
+      "type": "object",
+      "required": true,
+      "cardinality": "single",
+      "question": "1"
+    },
+    {
+      "path": "continuity.capsule",
+      "type": "object or null",
+      "required": true,
+      "cardinality": "single",
+      "question": "1"
+    },
+    {
+      "path": "continuity.problem",
+      "type": "string",
+      "required": true,
+      "cardinality": "single",
+      "question": "1"
+    },
+    {
+      "path": "continuity.target_revision",
+      "type": "string",
+      "required": true,
+      "cardinality": "single",
+      "question": "1"
+    },
+    {
+      "path": "continuity.env_lock",
+      "type": "string",
+      "required": true,
+      "cardinality": "single",
+      "question": "1"
+    },
+    {
+      "path": "harness_version",
+      "type": "string",
+      "required": true,
+      "cardinality": "single",
+      "question": "10"
+    },
+    {
+      "path": "harness_revision",
+      "type": "string",
+      "required": true,
+      "cardinality": "single",
+      "question": "10"
+    },
+    {
+      "path": "report",
+      "type": "string",
+      "required": true,
+      "cardinality": "single",
+      "question": "1"
+    }
+  ],
+  "$comment": "Delivery Receipt v1 contract, frozen field list. Generated from the field table in docs/plan/DELIVERY-RECEIPT-V1.md (row S8). This list grows, never shrinks: a later contract version may append a field to frozen_fields, never remove or retype one already here. scripts/test_receipt_contract.py checks this file against the document and against a real generated receipt."
+}

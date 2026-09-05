@@ -1,0 +1,5 @@
+parent_customer_id,child_customer_id,relation_type,effective_from,effective_to,basis
+C001,C002,CORPORATE_STORE,2019-04-01,,shared_houjin_bangou_and_parent_link
+C001,C003,CORPORATE_STORE,2018-06-01,2025-03-31,shared_houjin_bangou_and_parent_link
+C001,C007,CORPORATE_STORE,2025-04-01,,shared_houjin_bangou_and_parent_link
+C004,C005,CORPORATE_STORE,2020-09-01,,shared_houjin_bangou_and_parent_link

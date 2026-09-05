@@ -80,6 +80,14 @@ docs/how-to/USE-THE-VAULT.md
 # records under docs/deliveries and the toy run in the README has one
 # there. Both scanned clean of private terms before adding.
 docs/CHARTER.md
+# Added 2026-09-05, required-fast row: docs/CHARTER.md itself names
+# `docs/MERGE-PLAN.md` as the record of the founder's 2026-08-22 decisions,
+# and a fresh public clone had no such file to open. Read in full before
+# adding: it names Khalil Maaouni (the one personal exception the privacy
+# law allows) and BrotherDS's private client engagements only in the
+# abstract, no client name, no machine path, no team member. Scanned clean
+# of every private term before adding.
+docs/MERGE-PLAN.md
 # Added 2026-09-04 with the .agents line above: the Codex package's own
 # documentation (the package shape decision and the hook mapping's per-event
 # NO-DATA table). A dual-client install that ships the manifest but not the
@@ -103,6 +111,32 @@ docs/plan/BATTERY-EXPECTATIONS.json
 # README proof suite test_brother_run_continue.py imports it, and the 1.0.3
 # tag attempt was refused because the export did not carry it.
 docs/plan/CAPABILITY-AREAS.json
+# Added 2026-09-05, required-fast row: scripts/test_version_truth.py reads
+# this file as one of the places a shipped version string must repeat the
+# manifest's own number, and its own content says it IS the exported public
+# variant of the private PROJECT.md, so its absence was an oversight, not a
+# choice. Scanned clean of every private term before adding.
+docs/plan/PROJECT.public.md
+# Added 2026-09-05, required-fast row (E47's own regression): docs/CHARTER.md
+# names this file as the architecture of record and tests/test_surface.py's
+# TestCoordinationIsCurrent opens it in a fresh clone; it was written to be
+# read back off the tree as it stands (see its own opening lines), unlike
+# its longer sibling under products/brothermode/docs/plan/, which is the
+# private deciding record with the founder's own words, effort tables and a
+# private archive path, and stays withheld (see scripts/charter_paths.py's
+# GENERIC exemption for that path). Scanned clean of every private term
+# before adding.
+docs/plan/ADR-2026-08-23-one-brother-repository.md
+# Added 2026-09-05, row S30: the public dated roadmap page. It is NOT the hub
+# board (READINESS-BOARD.html, which stays private and is not listed): it is a
+# second page written by the same generator under --public, which reads a
+# declared field list (gen_readiness_board.PUBLIC_ROW_FIELDS) and nothing
+# else, so evidence bodies, resume points, owner session ids and machine paths
+# are absent because they were never read rather than because a scan caught
+# them. Regenerate with `python3 scripts/gen_readiness_board.py --public`; the
+# battery's roadmap-public-clean check refuses a build that carries a machine
+# path or an at-sign address.
+docs/plan/ROADMAP-PUBLIC.html
 # E80, 2026-09-04: this file itself. An external release integrity trial on
 # the public v1.0.1 clone found scripts/export_public.py and
 # scripts/reproduce_export.py both refusing at once, because load_allowlist()
@@ -449,3 +483,5 @@ products/brothersbe/docs/guides/05-a-worked-engagement.md
 # The teaching numbers manifest scripts/test_receipt_door.py copies into a
 # temp root; the README names that suite as its own proof, and v1.0.2's
 # first tag attempt was refused because the export tree did not carry it.
+docs/plan/DELIVERY-RECEIPT-V1.md
+docs/plan/delivery-receipt-v1.schema.json

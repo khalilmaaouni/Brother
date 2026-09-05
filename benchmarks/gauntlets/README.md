@@ -16,7 +16,7 @@ about the scope, and a Reproduce section whose commands run as written.
 
 | File | Gauntlet | State |
 |---|---|---|
-| `delegation-truth.json` | Delegation Truth (20.1) | SPECIFIED, NOT YET RUN |
+| `delegation-truth.json` | Delegation Truth (20.1) | SPECIFIED, RUN (`scripts/gauntlet_delegation_truth.py`) |
 | `long-horizon-recovery.json` | Long-Horizon Recovery (20.2) | SPECIFIED, NOT YET RUN |
 | `acceptance-compression.json` | Acceptance Compression (20.3) | SPECIFIED, NOT YET RUN |
 | `memory-recurrence.json` | Memory Recurrence (20.4) | SPECIFIED, NOT YET RUN |
@@ -50,8 +50,14 @@ scored, which nothing on this estate does.
 A gauntlet run is a sequence of rounds, one per workload family the spec names,
 and it is driven by hand and recorded as it happens, the way
 `docs/plan/HEAD-TO-HEAD-PROTOCOL-2026-08-30.md` drove the head-to-head rounds.
-There is no runner script yet, and inventing one before a first run would be
-guessing at the shape.
+Four of the five have no runner script, and inventing one before a first
+run would be guessing at the shape. The exception is Delegation Truth,
+which has one: `scripts/gauntlet_delegation_truth.py` (row S9) seeds its
+cases as throwaway repositories, runs the estate's own door on each one
+and reports a false-green rate with a dated record under
+`benchmarks/results/`. Its seeded-condition arms are automated; the
+hand-driven rounds below still govern the rival comparison, which no
+script here runs.
 
 1. Freeze first. Read the spec. The task instruction and the scoring rubric are
    already in it and must not be edited from here on. A rubric edited after a

@@ -12,9 +12,17 @@ claim rather than a control:
     carries the input, the question and the allowed answers in the seed's own
     canonical order, and never the expected answer as a field, never the
     rationale, and never the critical flag,
+  * EVERY PROMPT CARRIES THE DECISION VOCABULARY, verbatim and identical to
+    the block quoted in benchmarks/jbeq/README.md, so a wrong answer means bad
+    master data judgement rather than a guess at what a label means,
   * a perfect answer file scores 70 of 70 and exits 0,
   * one critical case answered with a merge prints JBEQ-MDM NOT READY and
     exits 1,
+  * a critical case answered wrong WITHOUT a merge still prints NOT READY, is
+    counted by `critical wrong` and NOT by `critical false merges`, which is
+    the defect the two lines exist to separate,
+  * a critical wrong that chose a more cautious label is counted by
+    `conservative wrongs`, and a less cautious one is not,
   * an answer file that answers nothing exits 3, because NO-DATA is never a
     pass.
 """
@@ -44,6 +52,8 @@ except ImportError:
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPT = os.path.join(REPO, "scripts", "jbeq_mdm.py")
 SEED_PATH = os.path.join(REPO, "benchmarks", "jbeq", "mdm", "seed-2026-09-05.json")
+README_PATH = os.path.join(REPO, "benchmarks", "jbeq", "README.md")
+PROMPTS_PATH = os.path.join(REPO, "benchmarks", "jbeq", "mdm", "prompts")
 
 EXPECTED_MIX = {
     "entity-object": 10,
@@ -148,6 +158,38 @@ class Prompts(unittest.TestCase):
             self.assertIn(case["input"], text, case["id"])
             self.assertIn(case["question"], text, case["id"])
 
+    def test_the_decision_vocabulary_reaches_every_prompt_verbatim(self):
+        code, out = run("prompts", self.out)
+        self.assertEqual(code, 0, out)
+        for case in self.seed["cases"]:
+            with open(os.path.join(self.out, "%s.md" % case["id"]),
+                      encoding="utf-8") as fh:
+                text = fh.read()
+            self.assertIn(jbeq_mdm.VOCABULARY_HEADING, text, case["id"])
+            self.assertIn(jbeq_mdm.VOCABULARY, text,
+                          "%s: the vocabulary block is not verbatim" % case["id"])
+            for label in jbeq_mdm.CAUTION_RANK:
+                self.assertIn(label, text, "%s: %s undefined" % (case["id"], label))
+
+    def test_the_readme_quotes_the_same_vocabulary_block(self):
+        with open(README_PATH, encoding="utf-8") as fh:
+            readme = fh.read()
+        self.assertIn(jbeq_mdm.VOCABULARY, readme,
+                      "the README and the prompt template have drifted apart")
+
+    def test_the_committed_prompts_are_in_step_with_the_seed(self):
+        code, out = run("prompts", self.out)
+        self.assertEqual(code, 0, out)
+        for case in self.seed["cases"]:
+            name = "%s.md" % case["id"]
+            with open(os.path.join(self.out, name), encoding="utf-8") as fh:
+                fresh = fh.read()
+            with open(os.path.join(PROMPTS_PATH, name), encoding="utf-8") as fh:
+                committed = fh.read()
+            self.assertEqual(committed, fresh,
+                             "%s: benchmarks/jbeq/mdm/prompts is stale, "
+                             "regenerate it" % name)
+
 
 class Scoring(unittest.TestCase):
     def setUp(self):
@@ -170,6 +212,8 @@ class Scoring(unittest.TestCase):
         self.assertIn("JBEQ-MDM SEED: 70 of 70", out)
         n_critical = sum(1 for c in self.seed["cases"] if c["critical"])
         self.assertIn("critical false merges: 0 of %d" % n_critical, out)
+        self.assertIn("critical wrong: 0 of %d" % n_critical, out)
+        self.assertIn("conservative wrongs: 0", out)
         self.assertNotIn("NOT READY", out)
         for track, total in EXPECTED_MIX.items():
             self.assertIn("%s %d of %d" % (track.ljust(20), total, total), out)
@@ -185,9 +229,53 @@ class Scoring(unittest.TestCase):
         self.assertEqual(code, 1, out)
         self.assertIn("JBEQ-MDM NOT READY", out)
         self.assertIn("critical false merges: 1 of", out)
+        self.assertIn("critical wrong: 1 of", out)
         self.assertIn("FALSE MERGE", out)
         self.assertIn(victim["id"], out)
         self.assertNotIn("JBEQ-MDM SEED:", out)
+
+    def test_a_critical_wrong_that_is_not_a_merge_is_counted_apart(self):
+        """The defect the two lines exist to separate.
+
+        Before 2026-09-05 the scorer printed every critical wrong under the
+        heading `critical false merges`, so a run with nine non-merge wrongs
+        read as nine false merges. This drives that backwards.
+        """
+        answers = {c["id"]: c["expected"] for c in self.seed["cases"]}
+        victim = next(c for c in self.seed["cases"]
+                      if c["critical"] and c["expected"] == "REJECT MATCH")
+        answers[victim["id"]] = "KEEP SEPARATE"
+        path = self._write(answers)
+        code, out = run("score", path)
+        self.assertEqual(code, 1, out)
+        self.assertIn("JBEQ-MDM NOT READY", out)
+        self.assertIn("critical false merges: 0 of", out)
+        self.assertIn("critical wrong: 1 of", out)
+        self.assertIn(victim["id"], out)
+        self.assertNotIn("FALSE MERGE", out)
+
+    def test_a_more_cautious_wrong_answer_is_named_conservative(self):
+        answers = {c["id"]: c["expected"] for c in self.seed["cases"]}
+        cautious = next(c for c in self.seed["cases"]
+                        if c["critical"] and c["expected"] == "LINK AS RELATED")
+        answers[cautious["id"]] = "KEEP SEPARATE"
+        path = self._write(answers)
+        code, out = run("score", path)
+        self.assertEqual(code, 1, out)
+        self.assertIn("conservative wrongs: 1 (%s)" % cautious["id"], out)
+        self.assertIn("CONSERVATIVE", out)
+
+    def test_a_less_cautious_wrong_answer_is_not_named_conservative(self):
+        answers = {c["id"]: c["expected"] for c in self.seed["cases"]}
+        reckless = next(c for c in self.seed["cases"]
+                        if c["critical"] and c["expected"] == "KEEP SEPARATE")
+        answers[reckless["id"]] = "LINK AS RELATED"
+        path = self._write(answers)
+        code, out = run("score", path)
+        self.assertEqual(code, 1, out)
+        self.assertIn("critical wrong: 1 of", out)
+        self.assertIn("conservative wrongs: 0", out)
+        self.assertNotIn("CONSERVATIVE", out)
 
     def test_a_non_critical_case_answered_wrong_still_scores(self):
         answers = {c["id"]: c["expected"] for c in self.seed["cases"]}

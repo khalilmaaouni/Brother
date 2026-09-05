@@ -1,0 +1,13 @@
+1788556959.235 STARTED long-horizon-recovery morning partial run
+1788556959.495 built throwaway git repository at <THROWAWAY_REPO>
+1788556959.497 launch: <PYTHON3> <BROTHER_SCRIPTS>/brother_run.py two files exist, the second after the first --cwd <THROWAWAY_REPO> --runs-root <SCRATCH_ROOT>
+1788556959.505 pid=46598 pgid=46598
+1788556959.900 run_dir=<KILLED_RUN_DIR>
+1788556963.082 A1 reached DONE: first integration performed
+1788556963.162 A2 claimed: {"attempt": 1, "claimed_at": 1788556963.1517582, "expires_at": 1788558163.1517582, "hostname": "<HOSTNAME>", "owner": "brother-run-46598", "pid": 46598, "reclaimed_from": null, "state": "claimed", "unit_id": "A2", "work_id": "", "worker_id": "brother-run-46598/A2/1"}
+1788556963.166 captured canonical state (claims, store, receipts, integration record) before interruption: <DRIVER_WORK_DIR>/canonical_state_before_kill
+1788556963.166 INJECTING INTERRUPTION per long-horizon-recovery.json seeded_conditions_note: 'a crash is a SIGKILL of the whole run's process group, the shape docs/plan/runs/live-autonomous-adversity-2026-09-04/ already drove' -- SIGKILL pgid=46598 pid=46598
+1788556963.171 kill issued and process group reaped at 1788556963.171 (elapsed 0.005s since kill)
+1788556963.171 A2 claim state after kill: {"attempt": 1, "claimed_at": 1788556963.1517582, "expires_at": 1788558163.1517582, "hostname": "<HOSTNAME>", "owner": "brother-run-46598", "pid": 46598, "reclaimed_from": null, "state": "claimed", "unit_id": "A2", "work_id": "", "worker_id": "brother-run-46598/A2/1"}
+1788556963.319 continuity capsule captured after the kill (exit=0) -> <DRIVER_WORK_DIR>/continuity_capsule_after_kill.json
+1788556963.446 DONE: driver finished, result written to <DRIVER_WORK_DIR>/result.json

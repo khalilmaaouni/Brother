@@ -43,6 +43,29 @@ string and never the code.
 FAILS OPEN. Any malformed payload, unreadable state file, or unexpected
 exception exits 0 and lets the work proceed. A guard that breaks a session
 because its own state file is corrupt is worse than no guard.
+
+THE EXIT_CODE SEAM, found 2026-09-05 (lane E53, PR 279, measured). Of
+86,907 outcomes this hook had recorded on this machine, 84,659 carried
+exit_code None and 2,248 carried 0; not one carried a nonzero value,
+ever. Bash's own tool_response rarely if ever supplies exit_code
+(confirmed against real session transcripts, whose stored toolUseResult
+for a Bash call carries only interrupted/isImage/noOutputExpected plus
+stdout/stderr, no exit code field), and the OLD verdict_of() defaulted a
+missing exit_code straight to success (`rec.get("success") is not
+False`, true whenever "success" was never stored either, which was
+always, since post() computed it and then never wrote it to disk). A
+command that genuinely failed, reported no exit_code, and set no success
+flag was recorded as a pass and could never trip the counter: skeptical
+memory with nothing to be skeptical about. Fixed by storing the raw
+success/timed_out fields the harness DOES sometimes supply, and, when
+none of exit_code/success/timed_out say anything, scanning stdout/stderr
+for a known failure signature the way scripts/attempt_hook.py already
+does for the sibling attempt-ledger hook. A signature match is recorded
+as a failure; no match is recorded as UNKNOWN (exit_code stays None, and
+the row says so) rather than guessed as either a pass or a fail. pre()'s
+counting loop treats UNKNOWN as a no-op: it neither resets a real
+failure streak (unlike an actual success) nor extends one (unlike an
+actual failure).
 """
 import hashlib
 import json
@@ -89,7 +112,8 @@ def state_path(session_id):
 
 
 def verdict_of(rec):
-    """Re-derive success from the RAW fields, never from the stored `ok`.
+    """True (passed), False (failed), or None (genuinely unknown) --
+    re-derived from the RAW fields, never from the stored `ok`.
 
     WHY THIS EXISTS, 2026-08-25. The exit_code defect recorded every successful
     Edit, Write and NotebookEdit as a failure, and fixing the classifier did NOT
@@ -110,9 +134,15 @@ def verdict_of(rec):
     code = rec.get("exit_code")
     if rec.get("timed_out"):
         return False
-    if code is None:
-        return rec.get("success") is not False
-    return code == 0
+    if code is not None:
+        return code == 0
+    if rec.get("success") is False:
+        return False
+    if rec.get("success") is True:
+        return True
+    if rec.get("inferred_fail"):
+        return False
+    return None  # genuinely unknown: never a false pass, never a false fail
 
 
 def read_attempts(path, sig):
@@ -171,10 +201,14 @@ def pre(payload):
         # verdict_of, never a.get("ok"): the stored verdict may have been
         # computed by the defective classifier, and re-deriving it here is what
         # releases a signature that fix alone could not.
-        if verdict_of(a):
+        v = verdict_of(a)
+        if v is True:
             fails = []
-        else:
+        elif v is False:
             fails.append(a)
+        # v is None: a genuinely unknown outcome, skipped -- it must not
+        # mask a real failure streak the way a false success would, and it
+        # must not count against the caller the way a false failure would.
 
     if len(fails) >= MAX_ATTEMPTS:
         last = fails[-1]
@@ -211,12 +245,46 @@ def pre(payload):
     return 0
 
 
+# The output failure signatures, checked only when exit_code and success
+# are both absent (see THE EXIT_CODE SEAM in the module docstring). Plain
+# substrings, plus one regex for the "exit <N>" shape (N held to 1-255, a
+# real exit status range, so "exit 0" or a paragraph ending in a big
+# number never matches). Mirrors scripts/attempt_hook.py's own list.
+_OUTPUT_FAIL_SIGNATURES = (
+    "command not found", "No such file or directory", "fatal:", "FAILED",
+    "Error:", "error:", "ModuleNotFoundError", "SyntaxError", "AssertionError",
+)
+_EXIT_N_RE = re.compile(r"\bexit\b.*\b(\d{1,3})\s*$")
+_TAIL_LINES = 20
+
+
+def _infer_failure_line(resp):
+    """The most recent failure-shaped line among the last _TAIL_LINES
+    non-blank lines of stdout+stderr, or None when nothing matches. Only
+    consulted when exit_code and success are both absent -- see THE
+    EXIT_CODE SEAM in the module docstring for why that is the common
+    case rather than the rare one."""
+    text = str(resp.get("stdout") or "") + "\n" + str(resp.get("stderr") or "")
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    for line in reversed(lines[-_TAIL_LINES:]):
+        if line.startswith("Traceback"):
+            return line[:300]
+        if any(sig in line for sig in _OUTPUT_FAIL_SIGNATURES):
+            return line[:300]
+        m = _EXIT_N_RE.search(line)
+        if m and 1 <= int(m.group(1)) <= 255:
+            return line[:300]
+    return None
+
+
 def post(payload):
     sig, shown = signature(payload.get("tool_name", ""), payload.get("tool_input") or {})
     resp = payload.get("tool_response")
     if not isinstance(resp, dict):
         return 0  # nothing to learn from a shape we do not recognise
     code = resp.get("exit_code")
+    timed_out = bool(resp.get("timed_out"))
+    success = resp.get("success")
     # FAIL OPEN WHEN THERE IS NO EXIT CODE. `exit_code` is a Bash concept: the
     # Edit, Write and NotebookEdit tools this hook is ALSO registered on return
     # no such field, so `(None == 0)` scored every one of their SUCCESSES as a
@@ -229,16 +297,28 @@ def post(payload):
     # unrecognised shape is allowed, never counted against the caller. A tool
     # that reports failure some other way is handled by the explicit checks
     # below rather than by an absent field meaning "broken".
-    if code is None:
-        ok = not resp.get("timed_out") and resp.get("success") is not False
+    inferred_line = None
+    if code is None and success not in (True, False):
+        inferred_line = _infer_failure_line(resp)
+    if timed_out:
+        ok, note = False, (resp.get("stderr") or "")[:500]
+    elif code is not None:
+        ok, note = (code == 0), (resp.get("stderr") or "")[:500]
+    elif success is not None:
+        ok, note = bool(success), (resp.get("stderr") or "")[:500]
+    elif inferred_line is not None:
+        ok, note = False, "inferred: " + inferred_line
     else:
-        ok = (code == 0) and not resp.get("timed_out")
+        ok, note = None, "no exit code and no failure signature in output"
     record(state_path(payload.get("session_id")), {
         "sig": sig,
         "approach": shown,
-        "ok": bool(ok),
+        "ok": ok,
         "exit_code": code,
-        "err": (resp.get("stderr") or "")[:500],
+        "timed_out": timed_out,
+        "success": success,
+        "inferred_fail": inferred_line is not None,
+        "err": note,
     })
     return 0
 

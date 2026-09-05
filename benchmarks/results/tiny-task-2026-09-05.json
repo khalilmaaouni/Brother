@@ -1,0 +1,85 @@
+{
+ "cases": [
+  {
+   "case": "docs",
+   "exit_code": 0,
+   "files_written_in_repo": [
+    "NOTES.md"
+   ],
+   "files_written_in_runs_root": [
+    "docs/plan/runs/20260905T072645-the-notes-file-carries-the-one-line-it-i/W-the-notes-file-carries-the-one-line-it-i.json",
+    "docs/plan/runs/20260905T072645-the-notes-file-carries-the-one-line-it-i/attempts/D1-33a123e5/attempt-1/claim.json",
+    "docs/plan/runs/20260905T072645-the-notes-file-carries-the-one-line-it-i/attempts/D1-33a123e5/attempt-1/engine_output.txt",
+    "docs/plan/runs/20260905T072645-the-notes-file-carries-the-one-line-it-i/attempts/D1-33a123e5/attempt-1/tree_state.txt",
+    "docs/plan/runs/20260905T072645-the-notes-file-carries-the-one-line-it-i/capsule.json",
+    "docs/plan/runs/20260905T072645-the-notes-file-carries-the-one-line-it-i/claims.json",
+    "docs/plan/runs/20260905T072645-the-notes-file-carries-the-one-line-it-i/journal.jsonl",
+    "docs/plan/runs/20260905T072645-the-notes-file-carries-the-one-line-it-i/receipt/receipt.json",
+    "docs/plan/runs/20260905T072645-the-notes-file-carries-the-one-line-it-i/run.log",
+    "docs/plan/runs/20260905T072645-the-notes-file-carries-the-one-line-it-i/screens/acceptance-screen.html",
+    "docs/plan/runs/20260905T072645-the-notes-file-carries-the-one-line-it-i/screens/acceptance-screen.json",
+    "docs/plan/runs/20260905T072645-the-notes-file-carries-the-one-line-it-i/screens/delivery-receipt.html",
+    "docs/plan/runs/20260905T072645-the-notes-file-carries-the-one-line-it-i/screens/delivery-receipt.json",
+    "docs/plan/runs/20260905T072645-the-notes-file-carries-the-one-line-it-i/screens/intent-screen.html",
+    "docs/plan/runs/20260905T072645-the-notes-file-carries-the-one-line-it-i/screens/intent-screen.json",
+    "docs/plan/runs/20260905T072645-the-notes-file-carries-the-one-line-it-i/target.json"
+   ],
+   "first_worker_log_line": 24,
+   "outcome": "the notes file carries the one line it is missing",
+   "price_line_number": 12,
+   "price_paragraph": "Price, before anything is claimed or run: this run opens 2 model session(s), one to plan the work and one for each of the 1 piece(s) of work in the plan. This plan holds one piece of work, so the run already skips what a larger one pays for: no dependency round, no reviewer unless the piece crosses a risk boundary, and no release screen. It still runs the planning pass, deliberately. The expected wall clock reads NO-DATA: no earlier run against this target left a measured one, and this estate will not invent a duration. What it has timed, elsewhere and with an instrument named beside each figure: a genuinely tiny task driven through this same entry point cost the engine itself under 5 seconds of wall clock (scripts/tiny_task_cost.py), and the one tiny task ever timed end to end against a real model took 568.03 seconds on 2026-09-04, nearly all of it the model answering rather than this code. Neither figure is a prediction for this run: they are what the wait has been. What the same edit would cost you by hand is not measured here, and nothing below claims to beat it: the run proves what it does.",
+   "price_said_up_front": true,
+   "price_states_a_wait": "quoted from a timed run elsewhere",
+   "user_step_commands": [
+    "python3 scripts/brother_run.py \"the notes file carries the one line it is missing\" --cwd <repo> --runs-root <runs>"
+   ],
+   "user_steps": 1,
+   "verdict": "PASS",
+   "wall_clock_note": "the ENGINE only: both model calls are stubbed at the DOOR_MODEL_CMD and MODEL_WORKER_CMD seam, so model latency is NO-DATA here and this figure is never the wait a person with a real model pays",
+   "wall_clock_seconds": 3.39
+  },
+  {
+   "case": "code",
+   "exit_code": 0,
+   "files_written_in_repo": [
+    "widget.py"
+   ],
+   "files_written_in_runs_root": [
+    "docs/plan/runs/20260905T072649-the-existing-widget-test-passes/W-the-existing-widget-test-passes.json",
+    "docs/plan/runs/20260905T072649-the-existing-widget-test-passes/attempts/C1-ab861dc1/attempt-1/claim.json",
+    "docs/plan/runs/20260905T072649-the-existing-widget-test-passes/attempts/C1-ab861dc1/attempt-1/engine_output.txt",
+    "docs/plan/runs/20260905T072649-the-existing-widget-test-passes/attempts/C1-ab861dc1/attempt-1/tree_state.txt",
+    "docs/plan/runs/20260905T072649-the-existing-widget-test-passes/capsule.json",
+    "docs/plan/runs/20260905T072649-the-existing-widget-test-passes/claims.json",
+    "docs/plan/runs/20260905T072649-the-existing-widget-test-passes/journal.jsonl",
+    "docs/plan/runs/20260905T072649-the-existing-widget-test-passes/receipt/receipt.json",
+    "docs/plan/runs/20260905T072649-the-existing-widget-test-passes/run.log",
+    "docs/plan/runs/20260905T072649-the-existing-widget-test-passes/screens/acceptance-screen.html",
+    "docs/plan/runs/20260905T072649-the-existing-widget-test-passes/screens/acceptance-screen.json",
+    "docs/plan/runs/20260905T072649-the-existing-widget-test-passes/screens/delivery-receipt.html",
+    "docs/plan/runs/20260905T072649-the-existing-widget-test-passes/screens/delivery-receipt.json",
+    "docs/plan/runs/20260905T072649-the-existing-widget-test-passes/screens/intent-screen.html",
+    "docs/plan/runs/20260905T072649-the-existing-widget-test-passes/screens/intent-screen.json",
+    "docs/plan/runs/20260905T072649-the-existing-widget-test-passes/target.json"
+   ],
+   "first_worker_log_line": 24,
+   "outcome": "the existing widget test passes",
+   "price_line_number": 12,
+   "price_paragraph": "Price, before anything is claimed or run: this run opens 2 model session(s), one to plan the work and one for each of the 1 piece(s) of work in the plan. This plan holds one piece of work, so the run already skips what a larger one pays for: no dependency round, no reviewer unless the piece crosses a risk boundary, and no release screen. It still runs the planning pass, deliberately. The expected wall clock reads NO-DATA: no earlier run against this target left a measured one, and this estate will not invent a duration. What it has timed, elsewhere and with an instrument named beside each figure: a genuinely tiny task driven through this same entry point cost the engine itself under 5 seconds of wall clock (scripts/tiny_task_cost.py), and the one tiny task ever timed end to end against a real model took 568.03 seconds on 2026-09-04, nearly all of it the model answering rather than this code. Neither figure is a prediction for this run: they are what the wait has been. What the same edit would cost you by hand is not measured here, and nothing below claims to beat it: the run proves what it does.",
+   "price_said_up_front": true,
+   "price_states_a_wait": "quoted from a timed run elsewhere",
+   "seeded_test_failed_before": true,
+   "user_step_commands": [
+    "python3 scripts/brother_run.py \"the existing widget test passes\" --cwd <repo> --runs-root <runs>"
+   ],
+   "user_steps": 1,
+   "verdict": "PASS",
+   "wall_clock_note": "the ENGINE only: both model calls are stubbed at the DOOR_MODEL_CMD and MODEL_WORKER_CMD seam, so model latency is NO-DATA here and this figure is never the wait a person with a real model pays",
+   "wall_clock_seconds": 3.86
+  }
+ ],
+ "driven": "scripts/brother_run.py, one command per case, the stub model seam scripts/product_acceptance.py uses",
+ "instrument": "scripts/tiny_task_cost.py",
+ "limits": "model latency is NO-DATA under the stub seam. The only measurement of a real tiny task's wall clock this estate holds is the t7 report of 2026-09-04, 568.03s, quoted in README.md's limits section.",
+ "measured_at": "2026-09-05T07:26:53+0900"
+}

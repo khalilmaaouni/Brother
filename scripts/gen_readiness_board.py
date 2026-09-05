@@ -17,19 +17,97 @@ Exit 0 on a successful render. Exit 2 when the roadmap file cannot be read or is
 not valid JSON, which is NO-DATA: nothing was rendered and that is never a pass.
 
 PRODUCER: this module is the sole producer of docs/plan/READINESS-BOARD.html.
-main() (line 926) is the only writer: it does the actual open(OUTPUT, 'w',
-encoding='utf-8') plus fh.write(render(doc)) at lines 942-943.
+main() is the only writer: it does the actual open(OUTPUT, 'w',
+encoding='utf-8') plus fh.write(render(doc)).
+
+It is also the sole producer of docs/plan/ROADMAP-PUBLIC.html, the PUBLIC
+dated roadmap page (row S30), written only by public_build() under --public.
+That page is a different object, not this one filtered: it reads
+PUBLIC_ROW_FIELDS and nothing else, so evidence bodies, resume points, owner
+session ids and machine paths are absent because they were never read.
 """
 import html
 import json
 import board_status as BS
 import parity_gate as PG
 import os
+import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SOURCE = os.path.join(ROOT, 'docs', 'plan', 'READINESS-ROADMAP-2026-08-29.json')
 OUTPUT = os.path.join(ROOT, 'docs', 'plan', 'READINESS-BOARD.html')
+
+# THE PUBLIC PAGE (row S30). The board above is a hub object: it prints
+# evidence bodies, owner session ids, resume points and the paths a run wrote
+# on one machine. None of that may reach a public clone, so the public page is
+# not that page with a filter bolted on. It is built from a DECLARED FIELD SET,
+# so a field nobody listed is absent because it was never read, not because a
+# scan happened to catch it. Adding a private field to a row can therefore
+# never leak it here; only editing PUBLIC_ROW_FIELDS can.
+PUBLIC_OUTPUT = os.path.join(ROOT, 'docs', 'plan', 'ROADMAP-PUBLIC.html')
+
+#: The only row fields the public page reads. 'evidence', 'resume_from',
+#: 'owner', 'watchdog_verify', 'detail' and 'why_now' are deliberately absent:
+#: evidence bodies quote run directories, owner is a session id, and
+#: watchdog_verify is a command line against one checkout.
+PUBLIC_ROW_FIELDS = ('id', 'title', 'status', 'gate', 'horizon',
+                     'done_check', 'delivered_at', 'promised_at')
+
+#: A MACHINE PATH is home anchored, or rooted at a directory a real filesystem
+#: has. A bare /word with no second segment is NOT a path: '/brother' and
+#: '/act' are this product's own command names and appear in row titles, so
+#: treating every leading slash as a path would withhold the product's name
+#: for itself. The second segment is optional only for the named roots, which
+#: is why '/tmp' hits and '/brother' does not.
+MACHINE_PATH = re.compile(
+    r"~/[^\s,;:)\]\"']*"
+    r"|/(?:Users|home|var|tmp|private|opt|usr|etc|Volumes|Applications)"
+    r"(?:/[^\s,;:)\]\"']*)?",
+    re.IGNORECASE)
+
+#: An at-sign address. Contact details are private content under the estate's
+#: privacy law even when the name attached to them is the founder's own.
+AT_ADDRESS = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+
+
+def leaks(text):
+    """True when a string carries a machine path or an at-sign address.
+
+    Deliberately returns a BOOLEAN and never the match. Every caller here
+    reports by row id, because a report that quotes the hit publishes the
+    exact string the scan exists to keep off a public page, usually into a
+    log somebody later pastes somewhere.
+    """
+    s = str(text or '')
+    return bool(MACHINE_PATH.search(s) or AT_ADDRESS.search(s))
+
+
+def why_leak_rows(doc):
+    """Row ids whose `why` carries a machine path or an at-sign address.
+
+    The `why` prose is the one public field written for a reader rather than
+    for a checker, so it is the one most likely to reach for the evidence file
+    that settled the point. Scanned across the WHOLE roadmap and answered
+    all-or-nothing: a page that prints `why` for most rows and silently drops
+    it for a few reads as if those rows had no reason, which is worse than a
+    page that never promised the column.
+    """
+    return sorted(str(r.get('id')) for r in doc.get('rows', [])
+                  if leaks(r.get('why')))
+
+
+def public_field(row, name):
+    """One carried field, or None when it carries a machine path or address.
+
+    WITHHELD, never redacted. A redactor rewrites the string it does not
+    understand and ships the rest, so it leaks exactly the form nobody thought
+    of; dropping the whole field cannot leak that field at all.
+    """
+    if name not in PUBLIC_ROW_FIELDS:
+        raise KeyError('%r is not a public row field' % (name,))
+    value = row.get(name)
+    return None if leaks(value) else value
 
 # Status vocabulary is CLOSED. A status outside it is reported by name rather
 # than rendered as a default colour, because a silently defaulted status reads
@@ -765,6 +843,150 @@ def render(doc):
     return '\n'.join(parts)
 
 
+
+# The public page's own sections. A row's SECTION is its horizon, which is how
+# the hub board already groups them; 'near' and rows with no horizon get named
+# buckets rather than being dropped, because a row that vanishes from a public
+# page reads as work that was never planned.
+PUBLIC_HORIZONS = (('immediate', 'Immediate'),
+                   ('days', 'Days'),
+                   ('near', 'Near term'),
+                   ('weeks', 'Weeks'),
+                   ('months', 'Months'),
+                   (None, 'Unscheduled'))
+
+WITHHELD = ('withheld: this text names a path on the machine it was written '
+            'on, which does not belong on a public page')
+
+
+def public_section(row):
+    """The section heading a row belongs under, by horizon."""
+    h = row.get('horizon')
+    known = [k for k, _ in PUBLIC_HORIZONS if k is not None]
+    return h if h in known else None
+
+
+def render_public(doc):
+    """The public dated roadmap page.
+
+    Reads PUBLIC_ROW_FIELDS and nothing else, so the private half of a row is
+    absent by construction rather than by filtering. Returns HTML; writing it
+    is main()'s job, and main() re-scans this output before it writes.
+    """
+    rows = doc.get('rows', [])
+    gates = {g.get('id'): g for g in doc.get('gates', [])}
+    cnt = counts(doc)
+    total = len(rows)
+    done = cnt.get('DONE', 0)
+    carry_why = not why_leak_rows(doc)
+
+    parts = []
+    parts.append('<title>Brother Roadmap</title>')
+    parts.append(STYLE)
+    parts.append('<div class="wrap">')
+    parts.append('<p class="eyebrow">Brother &middot; public roadmap</p>')
+    parts.append('<h1>What is done, what is next, and how each row closes</h1>')
+    lede = doc.get('readiness_definition', '')
+    parts.append('<p class="lede">%s</p>' % e('' if leaks(lede) else lede))
+    parts.append('<p class="stamp">Generated by <code>python3 scripts/'
+                 'gen_readiness_board.py --public</code> from the same roadmap '
+                 'record the team works from, measured %s. Never hand edited. '
+                 'Each row shows its own done-check: the command that has to '
+                 'run, after the last edit, before the row may tick.</p>'
+                 % e(doc.get('measured_at')))
+    parts.append('<p class="note small">This page carries a row\'s id, title, '
+                 'status, gate, section, done-check and dates. It does not '
+                 'carry evidence bodies, resume points, owner session ids or '
+                 'any path on the machine the work ran on: those are read from '
+                 'fields this page never opens.%s</p>'
+                 % ('' if carry_why else
+                    ' The reason column is withheld from every row on this '
+                    'build, because the scan found at least one reason naming a '
+                    'file path on one machine.'))
+
+    parts.append('<div class="strip">')
+    parts.append('<div><span class="v">%d/%d</span><span class="l">rows done'
+                 '</span></div>' % (done, total))
+    for k in ('IN-FLIGHT', 'OPEN'):
+        if cnt.get(k):
+            parts.append('<div><span class="v">%d</span><span class="l">%s'
+                         '</span></div>' % (cnt[k], e(k.lower())))
+    parts.append('</div>')
+
+    # THE COUNTED BARS, the same ones the hub board shows, from the same
+    # producer. A row that says DONE and carries no evidence is excluded from
+    # these bars by board_status itself, so the public number can never be
+    # higher than the private one.
+    parts.append('<section class="progress">')
+    parts.append('<h2>What is actually done</h2>')
+    parts.append('<p class="note">%s</p>'
+                 % e('Counted, never asserted. A thing counts as done only '
+                     'when it says done AND carries evidence in the record. '
+                     'Anything claiming done without evidence is excluded '
+                     'from these bars.'))
+    for sec in BS.sections(doc):
+        c, pct = sec['counts'], sec['percent']
+        parts.append('<div class="pgrow">')
+        parts.append('<div class="pglab">%s</div>' % e(sec['label']))
+        parts.append('<div class="pgtrack"><div class="pgfill" '
+                     'style="width:%.1f%%"></div></div>'
+                     % (0 if pct is None else pct))
+        parts.append('<div class="pgnum">%s</div>'
+                     % (e(BS.NODATA) if pct is None else '%.0f%%' % pct))
+        parts.append('<div class="pgmeta">%d done &middot; %d in flight '
+                     '&middot; %d open</div>'
+                     % (c['done'], c['in_flight'], c['open']))
+        parts.append('</div>')
+    parts.append('</section>')
+
+    by_section = {}
+    for r in rows:
+        by_section.setdefault(public_section(r), []).append(r)
+    for key, label in PUBLIC_HORIZONS:
+        group = sorted(by_section.get(key, []),
+                       key=lambda x: (x.get('wave') or 0, str(x.get('id'))))
+        if not group:
+            continue
+        parts.append('<h2>%s &middot; %d row(s)</h2>' % (e(label), len(group)))
+        for r in group:
+            cls = STATUS_CLASS.get(r.get('status'), 'st-nodata')
+            gate_id = public_field(r, 'gate')
+            gate = gates.get(gate_id) or {}
+            parts.append('<div class="card">')
+            parts.append('<div class="chead"><span class="cid">%s</span>'
+                         '<span class="tag %s">%s</span>'
+                         '<span class="gate">%s %s</span></div>'
+                         % (e(public_field(r, 'id')), cls,
+                            e(r.get('status')), e(gate_id or ''),
+                            e('' if leaks(gate.get('title'))
+                              else gate.get('title', ''))))
+            title = public_field(r, 'title')
+            parts.append('<h4>%s</h4>' % e(WITHHELD if title is None else title))
+            if carry_why:
+                parts.append('<p class="detail">%s</p>' % e(r.get('why', '')))
+            dcheck = public_field(r, 'done_check')
+            parts.append('<div class="dc"><b>Done-check</b>%s</div>'
+                         % e(WITHHELD if dcheck is None else dcheck))
+            promised = public_field(r, 'promised_at') or ''
+            delivered = public_field(r, 'delivered_at')
+            when = []
+            if promised:
+                when.append('due %s' % promised.replace('T', ' ')[:16])
+            if delivered:
+                when.append('delivered %s' % delivered.replace('T', ' ')[:16])
+            parts.append('<div class="bar-meta"><span class="gate">%s</span>'
+                         '<span class="when">%s</span></div>'
+                         % (e(label), e(', '.join(when) or 'no date recorded')))
+            parts.append('</div>')
+
+    parts.append('<p class="stamp">Tick contract, verbatim: a box ticks ONLY '
+                 'when its done-check ran after the last edit and the output is '
+                 'quoted beside it. Percentages are counts of records, never '
+                 'impressions.</p>')
+    parts.append('</div>')
+    return '\n'.join(parts)
+
+
 STYLE = """<style>
 :root{--paper:#F7F8F6;--raised:#FFF;--ink:#141B22;--soft:#4A5763;--faint:#7C8894;
 --petrol:#0E7A6F;--psoft:#E3F0EE;--rule:#DDE3E1;--rsoft:#EAEEEC;--fail:#A32C22;
@@ -946,6 +1168,59 @@ details.wbs.undec>summary{color:var(--fail)}
 </style>"""
 
 
+def public_build(doc, check=False):
+    """Build (or, with check=True, only verify) the public roadmap page.
+
+    Two verdicts, and the second is the one that matters: the page is
+    assembled from PUBLIC_ROW_FIELDS only, and then the ASSEMBLED HTML is
+    scanned again before anything is written. A construction that is correct
+    still gets checked, because the field list is the thing a future edit will
+    widen, and the check is what makes widening it visible.
+
+    Refuses (exit 1) rather than writing a page that carries a machine path or
+    an at-sign address, naming the offending row ids and never their text.
+    """
+    why_hits = why_leak_rows(doc)
+    if why_hits:
+        # REFUSED, and said out loud rather than dropped quietly. The reason
+        # column is not written for ANY row on this build. The row ids are
+        # named so they can be fixed; the offending text never is.
+        print('readiness-board: REFUSED the reason column on the public page: '
+              '%d row(s) name a machine path or an address in `why`: %s'
+              % (len(why_hits), ', '.join(why_hits)), file=sys.stderr)
+
+    page = render_public(doc)
+    if leaks(page):
+        # Defence in depth: a carried field slipped a form the field-level
+        # scan did not catch. Nothing is written, and the rows whose carried
+        # text is responsible are named.
+        blame = sorted(str(r.get('id')) for r in doc.get('rows', [])
+                       if any(leaks(r.get(f)) for f in PUBLIC_ROW_FIELDS))
+        print('readiness-board: FAIL: the rendered public page carries a '
+              'machine path or an address; nothing written. Row(s) whose '
+              'carried fields are responsible: %s'
+              % (', '.join(blame) or 'none, so the leak is in page furniture'),
+              file=sys.stderr)
+        return 1
+    if check:
+        print('readiness-board: PASS: the public page renders from %d row(s) '
+              'and carries no machine path and no address (reason column '
+              '%s)' % (len(doc.get('rows', [])),
+                       'withheld' if why_hits else 'carried'))
+        return 0
+    try:
+        with open(PUBLIC_OUTPUT, 'w', encoding='utf-8') as fh:
+            fh.write(page)
+    except OSError as exc:
+        print('readiness-board: NO-DATA, cannot write %s: %s'
+              % (PUBLIC_OUTPUT, exc), file=sys.stderr)
+        return 2
+    print('readiness-board: wrote %s from %d row(s); reason column %s'
+          % (os.path.relpath(PUBLIC_OUTPUT, ROOT), len(doc.get('rows', [])),
+             'withheld' if why_hits else 'carried'))
+    return 0
+
+
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     try:
@@ -958,6 +1233,8 @@ def main(argv=None):
         for p in problems:
             print('readiness-board: FAIL: %s' % p, file=sys.stderr)
         return 1
+    if '--public' in argv:
+        return public_build(doc, check='--check' in argv)
     if '--check' in argv:
         print('readiness-board: %d row(s), %d gate(s), coherent, ready now: %s'
               % (len(doc['rows']), len(doc['gates']), ', '.join(ready_rows(doc)) or 'none'))

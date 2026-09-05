@@ -1,0 +1,8 @@
+customer_id,houjin_bangou,legal_name,commercial_name,record_type,store_id,parent_customer_id,payment_terms_days,valid_from,valid_to,status,legal_name_source,commercial_name_source,merged_from
+C001,8130001000101,株式会社青葉ホールディングス,アオバHD,CORPORATE,,,30,2011-04-01,,ACTIVE,registry,sales_master,
+C002,8130001000101,株式会社青葉ホールディングス,アオバ 丸の内店,STORE,S001,C001,30,2019-04-01,,ACTIVE,registry,sales_master,
+C003,8130001000101,株式会社青葉ホールディングス,アオバ 神田店,STORE,S002,C001,45,2018-06-01,2025-03-31,CLOSED,registry,sales_master,
+C004,8130001000202,有限会社小鳥屋商店,ことりや,CORPORATE,,,60,2005-09-15,,ACTIVE,registry,sales_master,
+C005,8130001000202,有限会社小鳥屋商店,ことりや 梅田店,STORE,S003,C004,60,2020-09-01,,ACTIVE,registry,sales_master,
+C006,8130001000303,株式会社瀬戸内フーズ,せとうちフーズ,CORPORATE,,,30,2016-02-01,,ACTIVE,registry,sales_master,
+C007,8130001000101,株式会社青葉ホールディングス,アオバ 神田北店,STORE,S004,C001,45,2025-04-01,,ACTIVE,registry,sales_master,

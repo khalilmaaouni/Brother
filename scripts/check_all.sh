@@ -186,6 +186,12 @@ run_check "intake-record-diagrams" python3 scripts/intake_score.py --gate --requ
 # on demand precisely so a session cannot produce a perfect board by never
 # looking. FAILS when a row is late with no blocker recorded.
 run_check "readiness-board-self" python3 scripts/test_gen_readiness_board.py -v
+# S30, the public dated roadmap page. Renders the page in memory and refuses
+# when the result carries a machine path or an at-sign address, so the check
+# is about what a public clone would OPEN rather than about whether somebody
+# remembered to regenerate. It writes nothing, so it can never turn red
+# merely because a peer edited a row without re-running the generator.
+run_check "roadmap-public-clean" python3 scripts/gen_readiness_board.py --public --check
 run_check "delivery-tracker-self" python3 scripts/test_track_delivery.py -v
 run_check "delivery-tracking"     python3 scripts/track_delivery.py
 # roadmap_merge.py: the by-row-id merge driver that lets lanes add rows to
@@ -199,6 +205,15 @@ run_check "roadmap-merge-self" python3 scripts/test_roadmap_merge.py -v
 # sessions until a human reaped them. FAILS on a claim that can never expire;
 # an expiry that merely lapsed is the system working, not a finding.
 run_check "fence-expiry-self"     python3 scripts/test_fence_expiry.py -v
+# S10: the Safe Unwatched Time metric, the duration figure section 7 zone
+# 2 asks Brother to own. Registered in the same change that lands it, per
+# this estate's own recorded lesson that an unregistered check is
+# invisible to every check the project owns. The suite drives the reader
+# backwards over fixture runs (an unbroken one, one broken at minute 40 of
+# 90, one with no records at all) and includes a read-only sweep of every
+# committed run directory, so a record shape this estate actually writes
+# and this reader cannot parse turns red here.
+run_check "safe-unwatched-time-self" python3 scripts/test_safe_unwatched_time.py -v
 run_check "fence-expiry"          python3 scripts/fence_expiry.py
 # The graph loop. Codified 2026-08-29 on founder direction, after measuring
 # that this estate was using two of the ready-set standard's five practices.
@@ -504,6 +519,14 @@ run_check "receipt-door-self" python3 scripts/test_receipt_door.py -v
 # only thing that runs it: a rule with no check behind it is a docstring.
 run_check "acceptance-compression" python3 scripts/test_acceptance_compression.py -v
 
+# S11, acceptance time: the harness half of the benchmark that does not need
+# a human being timed. prepare() writes the three condition packets (raw
+# diff, ordinary summary, Brother receipt) for three fixed seeded changes;
+# score() reads a human trial's results CSV and refuses to report a
+# comparison under five reviewers. The trial itself is scheduled work, not
+# something this line runs.
+run_check "acceptance-time" python3 scripts/test_acceptance_time.py -v
+
 # P0.1 packaging: the installed bundle ships no code of its own beside
 # commands and skills, so /brother's BUILD IT route was dead on an installed
 # machine. bundle/runtime/ is the fix; this is its own drift gate, proving
@@ -660,6 +683,21 @@ run_check "benchmark-bundle-self"   python3 -m unittest -v scripts/test_make_ben
 # benchmark-bundle sibling above, per this estate's own recorded lesson that
 # an unregistered tool is invisible to every check the project owns.
 run_check "gauntlets-validate" python3 benchmarks/gauntlets/validate.py
+# S12: the memory recurrence gauntlet's own counting, driven by a fake
+# recall (all surfaced reads 5 of 5, silence 0, a NO-DATA arm leaves the
+# denominator at 4). The SELF TEST is registered, not the gauntlet run
+# itself: a run writes a dated record under benchmarks/results/, and a
+# battery that dirties the tree on every invocation is exactly what the
+# tag-time tree hash lesson forbids. Registered beside its gauntlet
+# sibling above, per this estate's own recorded lesson that an
+# unregistered suite is invisible to every check the project owns.
+run_check "memory-recurrence-self" python3 scripts/test_gauntlet_memory_recurrence.py
+# S9: the delegation-truth gauntlet's own runner, driven both ways (a
+# door that passes everything must read 100 percent, a refusing one 0,
+# and an unbuildable class NO-DATA rather than RIGHT). The runner itself
+# is a deliberate run, not a battery step: it writes a dated record into
+# benchmarks/results/ on every invocation.
+run_check "delegation-truth-self" python3 scripts/test_gauntlet_delegation_truth.py
 # J1: the JBEQ-MDM seed suite (benchmarks/jbeq/) and its scorer. It proves the
 # seed is 70 cases in the directive's mix, that every critical case names a
 # critical class, that no expected answer reaches a blind prompt file, and that
@@ -841,6 +879,7 @@ run_check "close-ceremony-tests" python3 scripts/test_close_ceremony_check.py
 run_check "attempt-hook-tests" python3 scripts/test_attempt_hook.py
 run_check "find-out-tests" python3 scripts/test_find_out.py
 run_check "repeat-control-tests" python3 scripts/test_repeat_control.py
+run_check "lesson-repeat-trial-tests" python3 scripts/test_lesson_repeat_trial.py
 
 # One-repo transition M3 (docs/plan/ONE-REPO-TRANSITION-2026-08-31.md): the
 # consolidated product's OWN battery, delegated, run from its subtree path
@@ -1025,17 +1064,26 @@ run_check "receipt-contract-v1"          python3 scripts/test_receipt_contract.p
 # recorded lesson that an unregistered tool is invisible to every check
 # the project owns.
 run_check "review-depth-self"            python3 scripts/test_review_pass.py -v
+# tiny-task-cost-self (rows S18 and E90): the instrument that measures what a
+# genuinely tiny task costs through scripts/brother_run.py, and the fixtures
+# that drive its price reading backwards (a log with no price line, and a
+# price printed after the work started). Registered beside its review-depth
+# sibling above, per this estate's own recorded lesson that an unregistered
+# tool is invisible to every check the project owns.
+run_check "tiny-task-cost-self"          python3 scripts/test_tiny_task_cost.py -v
 run_check "v3-judge-self"                python3 scripts/test_v3_judge.py -v
 run_check "v3-night-receipts-self"       python3 scripts/test_v3_night_receipts.py -v
 run_check "v3-surfacing-self"            python3 scripts/test_v3_surfacing.py -v
 run_check "verify-advisor-self"          python3 scripts/test_verify_advisor.py -v
-# repair-drain-self is FAIL on the unchanged tree: its own second-attempt
-# scenario now collides with receipt_door.py's later "a check that already
-# passed before the work proves nothing" rule (memory: a-check-that-
-# already-passes-before-the-work-proves-nothing). Declared at test
-# granularity in docs/plan/BATTERY-EXPECTATIONS.json rather than silenced
-# here, per this estate's rule that a suite-level exception hides every new
-# failure in the suite.
+# repair-drain-self was FAIL on the unchanged tree until BAT-103: its own
+# second-attempt scenario collided with receipt_door.py's later "a check that
+# already passed before the work proves nothing" rule (memory: a-check-that-
+# already-passes-before-the-work-proves-nothing), because the fixture's unit
+# declared `true` as its done_check, which exits 0 on the untouched repo. The
+# fixture now declares a check that is false until the repair lands and
+# records the file that repair changed, so the test measures the drain again
+# and this check reads PASS; its declaration in
+# docs/plan/BATTERY-EXPECTATIONS.json was deleted with the fix.
 run_check "repair-drain-self"            python3 scripts/test_repair_drain.py -v
 
 # prevented_word_gate.py's own live scan (not just its self-test above):
@@ -1062,6 +1110,15 @@ run_check "sbe-proof-gate" python3 products/brothersbe/tools/sbe_gate.py . --str
 # a tool a data-science pack unit names as its own done_check, not something
 # this repository has data to run against on every push.
 run_check "split-check-self" python3 scripts/test_split_check.py -v
+
+# J2: the JBEQ-MDM end to end scenario checker. Its self test drives all
+# three verdict states and all four critical classes backwards (a false
+# merge, a reassigned historical transaction, a reversed hierarchy, a
+# survivorship precedence violation), which is the only reason the critical
+# line can be quoted as a control rather than a claim. The checker itself
+# runs against a run directory, so it is a scenario's own done_check, not a
+# thing this battery has a run to point at on every push.
+run_check "jbeq-e2e-check-self" python3 scripts/test_jbeq_e2e_check.py -v
 
 # C4: every shipped SKILL.md stays readable by a client other than the one it
 # was written on. The three habits it refuses (a ~/.claude path, a

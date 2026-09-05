@@ -75,8 +75,19 @@ class RepairDrain(unittest.TestCase):
         sh(["git", "commit", "-q", "-m", "R0"], self.repo)
 
         self.run_dir = tempfile.mkdtemp(prefix="drain-run-")
+        # BAT-103: the unit's check must be FALSE until the repair lands, or
+        # the second attempt proves nothing. This check used to be `true`,
+        # which exits 0 on the untouched repository, so brother_run's own
+        # check-discrimination precheck rightly stamps check_passed_before
+        # and receipt_door scores the unit NO-DATA ("the check already passed
+        # before the work began, so it cannot prove the work") however well
+        # the drain behaved. `test -f f.txt` is false in the fresh repo built
+        # above and true only once the fake worker's done state writes and
+        # commits that file, so what this file measures is the drain's own
+        # behaviour again rather than a check nobody's work could move.
         rec, problems = WR.create("one unit that fails once then repairs",
-                                  [{"id": "F1", "done_check": "true",
+                                  [{"id": "F1",
+                                    "done_check": "test -f f.txt",
                                     "owns": ["f.txt"]}], store=self.run_dir)
         self.assertEqual(problems, [])
         self.claims_path = os.path.join(self.run_dir, "claims.json")
@@ -115,7 +126,14 @@ class RepairDrain(unittest.TestCase):
                 sh(["git", "add", "f.txt"], self.repo)
                 sh(["git", "commit", "-q", "-m", "F1 lands"], self.repo)
                 rev = sh(["git", "rev-parse", "HEAD"], self.repo).stdout.strip()
-                evidence = {"check_command": "true", "exit_code": 0,
+                # files_changed (E41) is what _mark_integrated stamps as the
+                # row's files_changed_by_unit, and receipt_door refuses to
+                # score a unit whose changed files were never recorded, so
+                # the fake worker records the one file it really committed
+                # above rather than leaving the fact unmeasured.
+                evidence = {"check_command": "test -f f.txt",
+                            "files_changed": ["f.txt"],
+                            "exit_code": 0,
                             "output": "ok", "output_truncated": False,
                             "canonical_rev": rev}
             claim_store.release(claims_path, "F1", "test-owner", state=state,

@@ -76,6 +76,63 @@ with open(p, 'w') as fh:
 print('docs/VERSIONING.md -> Current version: %s.' % VERSION)
 PY
 
+echo "== 1b. re-pin the product's public install tag to $TAG =="
+# Row BAT-103. The 1.0.3 cut moved products/brothermode/README.md's pinned
+# clone to v1.0.3 by hand and left PUBLIC_INSTALL_TAG (the constant every
+# install page is held equal to) at v1.0.0, so four of that product's own
+# documentation tests went red on the merged tip. The re-pin is mechanical,
+# so it belongs in the cut rather than in a maintainer's memory.
+python3 - <<'REPIN'
+import io
+import os
+import re
+
+VERSION = os.environ['VERSION']
+TAG = 'v' + VERSION
+FACTS = 'products/brothermode/tools/bm_project_facts.py'
+PAGES = ('README.md', 'docs/QUICKSTART.md', 'docs/SETUP.md', 'docs/RELEASE.md')
+
+try:
+    with io.open(FACTS, encoding='utf-8') as fh:
+        text = fh.read()
+except (IOError, OSError) as exc:
+    raise SystemExit(
+        '%s: cannot read (%s), refusing to re-pin silently' % (FACTS, exc))
+m = re.search(r'^PUBLIC_INSTALL_TAG = "([^"]+)"$', text, re.M)
+if not m:
+    raise SystemExit(
+        '%s: no PUBLIC_INSTALL_TAG line in the form this step rewrites, '
+        'refusing to re-pin silently' % FACTS)
+old = m.group(1)
+if old == TAG:
+    print('%s -> PUBLIC_INSTALL_TAG already %s' % (FACTS, TAG))
+else:
+    try:
+        with io.open(FACTS, 'w', encoding='utf-8') as fh:
+            fh.write(text[:m.start(1)] + TAG + text[m.end(1):])
+    except (IOError, OSError) as exc:
+        raise SystemExit('%s: cannot write (%s)' % (FACTS, exc))
+    print('%s -> PUBLIC_INSTALL_TAG %s (was %s)' % (FACTS, TAG, old))
+    for rel in PAGES:
+        path = os.path.join('products', 'brothermode', rel)
+        try:
+            with io.open(path, encoding='utf-8') as fh:
+                page = fh.read()
+        except (IOError, OSError) as exc:
+            raise SystemExit('%s: cannot read (%s)' % (path, exc))
+        moved = page.replace('--branch %s ' % old, '--branch %s ' % TAG)
+        moved = moved.replace('`--branch %s`' % old, '`--branch %s`' % TAG)
+        moved = moved.replace('currently `%s`' % old, 'currently `%s`' % TAG)
+        if moved == page:
+            continue
+        try:
+            with io.open(path, 'w', encoding='utf-8') as fh:
+                fh.write(moved)
+        except (IOError, OSError) as exc:
+            raise SystemExit('%s: cannot write (%s)' % (path, exc))
+        print('%s -> pinned install %s' % (path, TAG))
+REPIN
+
 echo "== 2. drop the release-invariant exception (the tag will exist) =="
 python3 - <<'PY'
 import json

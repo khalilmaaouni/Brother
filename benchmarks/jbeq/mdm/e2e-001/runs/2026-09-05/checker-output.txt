@@ -1,0 +1,9 @@
+golden.csv: PASS
+links.csv: PASS
+mapping.json: PASS
+decisions.json: PASS
+reconciliation.json: PASS
+handover.ja.md: PASS
+critical integrity: PASS
+handover sections: PASS (11 of 11 present)
+jbeq-mdm e2e: PASS
