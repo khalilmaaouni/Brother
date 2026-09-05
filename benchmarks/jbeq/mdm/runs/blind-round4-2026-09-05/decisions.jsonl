@@ -1,0 +1,45 @@
+{"case_id": "AD-01", "answer": "KEEP SEPARATE", "rule_fired": "1", "why": "stated_relation=none: the input states no relation"}
+{"case_id": "AD-02", "answer": "NO-DATA", "rule_fired": "A", "why": "blank field(s) ['building_name', 'room_number'] and nothing corroborates them"}
+{"case_id": "AD-03", "answer": "KEEP SEPARATE", "rule_fired": "1", "why": "stated_relation=none: the input states no relation"}
+{"case_id": "AD-04", "answer": "REJECT MATCH", "rule_fired": "2", "why": "stated_difference=different_legal_entity refutes the proposed identity outright"}
+{"case_id": "AD-05", "answer": "KEEP SEPARATE", "rule_fired": "1", "why": "stated_relation=none: the input states no relation"}
+{"case_id": "AD-06", "answer": "KEEP SEPARATE", "rule_fired": "1", "why": "stated_relation=none: the input states no relation"}
+{"case_id": "AD-07", "answer": "KEEP SEPARATE", "rule_fired": "1", "why": "stated_relation=none: the input states no relation"}
+{"case_id": "AD-08", "answer": "ESCALATE", "rule_fired": "A", "why": "blank field(s) ['prefecture'] but corroborating fact(s) ['chome_and_banchi_match_the_candidate_record_but_fuchu_city_exists_in_both_tokyo_and_hiroshima'] support without confirming"}
+{"case_id": "AD-09", "answer": "NO-DATA", "rule_fired": "A", "why": "blank field(s) ['prefecture', 'city', 'lot_number', 'postal_code'] and nothing corroborates them"}
+{"case_id": "AD-10", "answer": "REJECT MATCH", "rule_fired": "2", "why": "stated_difference=different_legal_entity refutes the proposed identity outright"}
+{"case_id": "EO-01", "answer": "LINK AS RELATED", "rule_fired": "1", "why": "stated_relation='corporate_number_shared': the input itself states a relation"}
+{"case_id": "EO-02", "answer": "REJECT MATCH", "rule_fired": "2", "why": "stated_difference=different_legal_entity refutes the proposed identity outright"}
+{"case_id": "EO-03", "answer": "AUTO-MERGE", "rule_fired": "B", "why": "evidence_strength=strong with no conflicting or confirmation reason"}
+{"case_id": "EO-04", "answer": "REJECT MATCH", "rule_fired": "2", "why": "stated_difference=different_legal_entity refutes the proposed identity outright"}
+{"case_id": "EO-05", "answer": "LINK AS RELATED", "rule_fired": "1", "why": "stated_relation='role_pair': the input itself states a relation"}
+{"case_id": "EO-06", "answer": "KEEP SEPARATE", "rule_fired": "5", "why": "only a shared address is stated and one side is a one-to-many object; a shared address alone is never the stated relation"}
+{"case_id": "EO-07", "answer": "ESCALATE", "rule_fired": "B", "why": "evidence_strength=weak; irreversibility or history never upgrade weak evidence into a merge"}
+{"case_id": "EO-08", "answer": "ESCALATE", "rule_fired": "A", "why": "blank field(s) ['address', 'corporate_number', 'contact_person', 'phone_number'] but corroborating fact(s) ['three_existing_candidate_records_share_the_name'] support without confirming"}
+{"case_id": "EO-09", "answer": "REJECT MATCH", "rule_fired": "2", "why": "stated_difference=different_legal_entity refutes the proposed identity outright"}
+{"case_id": "EO-10", "answer": "SUGGEST MERGE", "rule_fired": "B", "why": "evidence_strength=strong, reasons=[], irreversible=False, history_exists=True: enough to merge but a person should confirm"}
+{"case_id": "HI-01", "answer": "KEEP SEPARATE", "rule_fired": "D", "why": "hierarchy_parents states 3 distinct types (capital, reporting, trade_flow), each valid; hierarchy types are independent, not one conflict"}
+{"case_id": "HI-02", "answer": "LINK AS RELATED", "rule_fired": "1", "why": "stated_relation='parent_child': the input itself states a relation"}
+{"case_id": "HI-03", "answer": "LINK AS RELATED", "rule_fired": "1", "why": "stated_relation='parent_child': the input itself states a relation"}
+{"case_id": "HI-04", "answer": "KEEP SEPARATE", "rule_fired": "1", "why": "stated_relation=none: the input states no relation"}
+{"case_id": "HI-05", "answer": "REJECT MATCH", "rule_fired": "2", "why": "stated_difference=different_legal_entity refutes the proposed identity outright"}
+{"case_id": "HI-06", "answer": "LINK AS RELATED", "rule_fired": "1", "why": "stated_relation='parent_child': the input itself states a relation"}
+{"case_id": "HI-07", "answer": "ESCALATE", "rule_fired": "A", "why": "blank field(s) ['hierarchy_type'] but corroborating fact(s) ['description_states_group_membership_only_without_naming_capital_trade_flow_or_reporting'] support without confirming"}
+{"case_id": "HI-08", "answer": "LINK AS RELATED", "rule_fired": "1", "why": "stated_relation='trade_flow': the input itself states a relation"}
+{"case_id": "HI-09", "answer": "KEEP SEPARATE", "rule_fired": "1", "why": "stated_relation=none: the input states no relation"}
+{"case_id": "HI-10", "answer": "LINK AS RELATED", "rule_fired": "1", "why": "stated_relation='trade_flow': the input itself states a relation"}
+{"case_id": "ID-01", "answer": "REJECT MATCH", "rule_fired": "C", "why": "tenant_boundary='none', stated_difference='different_identifier_domain' states the two are not the same or must never link"}
+{"case_id": "ID-02", "answer": "ESCALATE", "rule_fired": "A", "why": "blank field(s) ['new_invoice_registration_number'] but corroborating fact(s) ['registration_expired_2026-06-30_and_today_is_2026-09-05'] support without confirming"}
+{"case_id": "ID-03", "answer": "AUTO-MERGE", "rule_fired": "B", "why": "evidence_strength=strong with no conflicting or confirmation reason"}
+{"case_id": "ID-04", "answer": "REJECT MATCH", "rule_fired": "C", "why": "tenant_boundary='none', stated_difference='different_identifier_domain' states the two are not the same or must never link"}
+{"case_id": "ID-05", "answer": "REJECT MATCH", "rule_fired": "2", "why": "stated_difference=different_legal_entity refutes the proposed identity outright"}
+{"case_id": "MM-01", "answer": "AUTO-MERGE", "rule_fired": "B", "why": "evidence_strength=strong with no conflicting or confirmation reason"}
+{"case_id": "MM-02", "answer": "REJECT MATCH", "rule_fired": "C", "why": "tenant_boundary='none', stated_difference='different_identifier_domain' states the two are not the same or must never link"}
+{"case_id": "MM-03", "answer": "REJECT MATCH", "rule_fired": "2", "why": "stated_difference=different_legal_entity refutes the proposed identity outright"}
+{"case_id": "MM-04", "answer": "AUTO-MERGE", "rule_fired": "B", "why": "evidence_strength=strong with no conflicting or confirmation reason"}
+{"case_id": "MM-05", "answer": "ESCALATE", "rule_fired": "B", "why": "evidence_strength=weak; irreversibility or history never upgrade weak evidence into a merge"}
+{"case_id": "MM-06", "answer": "ESCALATE", "rule_fired": "B", "why": "evidence_strength=weak; irreversibility or history never upgrade weak evidence into a merge"}
+{"case_id": "MM-07", "answer": "SUGGEST MERGE", "rule_fired": "B", "why": "evidence_strength=strong, reasons=['explained_conflict'], irreversible=False, history_exists=False: enough to merge but a person should confirm"}
+{"case_id": "MM-08", "answer": "REJECT MATCH", "rule_fired": "C", "why": "tenant_boundary='stated', stated_difference='contractual_wall' states the two are not the same or must never link"}
+{"case_id": "MM-09", "answer": "ESCALATE", "rule_fired": "B", "why": "evidence_strength=weak; irreversibility or history never upgrade weak evidence into a merge"}
+{"case_id": "MM-10", "answer": "LINK AS RELATED", "rule_fired": "1", "why": "stated_relation='corporate_number_shared': the input itself states a relation"}

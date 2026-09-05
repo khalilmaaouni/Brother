@@ -1,0 +1,603 @@
+{
+  "_provenance": {
+    "benchmark": "MemoryAgentBench",
+    "paper": "Evaluating Memory in LLM Agents via Incremental Multi-Turn Interactions (ICLR 2026)",
+    "arxiv": "https://arxiv.org/abs/2507.05257",
+    "competencies_covered": [
+      "Conflict Resolution",
+      "Selective Forgetting"
+    ],
+    "note_on_competency_naming": "The paper's own four competency names are Accurate Retrieval, Test-Time Learning, Long-Range Understanding and Selective Forgetting; its own four published dataset splits are Accurate_Retrieval, Conflict_Resolution, Long_Range_Understanding and Test_Time_Learning. There is no separate Selective_Forgetting split. The Conflict_Resolution split's own task (FactConsolidation: a fact is stated, then restated with a different value later in the same context, and the query asks for the CURRENT value) is the one place in the public data that exercises both named competencies at once: answering it correctly requires resolving which of two conflicting facts is current (conflict resolution) and not answering with the superseded one (selective forgetting). This fixture is built from that split for exactly that reason, stated here rather than left for a reader to reconcile.",
+    "dataset": "ai-hyz/MemoryAgentBench",
+    "dataset_url": "https://huggingface.co/datasets/ai-hyz/MemoryAgentBench",
+    "split_file": "data/Conflict_Resolution-00000-of-00001.parquet",
+    "hf_revision_x_repo_commit": "7ea066982b140a19337e17e60d45d4076e042faf",
+    "raw_parquet_sha256": "24d5c3f09ce0ce15625cb9f8a98f44f0d864ca6c94d7b4ad04eb697ca3a5ff45",
+    "raw_parquet_bytes": 1491588,
+    "license": "MIT (per the dataset's own HuggingFace listing)",
+    "row_used": "metadata.source == 'factconsolidation_sh_6k' (single-hop, ~6k token context; the smallest of the four single-hop/multi-hop x context-length variants in this split, chosen for a fast deterministic run, not for a better score)",
+    "extraction_method": "This split's context is a numbered list of subject-relation-object fact sentences (e.g. '223. goaltender is associated with the sport of ice hockey.'), where FactConsolidation restates some facts later in the list with a different object (e.g. '310. goaltender is associated with the sport of pesapallo.'), and the paired question ('Which sport is goaltender associated with?') is answered by the LATEST restatement only. For each of the split's 100 (question, answer) pairs: find every fact line ending in the exact answer text, score each candidate's prefix (the line with the trailing answer value removed) against the question's own content words (a small stopword list removed), and accept a candidate only when exactly one has a strictly best score of at least 1 shared content word (otherwise the pair is NO-DATA: no confident single match). Given the accepted prefix, search the same context for any OTHER fact line starting with that exact prefix but ending in a different value; the earliest such line is the superseded fact (NO-DATA when none exists: this row was Accurate Retrieval shaped, not a real conflict). Verified: every mapped item has superseded_position < latest_position (the dataset's own chronological order is preserved, never fabricated), zero duplicate (prefix, latest value) pairs, and unique ids.",
+    "person_name_filter": "This row's own rule is never to print a client name or a person's name other than the founder's. The Wikidata facts behind FactConsolidation are mostly biographical (a real named individual as subject or object: a director, an author, a spouse, a citizen), so of the 74 items the extraction above mapped, every item whose question or fact text names a real person was reviewed by hand and excluded, moved into this fixture's own no_data list with the reason 'excluded: ... names a real person'. What remains is facts about sports, positions, countries, continents, languages, capitals, religions of polities, and companies, none of them a person. This shrinks the mapped set from 74 to 29; it is a deliberate content filter, not an extraction failure, and is called out here rather than folded silently into the same NO-DATA count as the format mismatches.",
+    "mapped_count": 29,
+    "no_data_count": 71,
+    "total_questions_in_row": 100
+  },
+  "items": [
+    {
+      "id": "fc-sh6k-000",
+      "question": "Which sport is goaltender associated with?",
+      "latest_value": "pesäpallo",
+      "latest_position": 310,
+      "latest_fact_text": "goaltender is associated with the sport of pesäpallo.",
+      "superseded_value": "ice hockey",
+      "superseded_position": 223,
+      "superseded_fact_text": "goaltender is associated with the sport of ice hockey."
+    },
+    {
+      "id": "fc-sh6k-002",
+      "question": "Which country was rugby union created in?",
+      "latest_value": "India",
+      "latest_position": 186,
+      "latest_fact_text": "rugby union was created in the country of India.",
+      "superseded_value": "England",
+      "superseded_position": 100,
+      "superseded_fact_text": "rugby union was created in the country of England."
+    },
+    {
+      "id": "fc-sh6k-006",
+      "question": "Which sport is Tunisia national football team associated with?",
+      "latest_value": "basketball",
+      "latest_position": 418,
+      "latest_fact_text": "Tunisia national football team is associated with the sport of basketball.",
+      "superseded_value": "association football",
+      "superseded_position": 235,
+      "superseded_fact_text": "Tunisia national football team is associated with the sport of association football."
+    },
+    {
+      "id": "fc-sh6k-007",
+      "question": "Which sport is quarterback associated with?",
+      "latest_value": "Muay Thai",
+      "latest_position": 50,
+      "latest_fact_text": "quarterback is associated with the sport of Muay Thai.",
+      "superseded_value": "American football",
+      "superseded_position": 31,
+      "superseded_fact_text": "quarterback is associated with the sport of American football."
+    },
+    {
+      "id": "fc-sh6k-008",
+      "question": "What is the official language of Japan?",
+      "latest_value": "Swedish",
+      "latest_position": 439,
+      "latest_fact_text": "The official language of Japan is Swedish.",
+      "superseded_value": "Japanese",
+      "superseded_position": 240,
+      "superseded_fact_text": "The official language of Japan is Japanese."
+    },
+    {
+      "id": "fc-sh6k-015",
+      "question": "Which continent is Germany located in?",
+      "latest_value": "Africa",
+      "latest_position": 435,
+      "latest_fact_text": "Germany is located in the continent of Africa.",
+      "superseded_value": "Europe",
+      "superseded_position": 41,
+      "superseded_fact_text": "Germany is located in the continent of Europe."
+    },
+    {
+      "id": "fc-sh6k-016",
+      "question": "Which religion is Kingdom of Ireland affiliated with?",
+      "latest_value": "Zoroastrianism",
+      "latest_position": 260,
+      "latest_fact_text": "Kingdom of Ireland is affiliated with the religion of Zoroastrianism.",
+      "superseded_value": "Catholic Church",
+      "superseded_position": 70,
+      "superseded_fact_text": "Kingdom of Ireland is affiliated with the religion of Catholic Church."
+    },
+    {
+      "id": "fc-sh6k-017",
+      "question": "Which country was association football created in?",
+      "latest_value": "Italy",
+      "latest_position": 389,
+      "latest_fact_text": "association football was created in the country of Italy.",
+      "superseded_value": "England",
+      "superseded_position": 272,
+      "superseded_fact_text": "association football was created in the country of England."
+    },
+    {
+      "id": "fc-sh6k-025",
+      "question": "What is the capital of Tang Empire?",
+      "latest_value": "Beaumont",
+      "latest_position": 177,
+      "latest_fact_text": "The capital of Tang Empire is Beaumont.",
+      "superseded_value": "Chang'an",
+      "superseded_position": 21,
+      "superseded_fact_text": "The capital of Tang Empire is Chang'an."
+    },
+    {
+      "id": "fc-sh6k-030",
+      "question": "Which country was baseball created in?",
+      "latest_value": "Japan",
+      "latest_position": 382,
+      "latest_fact_text": "baseball was created in the country of Japan.",
+      "superseded_value": "United States of America",
+      "superseded_position": 160,
+      "superseded_fact_text": "baseball was created in the country of United States of America."
+    },
+    {
+      "id": "fc-sh6k-033",
+      "question": "Which country was rap rock created in?",
+      "latest_value": "Russian Empire",
+      "latest_position": 403,
+      "latest_fact_text": "rap rock was created in the country of Russian Empire.",
+      "superseded_value": "United States of America",
+      "superseded_position": 359,
+      "superseded_fact_text": "rap rock was created in the country of United States of America."
+    },
+    {
+      "id": "fc-sh6k-034",
+      "question": "Where was Christianity founded?",
+      "latest_value": "Taipei",
+      "latest_position": 43,
+      "latest_fact_text": "Christianity was founded in the city of Taipei.",
+      "superseded_value": "Jerusalem",
+      "superseded_position": 40,
+      "superseded_fact_text": "Christianity was founded in the city of Jerusalem."
+    },
+    {
+      "id": "fc-sh6k-035",
+      "question": "What is the official language of United States of America?",
+      "latest_value": "German",
+      "latest_position": 295,
+      "latest_fact_text": "The official language of United States of America is German.",
+      "superseded_value": "American English",
+      "superseded_position": 242,
+      "superseded_fact_text": "The official language of United States of America is American English."
+    },
+    {
+      "id": "fc-sh6k-038",
+      "question": "What is the capital of France?",
+      "latest_value": "Harare",
+      "latest_position": 171,
+      "latest_fact_text": "The capital of France is Harare.",
+      "superseded_value": "Paris",
+      "superseded_position": 163,
+      "superseded_fact_text": "The capital of France is Paris."
+    },
+    {
+      "id": "fc-sh6k-039",
+      "question": "Who is the developer of SteamOS?",
+      "latest_value": "ABB Group",
+      "latest_position": 277,
+      "latest_fact_text": "SteamOS was developed by ABB Group.",
+      "superseded_value": "Valve Corporation",
+      "superseded_position": 238,
+      "superseded_fact_text": "SteamOS was developed by Valve Corporation."
+    },
+    {
+      "id": "fc-sh6k-040",
+      "question": "Which city is the headquarter of University of Bucharest located in?",
+      "latest_value": "Ankara",
+      "latest_position": 409,
+      "latest_fact_text": "The headquarters of University of Bucharest is located in the city of Ankara.",
+      "superseded_value": "Bucharest",
+      "superseded_position": 173,
+      "superseded_fact_text": "The headquarters of University of Bucharest is located in the city of Bucharest."
+    },
+    {
+      "id": "fc-sh6k-041",
+      "question": "Which sport is wide receiver associated with?",
+      "latest_value": "rugby",
+      "latest_position": 252,
+      "latest_fact_text": "wide receiver is associated with the sport of rugby.",
+      "superseded_value": "American football",
+      "superseded_position": 46,
+      "superseded_fact_text": "wide receiver is associated with the sport of American football."
+    },
+    {
+      "id": "fc-sh6k-043",
+      "question": "What is the capital of Australia?",
+      "latest_value": "Oderzo",
+      "latest_position": 388,
+      "latest_fact_text": "The capital of Australia is Oderzo.",
+      "superseded_value": "Canberra",
+      "superseded_position": 284,
+      "superseded_fact_text": "The capital of Australia is Canberra."
+    },
+    {
+      "id": "fc-sh6k-044",
+      "question": "Which continent is Malaysia located in?",
+      "latest_value": "Antarctica",
+      "latest_position": 442,
+      "latest_fact_text": "Malaysia is located in the continent of Antarctica.",
+      "superseded_value": "Asia",
+      "superseded_position": 373,
+      "superseded_fact_text": "Malaysia is located in the continent of Asia."
+    },
+    {
+      "id": "fc-sh6k-048",
+      "question": "Which country was basketball created in?",
+      "latest_value": "Soviet Union",
+      "latest_position": 348,
+      "latest_fact_text": "basketball was created in the country of Soviet Union.",
+      "superseded_value": "United States of America",
+      "superseded_position": 216,
+      "superseded_fact_text": "basketball was created in the country of United States of America."
+    },
+    {
+      "id": "fc-sh6k-050",
+      "question": "Which continent is Bengaluru located in?",
+      "latest_value": "Oceania",
+      "latest_position": 234,
+      "latest_fact_text": "Bengaluru is located in the continent of Oceania.",
+      "superseded_value": "Asia",
+      "superseded_position": 4,
+      "superseded_fact_text": "Bengaluru is located in the continent of Asia."
+    },
+    {
+      "id": "fc-sh6k-051",
+      "question": "Which sport is Slovakia national football team associated with?",
+      "latest_value": "cricket",
+      "latest_position": 279,
+      "latest_fact_text": "Slovakia national football team is associated with the sport of cricket.",
+      "superseded_value": "association football",
+      "superseded_position": 18,
+      "superseded_fact_text": "Slovakia national football team is associated with the sport of association football."
+    },
+    {
+      "id": "fc-sh6k-056",
+      "question": "Which country was Charlie Hebdo created in?",
+      "latest_value": "Italy",
+      "latest_position": 358,
+      "latest_fact_text": "Charlie Hebdo was created in the country of Italy.",
+      "superseded_value": "France",
+      "superseded_position": 155,
+      "superseded_fact_text": "Charlie Hebdo was created in the country of France."
+    },
+    {
+      "id": "fc-sh6k-065",
+      "question": "Which sport is placekicker associated with?",
+      "latest_value": "rugby",
+      "latest_position": 321,
+      "latest_fact_text": "placekicker is associated with the sport of rugby.",
+      "superseded_value": "American football",
+      "superseded_position": 78,
+      "superseded_fact_text": "placekicker is associated with the sport of American football."
+    },
+    {
+      "id": "fc-sh6k-069",
+      "question": "Where was Canadair founded?",
+      "latest_value": "Tucson",
+      "latest_position": 265,
+      "latest_fact_text": "Canadair was founded in the city of Tucson.",
+      "superseded_value": "Montreal",
+      "superseded_position": 237,
+      "superseded_fact_text": "Canadair was founded in the city of Montreal."
+    },
+    {
+      "id": "fc-sh6k-070",
+      "question": "Which company is AP1000 produced by?",
+      "latest_value": "Canadair",
+      "latest_position": 356,
+      "latest_fact_text": "The company that produced AP1000 is Canadair.",
+      "superseded_value": "Westinghouse Electric",
+      "superseded_position": 196,
+      "superseded_fact_text": "The company that produced AP1000 is Westinghouse Electric."
+    },
+    {
+      "id": "fc-sh6k-085",
+      "question": "What is the capital of Romania?",
+      "latest_value": "Rajanpur",
+      "latest_position": 449,
+      "latest_fact_text": "The capital of Romania is Rajanpur.",
+      "superseded_value": "Bucharest",
+      "superseded_position": 185,
+      "superseded_fact_text": "The capital of Romania is Bucharest."
+    },
+    {
+      "id": "fc-sh6k-086",
+      "question": "Which continent is India located in?",
+      "latest_value": "Africa",
+      "latest_position": 280,
+      "latest_fact_text": "India is located in the continent of Africa.",
+      "superseded_value": "Asia",
+      "superseded_position": 228,
+      "superseded_fact_text": "India is located in the continent of Asia."
+    },
+    {
+      "id": "fc-sh6k-090",
+      "question": "Which sport is Surrey Senior Cup associated with?",
+      "latest_value": "basketball",
+      "latest_position": 315,
+      "latest_fact_text": "Surrey Senior Cup is associated with the sport of basketball.",
+      "superseded_value": "association football",
+      "superseded_position": 291,
+      "superseded_fact_text": "Surrey Senior Cup is associated with the sport of association football."
+    }
+  ],
+  "no_data": [
+    {
+      "source_index": 0,
+      "reason": "no earlier conflicting restatement of the same fact was found"
+    },
+    {
+      "source_index": 1,
+      "reason": "no earlier conflicting restatement of the same fact was found"
+    },
+    {
+      "source_index": 2,
+      "reason": "no earlier conflicting restatement of the same fact was found"
+    },
+    {
+      "source_index": 3,
+      "reason": "no earlier conflicting restatement of the same fact was found"
+    },
+    {
+      "source_index": 4,
+      "reason": "no earlier conflicting restatement of the same fact was found"
+    },
+    {
+      "source_index": 5,
+      "reason": "no earlier conflicting restatement of the same fact was found"
+    },
+    {
+      "source_index": 6,
+      "reason": "no earlier conflicting restatement of the same fact was found"
+    },
+    {
+      "source_index": 7,
+      "reason": "no earlier conflicting restatement of the same fact was found"
+    },
+    {
+      "source_index": 8,
+      "reason": "no earlier conflicting restatement of the same fact was found"
+    },
+    {
+      "source_index": 9,
+      "reason": "no earlier conflicting restatement of the same fact was found"
+    },
+    {
+      "source_index": 10,
+      "reason": "no earlier conflicting restatement of the same fact was found"
+    },
+    {
+      "source_index": 11,
+      "reason": "no earlier conflicting restatement of the same fact was found"
+    },
+    {
+      "source_index": 12,
+      "reason": "no earlier conflicting restatement of the same fact was found"
+    },
+    {
+      "source_index": 13,
+      "reason": "no earlier conflicting restatement of the same fact was found"
+    },
+    {
+      "source_index": 14,
+      "reason": "no earlier conflicting restatement of the same fact was found"
+    },
+    {
+      "source_index": 15,
+      "reason": "no earlier conflicting restatement of the same fact was found"
+    },
+    {
+      "source_index": 16,
+      "reason": "no earlier conflicting restatement of the same fact was found"
+    },
+    {
+      "source_index": 17,
+      "reason": "no earlier conflicting restatement of the same fact was found"
+    },
+    {
+      "source_index": 18,
+      "reason": "no earlier conflicting restatement of the same fact was found"
+    },
+    {
+      "source_index": 19,
+      "reason": "no earlier conflicting restatement of the same fact was found"
+    },
+    {
+      "source_index": 20,
+      "reason": "no earlier conflicting restatement of the same fact was found"
+    },
+    {
+      "source_index": 21,
+      "reason": "no earlier conflicting restatement of the same fact was found"
+    },
+    {
+      "source_index": 22,
+      "reason": "no earlier conflicting restatement of the same fact was found"
+    },
+    {
+      "source_index": 23,
+      "reason": "no earlier conflicting restatement of the same fact was found"
+    },
+    {
+      "source_index": 24,
+      "reason": "no earlier conflicting restatement of the same fact was found"
+    },
+    {
+      "source_index": 25,
+      "reason": "no earlier conflicting restatement of the same fact was found"
+    },
+    {
+      "id": "fc-sh6k-001",
+      "reason": "excluded: the fact text names a real person, and this row's own rule is never to print a person's name other than the founder's; reviewed by hand, not by a heuristic; the question and answer text are withheld from this record for the same reason"
+    },
+    {
+      "id": "fc-sh6k-005",
+      "reason": "excluded: the fact text names a real person, and this row's own rule is never to print a person's name other than the founder's; reviewed by hand, not by a heuristic; the question and answer text are withheld from this record for the same reason"
+    },
+    {
+      "id": "fc-sh6k-012",
+      "reason": "excluded: the fact text names a real person, and this row's own rule is never to print a person's name other than the founder's; reviewed by hand, not by a heuristic; the question and answer text are withheld from this record for the same reason"
+    },
+    {
+      "id": "fc-sh6k-013",
+      "reason": "excluded: the fact text names a real person, and this row's own rule is never to print a person's name other than the founder's; reviewed by hand, not by a heuristic; the question and answer text are withheld from this record for the same reason"
+    },
+    {
+      "id": "fc-sh6k-014",
+      "reason": "excluded: the fact text names a real person, and this row's own rule is never to print a person's name other than the founder's; reviewed by hand, not by a heuristic; the question and answer text are withheld from this record for the same reason"
+    },
+    {
+      "id": "fc-sh6k-019",
+      "reason": "excluded: the fact text names a real person, and this row's own rule is never to print a person's name other than the founder's; reviewed by hand, not by a heuristic; the question and answer text are withheld from this record for the same reason"
+    },
+    {
+      "id": "fc-sh6k-020",
+      "reason": "excluded: the fact text names a real person, and this row's own rule is never to print a person's name other than the founder's; reviewed by hand, not by a heuristic; the question and answer text are withheld from this record for the same reason"
+    },
+    {
+      "id": "fc-sh6k-023",
+      "reason": "excluded: the fact text names a real person, and this row's own rule is never to print a person's name other than the founder's; reviewed by hand, not by a heuristic; the question and answer text are withheld from this record for the same reason"
+    },
+    {
+      "id": "fc-sh6k-024",
+      "reason": "excluded: the fact text names a real person, and this row's own rule is never to print a person's name other than the founder's; reviewed by hand, not by a heuristic; the question and answer text are withheld from this record for the same reason"
+    },
+    {
+      "id": "fc-sh6k-026",
+      "reason": "excluded: the fact text names a real person, and this row's own rule is never to print a person's name other than the founder's; reviewed by hand, not by a heuristic; the question and answer text are withheld from this record for the same reason"
+    },
+    {
+      "id": "fc-sh6k-028",
+      "reason": "excluded: the fact text names a real person, and this row's own rule is never to print a person's name other than the founder's; reviewed by hand, not by a heuristic; the question and answer text are withheld from this record for the same reason"
+    },
+    {
+      "id": "fc-sh6k-029",
+      "reason": "excluded: the fact text names a real person, and this row's own rule is never to print a person's name other than the founder's; reviewed by hand, not by a heuristic; the question and answer text are withheld from this record for the same reason"
+    },
+    {
+      "id": "fc-sh6k-031",
+      "reason": "excluded: the fact text names a real person, and this row's own rule is never to print a person's name other than the founder's; reviewed by hand, not by a heuristic; the question and answer text are withheld from this record for the same reason"
+    },
+    {
+      "id": "fc-sh6k-036",
+      "reason": "excluded: the fact text names a real person, and this row's own rule is never to print a person's name other than the founder's; reviewed by hand, not by a heuristic; the question and answer text are withheld from this record for the same reason"
+    },
+    {
+      "id": "fc-sh6k-042",
+      "reason": "excluded: the fact text names a real person, and this row's own rule is never to print a person's name other than the founder's; reviewed by hand, not by a heuristic; the question and answer text are withheld from this record for the same reason"
+    },
+    {
+      "id": "fc-sh6k-045",
+      "reason": "excluded: the fact text names a real person, and this row's own rule is never to print a person's name other than the founder's; reviewed by hand, not by a heuristic; the question and answer text are withheld from this record for the same reason"
+    },
+    {
+      "id": "fc-sh6k-047",
+      "reason": "excluded: the fact text names a real person, and this row's own rule is never to print a person's name other than the founder's; reviewed by hand, not by a heuristic; the question and answer text are withheld from this record for the same reason"
+    },
+    {
+      "id": "fc-sh6k-052",
+      "reason": "excluded: the fact text names a real person, and this row's own rule is never to print a person's name other than the founder's; reviewed by hand, not by a heuristic; the question and answer text are withheld from this record for the same reason"
+    },
+    {
+      "id": "fc-sh6k-053",
+      "reason": "excluded: the fact text names a real person, and this row's own rule is never to print a person's name other than the founder's; reviewed by hand, not by a heuristic; the question and answer text are withheld from this record for the same reason"
+    },
+    {
+      "id": "fc-sh6k-054",
+      "reason": "excluded: the fact text names a real person, and this row's own rule is never to print a person's name other than the founder's; reviewed by hand, not by a heuristic; the question and answer text are withheld from this record for the same reason"
+    },
+    {
+      "id": "fc-sh6k-055",
+      "reason": "excluded: the fact text names a real person, and this row's own rule is never to print a person's name other than the founder's; reviewed by hand, not by a heuristic; the question and answer text are withheld from this record for the same reason"
+    },
+    {
+      "id": "fc-sh6k-057",
+      "reason": "excluded: the fact text names a real person, and this row's own rule is never to print a person's name other than the founder's; reviewed by hand, not by a heuristic; the question and answer text are withheld from this record for the same reason"
+    },
+    {
+      "id": "fc-sh6k-058",
+      "reason": "excluded: the fact text names a real person, and this row's own rule is never to print a person's name other than the founder's; reviewed by hand, not by a heuristic; the question and answer text are withheld from this record for the same reason"
+    },
+    {
+      "id": "fc-sh6k-059",
+      "reason": "excluded: the fact text names a real person, and this row's own rule is never to print a person's name other than the founder's; reviewed by hand, not by a heuristic; the question and answer text are withheld from this record for the same reason"
+    },
+    {
+      "id": "fc-sh6k-060",
+      "reason": "excluded: the fact text names a real person, and this row's own rule is never to print a person's name other than the founder's; reviewed by hand, not by a heuristic; the question and answer text are withheld from this record for the same reason"
+    },
+    {
+      "id": "fc-sh6k-061",
+      "reason": "excluded: the fact text names a real person, and this row's own rule is never to print a person's name other than the founder's; reviewed by hand, not by a heuristic; the question and answer text are withheld from this record for the same reason"
+    },
+    {
+      "id": "fc-sh6k-062",
+      "reason": "excluded: the fact text names a real person, and this row's own rule is never to print a person's name other than the founder's; reviewed by hand, not by a heuristic; the question and answer text are withheld from this record for the same reason"
+    },
+    {
+      "id": "fc-sh6k-063",
+      "reason": "excluded: the fact text names a real person, and this row's own rule is never to print a person's name other than the founder's; reviewed by hand, not by a heuristic; the question and answer text are withheld from this record for the same reason"
+    },
+    {
+      "id": "fc-sh6k-066",
+      "reason": "excluded: the fact text names a real person, and this row's own rule is never to print a person's name other than the founder's; reviewed by hand, not by a heuristic; the question and answer text are withheld from this record for the same reason"
+    },
+    {
+      "id": "fc-sh6k-067",
+      "reason": "excluded: the fact text names a real person, and this row's own rule is never to print a person's name other than the founder's; reviewed by hand, not by a heuristic; the question and answer text are withheld from this record for the same reason"
+    },
+    {
+      "id": "fc-sh6k-073",
+      "reason": "excluded: the fact text names a real person, and this row's own rule is never to print a person's name other than the founder's; reviewed by hand, not by a heuristic; the question and answer text are withheld from this record for the same reason"
+    },
+    {
+      "id": "fc-sh6k-077",
+      "reason": "excluded: the fact text names a real person, and this row's own rule is never to print a person's name other than the founder's; reviewed by hand, not by a heuristic; the question and answer text are withheld from this record for the same reason"
+    },
+    {
+      "id": "fc-sh6k-080",
+      "reason": "excluded: the fact text names a real person, and this row's own rule is never to print a person's name other than the founder's; reviewed by hand, not by a heuristic; the question and answer text are withheld from this record for the same reason"
+    },
+    {
+      "id": "fc-sh6k-081",
+      "reason": "excluded: the fact text names a real person, and this row's own rule is never to print a person's name other than the founder's; reviewed by hand, not by a heuristic; the question and answer text are withheld from this record for the same reason"
+    },
+    {
+      "id": "fc-sh6k-082",
+      "reason": "excluded: the fact text names a real person, and this row's own rule is never to print a person's name other than the founder's; reviewed by hand, not by a heuristic; the question and answer text are withheld from this record for the same reason"
+    },
+    {
+      "id": "fc-sh6k-083",
+      "reason": "excluded: the fact text names a real person, and this row's own rule is never to print a person's name other than the founder's; reviewed by hand, not by a heuristic; the question and answer text are withheld from this record for the same reason"
+    },
+    {
+      "id": "fc-sh6k-084",
+      "reason": "excluded: the fact text names a real person, and this row's own rule is never to print a person's name other than the founder's; reviewed by hand, not by a heuristic; the question and answer text are withheld from this record for the same reason"
+    },
+    {
+      "id": "fc-sh6k-087",
+      "reason": "excluded: the fact text names a real person, and this row's own rule is never to print a person's name other than the founder's; reviewed by hand, not by a heuristic; the question and answer text are withheld from this record for the same reason"
+    },
+    {
+      "id": "fc-sh6k-088",
+      "reason": "excluded: the fact text names a real person, and this row's own rule is never to print a person's name other than the founder's; reviewed by hand, not by a heuristic; the question and answer text are withheld from this record for the same reason"
+    },
+    {
+      "id": "fc-sh6k-091",
+      "reason": "excluded: the fact text names a real person, and this row's own rule is never to print a person's name other than the founder's; reviewed by hand, not by a heuristic; the question and answer text are withheld from this record for the same reason"
+    },
+    {
+      "id": "fc-sh6k-093",
+      "reason": "excluded: the fact text names a real person, and this row's own rule is never to print a person's name other than the founder's; reviewed by hand, not by a heuristic; the question and answer text are withheld from this record for the same reason"
+    },
+    {
+      "id": "fc-sh6k-094",
+      "reason": "excluded: the fact text names a real person, and this row's own rule is never to print a person's name other than the founder's; reviewed by hand, not by a heuristic; the question and answer text are withheld from this record for the same reason"
+    },
+    {
+      "id": "fc-sh6k-096",
+      "reason": "excluded: the fact text names a real person, and this row's own rule is never to print a person's name other than the founder's; reviewed by hand, not by a heuristic; the question and answer text are withheld from this record for the same reason"
+    },
+    {
+      "id": "fc-sh6k-097",
+      "reason": "excluded: the fact text names a real person, and this row's own rule is never to print a person's name other than the founder's; reviewed by hand, not by a heuristic; the question and answer text are withheld from this record for the same reason"
+    },
+    {
+      "id": "fc-sh6k-098",
+      "reason": "excluded: the fact text names a real person, and this row's own rule is never to print a person's name other than the founder's; reviewed by hand, not by a heuristic; the question and answer text are withheld from this record for the same reason"
+    }
+  ]
+}

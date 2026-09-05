@@ -195,6 +195,12 @@ tools
 # directories (internal QA kits, release process control, and program
 # management, none of it needed for the plugin to function).
 products/brothermode/.claude-plugin
+# .codex-plugin carries the Codex plugin manifest (plugin.json) added
+# alongside .claude-plugin: PR 367's packaging fix installs brothermode by
+# name on Codex (`codex plugin add brothermode@brother`), which resolves
+# this manifest under the marketplace-listed path; missing here, the export
+# tree cannot serve as a working local marketplace for it.
+products/brothermode/.codex-plugin
 products/brothermode/CHANGELOG.md
 products/brothermode/CHECKSUMS.sha256
 products/brothermode/CLAUDE.md

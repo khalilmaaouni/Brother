@@ -414,6 +414,21 @@ def _load_bm_vault_audit():
     return mod
 
 
+def _load_bm_vault_read_audit():
+    """Dynamic import by path, the same pattern _load_bm_vault_audit uses right above.
+    (V5.) The contract module (bm_vault_read_audit.py) is the ONE owner of the
+    hash-chained read-audit's shape and path; this file only calls record_read, so the
+    chain can never drift into a second reading of the same record. Guarded at the
+    caller: an ABSENT module means no read-audit row for this recall, stated on
+    stderr, never a crash -- the same degradation every sibling contract module here
+    already keeps."""
+    spec = importlib.util.spec_from_file_location(
+        "bm_vault_read_audit", os.path.join(_TOOLS_DIR, "bm_vault_read_audit.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def _schema(con):
     con.executescript("""
         CREATE TABLE IF NOT EXISTS notes (
@@ -2460,6 +2475,19 @@ def cmd_recall(args):
                      "What this estate has already written about that:",
                      roots=_freshness_roots(args), ledger_hits=ledger_hits,
                      withheld_out=withheld_out)
+    # V5: one hash-chained read-audit row per note actually shown above, regardless of
+    # the answer-ledger's own retry/collision dedup below -- that dedup governs whether
+    # THIS answer gets a second ledger/audit row, not whether the notes were shown to
+    # the reader again just now. A load or write failure degrades to one stderr NO-DATA
+    # line; it never withholds or blocks the read that already happened.
+    try:
+        read_audit = _load_bm_vault_read_audit()
+    except Exception as e:
+        sys.stderr.write("bm_vault: read audit unavailable (%s); recall continues\n" % e)
+    else:
+        for hit in ledger_hits:
+            read_audit.record_read(note=hit.get("id") or hit.get("path"),
+                                   surface="bm_vault_recall", query=text)
     if withheld_by_policy:
         print("%d note(s) withheld by access policy" % withheld_by_policy)
     # VB3-04: degraded is populated by _policy_deny's own enterprise fail-closed

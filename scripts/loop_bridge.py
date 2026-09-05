@@ -79,21 +79,31 @@ import run_heartbeat  # noqa: E402
 #: home directory.
 RUNTIME_ENV_VAR = "BROTHER_RUNTIME_ROOT"
 
-#: Where an installed bundle puts them, relative to HERE (this file's own
-#: install location), never HOME: not config-dir-relative, so this one
-#: candidate stays a plain module constant.
-BUNDLED_CANDIDATE = os.path.join(HERE, "..", "bundle", "tools")
+#: The hub checkout's own copy of the engine, so a developer running
+#: scripts/ directly needs no configuration. It lives only in this repo's
+#: own working tree (products/brothermode/tools) and never exists inside an
+#: installed plugin, so it is skipped there.
+HUB_CANDIDATE = os.path.normpath(
+    os.path.join(HERE, "..", "products", "brothermode", "tools"))
 
 #: The development fallback, kept LAST and named as such. It is this estate's own
 #: layout and it is not a contract anybody else inherits.
 DEV_CANDIDATE = os.path.expanduser("~/Documents/BrotherModeUp/tools")
 
-#: The plugin cache is VERSIONED: cache/brother/brothermode/<version>/tools,
-#: measured on a real install (3.4.2 on this machine). The unversioned cache
-#: candidate above never matches a real install, which is EVAD run 5 trial 2's
-#: finding; these segments are joined against the resolved config root at
-#: call time so a test can drive the resolution without touching this
-#: machine.
+#: The plugin cache is VERSIONED: cache/brother/brothermode/<version>/tools.
+#: brothermode is the SIBLING plugin from the same marketplace that carries
+#: the loop engine (bm_worker_spawn, bm_verify, bm_repair): it is not
+#: bundled into brother itself because the closure is too large a slice of
+#: brothermode to duplicate (bm_worker_spawn alone pulls in bm_controller,
+#: bm_store, bm_plan, bm_messages and bm_fence_hook). Claude installs it
+#: through the dependency declared in bundle/.claude-plugin/plugin.json.
+#: Codex has no dependency resolution, so README.md's Codex install adds it
+#: by name (`codex plugin add brothermode@brother --json`). config_root is
+#: CLAUDE_CONFIG_DIR or ~/.claude under Claude and CODEX_HOME or ~/.codex
+#: under Codex, resolved by _config_root(). A 3.4.2 install predates these
+#: modules (measured: brothermode 3.4.2 in the plugin cache has no
+#: bm_worker_spawn), which is why resolution walks every versioned install
+#: rather than stopping at the first directory that exists.
 INSTALLED_VERSIONED_SEGMENTS = ("plugins", "cache", "brother", "brothermode")
 
 #: The claude CLI's own env var for relocating its whole config directory
@@ -153,7 +163,7 @@ def runtime_candidates(env=None):
     if override:
         out.append(os.path.join(override, "tools") if not override.endswith("tools")
                    else override)
-    out.append(os.path.normpath(BUNDLED_CANDIDATE))
+    out.append(HUB_CANDIDATE)
     # config_root is CLAUDE_CONFIG_DIR when set, else $HOME/.claude: the
     # claude CLI's ACTUAL config directory, which is where it places an
     # installed plugin's cache. Building these from bare HOME (the previous
@@ -165,8 +175,6 @@ def runtime_candidates(env=None):
     config_root = _config_root(env)
     out.append(os.path.normpath(
         os.path.join(config_root, "skills", "brothermode", "tools")))
-    out.append(os.path.normpath(
-        os.path.join(config_root, *INSTALLED_VERSIONED_SEGMENTS, "tools")))
     versioned = glob.glob(os.path.join(
         config_root, *INSTALLED_VERSIONED_SEGMENTS, "*", "tools"))
     out.extend(os.path.normpath(c) for c in
@@ -197,6 +205,22 @@ def _import_parts(tools_dir):
             "repair": bm_repair}, ""
 
 
+def not_found_message(looked, skipped):
+    """The NO-DATA sentence for when none of `looked` loaded the three
+    modules, `skipped` carrying an import-failure detail per directory that
+    existed but did not work. Names the fix, not just the failure: the
+    engine ships in the brothermode plugin from the same marketplace, so a
+    reader who hits this knows the next command to run rather than only
+    that something was missing."""
+    detail = ("; ".join(skipped) + ". ") if skipped else ""
+    return ("the loop's worker, verifier and repair modules were not "
+            "found. %sLooked, in order: %s. The engine ships in the "
+            "brothermode plugin from the same marketplace: run `claude plugin "
+            "install brothermode@brother` or `codex plugin add "
+            "brothermode@brother --json`, or set %s to a checkout to "
+            "override." % (detail, ", ".join(looked), RUNTIME_ENV_VAR))
+
+
 def load_parts(tools_dir=None, env=None):
     """The three modules, or a reason. Returns (parts, problem).
 
@@ -219,10 +243,7 @@ def load_parts(tools_dir=None, env=None):
         if parts is not None:
             return parts, ""
         skipped.append(problem)
-    detail = ("; ".join(skipped) + ". ") if skipped else ""
-    return None, ("the loop's worker, verifier and repair modules were not "
-                  "found. %sLooked, in order: %s. Set %s to a checkout to "
-                  "override." % (detail, ", ".join(looked), RUNTIME_ENV_VAR))
+    return None, not_found_message(looked, skipped)
 
 
 def dispatchable(plan):

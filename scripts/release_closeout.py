@@ -60,6 +60,7 @@ REPO = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 
 import codex_smoke  # noqa: E402  (its sh, isolation witness and stub provider)
+import virgin_unit_proof  # noqa: E402  (X1: proves a unit closes through the exported bundle alone)
 
 DEFAULT_CODEX = codex_smoke.DEFAULT_CODEX
 PUBLIC_URL = "https://github.com/khalilmaaouni/Brother"
@@ -553,8 +554,64 @@ def gate_virgin_codex(args, ev, gate):
     broke = iso.check_isolation(gate)
     if broke:
         return gate.settle("FAIL", broke)
+
+    # THE GATE THE 2026-09-05 v1.0.6 DEFECT PROVED WAS MISSING FROM X1
+    # ITSELF: everything above already runs a real `codex plugin install`
+    # into an isolated home, but the stub turn a few lines up invokes
+    # `os.path.join(HERE, "brother_run.py")`, this SCRIPT's own sibling in
+    # the marketplace SOURCE tree, never the INSTALLED plugin's copy at
+    # `installed`. A public export that shipped bundle/runtime/
+    # loop_bridge.py without the modules it imports (bm_worker_spawn,
+    # bm_verify, bm_repair; they live only under products/brothermode/tools
+    # in the private hub) still passed X1, because the source tree beside
+    # `HERE` always carries products/ and the installed tree was never
+    # actually exercised. scripts/virgin_unit_proof.py closes that: it
+    # exports the tagged tree the documented way, carves out ONLY bundle/
+    # (what a plugin install actually receives), makes the development
+    # fallback unreachable, and proves one unit closes through the exported
+    # engine alone. Run here, against the SAME marketplace source this gate
+    # already installed from, so X1 cannot pass while the tagged tree ships
+    # zero runnable units.
+    if os.path.isdir(args.marketplace):
+        vup_work = os.path.join(iso.work, "virgin-unit-proof")
+        os.makedirs(vup_work, exist_ok=True)
+        vup_code, vup_lines = virgin_unit_proof.run(
+            work=vup_work, keep=True, root=args.marketplace)
+        vup_proc = subprocess.CompletedProcess(
+            args=["virgin_unit_proof.run(root=%s)" % args.marketplace],
+            returncode=vup_code, stdout="\n".join(vup_lines), stderr="")
+        kept_vup = ev.keep(gate.id, "virgin-unit-proof against the "
+                           "marketplace source", vup_proc)
+        gate.say("virgin-unit-proof against %s: exit %d   full output: %s"
+                 % (args.marketplace, vup_code, kept_vup or "NOT KEPT"))
+        for line in vup_lines[-6:]:
+            gate.say("    %s" % line)
+        shutil.rmtree(vup_work, ignore_errors=True)
+        if vup_code == 2:
+            return gate.settle("NO-DATA", "virgin-unit-proof could not run "
+                               "against %s: %s" % (args.marketplace,
+                                                    vup_lines[-1] if vup_lines
+                                                    else "no output"))
+        if vup_code != 0:
+            return gate.settle("FAIL", "virgin-unit-proof FAILED against "
+                               "the tagged tree: %s" % (
+                                   vup_lines[-1] if vup_lines
+                                   else "no output"))
+    else:
+        gate.say("NOTE: virgin-unit-proof needs a local checkout of the "
+                 "marketplace source to export from; %s is not a local "
+                 "directory, so this leg's own proof was not run. This is "
+                 "NOT a pass on that half: a release cut invokes this gate "
+                 "with a local tag checkout for exactly this reason."
+                 % args.marketplace)
+        return gate.settle("NO-DATA", "virgin-unit-proof needs a local "
+                           "checkout of %s, which was not one" %
+                           args.marketplace)
+
     return gate.settle("PASS", "install, skills and one stubbed invocation "
-                               "with a receipt, in an isolated home")
+                               "with a receipt, in an isolated home, and one "
+                               "unit closed through the exported bundle "
+                               "alone (virgin-unit-proof)")
 
 
 # ---------------------------------------------------------------------------

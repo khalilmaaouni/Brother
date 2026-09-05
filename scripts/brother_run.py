@@ -1906,10 +1906,38 @@ def _record_recurrence_and_draft_lessons(record, receipts, run_dir):
             applied = sorted({entry.get("slug")
                               for entry in section.get("applied", [])
                               if entry.get("slug")})
+            # LL-4, THE FIELD MISMATCH THAT READ THE DENOMINATOR AS 0 OF 5
+            # FOR A WEEK: applied_memory's "stale" and "unverified" sections
+            # are ALSO a recorded judgement about a surfaced lesson (the
+            # hook already decided not to trust it, and said why, in
+            # `line`); bm_recurrence.record_receipt's own definition of
+            # applicable is "applied OR declined", never "applied alone",
+            # but this call forwarded only `applied` and hardcoded
+            # declined=[]. A week of real receipts whose only recalled
+            # lessons were stale or unverified therefore read as "no
+            # applicable lesson" and never entered the denominator, even
+            # though a lesson WAS named. Fixed by forwarding those two
+            # states as declined, each with the hook's own reason line
+            # (never fabricated; a missing line reads NO-DATA rather than
+            # being invented) -- never by loosening record_receipt's own
+            # contract, which stays exactly as strict as it already was.
+            declined = []
+            reason_parts = []
+            applied_set = set(applied)
+            for state in ("stale", "unverified"):
+                for entry in section.get(state, []):
+                    slug = entry.get("slug")
+                    if not slug or slug in applied_set or slug in declined:
+                        continue
+                    declined.append(slug)
+                    reason_parts.append("%s (%s): %s" % (
+                        slug, state, entry.get("line") or NODATA))
+            declined = sorted(declined)
+            reason = "; ".join(reason_parts)
             try:
                 bm_recurrence.record_receipt(
-                    "%s:%s" % (run_id, uid), surfaced, applied, [], "",
-                    True, db_path=None)
+                    "%s:%s" % (run_id, uid), surfaced, applied, declined,
+                    reason, True, db_path=None)
             except Exception as exc:  # a receipt store failure (a locked or full db, a bad contract call) must never stop the run being reported
                 journal.append(run_dir, RECURRENCE_FAILED_EVENT_TYPE,
                                parent_ids=journal.previous(run_dir),
@@ -1948,6 +1976,187 @@ def _record_recurrence_and_draft_lessons(record, receipts, run_dir):
             unit_id=uid,
             payload={"path": os.path.relpath(path, run_dir),
                     "verdict": _verdict_for(receipt)})
+
+
+#: LL-4 (persona plan finding P12, second half, ship 2026-09-05): the
+#: vault-facing side of the loop the finding named ("no receipt files a
+#: recurrence receipt or drafts a failure case"). item 3 of the learning
+#: loop already covers the good outcome (scripts/accept_delivery.py writes
+#: a pattern note when a PERSON records an acceptance); this covers the bad
+#: one, a CANDIDATE vault note for every refused or NO-DATA receipt,
+#: admitted through bm_vault_intake's own `capture` door -- never a direct
+#: file write, matching the estate's one-front-door rule for vault content
+#: (pattern_note.py's own docstring). An integrated-but-unaccepted run
+#: drafts NOTHING: an agent's own green is not a pattern, and this file
+#: already refuses to speak for a human's acceptance anywhere else.
+FAILURE_CASE_DRAFTED_EVENT_TYPE = "failure_case.drafted"
+FAILURE_CASE_DRAFT_FAILED_EVENT_TYPE = "failure_case.draft_failed"
+#: No default. Defaulting to the real vault would mean an unattended
+#: engine run writes into a person's vault because nobody opted this run
+#: in. Unset reads as "no vault bound": drafting is skipped, honestly, at
+#: NO-DATA, and the run finishes exactly as it would without this feature.
+VAULT_ROOT_ENV_VAR = "BROTHERMODE_VAULT_ROOT"
+
+#: bm_vault_intake.py loaded by path once and cached, the same technique
+#: _load_bm_recurrence uses to reach its own sibling tool for the same
+#: reason: this ships as a plugin tool under products/brothermode/tools,
+#: never as an installed package. None means "could not load it", read at
+#: the call site as a reason to skip drafting, never to crash a delivery.
+_BM_VAULT_INTAKE_MODULE = None
+
+
+def _load_bm_vault_intake():
+    global _BM_VAULT_INTAKE_MODULE
+    if _BM_VAULT_INTAKE_MODULE is not None:
+        return _BM_VAULT_INTAKE_MODULE
+    path = os.path.join(REPO_ROOT, "products", "brothermode", "tools",
+                        "bm_vault_intake.py")
+    if not os.path.isfile(path):
+        return None
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("bm_vault_intake", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    except Exception:  # sbe: allow-silent a broken intake module must never break a delivery report; the caller reads None as "skip"
+        return None
+    _BM_VAULT_INTAKE_MODULE = mod
+    return mod
+
+
+def _vault_root():
+    """The vault this run may draft a failure case into, or None when this
+    run named none. Read fresh at every call, never cached: a test binds
+    and unbinds this env var around single calls."""
+    root = (os.environ.get(VAULT_ROOT_ENV_VAR) or "").strip()
+    return root or None
+
+
+def _receipt_file_sha256(path):
+    """sha256 hex digest of the receipt file already written to disk, or
+    None when it cannot be read back. Never raises: a boundary read of a
+    file this same process just wrote, that still might not be there (a
+    concurrent cleanup, a full disk)."""
+    try:
+        with open(path, "rb") as fh:
+            return hashlib.sha256(fh.read()).hexdigest()
+    except OSError:
+        return None
+
+
+def _failure_case_text(uid, row, receipt, run_id, receipt_path,
+                       receipt_sha256, record):
+    """The six LL-4 facts, plain lines a person reads before promoting this
+    draft, then the refusal in the engine's own words, quoted verbatim,
+    never paraphrased. `row` may be {} (a unit the Work document no longer
+    names by the time this runs): every field it feeds reads NO-DATA
+    rather than raising or guessing."""
+    row = row or {}
+    reason = str(receipt.get("reason") or "").strip()
+    quoted = reason or ("unit %r produced no verifiable evidence (a "
+                        "NO-DATA receipt)" % uid)
+    applies_to = [str(p) for p in (row.get("owns") or row.get("writes") or [])]
+    lines = [
+        "source_receipt: %s sha256:%s" % (run_id, receipt_sha256),
+        "applies_to: %s" % (", ".join(applies_to) if applies_to else NODATA),
+        "scope: %s" % (record.get("outcome") or record.get("work_id")
+                       or NODATA),
+        "evidence_locator: %s" % receipt_path,
+        "status: candidate",
+        "",
+        "Refusal, in the engine's own words:",
+        "",
+        "\"%s\"" % quoted,
+    ]
+    return "\n".join(lines)
+
+
+def _draft_failure_cases(record, final_receipts, run_dir, receipt_path):
+    """LL-4: one CANDIDATE vault note per refused or NO-DATA receipt in
+    `final_receipts`, admitted through bm_vault_intake's own `capture` door
+    -- never a direct file write. NEVER BLOCKS DELIVERY: a missing vault
+    binding, a missing intake module, an unreadable receipt file, or a
+    capture refusal (a credential shape in the refusal text, say) is
+    reported and this run finishes exactly as it would have without this
+    function.
+
+    IDEMPOTENT the same way _record_recurrence_and_draft_lessons is: guarded
+    per unit by its own journal event type, so a --continue rerun of an
+    already-finished run never mints a second candidate for the same unit.
+
+    A run with every unit at PASS drafts nothing at all, on purpose: a
+    passing receipt is not a failure case."""
+    if not run_dir:
+        return
+    non_pass = [r for r in (final_receipts or []) if _verdict_for(r) != "PASS"]
+    if not non_pass:
+        return
+    vault = _vault_root()
+    if vault is None:
+        print("brother_run: %s: no vault bound (%s unset), so no failure "
+              "case was drafted for this run's %d refused/unproven unit(s)"
+              % (NODATA, VAULT_ROOT_ENV_VAR, len(non_pass)))
+        return
+    vault_intake = _load_bm_vault_intake()
+    if vault_intake is None:
+        print("brother_run: %s: bm_vault_intake.py could not be loaded, so "
+              "no failure case was drafted" % NODATA)
+        return
+    if not receipt_path:
+        print("brother_run: %s: this run left no receipt file, so no "
+              "evidence_locator exists to draft a failure case against"
+              % NODATA)
+        return
+    receipt_sha256 = _receipt_file_sha256(receipt_path)
+    if receipt_sha256 is None:
+        print("brother_run: %s: the receipt file could not be read back to "
+              "hash, so no failure case was drafted" % NODATA)
+        return
+    events = journal.read(run_dir) or []
+    rows = {row.get("id"): row for row in
+           (record.get("rows") or record.get("units") or [])}
+    run_id = os.path.basename(os.path.normpath(run_dir))
+    drafted = 0
+    for receipt in non_pass:
+        uid = receipt.get("id")
+        if not uid:
+            continue
+        if _existing_event_id(events, FAILURE_CASE_DRAFTED_EVENT_TYPE, uid):
+            continue
+        text = _failure_case_text(uid, rows.get(uid), receipt, run_id,
+                                  receipt_path, receipt_sha256, record)
+        title = "%s: refused or unproven in run %s" % (uid, run_id)
+        args = argparse.Namespace(
+            vault=vault, by="brother_run.py (automated)", row=None,
+            title=title, expiry_class="lesson-candidate", today=None,
+            deny_list=None, text=[text])
+        buf = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(buf), \
+                 contextlib.redirect_stderr(buf):
+                code = vault_intake.cmd_capture(args)
+        except Exception as exc:  # sbe: allow-silent a capture crash must never turn a delivered run into a failed one; journaled and skipped
+            journal.append(run_dir, FAILURE_CASE_DRAFT_FAILED_EVENT_TYPE,
+                           parent_ids=journal.previous(run_dir), unit_id=uid,
+                           payload={"error": str(exc)[:200]})
+            continue
+        if code != 0:
+            journal.append(run_dir, FAILURE_CASE_DRAFT_FAILED_EVENT_TYPE,
+                           parent_ids=journal.previous(run_dir), unit_id=uid,
+                           payload={"error": buf.getvalue().strip()[:200]
+                                    or ("capture exited %d" % code)})
+            continue
+        event_id = journal.append(
+            run_dir, FAILURE_CASE_DRAFTED_EVENT_TYPE,
+            parent_ids=journal.previous(run_dir), unit_id=uid,
+            payload={"vault": vault})
+        if event_id:
+            events.append({"type": FAILURE_CASE_DRAFTED_EVENT_TYPE,
+                          "unit_id": uid})
+        drafted += 1
+    if drafted:
+        print("brother_run: drafted %d candidate failure case(s) into %s"
+             % (drafted, vault))
 
 
 def _exit_code_for(receipts, refused):
@@ -4628,6 +4837,11 @@ def main(argv=None):
         exit_reason = ("this run left no receipt, so nothing it did is "
                        "provable from disk: %s (the delivery itself ended: "
                        "%s)" % (receipt_problem, exit_reason))
+    # LL-4: the vault-facing half of the recurrence loop, run right after
+    # the receipt lands on disk so evidence_locator names a file that
+    # actually exists and source_receipt's sha256 is the real one. Never
+    # touches exit_code or exit_reason: drafting must never block delivery.
+    _draft_failure_cases(record, final_receipts, run_dir, receipt_path)
     print("brother_run: exit %d: %s" % (exit_code, exit_reason))
     # E81, THE NEXT COMMAND AFTER A REFUSAL. Printed only when it will
     # actually work: the candidate list is read back off disk through the

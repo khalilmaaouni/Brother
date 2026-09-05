@@ -21,6 +21,16 @@ Codex has hooks. Codex plugins do not.
 (run with `CODEX_HOME` pointed at a throwaway directory, so the founder's own
 `~/.codex` was read-only for this measurement and nothing was written into it.)
 
+Measured 2026-09-05, with the brothermode plugin installed beside brother
+(commit 07179111, because the loop engine ships in `products/brothermode`):
+Codex's `hooks/list` app-server method DOES return that plugin's own
+`hooks/hooks.json` entries, marked `"source": "plugin"`, `"trustStatus":
+"untrusted"`, alongside a warning that Codex is clamping its 30 second
+`SessionEnd` timeout to 3 seconds. Those entries never fire, because nothing
+ever trusts them, and `scripts/codex_hooks_install.py` reports them as a
+NO-DATA note beside its own PASS rather than failing on a file it never
+wrote.
+
 The canonical plugin validator agrees, and refuses a manifest that declares
 hooks at all. Scaffolded with Codex's own generator, one `hooks` key added,
 then validated with the installed canonical validator:

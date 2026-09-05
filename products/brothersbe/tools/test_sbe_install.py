@@ -841,8 +841,17 @@ class TestRollbackInstallScript(unittest.TestCase):
     # -- fixture construction -------------------------------------------
 
     def _git(self, repo, *args):
+        """Isolated from this machine's global and system git config (e.g.
+        tag.gpgsign/gpg.format set for the real signed release), so a
+        fixture tag or commit never blocks on signing that has nothing to
+        do with the test."""
+        env = dict(os.environ)
+        env["GIT_CONFIG_GLOBAL"] = os.devnull
+        env["GIT_CONFIG_NOSYSTEM"] = "1"
+        if args and args[0] in ("commit", "tag"):
+            args = ("-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false") + args
         return subprocess.run(["git"] + list(args), cwd=repo, check=True,
-                              capture_output=True, text=True)
+                              capture_output=True, text=True, env=env)
 
     def _release_source(self, versions, name="source"):
         """A git repository with one commit and one `v<version>` tag per entry

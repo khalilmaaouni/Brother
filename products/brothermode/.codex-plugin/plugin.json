@@ -1,0 +1,37 @@
+{
+  "name": "brothermode",
+  "version": "3.4.4",
+  "description": "Keep long-running AI work recoverable, give each file one supported writer, and deliver a record of decisions, cost, and checks.",
+  "author": {
+    "name": "Khalil Maaouni"
+  },
+  "homepage": "https://github.com/khalilmaaouni/Brother",
+  "repository": "https://github.com/khalilmaaouni/Brother",
+  "license": "MIT",
+  "keywords": [
+    "orchestration",
+    "project-management",
+    "delivery",
+    "forecasting",
+    "beginner-friendly",
+    "codex"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "BrotherMode",
+    "shortDescription": "Recoverable AI work with one writer per file.",
+    "longDescription": "BrotherMode keeps long-running AI work recoverable, gives each file one supported writer, and delivers a record of decisions, cost, and checks. It is the engine the Brother plugin runs its work through.",
+    "developerName": "Khalil Maaouni",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/khalilmaaouni/Brother",
+    "defaultPrompt": [
+      "Start a project with BrotherMode.",
+      "Show me the status of the current run.",
+      "Hand this work back with a decision record."
+    ]
+  }
+}

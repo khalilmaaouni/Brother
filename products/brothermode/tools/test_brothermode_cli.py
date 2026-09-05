@@ -156,11 +156,22 @@ def _init_store(root, env=None):
     return r
 
 
+def _git_env():
+    """Env for git calls against throwaway repos: masks this machine's
+    global and system git config (e.g. tag.gpgsign/gpg.format set for the
+    real signed release) so a fixture tag or commit never blocks on signing
+    that has nothing to do with the test."""
+    env = dict(os.environ)
+    env["GIT_CONFIG_GLOBAL"] = os.devnull
+    env["GIT_CONFIG_NOSYSTEM"] = "1"
+    return env
+
+
 def _git(repo, *args):
     """One git call against a throwaway repo, output captured. Mirrors
     tools/test_bm_autosave.py's own _git helper exactly."""
     return subprocess.run(["git", "-C", repo] + list(args),
-                          capture_output=True, text=True)
+                          capture_output=True, text=True, env=_git_env())
 
 
 def _init_repo(path):
@@ -174,6 +185,7 @@ def _init_repo(path):
     _git(path, "config", "user.email", "t@t.t")
     _git(path, "config", "user.name", "t")
     _git(path, "config", "commit.gpgsign", "false")
+    _git(path, "config", "tag.gpgsign", "false")
 
 
 def _write_consented_config(path, vault):

@@ -53,7 +53,7 @@ now reads `2.0.0-rc.12.dev1`, a DEVELOPMENT identity, not a release candidate.
 tag at all. The public install target stays pinned at the last tag actually
 known to resolve, `install_target_tag`. That was `v2.0.0-rc.9` when this
 paragraph was written 2026-08-01; it has moved since. The live value is
-`PUBLIC_INSTALL_TAG` in `tools/bm_project_facts.py`, currently `v1.0.7`,
+`PUBLIC_INSTALL_TAG` in `tools/bm_project_facts.py`, currently `v1.0.8`,
 independent of whatever VERSION says. See "The version law" below for the
 rule this follows.
 
@@ -172,12 +172,12 @@ installer copies it the rest of the way (`README.md`, "Install and
 preflight" explains why):
 
 ```bash
-git clone --branch v1.0.7 --depth 1 https://github.com/khalilmaaouni/Brother.git ~/.claude/skills/brothermode-src
+git clone --branch v1.0.8 --depth 1 https://github.com/khalilmaaouni/Brother.git ~/.claude/skills/brothermode-src
 cd ~/.claude/skills/brothermode-src/products/brothermode
 python3 scripts/install.py
 ```
 
-`--branch v1.0.7` checks out that exact tag, not a moving branch head. It
+`--branch v1.0.8` checks out that exact tag, not a moving branch head. It
 is the public install target, not necessarily the identity the tree on `main`
 currently carries: `python3 tools/bm_project_facts.py --field
 install_target_tag` prints the tag every onboarding page pins, and `python3

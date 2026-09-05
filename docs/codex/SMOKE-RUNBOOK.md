@@ -53,7 +53,7 @@ reached a write, being refused at the login first.
 So this proves the PLUMBING end to end. It does not prove a real model's
 behaviour. That is the half the runbook closes.
 
-## The four install commands, captured
+## The five install commands, captured
 
 Step 1, the marketplace. A LOCAL PATH is a valid marketplace source, and that
 is what the smoke uses so it tests the tree it is run from:
@@ -79,12 +79,28 @@ Step 2, the plugin:
       "authPolicy": "ON_INSTALL"
       exit 0
 
+Step 2b, the brothermode plugin. It carries the engine Brother runs work
+through: Claude pulls it in through the dependency declared in
+`bundle/.claude-plugin/plugin.json`, and Codex has no dependency resolution,
+so it is installed by name:
+
+    $ /Applications/ChatGPT.app/Contents/Resources/codex plugin add brothermode@brother --json
+      "name": "brothermode",
+      "marketplaceName": "brother",
+      "version": "3.4.4",
+      "installedPath": "<CODEX_HOME>/plugins/cache/brother/brothermode/3.4.4",
+      "authPolicy": "ON_INSTALL"
+      exit 0
+
 Step 3, the confirmation. `pluginId` is `brother@brother`, and its `source`
-resolves `./bundle` against the marketplace root:
+resolves `./bundle` against the marketplace root; the same list also names
+`brothermode@brother`:
 
     $ /Applications/ChatGPT.app/Contents/Resources/codex plugin list --available --json
       "pluginId": "brother@brother",
       "source": { "source": "local", "path": "<repo root>/bundle" }
+      "pluginId": "brothermode@brother",
+      "source": { "source": "local", "path": "<repo root>/products/brothermode" }
       exit 0
 
 Step 4, the hooks. A Codex plugin install delivers NO hooks (Codex removed
@@ -96,7 +112,16 @@ Codex user the fence:
         PostToolUse, PreCompact, PreToolUse, SessionEnd, SessionStart, Stop
       codex_hooks_install: codex hooks/list reports 18 hook(s) from <CODEX_HOME>/hooks.json
       codex_hooks_install: PASS: codex reports all 18 hook(s) trusted and enabled
+      codex_hooks_install: NO-DATA: 10 hook(s) sourced from plugin(s) brothermode@brother
+        are left untrusted on purpose: Brother's hooks are wired once, from
+        <CODEX_HOME>/hooks.json, so a plugin copy must not fire beside them
       exit 0
+
+With the brothermode plugin installed (step 2b), `hooks/list` also returns
+that plugin's own bundled `hooks/hooks.json` entries: 10 of them, forever
+`"trustStatus": "untrusted"`, never counted toward the PASS line above and
+never firing. The NO-DATA line names them rather than failing on a file this
+script never wrote.
 
 ## Step 5a: the real task, and the refusal that blocks it
 
@@ -234,11 +259,21 @@ Step 2, the plugin:
 
   PASS: JSON naming `"pluginId": "brother@brother"` and a version, exit 0.
 
+Step 2b, the brothermode plugin. It carries the engine Brother runs work
+through: Claude pulls it in through the dependency declared in
+`bundle/.claude-plugin/plugin.json`, and Codex has no dependency resolution,
+so it is installed by name:
+
+    codex plugin add brothermode@brother --json
+
+  PASS: JSON naming `"pluginId": "brothermode@brother"` and a version, exit 0.
+
 Step 3, the confirmation:
 
     codex plugin list --available --json
 
-  PASS: the installed list carries `brother@brother`, exit 0.
+  PASS: the installed list carries `brother@brother` and `brothermode@brother`,
+  exit 0.
 
 Step 4, the hooks, which the plugin install does NOT deliver. The installer is
 a maintainer script and does NOT ship inside `bundle/`, so it is run from a
@@ -250,7 +285,11 @@ checkout of this repository, not from the installed plugin:
 
   PASS: "PASS: codex reports all 18 hook(s) trusted and enabled", exit 0.
   Anything less is NO-DATA: a hooks file Codex has read but not trusted does
-  not run, and a Codex install without it has skills and no fence.
+  not run, and a Codex install without it has skills and no fence. A further
+  line, "NO-DATA: 10 hook(s) sourced from plugin(s) brothermode@brother are
+  left untrusted on purpose", is expected beside the PASS: it names the
+  brothermode plugin's own bundled hooks, which Codex reads back but never
+  trusts and never fires, and is not a failure.
 
 Step 5, the toy. In a throwaway directory, not a real project:
 

@@ -1,0 +1,4 @@
+run: 2026-09-05 19:05 JST, blind round 4, SUT: engine decides (scripts/jbeq_decide.py at b514ff6f, PR 357) over fact sheets a blind sonnet extractor wrote from prompts alone; RQ, SV, TM answered directly by the same blind extractor
+prompts sha256 3fd223d38fdbb9e7 (regenerated with the corrected vocabulary, branch wbs/jbeq-rules-a-to-d 96547b7d); schema 6590c6e204a0b73f; rules 72a28e4bbc6d2ab6; scorer from 96547b7d
+fact sheets sha256 c75542ff2e01c96a; answers sha256 2014c1b9b0184da2
+result: 50 of 70, critical wrong 8 of 33, critical false merges 1 (MM-01), conservative wrongs 3, NOT READY. Worse than round 2 (63, 4) and round 3 (60, 6). Rounds 2 to 4 are diagnostic evidence; no expected answer was edited; the JBEQ loop stops tonight per the steering's stop conditions (three shapes, no convergence).

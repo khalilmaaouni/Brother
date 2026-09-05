@@ -624,6 +624,23 @@ def _consented():
         return False
 
 
+def _load_bm_vault_read_audit():
+    """Load bm_vault_read_audit.py by path, the same load-by-path shape every other
+    optional contract module in this hook already uses. (V5.) An absent or broken
+    module means no read-audit row for this recall, degraded on stderr, never a
+    crash and never a delayed edit -- the exact stance this hook already takes on
+    every other optional module it loads."""
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "bm_vault_read_audit_for_recall", os.path.join(HERE, "bm_vault_read_audit.py"))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception:  # sbe: allow-silent optional read-audit module load; recall continues unaudited
+        return None
+
+
 def _load_bm_repo_scope():
     """Load bm_repo_scope.py by path, the same load-by-path shape used
     across this product's hooks. E76 per-repository hook scoping, checked
@@ -757,6 +774,16 @@ def cmd_check():
                         bm_vault_heat_temporal.record_recall(slug)
                     except Exception:  # sbe: allow-silent counter must never break recall
                         pass
+        # V5: one hash-chained read-audit row per note actually shown above (never a
+        # withheld one -- lesson_states never returns those, see its own docstring).
+        # A load or write failure degrades to nothing here; bm_vault_read_audit.py's
+        # own record_read already prints the NO-DATA line itself, and this hook never
+        # blocks or delays the edit for it either way.
+        read_audit = _load_bm_vault_read_audit()
+        if read_audit is not None:
+            for rec in records:
+                read_audit.record_read(note=rec.get("path"), surface="recall_hook",
+                                       session=session, query=path)
     return 0
 
 

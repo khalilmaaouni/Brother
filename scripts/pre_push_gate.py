@@ -480,9 +480,50 @@ def _scan_range(rng, shown, cwd=ROOT, runner=None):
     # files here pre-cutover would diverge the subtrees from their sources;
     # cleanse.sh's working-tree dash scan carries the identical exclusion.
     # Removed at M6 when the shippable halves are cleaned deliberately.
-    net = _git(["diff", "--no-color"] + ([rng[0].replace("..", "...")]
-                                         if ".." in rng[0] else rng)
-               + ["--", ".", ":(exclude)products/"], cwd, runner)
+    # 2026-09-05: rng is either ["A..B"] (a remote counterpart exists) or
+    # [tip, "--not", "--remotes"] (a brand new branch, or a ref pushed by
+    # sha whose remote side is all zeros). The ".." shape above becomes a
+    # normal A...B diff. The second shape used to pass straight through to
+    # `git diff`, which does not read --not/--remotes as a rev-list style
+    # exclusion at all: it reads N refs after the first as a COMBINED diff
+    # against every one of them, so `git diff <tip> --not --remotes` diffed
+    # the tip against all 418 remote refs on the real repository. Measured
+    # 2026-09-05 at load 21: 3.9 seconds and 125 megabytes for one seeded
+    # commit, against 0.05 seconds for the two-tree form below; 54 to 63
+    # seconds under load on 2026-09-04 (the reason _git's timeout is 300),
+    # and reported at 1.4 gigabytes plus with no end in sight on the machine
+    # at load 80 to 115 with 38 worktrees pushing. git log and git rev-list read --not/--remotes
+    # correctly; only the diff call was wrong.
+    #
+    # The fix walks the FIRST-PARENT chain of the same outgoing range,
+    # with the same imported-history exclusions the log scan above already
+    # applies, to find the one commit this diff should compare against: the
+    # first excluded ancestor on that chain is the boundary, and the diff
+    # is a plain two-tree diff from there to the tip. A branch with no
+    # first-parent boundary at all (an orphan or root branch) diffs
+    # against git's own empty tree instead. This is the same ceiling the
+    # A...B path above already carries: a branch that merged its base back
+    # into itself still shows the merged-in changes here, because the
+    # boundary is walked on first-parent only.
+    if ".." in rng[0]:
+        net = _git(["diff", "--no-color", rng[0].replace("..", "...")]
+                   + ["--", ".", ":(exclude)products/"], cwd, runner)
+    else:
+        bnd = _git(["rev-list", "--boundary", "--first-parent"] + rng
+                   + exclusions, cwd, runner)
+        if bnd is None or bnd.returncode != 0:
+            net = None
+        else:
+            lines = (bnd.stdout or "").splitlines()
+            outgoing = [l for l in lines if l and not l.startswith("-")]
+            boundaries = [l[1:] for l in lines if l.startswith("-")]
+            if not outgoing:
+                net = subprocess.CompletedProcess(["git", "diff"], 0, "", "")
+            else:
+                base = boundaries[0] if boundaries \
+                    else "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+                net = _git(["diff", "--no-color", base, rng[0]]
+                           + ["--", ".", ":(exclude)products/"], cwd, runner)
     if diff is None or diff.returncode != 0:
         return [(NODATA, "correctness",
                  "could not read the outgoing range %s, so nothing was scanned. "
