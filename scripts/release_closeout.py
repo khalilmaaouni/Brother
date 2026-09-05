@@ -1433,7 +1433,16 @@ def tag_signature_verified(gate, ev, checkout, tag):
     verifies? Row S5 (roadmap) is founder gated: the signing key is his
     alone, so a tag with no signature at all is NO-DATA, never a FAIL. FAIL
     is reserved for a signature that IS present but does not check out,
-    which is the only shape that means something actually went wrong."""
+    which is the only shape that means something actually went wrong.
+
+    THIS IS AN INFORMATIONAL READING, NOT A LEG OF X7, since 1.0.5. It was
+    folded in as a required leg, and because no key exists the leg could not
+    run, so X7 settled NO-DATA on it and the release matrix read NOT
+    COMPLETE with every other gate PASS. A gate cannot decide on a leg whose
+    only possible answer is "the founder has not done his own step yet":
+    that is what row S5 is for. X7 decides on REPRODUCTION alone, and this
+    line says what the signature looks like beside it, the same shape as the
+    hub drift line in X6."""
     proc = step(gate, ev, "tag signature", ["git", "tag", "-v", tag],
                 cwd=checkout, timeout=120,
                 needles=("gpg", "Good signature", "BAD", "error",
@@ -1514,10 +1523,15 @@ def gate_public_artifact(args, ev, gate):
 
     verdicts.append(manifest_self_consistency(args, ev, gate, checkout))
     verdicts.append(manifest_against_source(args, ev, gate, checkout))
-    verdicts.append(tag_signature_verified(gate, ev, checkout, tag))
 
     for verdict, why in verdicts:
         gate.say("  %-8s %s" % (verdict, why))
+    # INFORMATIONAL ONLY, never a leg: see tag_signature_verified for why a
+    # founder-gated signing key cannot decide a reproduction gate.
+    sig_verdict, sig_why = tag_signature_verified(gate, ev, checkout, tag)
+    gate.say("  tag signing: %s (INFORMATIONAL ONLY: row S5 is the founder's "
+             "own gate, so X7 decides on reproduction alone). %s"
+             % (sig_verdict, sig_why))
     fails = [w for v, w in verdicts if v == "FAIL"]
     if fails:
         return gate.settle("FAIL", "; ".join(fails))

@@ -330,7 +330,7 @@ Step 6, the task:
   hand the engine the units through its documented seam, which makes no model
   call at all.
 
-      DOOR_MODEL_CMD="cat plan.json" python3 "$BROTHER_PLUGIN_ROOT/runtime/brother_run.py" "<outcome>" --cwd "$PWD"
+      DOOR_MODEL_CMD="cat plan.json" python3 "$BROTHER_PLUGIN_ROOT/runtime/brother_run.py" "<outcome>" --cwd "$PWD" --runs-root "$TMPDIR/brother-runs"
 
   `plan.json` is a JSON list of units, each with `id`, `objective`,
   `done_check`, `writes` and `deps`. The engine still isolates every unit,
@@ -338,6 +338,23 @@ Step 6, the task:
   decomposition came from the agent driving the turn rather than from a
   nested model. The per-unit worker takes the same treatment through
   `MODEL_WORKER_CMD`.
+
+  `--runs-root` is the third thing this step needs, and its absence is the
+  2026-09-05 signed-in failure. The engine keeps its records OUTSIDE the
+  repository it integrates into, and the default is its own tree: under a
+  plugin install that tree is read only, so the first engine call died with
+  `PermissionError: [Errno 1] Operation not permitted` on the installed
+  plugin's own `docs` path. `$TMPDIR` is one of the roots a workspace-write
+  turn already grants. Never point it at a directory inside the toy: the records
+  then sit untracked inside the very tree integration checks for
+  cleanliness, and a run pointed there once spun 11 rounds of live worker
+  calls before it was killed by hand.
+
+  NOTHING ELSE IS WRITTEN INTO THE TOY. The turn goes straight to the engine:
+  no STATE.md, no `.sbe/`, no fence file, no task registry. Those are what
+  the 2026-09-05 run left behind, and they made the tree dirty before the
+  first unit ran, so all three worker attempts passed their own done checks
+  and integration then refused every one of them.
 
   A write outside every granted root is dropped SILENTLY, with no error line
   and exit 0. So if condition 3 below fails while conditions 1 and 2 pass,

@@ -79,3 +79,10 @@ model call can be made from inside one: a nested `codex exec` cannot start
 there at all, and any other model CLI has every socket blocked and reports
 itself not logged in. So under Codex, step 2's `DOOR_MODEL_CMD` seam is the
 route, not a fallback.
+
+## The one thing worth remembering
+
+A green verdict is not the end of the chain. The chain ends in observed
+reality: a change that shipped, a person who accepted it, and where a number
+was claimed, an outcome that scored it. Everything above is machinery for
+getting there honestly.

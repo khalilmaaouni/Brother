@@ -3398,13 +3398,15 @@ class TheDirtyTreeIsRefusedBeforeAnyClaim(unittest.TestCase):
     merge time, after every worker had spent its attempts. The engine now
     checks it once the door has said what the run writes and before
     anything is claimed, by integrate.py's own rule (bytecode never
-    counts). TWO KINDS OF DIRT (battery round 9, product-acceptance area 6):
-    dirt inside the run's write set is refused in one line naming the count
-    and the first three paths with their owning unit; dirt outside it (an
-    unrelated uncommitted edit) is named and left untouched while the run
-    proceeds, integration still refusing to merge over it, so the person can
-    commit their edit and resume. The first version of this class refused
-    every dirty tree before the door; that was the too-broad rule."""
+    counts). BOTH KINDS OF DIRT ARE REFUSED, each naming its own paths: dirt
+    inside the run's write set names the count and the first three paths
+    with their owning unit; dirt outside it names the paths and says the
+    merge would refuse them anyway. Outside dirt was a NOTICE that let the
+    run proceed until the founder's 2026-09-05 public 1.0.5 run, where two
+    setup files no unit owned let three worker attempts run and pass before
+    integration refused every one of them and the receipt reported
+    changed=[]. Nobody's edit is buried by refusing: nothing is claimed and
+    no path is written, which the survival assertions below still check."""
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="brother-run-dirty-")
@@ -3462,10 +3464,16 @@ class TheDirtyTreeIsRefusedBeforeAnyClaim(unittest.TestCase):
         with open(os.path.join(self.repo, "one.txt"), encoding="utf-8") as fh:
             self.assertEqual(fh.read(), "somebody's uncommitted one.txt\n")
 
-    def test_unrelated_dirt_proceeds_and_the_edit_survives(self):
+    def test_unrelated_dirt_is_refused_up_front_and_the_edit_survives(self):
         """The acceptance harness's area 6 shape: an uncommitted edit to a
-        file no unit owns. The run proceeds, integration refuses to merge
-        over the dirty tree by name, and the edit and HEAD are untouched."""
+        file no unit owns. It is refused BEFORE any worker runs, naming the
+        path, and the edit and HEAD are untouched.
+
+        THE REGRESSION, and it is the founder's 2026-09-05 public 1.0.5 run:
+        this used to proceed, spend all three worker attempts, and only then
+        have integration refuse every unit, leaving a receipt with
+        changed=[]. The assertions that no claim was made and no attempt ran
+        are the ones that would go red if that behavior came back."""
         with open(os.path.join(self.repo, "base.txt"), "a",
                  encoding="utf-8") as fh:
             fh.write("unrelated, uncommitted, must survive\n")
@@ -3473,10 +3481,15 @@ class TheDirtyTreeIsRefusedBeforeAnyClaim(unittest.TestCase):
         proc, out = self._run()
         self.assertEqual(proc.returncode, 1, out)
         self.assertIn("is dirty on 1 uncommitted path(s) outside this run's "
-                      "write set (base.txt); they are left untouched", out, out)
-        self.assertNotIn("nothing was claimed or run", out, out)
-        self.assertIn("dirty", out.lower(), out)
-        self.assertIn("refused (1):", out, out)
+                      "write set (base.txt); commit or remove them first, "
+                      "nothing was claimed or run", out, out)
+        # Refused BEFORE the drain: no unit was ever claimed, so the report
+        # cannot carry the per-unit refusal block the old path produced.
+        self.assertNotIn("refused (1):", out, out)
+        run_dir = _only_run_dir(self.tmp)
+        self.assertIsNotNone(run_dir, out)
+        self.assertFalse(os.path.isfile(os.path.join(run_dir, "claims.json")),
+                         out)
         with open(os.path.join(self.repo, "base.txt"), encoding="utf-8") as fh:
             self.assertEqual(fh.read(),
                              "base\nunrelated, uncommitted, must survive\n")
@@ -3502,16 +3515,21 @@ class TheDirtyTreeIsRefusedBeforeAnyClaim(unittest.TestCase):
                  encoding="utf-8") as fh:
             fh.write("x\n")
         refusal, notice = _br._dirty_tree_lines(self.repo, rows)
-        self.assertEqual(refusal, "")
+        self.assertEqual(notice, "")
         self.assertIn("1 uncommitted path(s) outside this run's write set "
-                      "(stray.txt)", notice)
+                      "(stray.txt)", refusal)
+        self.assertIn("nothing was claimed or run", refusal)
         owning = [{"id": "A1", "status": "SCHEDULED", "owns": ["stray.txt"]}]
         refusal, notice = _br._dirty_tree_lines(self.repo, owning)
         self.assertIn("(stray.txt (owned by A1))", refusal)
         self.assertEqual(notice, "")
-        # A DONE row's paths are not this run's write set anymore.
+        # A DONE row's paths are not this run's write set anymore, so the
+        # same dirt reads as OUTSIDE it: still refused (both kinds are), but
+        # by the line that names no owning unit.
         done = [{"id": "A1", "status": "DONE", "owns": ["stray.txt"]}]
-        self.assertEqual(_br._dirty_tree_lines(self.repo, done)[0], "")
+        done_refusal = _br._dirty_tree_lines(self.repo, done)[0]
+        self.assertIn("outside this run's write set", done_refusal)
+        self.assertNotIn("owned by", done_refusal)
         # Overlap reads directories both ways, trailing slash or not.
         self.assertTrue(_br._path_overlaps("pkg/x.txt", "pkg"))
         self.assertTrue(_br._path_overlaps("pkg/", "pkg/x.txt"))
@@ -5372,6 +5390,70 @@ class TheCleanTargetRuleIsStatedNotImplied(unittest.TestCase):
         clean = [{"id": "A1", "status": "SCHEDULED", "owns": ["__pycache__"]}]
         os.remove(os.path.join(repo, "stray.txt"))
         self.assertEqual(_br._dirty_tree_lines(repo, clean), ("", ""))
+
+
+class AnUnwritableDefaultRunsRootFallsBack(unittest.TestCase):
+    """The founder's 2026-09-05 public 1.0.5 run. Installed as a Codex
+    plugin, this tool's own repository IS the read-only plugin cache, so the
+    default runs root could not be created and the first engine call died
+    with an uncaught traceback, verbatim: "PermissionError: [Errno 1]
+    Operation not permitted:
+    .../plugins/cache/brother/brother/1.0.5/docs". It now falls back and
+    says where it went.
+
+    THE PROBE IS THE MAKEDIRS ITSELF, not os.access, because on that machine
+    the refusal came from the sandbox rather than from a mode bit and
+    os.access would have answered True. So these drive the probe directly."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="runs-root-fallback-")
+
+    def _refuse(self, _path):
+        raise PermissionError(1, "Operation not permitted")
+
+    def test_a_writable_default_is_used_and_says_nothing(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            root = _br._resolve_runs_root(None, default=self.tmp)
+        self.assertEqual(root, os.path.abspath(self.tmp))
+        self.assertEqual(buf.getvalue(), "")
+        self.assertTrue(os.path.isdir(
+            os.path.join(self.tmp, "docs", "plan", "runs")))
+
+    def test_an_unwritable_default_falls_back_and_prints_its_line(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            root = _br._resolve_runs_root(None, default=self.tmp,
+                                          probe=self._refuse)
+        expected = os.path.join(tempfile.gettempdir(), _br.FALLBACK_RUNS_DIR)
+        self.assertEqual(root, expected)
+        line = buf.getvalue()
+        self.assertIn("cannot be written", line)
+        self.assertIn(self.tmp, line)
+        self.assertIn(expected, line)
+        self.assertIn("Operation not permitted", line)
+
+    def test_the_fallback_is_never_inside_the_repository_being_worked_on(self):
+        """2026-08-30, vault: --runs-root pointed inside --cwd made every
+        integration refuse as dirty and the run spun 11 rounds of live
+        worker calls before a person killed it. A fallback that chose
+        <cwd>/.brother-runs would ship that failure as the default."""
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            root = _br._resolve_runs_root(None, default=self.tmp,
+                                          probe=self._refuse)
+        self.assertFalse(root.startswith(os.path.abspath(self.tmp) + os.sep))
+        self.assertNotIn(".brother-runs", root)
+
+    def test_an_explicit_runs_root_is_honored_and_never_moved(self):
+        """A path the caller named is the caller's, unwritable or not: it
+        has to surface as itself rather than being quietly relocated."""
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            root = _br._resolve_runs_root(self.tmp, default="/nonexistent",
+                                          probe=self._refuse)
+        self.assertEqual(root, os.path.abspath(self.tmp))
+        self.assertEqual(buf.getvalue(), "")
 
 
 if __name__ == "__main__":

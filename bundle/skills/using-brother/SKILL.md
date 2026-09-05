@@ -35,27 +35,37 @@ by running the engine. Four steps, in this order. Writing the patch by hand
 instead is the one failure this section exists to stop: a turn that edits
 files and prints no receipt has not used Brother at all.
 
+These four steps are the WHOLE ceremony. Write NO intake into the target
+repository first: no STATE.md, no `.sbe/`, no fence file, nothing a unit did
+not declare. Every such file makes the tree dirty, and the engine refuses the
+run before the first unit is claimed.
+
 1. **Write the unit or units, each with a real done check.** A done check is
    a command a machine runs that FAILS when the change is wrong. A test you
    added, run with `python3 -m unittest`, counts. "It looks right" does not.
 2. **Run the engine, never a slash command:**
 
-       python3 "$BROTHER_PLUGIN_ROOT/runtime/brother_run.py" "<outcome>" --cwd <repo>
+       python3 "$BROTHER_PLUGIN_ROOT/runtime/brother_run.py" "<outcome>" \
+           --cwd <repo> --runs-root "$TMPDIR/brother-runs"
 
    Under Claude Code the plugin root is `$CLAUDE_PLUGIN_ROOT`. The engine
    needs a configured model worker and refuses the run when none answers.
+
+   `--runs-root` holds the engine's own records. Keep it OUTSIDE the
+   repository: inside, the records make the tree dirty, and the default under
+   a read-only plugin install cannot be written at all.
 
    If it refuses with `door: refused after N attempt(s), store untouched`,
    hand it the units you wrote in step 1 instead of leaving it to ask a
    model it cannot reach:
 
-       DOOR_MODEL_CMD="cat plan.json" python3 "$BROTHER_PLUGIN_ROOT/runtime/brother_run.py" "<outcome>" --cwd <repo>
+       DOOR_MODEL_CMD="cat plan.json" python3 "$BROTHER_PLUGIN_ROOT/runtime/brother_run.py" \
+           "<outcome>" --cwd <repo> --runs-root "$TMPDIR/brother-runs"
 
    `plan.json` is a JSON list of units, each with `id`, `objective`,
    `done_check`, `writes` and `deps`. The engine still isolates every unit,
    still runs every `done_check`, and still writes the receipt; only the
-   decomposition came from you. This is a documented seam, not a way round
-   the engine, and writing the patch by hand is still the failure above.
+   decomposition came from you.
 3. **Print the receipt line, then read the receipt back.** The engine's last
    line is `brother_run: receipt: <path>`. Print that line, open the file it
    names, and report every per-file entry: the file, the check command, and
@@ -93,19 +103,9 @@ reaching a decision. Absent evidence is NO-DATA, never a pass.
 stated; the claim registers BEFORE the outcome is known, then scores against
 reality. Experimental, not in the bundle.
 
-The routes compose. A risky change usually wants provenance and assurance
-together. Nothing forces all three.
-
 ## More detail: verbs, boundaries, handback, closing
 
 The verb-to-slash-command table, what this router must never do, the
 handback rule, and the four-step closing ceremony are in
 references/router-details.md, next to this file. Load it when one of
 those situations applies.
-
-## The one thing worth remembering
-
-A green verdict is not the end of the chain. The chain ends in observed
-reality: a change that shipped, a person who accepted it, and where a number
-was claimed, an outcome that scored it. Everything above is machinery for
-getting there honestly.

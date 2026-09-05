@@ -29,6 +29,8 @@ places a wrong answer would look like a right one:
    printed command, or either toy file it prints, drifts from the constants
    the automation runs.
 """
+import contextlib
+import io
 import json
 import os
 import sys
@@ -37,6 +39,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import brother_run  # noqa: E402
 import codex_smoke  # noqa: E402
 
 # E100: one sandbox for every temp tree this process makes, removed at exit.
@@ -117,6 +120,32 @@ class TheRunbookMatchesTheCode(unittest.TestCase):
         # door refused its nested decomposer and named this in its refusal.
         self.assertIn("DOOR_MODEL_CMD", self.page)
         self.assertIn("MODEL_WORKER_CMD", self.page)
+
+    def test_the_page_names_the_runs_root_the_engine_needs(self):
+        """The second half of the same 2026-09-05 failure. With the seam but
+        no --runs-root, the engine defaults to its own tree, which under a
+        plugin install is read only, and the first call died with an uncaught
+        PermissionError on the installed plugin's docs path."""
+        self.assertIn(codex_smoke.documented_runs_root_flag(), self.page)
+        self.assertIn(codex_smoke.DOCUMENTED_RUNS_ROOT, self.page)
+
+    def test_the_documented_runs_root_is_never_inside_the_repository(self):
+        """Driven the other way: a runs root under the target is the shape
+        that made every integration refuse as dirty and spun 11 rounds of
+        live worker calls on 2026-08-30. The page must not offer it."""
+        self.assertNotIn("$PWD/.brother-runs", self.page)
+        self.assertFalse(
+            codex_smoke.DOCUMENTED_RUNS_ROOT.startswith("$PWD"),
+            codex_smoke.DOCUMENTED_RUNS_ROOT)
+
+    def test_the_page_forbids_writing_setup_files_into_the_toy(self):
+        """The first half of the 2026-09-05 failure: the turn wrote its own
+        intake into the toy before invoking Brother, which made the tree
+        dirty, so three worker attempts passed their done checks and
+        integration refused every one of them."""
+        for name in ("STATE.md", ".sbe/"):
+            self.assertIn(name, self.page)
+        self.assertIn("NOTHING ELSE IS WRITTEN INTO THE TOY", self.page)
 
     def test_every_documented_flag_is_built_from_sandbox_flags(self):
         # The page and the automation cannot say different things while the
@@ -308,6 +337,36 @@ class TheDocumentedCommand(unittest.TestCase):
         self.assertIn("mathlib.py", lines[0])
         self.assertIn("check python3 ", lines[0])
         self.assertIn("exited 0", lines[0])
+        # THE FOUNDER'S 2026-09-05 FAILURE, asserted as absence. His run left
+        # these two in the toy before invoking the engine, which made the
+        # tree dirty, so every unit was refused at integration and the
+        # receipt reported changed=[] with mathlib.py untouched. A receipt
+        # naming mathlib.py is only half the claim; the other half is that
+        # nothing else was written into the repository being worked on.
+        for name in ("STATE.md", ".sbe"):
+            self.assertFalse(
+                os.path.exists(os.path.join(toy, name)),
+                "the turn wrote %s into the toy, which is what made the "
+                "canonical tree dirty on 2026-09-05:\n%s"
+                % (name, body[-1500:]))
+        # And the run's own records stayed OUTSIDE the toy, which is the
+        # other way the same tree goes dirty.
+        self.assertFalse(
+            os.path.abspath(run_dir).startswith(os.path.abspath(toy) + os.sep),
+            run_dir)
+
+    def test_the_engine_says_where_it_put_its_records_when_the_default_fails(
+            self):
+        """The read-only plugin install, in the shape the founder hit: the
+        default runs root cannot be created, so the engine names the one it
+        used instead of dying with an uncaught PermissionError."""
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            root = brother_run._resolve_runs_root(
+                None, default="/dev/null/not-writable")
+        self.assertTrue(root.startswith(tempfile.gettempdir()), root)
+        self.assertIn("cannot be written", buf.getvalue())
+        self.assertIn(root, buf.getvalue())
 
 
 if __name__ == "__main__":
