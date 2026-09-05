@@ -5,7 +5,7 @@
   },
   "metadata": {
     "description": "Brother turns a plain-language outcome into checked work, a rerunnable receipt, useful local memory, and a human acceptance decision.",
-    "version": "1.0.3"
+    "version": "1.0.4"
   },
   "plugins": [
     {
@@ -14,7 +14,7 @@
         "source": "git-subdir",
         "url": "https://github.com/khalilmaaouni/Brother",
         "path": "products/brothermode",
-        "ref": "v1.0.3"
+        "ref": "v1.0.4"
       },
       "description": "Keep long-running AI work recoverable, give each file one supported writer, and deliver a record of decisions, cost, and checks.",
       "version": "3.4.4",
@@ -29,7 +29,7 @@
         "source": "git-subdir",
         "url": "https://github.com/khalilmaaouni/Brother",
         "path": "products/brothersbe",
-        "ref": "v1.0.3"
+        "ref": "v1.0.4"
       },
       "description": "Make missing evidence visible on risky backend and data work, with PASS, FAIL, and NO-DATA kept distinct for human review.",
       "version": "3.7.3",
@@ -44,10 +44,10 @@
         "source": "git-subdir",
         "url": "https://github.com/khalilmaaouni/Brother",
         "path": "bundle",
-        "ref": "v1.0.3"
+        "ref": "v1.0.4"
       },
       "description": "Turn a plain-language outcome into checked work, a rerunnable receipt, useful local memory, and a human acceptance decision.",
-      "version": "1.0.3",
+      "version": "1.0.4",
       "author": {
         "name": "Khalil Maaouni"
       },

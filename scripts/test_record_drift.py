@@ -186,6 +186,38 @@ class ASubPartsOwnStatusIsNotTheRows(unittest.TestCase):
         self.assertIn("LANDED", drift[0][2])
 
 
+class AnExplicitlyReaffirmedStatusIsNotOverruled(unittest.TestCase):
+    """The ninth false-positive class, found on the live board: rows S6, S10
+    and S14 each write, in so many words, that the status STAYS what it
+    already reads ('the status stays OPEN on purpose', 'THE ROW STAYS
+    IN-FLIGHT'), then go on for paragraphs describing sub-work that DID
+    close or land, in prose this checker's own word list also catches
+    ('fail-closed policy', 'a unit closed', '(E105, landed ...)', 'closed
+    the last two positive misses'). An author who explicitly reaffirms the
+    current status has already answered the question this check exists to
+    ask."""
+
+    def test_a_reaffirmed_status_is_not_flagged_despite_a_later_decided_word(self):
+        doc = board([{"id": "S10", "status": "OPEN",
+                      "evidence": "PARTIAL, and the status stays OPEN on "
+                                  "purpose. Elsewhere, a unit closed with no "
+                                  "check recorded is one of four break "
+                                  "conditions."}])
+        self.assertEqual(D.check_status_against_evidence(doc), [])
+
+    def test_the_SAME_evidence_WITHOUT_the_reaffirming_sentence_still_drifts(self):
+        """Same trailing decided word, no 'stays OPEN' sentence this time:
+        nothing tells the checker the OPEN status is deliberate, so the
+        contradiction this check exists to catch still fires."""
+        doc = board([{"id": "S10", "status": "OPEN",
+                      "evidence": "Elsewhere, a unit closed with no check "
+                                  "recorded is one of four break "
+                                  "conditions."}])
+        drift = D.check_status_against_evidence(doc)
+        self.assertTrue(drift)
+        self.assertIn("CLOSED", drift[0][2])
+
+
 class NoDataIsNeverAPass(unittest.TestCase):
     def test_a_board_with_no_complaints_says_so_rather_than_passing(self):
         found = D.check_complaints(board())

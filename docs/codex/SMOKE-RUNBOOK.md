@@ -292,6 +292,53 @@ Step 6, the task:
   `.git` and nothing wider: on a real project it also lets the model rewrite
   that repository's history, which is a deliberate act rather than a default.
 
+  WHAT THE ENGINE'S OWN MODEL CALLS DO INSIDE THIS SANDBOX, and why there is
+  no third flag. Brother's engine spawns its decomposer and its per-unit
+  worker as CHILD PROCESSES of this turn, so the sandbox governs them, and
+  three things were measured on 2026-09-05 rather than assumed.
+
+  1. `workspace-write` blocks EVERY socket a command in the turn opens,
+     loopback included. From a stub-provider probe, so no credential and no
+     spend was involved:
+
+         BLOCKED 1.1.1.1   PermissionError [Errno 1] Operation not permitted
+         BLOCKED 127.0.0.1 PermissionError [Errno 1] Operation not permitted
+
+     A model CLI in that position does not report a network problem. It
+     reports itself not logged in and exits 1, and the door then refuses
+     three attempts running with "door: refused after 3 attempt(s), store
+     untouched". That is exactly the FAIL this gate returned on both
+     binaries before any of this was understood.
+
+  2. `-c sandbox_workspace_write.network_access=true` does lift it (the same
+     probe then prints `REACHED 1.1.1.1`, and a nested `claude -p` answers at
+     exit 0 inside the turn). It is NOT in the command above on purpose, and
+     point 3 is why.
+
+  3. A nested `codex exec`, which is what the door falls back to on a Codex
+     host, cannot start inside a codex turn AT ALL, with or without the
+     network. Verbatim from the signed-in run:
+
+         Error: failed to initialize in-process app-server client:
+                Operation not permitted (os error 1)
+
+     So no supported path is rescued by granting the network, and granting a
+     whole turn network access to rescue a call that cannot be made either
+     way would be a widening bought with nothing.
+
+  THE ROUTE THAT DOES WORK, and the one the skill tells the model to take:
+  hand the engine the units through its documented seam, which makes no model
+  call at all.
+
+      DOOR_MODEL_CMD="cat plan.json" python3 "$BROTHER_PLUGIN_ROOT/runtime/brother_run.py" "<outcome>" --cwd "$PWD"
+
+  `plan.json` is a JSON list of units, each with `id`, `objective`,
+  `done_check`, `writes` and `deps`. The engine still isolates every unit,
+  still runs every `done_check`, and still writes the receipt; only the
+  decomposition came from the agent driving the turn rather than from a
+  nested model. The per-unit worker takes the same treatment through
+  `MODEL_WORKER_CMD`.
+
   A write outside every granted root is dropped SILENTLY, with no error line
   and exit 0. So if condition 3 below fails while conditions 1 and 2 pass,
   the thing to look for is a path the sandbox never granted.

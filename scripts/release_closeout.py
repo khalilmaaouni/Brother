@@ -564,7 +564,13 @@ def gate_virgin_codex(args, ev, gate):
 def gate_upgrade_codex(args, ev, gate):
     checkout = args.public_checkout
     tag = "v%s" % args.version
-    gate.revision = "%s upgraded to %s" % ("<previous>", tag)
+    # D3 (Codex lane, 2026-09-05): the upgrade itself has always honoured
+    # --ref (`ref = args.ref or tag` below), but every line this gate PRINTED
+    # named the tag, so a `--ref main` matrix reported "v1.0.2 upgraded to
+    # v1.0.3" while actually upgrading to main. A gate that misnames what it
+    # tested is a gate nobody can cite.
+    ref = args.ref or tag
+    gate.revision = "%s upgraded to %s" % ("<previous>", ref)
     previous, why = previous_public_tag(checkout, tag)
     if previous is None:
         gate.say(why)
@@ -575,14 +581,14 @@ def gate_upgrade_codex(args, ev, gate):
     if carries is None:
         return gate.settle("NO-DATA", detail)
     if not carries:
-        gate.revision = "%s to %s" % (previous, tag)
+        gate.revision = "%s to %s" % (previous, ref)
         return gate.settle(
             "NO-DATA",
             "%s ships no Codex package, so there is no Codex install to "
             "upgrade FROM; inventing one would be a fabricated gate" % detail)
 
     iso = Isolated(os.path.join(args.work, "x2"))
-    gate.revision = "%s upgraded to %s" % (previous, tag)
+    gate.revision = "%s upgraded to %s" % (previous, ref)
     old = marketplace_add(gate, ev, iso, args.marketplace, previous,
                           label="marketplace add previous")
     if old.returncode != 0:
@@ -621,7 +627,6 @@ def gate_upgrade_codex(args, ev, gate):
              ", ".join(sorted(os.path.basename(p) for p in seeds)))
 
     # The upgrade itself, run as README.md documents it and in that order.
-    ref = args.ref or tag
     gate.say("the documented upgrade route: %s" %
              upgrade_route_shell(args.marketplace, ref))
     got2 = None

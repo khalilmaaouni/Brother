@@ -2,8 +2,8 @@
 
 The seeded delivery of the byte order mark fixture (row S32). The defect is
 the plain decode on the read: a file written by a Windows tool carries a
-UTF-8 byte order mark, its first line then fails to parse, and this drops
-that record without saying so.
+UTF-8 byte order mark, its first line then fails to parse, and the record is
+dropped rather than converted.
 """
 import csv
 import json
@@ -19,7 +19,9 @@ def read_records(src):
                 continue
             try:
                 records.append(json.loads(line))
-            except ValueError:
+            except ValueError as exc:
+                print("jsonl2csv: dropped an unparsable line: %s" % exc,
+                      file=sys.stderr)
                 continue
     return records
 

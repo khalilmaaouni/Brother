@@ -115,6 +115,28 @@ TASK_SENTENCE = ("use the Brother plugin to make add() refuse non-numeric "
 #: that repository's history, so it is a deliberate act, not a default.
 GIT_GRANT = 'sandbox_workspace_write.writable_roots=["%s/.git"]'
 
+#: THE GRANT THAT IS DELIBERATELY NOT IN THE COMMAND ABOVE, kept here as a
+#: named constant because the runbook explains it and a later reader will
+#: otherwise propose it again. `workspace-write` blocks EVERY socket a
+#: model-generated command opens, loopback included, and this switch lifts
+#: that. Measured with a stub provider, so no credential and no spend was
+#: involved (~/.claude/evidence/lane-codex-door-sandbox-probe.log):
+#:     BLOCKED 1.1.1.1   PermissionError [Errno 1] Operation not permitted
+#:     BLOCKED 127.0.0.1 PermissionError [Errno 1] Operation not permitted
+#: and with it on, in the same turn shape: REACHED 1.1.1.1.
+#: It was tried as the fix for the 2026-09-05 Codex RUN finding and it is
+#: NOT the fix. A nested `codex exec`, which is what the door falls back to
+#: on a Codex host, cannot start inside a codex turn at all, network or no
+#: network, measured in the signed-in run itself:
+#:     Error: failed to initialize in-process app-server client:
+#:            Operation not permitted (os error 1)
+#: So under Codex the engine's model calls go through the documented
+#: DOOR_MODEL_CMD and MODEL_WORKER_CMD seams, which need no network, and the
+#: documented command stays as narrow as it was. Granting the whole turn
+#: network access to rescue a call that cannot be made either way would be a
+#: real widening bought with nothing.
+NETWORK_GRANT = "sandbox_workspace_write.network_access=true"
+
 
 def sandbox_flags(workspace):
     """The sandbox half of the documented command, for a workspace given as
@@ -134,11 +156,17 @@ def documented_argv(codex_bin, toy):
 def documented_shell_command():
     """The same command as the founder reads it, with his own `$PWD` left for
     the shell to expand. Double quotes around the -c value, never single: a
-    single-quoted value would hand Codex the four literal characters $PWD."""
-    return ('codex exec -s %s -c "%s" -C "$PWD" "%s"'
-            % (SANDBOX_MODE,
-               (GIT_GRANT % "$PWD").replace('"', '\\"'),
-               TASK_SENTENCE))
+    single-quoted value would hand Codex the four literal characters $PWD.
+
+    Built from sandbox_flags, never retyped: a flag added there has to reach
+    the page, and the regression in test_codex_smoke.py that asserts the page
+    carries this exact string is what makes that mechanical."""
+    words = ["codex", "exec"]
+    for word in sandbox_flags("$PWD"):
+        words.append('"%s"' % word.replace('"', '\\"')
+                     if word.startswith("sandbox_") else word)
+    words += ["-C", '"$PWD"', '"%s"' % TASK_SENTENCE]
+    return " ".join(words)
 
 
 def printf_line(body, path):

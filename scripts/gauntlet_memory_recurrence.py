@@ -63,6 +63,7 @@ SPEC_PATH = os.path.join(REPO_ROOT, "benchmarks", "gauntlets", "memory-recurrenc
 RESULTS_DIR = os.path.join(REPO_ROOT, "benchmarks", "results")
 
 sys.path.insert(0, HERE)
+import gauntlet_frozen  # noqa: E402
 import receipt_door as RD  # noqa: E402
 
 #: The file the seeded repeat action is about to edit, and the failure class the
@@ -447,6 +448,16 @@ def main(argv=None):
                     help="where the JSON record lands (default "
                          "benchmarks/results/memory-recurrence-<date>.json)")
     args = ap.parse_args(argv)
+
+    try:
+        frozen_result = gauntlet_frozen.check(SPEC_PATH)
+    except ValueError as exc:
+        print(str(exc))
+        return 1
+    if frozen_result.startswith(NODATA):
+        print(frozen_result)
+        return 2
+    print("frozen: OK %s" % frozen_result)
 
     rows = run_conditions()
     width = max(len(r["id"]) for r in rows)

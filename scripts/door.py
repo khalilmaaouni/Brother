@@ -12,10 +12,13 @@ that checking; it only drives the conversation until the answer passes it,
 or gives up and says why.
 
 Decomposer command, in order: --model-cmd, else env DOOR_MODEL_CMD, else the
-claude CLI headless in print mode (`claude -p`, reading the prompt on
-stdin: verified against `claude --help` on 2026-08-30, -p/--print with no
-positional prompt reads from stdin, output-format defaults to plain text on
-stdout).
+host's own headless client (default_model_cmd below). Under Claude Code that
+is the claude CLI in print mode (`claude -p`, reading the prompt on stdin:
+verified against `claude --help` on 2026-08-30, -p/--print with no positional
+prompt reads from stdin, output-format defaults to plain text on stdout).
+Under Codex it is `codex exec --json`, the argv model_worker.py already ships,
+because a Codex-only machine has no claude binary; see CODEX_SANDBOX_HINT for
+the sandbox that governs either of them inside a codex turn.
 
 REFUSAL IS STILL THE FEATURE, borrowed whole from work_record.py: a refusal
 is reported back to the decomposer verbatim and it gets another attempt, up
@@ -35,6 +38,8 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import work_record as WR  # noqa: E402
+import brother_paths  # noqa: E402
+import model_worker as MW  # noqa: E402
 
 NODATA = "NO-DATA"
 
@@ -45,6 +50,88 @@ NODATA = "NO-DATA"
 MAX_OUTCOME_CHARS = 2000
 DEFAULT_MODEL_CMD = ["claude", "-p"]
 UNIT_COUNT_HINT = "2 to 9 units"
+
+#: WHY A CODEX HOST GETS A DIFFERENT DEFAULT, and it is measured rather than
+#: assumed (2026-09-05, codex-cli 0.153.0-alpha.5, the app-bundled binary;
+#: ~/.claude/evidence/lane-codex-door-sandbox-probe.log,
+#: lane-codex-door-nested-probe.log and lane-codex-door-step6.log).
+#:
+#: `claude -p` is wrong under Codex twice over. A Codex-only machine has no
+#: `claude` binary at all, and Codex's own `workspace-write` sandbox blocks
+#: EVERY socket a model-generated command opens, loopback included:
+#:     BLOCKED 1.1.1.1   PermissionError [Errno 1] Operation not permitted
+#:     BLOCKED 127.0.0.1 PermissionError [Errno 1] Operation not permitted
+#: so the child cannot reach any API. It does not say so: it reports itself
+#: "Not logged in" and exits 1, three attempts running, which is the whole of
+#: the 2026-09-05 "door: refused after 3 attempt(s), store untouched"
+#: finding.
+#:
+#: SO THE DEFAULT IS THE HOST'S OWN CLIENT, and it is expected to fail inside
+#: a sandboxed turn rather than to rescue one. A nested `codex exec` cannot
+#: start inside a codex turn at all, with or without the network, measured in
+#: the signed-in run itself:
+#:     Error: failed to initialize in-process app-server client:
+#:            Operation not permitted (os error 1)
+#: It stays the default because a turn at `danger-full-access` is a different
+#: sandbox and this is the argv that host would want, and because the refusal
+#: it produces in four seconds NAMES the route that works. In the signed-in
+#: run of 2026-09-05 the agent driving the turn read exactly that message and
+#: went on to reach a receipt through the DOOR_MODEL_CMD seam.
+CODEX_SANDBOX_HINT = (
+    "under Codex the engine's model calls are child processes of a sandboxed "
+    "turn: a nested `codex exec` cannot start inside one (in-process "
+    "app-server, Operation not permitted) and any other model CLI has every "
+    "socket blocked, so it reports itself not logged in. The route that "
+    "works needs no model call: write the units yourself and point "
+    "DOOR_MODEL_CMD at a command that prints them, for example "
+    "DOOR_MODEL_CMD=\"cat plan.json\" (a JSON list of units with id, "
+    "objective, done_check, writes and deps). See "
+    "docs/codex/SMOKE-RUNBOOK.md step 6")
+
+
+def default_model_cmd(env=None):
+    """The decomposer nobody named, per host. Under Codex that is Codex's own
+    headless exec (the argv model_worker already ships and documents), never
+    `claude -p`; under anything else it is unchanged."""
+    if MW.model_client(env) == brother_paths.CODEX:
+        return list(MW.CODEX_ARGV)
+    return list(DEFAULT_MODEL_CMD)
+
+
+#: How much of a failing decomposer's stderr travels with the refusal. The
+#: whole of it is already printed above the refusal; this is the part that
+#: has to survive into the message brother_run stores and a receipt quotes.
+STDERR_TAIL_CHARS = 400
+
+
+def stderr_tail(text):
+    """The last STDERR_TAIL_CHARS of a failing child's stderr, on one line, or
+    a sentence saying it wrote none."""
+    body = " ".join((text or "").split())
+    if not body:
+        return "it wrote nothing to stderr either"
+    if len(body) > STDERR_TAIL_CHARS:
+        body = "..." + body[-STDERR_TAIL_CHARS:]
+    return "its last words were: %s" % body
+
+
+def is_codex_cmd(cmd):
+    """True when this command line is Codex's own headless exec."""
+    return bool(cmd) and os.path.basename(cmd[0]) == "codex"
+
+
+def decomposer_text(cmd, stdout):
+    """What the decomposer actually said, from its stdout.
+
+    `codex exec --json` prints JSONL events rather than the answer, so the
+    agent's own last message is pulled out of them with the parser
+    model_worker already owns and tests. Every other command speaks plain
+    text on stdout and is returned unchanged."""
+    if is_codex_cmd(cmd) and "--json" in cmd:
+        claim, _usage = MW._parse_codex_output(stdout)
+        return claim if claim else stdout
+    return stdout
+
 
 #: P2 (persona integration, docs/plan/PERSONA-INTEGRATION-PLAN-2026-09-04.md
 #: gap P2; docs/plan/PERSONA-INTEGRATION-ROWS-2026-09-04.json). A pack
@@ -928,7 +1015,7 @@ def resolve_cmd(model_cmd_arg):
     env_cmd = os.environ.get("DOOR_MODEL_CMD")
     if env_cmd:
         return shlex.split(env_cmd)
-    return list(DEFAULT_MODEL_CMD)
+    return default_model_cmd()
 
 
 def missing_reason(cmd):
@@ -980,8 +1067,10 @@ def main(argv=None):
     cmd = resolve_cmd(args.model_cmd)
     missing = missing_reason(cmd)
     if missing:
-        print("%s: %s, so the outcome cannot be decomposed" % (NODATA, missing),
-              file=sys.stderr)
+        line = "%s: %s, so the outcome cannot be decomposed" % (NODATA, missing)
+        if MW.model_client() == brother_paths.CODEX:
+            line += ". %s" % CODEX_SANDBOX_HINT
+        print(line, file=sys.stderr)
         return 44
 
     # GROUNDING, not a per-retry cost: the repository does not change between
@@ -1037,10 +1126,20 @@ def main(argv=None):
             print(proc.stderr.strip(), file=sys.stderr)
 
         try:
-            raw = json.loads(strip_code_fences(proc.stdout))
+            raw = json.loads(strip_code_fences(decomposer_text(cmd,
+                                                              proc.stdout)))
         except ValueError as exc:
-            last_problems = ["the decomposer's answer could not be read as "
-                             "JSON: %s" % exc]
+            # THE EXIT CODE IS THE FIRST FACT, and until 2026-09-05 it was
+            # thrown away: a decomposer that failed and wrote nothing was
+            # reported as though it had answered badly, which is what made
+            # the Codex finding take four probes to diagnose instead of one.
+            detail = "the decomposer's answer could not be read as JSON: %s" % exc
+            if proc.returncode != 0:
+                detail += (" (the decomposer command %r exited %d; %s)"
+                           % (cmd[0], proc.returncode, stderr_tail(proc.stderr)))
+                if is_codex_cmd(cmd) or MW.model_client() == brother_paths.CODEX:
+                    detail += ". %s" % CODEX_SANDBOX_HINT
+            last_problems = [detail]
             refusal = refusal_text(last_problems)
             print(refusal, file=sys.stderr)
             continue

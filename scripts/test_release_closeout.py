@@ -231,6 +231,33 @@ class TheUpgradesHonestNoData(unittest.TestCase):
             self.assertIn("ships no Codex package", gate.why)
             self.assertIn("v1.0.1", gate.why)
 
+    def _no_package_gate(self, work, ref):
+        repo = self._repo(work)
+        args = argparse.Namespace(
+            marketplace=repo, ref=ref, codex_bin="/no/such/codex/binary",
+            evidence_dir=os.path.join(work, "evidence"),
+            work=os.path.join(work, "w"), version="2.0.0",
+            public_url="https://example.invalid/none",
+            public_checkout=repo, actions_run_id=None, tag_checkout=None)
+        gate = rc.Gate("X2", "upgrade-codex", "upgrade")
+        gate.codex_bin = args.codex_bin
+        rc.gate_upgrade_codex(args, rc.Evidence(args.evidence_dir), gate)
+        return gate
+
+    def test_the_revision_names_the_ref_that_was_actually_tested(self):
+        # D3 (Codex lane, 2026-09-05): the upgrade honoured --ref while every
+        # line the gate printed named the version's tag, so a `--ref main`
+        # matrix reported "upgraded to v2.0.0" having upgraded to main.
+        with tempfile.TemporaryDirectory() as work:
+            gate = self._no_package_gate(work, "main")
+            self.assertIn("main", gate.revision)
+            self.assertNotIn("v2.0.0", gate.revision)
+
+    def test_no_ref_still_names_the_version_s_own_tag(self):
+        with tempfile.TemporaryDirectory() as work:
+            gate = self._no_package_gate(work, None)
+            self.assertIn("v2.0.0", gate.revision)
+
 
 class TheHashesAndTheReaders(unittest.TestCase):
     def test_tree_hash_is_none_for_a_directory_that_is_not_there(self):

@@ -639,6 +639,17 @@ run_check "accept-delivery-self" python3 scripts/test_accept_delivery.py -v
 # tool is invisible to every check the project owns.
 run_check "readme-honesty" python3 scripts/test_readme_honesty.py -v
 
+# S23: docs/how-to/USE-WITH-CLAUDE-CODE.md's real done_check, the guide's
+# commands run verbatim on a throwaway home against the published plugin,
+# each exit code quoted. Drives the parser and the NO-DATA path (the
+# guide's one interactive step, `/brother`) with a fake claude on PATH, no
+# network. The full network proof is scripts/prove_guide_claude.py itself,
+# run by hand (it writes the guide's own proof section), not by this
+# battery. Registered the same change that lands it, per this estate's own
+# recorded lesson that an unregistered tool is invisible to every check the
+# project owns.
+run_check "prove-guide-claude-self" python3 scripts/test_prove_guide_claude.py -v
+
 # R26.2/R26.4: the allowlist exporter and the edition guard, docs/plan/
 # HUB-MIGRATION-PLAN-2026-08-30.md steps 4 and 5. edition_guard.py binds a
 # directory to its nearest .brother-edition and refuses a push toward the
@@ -683,6 +694,20 @@ run_check "benchmark-bundle-self"   python3 -m unittest -v scripts/test_make_ben
 # benchmark-bundle sibling above, per this estate's own recorded lesson that
 # an unregistered tool is invisible to every check the project owns.
 run_check "gauntlets-validate" python3 benchmarks/gauntlets/validate.py
+# gauntlet-frozen-self: gauntlet_frozen.py actually refuses a moved spec or
+# corpus rather than reporting a green nobody checked against the
+# filesystem. Every fixture is a temp copy, never the tree's own files.
+# Registered beside its gauntlets-validate sibling above.
+run_check "gauntlet-frozen-self"     python3 scripts/test_gauntlet_frozen.py -v
+# gauntlet-hostile-ja: executes the frozen Hostile Japanese Identity
+# gauntlet (benchmarks/gauntlets/hostile-japanese-identity.json) over the
+# frozen blind corpus, scored per class against the shipped harness's own
+# floors. --quiet suppresses the per-case lines only; the run still writes
+# its dated record under benchmarks/results/. Its own counting is proven
+# separately, against a fake harness, by gauntlet-hostile-ja-self below.
+# Registered beside its gauntlets-validate sibling above.
+run_check "gauntlet-hostile-ja"      python3 scripts/gauntlet_hostile_ja.py --quiet
+run_check "gauntlet-hostile-ja-self" python3 scripts/test_gauntlet_hostile_ja.py -v
 # S12: the memory recurrence gauntlet's own counting, driven by a fake
 # recall (all surfaced reads 5 of 5, silence 0, a NO-DATA arm leaves the
 # denominator at 4). The SELF TEST is registered, not the gauntlet run
@@ -851,6 +876,13 @@ run_check "reproduce-export-self"  python3 scripts/test_reproduce_export.py -v
 # owns.
 run_check "japanese-threshold"      python3 scripts/test_japanese_threshold.py
 run_check "japanese-threshold-self" python3 -m unittest -v scripts/test_test_japanese_threshold.py
+# japanese-mutations: section 8 of the 2026-09-05 morning steering
+# directive, driven the mutation-testing way. Disables each named ranking
+# mechanism in turn and reports PROVEN only when the mutation moves a real
+# case from HIT to MISS; a mechanism the benchmark stays green without is
+# reported NO-DATA rather than counted as a pass. Registered beside its
+# japanese-threshold siblings above.
+run_check "japanese-mutations"       python3 scripts/test_ja_mutations.py
 
 # A6: battery_verdict.py, the canonical machine-readable "is current main
 # healthy" answer, separating PASS/FAIL/NO-DATA into declared-vs-undeclared
@@ -1014,6 +1046,12 @@ run_check "benchmark-atomic-self"        python3 scripts/test_benchmark_atomic.p
 # estate's own recorded lesson that an unregistered tool is invisible to
 # every check the project owns.
 run_check "floor-score-self"             python3 scripts/test_floor_score.py -v
+# earn-first-self: the same argument test_floor_score.py makes about its own
+# board applies one level up to earn_first.py (is an EARN FIRST claim
+# allowed to publish yet); every fixture is a temp floor file and temp
+# document, never the real tree. Registered beside its floor-score sibling
+# above.
+run_check "earn-first-self"              python3 scripts/test_earn_first.py -v
 run_check "brother-run-bare-resume-self" python3 scripts/test_brother_run_bare_resume.py -v
 run_check "brother-run-continue-self"    python3 scripts/test_brother_run_continue.py -v
 run_check "bundle-install-smoke-self"    python3 scripts/test_bundle_install_smoke.py -v
@@ -1029,6 +1067,17 @@ run_check "continuity-self"              python3 scripts/test_continuity.py -v
 # points, each asserting no duplicate integration, no lost unit, and a
 # refusal when state cannot be trusted. Registered the same way.
 run_check "continuity-matrix-self"       python3 scripts/test_continuity_matrix.py -v
+# capsule-items-self: row S13, the fifteen zone-3 items
+# (docs/plan/SWITCHING-STRATEGY-2026-09-04.md) on the capsule, driven both
+# ways (a killed run names all fifteen; a copy missing one key fails
+# naming it). Registered the same way as its neighbours above.
+run_check "capsule-items-self"           python3 scripts/test_capsule_items.py -v
+# lhr-checkpoint-self: the Long-Horizon Recovery morning checkpoint manifest
+# (benchmarks/results/long-horizon-recovery/2026-09-05-checkpoint/MANIFEST.json)
+# is a real killed run, not a claim nobody drives backwards; a manifest
+# missing one listed artefact must fail, not pass. Registered beside its
+# continuity and capsule neighbours above.
+run_check "lhr-checkpoint-self"          python3 scripts/test_lhr_checkpoint.py
 # test_cleanse.py: the regression test for the 2026-08-30 close-ceremony
 # leak (a team member's name reached the public repo past cleanse's own
 # force-add exclude). The 23 tests here are the mechanical proof that leak
@@ -1173,6 +1222,36 @@ python3 scripts/temp_residue.py --label end --prune --hours 1
 # that row is driven explicitly, because a population of NO-DATA composing
 # into a PASS is a failure this estate has already paid for once.
 run_check "release-closeout-self" python3 scripts/test_release_closeout.py -v
+# release-closeout-sign-self: row S5, the tag signature leg of gate X7. An
+# unsigned tag must never read FAIL (S5 is founder gated, the signing key
+# is his alone), so this proves NO-DATA for unsigned/absent-gpg and reserves
+# FAIL for a signature that is present but does not verify. Registered
+# beside its release-closeout sibling above.
+run_check "release-closeout-sign-self"   python3 scripts/test_release_closeout_sign.py -v
+# release-closeout-virgin-self: the S4 `virgin` verb, driven with no network
+# and a fake `gh` so this proves the dispatch logic (grant checked, commands
+# printed, run id and conclusion recorded) rather than the real GitHub API.
+# Registered beside its release-closeout sibling above.
+run_check "release-closeout-virgin-self" python3 scripts/test_release_closeout_virgin.py -v
+# next-cut-self: row S29, next_cut.py prints the next cut date, version and
+# closeout command from RELEASE-POLICY.md's own cut weekday, and reads
+# NO-DATA at exit 3 when no weekday is named. Registered beside its
+# release-closeout siblings above.
+run_check "next-cut-self"                python3 scripts/test_next_cut.py
+
+# J2: a filed benchmark run can commit a checker-output.txt claiming
+# PASS while the artefact it read never reached git (the JBEQ run's own
+# CSVs did exactly this before they were added). This re-runs every
+# filed run's declared checker inside a CLEAN `git archive HEAD` export,
+# so a claim nobody can reproduce from the repository shows as DIVERGES
+# rather than standing as a silent PASS. The checker's own exit 3 for
+# "nothing filed" is not this battery's exit 2, so that state reads as
+# FAIL here rather than NO-DATA; deliberately fail-safe, since a battery
+# where every filed run vanished is worth a loud FAIL, not a quiet pass.
+run_check "filed-runs-self" python3 scripts/test_filed_runs_check.py -v
+run_check "filed-runs"      python3 scripts/filed_runs_check.py
+
+run_check "morning-pack-self" python3 scripts/test_morning_pack.py -v
 
 echo
 echo "pass $pass   fail $fail   no-data $nodata"

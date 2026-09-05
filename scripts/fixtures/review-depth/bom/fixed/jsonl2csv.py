@@ -18,7 +18,9 @@ def read_records(src):
                 continue
             try:
                 records.append(json.loads(line))
-            except ValueError:
+            except ValueError as exc:
+                print("jsonl2csv: dropped an unparsable line: %s" % exc,
+                      file=sys.stderr)
                 continue
     return records
 

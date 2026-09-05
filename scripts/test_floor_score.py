@@ -38,7 +38,8 @@ def capability(name, role, brother, mandatory=False, **measured):
         "role": role,
         "competitive_target": "parity",
         "derivation": "fixture",
-        "brother": {"score": brother, "basis": "fixture evidence", "cites": []},
+        "brother": {"score": brother, "basis": "fixture evidence",
+                    "cites": ["E7"]},
         "competitors": cells(**measured),
     }
 
@@ -80,14 +81,50 @@ class MandatoryBehind(unittest.TestCase):
         self.assertIn("FLOOR: FAIL", out)
         self.assertIn("Release/CI", out)
 
-    def test_the_same_gap_on_a_non_mandatory_capability_does_not_exit_1(self):
-        """The exit code is about the mandatory list, not about any BEHIND."""
-        doc = board([capability("Review depth", "MUST MATCH", 0.2, gsd=0.9)],
+    def test_a_behind_must_match_capability_off_the_list_still_exits_1(self):
+        """The finding this test was rewritten for: Tiny-task friction read
+        BEHIND by 0.74 and the script exited 0, because the exit code was
+        decided off the six mandatory names alone."""
+        doc = board([capability("Tiny-task friction", "MUST MATCH", 0.26,
+                                gsd=1.0)],
+                    mandatory=[])
+        code, out, _ = run(doc)
+        self.assertEqual(code, 1, out)
+        self.assertIn("FLOOR: FAIL", out)
+        self.assertIn("Tiny-task friction", out)
+
+    def test_a_behind_mandatory_dominate_capability_still_exits_1(self):
+        """Two of the six mandatory names are DOMINATE rows, so widening the
+        exit code to MUST MATCH must not narrow it away from the list."""
+        doc = board([capability("Crash/resume", "DOMINATE", 0.2, gsd=0.9)],
+                    mandatory=["Crash/resume"])
+        code, out, _ = run(doc)
+        self.assertEqual(code, 1, out)
+        self.assertIn("Crash/resume (mandatory parity)", out)
+
+    def test_a_behind_dominate_capability_does_not_exit_1(self):
+        """The floor is a floor for MUST MATCH. DOMINATE is a separate score."""
+        doc = board([capability("Review depth", "DOMINATE", 0.2, gsd=0.9)],
                     mandatory=[])
         code, out, _ = run(doc)
         self.assertEqual(code, 0, out)
         self.assertIn("BEHIND", out)
         self.assertIn("FLOOR: PASS", out)
+
+    def test_the_offending_capabilities_are_named_before_the_score(self):
+        doc = board([capability("Tiny-task friction", "MUST MATCH", 0.26,
+                                gsd=1.0),
+                     capability("Release/CI", "MUST MATCH", 0.1, gsd=1.0)],
+                    mandatory=["Release/CI"])
+        code, out, _ = run(doc)
+        self.assertEqual(code, 1, out)
+        named = [line for line in out.splitlines()
+                 if line.startswith("BEHIND the floor of")]
+        self.assertEqual(len(named), 1, out)
+        self.assertIn("Tiny-task friction, Release/CI", named[0])
+        self.assertLess(out.index(named[0]),
+                        out.index("Competitive Floor Score:"), out)
+        self.assertIn("Release/CI (mandatory parity)", out)
 
     def test_exactly_at_the_floor_is_a_match_not_behind(self):
         doc = board([capability("Release/CI", "MUST MATCH", 0.85, gsd=1.0)],
@@ -145,6 +182,75 @@ class NoDataIsNeverCounted(unittest.TestCase):
         self.assertEqual(code, 0, out)
         self.assertIn("Brother leads", out)
         self.assertIn("+1 tied", out)
+
+
+class EvidenceMustResolve(unittest.TestCase):
+    """A basis was accepted as long as it was a non-empty string, so a cell
+    could name a file nobody has and keep its number. Now the reference has to
+    resolve: a row id the board carries, or a path the tree holds."""
+
+    def test_a_basis_naming_a_missing_file_scores_0_and_says_no_data(self):
+        cap = capability("A", "MUST MATCH", 1.0, gsd=1.0)
+        cap["brother"]["cites"] = []
+        cap["brother"]["basis"] = "proven by scripts/no_such_instrument.py"
+        code, out, _ = run(board([cap]))
+        self.assertEqual(code, 1, out)
+        self.assertIn("NO-DATA: A names scripts/no_such_instrument.py, which "
+                      "the tree does not hold", out)
+        self.assertIn("MUST MATCH     0.00", out)
+
+    def test_a_basis_naming_a_file_in_the_tree_keeps_its_score(self):
+        cap = capability("A", "MUST MATCH", 1.0, gsd=1.0)
+        cap["brother"]["cites"] = []
+        cap["brother"]["basis"] = "proven by scripts/floor_score.py"
+        code, out, _ = run(board([cap]))
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("NO-DATA: A", out)
+        self.assertIn("MUST MATCH     1.00", out)
+
+    def test_a_bare_filename_resolves_from_the_directories_evidence_lives_in(
+            self):
+        """The live file names PARITY-2026-08-29.json without its directory."""
+        cap = capability("A", "MUST MATCH", 1.0, gsd=1.0)
+        cap["brother"]["cites"] = []
+        cap["brother"]["basis"] = "PARITY-2026-08-29.json grants L4"
+        code, out, _ = run(board([cap]))
+        self.assertEqual(code, 0, out)
+        self.assertIn("MUST MATCH     1.00", out)
+
+    def test_a_cite_naming_a_missing_file_scores_0_and_says_no_data(self):
+        cap = capability("A", "MUST MATCH", 1.0, gsd=1.0)
+        cap["brother"]["cites"] = ["E7", "scripts/no_such_instrument.py"]
+        code, out, _ = run(board([cap]))
+        self.assertEqual(code, 1, out)
+        self.assertIn("NO-DATA: A cites scripts/no_such_instrument.py, which "
+                      "the tree does not hold", out)
+        self.assertIn("MUST MATCH     0.00", out)
+
+    def test_a_cite_naming_a_file_in_the_tree_keeps_its_score(self):
+        cap = capability("A", "MUST MATCH", 1.0, gsd=1.0)
+        cap["brother"]["cites"] = ["scripts/floor_score.py"]
+        code, out, _ = run(board([cap]))
+        self.assertEqual(code, 0, out)
+        self.assertIn("MUST MATCH     1.00", out)
+
+    def test_a_basis_naming_neither_a_row_nor_a_file_is_refused(self):
+        cap = capability("A", "MUST MATCH", 1.0, gsd=1.0)
+        cap["brother"]["cites"] = []
+        cap["brother"]["basis"] = "the team agrees this one is strong"
+        code, out, _ = run(board([cap]))
+        self.assertEqual(code, 1, out)
+        self.assertIn("cites no roadmap row and its basis names no file", out)
+        self.assertIn("MUST MATCH     0.00", out)
+
+    def test_a_refused_cell_lowers_the_floor_score_rather_than_vanishing(self):
+        good = capability("A", "MUST MATCH", 1.0, gsd=1.0)
+        bad = capability("B", "MUST MATCH", 1.0, gsd=1.0)
+        bad["brother"]["cites"] = []
+        bad["brother"]["basis"] = "asserted"
+        code, out, _ = run(board([good, bad]))
+        self.assertEqual(code, 1, out)
+        self.assertIn("Competitive Floor Score: 50.0% (1 of 2", out)
 
 
 class Malformed(unittest.TestCase):
@@ -263,6 +369,28 @@ class TheLiveFile(unittest.TestCase):
         self.assertIn(proc.returncode, (0, 1), proc.stderr)
         self.assertIn("Competitive Floor Score:", proc.stdout)
         self.assertIn("Differentiation Score:", proc.stdout)
+
+    def test_every_brother_cell_on_the_live_board_resolves_its_evidence(self):
+        """The positive control for the refusal: today nothing is refused, so
+        a refusal in a later run is a real cell going unevidenced."""
+        proc = subprocess.run(
+            [sys.executable, SCRIPT, "--json"], capture_output=True, text=True,
+            timeout=120, check=False, cwd=ROOT)
+        self.assertIn(proc.returncode, (0, 1), proc.stderr)
+        refused = json.loads(proc.stdout)["refused_evidence"]
+        self.assertEqual(refused, [], "live cells whose evidence does not "
+                                      "resolve on disk")
+
+    def test_the_live_exit_code_answers_every_must_match_capability(self):
+        """Not only the six mandatory names: a MUST MATCH row reading BEHIND
+        is what the exit code reports, which is why it is 1 while Tiny-task
+        friction is behind."""
+        proc = subprocess.run(
+            [sys.executable, SCRIPT, "--json"], capture_output=True, text=True,
+            timeout=120, check=False, cwd=ROOT)
+        payload = json.loads(proc.stdout)
+        self.assertEqual(proc.returncode, 1 if payload["floor_behind"] else 0,
+                         proc.stdout[:400])
 
     def test_the_mandatory_list_is_section_sixs_own_six(self):
         self.assertEqual(

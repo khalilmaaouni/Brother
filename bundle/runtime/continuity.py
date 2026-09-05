@@ -13,11 +13,22 @@ attempt counts, verification state per unit, the environment assumptions a
 resume needs (runs root, target cwd, slot count, model adapter), and one
 safe next action.
 
-WHAT IT DELIBERATELY HOLDS NONE OF: anything a `git log` or `git diff`
-against the target repository could answer on its own, any file's contents,
-any diff, any captured test output. Those already have homes (the attempt
-trace, the run log, git itself); copying them into a JSON blob would make
-this the second copy journal.py's own docstring warns against.
+WHAT IT DELIBERATELY HOLDS NONE OF: any file's contents, any unified diff,
+any captured test output. Those already have homes (the attempt trace, the
+run log, git itself); copying them into a JSON blob would make this the
+second copy journal.py's own docstring warns against. `git status
+--porcelain` and `git worktree list --porcelain` are read for two zone-3
+items below (file paths and worktree paths only, never a diff or a file's
+own text), which is a narrower thing than "a `git log` or `git diff`".
+
+ZONE 3, THE FIFTEEN ITEMS (row S13, docs/plan/SWITCHING-STRATEGY-2026-09-04.md
+"Zone 3 : Engineering Continuity"): the capsule above answers four of them
+under its own names (objective, canonical_revision, environment, next_action).
+cap["zone3"] answers all fifteen under the document's own names, each a real
+value or an explicit NO-DATA naming why this run has none -- never an empty
+string, never a missing key. ZONE3_ITEMS below names the fifteen, in the
+document's own order, once, so a reader and a test both check against the
+same list rather than two copies of it.
 
 NO JOURNAL, NO CAPSULE. A run directory with no journal.jsonl predates row
 E59, or the journal could not be written; capsule() refuses rather than
@@ -48,6 +59,30 @@ NODATA = "NO-DATA"
 #: run.py's own ENGINE_JSON_FILES, which excludes it by this same string so
 #: _work_doc_path (above) never mistakes it for the run's Work document.
 CAPSULE_FILENAME = "capsule.json"
+
+#: Zone 3's own fifteen names, verbatim from
+#: docs/plan/SWITCHING-STRATEGY-2026-09-04.md, in the document's own order.
+#: capsule()'s "zone3" field carries exactly these keys, always, each one a
+#: real value or a NO-DATA sentence naming why this run has none -- named
+#: once here so test_capsule_items.py checks against this same list rather
+#: than a second, driftable copy of it.
+ZONE3_ITEMS = (
+    "WHERE WE WERE",
+    "WHY WE WERE THERE",
+    "CANONICAL COMMIT",
+    "CURRENT OBJECTIVE",
+    "ACTIVE / FINISHED WORKTREES",
+    "CHANGED FILES",
+    "IMPORTANT COMMANDS",
+    "EXPECTED SERVICES",
+    "VERIFICATION STATE",
+    "KNOWN FAILURES",
+    "REJECTED APPROACHES",
+    "ENVIRONMENT ASSUMPTIONS",
+    "UNFINISHED WORK",
+    "RELEVANT LESSONS",
+    "SAFE NEXT ACTION",
+)
 
 
 def _target_cwd_from_file(run_dir):
@@ -213,6 +248,110 @@ def _next_action(units, buckets):
     return "done: every unit in this run is integrated; nothing is left to resume"
 
 
+def _last_unit_event(events):
+    """The most recent journal event that named a unit (events is
+    append-order, so the last match is the most recent), or None when
+    every event so far is run-level -- honest for a run that has not
+    touched a unit yet."""
+    last = None
+    for event in events:
+        if event.get("unit_id") is not None:
+            last = event
+    return last
+
+
+def _worktrees(cwd):
+    """`git worktree list --porcelain` of the run's own target repository,
+    parsed down to the path each "worktree <path>" line names. A finished
+    per-unit scratch worktree is removed by brother_run.py's own cleanup
+    once a unit ends (`git worktree remove --force`, line 2463), so
+    whatever this lists IS the active set; there is nothing left on disk to
+    call "finished" separately. None when there is no target cwd to ask or
+    git cannot answer."""
+    if not cwd:
+        return None
+    try:
+        proc = subprocess.run(["git", "worktree", "list", "--porcelain"],
+                              cwd=cwd, capture_output=True, text=True,
+                              timeout=30)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        sys.stderr.write("continuity: could not list worktrees of %s (%s)\n"
+                         % (cwd, exc))
+        return None
+    if proc.returncode != 0:
+        return None
+    return [line[len("worktree "):] for line in proc.stdout.splitlines()
+            if line.startswith("worktree ")]
+
+
+def _changed_files(cwd):
+    """`git status --porcelain` of the run's own target repository: file
+    paths and their status codes ONLY, never a diff or a file's contents --
+    the same boundary this module's docstring holds everywhere else. None
+    when there is no target cwd to ask or git cannot answer."""
+    if not cwd:
+        return None
+    try:
+        proc = subprocess.run(["git", "status", "--porcelain"], cwd=cwd,
+                              capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        sys.stderr.write("continuity: could not read git status of %s (%s)\n"
+                         % (cwd, exc))
+        return None
+    if proc.returncode != 0:
+        return None
+    return [line for line in proc.stdout.splitlines() if line.strip()]
+
+
+def _important_commands(rows):
+    """Every distinct done_check command a unit in the Work document
+    carries, first-seen order -- the same field brother_run.py's own
+    verifier re-executes (_verify_evidence), so this names exactly the
+    commands a resuming session would need to re-run, never a guess at
+    what "important" means."""
+    seen = []
+    for row in rows:
+        cmd = str(row.get("done_check") or "").strip()
+        if cmd and cmd not in seen:
+            seen.append(cmd)
+    return seen
+
+
+def _known_failures(rows, events):
+    """One line per unit this run has already refused: the row's own
+    integration_refused reason where the Work document still carries it
+    (a row pulled out during a refusal keeps the reason on itself, per
+    brother_run._refuse_broken_precheck_units and _refuse_exhausted_units),
+    falling back to a unit.refused journal event's own "why" payload field
+    for a unit whose row has since rolled back off the document."""
+    out = {}
+    for row in rows:
+        reason = row.get("integration_refused")
+        if reason:
+            out[str(row.get("id"))] = str(reason)
+    for event in events:
+        if event.get("type") == "unit.refused" and event.get("unit_id") is not None:
+            uid = str(event["unit_id"])
+            if uid not in out:
+                why = (event.get("payload") or {}).get("why")
+                if why:
+                    out[uid] = str(why)
+    return ["%s: %s" % (uid, reason) for uid, reason in sorted(out.items())]
+
+
+def _recalled_lessons(events):
+    """Every {"slug","path","state","line"} record any vault.recall
+    journal event has carried so far (brother_run.VAULT_RECALL_EVENT_TYPE,
+    E74's own recall-before-write hook), flattened across units and events
+    in the order recorded. [] before that hook has fired for the first
+    time in a run, which is the honest starting state, never a guess."""
+    out = []
+    for event in events:
+        if event.get("type") == brother_run.VAULT_RECALL_EVENT_TYPE:
+            out.extend((event.get("payload") or {}).get("records") or [])
+    return out
+
+
 def capsule(run_dir, clock=None):
     """(capsule, problem). problem is non-empty, and capsule is None, only
     when run_dir holds no journal at all -- everything else this reads
@@ -281,26 +420,130 @@ def capsule(run_dir, clock=None):
             "detail": detail,
         })
 
+    objective = record.get("outcome") or (
+        "%s: no Work document could be read for this run" % NODATA)
+    canonical_revision_field = canonical_revision or (
+        "%s: no readable git HEAD for the target repository" % NODATA)
+    environment = {
+        "runs_root": runs_root or (
+            "%s: run_dir does not sit under docs/plan/runs of a runs root"
+            % NODATA),
+        "target_cwd": target_cwd or (
+            "%s: no target.json and no run.opened event recorded a cwd"
+            % NODATA),
+        "slots": slots if slots is not None else (
+            "%s: no dispatch.round event recorded yet" % NODATA),
+        "model_adapter": model_adapter,
+    }
+    next_action = _next_action(units, buckets)
+
+    # ZONE 3 (row S13): the eleven items the four fields above do not
+    # already answer under their own names, plus those four again under
+    # the document's own names, so cap["zone3"] alone carries all fifteen.
+    last_event = _last_unit_event(events)
+    if last_event is None:
+        where_we_were = ("%s: no unit-scoped journal event recorded yet; "
+                         "only run-level events exist" % NODATA)
+        why_we_were_there = ("%s: no unit has been touched yet, so there "
+                             "is no reason to record" % NODATA)
+    else:
+        last_uid = last_event.get("unit_id")
+        where_we_were = ("last recorded activity: %s on %s at %s"
+                         % (last_event.get("type"), last_uid,
+                            last_event.get("at") or NODATA))
+        why = (last_event.get("payload") or {}).get("why")
+        if not why:
+            last_row = row_by_id.get(last_uid) or {}
+            why = last_row.get("objective") or last_row.get("title")
+        why_we_were_there = why or (
+            "%s: no reason recorded for %s" % (NODATA, last_uid))
+
+    worktrees = _worktrees(target_cwd)
+    if worktrees is None:
+        active_worktrees = ("%s: no target checkout to ask, or git could "
+                            "not list its worktrees" % NODATA)
+    else:
+        # realpath, not normpath: git worktree list resolves any symlink
+        # in the path (/tmp -> /private/tmp on macOS) but target_cwd, read
+        # straight off target.json/run.opened, does not -- a bare
+        # normpath compare would then count the target checkout itself as
+        # an "extra" worktree and mislabel the single-worktree case.
+        extra = [w for w in worktrees if os.path.realpath(w) !=
+                os.path.realpath(target_cwd or "")]
+        active_worktrees = (extra if extra else
+                            "no worktree beyond the target checkout itself; "
+                            "any per-unit scratch worktree already "
+                            "finished and was removed")
+
+    changed = _changed_files(target_cwd)
+    if changed is None:
+        changed_files = ("%s: no target checkout to ask, or git could not "
+                         "read its status" % NODATA)
+    elif not changed:
+        changed_files = "clean: no uncommitted changes in the target checkout"
+    else:
+        changed_files = changed
+
+    important_commands = _important_commands(rows) or (
+        "%s: no unit in this run's Work document carries a done_check"
+        % NODATA)
+
+    known_failures = _known_failures(rows, events) or (
+        "no refused or failing unit recorded in this run")
+
+    rejected = [u for u in units if u["bucket"] == "abandoned"]
+    rejected_approaches = ([
+        "%s: %s" % (u["id"], u["detail"] or "its claim expired before "
+                    "finishing") for u in rejected] if rejected else
+        "no unit's claim has been abandoned mid-attempt in this run")
+
+    unfinished = [u["id"] for u in units if u["bucket"] != "integrated"]
+    unfinished_work = (unfinished if unfinished else
+                       "nothing left unfinished; every unit in this run "
+                       "is integrated")
+
+    recalled = _recalled_lessons(events)
+    relevant_lessons = ([
+        "%s (%s)" % (r.get("slug"), r.get("state")) for r in recalled]
+        if recalled else
+        "%s: no vault.recall event recorded for this run yet" % NODATA)
+
+    verification_state = ("%d integrated, %d active, %d pending, "
+                          "%d abandoned, %d unclear"
+                          % (len(buckets["integrated"]), len(buckets["active"]),
+                             len(buckets["pending"]), len(buckets["abandoned"]),
+                             len(buckets["unclear"])))
+
+    zone3 = {
+        "WHERE WE WERE": where_we_were,
+        "WHY WE WERE THERE": why_we_were_there,
+        "CANONICAL COMMIT": canonical_revision_field,
+        "CURRENT OBJECTIVE": objective,
+        "ACTIVE / FINISHED WORKTREES": active_worktrees,
+        "CHANGED FILES": changed_files,
+        "IMPORTANT COMMANDS": important_commands,
+        "EXPECTED SERVICES": ("%s: this engine runs no background service "
+                              "(stdlib-only, no network); nothing is "
+                              "expected to be up" % NODATA),
+        "VERIFICATION STATE": verification_state,
+        "KNOWN FAILURES": known_failures,
+        "REJECTED APPROACHES": rejected_approaches,
+        "ENVIRONMENT ASSUMPTIONS": environment,
+        "UNFINISHED WORK": unfinished_work,
+        "RELEVANT LESSONS": relevant_lessons,
+        "SAFE NEXT ACTION": next_action,
+    }
+    assert set(zone3) == set(ZONE3_ITEMS), sorted(set(zone3) ^ set(ZONE3_ITEMS))
+
     return {
         "run_dir": run_dir,
-        "objective": record.get("outcome") or (
-            "%s: no Work document could be read for this run" % NODATA),
-        "canonical_revision": canonical_revision or (
-            "%s: no readable git HEAD for the target repository" % NODATA),
-        "environment": {
-            "runs_root": runs_root or (
-                "%s: run_dir does not sit under docs/plan/runs of a runs root"
-                % NODATA),
-            "target_cwd": target_cwd or (
-                "%s: no target.json and no run.opened event recorded a cwd"
-                % NODATA),
-            "slots": slots if slots is not None else (
-                "%s: no dispatch.round event recorded yet" % NODATA),
-            "model_adapter": model_adapter,
-        },
+        "objective": objective,
+        "canonical_revision": canonical_revision_field,
+        "environment": environment,
         "units": units,
         "buckets": buckets,
-        "next_action": _next_action(units, buckets),
+        "next_action": next_action,
+        "zone3": zone3,
     }, ""
 
 
@@ -376,6 +619,20 @@ def _print_screen(cap):
         print("  %-24s %-11s attempt=%s%s" % (u["id"], u["bucket"], attempt, tail))
     print("")
     print("next action: %s" % cap["next_action"])
+    print("")
+    print("zone 3 (%d items):" % len(ZONE3_ITEMS))
+    for name in ZONE3_ITEMS:
+        value = cap["zone3"][name]
+        if isinstance(value, list):
+            print("  %s:" % name)
+            for line in value:
+                print("    - %s" % line)
+        elif isinstance(value, dict):
+            print("  %s:" % name)
+            for k, v in value.items():
+                print("    %s: %s" % (k, v))
+        else:
+            print("  %s: %s" % (name, value))
 
 
 def main(argv=None):

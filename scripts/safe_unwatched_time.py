@@ -74,7 +74,7 @@ def _parse_at(value):
         return None
     try:
         stamp = datetime.datetime.fromisoformat(value.strip())
-    except ValueError:
+    except ValueError:  # sbe: allow-silent read_journal, the only caller, already counts this None as a skipped line and reports the count
         return None
     if stamp.tzinfo is None:
         stamp = stamp.replace(tzinfo=datetime.timezone.utc)
