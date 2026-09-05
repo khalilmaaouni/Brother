@@ -56,10 +56,10 @@ claude plugin uninstall brother@brother && claude plugin marketplace remove brot
 Run this in a terminal from any directory, using the app-bundled Codex CLI:
 
 ```bash
-codex plugin marketplace add https://github.com/khalilmaaouni/Brother && codex plugin add brother@brother --json
+codex plugin marketplace add https://github.com/khalilmaaouni/Brother && codex plugin add brother@brother --json && codex plugin add brothermode@brother --json
 ```
 
-The two commands are joined with `&&` on purpose. On separate lines the shell runs the second whatever the first did, so a failed marketplace step followed by a plugin step that succeeds against an older copy leaves a zero exit code and a reader with no sign that anything went wrong.
+The commands are joined with `&&` on purpose. On separate lines the shell runs the next one whatever the previous did, so a failed marketplace step followed by a plugin step that succeeds against an older copy leaves a zero exit code and a reader with no sign that anything went wrong. The third command installs the brothermode plugin, which carries the engine Brother runs work through: Claude pulls it in through the dependency declared in `bundle/.claude-plugin/plugin.json`, and Codex has no dependency resolution, so it is installed by name.
 
 A local clone path works in place of the HTTPS URL. Confirm the install:
 
@@ -67,7 +67,7 @@ A local clone path works in place of the HTTPS URL. Confirm the install:
 codex plugin list --available --json
 ```
 
-The result names `pluginId brother@brother`. A Codex plugin cannot carry hooks, so this alone leaves Brother's safety controls silent. Run the second, required step once per Codex home, from the root of a checkout of this repository, because `scripts/codex_hooks_install.py` is a path inside this repository and an installed plugin does not carry it:
+The result names `pluginId brother@brother` and `pluginId brothermode@brother`. Codex reads a plugin's hooks but never trusts them, so this alone leaves Brother's safety controls silent. Run the second, required step once per Codex home, from the root of a checkout of this repository, because `scripts/codex_hooks_install.py` is a path inside this repository and an installed plugin does not carry it:
 
 ```bash
 python3 scripts/codex_hooks_install.py --codex-home ~/.codex --allow-default-home --trust
@@ -86,7 +86,7 @@ That command needs a configured model worker on the machine: the engine asks a p
 To upgrade, remove the configured marketplace first, then add it again at the new ref and add the plugin again, joined so no step runs over a failed one:
 
 ```bash
-codex plugin marketplace remove brother && codex plugin marketplace add https://github.com/khalilmaaouni/Brother --ref <new ref> && codex plugin add brother@brother --json
+codex plugin marketplace remove brother && codex plugin marketplace add https://github.com/khalilmaaouni/Brother --ref <new ref> && codex plugin add brother@brother --json && codex plugin add brothermode@brother --json
 ```
 
 The removal is not optional: Codex refuses a second `marketplace add` of a name it already carries from another ref, with `Error: marketplace 'brother' is already added from a different source; remove it before adding this source`, and `codex plugin marketplace upgrade brother` exits 0 while leaving the version where it was, because it refreshes the snapshot at the ref already configured rather than moving to a new one. Your Codex home survives the removal: it drops the marketplace source and its checkout, not `config.toml`, `hooks.json` or anything else you keep there. On a machine with nothing installed yet the first command answers `Error: marketplace 'brother' is not configured or installed` and exits 1, which stops the rest: use the install block above instead, because there is nothing to upgrade from.

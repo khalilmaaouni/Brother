@@ -1,0 +1,325 @@
+{
+  "gauntlet": "memoryagentbench-conflict",
+  "benchmark": "MemoryAgentBench (ICLR 2026, arxiv.org/abs/2507.05257)",
+  "competencies": [
+    "Conflict Resolution",
+    "Selective Forgetting"
+  ],
+  "run_at": "2026-09-05T20:30:34",
+  "revision": "e1bb2a18479430fc69425cd74294e79096905af3",
+  "fixture": {
+    "row_used": "metadata.source == 'factconsolidation_sh_6k' (single-hop, ~6k token context; the smallest of the four single-hop/multi-hop x context-length variants in this split, chosen for a fast deterministic run, not for a better score)",
+    "dataset_url": "https://huggingface.co/datasets/ai-hyz/MemoryAgentBench",
+    "hf_revision_x_repo_commit": "7ea066982b140a19337e17e60d45d4076e042faf",
+    "raw_parquet_sha256": "24d5c3f09ce0ce15625cb9f8a98f44f0d864ca6c94d7b4ad04eb697ca3a5ff45",
+    "license": "MIT (per the dataset's own HuggingFace listing)",
+    "no_data_count": 71,
+    "mapped_count": 29
+  },
+  "summary": {
+    "conflict_resolution": {
+      "correct": 29,
+      "total": 29
+    },
+    "selective_forgetting": {
+      "correct": 29,
+      "total": 29,
+      "no_data": 0
+    }
+  },
+  "no_data": {
+    "format_did_not_map": 71
+  },
+  "items": [
+    {
+      "id": "fc-sh6k-000",
+      "question": "Which sport is goaltender associated with?",
+      "latest_value": "pesäpallo",
+      "superseded_value": "ice hockey",
+      "conflict_resolution": "correct",
+      "selective_forgetting": "correct",
+      "old_was_retrieval_candidate": true,
+      "served_note": "current"
+    },
+    {
+      "id": "fc-sh6k-002",
+      "question": "Which country was rugby union created in?",
+      "latest_value": "India",
+      "superseded_value": "England",
+      "conflict_resolution": "correct",
+      "selective_forgetting": "correct",
+      "old_was_retrieval_candidate": true,
+      "served_note": "current"
+    },
+    {
+      "id": "fc-sh6k-006",
+      "question": "Which sport is Tunisia national football team associated with?",
+      "latest_value": "basketball",
+      "superseded_value": "association football",
+      "conflict_resolution": "correct",
+      "selective_forgetting": "correct",
+      "old_was_retrieval_candidate": true,
+      "served_note": "current"
+    },
+    {
+      "id": "fc-sh6k-007",
+      "question": "Which sport is quarterback associated with?",
+      "latest_value": "Muay Thai",
+      "superseded_value": "American football",
+      "conflict_resolution": "correct",
+      "selective_forgetting": "correct",
+      "old_was_retrieval_candidate": true,
+      "served_note": "current"
+    },
+    {
+      "id": "fc-sh6k-008",
+      "question": "What is the official language of Japan?",
+      "latest_value": "Swedish",
+      "superseded_value": "Japanese",
+      "conflict_resolution": "correct",
+      "selective_forgetting": "correct",
+      "old_was_retrieval_candidate": true,
+      "served_note": "current"
+    },
+    {
+      "id": "fc-sh6k-015",
+      "question": "Which continent is Germany located in?",
+      "latest_value": "Africa",
+      "superseded_value": "Europe",
+      "conflict_resolution": "correct",
+      "selective_forgetting": "correct",
+      "old_was_retrieval_candidate": true,
+      "served_note": "current"
+    },
+    {
+      "id": "fc-sh6k-016",
+      "question": "Which religion is Kingdom of Ireland affiliated with?",
+      "latest_value": "Zoroastrianism",
+      "superseded_value": "Catholic Church",
+      "conflict_resolution": "correct",
+      "selective_forgetting": "correct",
+      "old_was_retrieval_candidate": true,
+      "served_note": "current"
+    },
+    {
+      "id": "fc-sh6k-017",
+      "question": "Which country was association football created in?",
+      "latest_value": "Italy",
+      "superseded_value": "England",
+      "conflict_resolution": "correct",
+      "selective_forgetting": "correct",
+      "old_was_retrieval_candidate": true,
+      "served_note": "current"
+    },
+    {
+      "id": "fc-sh6k-025",
+      "question": "What is the capital of Tang Empire?",
+      "latest_value": "Beaumont",
+      "superseded_value": "Chang'an",
+      "conflict_resolution": "correct",
+      "selective_forgetting": "correct",
+      "old_was_retrieval_candidate": true,
+      "served_note": "current"
+    },
+    {
+      "id": "fc-sh6k-030",
+      "question": "Which country was baseball created in?",
+      "latest_value": "Japan",
+      "superseded_value": "United States of America",
+      "conflict_resolution": "correct",
+      "selective_forgetting": "correct",
+      "old_was_retrieval_candidate": true,
+      "served_note": "current"
+    },
+    {
+      "id": "fc-sh6k-033",
+      "question": "Which country was rap rock created in?",
+      "latest_value": "Russian Empire",
+      "superseded_value": "United States of America",
+      "conflict_resolution": "correct",
+      "selective_forgetting": "correct",
+      "old_was_retrieval_candidate": true,
+      "served_note": "current"
+    },
+    {
+      "id": "fc-sh6k-034",
+      "question": "Where was Christianity founded?",
+      "latest_value": "Taipei",
+      "superseded_value": "Jerusalem",
+      "conflict_resolution": "correct",
+      "selective_forgetting": "correct",
+      "old_was_retrieval_candidate": true,
+      "served_note": "current"
+    },
+    {
+      "id": "fc-sh6k-035",
+      "question": "What is the official language of United States of America?",
+      "latest_value": "German",
+      "superseded_value": "American English",
+      "conflict_resolution": "correct",
+      "selective_forgetting": "correct",
+      "old_was_retrieval_candidate": true,
+      "served_note": "current"
+    },
+    {
+      "id": "fc-sh6k-038",
+      "question": "What is the capital of France?",
+      "latest_value": "Harare",
+      "superseded_value": "Paris",
+      "conflict_resolution": "correct",
+      "selective_forgetting": "correct",
+      "old_was_retrieval_candidate": true,
+      "served_note": "current"
+    },
+    {
+      "id": "fc-sh6k-039",
+      "question": "Who is the developer of SteamOS?",
+      "latest_value": "ABB Group",
+      "superseded_value": "Valve Corporation",
+      "conflict_resolution": "correct",
+      "selective_forgetting": "correct",
+      "old_was_retrieval_candidate": true,
+      "served_note": "current"
+    },
+    {
+      "id": "fc-sh6k-040",
+      "question": "Which city is the headquarter of University of Bucharest located in?",
+      "latest_value": "Ankara",
+      "superseded_value": "Bucharest",
+      "conflict_resolution": "correct",
+      "selective_forgetting": "correct",
+      "old_was_retrieval_candidate": true,
+      "served_note": "current"
+    },
+    {
+      "id": "fc-sh6k-041",
+      "question": "Which sport is wide receiver associated with?",
+      "latest_value": "rugby",
+      "superseded_value": "American football",
+      "conflict_resolution": "correct",
+      "selective_forgetting": "correct",
+      "old_was_retrieval_candidate": true,
+      "served_note": "current"
+    },
+    {
+      "id": "fc-sh6k-043",
+      "question": "What is the capital of Australia?",
+      "latest_value": "Oderzo",
+      "superseded_value": "Canberra",
+      "conflict_resolution": "correct",
+      "selective_forgetting": "correct",
+      "old_was_retrieval_candidate": true,
+      "served_note": "current"
+    },
+    {
+      "id": "fc-sh6k-044",
+      "question": "Which continent is Malaysia located in?",
+      "latest_value": "Antarctica",
+      "superseded_value": "Asia",
+      "conflict_resolution": "correct",
+      "selective_forgetting": "correct",
+      "old_was_retrieval_candidate": true,
+      "served_note": "current"
+    },
+    {
+      "id": "fc-sh6k-048",
+      "question": "Which country was basketball created in?",
+      "latest_value": "Soviet Union",
+      "superseded_value": "United States of America",
+      "conflict_resolution": "correct",
+      "selective_forgetting": "correct",
+      "old_was_retrieval_candidate": true,
+      "served_note": "current"
+    },
+    {
+      "id": "fc-sh6k-050",
+      "question": "Which continent is Bengaluru located in?",
+      "latest_value": "Oceania",
+      "superseded_value": "Asia",
+      "conflict_resolution": "correct",
+      "selective_forgetting": "correct",
+      "old_was_retrieval_candidate": true,
+      "served_note": "current"
+    },
+    {
+      "id": "fc-sh6k-051",
+      "question": "Which sport is Slovakia national football team associated with?",
+      "latest_value": "cricket",
+      "superseded_value": "association football",
+      "conflict_resolution": "correct",
+      "selective_forgetting": "correct",
+      "old_was_retrieval_candidate": true,
+      "served_note": "current"
+    },
+    {
+      "id": "fc-sh6k-056",
+      "question": "Which country was Charlie Hebdo created in?",
+      "latest_value": "Italy",
+      "superseded_value": "France",
+      "conflict_resolution": "correct",
+      "selective_forgetting": "correct",
+      "old_was_retrieval_candidate": true,
+      "served_note": "current"
+    },
+    {
+      "id": "fc-sh6k-065",
+      "question": "Which sport is placekicker associated with?",
+      "latest_value": "rugby",
+      "superseded_value": "American football",
+      "conflict_resolution": "correct",
+      "selective_forgetting": "correct",
+      "old_was_retrieval_candidate": true,
+      "served_note": "current"
+    },
+    {
+      "id": "fc-sh6k-069",
+      "question": "Where was Canadair founded?",
+      "latest_value": "Tucson",
+      "superseded_value": "Montreal",
+      "conflict_resolution": "correct",
+      "selective_forgetting": "correct",
+      "old_was_retrieval_candidate": true,
+      "served_note": "current"
+    },
+    {
+      "id": "fc-sh6k-070",
+      "question": "Which company is AP1000 produced by?",
+      "latest_value": "Canadair",
+      "superseded_value": "Westinghouse Electric",
+      "conflict_resolution": "correct",
+      "selective_forgetting": "correct",
+      "old_was_retrieval_candidate": true,
+      "served_note": "current"
+    },
+    {
+      "id": "fc-sh6k-085",
+      "question": "What is the capital of Romania?",
+      "latest_value": "Rajanpur",
+      "superseded_value": "Bucharest",
+      "conflict_resolution": "correct",
+      "selective_forgetting": "correct",
+      "old_was_retrieval_candidate": true,
+      "served_note": "current"
+    },
+    {
+      "id": "fc-sh6k-086",
+      "question": "Which continent is India located in?",
+      "latest_value": "Africa",
+      "superseded_value": "Asia",
+      "conflict_resolution": "correct",
+      "selective_forgetting": "correct",
+      "old_was_retrieval_candidate": true,
+      "served_note": "current"
+    },
+    {
+      "id": "fc-sh6k-090",
+      "question": "Which sport is Surrey Senior Cup associated with?",
+      "latest_value": "basketball",
+      "superseded_value": "association football",
+      "conflict_resolution": "correct",
+      "selective_forgetting": "correct",
+      "old_was_retrieval_candidate": true,
+      "served_note": "current"
+    }
+  ]
+}

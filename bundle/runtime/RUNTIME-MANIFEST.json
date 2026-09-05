@@ -11,7 +11,7 @@
   },
   {
    "path": "brother_run.py",
-   "sha256": "70890f5867480ca94540b31408c2937a76a1b463cb038439919bba67968137aa"
+   "sha256": "f723c9953a1d8a8c118f765d69616791488069058d52eee385c01f104b4edc24"
   },
   {
    "path": "claim_store.py",
@@ -51,7 +51,7 @@
   },
   {
    "path": "loop_bridge.py",
-   "sha256": "6e2aae5f7f2a8380df9e184b6ac79efc8b2a92758eebaea52e78403e2221eaf0"
+   "sha256": "2bb43afebc629d0da1c3b2c23945048b281c9c553b2824ee5fb9448605c94ad5"
   },
   {
    "path": "model_worker.py",
@@ -139,6 +139,6 @@
   }
  ],
  "generated_by": "scripts/bundle_runtime.py",
- "source_describe": "v0.9.6-3898-g12d4c4ef",
- "source_revision": "12d4c4ef9c805547cb7638df6b41c2b3dd3c3086"
+ "source_describe": "v0.9.6-4039-ge206c3f9",
+ "source_revision": "e206c3f98ed211a74a87fa9420122ee3b060e379"
 }

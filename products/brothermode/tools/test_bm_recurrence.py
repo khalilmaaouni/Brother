@@ -117,6 +117,22 @@ class TheRate(unittest.TestCase):
         self.assertEqual(r['numerator'], 3)
         self.assertAlmostEqual(r['rate'], 50.0)
 
+    def test_a_receipt_whose_applied_memory_section_only_names_stale_or_unverified_lessons_still_counts(self):
+        """LL-4: the field mismatch that read the denominator as 0 of 5 for a
+        week. A unit whose recalled lessons were all stale or unverified (never
+        applied) still HAD a lesson named for it -- applied_memory's own
+        "stale" and "unverified" sections -- so it belongs in the denominator
+        under record_receipt's own definition (applied OR declined), the exact
+        shape brother_run.py's _record_recurrence_and_draft_lessons now sends
+        when nothing in a unit's applied memory section was ever applied."""
+        R.record_receipt('u1', ['stale-one', 'unverified-one'], [],
+                         ['stale-one', 'unverified-one'],
+                         'stale-one (stale): STALE: s.md; unverified-one '
+                         '(unverified): NO-DATA', True, self.db)
+        r = R.compute_report(self.db)
+        self.assertEqual(r['denominator'], 1)
+        self.assertEqual(r['total_units'], 1)
+
 
 class ExitCodes(unittest.TestCase):
     def test_report_on_an_empty_store_exits_zero_and_prints_NO_DATA(self):

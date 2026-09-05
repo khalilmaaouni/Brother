@@ -13,10 +13,10 @@ to run the battery.
 
 | | |
 |---|---:|
-| Parts | 152 |
-| Parts with a purpose written in the file | 152 |
-| Parts with a suite wired into the battery | 129 |
-| Checks in the battery | 210 |
+| Parts | 155 |
+| Parts with a purpose written in the file | 155 |
+| Parts with a suite wired into the battery | 130 |
+| Checks in the battery | 212 |
 
 ## Every part, what it is for, and what proves it
 
@@ -46,7 +46,7 @@ to run the battery.
 | `blocker_freshness` | Re-measure every release blocker's own done-check, cheaply, on demand. | `blocker-fresh` |
 | `board_status` | what is ACTUALLY done, counted from evidence. | `board-status-self` |
 | `brother_paths` | C3: the one place Brother resolves its plugin root, its config directory, | **NO-DATA**, nothing in the battery runs it |
-| `brother_run` | a plain outcome in, a verified delivery report out. | `brother-run-self`, `bundle-runtime-self`, `codex-smoke`, `codex-smoke-self`, `fault-lab-self`, `limit-watch-self`, `product-acceptance-self`, `release-closeout-self`, `release-invariant`, `release-invariant-self`, `tiny-task-cost-self` |
+| `brother_run` | a plain outcome in, a verified delivery report out. | `brother-run-self`, `bundle-runtime-self`, `codex-smoke`, `codex-smoke-self`, `fault-lab-self`, `limit-watch-self`, `product-acceptance-self`, `release-closeout-self`, `release-invariant`, `release-invariant-self`, `tiny-task-cost-self`, `virgin-unit-proof`, `virgin-unit-proof-self` |
 | `bundle_runtime` | package brother_run.py's own execution engine into | `bundle-runtime-self` |
 | `capability_probe` | what this machine can actually do, measured not remembered. | **NO-DATA**, nothing in the battery runs it |
 | `charter_paths` | every repository path docs/CHARTER.md names must exist here. | `charter-paths`, `charter-paths-self` |
@@ -82,6 +82,7 @@ to run the battery.
 | `gauntlet_hostile_ja` | EXECUTE the frozen Hostile Japanese Identity gauntlet. | `gauntlet-hostile-ja`, `gauntlet-hostile-ja-self` |
 | `gauntlet_memory_poisoning` | The memory poisoning gauntlet: twelve planted lessons against the real | **NO-DATA**, nothing in the battery runs it |
 | `gauntlet_memory_recurrence` | The memory recurrence gauntlet: five seeded conditions against the real recall path. | `memory-recurrence-self` |
+| `gauntlet_memoryagentbench_conflict` | The MemoryAgentBench conflict resolution and selective forgetting self score. Row LL-6. | **NO-DATA**, nothing in the battery runs it |
 | `gen_command_center` | Render GANTT.html, the Brother command center, from the plan data files. | `gen-board-self` |
 | `gen_readiness_board` | Render the readiness board from docs/plan/READINESS-ROADMAP-2026-08-29.json. | `readiness-board-self`, `roadmap-public-clean` |
 | `gen_receipt_schema` | One-shot generator for docs/plan/delivery-receipt-v1.schema.json from the | **NO-DATA**, nothing in the battery runs it |
@@ -105,7 +106,7 @@ to run the battery.
 | `limit_drill` | R25 as a runnable harness: drive a session into each of the three limit | `limit-drill` |
 | `limit_watch` | R25.1: the limit watcher. Classifies the LAST record of a session | `limit-watch-self` |
 | `loom` | the interaction layer above the receipt door. | `brother-run-self`, `loom-self` |
-| `loop_bridge` | the scheduler's ready set becomes real dispatches. | `loop-bridge-self` |
+| `loop_bridge` | the scheduler's ready set becomes real dispatches. | `loop-bridge-self`, `virgin-unit-proof`, `virgin-unit-proof-self` |
 | `make_benchmark_bundle` | Assembles a self-contained, reproducible bundle for the vault memory-ab / | `benchmark-bundle-self` |
 | `memory_ab` | Memory ON versus OFF: the same tasks, run both ways, differences recorded. | `memory-ab`, `vault-benchmark-v2-self` |
 | `memory_ab_runner` | Runner for scripts/memory_ab.py (VB-11, D04 part B), 2026-08-30 run. | **NO-DATA**, nothing in the battery runs it |
@@ -140,6 +141,7 @@ to run the battery.
 | `release_note_perturb` | every file the release note names really goes red. | `release-note-perturb`, `release-note-perturb-self` |
 | `release_notes_stamped` | .py: refuses while any shipped release note still | **NO-DATA**, nothing in the battery runs it |
 | `repeat_control` | does a shown lesson actually stop the same failure happening again. | `repeat-control-tests` |
+| `repeat_rate_page` | writes docs/benchmarks/REPEAT-RATE.md, the public page | **NO-DATA**, nothing in the battery runs it |
 | `reproduce_export` | prove a released public tag was generated from a pinned | `release-closeout-self`, `reproduce-export-self` |
 | `resource_gate` | refuse admission when the MACHINE is short, not the code. | `resource-gate-self` |
 | `restart_schedule` | R25.3: the dynamic restart scheduler. Generalizes the existing launchd | **NO-DATA**, nothing in the battery runs it |
@@ -169,6 +171,7 @@ to run the battery.
 | `vault_correct` | Vault correction: fix a wrong vault note with one sentence (row V13, | `vault-correct` |
 | `verify_advisor` | a local page for checking work before a commit. | `verify-advisor-self` |
 | `verify_task_estate` | Run every task's OWN verifyCommand and produce real verdicts. | **NO-DATA**, nothing in the battery runs it |
+| `virgin_unit_proof` | the gate the v1.0.6 defect proved was missing. | `virgin-unit-proof`, `virgin-unit-proof-self` |
 | `wbs` | The decomposition standard: no node may be dispatched that nobody broke down. | `wbs-granularity`, `wbs-self` |
 | `wisdom_capture` | Turn a session's recorded lessons into vault notes the archive can search. | `wisdom-capture` |
 | `work_record` | an outcome somebody typed becomes units the scheduler can read. | `mutation-gate`, `mutation-gate-self`, `work-record-self` |
@@ -379,6 +382,8 @@ to run the battery.
 - `codex-package-self`: `python3 scripts/test_codex_package.py -v`
 - `codex-smoke`: `python3 scripts/codex_smoke.py`
 - `codex-smoke-self`: `python3 scripts/test_codex_smoke.py -v`
+- `virgin-unit-proof`: `python3 scripts/virgin_unit_proof.py`
+- `virgin-unit-proof-self`: `python3 scripts/test_virgin_unit_proof.py -v`
 - `temp-residue-self`: `python3 scripts/test_temp_residue.py -v`
 - `release-closeout-self`: `python3 scripts/test_release_closeout.py -v`
 - `release-closeout-sign-self`: `python3 scripts/test_release_closeout_sign.py -v`

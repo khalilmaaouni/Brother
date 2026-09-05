@@ -208,16 +208,41 @@ def write_hooks_json(home, document):
     return {"problem": None}
 
 
+def split_warnings(warnings, own_path):
+    """(own, foreign): the `hooks/list` warnings that name `own_path` (this
+    script's own hooks.json) versus every other warning, e.g. Codex clamping
+    a timeout in a plugin's bundled hooks/hooks.json. Only a warning about our
+    own file is a reason to fail the read-back; a warning about a file this
+    script never wrote is a note, not a refusal."""
+    own = [w for w in warnings if own_path in w]
+    foreign = [w for w in warnings if own_path not in w]
+    return own, foreign
+
+
+def partition_entries(entries, own_path):
+    """(own, foreign): the hook entries `hooks/list` sourced from `own_path`
+    versus every entry sourced elsewhere (a plugin's own copy, for one). Every
+    trust verdict is scoped to `own`; `foreign` is reported, never averaged
+    into whether Brother's own hooks are trusted."""
+    own = [e for e in entries if e.get("sourcePath") == own_path]
+    foreign = [e for e in entries if e.get("sourcePath") != own_path]
+    return own, foreign
+
+
 def list_hooks(codex_bin, home, cwd):
     """Codex's own reading of what it now has wired, via the app-server
-    `hooks/list` method. {"entries": [...], "problem": None} or a refusal.
+    `hooks/list` method. {"entries": [...], "problem": None or str,
+    "notes": [str, ...]}.
 
     This is the verification seam: the script never claims a hook is wired on
-    the strength of having written a file, it asks the client.
+    the strength of having written a file, it asks the client. A warning
+    about a hooks file this script did not write (a plugin's own hooks.json,
+    read back and clamped alongside ours) is not this script's problem to
+    fail on, so it comes back as a note instead.
     """
     if not os.path.exists(codex_bin):
         return {"entries": None,
-                "problem": "no Codex binary at %s" % codex_bin}
+                "problem": "no Codex binary at %s" % codex_bin, "notes": []}
     requests = [
         json.dumps({"jsonrpc": "2.0", "id": 0, "method": "initialize",
                     "params": {"clientInfo": {"name": "brother-codex-hooks",
@@ -236,7 +261,8 @@ def list_hooks(codex_bin, home, cwd):
                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE)
     except OSError as exc:
-        return {"entries": None, "problem": "codex app-server did not start: %s" % exc}
+        return {"entries": None,
+                "problem": "codex app-server did not start: %s" % exc, "notes": []}
     replies = queue.Queue()
 
     def pump():
@@ -255,7 +281,8 @@ def list_hooks(codex_bin, home, cwd):
         proc.stdin.flush()
     except OSError as exc:
         proc.kill()
-        return {"entries": None, "problem": "codex app-server closed stdin: %s" % exc}
+        return {"entries": None,
+                "problem": "codex app-server closed stdin: %s" % exc, "notes": []}
     deadline = time.time() + 120
     lines = []
     while time.time() < deadline:
@@ -287,11 +314,16 @@ def list_hooks(codex_bin, home, cwd):
             entries.extend(block.get("hooks") or [])
             warnings.extend(block.get("warnings") or [])
         if warnings:
-            return {"entries": entries,
-                    "problem": "codex reported: " + "; ".join(warnings)}
-        return {"entries": entries, "problem": None}
+            own_path = hooks_json_path(home)
+            own_warnings, foreign_warnings = split_warnings(warnings, own_path)
+            problem = ("codex reported: " + "; ".join(own_warnings)
+                       if own_warnings else None)
+            return {"entries": entries, "problem": problem,
+                    "notes": foreign_warnings}
+        return {"entries": entries, "problem": None, "notes": []}
     return {"entries": None,
-            "problem": "codex app-server returned no hooks/list result"}
+            "problem": "codex app-server returned no hooks/list result",
+            "notes": []}
 
 
 def trust_block(entries, source_path):
@@ -540,38 +572,60 @@ def main(argv):
     print("codex_hooks_install: wrote %s: %d command(s) across %s"
           % (hooks_json_path(home), count, ", ".join(events)))
 
+    own_path = hooks_json_path(home)
+
+    def print_notes(notes):
+        for note in notes:
+            print("codex_hooks_install: NO-DATA: codex warned about a hooks "
+                  "file this script did not write: %s" % note)
+
     listing = list_hooks(args.codex_bin, home, args.cwd or os.getcwd())
+    print_notes(listing.get("notes", []))
     if listing["problem"]:
         print("codex_hooks_install: NO-DATA: could not read the wiring back "
               "from Codex: %s" % listing["problem"])
         return 1
     entries = listing["entries"] or []
+    own_entries, _foreign_entries = partition_entries(entries, own_path)
     print("codex_hooks_install: codex hooks/list reports %d hook(s) from %s"
-          % (len([e for e in entries
-                  if e.get("sourcePath") == hooks_json_path(home)]),
-             hooks_json_path(home)))
+          % (len(own_entries), own_path))
     if not args.trust:
-        untrusted = [e for e in entries if e.get("trustStatus") != "trusted"]
+        untrusted = [e for e in own_entries if e.get("trustStatus") != "trusted"]
         if untrusted:
             print("codex_hooks_install: NO-DATA: %d hook(s) read back as "
                   "untrusted; re-run with --trust, or pass "
                   "--dangerously-bypass-hook-trust to codex" % len(untrusted))
         return 0
 
-    block = trust_block(entries, hooks_json_path(home))
+    block = trust_block(entries, own_path)
     trusted = write_trust(home, block)
     if trusted["problem"]:
         print("codex_hooks_install: FAIL: %s" % trusted["problem"])
         return 1
     confirm = list_hooks(args.codex_bin, home, args.cwd or os.getcwd())
+    print_notes(confirm.get("notes", []))
     if confirm["problem"]:
         print("codex_hooks_install: NO-DATA: trust written but not confirmed: "
               "%s" % confirm["problem"])
         return 1
-    states = [e.get("trustStatus") for e in (confirm["entries"] or [])]
-    if states and all(state == "trusted" for state in states):
+    confirm_own, confirm_foreign = partition_entries(
+        confirm["entries"] or [], own_path)
+    states = [e.get("trustStatus") for e in confirm_own]
+    if not states:
+        print("codex_hooks_install: FAIL: %s has no hook(s) sourced from it"
+              % own_path)
+        return 1
+    if all(state == "trusted" for state in states):
         print("codex_hooks_install: PASS: codex reports all %d hook(s) trusted "
               "and enabled" % len(states))
+        if confirm_foreign:
+            plugin_ids = sorted(set(
+                e.get("pluginId") for e in confirm_foreign if e.get("pluginId")))
+            print("codex_hooks_install: NO-DATA: %d hook(s) sourced from "
+                  "plugin(s) %s are left untrusted on purpose: Brother's "
+                  "hooks are wired once, from %s, so a plugin copy must not "
+                  "fire beside them"
+                  % (len(confirm_foreign), ", ".join(plugin_ids), own_path))
         return 0
     print("codex_hooks_install: FAIL: codex reports trust states %s"
           % sorted(set(states)))

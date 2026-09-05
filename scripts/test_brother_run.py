@@ -4598,16 +4598,25 @@ class TheRecurrenceLoopCloses(unittest.TestCase):
         conn = bm_recurrence._connect(self.db_path)
         try:
             row = conn.execute(
-                "SELECT surfaced, applied FROM receipts WHERE unit_id=?",
-                ("run1:U1",)).fetchone()
+                "SELECT surfaced, applied, declined, reason FROM receipts "
+                "WHERE unit_id=?", ("run1:U1",)).fetchone()
         finally:
             conn.close()
         self.assertIsNotNone(row, "no receipt was recorded for run1:U1")
         surfaced = json.loads(row[0])
         applied = json.loads(row[1])
+        declined = json.loads(row[2])
         self.assertEqual(sorted(surfaced),
                          ["applied-one", "stale-one", "unverified-one"])
         self.assertEqual(applied, ["applied-one"])
+        # LL-4: stale and unverified are ALSO a recorded judgement about a
+        # surfaced lesson, wired into declined (with the hook's own reason
+        # line) rather than dropped, so a unit whose only recalled lessons
+        # are stale or unverified still reads as applicable.
+        self.assertEqual(sorted(declined), ["stale-one", "unverified-one"])
+        self.assertIn("STALE: s.md", row[3], row[3])
+        self.assertIn("unverified-one (unverified): %s" % _br.NODATA,
+                      row[3], row[3])
 
     def test_build_report_called_twice_never_double_records_or_double_drafts(self):
         """main() calls build_report twice per real run (a first pass for
@@ -4668,6 +4677,115 @@ class TheRecurrenceLoopCloses(unittest.TestCase):
                  if e["type"] == "recurrence.receipt_failed"]
         self.assertEqual(len(failed), 1, failed)
         self.assertEqual(failed[0]["unit_id"], "U1")
+
+
+class TheFailureCaseDraftClosesTheVaultHalfOfTheLoop(unittest.TestCase):
+    """LL-4 (persona plan P12, second half, 2026-09-05): a refused or
+    NO-DATA receipt now drafts a CANDIDATE vault note through
+    bm_vault_intake's own `capture` door -- never a direct file write --
+    driven directly against _br._draft_failure_cases, the same seam
+    TheRecurrenceLoopCloses above uses for _br.build_report."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="ll4-failure-case-")
+        self.run_dir = os.path.join(self.tmp, "run1")
+        os.makedirs(self.run_dir)
+        self.vault = os.path.join(self.tmp, "vault")
+        os.makedirs(self.vault)
+        self.receipt_path = os.path.join(self.run_dir, _br.RECEIPT_DIRNAME,
+                                         _br.RECEIPT_FILENAME)
+        os.makedirs(os.path.dirname(self.receipt_path))
+        with open(self.receipt_path, "w", encoding="utf-8") as fh:
+            json.dump({"report": "a delivery report"}, fh)
+        self._orig_run_dir = os.environ.get(journal.RUN_DIR_ENV_VAR)
+        self._orig_vault = os.environ.get(_br.VAULT_ROOT_ENV_VAR)
+        os.environ[journal.RUN_DIR_ENV_VAR] = self.run_dir
+        os.environ[_br.VAULT_ROOT_ENV_VAR] = self.vault
+        self.record = {"outcome": "guard add()", "work_id": "w-ll4",
+                       "rows": [{"id": "U1", "objective": "guard add()",
+                                "owns": ["mathlib.py"]}]}
+
+    def tearDown(self):
+        if self._orig_run_dir is None:
+            os.environ.pop(journal.RUN_DIR_ENV_VAR, None)
+        else:
+            os.environ[journal.RUN_DIR_ENV_VAR] = self._orig_run_dir
+        if self._orig_vault is None:
+            os.environ.pop(_br.VAULT_ROOT_ENV_VAR, None)
+        else:
+            os.environ[_br.VAULT_ROOT_ENV_VAR] = self._orig_vault
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _inbox_notes(self):
+        inbox = os.path.join(self.vault, "00-Inbox")
+        if not os.path.isdir(inbox):
+            return []
+        return [n for n in os.listdir(inbox) if n.endswith(".md")]
+
+    def test_a_refused_unit_drafts_exactly_one_candidate_note_with_the_six_fields(self):
+        receipts = [{"id": "U1", "state": "refused",
+                    "reason": "the check exited 1",
+                    "objective": "guard add()"}]
+        with contextlib.redirect_stdout(io.StringIO()):
+            _br._draft_failure_cases(self.record, receipts, self.run_dir,
+                                     self.receipt_path)
+        notes = self._inbox_notes()
+        self.assertEqual(len(notes), 1, notes)
+        with open(os.path.join(self.vault, "00-Inbox", notes[0]),
+                 encoding="utf-8") as fh:
+            text = fh.read()
+        # THE SIX FIELDS: source_receipt (run id + the receipt's own
+        # sha256), applies_to (the paths U1 declared), scope,
+        # evidence_locator (the real receipt path), status: candidate, and
+        # the refusal quoted verbatim.
+        self.assertIn("source_receipt: run1 sha256:", text, text)
+        self.assertIn("applies_to: mathlib.py", text, text)
+        self.assertIn("scope: guard add()", text, text)
+        self.assertIn("evidence_locator: %s" % self.receipt_path, text, text)
+        self.assertIn("status: candidate", text, text)
+        self.assertIn("\"the check exited 1\"", text, text)
+        # A DRAFT, NEVER CANONICAL: bm_vault_intake's own capture lifecycle.
+        self.assertIn("lifecycle: candidate", text, text)
+
+    def test_a_no_data_receipt_drafts_one(self):
+        receipts = [{"id": "U1", "state": "no-data",
+                    "reason": "no captured exit code was recorded",
+                    "objective": "guard add()"}]
+        with contextlib.redirect_stdout(io.StringIO()):
+            _br._draft_failure_cases(self.record, receipts, self.run_dir,
+                                     self.receipt_path)
+        notes = self._inbox_notes()
+        self.assertEqual(len(notes), 1, notes)
+        with open(os.path.join(self.vault, "00-Inbox", notes[0]),
+                 encoding="utf-8") as fh:
+            text = fh.read()
+        self.assertIn("\"no captured exit code was recorded\"", text, text)
+
+    def test_an_integrated_run_drafts_none(self):
+        """A run whose every receipt PASSED drafts nothing: an agent's own
+        green is not a pattern (item 3 of the learning loop covers the good
+        outcome, and only when a PERSON records the acceptance)."""
+        receipts = [{"id": "U1", "state": "verified", "reason": ""}]
+        with contextlib.redirect_stdout(io.StringIO()):
+            _br._draft_failure_cases(self.record, receipts, self.run_dir,
+                                     self.receipt_path)
+        self.assertEqual(self._inbox_notes(), [])
+
+    def test_no_vault_bound_prints_no_data_and_never_raises(self):
+        """No vault bound (BROTHERMODE_VAULT_ROOT unset): one NO-DATA line,
+        nothing drafted, and drafting never touches the exit code main()
+        already decided -- _draft_failure_cases is called for its side
+        effect only and returns None either way."""
+        os.environ.pop(_br.VAULT_ROOT_ENV_VAR, None)
+        receipts = [{"id": "U1", "state": "refused", "reason": "x"}]
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            result = _br._draft_failure_cases(self.record, receipts,
+                                              self.run_dir, self.receipt_path)
+        self.assertIsNone(result)
+        self.assertIn("NO-DATA", buf.getvalue(), buf.getvalue())
+        self.assertIn(_br.VAULT_ROOT_ENV_VAR, buf.getvalue(), buf.getvalue())
+        self.assertEqual(self._inbox_notes(), [])
 
 
 class ReceiptIdentityFields(unittest.TestCase):

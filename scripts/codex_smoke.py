@@ -5,9 +5,11 @@ Ship gate 7 of the Codex workstream (board row C7). It drives, in order:
 
   1. codex plugin marketplace add <this repository>
   2. codex plugin add brother@brother --json
-  3. codex plugin list --available --json    (pluginId brother@brother)
-  4. python3 scripts/codex_hooks_install.py --codex-home <isolated> --trust
-  5. a REAL codex exec turn against a throwaway git repository holding the
+  3. codex plugin add brothermode@brother --json
+  4. codex plugin list --available --json    (pluginId brother@brother,
+     pluginId brothermode@brother)
+  5. python3 scripts/codex_hooks_install.py --codex-home <isolated> --trust
+  6. a REAL codex exec turn against a throwaway git repository holding the
      toy (mathlib.py, test_mathlib.py), whose tool call runs
      scripts/brother_run.py, which produces a receipt.
 
@@ -557,11 +559,18 @@ def main(argv=None):
     if report("2 plugin add", step2) != 0:
         failures.append("plugin add")
 
+    step2b = sh([args.codex_bin, "plugin", "add", "brothermode@brother",
+                "--json"], env=env)
+    if report("2b plugin add brothermode", step2b) != 0:
+        failures.append("plugin add brothermode")
+
     step3 = sh([args.codex_bin, "plugin", "list", "--available", "--json"],
                env=env)
     report("3 plugin list --available --json", step3, tail=3)
     if step3.returncode != 0 or '"brother@brother"' not in (step3.stdout or ""):
         failures.append("plugin list did not report pluginId brother@brother")
+    if step3.returncode != 0 or '"brothermode@brother"' not in (step3.stdout or ""):
+        failures.append("plugin list did not report pluginId brothermode@brother")
 
     why = build_toy(toy)
     if why:
@@ -634,7 +643,7 @@ def main(argv=None):
     if failures:
         print("\nFAIL: %s" % "; ".join(failures))
         return 1
-    print("\nPASS: the four codex plugin commands ran at exit 0 in an "
+    print("\nPASS: the five codex plugin commands ran at exit 0 in an "
           "isolated home, a real codex turn produced a receipt through the "
           "stub provider, and the founder's ~/.codex was untouched.")
     return 0

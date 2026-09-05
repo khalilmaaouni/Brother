@@ -206,6 +206,60 @@ class TestCheckAndTrust(unittest.TestCase):
         self.assertIn("sha256:aaa", text)
 
 
+class TestForeignHookScoping(unittest.TestCase):
+    """C3 amendment, 2026-09-05: with the brothermode plugin installed
+    (commit 07179111), hooks/list also returns that plugin's own
+    hooks/hooks.json entries, marked "source": "plugin" and forever
+    untrusted. A warning about that file (Codex clamping its SessionEnd
+    timeout) is not a reason to fail our read-back, and those entries are not
+    a reason to fail our trust verdict: both must be scoped to the file this
+    script itself writes."""
+
+    OWN = "/home/hooks.json"
+
+    def test_a_warning_naming_a_plugin_cache_path_is_a_note_not_a_problem(self):
+        warnings = ["clamping SessionEnd hook timeout to 3s in "
+                    "/home/plugins/cache/brother/brothermode/3.4.4/hooks/hooks.json"]
+        own, foreign = chi.split_warnings(warnings, self.OWN)
+        self.assertEqual(own, [])
+        self.assertEqual(foreign, warnings)
+
+    def test_a_warning_naming_our_own_hooks_json_is_a_problem(self):
+        warnings = ["something is wrong in %s" % self.OWN]
+        own, foreign = chi.split_warnings(warnings, self.OWN)
+        self.assertEqual(own, warnings)
+        self.assertEqual(foreign, [])
+
+    def test_entries_from_two_source_paths_partition_correctly(self):
+        entries = [
+            {"sourcePath": self.OWN, "trustStatus": "trusted"},
+            {"sourcePath": self.OWN, "trustStatus": "trusted"},
+            {"sourcePath": "/home/plugins/cache/brother/brothermode/3.4.4/"
+                           "hooks/hooks.json",
+             "trustStatus": "untrusted", "pluginId": "brothermode@brother"},
+        ]
+        own, foreign = chi.partition_entries(entries, self.OWN)
+        self.assertEqual(len(own), 2)
+        self.assertEqual(len(foreign), 1)
+        self.assertTrue(all(e["sourcePath"] == self.OWN for e in own))
+        self.assertEqual(foreign[0]["pluginId"], "brothermode@brother")
+
+    def test_the_verdict_over_own_entries_is_trusted_despite_foreign_untrusted(self):
+        entries = [
+            {"sourcePath": self.OWN, "trustStatus": "trusted"},
+            {"sourcePath": self.OWN, "trustStatus": "trusted"},
+            {"sourcePath": "/home/plugins/cache/brother/brothermode/3.4.4/"
+                           "hooks/hooks.json",
+             "trustStatus": "untrusted", "pluginId": "brothermode@brother"},
+        ]
+        own, foreign = chi.partition_entries(entries, self.OWN)
+        states = [e["trustStatus"] for e in own]
+        self.assertTrue(states and all(s == "trusted" for s in states))
+        foreign_states = [e["trustStatus"] for e in foreign]
+        self.assertTrue(foreign_states and all(s == "untrusted"
+                                                for s in foreign_states))
+
+
 class TestUninstall(unittest.TestCase):
     """--uninstall removes Brother's own commands and nothing else. Release
     1.0.2 had no uninstall route at all, so the README told a reader to delete

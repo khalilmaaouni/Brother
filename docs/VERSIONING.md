@@ -35,7 +35,7 @@ This repository (`brother`, the router plugin under `bundle/`) versions
 separately from the three products it fronts, because it is a marketplace and
 a facade, not a merge of their code. Its own version lives in
 `.claude-plugin/marketplace.json` and `bundle/.claude-plugin/plugin.json`.
-Current version: 1.0.7.
+Current version: 1.0.8.
 
 ## Stage 0, Stage 1, Stage 2
 

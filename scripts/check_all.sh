@@ -1220,6 +1220,18 @@ run_check "codex-smoke" python3 scripts/codex_smoke.py
 # the state the C7 lane actually hit, and reading it as a pass is the failure
 # this test exists to stop.
 run_check "codex-smoke-self" python3 scripts/test_codex_smoke.py -v
+# THE GATE THE 2026-09-05 v1.0.6 DEFECT PROVED WAS MISSING: every check
+# above, codex-smoke included, ran from a tree where loop_bridge.py's own
+# DEV_CANDIDATE fallback (a developer's sibling checkout) was reachable, so
+# all of them read green the same night a real signed-in Codex run refused
+# its only unit with "NO-DATA: the loop's worker, verifier and repair
+# modules were not found" against the public plugin. This builds the export
+# the documented way, carves out ONLY bundle/ (what a plugin install
+# actually receives), makes the development fallback unreachable, and
+# proves ONE UNIT closes through the exported engine alone. FAIL on the
+# exact defect, PASS once the export ships what loop_bridge.py imports.
+run_check "virgin-unit-proof" python3 scripts/virgin_unit_proof.py
+run_check "virgin-unit-proof-self" python3 scripts/test_virgin_unit_proof.py -v
 # E100: the temp pruner's own contract, driven backwards. A pruner nobody
 # drove backwards is a claim: this one proves it removes the stale Brother
 # tree (including a read-only one), keeps the fresh one, never touches a

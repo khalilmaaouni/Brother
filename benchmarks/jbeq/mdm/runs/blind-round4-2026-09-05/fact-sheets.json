@@ -1,0 +1,1394 @@
+{
+  "AD-01": {
+    "track": "address",
+    "allowed_answers": [
+      "AUTO-MERGE",
+      "SUGGEST MERGE",
+      "LINK AS RELATED",
+      "KEEP SEPARATE",
+      "REJECT MATCH",
+      "ESCALATE",
+      "NO-DATA"
+    ],
+    "identifiers": [],
+    "stated_relation": "none",
+    "stated_difference": "none",
+    "tenant_boundary": "none",
+    "evidence_strength": null,
+    "evidence_reasons": [],
+    "corroborating_facts": [],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [],
+    "one_to_many_object": false
+  },
+  "AD-02": {
+    "track": "address",
+    "allowed_answers": [
+      "AUTO-MERGE",
+      "SUGGEST MERGE",
+      "LINK AS RELATED",
+      "KEEP SEPARATE",
+      "REJECT MATCH",
+      "ESCALATE",
+      "NO-DATA"
+    ],
+    "identifiers": [],
+    "stated_relation": "none",
+    "stated_difference": "none",
+    "tenant_boundary": "none",
+    "evidence_strength": null,
+    "evidence_reasons": [],
+    "corroborating_facts": [],
+    "blank_fields": [
+      "building_name",
+      "room_number"
+    ],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [],
+    "one_to_many_object": false
+  },
+  "AD-03": {
+    "track": "address",
+    "allowed_answers": [
+      "AUTO-MERGE",
+      "SUGGEST MERGE",
+      "LINK AS RELATED",
+      "KEEP SEPARATE",
+      "REJECT MATCH",
+      "ESCALATE",
+      "NO-DATA"
+    ],
+    "identifiers": [],
+    "stated_relation": "none",
+    "stated_difference": "none",
+    "tenant_boundary": "none",
+    "evidence_strength": null,
+    "evidence_reasons": [],
+    "corroborating_facts": [],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [],
+    "one_to_many_object": false
+  },
+  "AD-04": {
+    "track": "address",
+    "allowed_answers": [
+      "AUTO-MERGE",
+      "SUGGEST MERGE",
+      "LINK AS RELATED",
+      "KEEP SEPARATE",
+      "REJECT MATCH",
+      "ESCALATE",
+      "NO-DATA"
+    ],
+    "identifiers": [],
+    "stated_relation": "none",
+    "stated_difference": "different_legal_entity",
+    "tenant_boundary": "none",
+    "evidence_strength": null,
+    "evidence_reasons": [],
+    "corroborating_facts": [],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [],
+    "one_to_many_object": false
+  },
+  "AD-05": {
+    "track": "address",
+    "allowed_answers": [
+      "AUTO-MERGE",
+      "SUGGEST MERGE",
+      "LINK AS RELATED",
+      "KEEP SEPARATE",
+      "REJECT MATCH",
+      "ESCALATE",
+      "NO-DATA"
+    ],
+    "identifiers": [],
+    "stated_relation": "none",
+    "stated_difference": "none",
+    "tenant_boundary": "none",
+    "evidence_strength": null,
+    "evidence_reasons": [],
+    "corroborating_facts": [
+      "same_chiban_lot_number_stated_across_old_and_new_municipal_names"
+    ],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [],
+    "one_to_many_object": false
+  },
+  "AD-06": {
+    "track": "address",
+    "allowed_answers": [
+      "AUTO-MERGE",
+      "SUGGEST MERGE",
+      "LINK AS RELATED",
+      "KEEP SEPARATE",
+      "REJECT MATCH",
+      "ESCALATE",
+      "NO-DATA"
+    ],
+    "identifiers": [],
+    "stated_relation": "none",
+    "stated_difference": "none",
+    "tenant_boundary": "none",
+    "evidence_strength": null,
+    "evidence_reasons": [
+      "unexplained_conflict"
+    ],
+    "corroborating_facts": [],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [],
+    "one_to_many_object": false
+  },
+  "AD-07": {
+    "track": "address",
+    "allowed_answers": [
+      "AUTO-MERGE",
+      "SUGGEST MERGE",
+      "LINK AS RELATED",
+      "KEEP SEPARATE",
+      "REJECT MATCH",
+      "ESCALATE",
+      "NO-DATA"
+    ],
+    "identifiers": [],
+    "stated_relation": "none",
+    "stated_difference": "none",
+    "tenant_boundary": "none",
+    "evidence_strength": null,
+    "evidence_reasons": [],
+    "corroborating_facts": [],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [],
+    "one_to_many_object": false
+  },
+  "AD-08": {
+    "track": "address",
+    "allowed_answers": [
+      "AUTO-MERGE",
+      "SUGGEST MERGE",
+      "LINK AS RELATED",
+      "KEEP SEPARATE",
+      "REJECT MATCH",
+      "ESCALATE",
+      "NO-DATA"
+    ],
+    "identifiers": [],
+    "stated_relation": "none",
+    "stated_difference": "none",
+    "tenant_boundary": "none",
+    "evidence_strength": null,
+    "evidence_reasons": [],
+    "corroborating_facts": [
+      "chome_and_banchi_match_the_candidate_record_but_fuchu_city_exists_in_both_tokyo_and_hiroshima"
+    ],
+    "blank_fields": [
+      "prefecture"
+    ],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [],
+    "one_to_many_object": false
+  },
+  "AD-09": {
+    "track": "address",
+    "allowed_answers": [
+      "AUTO-MERGE",
+      "SUGGEST MERGE",
+      "LINK AS RELATED",
+      "KEEP SEPARATE",
+      "REJECT MATCH",
+      "ESCALATE",
+      "NO-DATA"
+    ],
+    "identifiers": [],
+    "stated_relation": "none",
+    "stated_difference": "none",
+    "tenant_boundary": "none",
+    "evidence_strength": null,
+    "evidence_reasons": [],
+    "corroborating_facts": [],
+    "blank_fields": [
+      "prefecture",
+      "city",
+      "lot_number",
+      "postal_code"
+    ],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [],
+    "one_to_many_object": false
+  },
+  "AD-10": {
+    "track": "address",
+    "allowed_answers": [
+      "AUTO-MERGE",
+      "SUGGEST MERGE",
+      "LINK AS RELATED",
+      "KEEP SEPARATE",
+      "REJECT MATCH",
+      "ESCALATE",
+      "NO-DATA"
+    ],
+    "identifiers": [
+      {
+        "value": "1010001111111",
+        "domain": "corporate_number",
+        "legal_person_type": "corporation",
+        "status": "valid"
+      },
+      {
+        "value": "1010002222222",
+        "domain": "corporate_number",
+        "legal_person_type": "corporation",
+        "status": "valid"
+      }
+    ],
+    "stated_relation": "none",
+    "stated_difference": "different_legal_entity",
+    "tenant_boundary": "none",
+    "evidence_strength": null,
+    "evidence_reasons": [],
+    "corroborating_facts": [
+      "shared_office_floor_hosts_multiple_registered_head_offices"
+    ],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [],
+    "one_to_many_object": false
+  },
+  "EO-01": {
+    "track": "entity-object",
+    "allowed_answers": [
+      "AUTO-MERGE",
+      "SUGGEST MERGE",
+      "LINK AS RELATED",
+      "KEEP SEPARATE",
+      "REJECT MATCH",
+      "ESCALATE",
+      "NO-DATA"
+    ],
+    "identifiers": [
+      {
+        "value": "7010001234567",
+        "domain": "corporate_number",
+        "legal_person_type": "corporation",
+        "status": "valid"
+      }
+    ],
+    "stated_relation": "corporate_number_shared",
+    "stated_difference": "none",
+    "tenant_boundary": "none",
+    "evidence_strength": null,
+    "evidence_reasons": [],
+    "corroborating_facts": [
+      "branch_holds_its_own_credit_limit_and_billing_destination"
+    ],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [],
+    "one_to_many_object": false
+  },
+  "EO-02": {
+    "track": "entity-object",
+    "allowed_answers": [
+      "AUTO-MERGE",
+      "SUGGEST MERGE",
+      "LINK AS RELATED",
+      "KEEP SEPARATE",
+      "REJECT MATCH",
+      "ESCALATE",
+      "NO-DATA"
+    ],
+    "identifiers": [],
+    "stated_relation": "role_pair",
+    "stated_difference": "different_legal_entity",
+    "tenant_boundary": "none",
+    "evidence_strength": null,
+    "evidence_reasons": [],
+    "corroborating_facts": [
+      "payer_record_has_its_own_payment_terms"
+    ],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [
+      {
+        "type": "capital",
+        "parent": "緑川ホールディングス株式会社"
+      }
+    ],
+    "one_to_many_object": false
+  },
+  "EO-03": {
+    "track": "entity-object",
+    "allowed_answers": [
+      "AUTO-MERGE",
+      "SUGGEST MERGE",
+      "LINK AS RELATED",
+      "KEEP SEPARATE",
+      "REJECT MATCH",
+      "ESCALATE",
+      "NO-DATA"
+    ],
+    "identifiers": [],
+    "stated_relation": "corporate_number_shared",
+    "stated_difference": "none",
+    "tenant_boundary": "none",
+    "evidence_strength": "strong",
+    "evidence_reasons": [],
+    "corroborating_facts": [
+      "created_same_day_by_same_purchasing_department_via_double_submission"
+    ],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [],
+    "one_to_many_object": false
+  },
+  "EO-04": {
+    "track": "entity-object",
+    "allowed_answers": [
+      "AUTO-MERGE",
+      "SUGGEST MERGE",
+      "LINK AS RELATED",
+      "KEEP SEPARATE",
+      "REJECT MATCH",
+      "ESCALATE",
+      "NO-DATA"
+    ],
+    "identifiers": [
+      {
+        "value": "3010004567890",
+        "domain": "corporate_number",
+        "legal_person_type": "corporation",
+        "status": "valid"
+      },
+      {
+        "value": "6010009876543",
+        "domain": "corporate_number",
+        "legal_person_type": "corporation",
+        "status": "valid"
+      }
+    ],
+    "stated_relation": "none",
+    "stated_difference": "different_legal_entity",
+    "tenant_boundary": "none",
+    "evidence_strength": null,
+    "evidence_reasons": [],
+    "corroborating_facts": [
+      "no_capital_relationship_between_the_two_companies_stated"
+    ],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [],
+    "one_to_many_object": false
+  },
+  "EO-05": {
+    "track": "entity-object",
+    "allowed_answers": [
+      "AUTO-MERGE",
+      "SUGGEST MERGE",
+      "LINK AS RELATED",
+      "KEEP SEPARATE",
+      "REJECT MATCH",
+      "ESCALATE",
+      "NO-DATA"
+    ],
+    "identifiers": [],
+    "stated_relation": "role_pair",
+    "stated_difference": "none",
+    "tenant_boundary": "none",
+    "evidence_strength": null,
+    "evidence_reasons": [],
+    "corroborating_facts": [
+      "same_contact_window_for_both_records"
+    ],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [],
+    "one_to_many_object": false
+  },
+  "EO-06": {
+    "track": "entity-object",
+    "allowed_answers": [
+      "AUTO-MERGE",
+      "SUGGEST MERGE",
+      "LINK AS RELATED",
+      "KEEP SEPARATE",
+      "REJECT MATCH",
+      "ESCALATE",
+      "NO-DATA"
+    ],
+    "identifiers": [],
+    "stated_relation": "same_site_only",
+    "stated_difference": "none",
+    "tenant_boundary": "none",
+    "evidence_strength": null,
+    "evidence_reasons": [],
+    "corroborating_facts": [
+      "shipping_hub_consolidates_goods_for_five_nearby_stores"
+    ],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [],
+    "one_to_many_object": true
+  },
+  "EO-07": {
+    "track": "entity-object",
+    "allowed_answers": [
+      "AUTO-MERGE",
+      "SUGGEST MERGE",
+      "LINK AS RELATED",
+      "KEEP SEPARATE",
+      "REJECT MATCH",
+      "ESCALATE",
+      "NO-DATA"
+    ],
+    "identifiers": [
+      {
+        "value": "7010002345678",
+        "domain": "corporate_number",
+        "legal_person_type": "corporation",
+        "status": "valid"
+      }
+    ],
+    "stated_relation": "none",
+    "stated_difference": "none",
+    "tenant_boundary": "none",
+    "evidence_strength": "weak",
+    "evidence_reasons": [
+      "missing_identifier"
+    ],
+    "corroborating_facts": [
+      "both_records_have_order_history_in_the_past_year",
+      "different_sales_rep_assigned_to_each_record"
+    ],
+    "blank_fields": [
+      "corporate_number"
+    ],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [],
+    "one_to_many_object": false
+  },
+  "EO-08": {
+    "track": "entity-object",
+    "allowed_answers": [
+      "AUTO-MERGE",
+      "SUGGEST MERGE",
+      "LINK AS RELATED",
+      "KEEP SEPARATE",
+      "REJECT MATCH",
+      "ESCALATE",
+      "NO-DATA"
+    ],
+    "identifiers": [],
+    "stated_relation": "none",
+    "stated_difference": "none",
+    "tenant_boundary": "none",
+    "evidence_strength": null,
+    "evidence_reasons": [
+      "missing_identifier"
+    ],
+    "corroborating_facts": [
+      "three_existing_candidate_records_share_the_name"
+    ],
+    "blank_fields": [
+      "address",
+      "corporate_number",
+      "contact_person",
+      "phone_number"
+    ],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [],
+    "one_to_many_object": false
+  },
+  "EO-09": {
+    "track": "entity-object",
+    "allowed_answers": [
+      "AUTO-MERGE",
+      "SUGGEST MERGE",
+      "LINK AS RELATED",
+      "KEEP SEPARATE",
+      "REJECT MATCH",
+      "ESCALATE",
+      "NO-DATA"
+    ],
+    "identifiers": [
+      {
+        "value": "4010003456789",
+        "domain": "corporate_number",
+        "legal_person_type": "corporation",
+        "status": "valid"
+      },
+      {
+        "value": "4010003456790",
+        "domain": "corporate_number",
+        "legal_person_type": "corporation",
+        "status": "valid"
+      }
+    ],
+    "stated_relation": "parent_child",
+    "stated_difference": "different_legal_entity",
+    "tenant_boundary": "none",
+    "evidence_strength": null,
+    "evidence_reasons": [],
+    "corroborating_facts": [
+      "registered_head_offices_share_the_same_building_and_floor"
+    ],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [
+      {
+        "type": "capital",
+        "parent": "北都ベーカリー株式会社"
+      }
+    ],
+    "one_to_many_object": false
+  },
+  "EO-10": {
+    "track": "entity-object",
+    "allowed_answers": [
+      "AUTO-MERGE",
+      "SUGGEST MERGE",
+      "LINK AS RELATED",
+      "KEEP SEPARATE",
+      "REJECT MATCH",
+      "ESCALATE",
+      "NO-DATA"
+    ],
+    "identifiers": [],
+    "stated_relation": "corporate_number_shared",
+    "stated_difference": "none",
+    "tenant_boundary": "none",
+    "evidence_strength": "strong",
+    "evidence_reasons": [],
+    "corroborating_facts": [
+      "one_record_created_during_old_erp_migration",
+      "name_notation_differs_full_width_vs_half_width_only"
+    ],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": true,
+    "hierarchy_parents": [],
+    "one_to_many_object": false
+  },
+  "HI-01": {
+    "track": "hierarchy",
+    "allowed_answers": [
+      "AUTO-MERGE",
+      "SUGGEST MERGE",
+      "LINK AS RELATED",
+      "KEEP SEPARATE",
+      "REJECT MATCH",
+      "ESCALATE",
+      "NO-DATA"
+    ],
+    "identifiers": [],
+    "stated_relation": "parent_child",
+    "stated_difference": "none",
+    "tenant_boundary": "none",
+    "evidence_strength": null,
+    "evidence_reasons": [],
+    "corroborating_facts": [
+      "master_record_has_only_one_parent_field"
+    ],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [
+      {
+        "type": "capital",
+        "parent": "カワセミホールディングス株式会社"
+      },
+      {
+        "type": "trade_flow",
+        "parent": "株式会社トウカイ物流"
+      },
+      {
+        "type": "reporting",
+        "parent": "西日本統括部"
+      }
+    ],
+    "one_to_many_object": false
+  },
+  "HI-02": {
+    "track": "hierarchy",
+    "allowed_answers": [
+      "AUTO-MERGE",
+      "SUGGEST MERGE",
+      "LINK AS RELATED",
+      "KEEP SEPARATE",
+      "REJECT MATCH",
+      "ESCALATE",
+      "NO-DATA"
+    ],
+    "identifiers": [],
+    "stated_relation": "parent_child",
+    "stated_difference": "none",
+    "tenant_boundary": "none",
+    "evidence_strength": null,
+    "evidence_reasons": [],
+    "corroborating_facts": [
+      "subsidiary_sales_now_exceed_the_parents_sales",
+      "request_is_to_flip_hierarchy_to_match_internal_reporting_preference"
+    ],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [
+      {
+        "type": "capital",
+        "parent": "日之出ホールディングス株式会社"
+      }
+    ],
+    "one_to_many_object": false
+  },
+  "HI-03": {
+    "track": "hierarchy",
+    "allowed_answers": [
+      "AUTO-MERGE",
+      "SUGGEST MERGE",
+      "LINK AS RELATED",
+      "KEEP SEPARATE",
+      "REJECT MATCH",
+      "ESCALATE",
+      "NO-DATA"
+    ],
+    "identifiers": [],
+    "stated_relation": "parent_child",
+    "stated_difference": "none",
+    "tenant_boundary": "none",
+    "evidence_strength": null,
+    "evidence_reasons": [],
+    "corroborating_facts": [
+      "business_transfer_of_3_stores_effective_2026-07-01",
+      "pre_transfer_sales_were_aggregated_under_the_old_parent"
+    ],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": true,
+    "hierarchy_parents": [],
+    "one_to_many_object": false
+  },
+  "HI-04": {
+    "track": "hierarchy",
+    "allowed_answers": [
+      "AUTO-MERGE",
+      "SUGGEST MERGE",
+      "LINK AS RELATED",
+      "KEEP SEPARATE",
+      "REJECT MATCH",
+      "ESCALATE",
+      "NO-DATA"
+    ],
+    "identifiers": [],
+    "stated_relation": "none",
+    "stated_difference": "none",
+    "tenant_boundary": "none",
+    "evidence_strength": null,
+    "evidence_reasons": [],
+    "corroborating_facts": [
+      "change_is_a_sales_territory_and_rep_reassignment_not_a_capital_change",
+      "request_asks_to_apply_it_to_the_capital_hierarchy_parent_field"
+    ],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [
+      {
+        "type": "reporting",
+        "parent": "浜松営業所"
+      }
+    ],
+    "one_to_many_object": false
+  },
+  "HI-05": {
+    "track": "hierarchy",
+    "allowed_answers": [
+      "AUTO-MERGE",
+      "SUGGEST MERGE",
+      "LINK AS RELATED",
+      "KEEP SEPARATE",
+      "REJECT MATCH",
+      "ESCALATE",
+      "NO-DATA"
+    ],
+    "identifiers": [],
+    "stated_relation": "none",
+    "stated_difference": "different_legal_entity",
+    "tenant_boundary": "none",
+    "evidence_strength": null,
+    "evidence_reasons": [],
+    "corroborating_facts": [
+      "shares_brand_name_and_shop_signage_only",
+      "no_capital_relationship_or_shared_directors_stated"
+    ],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [],
+    "one_to_many_object": false
+  },
+  "HI-06": {
+    "track": "hierarchy",
+    "allowed_answers": [
+      "AUTO-MERGE",
+      "SUGGEST MERGE",
+      "LINK AS RELATED",
+      "KEEP SEPARATE",
+      "REJECT MATCH",
+      "ESCALATE",
+      "NO-DATA"
+    ],
+    "identifiers": [],
+    "stated_relation": "parent_child",
+    "stated_difference": "none",
+    "tenant_boundary": "none",
+    "evidence_strength": null,
+    "evidence_reasons": [],
+    "corroborating_facts": [
+      "newly_formed_subsidiary_has_a_similar_name_to_the_existing_parent",
+      "name_matching_engine_presented_both_as_candidates"
+    ],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [
+      {
+        "type": "capital",
+        "parent": "日之出ホールディングス株式会社"
+      }
+    ],
+    "one_to_many_object": false
+  },
+  "HI-07": {
+    "track": "hierarchy",
+    "allowed_answers": [
+      "AUTO-MERGE",
+      "SUGGEST MERGE",
+      "LINK AS RELATED",
+      "KEEP SEPARATE",
+      "REJECT MATCH",
+      "ESCALATE",
+      "NO-DATA"
+    ],
+    "identifiers": [],
+    "stated_relation": "parent_child",
+    "stated_difference": "none",
+    "tenant_boundary": "none",
+    "evidence_strength": null,
+    "evidence_reasons": [],
+    "corroborating_facts": [
+      "description_states_group_membership_only_without_naming_capital_trade_flow_or_reporting"
+    ],
+    "blank_fields": [
+      "hierarchy_type"
+    ],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [],
+    "one_to_many_object": false
+  },
+  "HI-08": {
+    "track": "hierarchy",
+    "allowed_answers": [
+      "AUTO-MERGE",
+      "SUGGEST MERGE",
+      "LINK AS RELATED",
+      "KEEP SEPARATE",
+      "REJECT MATCH",
+      "ESCALATE",
+      "NO-DATA"
+    ],
+    "identifiers": [],
+    "stated_relation": "trade_flow",
+    "stated_difference": "none",
+    "tenant_boundary": "none",
+    "evidence_strength": null,
+    "evidence_reasons": [],
+    "corroborating_facts": [
+      "two_group_companies_each_hold_their_own_company_code_record_for_the_same_external_counterparty",
+      "credit_limit_and_pricing_terms_differ_by_company_code"
+    ],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [],
+    "one_to_many_object": false
+  },
+  "HI-09": {
+    "track": "hierarchy",
+    "allowed_answers": [
+      "AUTO-MERGE",
+      "SUGGEST MERGE",
+      "LINK AS RELATED",
+      "KEEP SEPARATE",
+      "REJECT MATCH",
+      "ESCALATE",
+      "NO-DATA"
+    ],
+    "identifiers": [],
+    "stated_relation": "none",
+    "stated_difference": "none",
+    "tenant_boundary": "none",
+    "evidence_strength": null,
+    "evidence_reasons": [],
+    "corroborating_facts": [
+      "location_hierarchy_node_and_org_hierarchy_node_share_the_same_name",
+      "jurisdiction_of_the_two_nodes_only_partially_overlaps"
+    ],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [],
+    "one_to_many_object": false
+  },
+  "HI-10": {
+    "track": "hierarchy",
+    "allowed_answers": [
+      "AUTO-MERGE",
+      "SUGGEST MERGE",
+      "LINK AS RELATED",
+      "KEEP SEPARATE",
+      "REJECT MATCH",
+      "ESCALATE",
+      "NO-DATA"
+    ],
+    "identifiers": [],
+    "stated_relation": "trade_flow",
+    "stated_difference": "none",
+    "tenant_boundary": "none",
+    "evidence_strength": null,
+    "evidence_reasons": [],
+    "corroborating_facts": [
+      "request_asks_to_set_the_distributor_as_the_stores_capital_corporate_parent"
+    ],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [
+      {
+        "type": "trade_flow",
+        "parent": "株式会社トウカイ物流"
+      }
+    ],
+    "one_to_many_object": false
+  },
+  "ID-01": {
+    "track": "identifier",
+    "allowed_answers": [
+      "AUTO-MERGE",
+      "SUGGEST MERGE",
+      "LINK AS RELATED",
+      "KEEP SEPARATE",
+      "REJECT MATCH",
+      "ESCALATE",
+      "NO-DATA"
+    ],
+    "identifiers": [
+      {
+        "value": "7010001234567",
+        "domain": "internal_sequence",
+        "legal_person_type": "unknown",
+        "status": "valid"
+      },
+      {
+        "value": "7010001234567",
+        "domain": "corporate_number",
+        "legal_person_type": "corporation",
+        "status": "valid"
+      }
+    ],
+    "stated_relation": "none",
+    "stated_difference": "different_identifier_domain",
+    "tenant_boundary": "none",
+    "evidence_strength": null,
+    "evidence_reasons": [],
+    "corroborating_facts": [
+      "internal_customer_number_is_a_self_assigned_13_digit_sequence_distinct_from_the_corporate_number_scheme"
+    ],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [],
+    "one_to_many_object": false
+  },
+  "ID-02": {
+    "track": "identifier",
+    "allowed_answers": [
+      "AUTO-MERGE",
+      "SUGGEST MERGE",
+      "LINK AS RELATED",
+      "KEEP SEPARATE",
+      "REJECT MATCH",
+      "ESCALATE",
+      "NO-DATA"
+    ],
+    "identifiers": [
+      {
+        "value": "T3010005555555",
+        "domain": "tax_id",
+        "legal_person_type": "unknown",
+        "status": "expired"
+      }
+    ],
+    "stated_relation": "none",
+    "stated_difference": "none",
+    "tenant_boundary": "none",
+    "evidence_strength": null,
+    "evidence_reasons": [],
+    "corroborating_facts": [
+      "registration_expired_2026-06-30_and_today_is_2026-09-05"
+    ],
+    "blank_fields": [
+      "new_invoice_registration_number"
+    ],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [],
+    "one_to_many_object": false
+  },
+  "ID-03": {
+    "track": "identifier",
+    "allowed_answers": [
+      "AUTO-MERGE",
+      "SUGGEST MERGE",
+      "LINK AS RELATED",
+      "KEEP SEPARATE",
+      "REJECT MATCH",
+      "ESCALATE",
+      "NO-DATA"
+    ],
+    "identifiers": [
+      {
+        "value": "C-04412",
+        "domain": "internal_sequence",
+        "legal_person_type": "unknown",
+        "status": "valid"
+      },
+      {
+        "value": "9f2c1a70",
+        "domain": "unknown",
+        "legal_person_type": "unknown",
+        "status": "valid"
+      },
+      {
+        "value": "7010002345678",
+        "domain": "corporate_number",
+        "legal_person_type": "corporation",
+        "status": "valid"
+      }
+    ],
+    "stated_relation": "corporate_number_shared",
+    "stated_difference": "none",
+    "tenant_boundary": "none",
+    "evidence_strength": "strong",
+    "evidence_reasons": [],
+    "corroborating_facts": [
+      "migration_crosswalk_table_records_the_c04412_to_guid_correspondence",
+      "customer_role_also_matches_across_both_records"
+    ],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [],
+    "one_to_many_object": false
+  },
+  "ID-04": {
+    "track": "identifier",
+    "allowed_answers": [
+      "AUTO-MERGE",
+      "SUGGEST MERGE",
+      "LINK AS RELATED",
+      "KEEP SEPARATE",
+      "REJECT MATCH",
+      "ESCALATE",
+      "NO-DATA"
+    ],
+    "identifiers": [
+      {
+        "value": "100234",
+        "domain": "internal_sequence",
+        "legal_person_type": "unknown",
+        "status": "valid"
+      },
+      {
+        "value": "100234",
+        "domain": "internal_sequence",
+        "legal_person_type": "unknown",
+        "status": "valid"
+      }
+    ],
+    "stated_relation": "none",
+    "stated_difference": "different_identifier_domain",
+    "tenant_boundary": "none",
+    "evidence_strength": null,
+    "evidence_reasons": [],
+    "corroborating_facts": [
+      "store_id_and_site_id_use_the_same_6_digit_numbering_scheme_but_the_input_states_they_identify_different_targets"
+    ],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [],
+    "one_to_many_object": false
+  },
+  "ID-05": {
+    "track": "identifier",
+    "allowed_answers": [
+      "AUTO-MERGE",
+      "SUGGEST MERGE",
+      "LINK AS RELATED",
+      "KEEP SEPARATE",
+      "REJECT MATCH",
+      "ESCALATE",
+      "NO-DATA"
+    ],
+    "identifiers": [
+      {
+        "value": "400123",
+        "domain": "internal_sequence",
+        "legal_person_type": "unknown",
+        "status": "valid"
+      }
+    ],
+    "stated_relation": "none",
+    "stated_difference": "different_legal_entity",
+    "tenant_boundary": "none",
+    "evidence_strength": null,
+    "evidence_reasons": [],
+    "corroborating_facts": [
+      "customer_code_was_reused_for_a_different_legal_entity_starting_2023-10-01"
+    ],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [],
+    "one_to_many_object": false
+  },
+  "MM-01": {
+    "track": "match-or-no-merge",
+    "allowed_answers": [
+      "AUTO-MERGE",
+      "SUGGEST MERGE",
+      "LINK AS RELATED",
+      "KEEP SEPARATE",
+      "REJECT MATCH",
+      "ESCALATE",
+      "NO-DATA"
+    ],
+    "identifiers": [
+      {
+        "value": "7010001234567",
+        "domain": "corporate_number",
+        "legal_person_type": "corporation",
+        "status": "valid"
+      }
+    ],
+    "stated_relation": "corporate_number_shared",
+    "stated_difference": "none",
+    "tenant_boundary": "none",
+    "evidence_strength": "strong",
+    "evidence_reasons": [],
+    "corroborating_facts": [
+      "each_of_the_3_stores_has_its_own_delivery_destination_shelf_allocation_and_sales_booking_destination"
+    ],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [],
+    "one_to_many_object": false
+  },
+  "MM-02": {
+    "track": "match-or-no-merge",
+    "allowed_answers": [
+      "AUTO-MERGE",
+      "SUGGEST MERGE",
+      "LINK AS RELATED",
+      "KEEP SEPARATE",
+      "REJECT MATCH",
+      "ESCALATE",
+      "NO-DATA"
+    ],
+    "identifiers": [
+      {
+        "value": "T8012345678901",
+        "domain": "tax_id",
+        "legal_person_type": "individual",
+        "status": "valid"
+      },
+      {
+        "value": "8012345678901",
+        "domain": "corporate_number",
+        "legal_person_type": "corporation",
+        "status": "valid"
+      }
+    ],
+    "stated_relation": "none",
+    "stated_difference": "different_identifier_domain",
+    "tenant_boundary": "none",
+    "evidence_strength": null,
+    "evidence_reasons": [],
+    "corroborating_facts": [],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [],
+    "one_to_many_object": false
+  },
+  "MM-03": {
+    "track": "match-or-no-merge",
+    "allowed_answers": [
+      "AUTO-MERGE",
+      "SUGGEST MERGE",
+      "LINK AS RELATED",
+      "KEEP SEPARATE",
+      "REJECT MATCH",
+      "ESCALATE",
+      "NO-DATA"
+    ],
+    "identifiers": [],
+    "stated_relation": "none",
+    "stated_difference": "different_legal_entity",
+    "tenant_boundary": "none",
+    "evidence_strength": null,
+    "evidence_reasons": [],
+    "corroborating_facts": [
+      "both_companies_lease_space_in_the_same_building_and_share_the_landlords_representative_phone_number"
+    ],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [],
+    "one_to_many_object": false
+  },
+  "MM-04": {
+    "track": "match-or-no-merge",
+    "allowed_answers": [
+      "AUTO-MERGE",
+      "SUGGEST MERGE",
+      "LINK AS RELATED",
+      "KEEP SEPARATE",
+      "REJECT MATCH",
+      "ESCALATE",
+      "NO-DATA"
+    ],
+    "identifiers": [],
+    "stated_relation": "corporate_number_shared",
+    "stated_difference": "none",
+    "tenant_boundary": "none",
+    "evidence_strength": "strong",
+    "evidence_reasons": [],
+    "corroborating_facts": [
+      "one_record_has_no_transaction_history_at_all",
+      "it_was_created_3_days_after_the_other_with_a_comment_re-registered_because_uncertain_if_already_registered"
+    ],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [],
+    "one_to_many_object": false
+  },
+  "MM-05": {
+    "track": "match-or-no-merge",
+    "allowed_answers": [
+      "AUTO-MERGE",
+      "SUGGEST MERGE",
+      "LINK AS RELATED",
+      "KEEP SEPARATE",
+      "REJECT MATCH",
+      "ESCALATE",
+      "NO-DATA"
+    ],
+    "identifiers": [],
+    "stated_relation": "none",
+    "stated_difference": "none",
+    "tenant_boundary": "none",
+    "evidence_strength": "weak",
+    "evidence_reasons": [
+      "score_only",
+      "missing_identifier"
+    ],
+    "corroborating_facts": [
+      "merge_implementation_physically_deletes_the_losing_record_with_no_undo"
+    ],
+    "blank_fields": [
+      "corporate_number"
+    ],
+    "irreversible": true,
+    "history_exists": false,
+    "hierarchy_parents": [],
+    "one_to_many_object": false
+  },
+  "MM-06": {
+    "track": "match-or-no-merge",
+    "allowed_answers": [
+      "AUTO-MERGE",
+      "SUGGEST MERGE",
+      "LINK AS RELATED",
+      "KEEP SEPARATE",
+      "REJECT MATCH",
+      "ESCALATE",
+      "NO-DATA"
+    ],
+    "identifiers": [],
+    "stated_relation": "none",
+    "stated_difference": "none",
+    "tenant_boundary": "none",
+    "evidence_strength": "weak",
+    "evidence_reasons": [
+      "missing_identifier"
+    ],
+    "corroborating_facts": [
+      "same_reading_aoidenki_but_different_kanji_spelling",
+      "same_city_but_different_banchi_address_number"
+    ],
+    "blank_fields": [
+      "corporate_number"
+    ],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [],
+    "one_to_many_object": false
+  },
+  "MM-07": {
+    "track": "match-or-no-merge",
+    "allowed_answers": [
+      "AUTO-MERGE",
+      "SUGGEST MERGE",
+      "LINK AS RELATED",
+      "KEEP SEPARATE",
+      "REJECT MATCH",
+      "ESCALATE",
+      "NO-DATA"
+    ],
+    "identifiers": [
+      {
+        "value": "5010007654321",
+        "domain": "corporate_number",
+        "legal_person_type": "corporation",
+        "status": "valid"
+      }
+    ],
+    "stated_relation": "corporate_number_shared",
+    "stated_difference": "none",
+    "tenant_boundary": "none",
+    "evidence_strength": "strong",
+    "evidence_reasons": [
+      "explained_conflict"
+    ],
+    "corroborating_facts": [
+      "registered_trade_name_change_recorded_2025-04-01_explains_the_differing_names",
+      "customer_role_and_billing_destination_are_the_same"
+    ],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [],
+    "one_to_many_object": false
+  },
+  "MM-08": {
+    "track": "match-or-no-merge",
+    "allowed_answers": [
+      "AUTO-MERGE",
+      "SUGGEST MERGE",
+      "LINK AS RELATED",
+      "KEEP SEPARATE",
+      "REJECT MATCH",
+      "ESCALATE",
+      "NO-DATA"
+    ],
+    "identifiers": [],
+    "stated_relation": "none",
+    "stated_difference": "contractual_wall",
+    "tenant_boundary": "stated",
+    "evidence_strength": null,
+    "evidence_reasons": [],
+    "corroborating_facts": [
+      "candidate_record_belongs_to_a_different_operating_companys_tenant",
+      "the_two_tenants_are_contractually_barred_from_referencing_each_others_data"
+    ],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [],
+    "one_to_many_object": false
+  },
+  "MM-09": {
+    "track": "match-or-no-merge",
+    "allowed_answers": [
+      "AUTO-MERGE",
+      "SUGGEST MERGE",
+      "LINK AS RELATED",
+      "KEEP SEPARATE",
+      "REJECT MATCH",
+      "ESCALATE",
+      "NO-DATA"
+    ],
+    "identifiers": [],
+    "stated_relation": "none",
+    "stated_difference": "none",
+    "tenant_boundary": "none",
+    "evidence_strength": "weak",
+    "evidence_reasons": [
+      "score_only",
+      "missing_identifier"
+    ],
+    "corroborating_facts": [
+      "one_records_attributes_are_inaccessible_due_to_permission_control",
+      "only_a_match_score_of_0.91_is_visible"
+    ],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [],
+    "one_to_many_object": false
+  },
+  "MM-10": {
+    "track": "match-or-no-merge",
+    "allowed_answers": [
+      "AUTO-MERGE",
+      "SUGGEST MERGE",
+      "LINK AS RELATED",
+      "KEEP SEPARATE",
+      "REJECT MATCH",
+      "ESCALATE",
+      "NO-DATA"
+    ],
+    "identifiers": [],
+    "stated_relation": "corporate_number_shared",
+    "stated_difference": "none",
+    "tenant_boundary": "none",
+    "evidence_strength": null,
+    "evidence_reasons": [],
+    "corroborating_facts": [
+      "hq_bulk_contract_and_per_store_individual_contract_carry_different_payment_terms"
+    ],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [],
+    "one_to_many_object": false
+  }
+}

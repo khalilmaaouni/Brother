@@ -92,6 +92,17 @@ run_check "readme-honesty"      python3 scripts/test_readme_honesty.py
 # charter names. 0.09s on this machine, so it belongs in the fast slice.
 run_check "charter-paths"       python3 scripts/charter_paths.py
 run_check "export-public"       python3 scripts/test_export_public.py -v
+# The gate the 2026-09-05 v1.0.6 defect proved was missing: every other
+# check in this file (and codex_smoke.py, in the full battery) ran from a
+# tree where loop_bridge.py's own development fallback was reachable, so a
+# public export that shipped bundle/runtime/loop_bridge.py without the
+# modules it imports still read green everywhere. This builds the export
+# the documented way, carves out ONLY bundle/ (what a plugin install
+# actually receives), makes the development fallback unreachable, and
+# proves one unit closes through the exported engine alone. Measured
+# 2026-09-05: ~24s wall on this machine, well inside this file's own
+# budget.
+run_check "virgin-unit-proof"   python3 scripts/virgin_unit_proof.py
 # The enterprise readiness gate itself, not only its self-test: the public
 # v1.0.0 tag failed this gate the night the battery still read green,
 # because only readiness-gate-self (the suite) was registered anywhere.

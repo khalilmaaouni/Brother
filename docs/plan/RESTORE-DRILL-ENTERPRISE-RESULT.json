@@ -5,73 +5,73 @@
   },
   "checks": [
     {
-      "detail": "NO-DATA correction-rule store: no store exists at /private/tmp/bh-cut-107/.brothermode/store.sqlite3; run `python3 /private/tmp/bh-cut-107/products/brothermode/tools/bm_store.py init` to create one\nembedded 0 of 8 pending note(s)\nindexed 8 note(s): 8 new, 0 refreshed, 0 gone, 0 touched (content hash unchanged, mtime only)",
+      "detail": "NO-DATA correction-rule store: no store exists at /private/tmp/bh-cut-108/.brothermode/store.sqlite3; run `python3 /private/tmp/bh-cut-108/products/brothermode/tools/bm_store.py init` to create one\nembedded 0 of 8 pending note(s)\nindexed 8 note(s): 8 new, 0 refreshed, 0 gone, 0 touched (content hash unchanged, mtime only)",
       "name": "index",
       "passed": true,
       "tenant": "tenant-alpha"
     },
     {
-      "detail": "minted as-ee4ca8b865404532 -> /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-9et66x5i/live/tenant-alpha/vault/99-System/assertions.jsonl",
+      "detail": "minted as-369542aba7514310 -> /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-ez9cl4je/live/tenant-alpha/vault/99-System/assertions.jsonl",
       "name": "mint assertion (casual, green)",
       "passed": true,
       "tenant": "tenant-alpha"
     },
     {
-      "detail": "minted as-7ed26d41b718473f -> /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-9et66x5i/live/tenant-alpha/vault/99-System/assertions.jsonl",
+      "detail": "minted as-67e4da7c9c7f49f2 -> /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-ez9cl4je/live/tenant-alpha/vault/99-System/assertions.jsonl",
       "name": "mint assertion (source_of_record, red)",
       "passed": true,
       "tenant": "tenant-alpha"
     },
     {
-      "detail": "minted cr-7ccfdb2878b54217 -> /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-9et66x5i/live/tenant-alpha/vault/99-System/resolutions.jsonl",
+      "detail": "minted cr-40c5620d6944473d -> /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-ez9cl4je/live/tenant-alpha/vault/99-System/resolutions.jsonl",
       "name": "mint resolution (overrides the naive authority winner)",
       "passed": true,
       "tenant": "tenant-alpha"
     },
     {
-      "detail": "held: target=n-a0a4aab85cae4879 id=lh-f05e952aeafb4995 by=governance-bot -> /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-9et66x5i/live/tenant-alpha/vault/99-System/legal_holds.jsonl",
+      "detail": "held: target=n-25e3f4a7b1de4a9f id=lh-561bb5666168429a by=governance-bot -> /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-ez9cl4je/live/tenant-alpha/vault/99-System/legal_holds.jsonl",
       "name": "legal-hold placed",
       "passed": true,
       "tenant": "tenant-alpha"
     },
     {
-      "detail": "merged: n-2e08cec95ee44e74 -> n-464ff86b46c2466a (rule_version=vB1, effective=2026-03-01, event_key=merge:n-2e08cec95ee44e74:n-464ff86b46c2466a:2026-03-01)\nboth entity notes are untouched: entity-b.md, entity-a.md",
+      "detail": "merged: n-db7a37020ec44ec7 -> n-19fd2bf06c444f4b (rule_version=vB1, effective=2026-03-01, event_key=merge:n-db7a37020ec44ec7:n-19fd2bf06c444f4b:2026-03-01)\nboth entity notes are untouched: entity-b.md, entity-a.md",
       "name": "identity merge (entity-b into entity-a)",
       "passed": true,
       "tenant": "tenant-alpha"
     },
     {
-      "detail": "split plan:\n  source: derive-source.md\n  heading: 'Extractable Section'\n  new note: extractable-section.md (id n-46274b8e6c614dc0)\n  inherited frontmatter: status=open, type=reference\n  security label: public (inherited from derive-source.md)\n  source section replaced with: [[extractable-section]]\nwrote extractable-section.md and derive-source.md\nstaged-file check: 2 path(s)\nOK: 2 staged note(s) clean (frontmatter valid, no new broken links)\ngate: OK, 2 touched file(s) clean",
+      "detail": "split plan:\n  source: derive-source.md\n  heading: 'Extractable Section'\n  new note: extractable-section.md (id n-2fe85df5ffb5487d)\n  inherited frontmatter: status=open, type=reference\n  security label: public (inherited from derive-source.md)\n  source section replaced with: [[extractable-section]]\nwrote extractable-section.md and derive-source.md\nstaged-file check: 2 path(s)\nOK: 2 staged note(s) clean (frontmatter valid, no new broken links)\ngate: OK, 2 touched file(s) clean",
       "name": "derived note via compose split",
       "passed": true,
       "tenant": "tenant-alpha"
     },
     {
-      "detail": "forget-plan for /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-9et66x5i/live/tenant-alpha/vault/forget-note.md (stable_id=n-4631eb6466b24f32, index_id=6)\nentity_subject=None\nlegal_hold: none\n  index: 1 object(s) in bm_vault_index.sqlite3:notes (path=/var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-9et66x5i/live/tenant-alpha/vault/forget-note.md)\n  vectors: 0 object(s) in bm_vault_index.sqlite3:vectors (note_id=6)\n  fts: 1 object(s) in bm_vault_index.sqlite3:notes_fts (rowid=6)\n  anchors: 0 object(s) in bm_vault_index.sqlite3:anchors (note_id=6)\n  edges_outbound: 0 object(s) in bm_vault_index.sqlite3:links (note_id=6)\n  supersessions: 0 object(s) in bm_vault_index.sqlite3:supersessions (by_note_id=6)\n  edges_inbound: 0 object(s) in bm_vault_index.sqlite3:links (target=forget-note)\n  citations: 0 object(s) in /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-9et66x5i/live/tenant-alpha/vault/99-System/citations.jsonl (note_id=n-4631eb6466b24f32)\n  assertions: NOT-ENUMERABLE (note is not a declared entity (needs id: n-<16 hex> plus a recognised entity: type); assertions and resolutions key subjects by entity id)\n  resolutions: NOT-ENUMERABLE (note is not a declared entity (needs id: n-<16 hex> plus a recognised entity: type); assertions and resolutions key subjects by entity id)\n  events: 0 object(s) in /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-9et66x5i/live/tenant-alpha/vault/.vault/events.jsonl (ref=n-4631eb6466b24f32)\n  evidence: 0 object(s) in note body (claim: ... [evidence: ...] lines) (0 claim line(s) inside /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-9et66x5i/live/tenant-alpha/vault/forget-note.md)\n  summaries: 0 object(s) in /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-9et66x5i/live/tenant-alpha/vault/40-Failures (stem=forget-note)\n  caches: NOT-ENUMERABLE (query_cache is keyed by (embed model, exact query text) hash, never by note id; there is no per-note key to filter this class on)\n  exports: NOT-ENUMERABLE (export bundles land in a caller-named --out directory with no manifest registry recorded anywhere in the vault; there is no location to check for this note)\nplan written to /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-9et66x5i/live/tenant-alpha/forget-plan.json",
+      "detail": "forget-plan for /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-ez9cl4je/live/tenant-alpha/vault/forget-note.md (stable_id=n-32dec40e26e24c5c, index_id=6)\nentity_subject=None\nlegal_hold: none\n  index: 1 object(s) in bm_vault_index.sqlite3:notes (path=/var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-ez9cl4je/live/tenant-alpha/vault/forget-note.md)\n  vectors: 0 object(s) in bm_vault_index.sqlite3:vectors (note_id=6)\n  fts: 1 object(s) in bm_vault_index.sqlite3:notes_fts (rowid=6)\n  anchors: 0 object(s) in bm_vault_index.sqlite3:anchors (note_id=6)\n  edges_outbound: 0 object(s) in bm_vault_index.sqlite3:links (note_id=6)\n  supersessions: 0 object(s) in bm_vault_index.sqlite3:supersessions (by_note_id=6)\n  edges_inbound: 0 object(s) in bm_vault_index.sqlite3:links (target=forget-note)\n  citations: 0 object(s) in /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-ez9cl4je/live/tenant-alpha/vault/99-System/citations.jsonl (note_id=n-32dec40e26e24c5c)\n  assertions: NOT-ENUMERABLE (note is not a declared entity (needs id: n-<16 hex> plus a recognised entity: type); assertions and resolutions key subjects by entity id)\n  resolutions: NOT-ENUMERABLE (note is not a declared entity (needs id: n-<16 hex> plus a recognised entity: type); assertions and resolutions key subjects by entity id)\n  events: 0 object(s) in /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-ez9cl4je/live/tenant-alpha/vault/.vault/events.jsonl (ref=n-32dec40e26e24c5c)\n  evidence: 0 object(s) in note body (claim: ... [evidence: ...] lines) (0 claim line(s) inside /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-ez9cl4je/live/tenant-alpha/vault/forget-note.md)\n  summaries: 0 object(s) in /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-ez9cl4je/live/tenant-alpha/vault/40-Failures (stem=forget-note)\n  caches: NOT-ENUMERABLE (query_cache is keyed by (embed model, exact query text) hash, never by note id; there is no per-note key to filter this class on)\n  exports: NOT-ENUMERABLE (export bundles land in a caller-named --out directory with no manifest registry recorded anywhere in the vault; there is no location to check for this note)\nplan written to /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-ez9cl4je/live/tenant-alpha/forget-plan.json",
       "name": "forget-plan (unheld note)",
       "passed": true,
       "tenant": "tenant-alpha"
     },
     {
-      "detail": "applied: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-9et66x5i/live/tenant-alpha/vault/forget-note.md forgotten\n  removed 0 row(s) from anchors\n  removed 0 row(s) from edges_outbound\n  removed 1 row(s) from fts\n  removed 1 row(s) from index\n  removed 0 row(s) from supersessions\n  removed 0 row(s) from vectors\n  MANUAL follow-up, never auto-erased: edges_inbound (see the plan for detail)\n  MANUAL follow-up, never auto-erased: citations (see the plan for detail)\n  MANUAL follow-up, never auto-erased: assertions (see the plan for detail)\n  MANUAL follow-up, never auto-erased: resolutions (see the plan for detail)\n  MANUAL follow-up, never auto-erased: events (see the plan for detail)\n  MANUAL follow-up, never auto-erased: summaries (see the plan for detail)\n  MANUAL follow-up, never auto-erased: caches (see the plan for detail)\n  MANUAL follow-up, never auto-erased: exports (see the plan for detail)\nreceipt: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-9et66x5i/live/tenant-alpha/vault/99-System/forget-receipts/fr-e84cbc7003e04955.json content_hash=c7f220c59086d2ffce4a7125736bc328285f551d959995a163f5d5b96a668d66",
+      "detail": "applied: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-ez9cl4je/live/tenant-alpha/vault/forget-note.md forgotten\n  removed 0 row(s) from anchors\n  removed 0 row(s) from edges_outbound\n  removed 1 row(s) from fts\n  removed 1 row(s) from index\n  removed 0 row(s) from supersessions\n  removed 0 row(s) from vectors\n  MANUAL follow-up, never auto-erased: edges_inbound (see the plan for detail)\n  MANUAL follow-up, never auto-erased: citations (see the plan for detail)\n  MANUAL follow-up, never auto-erased: assertions (see the plan for detail)\n  MANUAL follow-up, never auto-erased: resolutions (see the plan for detail)\n  MANUAL follow-up, never auto-erased: events (see the plan for detail)\n  MANUAL follow-up, never auto-erased: summaries (see the plan for detail)\n  MANUAL follow-up, never auto-erased: caches (see the plan for detail)\n  MANUAL follow-up, never auto-erased: exports (see the plan for detail)\nreceipt: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-ez9cl4je/live/tenant-alpha/vault/99-System/forget-receipts/fr-090bebb80d324ba7.json content_hash=48a02379c68e7e6059ee7cbed13003f7147b4aa5c1e57043488520199712cb85",
       "name": "forget-execute (unheld note actually erased)",
       "passed": true,
       "tenant": "tenant-alpha"
     },
     {
-      "detail": "NO-DATA correction-rule store: no store exists at /private/tmp/bh-cut-107/.brothermode/store.sqlite3; run `python3 /private/tmp/bh-cut-107/products/brothermode/tools/bm_store.py init` to create one\nembedded 0 of 8 pending note(s)\nindexed 8 note(s): 1 new, 1 refreshed, 0 gone, 0 touched (content hash unchanged, mtime only)",
+      "detail": "NO-DATA correction-rule store: no store exists at /private/tmp/bh-cut-108/.brothermode/store.sqlite3; run `python3 /private/tmp/bh-cut-108/products/brothermode/tools/bm_store.py init` to create one\nembedded 0 of 8 pending note(s)\nindexed 8 note(s): 1 new, 1 refreshed, 0 gone, 0 touched (content hash unchanged, mtime only)",
       "name": "reindex after derive+forget",
       "passed": true,
       "tenant": "tenant-alpha"
     },
     {
-      "detail": "bm_vault_export: 1 restricted note(s) excluded (default policy; pass --include-restricted to opt in)\nBUNDLED bundle=bundle-3ab7240547b14d2a assertions=8 events=0 encrypted=False restricted_included=False out=/var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-9et66x5i/bundles/tenant-alpha/before",
+      "detail": "bm_vault_export: 1 restricted note(s) excluded (default policy; pass --include-restricted to opt in)\nBUNDLED bundle=bundle-f4376ea2d6be463d assertions=8 events=0 encrypted=False restricted_included=False out=/var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-ez9cl4je/bundles/tenant-alpha/before",
       "name": "bundle before destroy",
       "passed": true,
       "tenant": "tenant-alpha"
     },
     {
-      "detail": "VERIFIED bundle=bundle-3ab7240547b14d2a encrypted=False files=assertions.jsonl,events.jsonl",
+      "detail": "VERIFIED bundle=bundle-f4376ea2d6be463d encrypted=False files=assertions.jsonl,events.jsonl",
       "name": "verify bundle before destroy",
       "passed": true,
       "tenant": "tenant-alpha"
@@ -83,73 +83,73 @@
       "tenant": "tenant-alpha"
     },
     {
-      "detail": "removed /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-9et66x5i/live/tenant-alpha/vault",
+      "detail": "removed /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-ez9cl4je/live/tenant-alpha/vault",
       "name": "working store destroyed",
       "passed": true,
       "tenant": "tenant-alpha"
     },
     {
-      "detail": "/var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-9et66x5i/restored/tenant-alpha/vault",
+      "detail": "/var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-ez9cl4je/restored/tenant-alpha/vault",
       "name": "restored into a fresh location",
       "passed": true,
       "tenant": "tenant-alpha"
     },
     {
-      "detail": "NO-DATA correction-rule store: no store exists at /private/tmp/bh-cut-107/.brothermode/store.sqlite3; run `python3 /private/tmp/bh-cut-107/products/brothermode/tools/bm_store.py init` to create one\nembedded 0 of 8 pending note(s)\nindexed 8 note(s): 8 new, 0 refreshed, 0 gone, 0 touched (content hash unchanged, mtime only)",
+      "detail": "NO-DATA correction-rule store: no store exists at /private/tmp/bh-cut-108/.brothermode/store.sqlite3; run `python3 /private/tmp/bh-cut-108/products/brothermode/tools/bm_store.py init` to create one\nembedded 0 of 8 pending note(s)\nindexed 8 note(s): 8 new, 0 refreshed, 0 gone, 0 touched (content hash unchanged, mtime only)",
       "name": "reindex the restored copy from scratch",
       "passed": true,
       "tenant": "tenant-alpha"
     },
     {
-      "detail": "before={'present': True, 'rows': 2, 'sha256': 'bf7d891df430b52d8c2ad923399815a7019987225b86b1ff9bf89af72f55d0c9'} after={'present': True, 'rows': 2, 'sha256': 'bf7d891df430b52d8c2ad923399815a7019987225b86b1ff9bf89af72f55d0c9'}",
+      "detail": "before={'present': True, 'rows': 2, 'sha256': '0676daec05842ee322e0689a6356dc260d777b02988481d2baf3f510c9b90f51'} after={'present': True, 'rows': 2, 'sha256': '0676daec05842ee322e0689a6356dc260d777b02988481d2baf3f510c9b90f51'}",
       "name": "store assertions_jsonl: rows and hash preserved (before=2, after=2)",
       "passed": true,
       "tenant": "tenant-alpha"
     },
     {
-      "detail": "before={'present': True, 'rows': 1, 'sha256': '386fb0eac985ebc5cec8e6ed7debf4c25d100aa96ef611310c1d84ba4be34885'} after={'present': True, 'rows': 1, 'sha256': '386fb0eac985ebc5cec8e6ed7debf4c25d100aa96ef611310c1d84ba4be34885'}",
+      "detail": "before={'present': True, 'rows': 1, 'sha256': '715eaab8cc4a19fbdc46a9a122a572669821afce9a0c8b5a288bff205082ccb3'} after={'present': True, 'rows': 1, 'sha256': '715eaab8cc4a19fbdc46a9a122a572669821afce9a0c8b5a288bff205082ccb3'}",
       "name": "store resolutions_jsonl: rows and hash preserved (before=1, after=1)",
       "passed": true,
       "tenant": "tenant-alpha"
     },
     {
-      "detail": "before={'present': True, 'rows': 1, 'sha256': 'd0906adaa64af41cb62713b380cb1b51ebe5aeb48ec2c1ea57e9b78f9e68e65c'} after={'present': True, 'rows': 1, 'sha256': 'd0906adaa64af41cb62713b380cb1b51ebe5aeb48ec2c1ea57e9b78f9e68e65c'}",
+      "detail": "before={'present': True, 'rows': 1, 'sha256': 'ff95c5f1f7b2ce6ba14300da05c1eaa1d0a1a1dcd421fc1d6a1cba0bf9130d64'} after={'present': True, 'rows': 1, 'sha256': 'ff95c5f1f7b2ce6ba14300da05c1eaa1d0a1a1dcd421fc1d6a1cba0bf9130d64'}",
       "name": "store legal_holds_jsonl: rows and hash preserved (before=1, after=1)",
       "passed": true,
       "tenant": "tenant-alpha"
     },
     {
-      "detail": "before={'present': True, 'rows': 1, 'sha256': 'b3b157512ef2b81f135a57bb9b5e0f23aa83fc8ec584cf2b9957c5ecfb502638'} after={'present': True, 'rows': 1, 'sha256': 'b3b157512ef2b81f135a57bb9b5e0f23aa83fc8ec584cf2b9957c5ecfb502638'}",
+      "detail": "before={'present': True, 'rows': 1, 'sha256': '88b41467fbfc49f3c4711d09202063ccc0f90f59704b0c73b520af8e9f9ed221'} after={'present': True, 'rows': 1, 'sha256': '88b41467fbfc49f3c4711d09202063ccc0f90f59704b0c73b520af8e9f9ed221'}",
       "name": "store identity_events_jsonl: rows and hash preserved (before=1, after=1)",
       "passed": true,
       "tenant": "tenant-alpha"
     },
     {
-      "detail": "before={'present': True, 'rows': 1, 'sha256': '1b6947da73304fc966bf94f03280b806b81325d91458274fb9d631580f6391ac'} after={'present': True, 'rows': 1, 'sha256': '1b6947da73304fc966bf94f03280b806b81325d91458274fb9d631580f6391ac'}",
+      "detail": "before={'present': True, 'rows': 1, 'sha256': 'a818e63e119aef7fcd177f5e3c27a578ab735b952f7b74a59dbf6973fe3389e9'} after={'present': True, 'rows': 1, 'sha256': 'a818e63e119aef7fcd177f5e3c27a578ab735b952f7b74a59dbf6973fe3389e9'}",
       "name": "store forget_receipts: rows and hash preserved (before=1, after=1)",
       "passed": true,
       "tenant": "tenant-alpha"
     },
     {
-      "detail": "before={'present': True, 'rows': 8, 'sha256': '7fd2aed80ef5bb3e94f87f4c7d4b96a514c3f94cfd8e004d05f51faf00059b4c'} after={'present': True, 'rows': 8, 'sha256': '7fd2aed80ef5bb3e94f87f4c7d4b96a514c3f94cfd8e004d05f51faf00059b4c'}",
+      "detail": "before={'present': True, 'rows': 8, 'sha256': '7d6a6a23244aac80690c4220125248cf094d1ee51e9d73b7fd7c4c0995ac3a7b'} after={'present': True, 'rows': 8, 'sha256': '7d6a6a23244aac80690c4220125248cf094d1ee51e9d73b7fd7c4c0995ac3a7b'}",
       "name": "store notes_tree: rows and hash preserved (before=8, after=8)",
       "passed": true,
       "tenant": "tenant-alpha"
     },
     {
-      "detail": "bm_vault_export: 1 restricted note(s) excluded (default policy; pass --include-restricted to opt in)\nBUNDLED bundle=bundle-a6f5468d13964d2a assertions=8 events=0 encrypted=False restricted_included=False out=/var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-9et66x5i/bundles/tenant-alpha/after",
+      "detail": "bm_vault_export: 1 restricted note(s) excluded (default policy; pass --include-restricted to opt in)\nBUNDLED bundle=bundle-077bd1af65124994 assertions=8 events=0 encrypted=False restricted_included=False out=/var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-ez9cl4je/bundles/tenant-alpha/after",
       "name": "bundle after restore",
       "passed": true,
       "tenant": "tenant-alpha"
     },
     {
-      "detail": "VERIFIED bundle=bundle-a6f5468d13964d2a encrypted=False files=assertions.jsonl,events.jsonl",
+      "detail": "VERIFIED bundle=bundle-077bd1af65124994 encrypted=False files=assertions.jsonl,events.jsonl",
       "name": "verify bundle after restore",
       "passed": true,
       "tenant": "tenant-alpha"
     },
     {
-      "detail": "before={'assertions.jsonl': '8dc7d1f9c29d96edca2275ed217824897dcd4db004ec1eba98073693eed2183b', 'events.jsonl': 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'} after={'assertions.jsonl': '8dc7d1f9c29d96edca2275ed217824897dcd4db004ec1eba98073693eed2183b', 'events.jsonl': 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'}",
+      "detail": "before={'assertions.jsonl': '55aae98b267fee3d4246f0b3364f0a7ffe3cedb5b734e3f7723dc5e3d76d1bc3', 'events.jsonl': 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'} after={'assertions.jsonl': '55aae98b267fee3d4246f0b3364f0a7ffe3cedb5b734e3f7723dc5e3d76d1bc3', 'events.jsonl': 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'}",
       "name": "bundle table hashes identical before/after (assertions.jsonl, events.jsonl)",
       "passed": true,
       "tenant": "tenant-alpha"
@@ -167,25 +167,25 @@
       "tenant": "tenant-alpha"
     },
     {
-      "detail": "before=\"subject=n-464ff86b46c2466a predicate=status scope=global as_of=2026-01-01\\nWINNER value='red' authority=source_of_record id=as-7ed26d41b718473f via the authority comparator\\nCONFLICT (2 distinct value(s)), exposed rather than hidden behind the winner:\\n  value='green' authority=casual id=as-ee4ca8b865404532 lifecycle=candidate\\n  value='red' authority=source_of_record id=as-7ed26d41b718473f lifecycle=validated\\n\" after=\"subject=n-464ff86b46c2466a predicate=status scope=global as_of=2026-01-01\\nWINNER value='red' authority=source_of_record id=as-7ed26d41b718473f via the authority comparator\\nCONFLICT (2 distinct value(s)), exposed rather than hidden behind the winner:\\n  value='green' authority=casual id=as-ee4ca8b865404532 lifecycle=candidate\\n  value='red' authority=source_of_record id=as-7ed26d41b718473f lifecycle=validated\\n\"",
+      "detail": "before=\"subject=n-19fd2bf06c444f4b predicate=status scope=global as_of=2026-01-01\\nWINNER value='red' authority=source_of_record id=as-67e4da7c9c7f49f2 via the authority comparator\\nCONFLICT (2 distinct value(s)), exposed rather than hidden behind the winner:\\n  value='green' authority=casual id=as-369542aba7514310 lifecycle=candidate\\n  value='red' authority=source_of_record id=as-67e4da7c9c7f49f2 lifecycle=validated\\n\" after=\"subject=n-19fd2bf06c444f4b predicate=status scope=global as_of=2026-01-01\\nWINNER value='red' authority=source_of_record id=as-67e4da7c9c7f49f2 via the authority comparator\\nCONFLICT (2 distinct value(s)), exposed rather than hidden behind the winner:\\n  value='green' authority=casual id=as-369542aba7514310 lifecycle=candidate\\n  value='red' authority=source_of_record id=as-67e4da7c9c7f49f2 lifecycle=validated\\n\"",
       "name": "behavior truth_before_resolution_valid_from identical before/after",
       "passed": true,
       "tenant": "tenant-alpha"
     },
     {
-      "detail": "before=\"subject=n-464ff86b46c2466a predicate=status scope=global as_of=2026-07-01\\nWINNER value='green' authority=casual id=as-ee4ca8b865404532 via resolution cr-7ccfdb2878b54217 (scope=global, approved by khalil)\\nCONFLICT (2 distinct value(s)), exposed rather than hidden behind the winner:\\n  value='green' authority=casual id=as-ee4ca8b865404532 lifecycle=candidate\\n  value='red' authority=source_of_record id=as-7ed26d41b718473f lifecycle=validated\\n\" after=\"subject=n-464ff86b46c2466a predicate=status scope=global as_of=2026-07-01\\nWINNER value='green' authority=casual id=as-ee4ca8b865404532 via resolution cr-7ccfdb2878b54217 (scope=global, approved by khalil)\\nCONFLICT (2 distinct value(s)), exposed rather than hidden behind the winner:\\n  value='green' authority=casual id=as-ee4ca8b865404532 lifecycle=candidate\\n  value='red' authority=source_of_record id=as-7ed26d41b718473f lifecycle=validated\\n\"",
+      "detail": "before=\"subject=n-19fd2bf06c444f4b predicate=status scope=global as_of=2026-07-01\\nWINNER value='green' authority=casual id=as-369542aba7514310 via resolution cr-40c5620d6944473d (scope=global, approved by khalil)\\nCONFLICT (2 distinct value(s)), exposed rather than hidden behind the winner:\\n  value='green' authority=casual id=as-369542aba7514310 lifecycle=candidate\\n  value='red' authority=source_of_record id=as-67e4da7c9c7f49f2 lifecycle=validated\\n\" after=\"subject=n-19fd2bf06c444f4b predicate=status scope=global as_of=2026-07-01\\nWINNER value='green' authority=casual id=as-369542aba7514310 via resolution cr-40c5620d6944473d (scope=global, approved by khalil)\\nCONFLICT (2 distinct value(s)), exposed rather than hidden behind the winner:\\n  value='green' authority=casual id=as-369542aba7514310 lifecycle=candidate\\n  value='red' authority=source_of_record id=as-67e4da7c9c7f49f2 lifecycle=validated\\n\"",
       "name": "behavior truth_after_resolution_valid_from identical before/after",
       "passed": true,
       "tenant": "tenant-alpha"
     },
     {
-      "detail": "before='n-2e08cec95ee44e74  entity=n-2e08cec95ee44e74 (no merge applies) as of 2026-01-01\\n' after='n-2e08cec95ee44e74  entity=n-2e08cec95ee44e74 (no merge applies) as of 2026-01-01\\n'",
+      "detail": "before='n-db7a37020ec44ec7  entity=n-db7a37020ec44ec7 (no merge applies) as of 2026-01-01\\n' after='n-db7a37020ec44ec7  entity=n-db7a37020ec44ec7 (no merge applies) as of 2026-01-01\\n'",
       "name": "behavior resolve_before_merge_effective identical before/after",
       "passed": true,
       "tenant": "tenant-alpha"
     },
     {
-      "detail": "before='n-2e08cec95ee44e74  survivor=n-464ff86b46c2466a  via n-2e08cec95ee44e74->n-464ff86b46c2466a@2026-03-01 as of 2026-12-01\\n' after='n-2e08cec95ee44e74  survivor=n-464ff86b46c2466a  via n-2e08cec95ee44e74->n-464ff86b46c2466a@2026-03-01 as of 2026-12-01\\n'",
+      "detail": "before='n-db7a37020ec44ec7  survivor=n-19fd2bf06c444f4b  via n-db7a37020ec44ec7->n-19fd2bf06c444f4b@2026-03-01 as of 2026-12-01\\n' after='n-db7a37020ec44ec7  survivor=n-19fd2bf06c444f4b  via n-db7a37020ec44ec7->n-19fd2bf06c444f4b@2026-03-01 as of 2026-12-01\\n'",
       "name": "behavior resolve_after_merge_effective identical before/after",
       "passed": true,
       "tenant": "tenant-alpha"
@@ -221,13 +221,13 @@
       "tenant": "tenant-alpha"
     },
     {
-      "detail": "record_id=lh-f05e952aeafb4995",
+      "detail": "record_id=lh-561bb5666168429a",
       "name": "legal hold still active after restore",
       "passed": true,
       "tenant": "tenant-alpha"
     },
     {
-      "detail": "REFUSED: legal hold lh-f05e952aeafb4995 blocks execution (target=n-a0a4aab85cae4879 by=governance-bot at=2026-09-05 reason=litigation hold, drill fixture). Nothing was touched. Release it first with legal-hold --release.\n",
+      "detail": "REFUSED: legal hold lh-561bb5666168429a blocks execution (target=n-25e3f4a7b1de4a9f by=governance-bot at=2026-09-05 reason=litigation hold, drill fixture). Nothing was touched. Release it first with legal-hold --release.\n",
       "name": "forget-execute still refuses the held note after restore",
       "passed": true,
       "tenant": "tenant-alpha"
@@ -257,73 +257,73 @@
       "tenant": "tenant-alpha"
     },
     {
-      "detail": "NO-DATA correction-rule store: no store exists at /private/tmp/bh-cut-107/.brothermode/store.sqlite3; run `python3 /private/tmp/bh-cut-107/products/brothermode/tools/bm_store.py init` to create one\nembedded 0 of 8 pending note(s)\nindexed 8 note(s): 8 new, 0 refreshed, 0 gone, 0 touched (content hash unchanged, mtime only)",
+      "detail": "NO-DATA correction-rule store: no store exists at /private/tmp/bh-cut-108/.brothermode/store.sqlite3; run `python3 /private/tmp/bh-cut-108/products/brothermode/tools/bm_store.py init` to create one\nembedded 0 of 8 pending note(s)\nindexed 8 note(s): 8 new, 0 refreshed, 0 gone, 0 touched (content hash unchanged, mtime only)",
       "name": "index",
       "passed": true,
       "tenant": "tenant-beta"
     },
     {
-      "detail": "minted as-37bf0fd5c78f4626 -> /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-9et66x5i/live/tenant-beta/vault/99-System/assertions.jsonl",
+      "detail": "minted as-64483745d826495b -> /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-ez9cl4je/live/tenant-beta/vault/99-System/assertions.jsonl",
       "name": "mint assertion (casual, green)",
       "passed": true,
       "tenant": "tenant-beta"
     },
     {
-      "detail": "minted as-427de27a2a01433a -> /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-9et66x5i/live/tenant-beta/vault/99-System/assertions.jsonl",
+      "detail": "minted as-c911207db8ee4429 -> /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-ez9cl4je/live/tenant-beta/vault/99-System/assertions.jsonl",
       "name": "mint assertion (source_of_record, red)",
       "passed": true,
       "tenant": "tenant-beta"
     },
     {
-      "detail": "minted cr-a9b4d7d494c94a61 -> /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-9et66x5i/live/tenant-beta/vault/99-System/resolutions.jsonl",
+      "detail": "minted cr-30b04565c01a481f -> /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-ez9cl4je/live/tenant-beta/vault/99-System/resolutions.jsonl",
       "name": "mint resolution (overrides the naive authority winner)",
       "passed": true,
       "tenant": "tenant-beta"
     },
     {
-      "detail": "held: target=n-1662fc5a47214af7 id=lh-1c7a261c0dec41ee by=governance-bot -> /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-9et66x5i/live/tenant-beta/vault/99-System/legal_holds.jsonl",
+      "detail": "held: target=n-d99b1ddcbc614ffa id=lh-76bd4d72390141b1 by=governance-bot -> /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-ez9cl4je/live/tenant-beta/vault/99-System/legal_holds.jsonl",
       "name": "legal-hold placed",
       "passed": true,
       "tenant": "tenant-beta"
     },
     {
-      "detail": "merged: n-207fb510a0564879 -> n-a9e4ac60cb804b2a (rule_version=vB1, effective=2026-03-01, event_key=merge:n-207fb510a0564879:n-a9e4ac60cb804b2a:2026-03-01)\nboth entity notes are untouched: entity-b.md, entity-a.md",
+      "detail": "merged: n-8374c5e3d34b4c56 -> n-1b352f78597c40d3 (rule_version=vB1, effective=2026-03-01, event_key=merge:n-8374c5e3d34b4c56:n-1b352f78597c40d3:2026-03-01)\nboth entity notes are untouched: entity-b.md, entity-a.md",
       "name": "identity merge (entity-b into entity-a)",
       "passed": true,
       "tenant": "tenant-beta"
     },
     {
-      "detail": "split plan:\n  source: derive-source.md\n  heading: 'Extractable Section'\n  new note: extractable-section.md (id n-05a7b24dda944f99)\n  inherited frontmatter: status=open, type=reference\n  security label: public (inherited from derive-source.md)\n  source section replaced with: [[extractable-section]]\nwrote extractable-section.md and derive-source.md\nstaged-file check: 2 path(s)\nOK: 2 staged note(s) clean (frontmatter valid, no new broken links)\ngate: OK, 2 touched file(s) clean",
+      "detail": "split plan:\n  source: derive-source.md\n  heading: 'Extractable Section'\n  new note: extractable-section.md (id n-da958e56443d45f5)\n  inherited frontmatter: status=open, type=reference\n  security label: public (inherited from derive-source.md)\n  source section replaced with: [[extractable-section]]\nwrote extractable-section.md and derive-source.md\nstaged-file check: 2 path(s)\nOK: 2 staged note(s) clean (frontmatter valid, no new broken links)\ngate: OK, 2 touched file(s) clean",
       "name": "derived note via compose split",
       "passed": true,
       "tenant": "tenant-beta"
     },
     {
-      "detail": "forget-plan for /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-9et66x5i/live/tenant-beta/vault/forget-note.md (stable_id=n-8dd5a28577db41ef, index_id=6)\nentity_subject=None\nlegal_hold: none\n  index: 1 object(s) in bm_vault_index.sqlite3:notes (path=/var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-9et66x5i/live/tenant-beta/vault/forget-note.md)\n  vectors: 0 object(s) in bm_vault_index.sqlite3:vectors (note_id=6)\n  fts: 1 object(s) in bm_vault_index.sqlite3:notes_fts (rowid=6)\n  anchors: 0 object(s) in bm_vault_index.sqlite3:anchors (note_id=6)\n  edges_outbound: 0 object(s) in bm_vault_index.sqlite3:links (note_id=6)\n  supersessions: 0 object(s) in bm_vault_index.sqlite3:supersessions (by_note_id=6)\n  edges_inbound: 0 object(s) in bm_vault_index.sqlite3:links (target=forget-note)\n  citations: 0 object(s) in /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-9et66x5i/live/tenant-beta/vault/99-System/citations.jsonl (note_id=n-8dd5a28577db41ef)\n  assertions: NOT-ENUMERABLE (note is not a declared entity (needs id: n-<16 hex> plus a recognised entity: type); assertions and resolutions key subjects by entity id)\n  resolutions: NOT-ENUMERABLE (note is not a declared entity (needs id: n-<16 hex> plus a recognised entity: type); assertions and resolutions key subjects by entity id)\n  events: 0 object(s) in /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-9et66x5i/live/tenant-beta/vault/.vault/events.jsonl (ref=n-8dd5a28577db41ef)\n  evidence: 0 object(s) in note body (claim: ... [evidence: ...] lines) (0 claim line(s) inside /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-9et66x5i/live/tenant-beta/vault/forget-note.md)\n  summaries: 0 object(s) in /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-9et66x5i/live/tenant-beta/vault/40-Failures (stem=forget-note)\n  caches: NOT-ENUMERABLE (query_cache is keyed by (embed model, exact query text) hash, never by note id; there is no per-note key to filter this class on)\n  exports: NOT-ENUMERABLE (export bundles land in a caller-named --out directory with no manifest registry recorded anywhere in the vault; there is no location to check for this note)\nplan written to /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-9et66x5i/live/tenant-beta/forget-plan.json",
+      "detail": "forget-plan for /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-ez9cl4je/live/tenant-beta/vault/forget-note.md (stable_id=n-de0b7b6d56ec461b, index_id=6)\nentity_subject=None\nlegal_hold: none\n  index: 1 object(s) in bm_vault_index.sqlite3:notes (path=/var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-ez9cl4je/live/tenant-beta/vault/forget-note.md)\n  vectors: 0 object(s) in bm_vault_index.sqlite3:vectors (note_id=6)\n  fts: 1 object(s) in bm_vault_index.sqlite3:notes_fts (rowid=6)\n  anchors: 0 object(s) in bm_vault_index.sqlite3:anchors (note_id=6)\n  edges_outbound: 0 object(s) in bm_vault_index.sqlite3:links (note_id=6)\n  supersessions: 0 object(s) in bm_vault_index.sqlite3:supersessions (by_note_id=6)\n  edges_inbound: 0 object(s) in bm_vault_index.sqlite3:links (target=forget-note)\n  citations: 0 object(s) in /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-ez9cl4je/live/tenant-beta/vault/99-System/citations.jsonl (note_id=n-de0b7b6d56ec461b)\n  assertions: NOT-ENUMERABLE (note is not a declared entity (needs id: n-<16 hex> plus a recognised entity: type); assertions and resolutions key subjects by entity id)\n  resolutions: NOT-ENUMERABLE (note is not a declared entity (needs id: n-<16 hex> plus a recognised entity: type); assertions and resolutions key subjects by entity id)\n  events: 0 object(s) in /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-ez9cl4je/live/tenant-beta/vault/.vault/events.jsonl (ref=n-de0b7b6d56ec461b)\n  evidence: 0 object(s) in note body (claim: ... [evidence: ...] lines) (0 claim line(s) inside /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-ez9cl4je/live/tenant-beta/vault/forget-note.md)\n  summaries: 0 object(s) in /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-ez9cl4je/live/tenant-beta/vault/40-Failures (stem=forget-note)\n  caches: NOT-ENUMERABLE (query_cache is keyed by (embed model, exact query text) hash, never by note id; there is no per-note key to filter this class on)\n  exports: NOT-ENUMERABLE (export bundles land in a caller-named --out directory with no manifest registry recorded anywhere in the vault; there is no location to check for this note)\nplan written to /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-ez9cl4je/live/tenant-beta/forget-plan.json",
       "name": "forget-plan (unheld note)",
       "passed": true,
       "tenant": "tenant-beta"
     },
     {
-      "detail": "applied: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-9et66x5i/live/tenant-beta/vault/forget-note.md forgotten\n  removed 0 row(s) from anchors\n  removed 0 row(s) from edges_outbound\n  removed 1 row(s) from fts\n  removed 1 row(s) from index\n  removed 0 row(s) from supersessions\n  removed 0 row(s) from vectors\n  MANUAL follow-up, never auto-erased: edges_inbound (see the plan for detail)\n  MANUAL follow-up, never auto-erased: citations (see the plan for detail)\n  MANUAL follow-up, never auto-erased: assertions (see the plan for detail)\n  MANUAL follow-up, never auto-erased: resolutions (see the plan for detail)\n  MANUAL follow-up, never auto-erased: events (see the plan for detail)\n  MANUAL follow-up, never auto-erased: summaries (see the plan for detail)\n  MANUAL follow-up, never auto-erased: caches (see the plan for detail)\n  MANUAL follow-up, never auto-erased: exports (see the plan for detail)\nreceipt: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-9et66x5i/live/tenant-beta/vault/99-System/forget-receipts/fr-9552d8d2253e41a8.json content_hash=292e007a30128c860e714cf4e28e0c959befb666089096ea8a5600639530ade1",
+      "detail": "applied: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-ez9cl4je/live/tenant-beta/vault/forget-note.md forgotten\n  removed 0 row(s) from anchors\n  removed 0 row(s) from edges_outbound\n  removed 1 row(s) from fts\n  removed 1 row(s) from index\n  removed 0 row(s) from supersessions\n  removed 0 row(s) from vectors\n  MANUAL follow-up, never auto-erased: edges_inbound (see the plan for detail)\n  MANUAL follow-up, never auto-erased: citations (see the plan for detail)\n  MANUAL follow-up, never auto-erased: assertions (see the plan for detail)\n  MANUAL follow-up, never auto-erased: resolutions (see the plan for detail)\n  MANUAL follow-up, never auto-erased: events (see the plan for detail)\n  MANUAL follow-up, never auto-erased: summaries (see the plan for detail)\n  MANUAL follow-up, never auto-erased: caches (see the plan for detail)\n  MANUAL follow-up, never auto-erased: exports (see the plan for detail)\nreceipt: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-ez9cl4je/live/tenant-beta/vault/99-System/forget-receipts/fr-ddf6ea9cbaf64f3b.json content_hash=f31e7081b658323c4d224d488a36d26750040482f2d77d329eaf03bdd5f6289b",
       "name": "forget-execute (unheld note actually erased)",
       "passed": true,
       "tenant": "tenant-beta"
     },
     {
-      "detail": "NO-DATA correction-rule store: no store exists at /private/tmp/bh-cut-107/.brothermode/store.sqlite3; run `python3 /private/tmp/bh-cut-107/products/brothermode/tools/bm_store.py init` to create one\nembedded 0 of 8 pending note(s)\nindexed 8 note(s): 1 new, 1 refreshed, 0 gone, 0 touched (content hash unchanged, mtime only)",
+      "detail": "NO-DATA correction-rule store: no store exists at /private/tmp/bh-cut-108/.brothermode/store.sqlite3; run `python3 /private/tmp/bh-cut-108/products/brothermode/tools/bm_store.py init` to create one\nembedded 0 of 8 pending note(s)\nindexed 8 note(s): 1 new, 1 refreshed, 0 gone, 0 touched (content hash unchanged, mtime only)",
       "name": "reindex after derive+forget",
       "passed": true,
       "tenant": "tenant-beta"
     },
     {
-      "detail": "bm_vault_export: 1 restricted note(s) excluded (default policy; pass --include-restricted to opt in)\nBUNDLED bundle=bundle-b707e454e8d44cc5 assertions=8 events=0 encrypted=False restricted_included=False out=/var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-9et66x5i/bundles/tenant-beta/before",
+      "detail": "bm_vault_export: 1 restricted note(s) excluded (default policy; pass --include-restricted to opt in)\nBUNDLED bundle=bundle-8a3051df742a4246 assertions=8 events=0 encrypted=False restricted_included=False out=/var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-ez9cl4je/bundles/tenant-beta/before",
       "name": "bundle before destroy",
       "passed": true,
       "tenant": "tenant-beta"
     },
     {
-      "detail": "VERIFIED bundle=bundle-b707e454e8d44cc5 encrypted=False files=assertions.jsonl,events.jsonl",
+      "detail": "VERIFIED bundle=bundle-8a3051df742a4246 encrypted=False files=assertions.jsonl,events.jsonl",
       "name": "verify bundle before destroy",
       "passed": true,
       "tenant": "tenant-beta"
@@ -335,73 +335,73 @@
       "tenant": "tenant-beta"
     },
     {
-      "detail": "removed /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-9et66x5i/live/tenant-beta/vault",
+      "detail": "removed /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-ez9cl4je/live/tenant-beta/vault",
       "name": "working store destroyed",
       "passed": true,
       "tenant": "tenant-beta"
     },
     {
-      "detail": "/var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-9et66x5i/restored/tenant-beta/vault",
+      "detail": "/var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-ez9cl4je/restored/tenant-beta/vault",
       "name": "restored into a fresh location",
       "passed": true,
       "tenant": "tenant-beta"
     },
     {
-      "detail": "NO-DATA correction-rule store: no store exists at /private/tmp/bh-cut-107/.brothermode/store.sqlite3; run `python3 /private/tmp/bh-cut-107/products/brothermode/tools/bm_store.py init` to create one\nembedded 0 of 8 pending note(s)\nindexed 8 note(s): 8 new, 0 refreshed, 0 gone, 0 touched (content hash unchanged, mtime only)",
+      "detail": "NO-DATA correction-rule store: no store exists at /private/tmp/bh-cut-108/.brothermode/store.sqlite3; run `python3 /private/tmp/bh-cut-108/products/brothermode/tools/bm_store.py init` to create one\nembedded 0 of 8 pending note(s)\nindexed 8 note(s): 8 new, 0 refreshed, 0 gone, 0 touched (content hash unchanged, mtime only)",
       "name": "reindex the restored copy from scratch",
       "passed": true,
       "tenant": "tenant-beta"
     },
     {
-      "detail": "before={'present': True, 'rows': 2, 'sha256': '7d28f78b1c50402f184bd5c40f9268165624575342ff326ca78322e1d5bb961f'} after={'present': True, 'rows': 2, 'sha256': '7d28f78b1c50402f184bd5c40f9268165624575342ff326ca78322e1d5bb961f'}",
+      "detail": "before={'present': True, 'rows': 2, 'sha256': 'd8790f7e5e8be605ea9205c48a5126cd4e31e8fb1eeea8728fce6e386be13396'} after={'present': True, 'rows': 2, 'sha256': 'd8790f7e5e8be605ea9205c48a5126cd4e31e8fb1eeea8728fce6e386be13396'}",
       "name": "store assertions_jsonl: rows and hash preserved (before=2, after=2)",
       "passed": true,
       "tenant": "tenant-beta"
     },
     {
-      "detail": "before={'present': True, 'rows': 1, 'sha256': '84f92a5680cee1f7b9718573dc4ce6012433c324af3d8dbdc77824f97fe4ddff'} after={'present': True, 'rows': 1, 'sha256': '84f92a5680cee1f7b9718573dc4ce6012433c324af3d8dbdc77824f97fe4ddff'}",
+      "detail": "before={'present': True, 'rows': 1, 'sha256': '72a3e6b7037679e54ede9b30f3c1a3aa206898893d87682c9a3e36f6bd5a8ab9'} after={'present': True, 'rows': 1, 'sha256': '72a3e6b7037679e54ede9b30f3c1a3aa206898893d87682c9a3e36f6bd5a8ab9'}",
       "name": "store resolutions_jsonl: rows and hash preserved (before=1, after=1)",
       "passed": true,
       "tenant": "tenant-beta"
     },
     {
-      "detail": "before={'present': True, 'rows': 1, 'sha256': '792b111e0b3a0662559f68a0a9b6e6d83c0707a764819d2676e3fd6a75239960'} after={'present': True, 'rows': 1, 'sha256': '792b111e0b3a0662559f68a0a9b6e6d83c0707a764819d2676e3fd6a75239960'}",
+      "detail": "before={'present': True, 'rows': 1, 'sha256': '975350ad2ca79fe70f056a211f937ab9e0cba41b7a66059996ab0e4c5eff7074'} after={'present': True, 'rows': 1, 'sha256': '975350ad2ca79fe70f056a211f937ab9e0cba41b7a66059996ab0e4c5eff7074'}",
       "name": "store legal_holds_jsonl: rows and hash preserved (before=1, after=1)",
       "passed": true,
       "tenant": "tenant-beta"
     },
     {
-      "detail": "before={'present': True, 'rows': 1, 'sha256': 'd2f1b6c0f6649c3570f8948e8dd856d7ab743c3e0c7381947d031335ed06afcc'} after={'present': True, 'rows': 1, 'sha256': 'd2f1b6c0f6649c3570f8948e8dd856d7ab743c3e0c7381947d031335ed06afcc'}",
+      "detail": "before={'present': True, 'rows': 1, 'sha256': 'ba5765c5ae07c4bbbaa82ec9550ff76e6aeedfd335625ec3a856197d31873745'} after={'present': True, 'rows': 1, 'sha256': 'ba5765c5ae07c4bbbaa82ec9550ff76e6aeedfd335625ec3a856197d31873745'}",
       "name": "store identity_events_jsonl: rows and hash preserved (before=1, after=1)",
       "passed": true,
       "tenant": "tenant-beta"
     },
     {
-      "detail": "before={'present': True, 'rows': 1, 'sha256': '62108a9b040cc88d07cf3ba44758d75f7f5969bb513012aec547d8fa0d8ef64c'} after={'present': True, 'rows': 1, 'sha256': '62108a9b040cc88d07cf3ba44758d75f7f5969bb513012aec547d8fa0d8ef64c'}",
+      "detail": "before={'present': True, 'rows': 1, 'sha256': '54169bcf70e5157048439e0ec413e680d0bd39417a7006bd310f3f7f049bcaca'} after={'present': True, 'rows': 1, 'sha256': '54169bcf70e5157048439e0ec413e680d0bd39417a7006bd310f3f7f049bcaca'}",
       "name": "store forget_receipts: rows and hash preserved (before=1, after=1)",
       "passed": true,
       "tenant": "tenant-beta"
     },
     {
-      "detail": "before={'present': True, 'rows': 8, 'sha256': 'bc07c713d79fdbef03cc7c362a763b9a78a5b0efb8dbf64d01bf62b969d23ffe'} after={'present': True, 'rows': 8, 'sha256': 'bc07c713d79fdbef03cc7c362a763b9a78a5b0efb8dbf64d01bf62b969d23ffe'}",
+      "detail": "before={'present': True, 'rows': 8, 'sha256': 'fffe2baa90e9cd6a0418ddf4543ed38219613d5b1f840a26da223700fcb0d2ae'} after={'present': True, 'rows': 8, 'sha256': 'fffe2baa90e9cd6a0418ddf4543ed38219613d5b1f840a26da223700fcb0d2ae'}",
       "name": "store notes_tree: rows and hash preserved (before=8, after=8)",
       "passed": true,
       "tenant": "tenant-beta"
     },
     {
-      "detail": "bm_vault_export: 1 restricted note(s) excluded (default policy; pass --include-restricted to opt in)\nBUNDLED bundle=bundle-8389bdf88aa44dd5 assertions=8 events=0 encrypted=False restricted_included=False out=/var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-9et66x5i/bundles/tenant-beta/after",
+      "detail": "bm_vault_export: 1 restricted note(s) excluded (default policy; pass --include-restricted to opt in)\nBUNDLED bundle=bundle-f72c0d4412324c37 assertions=8 events=0 encrypted=False restricted_included=False out=/var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/restore-drill-ent-ez9cl4je/bundles/tenant-beta/after",
       "name": "bundle after restore",
       "passed": true,
       "tenant": "tenant-beta"
     },
     {
-      "detail": "VERIFIED bundle=bundle-8389bdf88aa44dd5 encrypted=False files=assertions.jsonl,events.jsonl",
+      "detail": "VERIFIED bundle=bundle-f72c0d4412324c37 encrypted=False files=assertions.jsonl,events.jsonl",
       "name": "verify bundle after restore",
       "passed": true,
       "tenant": "tenant-beta"
     },
     {
-      "detail": "before={'assertions.jsonl': '38a8a15c1216f9480a85b78d32800b385eb27759ad8e5abaf8b535478c7bff6b', 'events.jsonl': 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'} after={'assertions.jsonl': '38a8a15c1216f9480a85b78d32800b385eb27759ad8e5abaf8b535478c7bff6b', 'events.jsonl': 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'}",
+      "detail": "before={'assertions.jsonl': '67cb5e68a08316ebfde52d8552921071d8c86f65ba627d2420ddc0bc55e427c8', 'events.jsonl': 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'} after={'assertions.jsonl': '67cb5e68a08316ebfde52d8552921071d8c86f65ba627d2420ddc0bc55e427c8', 'events.jsonl': 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'}",
       "name": "bundle table hashes identical before/after (assertions.jsonl, events.jsonl)",
       "passed": true,
       "tenant": "tenant-beta"
@@ -419,25 +419,25 @@
       "tenant": "tenant-beta"
     },
     {
-      "detail": "before=\"subject=n-a9e4ac60cb804b2a predicate=status scope=global as_of=2026-01-01\\nWINNER value='red' authority=source_of_record id=as-427de27a2a01433a via the authority comparator\\nCONFLICT (2 distinct value(s)), exposed rather than hidden behind the winner:\\n  value='green' authority=casual id=as-37bf0fd5c78f4626 lifecycle=candidate\\n  value='red' authority=source_of_record id=as-427de27a2a01433a lifecycle=validated\\n\" after=\"subject=n-a9e4ac60cb804b2a predicate=status scope=global as_of=2026-01-01\\nWINNER value='red' authority=source_of_record id=as-427de27a2a01433a via the authority comparator\\nCONFLICT (2 distinct value(s)), exposed rather than hidden behind the winner:\\n  value='green' authority=casual id=as-37bf0fd5c78f4626 lifecycle=candidate\\n  value='red' authority=source_of_record id=as-427de27a2a01433a lifecycle=validated\\n\"",
+      "detail": "before=\"subject=n-1b352f78597c40d3 predicate=status scope=global as_of=2026-01-01\\nWINNER value='red' authority=source_of_record id=as-c911207db8ee4429 via the authority comparator\\nCONFLICT (2 distinct value(s)), exposed rather than hidden behind the winner:\\n  value='green' authority=casual id=as-64483745d826495b lifecycle=candidate\\n  value='red' authority=source_of_record id=as-c911207db8ee4429 lifecycle=validated\\n\" after=\"subject=n-1b352f78597c40d3 predicate=status scope=global as_of=2026-01-01\\nWINNER value='red' authority=source_of_record id=as-c911207db8ee4429 via the authority comparator\\nCONFLICT (2 distinct value(s)), exposed rather than hidden behind the winner:\\n  value='green' authority=casual id=as-64483745d826495b lifecycle=candidate\\n  value='red' authority=source_of_record id=as-c911207db8ee4429 lifecycle=validated\\n\"",
       "name": "behavior truth_before_resolution_valid_from identical before/after",
       "passed": true,
       "tenant": "tenant-beta"
     },
     {
-      "detail": "before=\"subject=n-a9e4ac60cb804b2a predicate=status scope=global as_of=2026-07-01\\nWINNER value='green' authority=casual id=as-37bf0fd5c78f4626 via resolution cr-a9b4d7d494c94a61 (scope=global, approved by khalil)\\nCONFLICT (2 distinct value(s)), exposed rather than hidden behind the winner:\\n  value='green' authority=casual id=as-37bf0fd5c78f4626 lifecycle=candidate\\n  value='red' authority=source_of_record id=as-427de27a2a01433a lifecycle=validated\\n\" after=\"subject=n-a9e4ac60cb804b2a predicate=status scope=global as_of=2026-07-01\\nWINNER value='green' authority=casual id=as-37bf0fd5c78f4626 via resolution cr-a9b4d7d494c94a61 (scope=global, approved by khalil)\\nCONFLICT (2 distinct value(s)), exposed rather than hidden behind the winner:\\n  value='green' authority=casual id=as-37bf0fd5c78f4626 lifecycle=candidate\\n  value='red' authority=source_of_record id=as-427de27a2a01433a lifecycle=validated\\n\"",
+      "detail": "before=\"subject=n-1b352f78597c40d3 predicate=status scope=global as_of=2026-07-01\\nWINNER value='green' authority=casual id=as-64483745d826495b via resolution cr-30b04565c01a481f (scope=global, approved by khalil)\\nCONFLICT (2 distinct value(s)), exposed rather than hidden behind the winner:\\n  value='green' authority=casual id=as-64483745d826495b lifecycle=candidate\\n  value='red' authority=source_of_record id=as-c911207db8ee4429 lifecycle=validated\\n\" after=\"subject=n-1b352f78597c40d3 predicate=status scope=global as_of=2026-07-01\\nWINNER value='green' authority=casual id=as-64483745d826495b via resolution cr-30b04565c01a481f (scope=global, approved by khalil)\\nCONFLICT (2 distinct value(s)), exposed rather than hidden behind the winner:\\n  value='green' authority=casual id=as-64483745d826495b lifecycle=candidate\\n  value='red' authority=source_of_record id=as-c911207db8ee4429 lifecycle=validated\\n\"",
       "name": "behavior truth_after_resolution_valid_from identical before/after",
       "passed": true,
       "tenant": "tenant-beta"
     },
     {
-      "detail": "before='n-207fb510a0564879  entity=n-207fb510a0564879 (no merge applies) as of 2026-01-01\\n' after='n-207fb510a0564879  entity=n-207fb510a0564879 (no merge applies) as of 2026-01-01\\n'",
+      "detail": "before='n-8374c5e3d34b4c56  entity=n-8374c5e3d34b4c56 (no merge applies) as of 2026-01-01\\n' after='n-8374c5e3d34b4c56  entity=n-8374c5e3d34b4c56 (no merge applies) as of 2026-01-01\\n'",
       "name": "behavior resolve_before_merge_effective identical before/after",
       "passed": true,
       "tenant": "tenant-beta"
     },
     {
-      "detail": "before='n-207fb510a0564879  survivor=n-a9e4ac60cb804b2a  via n-207fb510a0564879->n-a9e4ac60cb804b2a@2026-03-01 as of 2026-12-01\\n' after='n-207fb510a0564879  survivor=n-a9e4ac60cb804b2a  via n-207fb510a0564879->n-a9e4ac60cb804b2a@2026-03-01 as of 2026-12-01\\n'",
+      "detail": "before='n-8374c5e3d34b4c56  survivor=n-1b352f78597c40d3  via n-8374c5e3d34b4c56->n-1b352f78597c40d3@2026-03-01 as of 2026-12-01\\n' after='n-8374c5e3d34b4c56  survivor=n-1b352f78597c40d3  via n-8374c5e3d34b4c56->n-1b352f78597c40d3@2026-03-01 as of 2026-12-01\\n'",
       "name": "behavior resolve_after_merge_effective identical before/after",
       "passed": true,
       "tenant": "tenant-beta"
@@ -473,13 +473,13 @@
       "tenant": "tenant-beta"
     },
     {
-      "detail": "record_id=lh-1c7a261c0dec41ee",
+      "detail": "record_id=lh-76bd4d72390141b1",
       "name": "legal hold still active after restore",
       "passed": true,
       "tenant": "tenant-beta"
     },
     {
-      "detail": "REFUSED: legal hold lh-1c7a261c0dec41ee blocks execution (target=n-1662fc5a47214af7 by=governance-bot at=2026-09-05 reason=litigation hold, drill fixture). Nothing was touched. Release it first with legal-hold --release.\n",
+      "detail": "REFUSED: legal hold lh-76bd4d72390141b1 blocks execution (target=n-d99b1ddcbc614ffa by=governance-bot at=2026-09-05 reason=litigation hold, drill fixture). Nothing was touched. Release it first with legal-hold --release.\n",
       "name": "forget-execute still refuses the held note after restore",
       "passed": true,
       "tenant": "tenant-beta"
@@ -511,7 +511,7 @@
   ],
   "checks_failed": 0,
   "checks_total": 84,
-  "commit": "e0f244b0204fbd216a8b40fa423222ae032ddf11",
+  "commit": "21592284f715365eb7ad382191eb2727f71c9803",
   "covered": [
     {
       "path": "scripts/restore_drill_enterprise.py",
@@ -519,7 +519,7 @@
     },
     {
       "path": "products/brothermode/tools/bm_vault.py",
-      "sha256": "c1c963ac19c441132207d33d546a47ade2d6ecab2f36d06097cc72d6d0f545c0"
+      "sha256": "96f980f2da362a2d1af0c2d0b774619b4b3a6dd0273097d268b0309473700307"
     },
     {
       "path": "products/brothermode/tools/bm_vault_assertions.py",
@@ -557,24 +557,24 @@
   "per_tenant_detail": {
     "tenant-alpha": {
       "after_behavior": {
-        "forget_execute_on_held_note_output": "REFUSED: legal hold lh-f05e952aeafb4995 blocks execution (target=n-a0a4aab85cae4879 by=governance-bot at=2026-09-05 reason=litigation hold, drill fixture). Nothing was touched. Release it first with legal-hold --release.\n",
+        "forget_execute_on_held_note_output": "REFUSED: legal hold lh-561bb5666168429a blocks execution (target=n-25e3f4a7b1de4a9f by=governance-bot at=2026-09-05 reason=litigation hold, drill fixture). Nothing was touched. Release it first with legal-hold --release.\n",
         "forget_execute_on_held_note_refused": true,
         "legal_hold_active": true,
-        "legal_hold_record_id": "lh-f05e952aeafb4995",
+        "legal_hold_record_id": "lh-561bb5666168429a",
         "recall_finds_own_canary": true,
         "recall_japanese_exit_code": 0,
         "recall_japanese_found_own_note": true,
         "recall_leaks_other_tenant_canary": false,
         "recall_other_canary_exit_code": 0,
         "recall_self_canary_exit_code": 0,
-        "resolve_after_merge_effective": "n-2e08cec95ee44e74  survivor=n-464ff86b46c2466a  via n-2e08cec95ee44e74->n-464ff86b46c2466a@2026-03-01 as of 2026-12-01\n",
-        "resolve_before_merge_effective": "n-2e08cec95ee44e74  entity=n-2e08cec95ee44e74 (no merge applies) as of 2026-01-01\n",
+        "resolve_after_merge_effective": "n-db7a37020ec44ec7  survivor=n-19fd2bf06c444f4b  via n-db7a37020ec44ec7->n-19fd2bf06c444f4b@2026-03-01 as of 2026-12-01\n",
+        "resolve_before_merge_effective": "n-db7a37020ec44ec7  entity=n-db7a37020ec44ec7 (no merge applies) as of 2026-01-01\n",
         "resolve_exit_codes": [
           0,
           0
         ],
-        "truth_after_resolution_valid_from": "subject=n-464ff86b46c2466a predicate=status scope=global as_of=2026-07-01\nWINNER value='green' authority=casual id=as-ee4ca8b865404532 via resolution cr-7ccfdb2878b54217 (scope=global, approved by khalil)\nCONFLICT (2 distinct value(s)), exposed rather than hidden behind the winner:\n  value='green' authority=casual id=as-ee4ca8b865404532 lifecycle=candidate\n  value='red' authority=source_of_record id=as-7ed26d41b718473f lifecycle=validated\n",
-        "truth_before_resolution_valid_from": "subject=n-464ff86b46c2466a predicate=status scope=global as_of=2026-01-01\nWINNER value='red' authority=source_of_record id=as-7ed26d41b718473f via the authority comparator\nCONFLICT (2 distinct value(s)), exposed rather than hidden behind the winner:\n  value='green' authority=casual id=as-ee4ca8b865404532 lifecycle=candidate\n  value='red' authority=source_of_record id=as-7ed26d41b718473f lifecycle=validated\n",
+        "truth_after_resolution_valid_from": "subject=n-19fd2bf06c444f4b predicate=status scope=global as_of=2026-07-01\nWINNER value='green' authority=casual id=as-369542aba7514310 via resolution cr-40c5620d6944473d (scope=global, approved by khalil)\nCONFLICT (2 distinct value(s)), exposed rather than hidden behind the winner:\n  value='green' authority=casual id=as-369542aba7514310 lifecycle=candidate\n  value='red' authority=source_of_record id=as-67e4da7c9c7f49f2 lifecycle=validated\n",
+        "truth_before_resolution_valid_from": "subject=n-19fd2bf06c444f4b predicate=status scope=global as_of=2026-01-01\nWINNER value='red' authority=source_of_record id=as-67e4da7c9c7f49f2 via the authority comparator\nCONFLICT (2 distinct value(s)), exposed rather than hidden behind the winner:\n  value='green' authority=casual id=as-369542aba7514310 lifecycle=candidate\n  value='red' authority=source_of_record id=as-67e4da7c9c7f49f2 lifecycle=validated\n",
         "truth_exit_codes": [
           0,
           0
@@ -584,53 +584,53 @@
         "assertions_jsonl": {
           "present": true,
           "rows": 2,
-          "sha256": "bf7d891df430b52d8c2ad923399815a7019987225b86b1ff9bf89af72f55d0c9"
+          "sha256": "0676daec05842ee322e0689a6356dc260d777b02988481d2baf3f510c9b90f51"
         },
         "forget_receipts": {
           "present": true,
           "rows": 1,
-          "sha256": "1b6947da73304fc966bf94f03280b806b81325d91458274fb9d631580f6391ac"
+          "sha256": "a818e63e119aef7fcd177f5e3c27a578ab735b952f7b74a59dbf6973fe3389e9"
         },
         "identity_events_jsonl": {
           "present": true,
           "rows": 1,
-          "sha256": "b3b157512ef2b81f135a57bb9b5e0f23aa83fc8ec584cf2b9957c5ecfb502638"
+          "sha256": "88b41467fbfc49f3c4711d09202063ccc0f90f59704b0c73b520af8e9f9ed221"
         },
         "legal_holds_jsonl": {
           "present": true,
           "rows": 1,
-          "sha256": "d0906adaa64af41cb62713b380cb1b51ebe5aeb48ec2c1ea57e9b78f9e68e65c"
+          "sha256": "ff95c5f1f7b2ce6ba14300da05c1eaa1d0a1a1dcd421fc1d6a1cba0bf9130d64"
         },
         "notes_tree": {
           "present": true,
           "rows": 8,
-          "sha256": "7fd2aed80ef5bb3e94f87f4c7d4b96a514c3f94cfd8e004d05f51faf00059b4c"
+          "sha256": "7d6a6a23244aac80690c4220125248cf094d1ee51e9d73b7fd7c4c0995ac3a7b"
         },
         "resolutions_jsonl": {
           "present": true,
           "rows": 1,
-          "sha256": "386fb0eac985ebc5cec8e6ed7debf4c25d100aa96ef611310c1d84ba4be34885"
+          "sha256": "715eaab8cc4a19fbdc46a9a122a572669821afce9a0c8b5a288bff205082ccb3"
         }
       },
       "before_behavior": {
-        "forget_execute_on_held_note_output": "REFUSED: legal hold lh-f05e952aeafb4995 blocks execution (target=n-a0a4aab85cae4879 by=governance-bot at=2026-09-05 reason=litigation hold, drill fixture). Nothing was touched. Release it first with legal-hold --release.\n",
+        "forget_execute_on_held_note_output": "REFUSED: legal hold lh-561bb5666168429a blocks execution (target=n-25e3f4a7b1de4a9f by=governance-bot at=2026-09-05 reason=litigation hold, drill fixture). Nothing was touched. Release it first with legal-hold --release.\n",
         "forget_execute_on_held_note_refused": true,
         "legal_hold_active": true,
-        "legal_hold_record_id": "lh-f05e952aeafb4995",
+        "legal_hold_record_id": "lh-561bb5666168429a",
         "recall_finds_own_canary": true,
         "recall_japanese_exit_code": 0,
         "recall_japanese_found_own_note": true,
         "recall_leaks_other_tenant_canary": false,
         "recall_other_canary_exit_code": 0,
         "recall_self_canary_exit_code": 0,
-        "resolve_after_merge_effective": "n-2e08cec95ee44e74  survivor=n-464ff86b46c2466a  via n-2e08cec95ee44e74->n-464ff86b46c2466a@2026-03-01 as of 2026-12-01\n",
-        "resolve_before_merge_effective": "n-2e08cec95ee44e74  entity=n-2e08cec95ee44e74 (no merge applies) as of 2026-01-01\n",
+        "resolve_after_merge_effective": "n-db7a37020ec44ec7  survivor=n-19fd2bf06c444f4b  via n-db7a37020ec44ec7->n-19fd2bf06c444f4b@2026-03-01 as of 2026-12-01\n",
+        "resolve_before_merge_effective": "n-db7a37020ec44ec7  entity=n-db7a37020ec44ec7 (no merge applies) as of 2026-01-01\n",
         "resolve_exit_codes": [
           0,
           0
         ],
-        "truth_after_resolution_valid_from": "subject=n-464ff86b46c2466a predicate=status scope=global as_of=2026-07-01\nWINNER value='green' authority=casual id=as-ee4ca8b865404532 via resolution cr-7ccfdb2878b54217 (scope=global, approved by khalil)\nCONFLICT (2 distinct value(s)), exposed rather than hidden behind the winner:\n  value='green' authority=casual id=as-ee4ca8b865404532 lifecycle=candidate\n  value='red' authority=source_of_record id=as-7ed26d41b718473f lifecycle=validated\n",
-        "truth_before_resolution_valid_from": "subject=n-464ff86b46c2466a predicate=status scope=global as_of=2026-01-01\nWINNER value='red' authority=source_of_record id=as-7ed26d41b718473f via the authority comparator\nCONFLICT (2 distinct value(s)), exposed rather than hidden behind the winner:\n  value='green' authority=casual id=as-ee4ca8b865404532 lifecycle=candidate\n  value='red' authority=source_of_record id=as-7ed26d41b718473f lifecycle=validated\n",
+        "truth_after_resolution_valid_from": "subject=n-19fd2bf06c444f4b predicate=status scope=global as_of=2026-07-01\nWINNER value='green' authority=casual id=as-369542aba7514310 via resolution cr-40c5620d6944473d (scope=global, approved by khalil)\nCONFLICT (2 distinct value(s)), exposed rather than hidden behind the winner:\n  value='green' authority=casual id=as-369542aba7514310 lifecycle=candidate\n  value='red' authority=source_of_record id=as-67e4da7c9c7f49f2 lifecycle=validated\n",
+        "truth_before_resolution_valid_from": "subject=n-19fd2bf06c444f4b predicate=status scope=global as_of=2026-01-01\nWINNER value='red' authority=source_of_record id=as-67e4da7c9c7f49f2 via the authority comparator\nCONFLICT (2 distinct value(s)), exposed rather than hidden behind the winner:\n  value='green' authority=casual id=as-369542aba7514310 lifecycle=candidate\n  value='red' authority=source_of_record id=as-67e4da7c9c7f49f2 lifecycle=validated\n",
         "truth_exit_codes": [
           0,
           0
@@ -640,32 +640,32 @@
         "assertions_jsonl": {
           "present": true,
           "rows": 2,
-          "sha256": "bf7d891df430b52d8c2ad923399815a7019987225b86b1ff9bf89af72f55d0c9"
+          "sha256": "0676daec05842ee322e0689a6356dc260d777b02988481d2baf3f510c9b90f51"
         },
         "forget_receipts": {
           "present": true,
           "rows": 1,
-          "sha256": "1b6947da73304fc966bf94f03280b806b81325d91458274fb9d631580f6391ac"
+          "sha256": "a818e63e119aef7fcd177f5e3c27a578ab735b952f7b74a59dbf6973fe3389e9"
         },
         "identity_events_jsonl": {
           "present": true,
           "rows": 1,
-          "sha256": "b3b157512ef2b81f135a57bb9b5e0f23aa83fc8ec584cf2b9957c5ecfb502638"
+          "sha256": "88b41467fbfc49f3c4711d09202063ccc0f90f59704b0c73b520af8e9f9ed221"
         },
         "legal_holds_jsonl": {
           "present": true,
           "rows": 1,
-          "sha256": "d0906adaa64af41cb62713b380cb1b51ebe5aeb48ec2c1ea57e9b78f9e68e65c"
+          "sha256": "ff95c5f1f7b2ce6ba14300da05c1eaa1d0a1a1dcd421fc1d6a1cba0bf9130d64"
         },
         "notes_tree": {
           "present": true,
           "rows": 8,
-          "sha256": "7fd2aed80ef5bb3e94f87f4c7d4b96a514c3f94cfd8e004d05f51faf00059b4c"
+          "sha256": "7d6a6a23244aac80690c4220125248cf094d1ee51e9d73b7fd7c4c0995ac3a7b"
         },
         "resolutions_jsonl": {
           "present": true,
           "rows": 1,
-          "sha256": "386fb0eac985ebc5cec8e6ed7debf4c25d100aa96ef611310c1d84ba4be34885"
+          "sha256": "715eaab8cc4a19fbdc46a9a122a572669821afce9a0c8b5a288bff205082ccb3"
         }
       },
       "locators_after": [
@@ -687,58 +687,58 @@
         "url"
       ],
       "manifest_after": {
-        "bundle_id": "bundle-a6f5468d13964d2a",
+        "bundle_id": "bundle-077bd1af65124994",
         "counts": {
           "assertions": 8,
           "events": 0
         },
         "encrypted": false,
         "files": {
-          "assertions.jsonl": "8dc7d1f9c29d96edca2275ed217824897dcd4db004ec1eba98073693eed2183b",
+          "assertions.jsonl": "55aae98b267fee3d4246f0b3364f0a7ffe3cedb5b734e3f7723dc5e3d76d1bc3",
           "events.jsonl": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         },
-        "generated_at": "2026-09-05T11:39:16Z",
+        "generated_at": "2026-09-05T12:39:54Z",
         "restricted_included": false,
         "schema_version": 1,
-        "sha256_manifest": "892950590484fe21a60959709accd36b5e8d49565ecba535c155334822dec338"
+        "sha256_manifest": "07514e39efcbb2779cfca7b973c0230c8bee7ede8345e7727c5ea0bce60e5f84"
       },
       "manifest_before": {
-        "bundle_id": "bundle-3ab7240547b14d2a",
+        "bundle_id": "bundle-f4376ea2d6be463d",
         "counts": {
           "assertions": 8,
           "events": 0
         },
         "encrypted": false,
         "files": {
-          "assertions.jsonl": "8dc7d1f9c29d96edca2275ed217824897dcd4db004ec1eba98073693eed2183b",
+          "assertions.jsonl": "55aae98b267fee3d4246f0b3364f0a7ffe3cedb5b734e3f7723dc5e3d76d1bc3",
           "events.jsonl": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         },
-        "generated_at": "2026-09-05T11:39:16Z",
+        "generated_at": "2026-09-05T12:39:53Z",
         "restricted_included": false,
         "schema_version": 1,
-        "sha256_manifest": "d5361c049ceaa1a0dfe947d59ea93c40fb91cb3d6e3ef5c3b7a7a1eee2d8463e"
+        "sha256_manifest": "5988bd655b41cd434d0aa78d2b665714a707b55907003a13fd66e4ff8d253529"
       }
     },
     "tenant-beta": {
       "after_behavior": {
-        "forget_execute_on_held_note_output": "REFUSED: legal hold lh-1c7a261c0dec41ee blocks execution (target=n-1662fc5a47214af7 by=governance-bot at=2026-09-05 reason=litigation hold, drill fixture). Nothing was touched. Release it first with legal-hold --release.\n",
+        "forget_execute_on_held_note_output": "REFUSED: legal hold lh-76bd4d72390141b1 blocks execution (target=n-d99b1ddcbc614ffa by=governance-bot at=2026-09-05 reason=litigation hold, drill fixture). Nothing was touched. Release it first with legal-hold --release.\n",
         "forget_execute_on_held_note_refused": true,
         "legal_hold_active": true,
-        "legal_hold_record_id": "lh-1c7a261c0dec41ee",
+        "legal_hold_record_id": "lh-76bd4d72390141b1",
         "recall_finds_own_canary": true,
         "recall_japanese_exit_code": 0,
         "recall_japanese_found_own_note": true,
         "recall_leaks_other_tenant_canary": false,
         "recall_other_canary_exit_code": 0,
         "recall_self_canary_exit_code": 0,
-        "resolve_after_merge_effective": "n-207fb510a0564879  survivor=n-a9e4ac60cb804b2a  via n-207fb510a0564879->n-a9e4ac60cb804b2a@2026-03-01 as of 2026-12-01\n",
-        "resolve_before_merge_effective": "n-207fb510a0564879  entity=n-207fb510a0564879 (no merge applies) as of 2026-01-01\n",
+        "resolve_after_merge_effective": "n-8374c5e3d34b4c56  survivor=n-1b352f78597c40d3  via n-8374c5e3d34b4c56->n-1b352f78597c40d3@2026-03-01 as of 2026-12-01\n",
+        "resolve_before_merge_effective": "n-8374c5e3d34b4c56  entity=n-8374c5e3d34b4c56 (no merge applies) as of 2026-01-01\n",
         "resolve_exit_codes": [
           0,
           0
         ],
-        "truth_after_resolution_valid_from": "subject=n-a9e4ac60cb804b2a predicate=status scope=global as_of=2026-07-01\nWINNER value='green' authority=casual id=as-37bf0fd5c78f4626 via resolution cr-a9b4d7d494c94a61 (scope=global, approved by khalil)\nCONFLICT (2 distinct value(s)), exposed rather than hidden behind the winner:\n  value='green' authority=casual id=as-37bf0fd5c78f4626 lifecycle=candidate\n  value='red' authority=source_of_record id=as-427de27a2a01433a lifecycle=validated\n",
-        "truth_before_resolution_valid_from": "subject=n-a9e4ac60cb804b2a predicate=status scope=global as_of=2026-01-01\nWINNER value='red' authority=source_of_record id=as-427de27a2a01433a via the authority comparator\nCONFLICT (2 distinct value(s)), exposed rather than hidden behind the winner:\n  value='green' authority=casual id=as-37bf0fd5c78f4626 lifecycle=candidate\n  value='red' authority=source_of_record id=as-427de27a2a01433a lifecycle=validated\n",
+        "truth_after_resolution_valid_from": "subject=n-1b352f78597c40d3 predicate=status scope=global as_of=2026-07-01\nWINNER value='green' authority=casual id=as-64483745d826495b via resolution cr-30b04565c01a481f (scope=global, approved by khalil)\nCONFLICT (2 distinct value(s)), exposed rather than hidden behind the winner:\n  value='green' authority=casual id=as-64483745d826495b lifecycle=candidate\n  value='red' authority=source_of_record id=as-c911207db8ee4429 lifecycle=validated\n",
+        "truth_before_resolution_valid_from": "subject=n-1b352f78597c40d3 predicate=status scope=global as_of=2026-01-01\nWINNER value='red' authority=source_of_record id=as-c911207db8ee4429 via the authority comparator\nCONFLICT (2 distinct value(s)), exposed rather than hidden behind the winner:\n  value='green' authority=casual id=as-64483745d826495b lifecycle=candidate\n  value='red' authority=source_of_record id=as-c911207db8ee4429 lifecycle=validated\n",
         "truth_exit_codes": [
           0,
           0
@@ -748,53 +748,53 @@
         "assertions_jsonl": {
           "present": true,
           "rows": 2,
-          "sha256": "7d28f78b1c50402f184bd5c40f9268165624575342ff326ca78322e1d5bb961f"
+          "sha256": "d8790f7e5e8be605ea9205c48a5126cd4e31e8fb1eeea8728fce6e386be13396"
         },
         "forget_receipts": {
           "present": true,
           "rows": 1,
-          "sha256": "62108a9b040cc88d07cf3ba44758d75f7f5969bb513012aec547d8fa0d8ef64c"
+          "sha256": "54169bcf70e5157048439e0ec413e680d0bd39417a7006bd310f3f7f049bcaca"
         },
         "identity_events_jsonl": {
           "present": true,
           "rows": 1,
-          "sha256": "d2f1b6c0f6649c3570f8948e8dd856d7ab743c3e0c7381947d031335ed06afcc"
+          "sha256": "ba5765c5ae07c4bbbaa82ec9550ff76e6aeedfd335625ec3a856197d31873745"
         },
         "legal_holds_jsonl": {
           "present": true,
           "rows": 1,
-          "sha256": "792b111e0b3a0662559f68a0a9b6e6d83c0707a764819d2676e3fd6a75239960"
+          "sha256": "975350ad2ca79fe70f056a211f937ab9e0cba41b7a66059996ab0e4c5eff7074"
         },
         "notes_tree": {
           "present": true,
           "rows": 8,
-          "sha256": "bc07c713d79fdbef03cc7c362a763b9a78a5b0efb8dbf64d01bf62b969d23ffe"
+          "sha256": "fffe2baa90e9cd6a0418ddf4543ed38219613d5b1f840a26da223700fcb0d2ae"
         },
         "resolutions_jsonl": {
           "present": true,
           "rows": 1,
-          "sha256": "84f92a5680cee1f7b9718573dc4ce6012433c324af3d8dbdc77824f97fe4ddff"
+          "sha256": "72a3e6b7037679e54ede9b30f3c1a3aa206898893d87682c9a3e36f6bd5a8ab9"
         }
       },
       "before_behavior": {
-        "forget_execute_on_held_note_output": "REFUSED: legal hold lh-1c7a261c0dec41ee blocks execution (target=n-1662fc5a47214af7 by=governance-bot at=2026-09-05 reason=litigation hold, drill fixture). Nothing was touched. Release it first with legal-hold --release.\n",
+        "forget_execute_on_held_note_output": "REFUSED: legal hold lh-76bd4d72390141b1 blocks execution (target=n-d99b1ddcbc614ffa by=governance-bot at=2026-09-05 reason=litigation hold, drill fixture). Nothing was touched. Release it first with legal-hold --release.\n",
         "forget_execute_on_held_note_refused": true,
         "legal_hold_active": true,
-        "legal_hold_record_id": "lh-1c7a261c0dec41ee",
+        "legal_hold_record_id": "lh-76bd4d72390141b1",
         "recall_finds_own_canary": true,
         "recall_japanese_exit_code": 0,
         "recall_japanese_found_own_note": true,
         "recall_leaks_other_tenant_canary": false,
         "recall_other_canary_exit_code": 0,
         "recall_self_canary_exit_code": 0,
-        "resolve_after_merge_effective": "n-207fb510a0564879  survivor=n-a9e4ac60cb804b2a  via n-207fb510a0564879->n-a9e4ac60cb804b2a@2026-03-01 as of 2026-12-01\n",
-        "resolve_before_merge_effective": "n-207fb510a0564879  entity=n-207fb510a0564879 (no merge applies) as of 2026-01-01\n",
+        "resolve_after_merge_effective": "n-8374c5e3d34b4c56  survivor=n-1b352f78597c40d3  via n-8374c5e3d34b4c56->n-1b352f78597c40d3@2026-03-01 as of 2026-12-01\n",
+        "resolve_before_merge_effective": "n-8374c5e3d34b4c56  entity=n-8374c5e3d34b4c56 (no merge applies) as of 2026-01-01\n",
         "resolve_exit_codes": [
           0,
           0
         ],
-        "truth_after_resolution_valid_from": "subject=n-a9e4ac60cb804b2a predicate=status scope=global as_of=2026-07-01\nWINNER value='green' authority=casual id=as-37bf0fd5c78f4626 via resolution cr-a9b4d7d494c94a61 (scope=global, approved by khalil)\nCONFLICT (2 distinct value(s)), exposed rather than hidden behind the winner:\n  value='green' authority=casual id=as-37bf0fd5c78f4626 lifecycle=candidate\n  value='red' authority=source_of_record id=as-427de27a2a01433a lifecycle=validated\n",
-        "truth_before_resolution_valid_from": "subject=n-a9e4ac60cb804b2a predicate=status scope=global as_of=2026-01-01\nWINNER value='red' authority=source_of_record id=as-427de27a2a01433a via the authority comparator\nCONFLICT (2 distinct value(s)), exposed rather than hidden behind the winner:\n  value='green' authority=casual id=as-37bf0fd5c78f4626 lifecycle=candidate\n  value='red' authority=source_of_record id=as-427de27a2a01433a lifecycle=validated\n",
+        "truth_after_resolution_valid_from": "subject=n-1b352f78597c40d3 predicate=status scope=global as_of=2026-07-01\nWINNER value='green' authority=casual id=as-64483745d826495b via resolution cr-30b04565c01a481f (scope=global, approved by khalil)\nCONFLICT (2 distinct value(s)), exposed rather than hidden behind the winner:\n  value='green' authority=casual id=as-64483745d826495b lifecycle=candidate\n  value='red' authority=source_of_record id=as-c911207db8ee4429 lifecycle=validated\n",
+        "truth_before_resolution_valid_from": "subject=n-1b352f78597c40d3 predicate=status scope=global as_of=2026-01-01\nWINNER value='red' authority=source_of_record id=as-c911207db8ee4429 via the authority comparator\nCONFLICT (2 distinct value(s)), exposed rather than hidden behind the winner:\n  value='green' authority=casual id=as-64483745d826495b lifecycle=candidate\n  value='red' authority=source_of_record id=as-c911207db8ee4429 lifecycle=validated\n",
         "truth_exit_codes": [
           0,
           0
@@ -804,32 +804,32 @@
         "assertions_jsonl": {
           "present": true,
           "rows": 2,
-          "sha256": "7d28f78b1c50402f184bd5c40f9268165624575342ff326ca78322e1d5bb961f"
+          "sha256": "d8790f7e5e8be605ea9205c48a5126cd4e31e8fb1eeea8728fce6e386be13396"
         },
         "forget_receipts": {
           "present": true,
           "rows": 1,
-          "sha256": "62108a9b040cc88d07cf3ba44758d75f7f5969bb513012aec547d8fa0d8ef64c"
+          "sha256": "54169bcf70e5157048439e0ec413e680d0bd39417a7006bd310f3f7f049bcaca"
         },
         "identity_events_jsonl": {
           "present": true,
           "rows": 1,
-          "sha256": "d2f1b6c0f6649c3570f8948e8dd856d7ab743c3e0c7381947d031335ed06afcc"
+          "sha256": "ba5765c5ae07c4bbbaa82ec9550ff76e6aeedfd335625ec3a856197d31873745"
         },
         "legal_holds_jsonl": {
           "present": true,
           "rows": 1,
-          "sha256": "792b111e0b3a0662559f68a0a9b6e6d83c0707a764819d2676e3fd6a75239960"
+          "sha256": "975350ad2ca79fe70f056a211f937ab9e0cba41b7a66059996ab0e4c5eff7074"
         },
         "notes_tree": {
           "present": true,
           "rows": 8,
-          "sha256": "bc07c713d79fdbef03cc7c362a763b9a78a5b0efb8dbf64d01bf62b969d23ffe"
+          "sha256": "fffe2baa90e9cd6a0418ddf4543ed38219613d5b1f840a26da223700fcb0d2ae"
         },
         "resolutions_jsonl": {
           "present": true,
           "rows": 1,
-          "sha256": "84f92a5680cee1f7b9718573dc4ce6012433c324af3d8dbdc77824f97fe4ddff"
+          "sha256": "72a3e6b7037679e54ede9b30f3c1a3aa206898893d87682c9a3e36f6bd5a8ab9"
         }
       },
       "locators_after": [
@@ -851,36 +851,36 @@
         "url"
       ],
       "manifest_after": {
-        "bundle_id": "bundle-8389bdf88aa44dd5",
+        "bundle_id": "bundle-f72c0d4412324c37",
         "counts": {
           "assertions": 8,
           "events": 0
         },
         "encrypted": false,
         "files": {
-          "assertions.jsonl": "38a8a15c1216f9480a85b78d32800b385eb27759ad8e5abaf8b535478c7bff6b",
+          "assertions.jsonl": "67cb5e68a08316ebfde52d8552921071d8c86f65ba627d2420ddc0bc55e427c8",
           "events.jsonl": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         },
-        "generated_at": "2026-09-05T11:39:18Z",
+        "generated_at": "2026-09-05T12:39:55Z",
         "restricted_included": false,
         "schema_version": 1,
-        "sha256_manifest": "0d55fdef6f4a6086d6a1941498ccf667514ec8cc47cbe1031c6c9b47c4fa51bb"
+        "sha256_manifest": "f4f0f0b6be3a2a90657b9db40b0a56ef28c3d6c87149147c1691b56bc5cce081"
       },
       "manifest_before": {
-        "bundle_id": "bundle-b707e454e8d44cc5",
+        "bundle_id": "bundle-8a3051df742a4246",
         "counts": {
           "assertions": 8,
           "events": 0
         },
         "encrypted": false,
         "files": {
-          "assertions.jsonl": "38a8a15c1216f9480a85b78d32800b385eb27759ad8e5abaf8b535478c7bff6b",
+          "assertions.jsonl": "67cb5e68a08316ebfde52d8552921071d8c86f65ba627d2420ddc0bc55e427c8",
           "events.jsonl": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         },
-        "generated_at": "2026-09-05T11:39:17Z",
+        "generated_at": "2026-09-05T12:39:55Z",
         "restricted_included": false,
         "schema_version": 1,
-        "sha256_manifest": "650af1d3f0f406384da75ff2e902d06e06d55ebb4265db8f426ed569c0c3c996"
+        "sha256_manifest": "b0204fe9ded53ded69a82b61564bada9fdeb3442b5209a8a3f4205dd6739c643"
       }
     }
   },
@@ -892,17 +892,17 @@
   ],
   "time_to_restore_seconds": {
     "tenant-alpha": {
-      "backup_seconds": 0.006,
+      "backup_seconds": 0.005,
       "destroy_seconds": 0.001,
-      "restore_and_reindex_seconds": 0.108
+      "restore_and_reindex_seconds": 0.088
     },
     "tenant-beta": {
-      "backup_seconds": 0.006,
-      "destroy_seconds": 0.002,
-      "restore_and_reindex_seconds": 0.097
+      "backup_seconds": 0.004,
+      "destroy_seconds": 0.001,
+      "restore_and_reindex_seconds": 0.072
     }
   },
   "tools_dir": "products/brothermode/tools",
   "unvalidated_categories": [],
-  "wall_total_seconds": 3.657
+  "wall_total_seconds": 3.201
 }

@@ -128,6 +128,65 @@ class ImportedHistoryStaysExcludedOnANewBranch(unittest.TestCase):
         self.assertEqual(proc.returncode, G.EXIT_BLOCKED,
                          proc.stdout + proc.stderr)
 
+    def _spy(self, calls):
+        def runner(cmd):
+            calls.append(cmd)
+            return subprocess.run(cmd, capture_output=True, text=True,
+                                  cwd=self.repo, timeout=300)
+        return runner
+
+    def test_the_net_dash_diff_never_hands_git_diff_a_rev_list_exclusion(self):
+        """The bug: the new-branch shape [tip, "--not", "--remotes"] used to
+        pass straight through to `git diff`, which reads --not/--remotes as
+        an N-way combined diff against every remote ref rather than a
+        two-tree diff. Measured against the real repository: 3.9s/125MB at
+        low load, 54-63s under load, 1.4GB+ and never finishing on the
+        loaded machine. Only git diff is wrong here; git log/rev-list read
+        --not/--remotes fine."""
+        calls = []
+        findings = G.check_correctness(cwd=self.repo, runner=self._spy(calls))
+        self.assertIsNotNone(findings)
+        diff_calls = [c for c in calls if len(c) >= 2 and c[0] == "git"
+                     and c[1] == "diff"]
+        self.assertTrue(diff_calls, calls)
+        for c in diff_calls:
+            self.assertNotIn("--not", c, c)
+            self.assertNotIn("--remotes", c, c)
+
+    def test_a_dash_in_a_genuinely_outgoing_commit_is_counted_once(self):
+        """The base.txt history (main, on the remote) must not be counted:
+        the clean setUp branch yields no dash BLOCK. Then one em dash added
+        by the branch's own commit is counted exactly once."""
+        clean_blocks = [f for f in self.findings() if f[0] == G.BLOCK]
+        self.assertEqual(clean_blocks, [], clean_blocks)
+        with open(os.path.join(self.repo, "note.md"), "w",
+                  encoding="utf-8") as fh:
+            fh.write("a line %s with one dash\n" % chr(0x2014))
+        sh(["git", "add", "-A"], cwd=self.repo)
+        sh(["git", "commit", "-q", "-m", "one dash"], cwd=self.repo)
+        blocks = [f for f in self.findings() if f[0] == G.BLOCK]
+        self.assertEqual(len(blocks), 1, blocks)
+        self.assertTrue(blocks[0][2].startswith("1 em or en dash(es)"), blocks)
+
+    def test_a_new_ref_pushed_by_sha_takes_the_same_two_tree_path(self):
+        """A brand new branch pushed by sha (remote side all zeros, the
+        exact shape _ranges_from_updates builds for it) must reach git diff
+        the same way as the checked-out-branch path above: no --not, no
+        --remotes on the diff call."""
+        tip = sh(["git", "rev-parse", "HEAD"], cwd=self.repo).stdout.strip()
+        stdin_text = ("refs/heads/wbs/scratch %s refs/heads/wbs/scratch "
+                     "0000000000000000000000000000000000000000\n" % tip)
+        calls = []
+        findings = G.check_correctness(cwd=self.repo, runner=self._spy(calls),
+                                       stdin_text=stdin_text)
+        self.assertIsNotNone(findings)
+        diff_calls = [c for c in calls if len(c) >= 2 and c[0] == "git"
+                     and c[1] == "diff"]
+        self.assertTrue(diff_calls, calls)
+        for c in diff_calls:
+            self.assertNotIn("--not", c, c)
+            self.assertNotIn("--remotes", c, c)
+
 
 class DetachedHeadHasNoOutgoingRange(unittest.TestCase):
     """The bug battery round 6 found (E31): a battery run certifies a git

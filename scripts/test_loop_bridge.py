@@ -445,6 +445,62 @@ class TheRuntimeIsResolvedNotHardcoded(unittest.TestCase):
             self.skipTest("a real runtime resolved on this machine, so the "
                           "not-found path cannot be exercised here")
 
+    def test_a_codex_home_install_is_matched(self):
+        """Codex has no dependency resolution, so the brothermode plugin is
+        installed by name into CODEX_HOME's own plugin cache. The resolver
+        must find it there under BROTHER_CLIENT=codex, ranked ahead of the
+        development checkout, and must not be fooled by a Claude-shaped
+        cache sitting under the same HOME."""
+        home_td = tempfile.TemporaryDirectory(prefix="lb-home-")
+        self.addCleanup(home_td.cleanup)
+        codex_td = tempfile.TemporaryDirectory(prefix="lb-codex-home-")
+        self.addCleanup(codex_td.cleanup)
+        home = home_td.name
+        codex_home = codex_td.name
+        tools = os.path.join(codex_home, "plugins", "cache", "brother",
+                             "brothermode", "3.4.4", "tools")
+        os.makedirs(tools)
+        env = {"HOME": home, "CODEX_HOME": codex_home,
+              B.brother_paths.CLIENT_ENV: B.brother_paths.CODEX}
+        order = B.runtime_candidates(env)
+        self.assertIn(tools, order, order)
+        self.assertLess(order.index(tools), order.index(B.DEV_CANDIDATE),
+                        "the Codex install must outrank the dev checkout")
+        claude_shaped = os.path.join(home, ".claude", "plugins", "cache",
+                                     "brother", "brothermode", "3.4.4",
+                                     "tools")
+        self.assertNotIn(claude_shaped, order, order)
+
+    def test_the_dead_candidates_are_gone(self):
+        """BUNDLED_CANDIDATE (bundle/tools) never exists anywhere, in the repo
+        or in any real install, and the unversioned cache candidate
+        (.../brother/brothermode/tools with no version segment) never
+        matches a real install either. Both were dead weight; HUB_CANDIDATE
+        replaces the bundle one and must rank ahead of anything under a
+        plugin cache."""
+        order = B.runtime_candidates({})
+        bundle_tools = os.path.join("bundle", "tools")
+        unversioned = os.path.join("brother", "brothermode", "tools")
+        for candidate in order:
+            self.assertFalse(candidate.endswith(bundle_tools), candidate)
+            self.assertFalse(candidate.endswith(unversioned), candidate)
+        self.assertIn(B.HUB_CANDIDATE, order, order)
+        plugin_candidates = [c for c in order if "plugins" in c]
+        for c in plugin_candidates:
+            self.assertLess(order.index(B.HUB_CANDIDATE), order.index(c),
+                            "HUB_CANDIDATE must come before every plugin "
+                            "cache candidate")
+
+    def test_not_found_names_the_sibling_plugin_install(self):
+        """The NO-DATA sentence must not just say what is missing, it must
+        say the next command to run."""
+        msg = B.not_found_message(["/a/tools", "/b/tools"], [])
+        self.assertIn("/a/tools", msg)
+        self.assertIn("/b/tools", msg)
+        self.assertIn(B.RUNTIME_ENV_VAR, msg)
+        self.assertIn("brothermode@brother", msg)
+        self.assertIn("codex plugin add", msg)
+
 
 class DispatchIsActuallyConcurrent(unittest.TestCase):
     """Until 2026-08-29 run() was a list comprehension: spawn, wait, spawn,

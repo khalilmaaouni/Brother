@@ -198,6 +198,17 @@ VERSION = "9.9.9"
 TAG = "v9.9.9"
 
 
+def _isolated_git_env():
+    """Env for git commands against throwaway fixture repos: masks this
+    machine's global and system git config (e.g. tag.gpgsign/gpg.format set
+    for the real signed release) so a fixture tag or commit never blocks on
+    signing that has nothing to do with the test."""
+    env = dict(os.environ)
+    env["GIT_CONFIG_GLOBAL"] = os.devnull
+    env["GIT_CONFIG_NOSYSTEM"] = "1"
+    return env
+
+
 def _make_public_repo(tmp, files, tamper=None, manifest_override=None,
                       note_digest=None, drop_manifest=False):
     """A real git repository carrying an export, its manifest and its note,
@@ -228,13 +239,16 @@ def _make_public_repo(tmp, files, tamper=None, manifest_override=None,
     for rel, data in (tamper or {}).items():
         with open(os.path.join(tmp, rel), "wb") as fh:
             fh.write(data)
+    env = _isolated_git_env()
     for cmd in (["git", "init", "-q"],
                 ["git", "config", "user.email", "t@example.com"],
                 ["git", "config", "user.name", "T"],
                 ["git", "add", "-A"],
-                ["git", "commit", "-q", "-m", "export"],
-                ["git", "tag", TAG]):
-        proc = subprocess.run(cmd, cwd=tmp, capture_output=True, text=True)
+                ["git", "-c", "commit.gpgsign=false", "commit", "-q", "-m",
+                 "export"],
+                ["git", "-c", "tag.gpgsign=false", "tag", TAG]):
+        proc = subprocess.run(cmd, cwd=tmp, capture_output=True, text=True,
+                              env=env)
         if proc.returncode != 0:
             raise AssertionError("fixture git failed: %s: %s"
                                  % (cmd, proc.stderr))
@@ -316,12 +330,14 @@ class VerifyTreeFromAPublicClone(unittest.TestCase):
         # check=True on all three: these build the fixture the assertion below
         # reads, so a git that failed here would leave the previous tag in
         # place and the test would measure the wrong tree while still passing.
+        env = _isolated_git_env()
         subprocess.run(["git", "add", "-A"], cwd=self.tmp, capture_output=True,
-                       check=True)
-        subprocess.run(["git", "commit", "-q", "-m", "strip"], cwd=self.tmp,
-                       capture_output=True, check=True)
-        subprocess.run(["git", "tag", "-f", TAG], cwd=self.tmp,
-                       capture_output=True, check=True)
+                       check=True, env=env)
+        subprocess.run(["git", "-c", "commit.gpgsign=false", "commit", "-q",
+                        "-m", "strip"], cwd=self.tmp, capture_output=True,
+                       check=True, env=env)
+        subprocess.run(["git", "-c", "tag.gpgsign=false", "tag", "-f", TAG],
+                       cwd=self.tmp, capture_output=True, check=True, env=env)
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             code = R.main(["--verify-tree", "--tag", TAG, "--public", self.tmp])
@@ -453,25 +469,30 @@ class E118TheDenylistIsReadFromTheSourceRevision(unittest.TestCase):
             os.makedirs(os.path.dirname(full), exist_ok=True)
             with open(full, "w", encoding="utf-8") as fh:
                 fh.write(text)
+        env = _isolated_git_env()
         for cmd in (["git", "init", "-q"],
                     ["git", "config", "user.email", "t@example.com"],
                     ["git", "config", "user.name", "T"],
                     ["git", "add", "-A", "-f"],
-                    ["git", "commit", "-q", "-m", "the cut"]):
+                    ["git", "-c", "commit.gpgsign=false", "commit", "-q",
+                     "-m", "the cut"]):
             proc = subprocess.run(cmd, cwd=tmp, capture_output=True,
-                                  text=True)
+                                  text=True, env=env)
             if proc.returncode != 0:
                 raise AssertionError("fixture git failed: %s: %s"
                                      % (cmd, proc.stderr))
         rev = subprocess.run(["git", "-C", tmp, "rev-parse", "HEAD"],
-                             capture_output=True, text=True).stdout.strip()
+                             capture_output=True, text=True,
+                             env=env).stdout.strip()
         # The newer revision drops the withholding, so the two disagree.
         with open(os.path.join(tmp, "docs", "plan", "EXPORT-DENYLIST.txt"),
                   "w", encoding="utf-8") as fh:
             fh.write("# nothing withheld any more\n")
         for cmd in (["git", "-C", tmp, "add", "-A", "-f"],
-                    ["git", "-C", tmp, "commit", "-q", "-m", "since"]):
-            proc = subprocess.run(cmd, capture_output=True, text=True)
+                    ["git", "-C", tmp, "-c", "commit.gpgsign=false", "commit",
+                     "-q", "-m", "since"]):
+            proc = subprocess.run(cmd, capture_output=True, text=True,
+                                  env=env)
             if proc.returncode != 0:
                 raise AssertionError("fixture git failed: %s: %s"
                                      % (cmd, proc.stderr))

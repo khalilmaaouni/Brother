@@ -112,6 +112,20 @@ arrive piecemeal:
 - **The access audit, merged.** `bm_vault_audit.py` (VB7-04) already
   records every `recall` call with its principal, served ids, and
   withheld count. This piece exists today.
+- **The immutable read-audit trail, merged (V5).** `bm_vault_read_audit.py`
+  records one hash-chained line per note actually shown, at
+  `bm_vault.LEDGER_PATH`'s own directory, file `bm_vault_read_audit.jsonl`
+  (config dir, not `99-System`; see the module docstring for why it
+  follows the ledger's location rather than opening a second one). Each
+  line chains to the one before it: it carries `prev_hash` (the previous
+  line's own `hash`) and `hash` (sha256 over its own fields plus
+  `prev_hash`), so `bm_vault_read_audit.py verify <dir>` can prove the log
+  has not been edited or trimmed since it was written, naming the first
+  broken line rather than merely reporting a clean-looking file. It does
+  NOT prove a note was never read outside Brother's own tools: it records
+  reads made by the recall hook and `bm_vault recall`, never a note opened
+  directly by Obsidian, a shell, or any other program, which is exactly
+  the same "served path only" limit the access audit above already has.
 - **The approval chain that gates who may act.**
   `docs/VAULT-ENTRA-APPROVAL-CONTRACT.md` (VB10-05) names the sequential
   tiers (requester, owner, optional reviewer, named approver users or

@@ -1,0 +1,20 @@
+address              4 of 10
+entity-object        7 of 10
+hierarchy            4 of 10
+identifier           4 of 5
+match-or-no-merge    6 of 10
+requirements         5 of 5
+survivorship         10 of 10
+temporal             10 of 10
+critical WRONG EO-02 [WRONG PAYER] expected LINK AS RELATED, answered REJECT MATCH  CONSERVATIVE
+critical WRONG EO-09 [WRONG LEGAL ENTITY] expected LINK AS RELATED, answered REJECT MATCH  CONSERVATIVE
+critical WRONG MM-01 [FALSE MERGE] expected LINK AS RELATED, answered AUTO-MERGE  FALSE MERGE
+critical WRONG MM-06 [FALSE MERGE] expected KEEP SEPARATE, answered ESCALATE  CONSERVATIVE
+critical WRONG HI-02 [HIERARCHY REVERSAL] expected REJECT MATCH, answered LINK AS RELATED
+critical WRONG HI-10 [HIERARCHY REVERSAL] expected REJECT MATCH, answered LINK AS RELATED
+critical WRONG AD-03 [WRONG STORE ASSIGNMENT] expected REJECT MATCH, answered KEEP SEPARATE
+critical WRONG AD-06 [WRONG STORE ASSIGNMENT] expected ESCALATE, answered KEEP SEPARATE
+critical false merges: 1 of 33 (MM-01)
+critical wrong: 8 of 33 (EO-02, EO-09, MM-01, MM-06, HI-02, HI-10, AD-03, AD-06)
+conservative wrongs: 3 (EO-02, EO-09, MM-06)
+JBEQ-MDM NOT READY

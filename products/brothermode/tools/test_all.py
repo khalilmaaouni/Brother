@@ -365,6 +365,11 @@ SUITES = (
     # principal. Registered in the same change that creates the suite; the
     # inventory gate refuses a test_*.py on disk that SUITES does not name.
     "test_bm_vault_audit.py",
+    # V5 (2026-09-05, founder order, VAULT-HARDENING-SCOPE re-opened by name):
+    # the immutable, hash-chained read-audit trail. Registered in the same
+    # change that creates the suite; the inventory gate refuses a test_*.py
+    # on disk that SUITES does not name.
+    "test_bm_vault_read_audit.py",
     # VB7-01 (2026-08-30): the vault front door, bm_vault_cli.py. Registered
     # in the same change that creates the suite; the inventory gate refuses
     # a test_*.py on disk that SUITES does not name.
