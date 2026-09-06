@@ -104,7 +104,8 @@ def _seed_bare_remote(remote_dir):
     actually PASS, without depending on reaching github.com. Same shape
     as TheExportersOwnInvocationPasses's own fixture below."""
     with tempfile.TemporaryDirectory() as seed_dir:
-        subprocess.run(["git", "init", "-q", "--bare", remote_dir],
+        subprocess.run(["git", "init", "-q", "--bare",
+                        "--initial-branch=main", remote_dir],
                         check=True)
         subprocess.run(["git", "init", "-q", seed_dir], check=True)
         subprocess.run(["git", "-C", seed_dir, "config", "user.name",
@@ -1777,7 +1778,8 @@ class TheExportersOwnInvocationPasses(unittest.TestCase):
         with tempfile.TemporaryDirectory() as remote_dir, \
              tempfile.TemporaryDirectory() as seed_dir, \
              tempfile.TemporaryDirectory() as root:
-            subprocess.run(["git", "init", "-q", "--bare", remote_dir],
+            subprocess.run(["git", "init", "-q", "--bare",
+                            "--initial-branch=main", remote_dir],
                             check=True)
             subprocess.run(["git", "init", "-q", seed_dir], check=True)
             subprocess.run(["git", "-C", seed_dir, "config", "user.name",
@@ -1847,7 +1849,8 @@ class TheExportersOwnInvocationPasses(unittest.TestCase):
         with tempfile.TemporaryDirectory() as remote_dir, \
              tempfile.TemporaryDirectory() as seed_dir, \
              tempfile.TemporaryDirectory() as root:
-            subprocess.run(["git", "init", "-q", "--bare", remote_dir],
+            subprocess.run(["git", "init", "-q", "--bare",
+                            "--initial-branch=main", remote_dir],
                             check=True)
             subprocess.run(["git", "init", "-q", seed_dir], check=True)
             subprocess.run(["git", "-C", seed_dir, "config", "user.name",
@@ -2612,7 +2615,8 @@ class TheReleaseRecordShipsItsOwnSourceRevision(unittest.TestCase):
         with tempfile.TemporaryDirectory() as remote_dir, \
              tempfile.TemporaryDirectory() as seed_dir, \
              tempfile.TemporaryDirectory() as root:
-            subprocess.run(["git", "init", "-q", "--bare", remote_dir],
+            subprocess.run(["git", "init", "-q", "--bare",
+                            "--initial-branch=main", remote_dir],
                             check=True)
             self._git("init", "-q", cwd=seed_dir)
             self._git("config", "user.name", "Seed", cwd=seed_dir)
