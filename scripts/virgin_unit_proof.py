@@ -134,7 +134,7 @@ def runtime_env_var_name(loop_bridge_path):
     try:
         with open(loop_bridge_path, encoding="utf-8") as fh:
             text = fh.read()
-    except OSError:
+    except OSError:  # sbe: allow-silent caller turns None into NO-DATA, docstring above
         return None
     m = _RUNTIME_ENV_VAR_RE.search(text)
     return m.group(1) if m else None

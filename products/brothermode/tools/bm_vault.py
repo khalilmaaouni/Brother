@@ -356,6 +356,40 @@ def _load_bm_vault_contradiction():
     return mod
 
 
+def _make_duplicate_probe(con):
+    """LL-2: a duplicate_probe(lesson) for bm_vault_contradiction.evidence_tier,
+    built once from the already-indexed `con` rather than a second disk walk.
+    Returns the path of a DIFFERENT note, in a different directory, sharing
+    this lesson's own filename stem with different body text -- the shape a
+    harvest-folder poisoning attack takes (same identity filed twice, no
+    contradicts: edge declared) -- or None. Every note's path and body is
+    already in `notes`, so this is a query over memory bm_vault.py already
+    holds, never a fresh read from disk.
+    ponytail: full table scan per lookup; fine at vault size today, add an
+    index on filename stem if this is ever measured slow."""
+    def probe(lesson):
+        own_path = lesson.get("path")
+        if not own_path:
+            return None
+        own_stem = os.path.splitext(os.path.basename(own_path))[0]
+        own_dir = os.path.dirname(os.path.abspath(own_path))
+        own_row = con.execute("SELECT body FROM notes WHERE path=? LIMIT 1",
+                              (own_path,)).fetchone()
+        own_body = (own_row["body"] if own_row else "") or ""
+        for r in con.execute("SELECT path, body FROM notes"):
+            other_path = r["path"]
+            if not other_path or os.path.normpath(other_path) == os.path.normpath(own_path):
+                continue
+            if os.path.splitext(os.path.basename(other_path))[0] != own_stem:
+                continue
+            if os.path.dirname(os.path.abspath(other_path)) == own_dir:
+                continue
+            if (r["body"] or "") != own_body:
+                return other_path
+        return None
+    return probe
+
+
 def _load_bm_vault_decay():
     """Dynamic import by path, the same pattern _load_bm_vault_staleness uses right
     above. (E57 mechanism 2, borrowed from MemoryBank, https://arxiv.org/abs/2305.10250.)
@@ -2007,6 +2041,7 @@ def _print_hits(con, fused, why, header, roots=None, ledger_hits=None, withheld_
         print("NOTE: contradiction resolver unavailable (%s); a CONTRADICTS "
               "pair is served exactly as before, annotated but not "
               "withheld" % e, file=sys.stderr)
+    duplicate_probe = _make_duplicate_probe(con) if contradiction is not None else None
     enrich = _load_enrichment()
     fresh_roots = roots if roots else freshness._default_roots()
     state_con = freshness._state_connect(freshness.STATE_DB)
@@ -2112,6 +2147,31 @@ def _print_hits(con, fused, why, header, roots=None, ledger_hits=None, withheld_
                 # to the plain CONTRADICTS annotation below, exactly the
                 # pre-existing behavior for a note that never declared into
                 # this law.
+            # LL-2, THE EVIDENCE TIER AT RECALL: the same evidence a
+            # declared contradicts: pair already checks (evidence_locator,
+            # verified_at, a duplicate slug) is now checked on EVERY hit,
+            # conflicted or not. Run once this note has survived every
+            # withhold check above it; a REFUSED tier withholds it here the
+            # same way stale/superseded/candidate already do, so it is
+            # never served as applicable. EVIDENCED/UNVERIFIED are printed,
+            # never withheld: UNVERIFIED is advisory only, read by
+            # vault_recall_hook.py's own count of applied vs declined.
+            tier, tier_reason = None, None
+            if contradiction is not None:
+                tier_lesson = contradiction._lesson_from_row(row["path"], row["body"])
+                probe = contradiction.make_evidence_probe(os.getcwd())
+                try:
+                    tier, tier_reason = contradiction.evidence_tier(
+                        tier_lesson, probe, duplicate_probe)
+                except Exception as e:
+                    tier, tier_reason = None, "tier resolver error: %s" % e
+                if tier == contradiction.TIER_REFUSED:
+                    withheld += 1
+                    print("\n  WITHHELD (refused)  %s  [%s, %s]" % (
+                        row["title"], row["kind"], row["source"]))
+                    print("    reason: %s" % tier_reason)
+                    print("    %s" % row["path"])
+                    continue
             print("\n  %s  [%s, %s]" % (row["title"], row["kind"], row["source"]))
             if row["descr"]:
                 print("    %s" % row["descr"][:160])
@@ -2128,6 +2188,8 @@ def _print_hits(con, fused, why, header, roots=None, ledger_hits=None, withheld_
             elif conflicting:
                 print("    CONTRADICTS: %s (see both before treating this as settled)"
                       % ", ".join(conflicting))
+            if tier is not None:
+                print("    TIER: %s (%s)" % (tier, tier_reason))
             print("    matched on: %s" % ", ".join(sorted(set(why.get(nid, ["wording"])))))
             print("    %s" % row["path"])
         state_con.commit()

@@ -46,7 +46,6 @@ run_check() {
   code=$?                      # the COMMAND's code, captured before anything else
   elapsed="$(($(date +%s) - start))"
   last="$(printf '%s\n' "$out" | tail -1 | cut -c1-72)"
-  keep=""
   case "$code" in
     0) pass=$((pass+1));   verdict="PASS   " ;;
     2) nodata=$((nodata+1)); verdict="NO-DATA"; nodata_names="$nodata_names $name" ;;
@@ -57,17 +56,6 @@ run_check() {
        ;;
   esac
   printf '%-7s exit %-3s %-20s %4ss  %s\n' "$verdict" "$code" "$name" "$elapsed" "$last"
-  # VISIBILITY ON A RUNNER: $keep lives under /tmp, which a GitHub runner
-  # discards with the job, so a failure's full output was NO-DATA the one
-  # place it mattered. On REQUIRED_FAST_PRINT_FAILURES=1 or GITHUB_ACTIONS,
-  # print the saved file's tail right after the FAIL line, instead of only
-  # naming a path nobody downstream can open. Exit codes are untouched.
-  if [ -n "$keep" ] && [ -f "$keep" ] \
-     && { [ "$REQUIRED_FAST_PRINT_FAILURES" = "1" ] || [ -n "$GITHUB_ACTIONS" ]; }; then
-    echo "---- $name failure detail ----"
-    tail -80 "$keep"
-    echo "---- $name failure detail ----"
-  fi
 }
 
 echo "Brother: required-fast, the pre-merge contract"

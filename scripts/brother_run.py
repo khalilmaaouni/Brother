@@ -2040,7 +2040,7 @@ def _receipt_file_sha256(path):
     try:
         with open(path, "rb") as fh:
             return hashlib.sha256(fh.read()).hexdigest()
-    except OSError:
+    except OSError:  # sbe: allow-silent boundary read of a file this process just wrote, never a rewrite
         return None
 
 

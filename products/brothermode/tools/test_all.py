@@ -718,6 +718,16 @@ SUITES = (
     # Registered in the same change that creates the suite; the inventory gate
     # refuses a test_*.py on disk that SUITES does not name.
     "test_bm_vault_disambig.py",
+    # Five suites shipped on disk tonight (2026-09-05) without ever being
+    # added here: check_all.sh's product-brothermode row refused to run at
+    # all until the inventory gate was satisfied, exactly the failure this
+    # tuple exists to catch. Registered in the change that closed the gap
+    # rather than the change that created any one of them.
+    "test_bm_profile.py",
+    "test_bm_sessionstart.py",
+    "test_bm_vault_contradiction.py",
+    "test_bm_vault_evidence_tier.py",
+    "test_bm_vault_heat_temporal.py",
 )
 
 # unittest writes its summary to stderr. Both shapes appear in real output:

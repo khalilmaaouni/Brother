@@ -165,7 +165,7 @@ def _last_hash(path):
         return GENESIS_HASH
     try:
         row = json.loads(last)
-    except ValueError:
+    except ValueError:  # sbe: allow-silent caller treats None as write failure, docstring above
         return None
     h = row.get("hash")
     return h if isinstance(h, str) else None

@@ -57,8 +57,20 @@ of every sibling contract module in this family (bm_vault_triage.py's own
 docstring: "so no module's behaviour shifts when a sibling changes").
 
 Python 3.9, standard library only. No vault writes, ever.
+
+ROW LL-2 ADDENDUM (2026-09-05): THE EVIDENCE TIER AT RECALL. The law above
+only engaged evidence_locator/verified_at inside a declared contradicts:
+pair -- the memory poisoning gauntlet (scripts/gauntlet_memory_poisoning.py)
+measured that a dead evidence_locator, a forged future verified_at, and a
+duplicate slug filed in a second folder all read APPLIED because nothing
+outside a conflict pair ever checked them. evidence_tier(), below, is the
+same check made unconditional: one tier per recalled lesson, whether or not
+it is in a conflict at all. It never replaces resolve()/recall_verdict
+(that remains the law for two lessons that disagree); it is the law for one
+lesson taken alone.
 """
 import argparse
+import datetime
 import importlib.util
 import os
 import re
@@ -81,8 +93,8 @@ WITHHOLD = "WITHHOLD"
 ESCALATE = "ESCALATE"
 
 FIELDS = ("lesson_id", "statement", "scope", "source", "source_type",
-          "verified_against", "verified_at", "supersedes", "status",
-          "contradicts", "evidence_locator")
+          "verified_against", "verified_at", "last_verified_at", "supersedes",
+          "status", "contradicts", "evidence_locator")
 
 # Same shape as bm_vault_triage.py's own FRONTMATTER_FIELD_RE: plain
 # `key: value` frontmatter lines, line-oriented.
@@ -144,7 +156,7 @@ def parse_lesson(path):
     try:
         with open(path, encoding="utf-8", errors="replace") as fh:
             text = fh.read()
-    except OSError:
+    except OSError:  # sbe: allow-silent explicit failure path, a reader never a ledger rewrite
         return None
     return _lesson_from_frontmatter(path, _frontmatter(text))
 
@@ -376,6 +388,110 @@ def _has_signal(lesson):
     return any(lesson.get(field, NO_DATA) != NO_DATA for field in _SIGNAL_FIELDS)
 
 
+# LL-2: the evidence tier at recall. One tier per lesson, independent of
+# whether it sits in a declared contradicts: pair at all.
+TIER_EVIDENCED = "EVIDENCED"
+TIER_UNVERIFIED = "UNVERIFIED"
+TIER_REFUSED = "REFUSED"
+
+#: Both date fields this estate's notes actually carry: verified_at (this
+#: resolver's own field, bm_vault_staleness.py's field) and last_verified_at
+#: (vault_recall_hook.py's E74 field, curator-declared applies_to's own
+#: verification date). A note can forge either one without ever touching
+#: evidence_locator or status, so both are checked here on their own,
+#: outside the _has_signal gate below.
+_DATE_FIELDS = ("verified_at", "last_verified_at")
+
+
+def _forged_future_field(lesson, today=None):
+    """(field, value) for the first of _DATE_FIELDS that parses as a real
+    calendar date strictly after today, or None when neither field is
+    declared, or declared but unparsable (an unparsable date is not
+    evidence either way, the same posture _within_as_of already takes
+    above), or declared but not in the future."""
+    today = today or datetime.date.today()
+    today_parts = (today.year, today.month, today.day)
+    for field in _DATE_FIELDS:
+        value = lesson.get(field, NO_DATA)
+        if not value or value == NO_DATA:
+            continue
+        try:
+            parts = tuple(int(p) for p in value.split("-")[:3])
+        except ValueError:  # sbe: allow-silent unparsable date is not evidence either way, docstring above
+            continue
+        if len(parts) == 3 and parts > today_parts:
+            return field, value
+    return None
+
+
+def evidence_tier(lesson, evidence_probe, duplicate_probe=None):
+    """(tier, reason): the ONE evidence tier a recalled lesson carries, read
+    identically by bm_vault.py's _print_hits and by vault_recall_hook.py so
+    both surfaces agree on the same lesson's verdict. Never mutates a note,
+    never writes to the vault, never touches a declared contradicts: pair
+    (resolve()/recall_verdict is the separate law for two lessons that
+    disagree; this is the law for one lesson taken alone, conflicted or not).
+
+    Checked in this order:
+
+      1. duplicate_probe(lesson), when supplied, names a DIFFERENT note
+         sharing this lesson's own slug in a different folder with
+         different body text: TIER_REFUSED. A caller with no vault-wide
+         view of sibling notes (vault_recall_hook.py sees one path at a
+         time) passes None here and this check is simply skipped, never
+         guessed at.
+      2. verified_at or last_verified_at parses as a real date strictly
+         after today (_forged_future_field): TIER_REFUSED, forged evidence,
+         whether or not evidence_locator or status is declared at all.
+      3. neither evidence_locator nor status is declared (_has_signal
+         False): RECALL_NO_DATA, not TIER_UNVERIFIED. This lesson never
+         opted into the resolver's own metadata -- the identical test
+         recall_verdict already applies for the identical reason -- so it
+         is served exactly as it always was rather than downgraded by a
+         law it never declared into. This is most of the vault today.
+      4. no evidence_locator declared (status alone, no locator):
+         TIER_UNVERIFIED, advisory only.
+      5. evidence_probe(lesson) is NO_DATA_EVIDENCE (an unparsable
+         locator): TIER_UNVERIFIED.
+      6. evidence_probe(lesson) is FAILS (a dead file, a grep pattern no
+         longer present, a failing test): TIER_REFUSED.
+      7. evidence_probe(lesson) is HOLDS and status is "superseded":
+         TIER_UNVERIFIED -- evidence holding does not un-supersede a note a
+         human already moved past.
+      8. evidence_probe(lesson) is HOLDS and status is not "superseded":
+         TIER_EVIDENCED.
+    """
+    if duplicate_probe is not None:
+        dup = duplicate_probe(lesson)
+        if dup:
+            return TIER_REFUSED, (
+                "slug %r duplicates %s in a different folder with "
+                "different content" % (lesson["lesson_id"], dup))
+
+    forged = _forged_future_field(lesson)
+    if forged:
+        field, value = forged
+        return TIER_REFUSED, "%s %s is in the future: forged" % (field, value)
+
+    if not _has_signal(lesson):
+        return RECALL_NO_DATA, ("no evidence_locator or status declared: "
+                                 "not tiered by this law")
+
+    locator = lesson.get("evidence_locator", NO_DATA)
+    if not locator or locator == NO_DATA:
+        return TIER_UNVERIFIED, "no evidence_locator declared"
+
+    verdict = evidence_probe(lesson)
+    if verdict == NO_DATA_EVIDENCE:
+        return TIER_UNVERIFIED, "evidence_locator %r could not be checked" % locator
+    if verdict == FAILS:
+        return TIER_REFUSED, "evidence_locator %r does not currently hold" % locator
+
+    if lesson.get("status") == "superseded":
+        return TIER_UNVERIFIED, "evidence holds but the note is marked superseded"
+    return TIER_EVIDENCED, "evidence_locator %r holds" % locator
+
+
 def recall_verdict(con, row, conflicting_titles, base_dir=None):
     """(verdict, winner_title_or_None, why): the smallest hook bm_vault.py's
     own recall path (_print_hits) needs at the exact point it already
@@ -452,7 +568,7 @@ def _parse_as_of(as_of):
         return None
     try:
         return tuple(int(p) for p in as_of.split("-")[:3])
-    except ValueError:
+    except ValueError:  # sbe: allow-silent a reader normalizing a date string, never a ledger write
         return None
 
 

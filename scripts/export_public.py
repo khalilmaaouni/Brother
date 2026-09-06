@@ -103,6 +103,7 @@ Python 3, standard library only. No network beyond git's own fetch/push.
 """
 import argparse
 import difflib
+import glob
 import importlib.util
 import os
 import re
@@ -195,6 +196,16 @@ README_PROVE_RE = re.compile(r"python3 scripts/test_[A-Za-z0-9_]+\.py")
 #: The export tree's own readiness gate, run at tag time from the export
 #: tree's root exactly as a fresh clone would run it.
 READINESS_GATE_REL = os.path.join("scripts", "readiness_gate.py")
+
+#: Every product battery the export ships. A products/<name>/tools/
+#: test_all.py REFUSES TO START while its SUITES names a test_*.py the tree
+#: lacks, so a suite the denylist withholds (or the allowlist never
+#: carried) turns the whole public battery red at a line a reader cannot
+#: act on: the E70 class again. test_bm_vault_contract.py did exactly
+#: this on the public tip from 2026-08-31 to 2026-09-04. `--check-only`
+#: asks the inventory question without running a suite, so run_gates asks
+#: it of every battery in the candidate tree on every export.
+BATTERY_GLOB = os.path.join("products", "*", "tools", "test_all.py")
 
 #: The GitHub CLI. Since the ruleset of row E64 (pull request required on
 #: main, non fast-forward and deletion refused, no bypass) a direct push to
@@ -1044,7 +1055,12 @@ def run_gates(export_dir, identity_dir, baseline_dir=None):
     BROTHER_PRIVATE_TERMS in its environment (cleanse.sh and
     identity_guard.py read that variable, private_terms_scan.py also gets
     it as --terms), so the three can never disagree about which file they
-    checked. Returns (all_ok, [verdict lines])."""
+    checked. The fifth gate, battery_inventory, runs `tools/test_all.py
+    --check-only` from every products/<name> in the candidate tree that
+    ships one (BATTERY_GLOB): a battery whose SUITES names a file the
+    export withholds refuses to start, and that refusal belongs here, at
+    export time, never on a public reader's screen. Returns (all_ok,
+    [verdict lines])."""
     terms_file = (os.environ.get("BROTHER_PRIVATE_TERMS")
                   or DEFAULT_TERMS_FILE)
     gate_env = dict(os.environ)
@@ -1069,12 +1085,24 @@ def run_gates(export_dir, identity_dir, baseline_dir=None):
                      "--terms", terms_file, "--range", "HEAD"],
                     export_dir))
 
+    batteries = sorted(glob.glob(os.path.join(export_dir, BATTERY_GLOB)))
+    for battery in batteries:
+        product_dir = os.path.dirname(os.path.dirname(battery))
+        checks.append(("battery_inventory %s"
+                       % os.path.relpath(product_dir, export_dir),
+                       [sys.executable, os.path.join("tools", "test_all.py"),
+                        "--check-only"],
+                       product_dir))
+
     all_ok = True
     lines = []
     for name, cmd, cwd in checks:
         ok, verdict = run_gate(cmd, cwd, name, env=gate_env)
         lines.append(verdict)
         all_ok = all_ok and ok
+    if not batteries:
+        lines.append("battery_inventory: no %s in the candidate tree, "
+                     "nothing to check" % BATTERY_GLOB)
 
     secrets_ok, secrets_lines = check_secrets(export_dir, baseline_dir)
     lines.extend(secrets_lines)

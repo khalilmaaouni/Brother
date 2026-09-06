@@ -63,20 +63,22 @@ lacks this event":
 ## The route that does work, and what now drives it
 
 Codex reads a USER-SCOPE hooks file out of its own home, and everything below
-was driven live against the app-bundled binary on 2026-09-04. Row C3 turns
+was driven live against the app-bundled binary on 2026-09-04, re-measured
+2026-09-05 after LL-1 (the attempt breaker, row 2 of the learning loop)
+added a second command to brothermode's PostToolUse Bash group. Row C3 turns
 that route from "a user could do this by hand" into something Brother ships:
 `scripts/codex_hooks_install.py` writes the file, and then asks Codex to read
 it back rather than asserting that it worked.
 
     $ python3 scripts/codex_hooks_install.py \
         --codex-home <throwaway> --trust --cwd <throwaway-repo>
-    codex_hooks_install: wrote <throwaway>/hooks.json: 18 command(s) across
+    codex_hooks_install: wrote <throwaway>/hooks.json: 19 command(s) across
       PostToolUse, PreCompact, PreToolUse, SessionEnd, SessionStart, Stop
-    codex_hooks_install: codex hooks/list reports 18 hook(s) from <throwaway>/hooks.json
-    codex_hooks_install: PASS: codex reports all 18 hook(s) trusted and enabled
+    codex_hooks_install: codex hooks/list reports 19 hook(s) from <throwaway>/hooks.json
+    codex_hooks_install: PASS: codex reports all 19 hook(s) trusted and enabled
     exit 0
 
-Eighteen commands is every hook registration the two products ship, and the
+Nineteen commands is every hook registration the two products ship, and the
 second and third lines are Codex's own reading of its own configuration, taken
 through the `hooks/list` method of `codex app-server`.
 

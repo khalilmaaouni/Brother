@@ -64,6 +64,17 @@ try:
 except ImportError:  # pragma: no cover, exercised only by a broken install
     bm_vault_heat_temporal = None
 
+# LL-2 (2026-09-05): THE EVIDENCE TIER AT RECALL. bm_vault_contradiction.py
+# is the ONE owner of evidence_tier (evidence_locator, verified_at,
+# duplicate slug); this hook only calls it, so the two surfaces can never
+# disagree about the same lesson. Guarded the same way the sibling imports
+# above are: an absent module degrades to the pre-LL-2 applies_to-only
+# verdict, never a crash in front of every edit.
+try:
+    import bm_vault_contradiction  # noqa: E402
+except ImportError:  # pragma: no cover, exercised only by a broken install
+    bm_vault_contradiction = None
+
 
 def _config_dir():
     """brother_paths' answer, or the pre-C3 literal when the helper is absent."""
@@ -185,6 +196,10 @@ HUMAN_APPROVED_RE = re.compile(r"^human_approved:\s*(\S+)\s*$", re.M)
 HUMAN_NOT_APPROVED_REASON = ("human_approved false: a drafted lesson nobody "
                               "has approved does not override current evidence")
 UNVERIFIED_LINE_FMT = "recall: UNVERIFIED %s: %s"
+
+#: LL-2: the reason line for a lesson this hook downgraded off
+#: bm_vault_contradiction.evidence_tier rather than off applies_to.
+EVIDENCE_TIER_LINE_FMT = "recall: %s %s: %s"
 
 #: A symbol-shaped anchor's grep, same budget class as bm_freshness.py's own
 #: symbol scan (SYMBOL_SCAN_BUDGET_S there is 8s for many anchors across
@@ -310,6 +325,26 @@ def _lesson_state(slug, path, tree):
     for anchor in applies_to:
         if not _anchor_resolves(anchor, tree):
             return "stale", STALE_LINE_FMT % (slug, anchor, tree), note_type
+    # LL-2, THE EVIDENCE TIER AT RECALL: applies_to passed, so the old E74
+    # verdict alone would say "applied". Fold in bm_vault_contradiction's own
+    # evidence tier, DOWNGRADE ONLY, never an upgrade: a lesson this hook
+    # would otherwise call applied is still declined when the tier says
+    # UNVERIFIED or REFUSED (no vault-wide view here, so REFUSED never
+    # covers a duplicate slug -- bm_vault.py's own check already withholds
+    # that case entirely before this hook ever sees the block). A lesson
+    # that never declared evidence_locator or status (RECALL_NO_DATA, most
+    # of the vault today) is untouched: it never opted into this law.
+    if bm_vault_contradiction is not None:
+        lesson = bm_vault_contradiction.parse_lesson(path)
+        if lesson is not None:
+            probe = bm_vault_contradiction.make_evidence_probe(tree)
+            try:
+                tier, reason = bm_vault_contradiction.evidence_tier(lesson, probe)
+            except Exception as e:  # sbe: allow-silent a broken tier resolver degrades to the old applies_to verdict, never a crash in front of every edit
+                tier, reason = None, None
+            if tier in (bm_vault_contradiction.TIER_UNVERIFIED,
+                       bm_vault_contradiction.TIER_REFUSED):
+                return "unverified", EVIDENCE_TIER_LINE_FMT % (tier, slug, reason), note_type
     return "applied", None, note_type
 
 

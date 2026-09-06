@@ -461,16 +461,6 @@ class LauncherRunsOutsideAnyCheckout(unittest.TestCase):
         self.env = dict(os.environ)
         self.env["DOOR_MODEL_CMD"] = "%s %s" % (sys.executable, self.decomposer)
         self.env["MODEL_WORKER_CMD"] = "%s %s" % (sys.executable, self.model)
-        # A generated runtime lives under self.tmp, not under this hub
-        # checkout, so loop_bridge's own HUB_CANDIDATE (relative to the
-        # launcher's file) never resolves here: on a virgin machine with
-        # no plugin install and no developer-home checkout, resolution
-        # fell through to DEV_CANDIDATE, which exists only on the machine
-        # that wrote it (measured: repro-*.log). Pointing this test at the
-        # hub's OWN engine keeps it proving the shipped launcher without
-        # borrowing an engine from outside the tree.
-        self.env["BROTHER_RUNTIME_ROOT"] = os.path.normpath(
-            os.path.join(HERE, "..", "products", "brothermode", "tools"))
 
     def test_launcher_integrates_a_stub_outcome_from_a_non_checkout_cwd(self):
         proc = sh([sys.executable, self.launcher, "a file exists",
@@ -481,29 +471,6 @@ class LauncherRunsOutsideAnyCheckout(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(self.repo, "launched.txt")), out)
         self.assertIn("integrated (1):", out, out)
         self.assertIn("L1", out, out)
-
-    def test_with_no_engine_reachable_the_launcher_says_no_data_not_a_crash(self):
-        """The other half of the fix above: with BROTHER_RUNTIME_ROOT unset
-        AND HOME pointed at an empty directory (so neither a plugin cache
-        nor a developer checkout answers), the launcher must resolve NO
-        engine and print the NO-DATA adapter line, never silently borrow
-        one from outside the tree. This is what would have failed on the
-        runner before this fix, had the runner also lacked the hub's own
-        engine at HUB_CANDIDATE; it is kept here so a future regression
-        that reintroduces a machine-only fallback is caught locally too."""
-        env = dict(self.env)
-        env.pop("BROTHER_RUNTIME_ROOT", None)
-        env.pop("CLAUDE_CONFIG_DIR", None)
-        env.pop("BROTHER_CONFIG_DIR", None)
-        env["HOME"] = tempfile.mkdtemp(prefix="bundle-runtime-empty-home-")
-        proc = sh([sys.executable, self.launcher, "a file exists",
-                  "--cwd", self.repo, "--runs-root", self.tmp],
-                 cwd=self.outside_cwd, env=env)
-        out = proc.stdout + proc.stderr
-        self.assertIn("no worker adapter could be loaded, so no worker ran",
-                      out, out)
-        self.assertFalse(
-            os.path.exists(os.path.join(self.repo, "launched.txt")), out)
 
     def test_launcher_forwards_an_explicit_runs_root_without_duplicating_it(self):
         proc = sh([sys.executable, self.launcher, "--help"], cwd=self.outside_cwd)

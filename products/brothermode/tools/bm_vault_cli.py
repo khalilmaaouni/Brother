@@ -21,6 +21,7 @@ is it healthy, what may I not do" in one read-only call.
   curate <find|list|accept|reject>   -> bm_vault_curate.py (subcommand is yours to pick)
   commit --vault V -m MSG [--dry-run] -> bake, gate, and commit the vault, see below
   doctor                             -> read-only report, see below
+  bind PATH                          -> the one first-run binding step, see below
 
 Every routed verb passes its remaining arguments straight through to the sibling
 file, over the SAME python3 interpreter, and exits with the child's exit code:
@@ -74,6 +75,20 @@ leaves the index half staged either way, matching this paragraph. `--dry-run`
 runs no writer at all: it prints bm_vault_catalog.py check's own staleness
 report plus `git status --porcelain`'s own line count, and returns without
 baking, staging, or committing anything.
+
+`bind PATH` is the one first-run binding step (row V2, done_check: a scripted
+first run choosing a non-default folder ends with the config pointing at that
+folder with no manual step). It writes {"vault": PATH} into the same
+CONFIG_PATH doctor/_default_vault() already read (bm_vault.py's
+~/.claude/bm_vault.json), creating PATH and CONFIG_PATH's directory if
+missing, merging into whatever the config already held rather than replacing
+it wholesale, and writing atomically (a temp file then os.replace, so a
+crash mid-write never leaves a half-written config). This is the only writer
+of that file in the whole project; before this verb nothing wrote it and a
+fresh install had a `_default_vault()` that could only ever return None or
+an environment variable someone set by hand. Exits 1 with NO-DATA on either
+failure path (PATH cannot be created, or CONFIG_PATH cannot be written),
+never partway: a failed bind leaves the prior config, if any, untouched.
 
 `doctor` prints, read-only, never writing a vault byte:
   (a) vault path resolution: BM_VAULT_ROOT / BROTHERMODE_VAULT, the installer-written
@@ -301,6 +316,46 @@ def cmd_doctor(argv):
     return 0
 
 
+def cmd_bind(argv):
+    """Write {"vault": PATH} into bm_vault.py's own CONFIG_PATH, merging into
+    whatever the config already holds rather than replacing it wholesale, so
+    a future key living beside "vault" is never clobbered by this verb.
+    Creates PATH itself and CONFIG_PATH's directory if either is missing.
+    Two explicit failure paths, both NO-DATA and both leaving the prior
+    config (if any) untouched: PATH cannot be created, or CONFIG_PATH cannot
+    be written. The write itself is a temp file then os.replace, so a crash
+    mid-write never leaves a half-written config either."""
+    if argv and argv[0] in ("-h", "--help"):
+        sys.stdout.write("usage: bm_vault_cli.py bind PATH\n")
+        return 0
+    if len(argv) != 1:
+        sys.stderr.write("bm_vault_cli bind: usage: bm_vault_cli.py bind PATH\n")
+        return 2
+    path = os.path.abspath(os.path.expanduser(argv[0]))
+    try:
+        os.makedirs(path, exist_ok=True)
+    except OSError as exc:
+        sys.stderr.write(
+            "bm_vault_cli bind: NO-DATA, could not create %r (%s)\n" % (path, exc))
+        return 1
+    bm_vault = _load_bm_vault()
+    cfg = bm_vault._config()
+    cfg["vault"] = path
+    try:
+        os.makedirs(os.path.dirname(bm_vault.CONFIG_PATH), exist_ok=True)
+        tmp_path = bm_vault.CONFIG_PATH + ".tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, indent=2)
+        os.replace(tmp_path, bm_vault.CONFIG_PATH)
+    except OSError as exc:
+        sys.stderr.write(
+            "bm_vault_cli bind: NO-DATA, could not write %s (%s)\n"
+            % (bm_vault.CONFIG_PATH, exc))
+        return 1
+    print("vault bound: %s -> %s" % (bm_vault.CONFIG_PATH, path))
+    return 0
+
+
 def _build_commit_parser():
     p = argparse.ArgumentParser(prog="bm_vault_cli.py commit",
                                  description="bake, gate, and commit the vault")
@@ -439,7 +494,7 @@ def cmd_commit(argv):
 
 def _usage():
     return ("usage: bm_vault_cli.py <verb> [args...]\n"
-            "verbs: %s, commit, doctor\n" % ", ".join(sorted(VERBS)))
+            "verbs: %s, bind, commit, doctor\n" % ", ".join(sorted(VERBS)))
 
 
 def main(argv=None):
@@ -450,6 +505,8 @@ def main(argv=None):
     verb, rest = argv[0], argv[1:]
     if verb == "doctor":
         return cmd_doctor(rest)
+    if verb == "bind":
+        return cmd_bind(rest)
     if verb == "commit":
         return cmd_commit(rest)
     if verb not in VERBS:

@@ -662,6 +662,12 @@ class TelemetryEveryHookProgramPreConsentCase(unittest.TestCase):
     # one program, so both floors move by exactly one, the same shape as
     # the V1 raise above.
     #
+    # Raised 10 to 11 and 14 to 15 on 2026-09-05 (LL-1, the attempt breaker)
+    # when the PostToolUse Bash group gained a second entry beside
+    # bm_bash_audit.py post: tools/attempt_hook.py. One command string, one
+    # program, so both floors move by exactly one, the same shape as the
+    # V1 and E54 raises above.
+    #
     # BOTH NUMBERS SURVIVED THE 2026-08-17 WINDOWS PORT UNCHANGED, and that
     # is the point rather than a coincidence. The port moved the Stop and
     # PreCompact chains out of two `sh -c` strings and into
@@ -672,8 +678,8 @@ class TelemetryEveryHookProgramPreConsentCase(unittest.TestCase):
     # programs still run on the same eight command strings, and a program
     # dropped from the table fails here exactly as a program dropped from a
     # command string used to.
-    MIN_WIRED_COMMAND_STRINGS = 10
-    MIN_WIRED_PROGRAMS = 14
+    MIN_WIRED_COMMAND_STRINGS = 11
+    MIN_WIRED_PROGRAMS = 15
     _PROGRAM_RE = re.compile(
         r"(?:python3|sh)\s+\S*?(?:tools|scripts)/\S+\.(?:py|sh)")
 
@@ -882,6 +888,25 @@ class TelemetryEveryHookProgramPreConsentCase(unittest.TestCase):
             "a machine-wide cap is for. Its two output funnels carry only "
             "its own fixed sentences plus three integers, reviewed in "
             "tools/write_sites.json."),
+        # LL-1 (2026-09-05): the attempt breaker, wired into the same
+        # PostToolUse Bash group as bm_bash_audit.py. It IS gated, the same
+        # per-command technique bm_bash_audit.py and vault_recall_hook.py
+        # both use (a private, duplicated _consented(), checked before any
+        # read of the ledger or any write to it or the outcome log), but it
+        # fits neither shape below: it has no subcommand at all, so there
+        # is no cmd_ function for the "per-command" shape to find and no
+        # COMMANDS[] dispatch table for "one-door" to check an order
+        # against. Exempted here rather than forcing a dispatch table onto
+        # a single bare entry point; the gate itself is proven directly in
+        # tools/test_attempt_hook.py (a "setup_complete": false config
+        # writes nothing to either store, a "setup_complete": true one
+        # does), the same shape this file's own test_calibrated_a_wired_
+        # command_that_never_ran_is_not_a_pass reasoning asks for: a
+        # negative case that would fail if the gate were ever removed.
+        "attempt_hook.py": (
+            "gated directly in _run() rather than through either "
+            "enumerated dispatch shape; see the comment on this entry and "
+            "tools/test_attempt_hook.py's own consent tests for the proof."),
     }
 
     # WHERE each module's gate lives, and how it spells the check. Every

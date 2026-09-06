@@ -135,6 +135,29 @@ def _load_bm_repo_scope():
         return None
 
 
+def _no_vault_bound():
+    """True when bm_vault.py's own _default_vault() resolves to nothing:
+    neither BM_VAULT_ROOT/BROTHERMODE_VAULT nor the installer config
+    (~/.claude/bm_vault.json) names a folder. Row V2: a fresh install binds
+    no vault and nothing ever nudges the newcomer to fix that, so the first
+    session that would otherwise show "new project" also names the gap.
+    Loaded by path, same technique _load_bm_repo_scope() above already uses
+    (bm_vault.py is a sibling script, not a package this file can import),
+    and fail-open like every check in this file: an unreadable or broken
+    bm_vault.py degrades to False (no nudge shown) rather than a crash,
+    since a missed nudge is a much smaller failure than taking the session
+    down over a purely informational line."""
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "bm_vault_for_sessionstart", os.path.join(HERE, "bm_vault.py"))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod._default_vault() is None
+    except Exception:  # sbe: allow-silent optional nudge; a broken load just skips the line
+        return False
+
+
 def _run(args, stdin_text=None, capture=False, keep_stderr=False):
     """One sibling tool, with the shell version's exact degrade semantics:
     OSError (interpreter or file missing) reads as a silent non-run, the
@@ -191,6 +214,12 @@ def main():
         # "installed" and "used". README.md names this command as the first
         # thing to type; until now the product's own first words never did.
         _say("BrotherMode: new project. Run /brothermode:start to begin.\n")
+        # Row V2: a fresh install binds no vault at all, and a nag that fires
+        # every session stops being read, so this line is gated to the same
+        # first-run moment as the line above, silent ever after.
+        if _no_vault_bound():
+            _say("No memory vault is bound yet; /brothermode:start will ask "
+                 "where it should live and bind it.\n")
 
     try:
         with io.open(_tool("DIGEST.md"), encoding="utf-8") as fh:

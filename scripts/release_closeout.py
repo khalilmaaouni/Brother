@@ -348,11 +348,12 @@ UPGRADE_ROUTE = (
     ("plugin", "marketplace", "remove", "brother"),
     ("plugin", "marketplace", "add", "{source}", "--ref", "{ref}"),
     ("plugin", "add", "brother@brother", "--json"),
+    ("plugin", "add", "brothermode@brother", "--json"),
 )
 
 #: What each route step is called on the gate's own record, in route order.
 UPGRADE_ROUTE_LABELS = ("marketplace remove", "marketplace add target",
-                        "plugin add target")
+                        "plugin add target", "plugin add brothermode target")
 
 #: The lines worth lifting out of each route step's output onto the record.
 UPGRADE_ROUTE_NEEDLES = ("Removed marketplace", "Added marketplace",
