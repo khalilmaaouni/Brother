@@ -4867,3 +4867,5 @@ def main(argv=None):
 
 if __name__ == "__main__":
     sys.exit(main())
+
+# proof: an uncommitted drift line so the bundle-runtime check must fail
