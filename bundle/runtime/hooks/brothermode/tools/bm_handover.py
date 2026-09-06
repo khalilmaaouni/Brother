@@ -1,0 +1,2236 @@
+#!/usr/bin/env python3
+"""bm_handover.py: the baton ceremony tool.
+
+WHAT THIS IS FOR
+  docs/superpowers/specs/2026-08-11-baton-ceremony-design.md, section 4.
+  Sessions die; work must not. This tool is the CLOSE half's skeleton and
+  verdict, and the START half's first read: it generates a traceable pack of
+  narrative files pre filled from the store, checks that a filled pack is
+  actually ready to close, zips it for the founder's own archive, and (on a
+  fresh session) reports what the store already knows about leftovers from
+  a session that never got to close cleanly.
+
+Four commands:
+  skeleton [--out DIR] [--slot NAME] [--date YYYY-MM-DD]
+      Writes the pack folder (default docs/handover/<date>-<slot>/, slot
+      default "session") with the eight files this pack always carries,
+      structural sections pre filled from the store, and one FILL-BY-HAND
+      human block per file. Re running over a filled pack preserves every
+      human byte from the "Notes" heading onward, unchanged, however many
+      blocks or trailing paragraphs a person added (I10): see
+      _existing_human_region / render_page. --out must be relative to the
+      project root; an absolute path is refused, never silently
+      reinterpreted.
+  verify-close [--pack DIR] [--session ID]
+      The mechanical checklist: every pack file present, non empty, and
+      carrying a filled human block (FILL-BY-HAND matched case
+      insensitively); a command center copy when the project has one; the
+      close report's first non-empty human line a whole-word FINISHED or
+      UNFINISHED; a zip whose CONTENT matches the pack right now; and no
+      unparked record (any state but parked or complete) still held by the
+      closing session, given by --session or, when omitted, the store's
+      own notion of the current session (BM_FENCE_SESSION_ID or
+      CLAUDE_SESSION_ID). NO-DATA when there is no store, no pack, or no
+      session can be determined for the ownership check; never PASS in
+      that case. --pack is routed through the same containment gate
+      skeleton's --out uses. PASS only when every check clears; exit 0
+      only on PASS.
+  zip [--pack DIR]
+      Packages the pack folder to
+      ~/Documents/BrotherModeUp-handovers/BrotherMode-Handover-<date>-<slot>
+      .zip (the directory name doubles as <date>-<slot>). Idempotent by
+      content: an unchanged pack says so rather than rewriting the file.
+      --pack is contained to the project root; a subdirectory in the pack,
+      or a pack file that is a symlink escaping the project, is refused
+      rather than silently dropped or followed.
+  detect
+      Read only: the newest pack and zip with their ages, unacknowledged
+      handovers (from the store), and dead-owner leftovers (from
+      tools/bm_stall.py's own sweep). Exit 0 always; an empty estate is
+      stated, never silent.
+
+WHAT THIS DOES NOT DO
+  It never writes the store. Every store mutation the ceremony needs (park,
+  handover-ack) stays in bm_store.py, exactly where the rule (section 3)
+  already sends the founder. Every store READ here goes through a public
+  bm_store.py or bm_stall.py function: ReadOnlyStore.dump(), bs.verify(),
+  and bm_stall.sweep(). No SQL of this file's own, no network, no
+  subprocess.
+
+Python 3.9, standard library only.
+
+No em or en dashes anywhere in this file, its comments, or its output.
+"""
+
+import hashlib
+import importlib.util
+import io
+import os
+import re
+import shutil
+import sys
+import time
+import zipfile
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def _load(name):
+    """Load a sibling module by PATH, the same technique tools/bm_packs.py
+    and tools/bm_stall.py use: this file is invoked from an arbitrary
+    working directory and must not depend on whatever sys.path the caller
+    happened to have."""
+    spec = importlib.util.spec_from_file_location(
+        name, os.path.join(HERE, name + ".py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+bs = _load("bm_store")
+
+HUMAN_BEGIN = bs.HUMAN_BLOCK_BEGIN
+HUMAN_END = bs.HUMAN_BLOCK_END
+
+FILL_BY_HAND = "FILL-BY-HAND"
+
+SLOT_DEFAULT = "session"
+
+PACK_FILES = (
+    "00-READ-ME-FIRST.md",
+    "01-HANDOVER.md",
+    "02-LEARNINGS-AND-MISTAKES.md",
+    "03-RULES-AND-PROCESS-FIXES.md",
+    "04-NEXT-LOOPS-PRIORITIZED.md",
+    "05-VAULT-AND-OBSIDIAN.md",
+    "06-CLOSE-REPORT.md",
+    "07-NEXT-SESSION-PROMPT.md",
+)
+
+PAGE_TITLES = {
+    "00-READ-ME-FIRST.md": "Read me first",
+    "01-HANDOVER.md": "Handover",
+    "02-LEARNINGS-AND-MISTAKES.md": "Learnings and mistakes",
+    "03-RULES-AND-PROCESS-FIXES.md": "Rules and process fixes",
+    "04-NEXT-LOOPS-PRIORITIZED.md": "Next loops, prioritized",
+    "05-VAULT-AND-OBSIDIAN.md": "Vault and Obsidian",
+    "06-CLOSE-REPORT.md": "Close report",
+    "07-NEXT-SESSION-PROMPT.md": "Next session prompt",
+}
+
+#: The one pack page that is not free prose: a paste-ready prompt for
+#: whoever opens the next session, generated by default at every close
+#: rather than depending on somebody remembering to hand-write one (the
+#: model this generator follows is the hand-written
+#: docs/handover/2026-08-20-day-run-close/07-NEXT-SESSION-PROMPT.md).
+PROMPT_PAGE = "07-NEXT-SESSION-PROMPT.md"
+
+#: The four things this generator cannot know, each its own human block
+#: under its own subheading on PROMPT_PAGE, matched to the block at the
+#: same POSITION (_prompt_page_problem below), same convention every other
+#: page's single human block already follows, just four times over. The
+#: hint text is the DEFAULT_HUMAN-style seed for a fresh page.
+PROMPT_SLOTS = (
+    ("Goal of the next round",
+     "the goal of the next round, in one sentence."),
+    ("Decisions already made",
+     "the decisions already made, so the next session does not re-ask."),
+    ("Ordered work list",
+     "the ordered work list; every item names its files and its runnable "
+     "done-check."),
+    ("Frozen or blocked",
+     "what is frozen or blocked, and why."),
+)
+
+#: The rules this estate has already paid for, generated onto PROMPT_PAGE
+#: so they travel with every close pack instead of living only in whoever
+#: remembers them. One list, edited in one place, rather than restated by
+#: hand in every hand-written successor prompt (the day-run pack's own
+#: 07-NEXT-SESSION-PROMPT.md restates several of these from memory; this is
+#: the generator's answer to that repetition).
+STANDING_LESSONS = (
+    "PO-1, the gate recipe, exactly: clear the sentinel file FIRST, "
+    "detach the run, poll the process rather than a fixed sleep, and keep "
+    "hands off the tree while it runs. The gate refuses a dirty tree.",
+    "git add every new file, THEN regenerate the manifest (CHECKSUMS.sha256) "
+    "LAST, then commit. Regenerating before a new file is added silently "
+    "omits it from the manifest.",
+    "The delivery scans (secret, dash, attribution, private-terms, and "
+    "whichever others this project runs) are grep-shaped, and a grep that "
+    "finds nothing exits 1, not 0. Read the exit code; a scan step that "
+    "is not checked is not a scan.",
+    "Claim write scope in BOTH registries before writing a single byte, "
+    "under this session's own DERIVED label. A session never reuses a "
+    "label a previous session printed; see the STANDING PREAMBLE above "
+    "for how a label is derived.",
+    "A worktree agent's tree starts at HEAD, not at the main tree's "
+    "uncommitted state. Uncommitted work in the main checkout is invisible "
+    "to it until that work is committed.",
+    "Ask a control for its own answer rather than re-deriving that answer "
+    "by hand (grep, manual parse, a second reader of the same file "
+    "format). Two readers of one format drift silently. NO-DATA is never "
+    "a pass, whichever way the answer was reached.",
+    "Every dated document carries a status line in its first 25 lines.",
+    "A complaint closes with code plus a regression test that fails on "
+    "the pre-fix shape, never with prose alone.",
+    "Nothing lands after a release-cut commit until the tag is pushed; "
+    "the tag is a founder gate.",
+)
+
+DEFAULT_HUMAN = {
+    "00-READ-ME-FIRST.md": (
+        FILL_BY_HAND + ": anything else the next session should know "
+        "before reading further."),
+    "01-HANDOVER.md": (
+        FILL_BY_HAND + ": what happened this session, and what is next."),
+    "02-LEARNINGS-AND-MISTAKES.md": (
+        FILL_BY_HAND + ": learnings, mistakes, and near misses from this "
+        "session."),
+    "03-RULES-AND-PROCESS-FIXES.md": (
+        FILL_BY_HAND + ": a rule or process fix this session's own mistakes "
+        "surfaced, if any."),
+    "04-NEXT-LOOPS-PRIORITIZED.md": (
+        FILL_BY_HAND + ": the next loops, in priority order."),
+    "05-VAULT-AND-OBSIDIAN.md": (
+        FILL_BY_HAND + ": what changed in the memory vault this session, and "
+        "its session log entry."),
+    "06-CLOSE-REPORT.md": (
+        FILL_BY_HAND + ": replace this whole block. The FIRST LINE must "
+        "start with the exact word FINISHED, or the exact word UNFINISHED "
+        "followed by exactly where the baton lies."),
+}
+
+#: The live board to copy into a pack, checked in this order. GANTT.html
+#: is the project's current board (the progress-page law); COMMAND-
+#: CENTER.html is the older name, kept as a fallback for a project that
+#: has not moved to GANTT.html yet. Fixes a real defect: for three days
+#: this generator copied only COMMAND-CENTER.html (last written 2026-08-17)
+#: while the live board moved to GANTT.html (written same-day, every
+#: close), so every pack in that window shipped a stale copy of a page
+#: nobody was looking at any more. _board_source is the one place that
+#: decides which file wins, so cmd_skeleton's copy, _struct_00's text, and
+#: cmd_verify_close's check 1b can never disagree about which file is
+#: "the" board.
+BOARD_CANDIDATES = (
+    ("docs", "plan", "GANTT.html"),
+    ("docs", "plan", "COMMAND-CENTER.html"),
+)
+
+
+def _board_source(root):
+    """(rel_path_tuple, abs_path) for the first BOARD_CANDIDATES entry that
+    exists in this project, or (None, None) if neither does. The in-pack
+    filename is always the source file's OWN basename (rel_path_tuple[-1]):
+    a GANTT.html copy is never renamed to COMMAND-CENTER.html or back, so
+    the name in the pack always matches the name a reader would recognize
+    from the live project."""
+    for rel in BOARD_CANDIDATES:
+        p = bs.safe_project_path(root, *rel)
+        if os.path.isfile(p):
+            return rel, p
+    return None, None
+
+def _report_superseded_board_copies(pack_dir, board_rel):
+    """M21. Report every board copy sitting in `pack_dir` that is NOT the
+    board this project would copy now, and say which of the two ways it got
+    there. `board_rel` is `_board_source`'s first return value, so None means
+    the project has no board at all any more.
+
+    The M19 refresh above fixed the board's CONTENT going stale. It cannot
+    see either way the board's IDENTITY changes under a pack, because both
+    leave the copy already in pack_dir untouched:
+
+    APPEARED. skeleton ran when only the SECOND candidate existed, so the
+    pack holds a copy under that name and its read-me points there. The
+    first candidate is then written, `_board_source` starts answering with
+    it, the refresh copies it in beside the old one, and the pack ships two
+    boards while naming the wrong one.
+
+    DISAPPEARED. The live board is removed, `_board_source` returns
+    (None, None), and `if board_abs:` skips the whole refresh, so the copy is
+    archived unchanged with nothing to say it now corresponds to no file in
+    the project.
+
+    This only ever PRINTS, which is what M21's own done_check asks for: the
+    pack is to be REPORTED rather than silently archived. Deleting the
+    superseded copy would destroy the only surviving trace of a board
+    somebody may have been reading, and rewriting the read-me is the closing
+    session's judgement, not this function's. It runs before the zip is
+    written so the operator sees it while the pack can still be changed.
+    """
+    live_name = board_rel[-1] if board_rel else None
+    for rel in BOARD_CANDIDATES:
+        name = rel[-1]
+        if name == live_name:
+            continue
+        if not os.path.isfile(os.path.join(pack_dir, name)):
+            continue
+        if live_name:
+            _out(
+                "the pack also holds %s, which is SUPERSEDED: this project's "
+                "board is now %s, so the pack carries two boards and "
+                "00-READ-ME-FIRST.md still names the superseded one. Delete "
+                "the superseded copy and regenerate the read-me, or say in "
+                "the close report which board a reader should believe"
+                % (name, live_name))
+        else:
+            _out(
+                "the pack holds %s but %s no longer exists in this project, "
+                "so the archived board corresponds to nothing on disk and "
+                "nothing refreshed it. Say in the close report where the "
+                "board went, or restore it before zipping"
+                % (name, os.path.join(*rel)))
+
+
+GENERATED_NOTE = (
+    "<!-- GENERATED by tools/bm_handover.py. Regenerate rather than "
+    "hand-edit, except inside the human markers, which are preserved "
+    "verbatim. -->")
+
+#: The fixed heading every page's human section opens with (render_page
+#: writes it verbatim). Everything from this line to end of file, on a page
+#: already on disk, is the region I10 protects: not just the first human
+#: block, but every byte after this heading, however many blocks or trailing
+#: paragraphs a person added (report finding F8). See _existing_human_region.
+NOTES_HEADING = "## Notes (human, preserved verbatim on regeneration)"
+
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+#: The close report's status line must open with one of these words, matched
+#: whole-word (report finding F10: a prefix match let "FINISHEDNESS is a
+#: myth..." through). Case sensitive on purpose: FINISHED and UNFINISHED are
+#: shouted so a scanning eye cannot miss them, unlike the FILL-BY-HAND marker
+#: scan below, which is deliberately case INSENSITIVE (report finding F15).
+#: The asymmetry is intentional: FILL-BY-HAND is a generated label a person
+#: might retype in any case without meaning anything by it; FINISHED /
+#: UNFINISHED is a word this tool asks the CLOSING SESSION to shout on
+#: purpose, so a differently-cased spelling is not an accidental match to
+#: forgive, it is a missed instruction to catch.
+_STATUS_LINE_RE = re.compile(r"^(FINISHED|UNFINISHED)\b")
+
+PASS, FAIL, NODATA = 0, 1, 2
+
+#: Returned by _pack_paths_not_in_git when the project is not a git
+#: repository at all. A distinct object rather than None or an empty list,
+#: because the three answers are genuinely different: NOT_A_GIT_REPO means
+#: the question does not apply, None means it could not be answered, and an
+#: empty list means it was answered and everything is committed.
+NOT_A_GIT_REPO = object()
+
+
+# ---------------------------------------------------------------------------
+# Small shared helpers.
+# ---------------------------------------------------------------------------
+
+def _out(msg=""):
+    sys.stdout.write("%s\n" % msg)
+
+
+def _err(msg):
+    sys.stderr.write("%s\n" % msg)
+
+
+def _parse(argv, known, wants_value=()):
+    """Flags into (positional, kv), refusing anything unrecognized. The
+    same shape tools/bm_packs.py's _parse uses, minus the repeatable-flag
+    case this tool never needs."""
+    positional, kv, i = [], {}, 0
+    while i < len(argv):
+        tok = argv[i]
+        if tok.startswith("--"):
+            name = tok[2:]
+            if name not in known:
+                _err("bm_handover: unrecognized flag --%s (recognized: %s)"
+                     % (name, ", ".join("--" + k for k in sorted(known))))
+                sys.exit(2)
+            if name in wants_value:
+                if i + 1 >= len(argv):
+                    _err("bm_handover: --%s needs a value" % name)
+                    sys.exit(2)
+                kv[name] = argv[i + 1]
+                i += 2
+                continue
+            kv[name] = True
+            i += 1
+            continue
+        positional.append(tok)
+        i += 1
+    return positional, kv
+
+
+#: A record is still "unparked and owned" (report finding F6) in every state
+#: except the two settled ones: "parked" (the session let go of it, with a
+#: handover) and "complete" (finished, nothing left to hand off). Derived
+#: from bs._LEGAL_MOVES, the store's own transition table (tools/bm_store.py
+#: around line 5554: "parked", "active", "complete", "adopted"), rather than
+#: a literal "active" restated here: that literal is exactly what let an
+#: "adopted" record, equally unparked and equally owned, slip past check 4.
+UNPARKED_STATES = frozenset(
+    s for s in bs._LEGAL_MOVES if s not in ("parked", "complete"))
+
+
+def _root():
+    root, _source = bs.require_root()
+    return root
+
+
+def _inv():
+    return bs.invocation("bm_handover.py", os.path.join(HERE, "bm_handover.py"))
+
+
+def _store_inv():
+    return bs.invocation("bm_store.py", os.path.join(HERE, "bm_store.py"))
+
+
+def _forecast_inv():
+    return bs.invocation("bm_forecast.py",
+                         os.path.join(HERE, "bm_forecast.py"))
+
+
+def _today():
+    return time.strftime("%Y-%m-%d")
+
+
+def _current_session_id():
+    """The store's own notion of "the session doing this", read when
+    verify-close's --session flag is omitted (report finding F1). The same
+    two harness env vars bm_store.py's own _hook_derived_session_id reads,
+    in the same order (BM_FENCE_SESSION_ID, then CLAUDE_SESSION_ID), taken
+    AS-IS rather than through that function's hook-derived bm1-<hash>
+    label: deriving that label materializes a token file on disk
+    (tools/bm_fence_hook.py's ensure_token), and this tool is read only
+    over the store per section 4. Returns "" when neither env var is set;
+    the caller decides what an undetermined session means (verify-close
+    treats it as NO-DATA, never as PASS)."""
+    return (os.environ.get("BM_FENCE_SESSION_ID", "").strip()
+            or os.environ.get("CLAUDE_SESSION_ID", "").strip())
+
+
+def _handovers_dir():
+    """~/Documents/BrotherModeUp-handovers, or BROTHERMODE_HANDOVERS_DIR
+    when set. Read at CALL time, not at import time, so a test that sets
+    the env var after loading this module (the ordinary case for a module
+    loaded once and reused across a suite) still redirects every command
+    that writes here. Mirrors the BROTHERMODE_VAULT idiom tools/
+    bm_autosave.py, tools/bm_telemetry.py and tools/bm_ledger.py already
+    use for the same reason: a real founder path must never be the only
+    spelling a test can reach."""
+    return os.environ.get("BROTHERMODE_HANDOVERS_DIR",
+                          os.path.expanduser("~/Documents/BrotherModeUp-handovers"))
+
+
+def _scrub(value):
+    """The same two-function funnel tools/bm_stall.py's own _scrub applies:
+    redact_text for secret shapes, mask_absolute_paths for the founder's
+    filesystem layout. Every store-derived string this file writes to a
+    pack page or prints goes through here first."""
+    return bs.mask_absolute_paths(bs.redact_text(value or ""))
+
+
+def _out_scrubbed(msg=""):
+    """_out, with absolute paths masked (report finding F14). verify-close
+    and detect print verdicts the ceremony asks a session to QUOTE into a
+    session log or a committed pack page, so the founder's filesystem
+    layout must not ride along in a path an operator only needed to see
+    on their own screen. zip's own stdout is deliberately NOT routed
+    through this: the report scoped F14 to verify-close and detect only,
+    and zip's message is the one place an operator needs the real path to
+    go look at what was just written."""
+    _out(bs.mask_absolute_paths(msg))
+
+
+def _fmt_age(seconds):
+    seconds = max(0.0, seconds)
+    if seconds < 60:
+        return "%ds" % int(seconds)
+    minutes = seconds / 60.0
+    if minutes < 60:
+        return "%.0fm" % minutes
+    hours = minutes / 60.0
+    if hours < 48:
+        return "%.1fh" % hours
+    return "%.1fd" % (hours / 24.0)
+
+
+def _dir_mtime(pack_dir):
+    """The freshest mtime among the pack's own files. A plain directory
+    mtime does not move when an existing file inside it is REWRITTEN in
+    place (only when an entry is added or removed), and filling in a
+    narrative slot is exactly that: the same seven files, rewritten.
+
+    Every filesystem call here is a BOUNDARY READ (report finding F12): an
+    unreadable directory or a file that vanishes mid-walk raises OSError,
+    converted to bs.BMStoreError rather than left to crash whatever called
+    this, so detect's own "exit 0 always" promise can hold even when a
+    pack directory is not readable."""
+    try:
+        times = [os.path.getmtime(pack_dir)]
+        for name in os.listdir(pack_dir):
+            full = os.path.join(pack_dir, name)
+            if os.path.isfile(full):
+                times.append(os.path.getmtime(full))
+        return max(times)
+    except OSError as e:
+        raise bs.BMStoreError(
+            "could not read %s to compute its freshness (%s)"
+            % (pack_dir, e))
+
+
+def _pack_dirname(date, slot):
+    return "%s-%s" % (date, slot)
+
+
+def _find_newest_pack(root):
+    """The most recently touched directory under docs/handover, or None.
+
+    A candidate that cannot be read (report finding F12: a permission
+    error while scoring it) is skipped rather than left to crash the
+    caller: detect's own promise is exit 0 always, and this is the
+    function both detect and verify-close's auto-detection share."""
+    handover_root = bs.safe_project_path(root, "docs", "handover")
+    if not os.path.isdir(handover_root):
+        return None
+    try:
+        names = os.listdir(handover_root)
+    except OSError:  # sbe: allow-silent unreadable handover root, docstring above: detect's own promise is exit 0 always
+        return None
+    candidates = [os.path.join(handover_root, n) for n in names
+                 if os.path.isdir(os.path.join(handover_root, n))]
+    if not candidates:
+        return None
+    scored = []
+    for c in candidates:
+        try:
+            scored.append((_dir_mtime(c), c))
+        except bs.BMStoreError:  # sbe: allow-silent unscoreable candidate skipped per F12, per-candidate not fatal to the scan
+            continue
+    if not scored:
+        return None
+    scored.sort(key=lambda t: t[0], reverse=True)
+    return scored[0][1]
+
+
+def _find_newest_zip():
+    d = _handovers_dir()
+    if not os.path.isdir(d):
+        return None
+    candidates = [os.path.join(d, n) for n in os.listdir(d)
+                 if n.startswith("BrotherMode-Handover-") and n.endswith(".zip")
+                 and os.path.isfile(os.path.join(d, n))]
+    if not candidates:
+        return None
+    candidates.sort(key=os.path.getmtime, reverse=True)
+    return candidates[0]
+
+
+def _zip_path_for(dirname):
+    return os.path.join(_handovers_dir(), "BrotherMode-Handover-%s.zip" % dirname)
+
+
+def _sha256_file(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _contained_pack_dir(root, raw):
+    """A --pack argument, resolved to an absolute path INSIDE root, through
+    the exact same bs.safe_project_path containment gate cmd_skeleton's
+    --out already runs every write through: symlink-escape and hardlink
+    checks on every path component, then a final realpath check.
+
+    verify-close and zip used to skip this entirely (plain
+    os.path.abspath and nothing else), so a --pack pointed at any
+    absolute directory (report findings F13, A6d), at the project root
+    itself (A6e), or reached through a symlinked component, was read or
+    packaged unredacted. Raises bs.OwnershipRefused('path-escape') for
+    anything outside the project, exactly as skeleton already does for
+    --out.
+
+    Uses os.path.realpath, not os.path.abspath, on the incoming path: the
+    project root bs.require_root() hands back is itself already resolved
+    (macOS routinely symlinks /var -> /private/var), and comparing a
+    resolved root against an UNresolved caller path made every legitimate
+    absolute --pack look like an escape (a real regression caught by this
+    file's own test suite, not a report finding). Resolving both sides is
+    also what correctly catches a pack_dir reached through a symlinked
+    component: it dissolves to wherever that symlink really points, and
+    the containment check below judges THAT."""
+    abs_raw = os.path.realpath(os.path.abspath(raw))
+    real_root = os.path.realpath(root)
+    rel = os.path.relpath(abs_raw, real_root)
+    parts = [] if rel == os.curdir else rel.split(os.sep)
+    if not parts or parts[0] == os.pardir or os.path.isabs(rel):
+        raise bs.OwnershipRefused(
+            "path-escape",
+            "%s resolves to %s, which is not inside the project root %s "
+            "(or is the project root itself, which is not a valid pack "
+            "directory); refusing to read or package it"
+            % (raw, abs_raw, real_root))
+    return bs.safe_project_path(root, *parts)
+
+
+def _safe_pack_file(root, pack_dir, name):
+    """One file's path inside an already-contained pack_dir, routed
+    through the same bs.safe_project_path gate as _contained_pack_dir
+    itself, so a pack FILE that is a symlink escaping the project (report
+    finding F5, R2b: all seven pack files replaced with symlinks to one
+    decoy outside the project) is refused rather than followed."""
+    real_root = os.path.realpath(root)
+    rel_dir = os.path.relpath(pack_dir, real_root)
+    parts = [] if rel_dir == os.curdir else rel_dir.split(os.sep)
+    return bs.safe_project_path(root, *(parts + [name]))
+
+
+def _pack_files_for_zip(root, pack_dir):
+    """Sorted (arcname, safe_full_path) pairs for every file the zip
+    should contain: the flat files directly under pack_dir, each routed
+    through _safe_pack_file (F5, F13).
+
+    A SUBDIRECTORY directly under pack_dir raises rather than being
+    silently skipped (report finding F7: an evidence/ folder used to
+    vanish from the zip with no word said, and its later edits never
+    moved the pack's tracked freshness either). This tool zips a flat
+    pack only; a subdirectory is either flattened by hand or the pack is
+    generated without one."""
+    entries = []
+    try:
+        names = sorted(os.listdir(pack_dir))
+    except OSError as e:
+        raise bs.BMStoreError("could not list %s (%s)" % (pack_dir, e))
+    for f in names:
+        full = os.path.join(pack_dir, f)
+        if os.path.isdir(full):
+            raise bs.OwnershipRefused(
+                "pack-subdirectory",
+                "%s contains a subdirectory (%s); this tool zips a FLAT "
+                "pack only. Silently leaving it out of the archive is "
+                "worse than refusing (report finding F7): remove it, or "
+                "flatten its contents into the pack, before zipping."
+                % (pack_dir, f))
+        entries.append((f, _safe_pack_file(root, pack_dir, f)))
+    return entries
+
+
+def _zip_bytes(dirname, entries):
+    """The exact bytes a zip of `entries` (as cmd_zip and verify-close's
+    freshness check both build) would contain, in memory. Used to compare
+    what SHOULD be in the archive against what already is, by content
+    rather than by mtime (report finding F9: an unchanged pack rewritten
+    with the same bytes, by an editor or formatter, nudges the directory
+    mtime forward with nothing to show for it, which used to FAIL
+    verify-close forever with a remedy that could never clear it)."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for f, full in entries:
+            zf.write(full, arcname="%s/%s" % (dirname, f))
+    return buf.getvalue()
+
+
+def _content_fingerprint(pairs):
+    """A fingerprint of (arcname, file bytes) pairs and NOTHING else.
+
+    Why this exists, and why hashing the zip's bytes was not enough. F9's
+    original fix moved the freshness check off the pack DIRECTORY's mtime
+    and onto the archive's bytes, on the reasoning that bytes are content
+    and mtimes are not. That is true of a plain file and false of a zip: a
+    zip entry header stores each member's modification time, so
+    zipfile's own member-writing call bakes that mtime into the archive
+    editor or formatter re-saving a file with byte-identical content still
+    moves that mtime, and once it crosses one of the MS-DOS format's two
+    second boundaries the archive's bytes change with nothing to show for
+    it. The check then reported a pack as stale, which is exactly the
+    failure F9 set out to remove, just harder to catch because it only
+    fires inside a two second window.
+
+    Proven rather than reasoned, 2026-08-12: writing one file into a zip,
+    then calling os.utime to move its mtime forward two seconds with the
+    contents untouched, produced two different sha256 digests. It first
+    surfaced as an intermittent gate failure that would not reproduce in
+    five isolated runs, which is what a two second window looks like from
+    the outside.
+
+    So the comparison is done on this instead, which depends only on names
+    and contents. Sorted, so member order can never decide the answer.
+    """
+    h = hashlib.sha256()
+    for arcname, blob in sorted(pairs):
+        h.update(arcname.encode("utf-8"))
+        h.update(b"\0")
+        h.update(hashlib.sha256(blob).hexdigest().encode("ascii"))
+        h.update(b"\0")
+    return h.hexdigest()
+
+
+def _pack_content_fingerprint(dirname, entries):
+    """_content_fingerprint of what the archive SHOULD contain, read from
+    the pack directory on disk."""
+    pairs = []
+    for f, full in entries:
+        with open(full, "rb") as fh:
+            pairs.append(("%s/%s" % (dirname, f), fh.read()))
+    return _content_fingerprint(pairs)
+
+
+def _zip_content_fingerprint(zip_path):
+    """_content_fingerprint of what an EXISTING archive actually contains,
+    or None if it cannot be read as a zip at all.
+
+    None means could not tell, and every caller treats it as "rewrite" or
+    "stale" rather than as a match. A corrupt or truncated archive must
+    never be able to pass a freshness check by being unreadable.
+    """
+    try:
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            return _content_fingerprint(
+                [(n, zf.read(n)) for n in zf.namelist()])
+    except Exception:  # sbe: allow-silent unreadable/corrupt archive means could-not-tell per docstring, callers treat None as rewrite/stale
+        return None
+
+
+def _pack_secret_hits(entries):
+    """(arcname, [1-based line numbers]) pairs for every pack file that
+    carries a secret-shaped line inside a human block.
+
+    FIX SBE16. _zip_bytes writes raw file bytes with no content scan at
+    all; the containment gates above it (_contained_pack_dir,
+    _safe_pack_file) are PATH controls, not CONTENT controls. That matters
+    because the documented ceremony has a human fill every FILL-BY-HAND
+    block BY HAND, AFTER the redaction funnel already ran over the
+    generated parts of the file, and the archive this produces lands
+    outside the repository (see cmd_zip), past the commit-time secret
+    scan, in a folder that is commonly cloud synced.
+
+    Reuses bs.human_block_secret_hits, the exact detector every other
+    generated document in this project already uses for the same
+    question ("does this human paragraph contain something secret
+    shaped"), rather than inventing a second parser of the same
+    redaction pattern set. Every line OUTSIDE a human block already
+    passed through bs.redact_text when the pack was first written
+    (_write_generated_file, protect_human_blocks=True), so only
+    hand-typed text can still trip this.
+
+    Raises bs.RedactionUnavailable, like every other caller of
+    redact_text, rather than let "could not check" read as "nothing to
+    find"."""
+    hits = []
+    for f, full in entries:
+        with open(full, "r", encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
+        lines = bs.human_block_secret_hits(text)
+        if lines:
+            hits.append((f, lines))
+    return hits
+
+
+# ---------------------------------------------------------------------------
+# Store reads. Every one goes through a public bm_store.py function:
+# ReadOnlyStore.dump() and bs.verify(). No SQL of this file's own.
+# ---------------------------------------------------------------------------
+
+def _open_read_only(root):
+    """(store, None) or (None, the OwnershipRefused it raised). Never lets
+    an unreadable or absent store crash a caller: every command that needs
+    NO-DATA semantics (verify-close, detect) can act on the second value
+    directly."""
+    try:
+        return bs.ReadOnlyStore(root), None
+    except bs.OwnershipRefused as e:
+        return None, e
+
+
+def _gather(root):
+    """(data, None) or (None, the refusal). `data` carries exactly the
+    structural, already-scrubbed facts a pack page or a verify-close check
+    needs: records (fences), their claimed paths, unacknowledged handovers,
+    decisions, and the store's own verify() problems. Every free-text field
+    (record names, claim paths, handover headings, decision text) is
+    scrubbed with _scrub before it leaves this function, whether it is
+    about to be written to a generated file or only compared in memory: a
+    pack page is exactly the kind of ungated diagnostic surface _scrub
+    exists for."""
+    store, refusal = _open_read_only(root)
+    if store is None:
+        return None, refusal
+    try:
+        dump = store.dump(raw=True)
+    finally:
+        store.close()
+
+    records = []
+    for r in dump.get("records", []):
+        records.append({
+            "lifecycle_uuid": r["lifecycle_uuid"],
+            "name": _scrub(r.get("name")),
+            "state": r.get("state"),
+            # TWO FIELDS, ON PURPOSE, and the pair is the whole point of
+            # reading this store raw. `session_id` is the real value, and it
+            # exists so verify-close's ownership test can compare against
+            # what the store actually holds: the default redacted dump
+            # withholds a session id that does not match this codebase's own
+            # generated-id shapes, so a comparison against it would silently
+            # match nothing. `session_display` is what any PAGE prints,
+            # because a pack page is committed to git and zipped into a
+            # handover, and the store classifies a session id as founder text
+            # precisely because it could be anything. Renderers use the
+            # display field; only comparisons touch the raw one.
+            #
+            # The display value comes from bs.export_column, the store's OWN
+            # central withholding policy, rather than from _scrub or from any
+            # rule restated here: _scrub covers secret shapes and absolute
+            # paths, and a plain hand-typed id is neither, so it went straight
+            # onto the page. Asking the control that already owns this
+            # decision is also what keeps a second copy of the policy from
+            # drifting away from the first.
+            "session_id": r.get("session_id") or "",
+            "session_display": _scrub(
+                bs.export_column("records", "session_id",
+                                 r.get("session_id"))) or "",
+            "version": r.get("version"),
+            "created_at": r.get("created_at"),
+            "updated_at": r.get("updated_at"),
+        })
+    records.sort(key=lambda r: (r["name"], r["lifecycle_uuid"]))
+
+    claims_by_uuid = {}
+    for c in dump.get("claims", []):
+        claims_by_uuid.setdefault(c["lifecycle_uuid"], []).append(
+            _scrub(c.get("path")))
+
+    handovers = []
+    for h in dump.get("handovers", []):
+        if h.get("delivered_at"):
+            continue
+        handovers.append({
+            "handover_uuid": h["handover_uuid"],
+            "lifecycle_uuid": h["lifecycle_uuid"],
+            "created_at": h.get("created_at"),
+            # Report finding F4: this is founder-typed prose, exactly the
+            # class of column export_column's default rule (5) withholds
+            # entirely. _scrub alone (secret shapes, absolute paths) is
+            # not that policy; it is the gap the session_id comment above
+            # already names. Ask the policy first, same as session_display.
+            "heading": _scrub(
+                bs.export_column("handovers", "heading", h.get("heading")))
+                or "",
+        })
+    handovers.sort(key=lambda h: h["created_at"] or "")
+
+    decisions = []
+    for d in dump.get("decisions", []):
+        decisions.append({
+            "lifecycle_uuid": d["lifecycle_uuid"],
+            "created_at": d.get("created_at"),
+            # Same reasoning as handovers.heading above (F4): decisions.topic
+            # and decisions.text are founder prose export_column withholds
+            # by default; route through it before _scrub, not around it.
+            "topic": _scrub(
+                bs.export_column("decisions", "topic", d.get("topic")))
+                or "",
+            "text": _scrub(
+                bs.export_column("decisions", "text", d.get("text")))
+                or "",
+        })
+    decisions.sort(key=lambda d: d["created_at"] or "")
+
+    try:
+        verify_problems = [_scrub(p) for p in bs.verify(root)]
+    except bs.BMStoreError as e:
+        verify_problems = ["verify() could not run: %s" % e]
+
+    return {"records": records, "claims_by_uuid": claims_by_uuid,
+            "handovers": handovers, "decisions": decisions,
+            "verify_problems": verify_problems}, None
+
+
+# ---------------------------------------------------------------------------
+# Pack rendering. The whole human region per page (I10): _existing_human_
+# region recovers everything a person already typed from the NOTES_HEADING
+# onward, render_page carries it through verbatim on every regeneration.
+# ---------------------------------------------------------------------------
+
+def _existing_human_region(path):
+    """(ok, region) for a pack page that may already be on disk.
+
+    `region` is None, and `ok` True, when the file does not exist yet:
+    nothing to preserve, skeleton writes a fresh default block.
+
+    Otherwise `region` is the ENTIRE slice of the existing file from its
+    NOTES_HEADING line to end of file, byte for byte, and `ok` is True:
+    this is the whole region I10 protects, not just the inside of the
+    first human block. Report finding F8: reconstructing only ONE block's
+    inner text and rebuilding the markers around it (the old approach)
+    silently destroyed a second hand-added block, text after a quoted end
+    marker, a stray marker before the real begin marker, and a paragraph
+    appended after the end marker, because none of those live inside "the"
+    block the old reader kept. Carrying everything from the heading
+    onward forward untouched cannot lose any of them, whatever shape a
+    person gave that region, because it is never reparsed at all: the
+    funnel's own protect_human_blocks pass (bs._write_generated_file, via
+    bs._human_block_spans) is what actually keeps the marker-delimited
+    lines verbatim on the way to disk; this function's only job is to not
+    let the text feeding that funnel lose bytes before it gets there.
+
+    `ok` is False (region is None) when the file exists but NOTES_HEADING
+    cannot be found in it: the heading itself was deleted, or predates
+    this shape. There is no safe way to tell generated structure from
+    human text without that anchor, and guessing is the choice that
+    destroys human bytes (I10), so the caller must refuse to write rather
+    than reconcile a guess."""
+    if not os.path.isfile(path):
+        return True, None
+    with io.open(path, encoding="utf-8", errors="replace") as fh:
+        text = fh.read()
+    idx = text.find(NOTES_HEADING)
+    if idx == -1:
+        return False, None
+    return True, text[idx:]
+
+
+def _pack_file_blocks(text):
+    """Every top-level human block's inner text, in file order, as a list
+    of strings. Mirrors bs._human_block_spans's own depth-tracking rule
+    exactly (a second begin marker INSIDE a block is content, not a
+    nested block) rather than restating a different one: report finding
+    F8's note names this divergence as the cause of the A3c loss. Tolerant
+    of an unterminated trailing block, the same reasoning
+    tools/bm_packs.py's read_existing applies: it runs to EOF rather than
+    being treated as absent."""
+    blocks = []
+    depth = 0
+    buf = []
+    for line in text.split("\n"):
+        stripped = line.strip()
+        if stripped == HUMAN_BEGIN and not depth:
+            depth = 1
+            buf = []
+            continue
+        if stripped == HUMAN_END and depth:
+            depth = 0
+            blocks.append("\n".join(buf))
+            continue
+        if depth:
+            buf.append(line)
+    if depth:
+        blocks.append("\n".join(buf))
+    return blocks
+
+
+def _pack_file_problem(path):
+    """None when a pack file passes every structural check verify-close's
+    check 1 makes, or a short reason string naming exactly what is wrong
+    (report findings F2, F3, F10, F15): an unreadable, empty, or blank
+    file; a file with no human block at all (a deleted marker is treated
+    as unfilled, not as clean: F3); an empty human block (F2); or a
+    surviving FILL-BY-HAND marker, matched case INSENSITIVELY (F15: the
+    marker is a generated label, not shouted text, so retyping it in
+    lowercase is not a defeat of the scan)."""
+    try:
+        with io.open(path, "rb") as fh:
+            raw = fh.read()
+    except OSError as e:
+        return "could not be read (%s)" % e
+    if not raw:
+        return "is empty (0 bytes)"
+    text = raw.decode("utf-8", errors="replace")
+    if not text.strip():
+        return "is blank"
+    blocks = _pack_file_blocks(text)
+    if not blocks:
+        return ("has no human block at all (a deleted marker is treated "
+                "as unfilled, never as clean)")
+    joined = "\n".join(blocks)
+    if not joined.strip():
+        return "has an empty human block"
+    if FILL_BY_HAND.lower() in joined.lower():
+        return "still contains %s" % FILL_BY_HAND
+    return None
+
+
+def _prompt_page_problem(path):
+    """Like _pack_file_problem, but for PROMPT_PAGE, which carries
+    len(PROMPT_SLOTS) separate human blocks instead of one. Names the
+    exact SLOT that is missing or still unfilled, rather than the generic
+    "still contains FILL-BY-HAND" _pack_file_problem would give for the
+    file as a whole: a page a person has to fill by hand should refuse by
+    naming the one thing left to fill in, the same courtesy check 2
+    already extends to the close report's status line.
+
+    Blocks are matched to PROMPT_SLOTS by POSITION, the same convention
+    render_page's own default-region builder writes them in. A human is
+    free to write ANYTHING inside a block; reordering the blocks
+    themselves is the one shape this positional match cannot see through,
+    and is not a shape the ceremony asks anyone to produce."""
+    try:
+        with io.open(path, "rb") as fh:
+            raw = fh.read()
+    except OSError as e:
+        return "could not be read (%s)" % e
+    if not raw:
+        return "is empty (0 bytes)"
+    text = raw.decode("utf-8", errors="replace")
+    if not text.strip():
+        return "is blank"
+    blocks = _pack_file_blocks(text)
+    if len(blocks) < len(PROMPT_SLOTS):
+        missing = [label for label, _hint in PROMPT_SLOTS[len(blocks):]]
+        return ("is missing %d of its %d FILL-BY-HAND slot(s): %s (a "
+                "deleted marker is treated as unfilled, never as clean)"
+                % (len(missing), len(PROMPT_SLOTS), ", ".join(missing)))
+    for (label, _hint), block in zip(PROMPT_SLOTS, blocks):
+        if not block.strip():
+            return "slot %r has an empty human block" % label
+        if FILL_BY_HAND.lower() in block.lower():
+            return "slot %r still contains %s" % (label, FILL_BY_HAND)
+    return None
+
+
+def _find_ledger_dir(root):
+    """The bm_lead.py handover-pack directory (Handover/ or
+    Handover-<project>/), if one has already been generated, so 00 can
+    point at it instead of duplicating it (spec section 5)."""
+    try:
+        names = os.listdir(root)
+    except OSError:  # sbe: allow-silent unreadable project root, treated as no ledger dir found
+        return None
+    for name in sorted(names):
+        if (name == "Handover" or name.startswith("Handover-")) \
+                and os.path.isdir(os.path.join(root, name)):
+            return name
+    return None
+
+
+def _struct_00(ctx):
+    lines = ["Read this pack in this order: %s." % ", ".join(PACK_FILES), ""]
+    ledger_dir = _find_ledger_dir(ctx["root"])
+    if ledger_dir:
+        lines.append(
+            "The seven generated ledger pages from `bm_lead.py "
+            "handover-pack` already live at `%s/`; read those first for "
+            "the project-level situation, decisions, risks, calibrations, "
+            "learnings, timeline and handbacks. This pack does not "
+            "duplicate them." % ledger_dir)
+    else:
+        lines.append(
+            "No `bm_lead.py handover-pack` ledger directory was found "
+            "under the project root (Handover/ or Handover-<project>/). "
+            "Generate one with `%s handover-pack --project-id <ID>` if "
+            "this project uses bm_lead.py."
+            % bs.invocation("bm_lead.py", os.path.join(HERE, "bm_lead.py")))
+    lines.append("")
+    # Report finding F11 (secondary): this used to check whether the copy
+    # was ALREADY SITTING in pack_dir, which is only true on a REGENERATION
+    # over a pack that already has one; on the FIRST generation the copy is
+    # made AFTER this page is rendered, so this text always said "not
+    # found" on a fresh pack even when the project has a board file, while
+    # the real copy landed moments later and stdout truthfully said
+    # "included". Reading ctx["board_rel"]/ctx["board_abs"], the SAME
+    # values cmd_skeleton uses to decide whether to make the copy at all
+    # and what to tell stdout (via _board_source), gives this page, the
+    # copy, and stdout one shared source of truth instead of three that
+    # could disagree.
+    board_rel, board_abs = ctx["board_rel"], ctx["board_abs"]
+    if board_abs:
+        board_name = board_rel[-1]
+        mtime = time.strftime(
+            "%Y-%m-%d %H:%M", time.localtime(os.path.getmtime(board_abs)))
+        lines.append(
+            "A copy of the live board, `%s` (that file's own last-modified "
+            "stamp: %s), from the moment this pack was generated, is "
+            "included as `%s`. This project keeps two possible board file "
+            "names, `docs/plan/GANTT.html` and the older `docs/plan/"
+            "COMMAND-CENTER.html`; GANTT.html wins whenever both exist, so "
+            "a stale board can never again travel silently under a name "
+            "nobody is watching."
+            % ("/".join(board_rel), mtime, board_name))
+    else:
+        lines.append(
+            "No board was found at `docs/plan/GANTT.html` or `docs/plan/"
+            "COMMAND-CENTER.html` at generation time, so none is included.")
+    lines.append("")
+    return lines
+
+
+def _struct_01(ctx):
+    data = ctx["data"]
+    lines = ["## Records (fences) as of generation", ""]
+    if not data["records"]:
+        lines.append("No records exist in the store.")
+    for r in data["records"]:
+        claims = data["claims_by_uuid"].get(r["lifecycle_uuid"], [])
+        lines.append(
+            "- `%s` (%s) state=%s session=%s version=%s%s"
+            % (r["name"], r["lifecycle_uuid"][:8], r["state"],
+               r["session_display"] or "(none)", r["version"],
+               (": " + ", ".join(claims)) if claims else ""))
+    lines.append("")
+    lines.append("## Decisions recorded")
+    lines.append("")
+    if not data["decisions"]:
+        lines.append("None recorded.")
+    for d in data["decisions"]:
+        lines.append("- `%s` %s: %s (%s)"
+                     % (d["lifecycle_uuid"][:8], d["created_at"], d["topic"],
+                        d["text"]))
+    lines.append("")
+    lines.append("## Unacknowledged handovers")
+    lines.append("")
+    if not data["handovers"]:
+        lines.append("None outstanding.")
+    for h in data["handovers"]:
+        lines.append(
+            "- `%s` lifecycle %s at %s: %s"
+            % (h["handover_uuid"][:8], h["lifecycle_uuid"][:8],
+               h["created_at"], h["heading"] or "(no heading)"))
+        lines.append("  clear with: %s handover-ack --handover %s"
+                     % (_store_inv(), h["handover_uuid"]))
+    lines.append("")
+    return lines
+
+
+def _struct_02(ctx):
+    return ["No structural facts are generated for this page; the store "
+           "has no concept of a mistake, only of records, decisions and "
+           "handovers. Everything here is written by hand.", ""]
+
+
+def _struct_03(ctx):
+    data = ctx["data"]
+    lines = ["## bm_store.py verify() problems at generation time", ""]
+    if not data["verify_problems"]:
+        lines.append("None. If a process fix belongs here anyway, it is "
+                     "one this session found some other way; write it in "
+                     "below.")
+    else:
+        for p in data["verify_problems"]:
+            lines.append("- %s" % p)
+    lines.append("")
+    return lines
+
+
+def _struct_04(ctx):
+    data = ctx["data"]
+    lines = ["## Candidates already recorded by the store", ""]
+    if not data["handovers"]:
+        lines.append("No unacknowledged handover exists to seed a next "
+                     "loop from; the priority order below is entirely by "
+                     "hand.")
+    else:
+        for h in data["handovers"]:
+            lines.append("- follow up on handover `%s`: %s"
+                         % (h["handover_uuid"][:8],
+                            h["heading"] or "(no heading)"))
+    lines.append("")
+    return lines
+
+
+def _struct_05(ctx):
+    return [
+        "Update the memory vault session log to the close moment (rule step "
+        "6): record what changed, what was learned, and what is open.",
+        "", "This page has no store-derived section: the vault lives "
+        "outside this project's own store.", ""]
+
+
+def _struct_06(ctx):
+    data = ctx["data"]
+    lines = ["## bm_store.py verify() output at generation time", ""]
+    if not data["verify_problems"]:
+        lines.append("healthy, 0 problem(s).")
+    else:
+        lines.append("%d problem(s):" % len(data["verify_problems"]))
+        for p in data["verify_problems"]:
+            lines.append("- %s" % p)
+    lines.append("")
+    lines.append(
+        "The notes block below MUST open with a line starting with the "
+        "exact word FINISHED, or the exact word UNFINISHED (and, if "
+        "UNFINISHED, exactly where the baton lies). verify-close checks "
+        "for it and refuses to close without it.")
+    lines.append("")
+    return lines
+
+
+def _struct_07(ctx):
+    """The generated half of PROMPT_PAGE: a STANDING PREAMBLE that makes
+    this pack portable to a different Claude account on the same machine,
+    then the STANDING LESSONS list (STANDING_LESSONS, one place to edit).
+    The four FILL-BY-HAND slots (PROMPT_SLOTS) live in the human region
+    below this, built by render_page's own default-region branch.
+
+    Every literal filesystem path this function might otherwise print gets
+    masked to bs.PATH_WITHHELD_MARKER on the way to disk anyway: this
+    repository is public (PROJECT.md), and write_generated_document routes
+    every generated section through bs.mask_absolute_paths before it is
+    written (the same funnel that already turns bs.invocation()'s absolute
+    tools/ path into "[PATH WITHHELD]" on every other page). So rather than
+    fight the funnel, this text never embeds the real path at all: it
+    points at where the path actually lives (PROJECT.md's own "Canonical
+    path" line, kept $HOME-relative there for the same reason) and at `pwd`
+    run from inside the checkout, both of which work unchanged on any
+    account."""
+    lines = [
+        "## Standing preamble (portability across accounts on this "
+        "machine)", "",
+        "This pack, and this whole project, live under one repository "
+        "checkout on this machine. That checkout's own absolute path is "
+        "masked above and everywhere else this generator writes it, on "
+        "purpose: this repository is public, and every generated section "
+        "of every pack page is routed through this project's own "
+        "path-masking funnel before it reaches disk. Get the real path "
+        "with `pwd` run from inside the checkout, or by reading "
+        "PROJECT.md's own \"Canonical path\" line at the project root "
+        "(recorded there in the same $HOME-relative form for the same "
+        "reason). Whatever that path is, `cd` there before running "
+        "anything below.",
+        "",
+        "Run every tool as `python3 tools/<name>.py`, FROM the repository "
+        "root, never by name alone. An installed copy of this project's "
+        "tools can live under the Claude Code harness's own skills "
+        "directory, and that installed copy can sit at an OLDER store "
+        "schema than this repository's own store; invoked by name it "
+        "refuses with a schema-ahead error instead of running. Running "
+        "`python3 tools/<name>.py` from this checkout is never wrong; "
+        "running whatever the shell happens to have on PATH can be.",
+        "",
+        "This session's own write-scope label (the `bm1-<hash>` shape a "
+        "record or STATE.md may show) is DERIVED, never chosen and never "
+        "copied. tools/bm_fence_hook.py computes it from this session's "
+        "own harness session id (BM_FENCE_SESSION_ID or CLAUDE_SESSION_ID) "
+        "the first time it claims or checks a fence, and any earlier "
+        "label printed in STATE.md or on a record belongs to WHICHEVER "
+        "session claimed it, never to this one. A fresh session, on a "
+        "fresh account, derives its own the first time it claims anything; "
+        "it never reuses a label read off a page.",
+        "",
+        "The project's store, STATE.md, and the .sbe/ evidence directory "
+        "are all machine-local: none of the three is tracked in git "
+        "(see .gitignore), so all three are inherited by whoever sits at "
+        "this machine and this checkout, regardless of which Claude "
+        "account is running the session. Nothing about switching accounts "
+        "on this same machine requires rebuilding any of them.",
+        "",
+        "The ONE thing that genuinely does not carry across accounts is "
+        "the published progress artifact. Its URL belongs to the account "
+        "that published it (PROJECT.md's own \"Published artifact URL\" "
+        "line), and a different account cannot update that same URL. A "
+        "session picking this work up under a different account delivers "
+        "the board's own HTML file instead (the board copy in THIS pack, "
+        "named in 00-READ-ME-FIRST.md, or a freshly generated one) and "
+        "must NOT publish a second, competing artifact for this same "
+        "project: one current board, one URL, owned by whichever account "
+        "first published it.",
+        "",
+        "## Standing lessons", "",
+    ]
+    for lesson in STANDING_LESSONS:
+        lines.append("- %s" % lesson)
+    lines.append("")
+    return lines
+
+
+STRUCT_BUILDERS = {
+    "00-READ-ME-FIRST.md": _struct_00,
+    "01-HANDOVER.md": _struct_01,
+    "02-LEARNINGS-AND-MISTAKES.md": _struct_02,
+    "03-RULES-AND-PROCESS-FIXES.md": _struct_03,
+    "04-NEXT-LOOPS-PRIORITIZED.md": _struct_04,
+    "05-VAULT-AND-OBSIDIAN.md": _struct_05,
+    "06-CLOSE-REPORT.md": _struct_06,
+    "07-NEXT-SESSION-PROMPT.md": _struct_07,
+}
+
+
+def render_page(name, ctx, existing_region):
+    """One pack page: a freshly generated header and structural section,
+    followed by the human region carried through UNCHANGED from what was
+    already on disk (I10), or a fresh default block on first generation.
+
+    `existing_region` is either None (first generation: write the file's
+    default block) or the entire NOTES_HEADING-to-EOF slice
+    _existing_human_region already read verbatim from the prior file.
+    This function never reparses that region's markers; it only decides
+    whether to keep it as-is or manufacture a fresh default one (see
+    _existing_human_region for why: reparsing is what used to lose human
+    bytes outside the first block, report finding F8).
+
+    SBE14: `header` is assembled from the store and the repository (record
+    names, claimed paths, verify() problems), most of it through _scrub
+    rather than bm_learning.safe_display, so unlike bm_docs.py and
+    bm_packs.py it does NOT strip an embedded newline out of a free-text
+    field first (report tools/PROBLEMS-2026-08-16.md's SBE14: a claimed
+    path, which is scrub-only rather than withheld, can legally hold one).
+    A newline lets a claimed path start a line of its own, and a line
+    that equals HUMAN_BEGIN would open what bs._redact_outside_human_
+    blocks (the funnel every write below routes through) reads as a REAL
+    human block, closed by the genuine one this page's own NOTES section
+    always ends in: everything between, structure and secrets alike,
+    would round-trip byte for byte instead of being redacted, and I10
+    correctly forbids the funnel from ever telling that content apart
+    from a human's own paragraph once it is in that position. So this
+    line is never allowed to reach the funnel un-neutralized: header is
+    the only untrusted part of this page (existing_region is either a
+    fresh, code-written default or the prior file's own already-written
+    tail), and neutralizing a marker-looking line here is exactly as
+    harmless as it is for the funnel's own generated bucket, since a
+    legitimate marker is never supposed to originate from this half."""
+    lines = [GENERATED_NOTE, "", "# %s" % PAGE_TITLES[name], ""]
+    lines.extend(STRUCT_BUILDERS[name](ctx))
+    header = "\n".join(lines).rstrip("\n") + "\n"
+    header = "\n".join(bs._neutralize_stray_marker(l)
+                       for l in header.split("\n"))
+    if existing_region is None:
+        if name == PROMPT_PAGE:
+            # Four slots, four separate human blocks under their own
+            # subheadings, matched by POSITION to PROMPT_SLOTS
+            # (_prompt_page_problem reads them back the same way). Every
+            # other page's default region carries exactly one block; this
+            # is the one page that needs more than one thing filled in by
+            # hand, and the ceremony's existing "preserve everything from
+            # NOTES_HEADING onward, verbatim, forever" rule (I10) already
+            # covers a region with more than one block with no change of
+            # its own: _existing_human_region carries the WHOLE region
+            # forward untouched, whatever shape a human gave it.
+            region_lines = [NOTES_HEADING, ""]
+            for label, hint in PROMPT_SLOTS:
+                region_lines.append("### %s" % label)
+                region_lines.append("")
+                region_lines.append(HUMAN_BEGIN)
+                region_lines.append("%s: %s" % (FILL_BY_HAND, hint))
+                region_lines.append(HUMAN_END)
+                region_lines.append("")
+            existing_region = "\n".join(region_lines)
+        else:
+            region_lines = [NOTES_HEADING, "", HUMAN_BEGIN]
+            region_lines.extend(DEFAULT_HUMAN[name].split("\n"))
+            region_lines.append(HUMAN_END)
+            existing_region = "\n".join(region_lines)
+    return header + "\n" + existing_region.rstrip("\n") + "\n"
+
+
+# ---------------------------------------------------------------------------
+# Commands.
+# ---------------------------------------------------------------------------
+
+def cmd_skeleton(argv):
+    _pos, kv = _parse(argv, {"out", "slot", "date"},
+                      wants_value=("out", "slot", "date"))
+    root = _root()
+    date = kv.get("date") or _today()
+    if not _DATE_RE.match(date):
+        _err("bm_handover: --date must be YYYY-MM-DD, got %r" % date)
+        return 2
+    slot = kv.get("slot") or SLOT_DEFAULT
+    if kv.get("out"):
+        # Report finding F16: an ABSOLUTE --out used to be silently
+        # reinterpreted as relative to the project root (its leading
+        # slashes just stripped), so a typo'd absolute path landed
+        # somewhere the caller never named and never a word was said.
+        # Refusing loudly matches how safe_project_path itself already
+        # refuses an absolute PART two lines below this one; --out gets
+        # the same rule before it ever reaches that function.
+        if os.path.isabs(kv["out"]):
+            _err("bm_handover: --out must be relative to the project "
+                 "root, got the absolute path %r; refusing to silently "
+                 "reinterpret it as relative" % kv["out"])
+            return 2
+        parts = [p for p in kv["out"].strip("/").split("/") if p]
+        if not parts:
+            _err("bm_handover: --out %r has no usable path component"
+                 % kv["out"])
+            return 2
+        pack_dir = bs.safe_project_path(root, *parts)
+    else:
+        pack_dir = bs.safe_project_path(
+            root, "docs", "handover", _pack_dirname(date, slot))
+    data, refusal = _gather(root)
+    if data is None:
+        raise refusal
+    if not os.path.isdir(pack_dir):
+        os.makedirs(pack_dir)
+    # Report finding F11 (secondary), now generalized to the board rather
+    # than one fixed filename (CHANGE 3): decide ONCE, before any page is
+    # rendered, which board file exists to copy, if any. This is the
+    # single fact _struct_00's text, the actual copy below, and the
+    # stdout line all now read, instead of _struct_00 checking the
+    # DESTINATION (which does not have the copy yet on a first run) while
+    # stdout and the copy itself checked the SOURCE.
+    board_rel, board_abs = _board_source(root)
+    ctx = {"root": root, "pack_dir": pack_dir, "data": data,
+           "board_rel": board_rel, "board_abs": board_abs}
+    written = []
+    for name in PACK_FILES:
+        path = os.path.join(pack_dir, name)
+        ok, existing_region = _existing_human_region(path)
+        if not ok:
+            raise bs.BMStoreError(
+                "%s already exists but its %r heading is missing or was "
+                "altered, so there is no safe anchor telling generated "
+                "structure apart from human text in it. Guessing is the "
+                "choice that destroys human bytes (I10, report finding "
+                "F8), so this refuses to write it at all: restore the "
+                "heading by hand, or move the file aside, then run "
+                "skeleton again." % (path, NOTES_HEADING))
+        text = render_page(name, ctx, existing_region)
+        bs.write_generated_document(path, text)
+        written.append(name)
+    # Same defect the outside review found in cmd_zip's own board copy
+    # (see cmd_zip), reachable here too: skeleton re-run over an EXISTING
+    # pack_dir is ordinary, not exotic, so this destination is exactly as
+    # attacker-reachable as cmd_zip's was. Same guard, same shape: refuse
+    # a symlink destination with os.path.islink BEFORE any write (never
+    # os.path.exists, which follows the link and answers about the
+    # target), then land the copy through a temp name plus os.replace so
+    # even a symlink raced into place after the check cannot be written
+    # through, matching cmd_zip's fix exactly.
+    if board_abs:
+        board_dest = os.path.join(pack_dir, board_rel[-1])
+        if os.path.islink(board_dest):
+            raise bs.OwnershipRefused(
+                "path-escape",
+                "%s is a symlink (resolving to %s); refusing to write "
+                "the live board's content through it, before any write, "
+                "the same refusal _safe_pack_file already gives a pack "
+                "FILE that is a symlink escaping the project"
+                % (board_dest, os.path.realpath(board_dest)))
+        board_tmp = board_dest + ".tmp-%d" % os.getpid()
+        shutil.copy2(board_abs, board_tmp)
+        os.replace(board_tmp, board_dest)
+    rel = os.path.relpath(pack_dir, root)
+    _out("wrote pack %s" % rel)
+    _out("  %d file(s): %s" % (len(written), ", ".join(written)))
+    _out("  board copy: %s"
+         % ("included (%s)" % board_rel[-1] if board_abs
+            else "no docs/plan/GANTT.html or docs/plan/COMMAND-CENTER.html "
+                 "found, skipped"))
+    return 0
+
+
+def cmd_verify_close(argv):
+    _pos, kv = _parse(argv, {"pack", "session"},
+                      wants_value=("pack", "session"))
+    try:
+        root = _root()
+    except bs.OwnershipRefused as e:
+        _out_scrubbed("NO-DATA: %s" % e)
+        return NODATA
+
+    if kv.get("pack"):
+        try:
+            pack_dir = _contained_pack_dir(root, kv["pack"])
+        except bs.OwnershipRefused as e:
+            # Report findings F5, F13, R2b: --pack used to go straight to
+            # os.path.abspath with no containment at all. A pack argument
+            # that escapes the project is a FAIL, not a crash: this is the
+            # same class of "must never crash" boundary read as F12, just
+            # surfaced through the ceremony's own verdict channel instead.
+            _out_scrubbed("FAIL: --pack %s" % e)
+            return FAIL
+    else:
+        pack_dir = _find_newest_pack(root)
+    if not pack_dir or not os.path.isdir(pack_dir):
+        _out_scrubbed(
+            "NO-DATA: no handover pack found under docs/handover (pass "
+            "--pack DIR, or run `%s skeleton` first)" % _inv())
+        return NODATA
+
+    data, refusal = _gather(root)
+    if data is None:
+        _out_scrubbed("NO-DATA: %s" % refusal)
+        return NODATA
+
+    # Check 1: every pack file exists, is not a symlink escaping the
+    # project (F5, R2b), is not empty or blank (F2), carries at least one
+    # human block (F3: a deleted marker is unfilled, not clean), that
+    # block is not itself empty (F2), and does not still say FILL-BY-HAND,
+    # matched case insensitively (F15).
+    for name in PACK_FILES:
+        try:
+            path = _safe_pack_file(root, pack_dir, name)
+        except bs.OwnershipRefused as e:
+            _out_scrubbed("FAIL: %s %s" % (name, e))
+            return FAIL
+        if not os.path.isfile(path):
+            _out_scrubbed(
+                "FAIL: %s is missing from the pack at %s" % (name, pack_dir))
+            return FAIL
+        # PROMPT_PAGE carries four separate FILL-BY-HAND slots rather than
+        # one (CHANGE 2): name which SLOT is still unfilled, the same
+        # courtesy check 2 below already gives the close report's status
+        # line, instead of the generic "still contains FILL-BY-HAND" every
+        # other page gets.
+        problem = (_prompt_page_problem(path) if name == PROMPT_PAGE
+                   else _pack_file_problem(path))
+        if problem:
+            _out_scrubbed("FAIL: %s %s" % (name, problem))
+            return FAIL
+
+    # Check 1b (F11, generalized by CHANGE 3): a copy of the live board is
+    # part of the pack whenever the PROJECT has one. verify-close used to
+    # iterate only PACK_FILES (the narrative/close files) and never looked
+    # for it, so a pack missing the page the rule names passed. _board_source
+    # is the same function cmd_skeleton's own copy uses, so this check can
+    # never disagree with what was actually copied in.
+    board_rel, board_abs = _board_source(root)
+    if board_abs:
+        board_name = board_rel[-1]
+        try:
+            board_in_pack = _safe_pack_file(root, pack_dir, board_name)
+        except bs.OwnershipRefused as e:
+            _out_scrubbed("FAIL: %s %s" % (board_name, e))
+            return FAIL
+        if not os.path.isfile(board_in_pack):
+            _out_scrubbed(
+                "FAIL: the project has %s but the pack at %s carries no "
+                "%s copy; run `%s skeleton` again to refresh it"
+                % ("/".join(board_rel), pack_dir, board_name, _inv()))
+            return FAIL
+
+    # Check 2: 06-CLOSE-REPORT.md's FIRST human block opens, on its first
+    # NON-EMPTY line, with a whole word FINISHED or UNFINISHED (F10: a
+    # prior version accepted the word anywhere in the file, inside a code
+    # fence, and as a prefix, not only as the block's opening line).
+    close_path = _safe_pack_file(root, pack_dir, "06-CLOSE-REPORT.md")
+    with io.open(close_path, encoding="utf-8", errors="replace") as fh:
+        close_blocks = _pack_file_blocks(fh.read())
+    first_line = ""
+    if close_blocks:
+        for line in close_blocks[0].split("\n"):
+            if line.strip():
+                first_line = line.strip()
+                break
+    if not _STATUS_LINE_RE.match(first_line):
+        _out_scrubbed(
+            "FAIL: 06-CLOSE-REPORT.md's human block must OPEN, on its "
+            "first non-empty line, with a line starting with the exact "
+            "word FINISHED or the exact word UNFINISHED; found %r"
+            % (first_line or "(nothing)"))
+        return FAIL
+
+    # Check 3: a zip exists for this pack, and its CONTENT matches what
+    # zipping the pack right now would produce (F9: content based, not
+    # mtime based, so a pack re-saved with byte-identical content, which
+    # moves the directory mtime but changes nothing zip would write, is
+    # fresh by definition instead of FAILing forever with a remedy that
+    # can never clear it).
+    dirname = os.path.basename(pack_dir.rstrip("/"))
+    zip_path = _zip_path_for(dirname)
+    if not os.path.isfile(zip_path):
+        _out_scrubbed(
+            "FAIL: no zip found for this pack at %s; run `%s zip --pack "
+            "%s`" % (zip_path, _inv(), pack_dir))
+        return FAIL
+    try:
+        entries = _pack_files_for_zip(root, pack_dir)
+    except bs.OwnershipRefused as e:
+        _out_scrubbed("FAIL: %s" % e)
+        return FAIL
+    # Compared by CONTENT, never by the archive's raw bytes: those carry
+    # each member's mtime, so a no-op re-save could report a fresh pack as
+    # stale. See _content_fingerprint. An unreadable archive fingerprints
+    # as None, which never equals a real pack, so a corrupt zip fails here
+    # rather than passing by being unparseable.
+    if _pack_content_fingerprint(dirname, entries) \
+            != _zip_content_fingerprint(zip_path):
+        _out_scrubbed(
+            "FAIL: the zip at %s does not match the pack's current "
+            "content at %s; run `%s zip --pack %s` again"
+            % (zip_path, pack_dir, _inv(), pack_dir))
+        return FAIL
+
+    # Check 4: the closing session owns no unparked record still (F6: every
+    # UNPARKED_STATES member, not just "active"). Report finding F1: the
+    # rule's own prescribed invocation omits --session entirely, which used
+    # to skip this check outright; now it falls back to the store's own
+    # notion of the current session (_current_session_id), and if THAT
+    # cannot be determined either, the verdict is NO-DATA, never PASS.
+    session = kv.get("session") or _current_session_id()
+    if not session:
+        _out_scrubbed(
+            "NO-DATA: no --session was given and no session could be "
+            "determined from BM_FENCE_SESSION_ID or CLAUDE_SESSION_ID; "
+            "the unparked-records check cannot run without knowing which "
+            "session is closing. Pass --session explicitly.")
+        return NODATA
+    # An audit broke this check with `--session audit-fake-session`: a session
+    # id the store has never seen owns no records, therefore owns no unparked
+    # records, therefore passes. The check the founder relies on was defeated
+    # by a typo. A session that appears nowhere in the store is not a clean
+    # session, it is an unanswerable question, so it is NO-DATA rather than
+    # PASS, WHEN the id came from a human's own --session flag: that is
+    # exactly what a typo produces, and cannot be told apart here from a
+    # session that genuinely never claimed anything.
+    #
+    # M10 (disproven 2026-08-15): the comment used to close here with "the
+    # one legitimate case, a brand new session that never claimed anything,
+    # is exactly the case with no pack to close either" -- treating an
+    # unknown session as always suspicious. A real session did real,
+    # closeable work (a full pack, every other check above already passed)
+    # while claiming zero fence records, so that assumption was false, and
+    # this check returned NO-DATA on a perfectly good close. The fix keeps
+    # the typo guard where a typo can actually happen (a human-typed
+    # --session) and drops it where it cannot: `session` came from
+    # _current_session_id() (BM_FENCE_SESSION_ID or CLAUDE_SESSION_ID, the
+    # harness's own env vars, never hand-typed on this command line), owning
+    # zero records anywhere is then a plain fact, not an unanswerable
+    # question, and zero records trivially means zero UNPARKED ones.
+    known = {r["session_id"] for r in data["records"] if r.get("session_id")}
+    if session not in known:
+        if kv.get("session"):
+            _out_scrubbed(
+                "NO-DATA: session %r owns no record in this store, so the "
+                "unparked-records check cannot say anything about it. Either "
+                "the id is mistyped or this session never claimed anything. "
+                "Pass the id the session actually claimed under; `%s "
+                "detect` prints the live ones." % (session, _inv()))
+            return NODATA
+        owned = []
+    else:
+        owned = [r for r in data["records"]
+                if r["state"] in UNPARKED_STATES and r["session_id"] == session]
+    if owned:
+        names = ", ".join(
+            "%s (%s)" % (r["name"], r["lifecycle_uuid"][:8])
+            for r in owned)
+        _out_scrubbed("FAIL: session %s still owns %d unparked record(s): %s"
+                     % (session, len(owned), names))
+        return FAIL
+
+    # Check 5: no forecast this project made is still open past its window.
+    #
+    # Why this belongs in the CLOSE gate rather than beside the tool that
+    # records it. The forecasting bias that produced a 3 out of 10 survived
+    # four estimates in one night for one reason: nothing ever compared a
+    # forecast to what actually happened, because nothing ever required it.
+    # A tool that records both and is only run when somebody remembers is a
+    # rule, not a control. This is the line that makes it a control.
+    #
+    # Deliberately conservative in two ways. It FAILs only on a forecast
+    # open longer than the window (12 hours), so work legitimately in
+    # flight never blocks a close. And a project with no forecast log at
+    # all is NOT failed: that is a project that has not adopted the tool,
+    # not a project hiding something, and blocking it would punish every
+    # repository this ceremony is meant to serve. Both cases print their
+    # state rather than staying silent about it.
+    forecast_note = _open_forecast_note(root)
+    if forecast_note is not None:
+        _out_scrubbed("FAIL: %s" % forecast_note)
+        return FAIL
+
+    # Check 6: the pack is IN GIT. Found by an independent review, and it is
+    # the founder's own failure mode rather than a hypothetical: a session can
+    # write a pack, zip it, and collect PASS while the pack sits untracked on
+    # disk. If that checkout is a worktree that gets cleaned, or the machine
+    # is rebuilt, the handover the ceremony just certified is gone. A pack
+    # nobody committed is not a handover; it is a local file.
+    untracked = _pack_paths_not_in_git(root, pack_dir)
+    if untracked is NOT_A_GIT_REPO:
+        untracked = []
+    if untracked is None:
+        _out_scrubbed(
+            "NO-DATA: the git index could not be read, so whether this pack "
+            "is committed cannot be established. That is not a pass: run "
+            "`git status` yourself before trusting this pack to survive.")
+        return NODATA
+    if untracked:
+        _out_scrubbed(
+            "FAIL: %d pack file(s) are not in git: %s. A pack nobody "
+            "committed is a local file, not a handover, and it dies with the "
+            "checkout. Run `git add %s` and commit before closing."
+            % (len(untracked), ", ".join(untracked[:5]), pack_dir))
+        return FAIL
+
+    # Check 6b: every TRACKED pack file's on disk content still matches
+    # what git staged for it. An outside review of the M19 board refresh
+    # fix (see cmd_zip) reproduced this by executed command: skeleton
+    # wrote board A into the pack, the pack was committed, the live board
+    # was edited to B, zip ran again. `git diff --stat HEAD` then showed
+    # the pack's GANTT.html modified, `git show HEAD:<pack>/GANTT.html`
+    # still read board A, the working copy read board B, and this verb
+    # returned PASS anyway: check 6 above only asks whether a path is
+    # tracked AT ALL, which an edited-after-commit file still is. The
+    # durable, committed record held the stale board while every check
+    # reported healthy. This is the check that makes that impossible:
+    # dirty, not merely untracked, fails too.
+    dirty = _pack_paths_dirty(root, pack_dir)
+    if dirty is NOT_A_GIT_REPO:
+        dirty = []
+    if dirty is None:
+        _out_scrubbed(
+            "NO-DATA: the git index could not be read, so whether the "
+            "pack's tracked files still match what was committed cannot "
+            "be established. That is not a pass: run `git status` "
+            "yourself before trusting this pack to survive.")
+        return NODATA
+    if dirty:
+        _out_scrubbed(
+            "FAIL: %d pack file(s) are tracked by git but the working "
+            "tree no longer matches what git has staged for them: %s. "
+            "The committed record is stale. Run `git add %s` and commit "
+            "again before closing."
+            % (len(dirty), ", ".join(dirty[:5]), pack_dir))
+        return FAIL
+
+    _out_scrubbed("PASS: %s is ready to close." % pack_dir)
+    return PASS
+
+
+def _pack_paths_not_in_git(root, pack_dir):
+    """Pack files git does not have, as a sorted list, or None for could
+    not tell.
+
+    None is never an empty list and callers must not treat it as one: an
+    index this cannot parse means the question is unanswered, and reporting
+    "nothing untracked" would be the fail-open shape this project already
+    has a finding about. Reads the index through bm_store's own pure-Python
+    parser rather than running git, because this module promises no
+    subprocess anywhere.
+    """
+    gitdir = os.path.join(root, ".git")
+    index_path = os.path.join(gitdir, "index")
+    if not os.path.isdir(gitdir):
+        # NOT APPLICABLE, which is a third state and not the same as could
+        # not tell. A project that is not a git repository cannot be asked
+        # whether its files are committed, and answering NO-DATA there would
+        # block every such project from ever closing a session. Conflating
+        # the two broke six existing tests on the first run of this check,
+        # every one of them a legitimate temp root with no git in it, and
+        # that is why the distinction is written down rather than assumed.
+        return NOT_A_GIT_REPO
+    tracked = bs._git_index_tracked_paths(index_path)
+    if tracked is None:
+        return None
+    missing = []
+    for name in sorted(os.listdir(pack_dir)):
+        full = os.path.join(pack_dir, name)
+        if not os.path.isfile(full):
+            continue
+        rel = os.path.relpath(full, root).replace(os.sep, "/")
+        if rel not in tracked:
+            missing.append(rel)
+    return missing
+
+
+def _git_blob_sha1(path):
+    """The sha1 git would assign PATH's bytes on disk right now, computed
+    exactly as `git hash-object` does (a literal 'blob <size>\\0' header
+    then the raw content), so it can be compared straight against the
+    sha1 _git_index_blob_shas reads out of the index, without ever
+    running git."""
+    with open(path, "rb") as fh:
+        content = fh.read()
+    header = b"blob %d\x00" % len(content)
+    return hashlib.sha1(header + content).digest()
+
+
+def _git_index_blob_shas(index_path):
+    """{posix path: 20 byte blob sha1} for every entry in a git index, or
+    None for could not tell (never an empty dict standing in for that,
+    matching bs._git_index_tracked_paths, which this closely mirrors). A
+    MISSING index returns an empty dict: nothing is staged, so nothing can
+    be dirty against it.
+
+    A close copy of bs._git_index_tracked_paths's own parser (git's
+    Documentation/gitformat-index.txt), kept in THIS file rather than
+    grown as a new public function on bm_store.py: the write fence for
+    this fix covers only tools/bm_handover.py. The entry layout walked is
+    identical; this copy additionally keeps the 20 byte sha1 sitting at
+    bytes 40 through 60 of each entry's fixed stat block instead of
+    throwing it away, because _pack_paths_dirty below needs to compare it
+    against the working tree, a question _git_index_tracked_paths is
+    never asked and does not answer."""
+    try:
+        with open(index_path, "rb") as f:
+            data = f.read()
+    except FileNotFoundError:
+        return {}
+    except OSError:  # sbe: allow-silent unreadable index means could-not-tell per docstring, distinct from a missing index
+        return None
+    if len(data) < 12 or data[:4] != b"DIRC":
+        return None
+    version = int.from_bytes(data[4:8], "big")
+    count = int.from_bytes(data[8:12], "big")
+    if version not in (2, 3, 4):
+        return None
+    if count > max(len(data) - 12, 0) // 8:
+        return None
+    pos = 12
+    prev = b""
+    shas = {}
+    for _ in range(count):
+        start = pos
+        if start + 62 > len(data):
+            return None
+        sha1 = data[start + 40:start + 60]
+        flags = int.from_bytes(data[start + 60:start + 62], "big")
+        pos = start + 62
+        if version >= 3 and (flags & 0x4000):
+            if pos + 2 > len(data):
+                return None
+            pos += 2
+        if version == 4:
+            strip, pos = bs._git_decode_varint(data, pos)
+            if strip is None or strip > len(prev):
+                return None
+            end = data.find(b"\x00", pos)
+            if end < 0:
+                return None
+            name = prev[:len(prev) - strip] + data[pos:end]
+            pos = end + 1
+        else:
+            name_len = flags & 0x0FFF
+            if name_len == 0x0FFF:
+                end = data.find(b"\x00", pos)
+                if end < 0:
+                    return None
+                name = data[pos:end]
+            else:
+                if pos + name_len > len(data):
+                    return None
+                name = data[pos:pos + name_len]
+            pos += len(name)
+            pos += 8 - ((pos - start) % 8)
+            if pos > len(data):
+                return None
+        prev = name
+        shas[name.decode("utf-8", "replace")] = sha1
+    return shas
+
+
+def _pack_paths_dirty(root, pack_dir):
+    """Pack files git already TRACKS whose on disk content right now does
+    not match the blob sha1 staged for them, as a sorted list of relative
+    paths, or None for could not tell. Mirrors _pack_paths_not_in_git's
+    three way answer (NOT_A_GIT_REPO, None, or a list) for the same
+    reason: could not tell must never be folded silently into nothing
+    wrong.
+
+    Defect found by an outside review of the M19 board refresh fix (see
+    cmd_zip), reproduced by executed command: cmd_zip's own re copy of
+    the live board can rewrite a pack file that is ALREADY COMMITTED, and
+    verify-close's existing check 6 (_pack_paths_not_in_git) only asks
+    whether a path is tracked AT ALL, which a file edited after its own
+    commit still is. A pack whose durable, committed record read one
+    board while the working tree read another sailed through as PASS.
+    This asks the question check 6 does not: not "is it tracked", but
+    "does the working tree still match what was staged"."""
+    gitdir = os.path.join(root, ".git")
+    index_path = os.path.join(gitdir, "index")
+    if not os.path.isdir(gitdir):
+        return NOT_A_GIT_REPO
+    shas = _git_index_blob_shas(index_path)
+    if shas is None:
+        return None
+    dirty = []
+    for name in sorted(os.listdir(pack_dir)):
+        full = os.path.join(pack_dir, name)
+        if not os.path.isfile(full):
+            continue
+        rel = os.path.relpath(full, root).replace(os.sep, "/")
+        staged = shas.get(rel)
+        if staged is None:
+            continue
+        if _git_blob_sha1(full) != staged:
+            dirty.append(rel)
+    return dirty
+
+
+def _open_forecast_note(root):
+    """The FAIL text when this project left a forecast open past its
+    window, or None when there is nothing to say.
+
+    None covers three genuinely different situations and treats them the
+    same on purpose: no forecast log at all, a log with nothing open, and a
+    log this function could not read. Only the middle one is a clean bill of
+    health. The other two are could-not-tell, and a close ceremony that
+    refused a session because it could not read an optional file would be a
+    worse failure than the one it is guarding against. bm_forecast.py's own
+    `check` verb is where a could-not-tell is reported as NO-DATA and where
+    a project that cares can gate on it.
+    """
+    try:
+        mod = _load("bm_forecast")
+        log_path, _reason = mod.resolve_log_path(None, root)
+        tasks, _note = mod.open_forecasts(
+            log_path, mod._now_iso(), 12.0)
+    except Exception:  # sbe: allow-silent unreadable forecast log is could-not-tell per docstring, never blocks close on an optional file
+        return None
+    if not tasks:
+        return None
+    return ("this session recorded %d forecast(s) that never got an actual "
+            "and are now more than 12 hours old: %s. Close them with "
+            "`%s actual --task <name> --minutes N`, or the next estimate is "
+            "guessed from nothing again."
+            % (len(tasks), ", ".join(tasks), _forecast_inv()))
+
+
+def cmd_zip(argv):
+    _pos, kv = _parse(argv, {"pack"}, wants_value=("pack",))
+    root = _root()
+    # Report findings F13, A6d, A6e: --pack used to go straight to
+    # os.path.abspath with no containment at all, so any absolute
+    # directory (an unrelated one, or the project root itself) was
+    # packaged unredacted into the founder's own handovers archive.
+    # Routed through the same gate cmd_skeleton's --out already uses.
+    pack_dir = _contained_pack_dir(root, kv["pack"]) if kv.get("pack") \
+        else _find_newest_pack(root)
+    if not pack_dir or not os.path.isdir(pack_dir):
+        _err("bm_handover: no pack found (pass --pack DIR, or run `%s "
+             "skeleton` first)" % _inv())
+        return 2
+
+    dirname = os.path.basename(pack_dir.rstrip("/"))
+    zip_path = _zip_path_for(dirname)
+    zdir = os.path.dirname(zip_path)
+    if not os.path.isdir(zdir):
+        os.makedirs(zdir)
+
+    # M19: the board copy sitting in pack_dir was made ONCE, at skeleton
+    # time (cmd_skeleton's own shutil.copy2 call above), and until now was
+    # never refreshed. A session that folds a finding into the live board
+    # (docs/plan/GANTT.html) AFTER generating the pack, then re-runs zip,
+    # used to archive that stale copy with nothing to say so:
+    # _pack_files_for_zip below only lists whatever is already sitting in
+    # pack_dir, it never compares that file against the live board. Running
+    # the exact same lookup and copy cmd_skeleton already uses, right
+    # before the pack is read for zipping, means the archive can never
+    # hold a board copy older than the one on disk right now. board_abs is
+    # None when the project has no board at all, matching cmd_skeleton's
+    # own "nothing to copy" case; a project with no board never had a
+    # stale-board problem to begin with.
+    #
+    # Two defects an outside review found IN this M19 fix, both reproduced
+    # by executed command, not argued.
+    #
+    # One: shutil.copy2 opens its DESTINATION for writing and follows a
+    # symlink placed there, so a pack_dir/GANTT.html made into a symlink
+    # pointing outside the project had its TARGET overwritten with the
+    # live board's bytes before _pack_files_for_zip below ever got a turn
+    # to refuse it as a containment escape; the refusal fired, but only
+    # after the damage was already done. The check below runs BEFORE any
+    # write and uses os.path.islink, never os.path.exists (which follows
+    # the link and answers about the target, not about board_dest itself).
+    # The write itself then lands through a temp name plus os.replace
+    # rather than shutil.copy2 straight onto board_dest: os.replace
+    # repoints the DIRECTORY ENTRY rather than opening and following
+    # whatever it currently names, the same shape this function already
+    # uses for zip_path below, so even a symlink raced into place between
+    # the check and the write cannot turn it into a write through that
+    # link.
+    #
+    # Two: this copy can rewrite a pack file that is ALREADY COMMITTED,
+    # and nothing said so: a durable committed record could hold a stale
+    # board forever while zip kept reporting success. Naming it here,
+    # whenever the refresh actually changes the bytes, is the courtesy
+    # half of that fix; verify-close's own new check 6b is the refusal
+    # half that makes the silence impossible to rely on.
+    board_rel, board_abs = _board_source(root)
+    # M21: name a board whose IDENTITY changed under this pack, in both
+    # directions, before the archive is written. The refresh below only ever
+    # looks at the board this project would copy NOW, so on its own it cannot
+    # see a superseded copy left beside it, nor a copy whose source is gone.
+    _report_superseded_board_copies(pack_dir, board_rel)
+    if board_abs:
+        board_dest = os.path.join(pack_dir, board_rel[-1])
+        if os.path.islink(board_dest):
+            raise bs.OwnershipRefused(
+                "path-escape",
+                "%s is a symlink (resolving to %s); refusing to write "
+                "the live board's content through it, before any write, "
+                "the same refusal _safe_pack_file already gives a pack "
+                "FILE that is a symlink escaping the project"
+                % (board_dest, os.path.realpath(board_dest)))
+        old_board = None
+        if os.path.isfile(board_dest):
+            with open(board_dest, "rb") as fh:
+                old_board = fh.read()
+        board_tmp = board_dest + ".tmp-%d" % os.getpid()
+        shutil.copy2(board_abs, board_tmp)
+        os.replace(board_tmp, board_dest)
+        if old_board is not None:
+            with open(board_dest, "rb") as fh:
+                new_board = fh.read()
+            if old_board != new_board:
+                _out(
+                    "refreshed the pack's board copy (%s) from the live "
+                    "board; if this pack is already committed, it is now "
+                    "DIRTY and must be added and committed again, or `%s "
+                    "verify-close` will refuse it"
+                    % (board_rel[-1], _inv()))
+
+    # Report findings F5, F7, R2b: every listed file is routed through the
+    # same containment gate (refuses a symlink escaping the project), and
+    # a subdirectory is refused loudly rather than silently left out.
+    entries = _pack_files_for_zip(root, pack_dir)
+
+    # FIX SBE16: refuse rather than package a pack that still carries a
+    # secret-shaped line in a human-filled block. Named by file and line
+    # so the founder can go straight to it and fix the pack file by hand.
+    hits = _pack_secret_hits(entries)
+    if hits:
+        named = "; ".join(
+            "%s line %d" % (f, ln) for f, lines in hits for ln in lines)
+        raise bs.OwnershipRefused(
+            "pack-secret",
+            "%s contains what looks like a secret (%s); edit the pack "
+            "file by hand to remove or replace it, then run `%s zip` "
+            "again" % (pack_dir, named, _inv()))
+
+    data = _zip_bytes(dirname, entries)
+
+    # Idempotence decided on content, not on the archive's bytes. Same
+    # reason as the freshness check in verify_close above.
+    if os.path.isfile(zip_path) \
+            and _zip_content_fingerprint(zip_path) \
+            == _pack_content_fingerprint(dirname, entries):
+        _out("zip unchanged: %s (%d file(s)), idempotent, not rewritten"
+             % (zip_path, len(entries)))
+        return 0
+
+    tmp_path = zip_path + ".tmp-%d" % os.getpid()
+    with open(tmp_path, "wb") as fh:
+        fh.write(data)
+    os.replace(tmp_path, zip_path)
+    _out("wrote %s (%d file(s))" % (zip_path, len(entries)))
+    return 0
+
+
+def cmd_detect(argv):
+    _parse(argv, set())
+    try:
+        root = _root()
+    except bs.OwnershipRefused as e:
+        _out_scrubbed("NO-DATA: %s" % e)
+        return 0
+
+    lines = []
+    # Report finding F12: this whole command promises exit 0 always ("it
+    # informs; the start half of the rule is what acts"), so every boundary
+    # read below (a directory that exists but cannot be listed, a file
+    # that vanishes mid-check) degrades to a stated line instead of an
+    # uncaught traceback.
+    newest_pack = _find_newest_pack(root)
+    if newest_pack:
+        try:
+            age = _fmt_age(time.time() - _dir_mtime(newest_pack))
+            lines.append("newest pack: %s (%s old)" % (newest_pack, age))
+        except bs.BMStoreError as e:
+            lines.append("newest pack: %s (could not read it to compute "
+                         "its age: %s)" % (newest_pack, e))
+    else:
+        lines.append("NO-DATA: no handover pack exists yet under "
+                     "docs/handover; run `%s skeleton`" % _inv())
+
+    newest_zip = _find_newest_zip()
+    if newest_zip:
+        try:
+            age = _fmt_age(time.time() - os.path.getmtime(newest_zip))
+            lines.append("newest zip: %s (%s old)" % (newest_zip, age))
+        except OSError as e:
+            lines.append("newest zip: %s (could not read it to compute "
+                         "its age: %s)" % (newest_zip, e))
+    else:
+        lines.append("NO-DATA: no handover zip exists yet at %s"
+                     % _handovers_dir())
+
+    data, refusal = _gather(root)
+    if data is None:
+        lines.append("NO-DATA: could not read the store (%s)" % refusal)
+    else:
+        if data["handovers"]:
+            lines.append("unacknowledged handovers: %d" % len(data["handovers"]))
+            for h in data["handovers"]:
+                lines.append(
+                    "  - `%s` lifecycle %s at %s: %s"
+                    % (h["handover_uuid"][:8], h["lifecycle_uuid"][:8],
+                       h["created_at"], h["heading"] or "(no heading)"))
+                lines.append("    clear with: %s handover-ack --handover %s"
+                             % (_store_inv(), h["handover_uuid"]))
+        else:
+            lines.append("unacknowledged handovers: none")
+
+        stall, findings = None, None
+        try:
+            stall = _load("bm_stall")
+        except Exception as e:
+            lines.append("NO-DATA: could not load tools/bm_stall.py (%s)"
+                         % e)
+        if stall is not None:
+            store, sweep_refusal = _open_read_only(root)
+            if store is None:
+                lines.append("NO-DATA: could not sweep for dead-owner "
+                             "leftovers (%s)" % sweep_refusal)
+            else:
+                try:
+                    findings = stall.sweep(bs, store)
+                finally:
+                    store.close()
+        if findings is not None:
+            if findings:
+                lines.append("dead-owner leftovers: %d" % len(findings))
+                for f in findings:
+                    lines.append("  - [%s/%s] %s"
+                                 % (f["severity"], f["kind"],
+                                    f["name"] or "(unnamed)"))
+                    lines.append("    %s" % f["message"])
+                    for action in f["actions"]:
+                        lines.append("    -> %s" % action["command"])
+            else:
+                lines.append("dead-owner leftovers: none")
+
+    for line in lines:
+        _out_scrubbed(line)
+    return 0
+
+
+def _last_commit_time(root):
+    """The mtime of the git ref this checkout is on, which moves on every
+    commit, or None when it cannot be read.
+
+    Read from git's own on-disk files rather than by running git. This
+    module promises no subprocess anywhere, and bm_store.py already
+    establishes the pattern of parsing .git files directly for exactly
+    that reason. .git/HEAD names the ref; the ref file's mtime is the
+    moment of the last commit on this branch. A detached HEAD, a packed
+    ref, or an unreadable file all return None, which every caller treats
+    as could-not-tell rather than as nothing-to-do.
+    """
+    try:
+        head_path = os.path.join(root, ".git", "HEAD")
+        with io.open(head_path, encoding="utf-8") as fh:
+            head = fh.read().strip()
+        if not head.startswith("ref:"):
+            return None
+        ref = head.split(":", 1)[1].strip()
+        ref_path = os.path.join(root, ".git", *ref.split("/"))
+        if os.path.isfile(ref_path):
+            return os.path.getmtime(ref_path)
+        # A PACKED ref, which is what a fresh clone looks like and what any
+        # repository looks like after `git gc`. Found by attacking this verb
+        # rather than by reading it: with refs packed there is no loose file,
+        # so the branch mtime does not exist and this returned None, meaning
+        # the control was BLIND on exactly the machine where a first session
+        # is most likely to skip the ceremony. It failed safe (NO-DATA, never
+        # a false CURRENT), which is why it was survivable, and blind is still
+        # blind. COMMIT_EDITMSG is written by every `git commit` regardless of
+        # how refs are stored; measured on this repository, its mtime matched
+        # `git log -1` to the minute.
+        editmsg = os.path.join(root, ".git", "COMMIT_EDITMSG")
+        if os.path.isfile(editmsg):
+            return os.path.getmtime(editmsg)
+        return None
+    except Exception:  # sbe: allow-silent NO-DATA-blind read of branch mtime is fail-safe by design, never a false CURRENT
+        return None
+
+
+def cmd_owed(argv):
+    """Is a close pack owed right now?
+
+    WHY THIS VERB EXISTS, stated plainly because it is a correction. The
+    ceremony closing half was enforced by verify-close, and verify-close only
+    ever runs when somebody chooses to run it. Nothing observed a session that
+    did real work and wrote no pack. The founder had to ask four separate
+    times and scored the fourth 1 out of 5.
+
+    THE SIGNAL IS COMMITTEDNESS, NOT RECENCY, and that is the second design.
+    The first compared the git ref mtime against the pack directory, and an
+    independent audit broke it in four ways within the hour: it went permanently
+    blind on a packed-ref repository, which is the shape of every fresh clone;
+    it cleared when anything touched the zip, including a file Finder writes
+    into the pack directory; it read CURRENT for work committed on another
+    branch; and worst, on a correctly closed session it read OWED forever,
+    because this project's own rule regenerates CHECKSUMS.sha256 and commits
+    LAST, so the final commit is always newer than the pack it contains. A nag
+    that fires after every correct close is the noise this check must not
+    become.
+
+    So the question it asks now is the one that actually matters and has no
+    false positives: IS THE NEWEST PACK IN GIT? A pack nobody committed dies
+    with the checkout, and that is the founder's failure verbatim.
+
+    Four verdicts:
+
+      OWED      no pack exists at all in a git repository          exit 1
+      OWED      the newest pack has files git does not have        exit 1
+      CURRENT   every file of the newest pack is committed         exit 0
+      NO-DATA   no root, or a git index that cannot be parsed      exit 2
+
+    WHAT IT DOES NOT DETECT, stated rather than left to be discovered: work
+    committed AFTER the pack was committed. Answering that needs the commit
+    graph, and reading the graph needs git as a subprocess, which this module
+    promises nowhere to use. A session that closes properly and then keeps
+    working will read CURRENT until it writes a new pack. That is a real gap
+    and it is smaller than the one it replaces, because the failure it does
+    catch is the one that actually happened four times.
+    """
+    _parse(argv, set())
+    root = _root()
+    if not root:
+        _out("NO-DATA: no project root resolved, so nothing can be judged")
+        return NODATA
+    pack_dir = _find_newest_pack(root)
+    if pack_dir is None:
+        if not os.path.isdir(os.path.join(root, ".git")):
+            _out("NO-DATA: no close pack exists and this is not a git "
+                 "repository, so whether one is owed cannot be judged")
+            return NODATA
+        _out("OWED: no close pack exists in this checkout at all. Run `%s "
+             "skeleton --slot <name>`, fill every FILL-BY-HAND block, `%s "
+             "zip`, then `%s verify-close`."
+             % (_inv(), _inv(), _inv()))
+        return FAIL
+    untracked = _pack_paths_not_in_git(root, pack_dir)
+    if untracked is NOT_A_GIT_REPO:
+        _out_scrubbed("NO-DATA: %s is not a git repository, so whether the "
+                      "newest pack is committed cannot be judged" % root)
+        return NODATA
+    if untracked is None:
+        _out_scrubbed("NO-DATA: the git index could not be parsed, so whether "
+                      "the newest pack is committed cannot be judged. That is "
+                      "not a pass: run `git status` yourself.")
+        return NODATA
+    if untracked:
+        _out_scrubbed(
+            "OWED: the newest close pack (%s) has %d file(s) git does not "
+            "have: %s. A pack nobody committed dies with the checkout. Run "
+            "`git add %s` and commit."
+            % (pack_dir, len(untracked), ", ".join(untracked[:3]), pack_dir))
+        return FAIL
+    _out_scrubbed("CURRENT: every file of the newest close pack (%s) is "
+                  "committed." % pack_dir)
+    return PASS
+
+
+COMMANDS = {"skeleton": cmd_skeleton, "verify-close": cmd_verify_close,
+           "zip": cmd_zip, "detect": cmd_detect, "owed": cmd_owed}
+
+
+def main(argv):
+    if not argv or argv[0] in ("-h", "--help", "help"):
+        _out(__doc__.strip())
+        _out("")
+        _out("commands: %s" % ", ".join(sorted(COMMANDS)))
+        return 0
+    cmd = argv[0]
+    if cmd not in COMMANDS:
+        _err("bm_handover: unknown command %r (known: %s)"
+             % (cmd, ", ".join(sorted(COMMANDS))))
+        return 2
+    try:
+        return COMMANDS[cmd](argv[1:])
+    except bs.OwnershipRefused as e:
+        _err("refused (%s): %s" % (e.reason, e))
+        return 2
+    except bs.BMStoreError as e:
+        _err("bm_handover: %s" % e)
+        return 2
+
+
+def cli():
+    sys.exit(main(sys.argv[1:]))
+
+
+if __name__ == "__main__":
+    cli()

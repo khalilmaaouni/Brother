@@ -187,7 +187,9 @@ def main(argv=None):
     try:
         doc = load()
     except (OSError, ValueError) as exc:
-        print('track-delivery: NO-DATA, cannot read the roadmap: %s' % exc, file=sys.stderr)
+        # Plain stdout, not stderr -- see the note beside the FAIL prints
+        # below for why a split stream corrupts a combined 2>&1 capture.
+        print('track-delivery: NO-DATA, cannot read the roadmap: %s' % exc)
         return 2
 
     now = parse_dt(args.now) if args.now else datetime.datetime.now(datetime.timezone.utc)
@@ -220,14 +222,25 @@ def main(argv=None):
                        for rid, v, _, m, _ in rows])
         print('track-delivery: %d row(s) appended to %s' % (len(rows), os.path.relpath(LEDGER, ROOT)))
 
+    # Both FAIL lines below print to stdout, not stderr. CPython fully
+    # buffers stdout when it is not a tty (any pipe or command
+    # substitution, which is exactly how scripts/check_all.sh's run_check
+    # captures every check with `2>&1`), while stderr is never buffered.
+    # An unbuffered stderr write lands in the merged stream immediately,
+    # ahead of the still-buffered stdout rows printed earlier in this same
+    # call, so this FAIL line was appearing spliced into the MIDDLE of an
+    # unrelated row's report line with no newline between them (observed:
+    # the P5 row's own line absorbing this text, read at battery time as
+    # if P5 itself were the failure). One stream for the whole script's
+    # output removes the race entirely.
     if unexplained:
         print('FAIL: %d row(s) LATE with NO blocker recorded: %s. A miss nobody explained teaches '
               'nothing, which is the whole reason this tracker exists.'
-              % (len(unexplained), ', '.join(unexplained)), file=sys.stderr)
+              % (len(unexplained), ', '.join(unexplained)))
         return 1
     if escalations:
         print('FAIL: %d row(s) at escalation 3, owed to the founder: %s'
-              % (len(escalations), ', '.join(escalations)), file=sys.stderr)
+              % (len(escalations), ', '.join(escalations)))
         return 1
     return 0
 

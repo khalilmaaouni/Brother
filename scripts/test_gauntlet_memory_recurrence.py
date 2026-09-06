@@ -40,6 +40,29 @@ def silent_observation(condition):
     return G.empty_observation()
 
 
+def realistic_recall(condition):
+    """What a healthy real run actually produces: the 'memory off' control
+    stays silent by design (nothing was seeded for it to surface), and every
+    other frozen condition surfaces its expected lesson. This is the exact
+    shape scripts/gauntlet_memory_recurrence.py's real_recall() has printed
+    since PR 346 (8a1caa27): 'recurrence prevented: 4 of 5 conditions', never
+    5 of 5, because the control arm is not supposed to surface."""
+    if condition["id"] == "memory off":
+        return silent_observation(condition)
+    return surfaced_observation(condition)
+
+
+def poisoned_withheld_row():
+    """The evidence-absent variant's own FAIL shape (classify_withheld's
+    'wrong' branch): a lesson reached the applied section despite neither
+    side's evidence holding against current source, so the resolver should
+    have withheld it and did not."""
+    return {"id": "contradictory memory (evidence absent)", "result": "wrong",
+            "detail": "applied [never-validate] despite absent evidence on "
+                      "both sides",
+            "applied": ["never-validate"]}
+
+
 def healthy_withheld_row():
     """A passing row for the evidence-absent second-run check, used to stub
     out G.run_contradictory_withheld_check in tests that drive main() to
@@ -314,6 +337,68 @@ class TheEvidenceAbsentVariantWithholdsBothSides(unittest.TestCase):
         obs = G.real_recall(G.contradictory_withheld_condition())
         self.assertEqual(obs["applied"], [])
         self.assertIn("WITHHELD (contradiction", obs["raw"])
+
+
+class TheByDesignSilentControlArmIsHonestlyAPass(unittest.TestCase):
+    """The 2026-09-06 fix: 'memory off' is the isolation control and its own
+    designed outcome is 'silent', so 4 of 5 with a healthy withheld arm is
+    the gauntlet's own PASS, not a shortfall a naive prevented==counted rule
+    would misread as FAIL forever."""
+
+    def test_four_of_five_with_a_healthy_withheld_arm_is_pass(self):
+        rows = G.run_conditions(recall=realistic_recall)
+        self.assertEqual(G.summarize(rows), (4, 5))
+        verdict, reason = G.gauntlet_verdict(rows, healthy_withheld_row())
+        self.assertEqual(verdict, "PASS", reason)
+        self.assertIn("4 of 5", reason)
+        self.assertIn("isolation control", reason)
+
+    def test_the_record_carries_the_same_verdict(self):
+        rows = G.run_conditions(recall=realistic_recall)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "results", "memory-recurrence-test.json")
+            doc = G.record(rows, path, withheld_check=healthy_withheld_row())
+        self.assertEqual(doc["summary"]["verdict"], "PASS")
+        self.assertIn("4 of 5", doc["summary"]["verdict_reason"])
+
+    def test_all_five_surfaced_with_a_healthy_withheld_arm_is_also_pass(self):
+        """The control arm being silent is not REQUIRED for a pass, only
+        never punished: an arm-isolation bug that made memory off surface
+        too would be caught elsewhere (its own note says so), not by this
+        verdict rule."""
+        rows = G.run_conditions(recall=surfaced_observation)
+        verdict, _ = G.gauntlet_verdict(rows, healthy_withheld_row())
+        self.assertEqual(verdict, "PASS")
+
+
+class TheWithheldArmStillCountsTowardTheVerdict(unittest.TestCase):
+    """The frozen five conditions can all read correctly and the overall
+    verdict must still fail when the evidence-absent variant applied a
+    poisoned lesson it should have withheld -- the withheld arm is not
+    decorative, it is load-bearing for PASS."""
+
+    def test_a_poisoned_withheld_arm_flips_the_verdict_to_fail(self):
+        rows = G.run_conditions(recall=realistic_recall)
+        verdict, reason = G.gauntlet_verdict(rows, poisoned_withheld_row())
+        self.assertEqual(verdict, "FAIL")
+        self.assertIn("never-validate", reason)
+
+    def test_main_exits_one_when_only_the_withheld_arm_is_poisoned(self):
+        """Every one of the five frozen conditions surfaces cleanly here;
+        only the separate withheld check is poisoned, and that alone must
+        still take main()'s exit code from 0 to 1."""
+        rows = G.run_conditions(recall=realistic_recall)
+        original_run = G.run_conditions
+        original_withheld = G.run_contradictory_withheld_check
+        G.run_conditions = lambda *a, **k: rows
+        G.run_contradictory_withheld_check = lambda *a, **k: poisoned_withheld_row()
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                code = G.main(["--out", os.path.join(tmp, "record.json")])
+        finally:
+            G.run_conditions = original_run
+            G.run_contradictory_withheld_check = original_withheld
+        self.assertEqual(code, 1)
 
 
 if __name__ == "__main__":

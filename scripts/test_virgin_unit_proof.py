@@ -178,23 +178,26 @@ class TheBundleAloneClassifier(unittest.TestCase):
     unexpected integration, or a failure for an unrelated reason) is a real
     FAIL of the whole run."""
 
-    def test_the_calibrated_nodata_shape_reads_as_no_data(self):
+    # Portability release (2026-09-06): brother@brother carries the engine
+    # and the hook tools itself, so the bundle alone integrating a unit is
+    # the pass and finding no adapter is the E84 defect, a FAIL.
+
+    def test_the_old_nodata_shape_is_now_a_fail(self):
         verdict, why = vup.classify_bundle_alone(
             "FAIL", "the engine reported NO-DATA: %s" % vup.NODATA_SIGNATURE)
-        self.assertEqual(verdict, "NO-DATA")
-        self.assertIn("as designed", why)
+        self.assertEqual(verdict, "FAIL")
+        self.assertIn("one-plugin end state", why)
 
-    def test_an_unexpected_pass_is_a_real_fail(self):
+    def test_an_integration_is_the_pass(self):
         verdict, why = vup.classify_bundle_alone(
             "PASS", "1 unit(s) integrated, 0 refused")
-        self.assertEqual(verdict, "FAIL")
-        self.assertIn("leaked", why)
+        self.assertEqual(verdict, "PASS")
+        self.assertIn("one-plugin end state", why)
 
     def test_a_fail_for_an_unrelated_reason_is_still_a_fail(self):
         verdict, why = vup.classify_bundle_alone(
             "FAIL", "U1 was refused: declined")
         self.assertEqual(verdict, "FAIL")
-        self.assertNotIn("as designed", why)
 
 
 class TheInstalledEngineFinder(unittest.TestCase):

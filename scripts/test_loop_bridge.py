@@ -671,5 +671,56 @@ class AnUndeclaredWriteIsNotIntegrableHoweverGreenItIs(unittest.TestCase):
         self.assertEqual(scope["verdict"], "NO-DATA")
 
 
+class AMachineWideRefusalIsAnAlertAndADependencyWaitIsNot(unittest.TestCase):
+    """2026-08-31: eleven units ready, none claimed, every refusal reading 'no
+    free slot: capacity is 0' because free disk was under the floor. The
+    scheduler was correct and said so per unit, but the round READ as a normal
+    quiet one, so it sat for a day until the founder asked why. The alert
+    exists for that, and the whole difficulty is not crying wolf: a round that
+    dispatches nothing because units are waiting on each other is the plan
+    working."""
+
+    @staticmethod
+    def _n(i):
+        return {"id": i}
+
+    def test_a_pure_dependency_wait_is_silent(self):
+        plan = {"batch": [], "deferred": [],
+                "blocked": [(self._n("M6"), ["M5"]), (self._n("M7"), ["M6"])]}
+        self.assertEqual(B.machine_wide_refusal(plan), "")
+
+    def test_a_shared_machine_reason_alerts_and_quotes_that_reason(self):
+        plan = {"batch": [],
+                "deferred": [(self._n("M5"), "no free slot: capacity is 0")],
+                "blocked": []}
+        msg = B.machine_wide_refusal(plan)
+        self.assertIn("capacity is 0", msg)
+        self.assertIn("machine refusing", msg)
+
+    def test_a_machine_reason_mixed_with_dependency_waits_still_alerts(self):
+        plan = {"batch": [],
+                "deferred": [(self._n("E1"), "no free slot: capacity is 0")],
+                "blocked": [(self._n("E7"), ["E1"])]}
+        self.assertNotEqual(B.machine_wide_refusal(plan), "")
+
+    def test_any_dispatched_work_is_never_an_alert(self):
+        plan = {"batch": [self._n("M5")],
+                "deferred": [(self._n("E1"), "no free slot: capacity is 0")],
+                "blocked": []}
+        self.assertEqual(B.machine_wide_refusal(plan), "")
+
+    def test_an_empty_plan_says_nothing(self):
+        self.assertEqual(
+            B.machine_wide_refusal({"batch": [], "deferred": [], "blocked": []}), "")
+
+    def test_two_different_machine_reasons_are_both_named(self):
+        plan = {"batch": [], "blocked": [],
+                "deferred": [(self._n("A"), "no free slot: capacity is 0"),
+                             (self._n("B"), "held elsewhere by owner x")]}
+        msg = B.machine_wide_refusal(plan)
+        self.assertIn("capacity is 0", msg)
+        self.assertIn("held elsewhere", msg)
+
+
 if __name__ == "__main__":
     unittest.main()

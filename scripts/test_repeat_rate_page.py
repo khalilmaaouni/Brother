@@ -222,7 +222,7 @@ def demo():
     try:
         P.build_page(run=make_run({"board_status": (1, "", "boom")}))
         raise AssertionError("expected InstrumentMissing")
-    except P.InstrumentMissing:
+    except P.InstrumentMissing:  # sbe: allow-silent the expected exception this demo asserts is raised
         pass
     print("demo: ok")
 

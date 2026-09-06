@@ -1,0 +1,131 @@
+JBEQ-MDM blind round 10, 2026-09-06, frozen 70, the first extraction under the
+widened requested_action definition of PR 435. Extractor: a fresh Claude
+subagent (sonnet, effort high) reading only the extractor prompt, the schema
+and the 70 prompts; hashes recorded before any answer was read; engine of hub
+main b24925cb5ecc74802f194dfdaf7375bdff788ab4. A regression number by
+construction (the frozen 70 is a seen set); qualification is the unseen sets.
+
+Inputs were staged read-only at /private/tmp/bh-r10-inputs (hub main merged
+with the widened prompt, tree 627ef8d9). PR 435
+(khalilmaaouni/brother-hub, wbs/jbeq-prompt-requested-action-widen) was
+still OPEN at the time this ran (not yet merged), so per the task's own
+fallback this branched wbs/jbeq-round10-extraction from
+origin/wbs/jbeq-prompt-requested-action-widen directly and merged
+origin/main (--no-edit) into it inside the worktree at
+/private/tmp/bh-lane-r10, giving commit 1ef57b4ce0a0a0f8d64bd09f30f1f8a2fbfe434f.
+The prompt content (benchmarks/jbeq/mdm/prompts/EXTRACTOR-PROMPT.md) was
+verified byte-identical between the staged inputs and this merged worktree
+before any extraction was written.
+
+Hashes (recorded before Phase 2, before any answer file was read):
+  fact-sheets.json     sha256 902aa594f6131ee5d836bcd029821d55aa70358693932e1f6fcdd8ea1b9acda9
+  extractor-notes.md   sha256 94cd0b9f576133cd224008324a8a4786effea0f7459fd5842db3328f6c63f1d2
+Rerun after Phase 2 (files untouched since hashing, confirming no edit occurred between phases):
+  fact-sheets.json     sha256 902aa594f6131ee5d836bcd029821d55aa70358693932e1f6fcdd8ea1b9acda9   MATCH
+  extractor-notes.md   sha256 94cd0b9f576133cd224008324a8a4786effea0f7459fd5842db3328f6c63f1d2   MATCH
+
+validate: 70 fact sheet(s) OK (exit 0), zero off-enum values, zero fixes needed.
+
+SCORER_VERSION: not found. scripts/jbeq_mdm.py carries no SCORER_VERSION
+constant at all (grepped for "SCORER_VERSION", "scorer_version" and any
+"version" token in the file; none exist). score.txt was therefore produced
+by whatever scorer scripts/jbeq_mdm.py's score command currently is, which
+by definition of absence is not scorer 2026-09-06.2 (hub PR 428, REJECT
+MATCH and KEEP SEPARATE as one class). score-oneclass.txt was written
+alongside it (a small python script reading answers.json against the seed,
+treating REJECT MATCH and KEEP SEPARATE as one class) per the task's own
+instruction for this case.
+
+Score (scripts/jbeq_mdm.py score benchmarks/jbeq/mdm/runs/blind-round10-2026-09-06/answers.json --seed benchmarks/jbeq/mdm/seed-2026-09-05.json, exit 1):
+  address              9 of 10
+  entity-object        10 of 10
+  hierarchy            6 of 10
+  identifier           3 of 5
+  match-or-no-merge    9 of 10
+  requirements         5 of 5
+  survivorship         10 of 10
+  temporal             2 of 10
+  engine-decided: 44 of 60
+  direct-answered (not blind, not evidence about the engine): 10 of 10
+  critical WRONG TM-01 [HISTORICAL REASSIGNMENT] expected R1, answered NO-DATA
+  critical WRONG TM-04 [HISTORICAL REASSIGNMENT] expected R2, answered NO-DATA
+  critical WRONG TM-07 [HISTORICAL REASSIGNMENT] expected R1, answered NO-DATA
+  critical WRONG TM-10 [HISTORICAL REASSIGNMENT] expected R1, answered NO-DATA
+  critical WRONG ID-02 [WRONG TAX IDENTITY] expected ESCALATE, answered KEEP SEPARATE
+  critical false merges: 0 of 33
+  critical wrong: 5 of 33 (TM-01, TM-04, TM-07, TM-10, ID-02)
+  conservative wrongs: 0
+  JBEQ-MDM NOT READY
+
+Score-oneclass (REJECT MATCH and KEEP SEPARATE treated as one class):
+  address              9 of 10
+  entity-object        10 of 10
+  hierarchy            7 of 10
+  identifier           3 of 5
+  match-or-no-merge    9 of 10
+  requirements         5 of 5
+  survivorship         10 of 10
+  temporal             2 of 10
+  critical (oneclass): 28 of 33
+  same five critical wrongs as above (none of them are REJECT MATCH/KEEP
+  SEPARATE confusions; all five are genuine wrong-track answers on TM and
+  ID-02, so the one-class merge only moves HI-07, which flips from wrong
+  under the real scorer to a pass under the merged class)
+
+The comparison this round exists for: requested_action under round 9's
+extraction versus round 10's, and what the engine did with each, for the
+four cases the orchestrator named.
+
+  AD-03 (神奈川県横浜市中区 vs 川崎市川崎区, town+chiban match, city differs)
+    round 9  requested_action=none               -> rule L         -> KEEP SEPARATE
+    round 10 requested_action=match_on_stated_basis -> rule L       -> REJECT MATCH
+    seed expected: REJECT MATCH (critical, WRONG STORE ASSIGNMENT)
+    round 9 was WRONG on this case; round 10 is CORRECT.
+
+  AD-04 (愛知県名古屋市中区栄 same building, 3F vs 8F, different tenants)
+    round 9  requested_action=none               -> rule_r         -> KEEP SEPARATE
+    round 10 requested_action=match_on_stated_basis -> rule_r       -> REJECT MATCH
+    seed expected: REJECT MATCH (critical, WRONG STORE ASSIGNMENT)
+    round 9 was WRONG on this case; round 10 is CORRECT.
+
+  EO-04 (有限会社ハマノ商会 same name, two different corporate numbers, no capital tie)
+    round 9  requested_action=none               -> rule 2         -> KEEP SEPARATE
+    round 10 requested_action=match_on_stated_basis -> rule 2       -> REJECT MATCH
+    seed expected: REJECT MATCH (critical, CROSS-CUSTOMER CONTAMINATION)
+    round 9 was WRONG on this case; round 10 is CORRECT.
+
+  ID-05 (得意先コード400123 reused 2023-10-01 to a different legal entity;
+         matching engine already presented the reused-code pair as a
+         candidate before the open "どう扱うべきか" question)
+    round 9  requested_action=none               -> rule_r         -> KEEP SEPARATE
+    round 10 requested_action=match_on_stated_basis -> rule_r       -> REJECT MATCH
+    seed expected: REJECT MATCH (critical, CROSS-CUSTOMER CONTAMINATION)
+    round 9 was WRONG on this case; round 10 is CORRECT.
+    ID-05 in particular tests the "a dedup step already proposed the pair
+    on a named basis before the question" clause of the widening: the
+    question itself is open, and only that clause pulls it to
+    match_on_stated_basis.
+
+All four cases flip from a critical WRONG (KEEP SEPARATE) under round 9's
+narrower requested_action reading to the seed's expected REJECT MATCH under
+round 10's widened reading, with the same rule firing in both rounds
+(rule L, rule_r, rule 2, rule_r respectively) off the different
+requested_action input alone. None of the four appear in round 10's
+remaining critical-wrong list.
+
+Off-enum fixes needed during validate: 0.
+
+Remaining critical wrongs after this round (5 of 33, unrelated to the
+requested_action widening): TM-01, TM-04, TM-07, TM-10 (all
+[HISTORICAL REASSIGNMENT], the general merge/hierarchy rule table fires
+before any temporal-authority rule reaches the R1/R2/R3/NO-DATA vocabulary
+and gets remapped by CAUTION_RANK to NO-DATA in every one of these four),
+and ID-02 (expected ESCALATE for using a lapsed tax invoice registration
+number; this extraction read it as a single-record lifecycle/validity
+question with requested_action=none rather than one the boundary rules
+escalate). These are read as engine/rule-table gaps on the temporal track
+and on lapsed-identifier handling, not as requested_action extraction
+defects, and are left for the orchestrator to route rather than patched
+here.
+
+Orchestrator note, 2026-09-06 19:19 JST: the temporal track reads 2 of 10 here because this round let the ENGINE answer it (UNSUPPORTED_TRACKS is survivorship and requirements only since PR 409), while rounds 9 and earlier direct-answered the temporal track by the lane's own reading (round 9: 25 direct answers, temporal 10 of 10, not evidence about the engine). The engine answers NO-DATA on TM-01, TM-04, TM-07 and TM-10 in BOTH rounds' decisions.jsonl; the fact sheets differ only in effective_dates detail. So 2 of 10 is the engine's real temporal capability (it never reaches the R1, R2, R3 vocabulary), a named engine gap for the next session, and the four proposal cases AD-03, AD-04, EO-04 and ID-05 gained under the widened prompt as this round was cut to show. Fixture default stays b.

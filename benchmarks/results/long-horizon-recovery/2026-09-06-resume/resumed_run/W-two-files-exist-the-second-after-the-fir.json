@@ -1,0 +1,81 @@
+{
+ "work_id": "W-two-files-exist-the-second-after-the-fir",
+ "outcome": "two files exist, the second after the first",
+ "lens_inferred": null,
+ "challenge_assumption": null,
+ "pending_challenge": null,
+ "human_decision": null,
+ "rows": [
+  {
+   "id": "A1",
+   "title": "create file one",
+   "status": "DONE",
+   "depends_on": [],
+   "owns": [
+    "one.txt"
+   ],
+   "done_check": "test -f one.txt",
+   "evidence": "integrated on canonical at 4cd78db049560233283138ea7704288925bebd73; check 'test -f one.txt' exited 0. output: (the check printed nothing)",
+   "evidence_family": "",
+   "oracle_source": "",
+   "independence": "unverified",
+   "check_passed_before": false,
+   "check_exit_before": 1,
+   "files_changed_by_unit": [
+    "one.txt"
+   ],
+   "review_findings": {
+    "tier": "low",
+    "class": "",
+    "reviewer": "",
+    "unmeasured_classes": [],
+    "state": "NO-DATA: this unit crossed no risk boundary, so no reviewer was dispatched",
+    "findings": []
+   }
+  },
+  {
+   "id": "A2",
+   "title": "create file two",
+   "status": "DONE",
+   "depends_on": [
+    "A1"
+   ],
+   "owns": [
+    "two.txt"
+   ],
+   "done_check": "test -f two.txt",
+   "evidence": "integrated on canonical at 20682048b0f78673642a4bc288c3f9473bf994db; check 'test -f two.txt' exited 0. output: (the check printed nothing)",
+   "evidence_family": "",
+   "oracle_source": "",
+   "independence": "unverified",
+   "check_passed_before": false,
+   "check_exit_before": 1,
+   "files_changed_by_unit": [
+    "two.txt"
+   ],
+   "check_without_dependencies": [
+    {
+     "unit": "A1",
+     "files": [
+      "one.txt"
+     ],
+     "revision": "20682048b0f78673642a4bc288c3f9473bf994db",
+     "exit_code": 0,
+     "stderr": "",
+     "note": ""
+    }
+   ],
+   "review_findings": {
+    "tier": "low",
+    "class": "",
+    "reviewer": "",
+    "unmeasured_classes": [],
+    "state": "NO-DATA: this unit crossed no risk boundary, so no reviewer was dispatched",
+    "findings": []
+   }
+  }
+ ],
+ "features": [],
+ "harness_revision": "50f28522da8893800dd8386f8b067fa3e1975661",
+ "harness_revision_resumed": "50f28522da8893800dd8386f8b067fa3e1975661"
+}

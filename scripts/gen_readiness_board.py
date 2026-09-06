@@ -328,6 +328,36 @@ def render(doc):
     parts.append('<div><span class="v">%d</span><span class="l">ready now</span></div>' % len(ready))
     parts.append('</div>')
 
+    # THE FOUNDER QUEUE, founder ruling 2026-09-06 in the question UI, "One
+    # founder queue card": actions only he can take were ageing at the bottom
+    # of long reports. One file (docs/plan/FOUNDER-QUEUE.json), read by
+    # board_status.py, rendered here and printed by board_status's own CLI, so
+    # neither surface can drift from the other. NO-DATA text, never an empty
+    # section and never a crash, when the file is missing or malformed.
+    parts.append('<section class="fqueue">')
+    parts.append('<h2>Founder queue</h2>')
+    fq_items, fq_err = BS.open_founder_queue_items()
+    if fq_items is None:
+        parts.append('<p class="warn">%s: %s</p>' % (BS.NODATA, e(fq_err)))
+    elif not fq_items:
+        parts.append('<p class="note">Nothing is waiting on him right now.</p>')
+    else:
+        parts.append('<div class="pgrid">')
+        for it in fq_items:
+            age = BS.founder_queue_age_days(it.get('since'))
+            age_txt = ('%d day%s' % (age, '' if age == 1 else 's')) if age is not None else BS.NODATA
+            blocks = it.get('blocks') or []
+            parts.append('<div class="norow">')
+            parts.append('<div class="nohead"><span class="noid">%s</span><b>%s</b>'
+                         '<span class="nohrs">since %s &middot; %s</span></div>'
+                         % (e(it.get('id')), e(it.get('title')), e(it.get('since')), e(age_txt)))
+            parts.append('<div class="dc"><b>Command</b><code>%s</code></div>' % e(it.get('command')))
+            parts.append('<div class="dc"><b>Blocks</b>%s</div>'
+                         % (e(', '.join(str(b) for b in blocks)) if blocks else 'nothing on the release'))
+            parts.append('</div>')
+        parts.append('</div>')
+    parts.append('</section>')
+
     # THE VAULT COUNTER (WBS V12): "lessons recalled this week, receipts
     # bound, notes written", read from the store and the vault at render
     # time, never typed here. board_status.vault_counters() is the sole

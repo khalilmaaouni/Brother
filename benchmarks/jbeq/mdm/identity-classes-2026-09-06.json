@@ -1,0 +1,627 @@
+{
+ "_doc": "Thirteen INDEPENDENT identity-versus-relation test classes for scripts/jbeq_decide.py decide(), written test first per sections 15 to 20 of ~/.claude/evidence/FIX-DIRECTIVE-2026-09-06.md. Each case is invented for this file: none reuses a case id, class name or fact pattern from the frozen benchmark benchmarks/jbeq/mdm/seed-2026-09-05.json, which was read only to learn the fact-sheet SHAPE and the decision vocabulary. The directive's principle throughout: legal identity does not imply operational-object identity. Some cases are expected to be RED against today's decide() (see scripts/test_jbeq_identity_classes.py and the PR body for which and why); a separate lane is fixing decide() concurrently, and these cases are the written-first spec that lane's fix must satisfy.",
+ "cases": [
+  {
+   "id": "IC-01",
+   "name": "same corporate number, two stores",
+   "severity": "critical",
+   "expected": "LINK AS RELATED",
+   "why": "Legal identity (one corporate number) does not imply operational-object identity: two stores under the same legal entity are related but never the same object, so the answer is LINK AS RELATED, never AUTO-MERGE.",
+   "fact_sheet": {
+    "track": "entity-object",
+    "allowed_answers": [
+     "AUTO-MERGE",
+     "SUGGEST MERGE",
+     "LINK AS RELATED",
+     "KEEP SEPARATE",
+     "REJECT MATCH",
+     "ESCALATE",
+     "NO-DATA"
+    ],
+    "identifiers": [
+     {
+      "value": "1010401123456",
+      "domain": "corporate_number",
+      "legal_person_type": "corporation",
+      "status": "valid"
+     }
+    ],
+    "stated_relation": "corporate_number_shared",
+    "stated_difference": "none",
+    "tenant_boundary": "none",
+    "evidence_strength": null,
+    "evidence_reasons": [],
+    "corroborating_facts": [],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [],
+    "one_to_many_object": false,
+    "object_type_a": "legal_entity",
+    "object_type_b": "legal_entity",
+    "lifecycle": "active",
+    "requested_action": "none",
+    "requested_relation_type": null,
+    "authoritative_identifier": "aligned",
+    "contradicted_attributes": [],
+    "distinct_operational_attributes": false,
+    "location_comparison": null,
+    "effective_dates": {
+     "as_of": null,
+     "candidate_effective_date": null,
+     "conflict": false
+    }
+   }
+  },
+  {
+   "id": "IC-02",
+   "name": "same address, different legal entities",
+   "severity": "critical",
+   "expected": "REJECT MATCH",
+   "why": "A shared address never overrides a stated different legal entity: boundary rule 2 refutes identity outright, so the answer is REJECT MATCH, not a merge on address proximity alone.",
+   "fact_sheet": {
+    "track": "entity-object",
+    "allowed_answers": [
+     "AUTO-MERGE",
+     "SUGGEST MERGE",
+     "LINK AS RELATED",
+     "KEEP SEPARATE",
+     "REJECT MATCH",
+     "ESCALATE",
+     "NO-DATA"
+    ],
+    "identifiers": [],
+    "stated_relation": "none",
+    "stated_difference": "different_legal_entity",
+    "tenant_boundary": "none",
+    "evidence_strength": null,
+    "evidence_reasons": [],
+    "corroborating_facts": [],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [],
+    "one_to_many_object": false,
+    "object_type_a": "legal_entity",
+    "object_type_b": "legal_entity",
+    "lifecycle": "active",
+    "requested_action": "match_on_stated_basis",
+    "requested_relation_type": null,
+    "authoritative_identifier": "aligned",
+    "contradicted_attributes": [],
+    "distinct_operational_attributes": false,
+    "location_comparison": null,
+    "effective_dates": {
+     "as_of": null,
+     "candidate_effective_date": null,
+     "conflict": false
+    }
+   }
+  },
+  {
+   "id": "IC-03",
+   "name": "same legal entity, multiple commercial accounts",
+   "severity": "critical",
+   "expected": "LINK AS RELATED",
+   "why": "One legal entity holding several commercial account records is a relation, not a single operational object; the accounts LINK AS RELATED and are never merged into one, since each account carries its own commercial terms.",
+   "fact_sheet": {
+    "track": "entity-object",
+    "allowed_answers": [
+     "AUTO-MERGE",
+     "SUGGEST MERGE",
+     "LINK AS RELATED",
+     "KEEP SEPARATE",
+     "REJECT MATCH",
+     "ESCALATE",
+     "NO-DATA"
+    ],
+    "identifiers": [
+     {
+      "value": "1010401123456",
+      "domain": "corporate_number",
+      "legal_person_type": "corporation",
+      "status": "valid"
+     }
+    ],
+    "stated_relation": "corporate_number_shared",
+    "stated_difference": "none",
+    "tenant_boundary": "none",
+    "evidence_strength": null,
+    "evidence_reasons": [],
+    "corroborating_facts": [],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [],
+    "one_to_many_object": false,
+    "object_type_a": "legal_entity",
+    "object_type_b": "legal_entity",
+    "lifecycle": "active",
+    "requested_action": "none",
+    "requested_relation_type": null,
+    "authoritative_identifier": "aligned",
+    "contradicted_attributes": [],
+    "distinct_operational_attributes": false,
+    "location_comparison": null,
+    "effective_dates": {
+     "as_of": null,
+     "candidate_effective_date": null,
+     "conflict": false
+    }
+   }
+  },
+  {
+   "id": "IC-04",
+   "name": "closed store and newly opened nearby store",
+   "severity": "critical",
+   "expected": "KEEP SEPARATE",
+   "why": "Physical proximity and a lifecycle succession are never a stated relation on their own; with no corporate-number match, no role pair and no hierarchy link stated, the input states no relation at all, so the closed store and the new store KEEP SEPARATE rather than being read as one continuing object.",
+   "fact_sheet": {
+    "track": "entity-object",
+    "allowed_answers": [
+     "AUTO-MERGE",
+     "SUGGEST MERGE",
+     "LINK AS RELATED",
+     "KEEP SEPARATE",
+     "REJECT MATCH",
+     "ESCALATE",
+     "NO-DATA"
+    ],
+    "identifiers": [],
+    "stated_relation": "none",
+    "stated_difference": "none",
+    "tenant_boundary": "none",
+    "evidence_strength": null,
+    "evidence_reasons": [],
+    "corroborating_facts": [],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [],
+    "one_to_many_object": false,
+    "object_type_a": "legal_entity",
+    "object_type_b": "legal_entity",
+    "lifecycle": "active",
+    "requested_action": "none",
+    "requested_relation_type": null,
+    "authoritative_identifier": "aligned",
+    "contradicted_attributes": [],
+    "distinct_operational_attributes": false,
+    "location_comparison": null,
+    "effective_dates": {
+     "as_of": null,
+     "candidate_effective_date": null,
+     "conflict": false
+    }
+   }
+  },
+  {
+   "id": "IC-05",
+   "name": "parent and subsidiary",
+   "severity": "critical",
+   "expected": "LINK AS RELATED",
+   "why": "A capital parent-child link states a relation between two distinct legal objects, not one merged object; the subsidiary LINK AS RELATED to its parent, and a capital relation must never collapse into AUTO-MERGE or a hierarchy reversal.",
+   "fact_sheet": {
+    "track": "hierarchy",
+    "allowed_answers": [
+     "AUTO-MERGE",
+     "SUGGEST MERGE",
+     "LINK AS RELATED",
+     "KEEP SEPARATE",
+     "REJECT MATCH",
+     "ESCALATE",
+     "NO-DATA"
+    ],
+    "identifiers": [],
+    "stated_relation": "parent_child",
+    "stated_difference": "none",
+    "tenant_boundary": "none",
+    "evidence_strength": null,
+    "evidence_reasons": [],
+    "corroborating_facts": [],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [
+     {
+      "type": "capital",
+      "parent": "からまつホールディングス株式会社"
+     }
+    ],
+    "one_to_many_object": false,
+    "object_type_a": "legal_entity",
+    "object_type_b": "legal_entity",
+    "lifecycle": "active",
+    "requested_action": "none",
+    "requested_relation_type": null,
+    "authoritative_identifier": "aligned",
+    "contradicted_attributes": [],
+    "distinct_operational_attributes": false,
+    "location_comparison": null,
+    "effective_dates": {
+     "as_of": null,
+     "candidate_effective_date": null,
+     "conflict": false
+    }
+   }
+  },
+  {
+   "id": "IC-06",
+   "name": "payer and sold-to",
+   "severity": "critical",
+   "expected": "LINK AS RELATED",
+   "why": "Payer and sold-to are two distinct roles on one transaction, not one operational object; the input states a role pair relation, so the answer is LINK AS RELATED, never a merge that would misroute payment to the wrong payer.",
+   "fact_sheet": {
+    "track": "entity-object",
+    "allowed_answers": [
+     "AUTO-MERGE",
+     "SUGGEST MERGE",
+     "LINK AS RELATED",
+     "KEEP SEPARATE",
+     "REJECT MATCH",
+     "ESCALATE",
+     "NO-DATA"
+    ],
+    "identifiers": [],
+    "stated_relation": "role_pair",
+    "stated_difference": "none",
+    "tenant_boundary": "none",
+    "evidence_strength": null,
+    "evidence_reasons": [],
+    "corroborating_facts": [],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [],
+    "one_to_many_object": false,
+    "object_type_a": "legal_entity",
+    "object_type_b": "legal_entity",
+    "lifecycle": "active",
+    "requested_action": "none",
+    "requested_relation_type": null,
+    "authoritative_identifier": "aligned",
+    "contradicted_attributes": [],
+    "distinct_operational_attributes": false,
+    "location_comparison": null,
+    "effective_dates": {
+     "as_of": null,
+     "candidate_effective_date": null,
+     "conflict": false
+    }
+   }
+  },
+  {
+   "id": "IC-07",
+   "name": "ship-to and store",
+   "severity": "critical",
+   "expected": "LINK AS RELATED",
+   "why": "A ship-to address is a delivery role attached to a store object, not the store itself; a stated role pair yields LINK AS RELATED (or ESCALATE when the role is not clearly stated), and merging a ship-to into a store record risks a wrong store assignment.",
+   "fact_sheet": {
+    "track": "entity-object",
+    "allowed_answers": [
+     "AUTO-MERGE",
+     "SUGGEST MERGE",
+     "LINK AS RELATED",
+     "KEEP SEPARATE",
+     "REJECT MATCH",
+     "ESCALATE",
+     "NO-DATA"
+    ],
+    "identifiers": [],
+    "stated_relation": "role_pair",
+    "stated_difference": "none",
+    "tenant_boundary": "none",
+    "evidence_strength": null,
+    "evidence_reasons": [],
+    "corroborating_facts": [],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [],
+    "one_to_many_object": false,
+    "object_type_a": "legal_entity",
+    "object_type_b": "legal_entity",
+    "lifecycle": "active",
+    "requested_action": "none",
+    "requested_relation_type": null,
+    "authoritative_identifier": "aligned",
+    "contradicted_attributes": [],
+    "distinct_operational_attributes": false,
+    "location_comparison": null,
+    "effective_dates": {
+     "as_of": null,
+     "candidate_effective_date": null,
+     "conflict": false
+    }
+   }
+  },
+  {
+   "id": "IC-08",
+   "name": "branch and head office",
+   "severity": "critical",
+   "expected": "LINK AS RELATED",
+   "why": "A branch reports to its head office through a single reporting hierarchy; that is a stated relation between two distinct objects, so the answer is LINK AS RELATED, and treating the branch as the parent would be a hierarchy reversal.",
+   "fact_sheet": {
+    "track": "hierarchy",
+    "allowed_answers": [
+     "AUTO-MERGE",
+     "SUGGEST MERGE",
+     "LINK AS RELATED",
+     "KEEP SEPARATE",
+     "REJECT MATCH",
+     "ESCALATE",
+     "NO-DATA"
+    ],
+    "identifiers": [],
+    "stated_relation": "parent_child",
+    "stated_difference": "none",
+    "tenant_boundary": "none",
+    "evidence_strength": null,
+    "evidence_reasons": [],
+    "corroborating_facts": [],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [
+     {
+      "type": "reporting",
+      "parent": "本社統括部"
+     }
+    ],
+    "one_to_many_object": false,
+    "object_type_a": "legal_entity",
+    "object_type_b": "legal_entity",
+    "lifecycle": "active",
+    "requested_action": "none",
+    "requested_relation_type": null,
+    "authoritative_identifier": "aligned",
+    "contradicted_attributes": [],
+    "distinct_operational_attributes": false,
+    "location_comparison": null,
+    "effective_dates": {
+     "as_of": null,
+     "candidate_effective_date": null,
+     "conflict": false
+    }
+   }
+  },
+  {
+   "id": "IC-09",
+   "name": "commercial group versus legal group disagree",
+   "severity": "normal",
+   "expected": "ESCALATE",
+   "why": "The fact-sheet schema's hierarchy_parents vocabulary has only capital, trade_flow and reporting types, with no commercial-group-versus-legal-group distinction; modeled here as a blank classification field corroborated by conflicting group facts, boundary rule A correctly ESCALATEs a genuine disagreement rather than picking a group silently.",
+   "fact_sheet": {
+    "track": "hierarchy",
+    "allowed_answers": [
+     "AUTO-MERGE",
+     "SUGGEST MERGE",
+     "LINK AS RELATED",
+     "KEEP SEPARATE",
+     "REJECT MATCH",
+     "ESCALATE",
+     "NO-DATA"
+    ],
+    "identifiers": [],
+    "stated_relation": "none",
+    "stated_difference": "none",
+    "tenant_boundary": "none",
+    "evidence_strength": null,
+    "evidence_reasons": [],
+    "corroborating_facts": [
+     "commercial_group_code_names_group_A_but_legal_group_register_names_group_B"
+    ],
+    "blank_fields": [
+     "group_classification"
+    ],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [],
+    "one_to_many_object": false,
+    "object_type_a": "legal_entity",
+    "object_type_b": "legal_entity",
+    "lifecycle": "active",
+    "requested_action": "none",
+    "requested_relation_type": null,
+    "authoritative_identifier": "aligned",
+    "contradicted_attributes": [],
+    "distinct_operational_attributes": false,
+    "location_comparison": null,
+    "effective_dates": {
+     "as_of": null,
+     "candidate_effective_date": null,
+     "conflict": false
+    }
+   }
+  },
+  {
+   "id": "IC-10",
+   "name": "temporal identity change",
+   "severity": "critical",
+   "expected": "KEEP SEPARATE",
+   "why": "A temporal identity change (the same operational entity re-registers under a new identifier on a stated change date) must KEEP SEPARATE the pre-change and post-change records or ESCALATE for a human to confirm continuity across the boundary; today's engine has no TM answer vocabulary (see the module docstring's reserved effective_dates fields) and returns NO-DATA for every temporal-track case, which is neither answer, so this test is RED until a rules addendum defines the TM decision path.",
+   "fact_sheet": {
+    "track": "temporal",
+    "allowed_answers": [
+     "AUTO-MERGE",
+     "SUGGEST MERGE",
+     "LINK AS RELATED",
+     "KEEP SEPARATE",
+     "REJECT MATCH",
+     "ESCALATE",
+     "NO-DATA"
+    ],
+    "identifiers": [],
+    "stated_relation": "none",
+    "stated_difference": "none",
+    "tenant_boundary": "none",
+    "evidence_strength": null,
+    "evidence_reasons": [],
+    "corroborating_facts": [],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [],
+    "one_to_many_object": false,
+    "object_type_a": "legal_entity",
+    "object_type_b": "legal_entity",
+    "lifecycle": "active",
+    "requested_action": "none",
+    "requested_relation_type": null,
+    "authoritative_identifier": "aligned",
+    "contradicted_attributes": [],
+    "distinct_operational_attributes": false,
+    "location_comparison": null,
+    "effective_dates": {
+     "as_of": null,
+     "candidate_effective_date": null,
+     "conflict": false
+    }
+   }
+  },
+  {
+   "id": "IC-11",
+   "name": "manual override present",
+   "severity": "critical",
+   "expected": "ESCALATE",
+   "why": "fact-sheet-schema.json's REQUIRED_FIELDS carries no manual-override or keep-separate flag, so a person's override cannot be stated directly to the engine today; modeled as weak, unvalidated evidence needing confirmation, boundary rule B correctly ESCALATEs rather than merging, but the directive's actual principle (an override always wins and forces KEEP SEPARATE outright) needs a real override field before the engine can honor it directly.",
+   "fact_sheet": {
+    "track": "match-or-no-merge",
+    "allowed_answers": [
+     "AUTO-MERGE",
+     "SUGGEST MERGE",
+     "LINK AS RELATED",
+     "KEEP SEPARATE",
+     "REJECT MATCH",
+     "ESCALATE",
+     "NO-DATA"
+    ],
+    "identifiers": [],
+    "stated_relation": "none",
+    "stated_difference": "none",
+    "tenant_boundary": "none",
+    "evidence_strength": "weak",
+    "evidence_reasons": [
+     "unvalidated_crosswalk"
+    ],
+    "corroborating_facts": [],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [],
+    "one_to_many_object": false,
+    "object_type_a": "legal_entity",
+    "object_type_b": "legal_entity",
+    "lifecycle": "active",
+    "requested_action": "none",
+    "requested_relation_type": null,
+    "authoritative_identifier": "aligned",
+    "contradicted_attributes": [],
+    "distinct_operational_attributes": false,
+    "location_comparison": null,
+    "effective_dates": {
+     "as_of": null,
+     "candidate_effective_date": null,
+     "conflict": false
+    }
+   }
+  },
+  {
+   "id": "IC-12",
+   "name": "identifier reuse",
+   "severity": "critical",
+   "expected": "REJECT MATCH",
+   "why": "An old corporate number reassigned to an unrelated new legal entity after dissolution is a stated different legal entity despite the numeric coincidence, so boundary rule 2 fires REJECT MATCH; treating the reused number as identity continuity would merge two genuinely different entities.",
+   "fact_sheet": {
+    "track": "entity-object",
+    "allowed_answers": [
+     "AUTO-MERGE",
+     "SUGGEST MERGE",
+     "LINK AS RELATED",
+     "KEEP SEPARATE",
+     "REJECT MATCH",
+     "ESCALATE",
+     "NO-DATA"
+    ],
+    "identifiers": [
+     {
+      "value": "1010401987654",
+      "domain": "corporate_number",
+      "legal_person_type": "corporation",
+      "status": "valid"
+     }
+    ],
+    "stated_relation": "none",
+    "stated_difference": "different_legal_entity",
+    "tenant_boundary": "none",
+    "evidence_strength": null,
+    "evidence_reasons": [],
+    "corroborating_facts": [],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [],
+    "one_to_many_object": false,
+    "object_type_a": "legal_entity",
+    "object_type_b": "legal_entity",
+    "lifecycle": "active",
+    "requested_action": "match_on_stated_basis",
+    "requested_relation_type": null,
+    "authoritative_identifier": "aligned",
+    "contradicted_attributes": [],
+    "distinct_operational_attributes": false,
+    "location_comparison": null,
+    "effective_dates": {
+     "as_of": null,
+     "candidate_effective_date": null,
+     "conflict": false
+    }
+   }
+  },
+  {
+   "id": "IC-13",
+   "name": "store relocation",
+   "severity": "critical",
+   "expected": "SUGGEST MERGE",
+   "why": "The same store moved to a new address is a compatible lifecycle of the SAME object, not a new one, but a relocated record still bars AUTO-MERGE (gate-lifecycle): a person confirms with SUGGEST MERGE rather than an automatic merge over a lifecycle event.",
+   "fact_sheet": {
+    "track": "match-or-no-merge",
+    "allowed_answers": [
+     "AUTO-MERGE",
+     "SUGGEST MERGE",
+     "LINK AS RELATED",
+     "KEEP SEPARATE",
+     "REJECT MATCH",
+     "ESCALATE",
+     "NO-DATA"
+    ],
+    "identifiers": [],
+    "stated_relation": "none",
+    "stated_difference": "none",
+    "tenant_boundary": "none",
+    "evidence_strength": "strong",
+    "evidence_reasons": [],
+    "corroborating_facts": [],
+    "blank_fields": [],
+    "irreversible": false,
+    "history_exists": false,
+    "hierarchy_parents": [],
+    "one_to_many_object": false,
+    "object_type_a": "legal_entity",
+    "object_type_b": "legal_entity",
+    "lifecycle": "relocated",
+    "requested_action": "none",
+    "requested_relation_type": null,
+    "authoritative_identifier": "aligned",
+    "contradicted_attributes": [],
+    "distinct_operational_attributes": false,
+    "location_comparison": null,
+    "effective_dates": {
+     "as_of": null,
+     "candidate_effective_date": null,
+     "conflict": false
+    }
+   }
+  }
+ ]
+}

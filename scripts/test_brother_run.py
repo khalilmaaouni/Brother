@@ -66,8 +66,12 @@ class DeliveryReportProvesItself(unittest.TestCase):
         # The verifier's stamp, as _mark_integrated writes it: build_report
         # integrates on the row's own DONE, never on the claim state alone.
         rec["rows"][0]["status"] = "DONE"
+        rec["rows"][0]["check_passed_before"] = False
+        rec["rows"][0]["files_changed_by_unit"] = ["tests/test_x.py"]
         report, integ, ref = _br.build_report(
-            rec, {"U1": {"state": "done"},
+            rec, {"U1": {"state": "done", "evidence": {
+                "check_command": "python3 -m pytest tests/test_x.py",
+                "exit_code": 0}},
                               "U2": {"state": "failed"}},
             "abc123", "def456", changed=["src/api.py", "tests/test_x.py"])
         self.assertIn("files changed (2): src/api.py, tests/test_x.py", report)
@@ -91,8 +95,12 @@ class DeliveryReportProvesItself(unittest.TestCase):
         self.assertGreater(len(long_check), 140)
         rec["rows"][0]["done_check"] = long_check
         rec["rows"][0]["status"] = "DONE"
+        rec["rows"][0]["check_passed_before"] = False
+        rec["rows"][0]["files_changed_by_unit"] = ["src/api.py"]
         report, integ, ref = _br.build_report(
-            rec, {"U1": {"state": "done"}, "U2": {"state": "failed"}},
+            rec, {"U1": {"state": "done", "evidence": {
+                "check_command": long_check, "exit_code": 0}},
+                  "U2": {"state": "failed"}},
             "abc123", "def456", changed=["src/api.py"])
         self.assertIn("verified by: " + long_check, report)
 
@@ -3573,6 +3581,14 @@ class RealUsageReachesTheCostBlock(unittest.TestCase):
         model = write_stub(self.tmp, name, model_body)
         env = dict(self.env)
         env["MODEL_WORKER_CMD"] = "%s %s" % (sys.executable, model)
+        # The stub answers in the claude CLI's --output-format json shape,
+        # so the client under test is pinned to claude. Left to detection,
+        # a suite run from inside a Codex turn inherits CODEX_CI and friends
+        # (brother_paths.client reads Codex's markers first, on purpose),
+        # model_worker then parses the answer as codex JSONL and drops the
+        # usage, and this test reads red for a reason that has nothing to
+        # do with the chain it proves (measured 2026-09-06 on ad48bc69).
+        env["BROTHER_MODEL_CLIENT"] = "claude"
         proc = sh([sys.executable, BROTHER_RUN, "two files exist",
                   "--cwd", self.repo, "--runs-root", self.tmp], env=env)
         return proc, proc.stdout + proc.stderr
@@ -5543,8 +5559,14 @@ class AnUnwritableDefaultRunsRootFallsBack(unittest.TestCase):
         with contextlib.redirect_stdout(buf):
             root = _br._resolve_runs_root(None, default=self.tmp,
                                           probe=self._refuse)
-        expected = os.path.join(tempfile.gettempdir(), _br.FALLBACK_RUNS_DIR)
+        # Portability release (2026-09-06): the fallback is DURABLE, under the
+        # client's own config directory, never the process temp directory,
+        # because a receipt under /tmp is lost at reboot (the v1.0.8 signed-in
+        # receipt landed under /private/tmp and was scored FAIL for it).
+        expected = os.path.join(_br.brother_paths.config_dir(), "brother", "runs")
         self.assertEqual(root, expected)
+        self.assertNotIn("/tmp", root)
+        self.assertFalse(root.startswith(tempfile.gettempdir()))
         line = buf.getvalue()
         self.assertIn("cannot be written", line)
         self.assertIn(self.tmp, line)
@@ -5572,6 +5594,289 @@ class AnUnwritableDefaultRunsRootFallsBack(unittest.TestCase):
                                           probe=self._refuse)
         self.assertEqual(root, os.path.abspath(self.tmp))
         self.assertEqual(buf.getvalue(), "")
+
+
+class IntentResolutionIsReusedOnResume(unittest.TestCase):
+    """Fix 1 (2026-09-06 resume defects, row P1-2, PR 383's own driver):
+    the intent screen used to be re-posed on every resume, taking a
+    second, independent auto-resolution that read textually identical to
+    the first one and so could not be told apart from a carried-forward
+    decision. A resume whose Work document already carries a stored
+    intent_resolution must reuse it instead, and say so plainly."""
+
+    def _leave_unfinished(self, scratch, runs_root, cwd, outcome, unit_id,
+                          filename):
+        decomposer_body = """
+            import json, sys
+            sys.stdin.read()
+            print(json.dumps([
+                {"id": %r, "objective": "create a file",
+                 "done_check": "test -f %s", "writes": [%r], "deps": []},
+            ]))
+        """ % (unit_id, filename, filename)
+        env = dict(os.environ)
+        env["DOOR_MODEL_CMD"] = "%s %s" % (
+            sys.executable, write_stub(scratch, "decomposer.py", decomposer_body))
+        env["MODEL_WORKER_CMD"] = "%s %s" % (
+            sys.executable, write_stub(scratch, "failing_model.py", FAILING_MODEL))
+        proc = sh([sys.executable, BROTHER_RUN, outcome,
+                  "--cwd", cwd, "--runs-root", runs_root], env=env)
+        return proc, env
+
+    def test_continue_reuses_the_recorded_resolution_and_says_so(self):
+        scratch = tempfile.mkdtemp(prefix="intent-reuse-scratch-")
+        runs_root = tempfile.mkdtemp(prefix="intent-reuse-runs-")
+        repo = make_repo(tempfile.mkdtemp(prefix="intent-reuse-repo-"))
+
+        proc1, env = self._leave_unfinished(scratch, runs_root, repo,
+                                            "intent reuse outcome",
+                                            "F1", "f1.txt")
+        out1 = proc1.stdout + proc1.stderr
+        self.assertRegex(
+            out1, r"intent resolved: chose 'Proceed as decomposed'", out1)
+
+        # A second, independent process resuming the same unfinished run:
+        # this must reuse the FIRST decision rather than take a second one.
+        proc2 = sh([sys.executable, BROTHER_RUN, "--continue",
+                   "--cwd", repo, "--runs-root", runs_root], env=env)
+        out2 = proc2.stdout + proc2.stderr
+        self.assertRegex(out2, r"intent resolution reused from", out2)
+        self.assertNotRegex(out2, r"intent resolved: chose", out2)
+
+        run_dir = os.path.join(runs_root, "docs", "plan", "runs")
+        run_dirs = [os.path.join(run_dir, n) for n in os.listdir(run_dir)]
+        doc_path = _br._find_work_doc(run_dirs[0])
+        with open(doc_path, encoding="utf-8") as fh:
+            record = json.load(fh)
+        self.assertEqual(record["intent_resolution"]["choice"], "proceed")
+
+    def test_a_resume_with_no_stored_resolution_still_decides(self):
+        """The other side of the drive: a Work document from before this fix
+        (or one whose intent screen never wrote the field for any other
+        reason) must not crash or silently skip the screen; it decides,
+        exactly as every resume did before this fix."""
+        scratch = tempfile.mkdtemp(prefix="intent-nodata-scratch-")
+        runs_root = tempfile.mkdtemp(prefix="intent-nodata-runs-")
+        repo = make_repo(tempfile.mkdtemp(prefix="intent-nodata-repo-"))
+
+        proc1, env = self._leave_unfinished(scratch, runs_root, repo,
+                                            "intent no-stored-resolution",
+                                            "F1", "f1.txt")
+        out1 = proc1.stdout + proc1.stderr
+        self.assertRegex(out1, r"intent resolved: chose", out1)
+
+        run_dir = os.path.join(runs_root, "docs", "plan", "runs")
+        run_dirs = [os.path.join(run_dir, n) for n in os.listdir(run_dir)]
+        doc_path = _br._find_work_doc(run_dirs[0])
+        with open(doc_path, encoding="utf-8") as fh:
+            record = json.load(fh)
+        del record["intent_resolution"]
+        with open(doc_path, "w", encoding="utf-8") as fh:
+            json.dump(record, fh)
+
+        proc2 = sh([sys.executable, BROTHER_RUN, "--continue",
+                   "--cwd", repo, "--runs-root", runs_root], env=env)
+        out2 = proc2.stdout + proc2.stderr
+        self.assertRegex(out2, r"intent resolved: chose", out2)
+        self.assertNotRegex(out2, r"intent resolution reused from", out2)
+
+
+class TheIntegratedBlockNamesEachUnitsOwnVerdict(unittest.TestCase):
+    """Fix 2 (2026-09-06 resume defects, row P1-2, PR 383's own driver): the
+    "integrated" block used to print "verified by: <check>" for every unit
+    whose row read DONE, whatever that unit's own per-unit verdict
+    (receipts_for's PASS/FAIL/NO-DATA) actually was. A unit whose check
+    already passed before the work (NO-DATA) or one a later reconcile
+    refused (FAIL) must never read as a proven "verified by" claim."""
+
+    def _rec(self):
+        return {"outcome": "add retry", "work_id": "w1", "rows": [
+            {"id": "U1", "status": "DONE",
+             "done_check": "python3 -m pytest tests/test_x.py",
+             "check_passed_before": False,
+             "files_changed_by_unit": ["tests/test_x.py"]}]}
+
+    def _claims(self):
+        return {"U1": {"state": "done", "evidence": {
+            "check_command": "python3 -m pytest tests/test_x.py",
+            "exit_code": 0}}}
+
+    def test_real_evidence_still_reads_verified_by(self):
+        report, integ, _ref = _br.build_report(
+            self._rec(), self._claims(), "abc123", "def456",
+            changed=["tests/test_x.py"])
+        self.assertEqual(integ, ["U1"])
+        self.assertRegex(
+            report, r"U1\s+verified by: python3 -m pytest tests/test_x.py")
+
+    def test_a_check_that_already_passed_before_reads_not_proven(self):
+        rec = self._rec()
+        rec["rows"][0]["check_passed_before"] = True
+        report, integ, _ref = _br.build_report(
+            rec, self._claims(), "abc123", "def456",
+            changed=["tests/test_x.py"])
+        self.assertEqual(integ, ["U1"])
+        self.assertRegex(
+            report,
+            r"U1\s+integrated, NOT PROVEN: the check already passed before "
+            r"the work began, so it cannot prove the work")
+        self.assertNotRegex(report, r"U1\s+verified by:")
+
+    def test_a_row_marked_refused_after_integration_reads_fail(self):
+        rec = self._rec()
+        rec["rows"][0]["integration_refused"] = "a later reconcile disowned it"
+        report, integ, _ref = _br.build_report(
+            rec, self._claims(), "abc123", "def456",
+            changed=["tests/test_x.py"])
+        self.assertEqual(integ, ["U1"])
+        self.assertRegex(
+            report, r"U1\s+integrated, FAIL: a later reconcile disowned it")
+        self.assertNotRegex(report, r"U1\s+verified by:")
+
+
+class TheCheckpointRevisionHelpersReadHonestly(unittest.TestCase):
+    """Fix 3's own pure building blocks: reading the last checkpoint's own
+    recorded canonical revision off disk, and counting the commits between
+    two revisions, never inventing either when they cannot be read."""
+
+    def test_missing_capsule_reads_none(self):
+        with tempfile.TemporaryDirectory() as run_dir:
+            self.assertIsNone(_br._checkpoint_canonical_revision(run_dir))
+
+    def test_a_capsule_with_no_canonical_revision_reads_none(self):
+        with tempfile.TemporaryDirectory() as run_dir:
+            with open(os.path.join(run_dir, _br.CAPSULE_FILENAME), "w",
+                      encoding="utf-8") as fh:
+                json.dump({"objective": "x"}, fh)
+            self.assertIsNone(_br._checkpoint_canonical_revision(run_dir))
+
+    def test_a_capsule_with_a_revision_reads_it_back(self):
+        with tempfile.TemporaryDirectory() as run_dir:
+            with open(os.path.join(run_dir, _br.CAPSULE_FILENAME), "w",
+                      encoding="utf-8") as fh:
+                json.dump({"canonical_revision": "deadbeef"}, fh)
+            self.assertEqual(
+                _br._checkpoint_canonical_revision(run_dir), "deadbeef")
+
+    def test_commits_between_counts_real_history(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = make_repo(tmp)
+            first = sh(["git", "rev-parse", "HEAD"], cwd=repo).stdout.strip()
+            with open(os.path.join(repo, "drift.txt"), "w",
+                      encoding="utf-8") as fh:
+                fh.write("drift\n")
+            sh(["git", "add", "drift.txt"], cwd=repo)
+            sh(["git", "commit", "-q", "-m", "drift"], cwd=repo)
+            second = sh(["git", "rev-parse", "HEAD"], cwd=repo).stdout.strip()
+            self.assertEqual(_br._commits_between(repo, first, second), 1)
+
+    def test_an_unreadable_range_counts_as_zero_not_a_crash(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = make_repo(tmp)
+            self.assertEqual(
+                _br._commits_between(repo, "deadbeef", "cafef00d"), 0)
+
+
+class ADriftedRepositoryIsNamedOnResume(unittest.TestCase):
+    """Fix 3, end to end (2026-09-06 resume defects, row P1-2): a resume
+    whose target repository moved between the last checkpoint and this
+    invocation must print and journal exactly one line naming the two
+    revisions, reproducing PR 383's own driver scenario (kill mid-second-
+    unit, land one commit on canonical while the run is down, resume)."""
+
+    def test_a_commit_landed_while_the_run_was_down_is_named_on_resume(self):
+        import product_acceptance as pa
+        rig, fail_verdict, fail_evidence = pa._run_and_kill_mid_second_unit(
+            "test-drift-detect-crash-")
+        self.assertIsNotNone(rig, fail_evidence)
+        # 2026-09-06, directive section 24: prove which process was killed.
+        self.assertIsNotNone(rig.get("killed_pid"), "no pid recorded for the kill")
+        self.assertFalse(pa.brother_run.claim_store.pid_alive(rig["killed_pid"]),
+                         "the recorded pid is still alive after the kill")
+
+        pa._edit_expires_at(rig["claims_path"], "A2", time.time() - 5)
+
+        # Repository state change is TWO things, per directive section 24
+        # ("change repository state"), not one: a new file, AND an edit to
+        # base.txt, which make_repo() committed at R0 and which every git
+        # operation this run performs (log, rev-parse, merge-base) reads as
+        # part of the tree -- a file the run had read, not only one the run
+        # never touched. Both land in the same drift commit.
+        base_path = os.path.join(rig["repo"], "base.txt")
+        with open(base_path, "a", encoding="utf-8") as fh:
+            fh.write("edited while the run was down, 2026-09-06\n")
+        drift_path = os.path.join(rig["repo"], "drift-2026-09-06.txt")
+        with open(drift_path, "w", encoding="utf-8") as fh:
+            fh.write("repository drift between the checkpoint and resume\n")
+        sh(["git", "add", "base.txt", "drift-2026-09-06.txt"], cwd=rig["repo"])
+        sh(["git", "commit", "-q", "-m", "repository drift"], cwd=rig["repo"])
+        drift_rev = sh(["git", "rev-parse", "HEAD"],
+                       cwd=rig["repo"]).stdout.strip()
+
+        proc = sh([sys.executable, BROTHER_RUN,
+                  "two files exist, the second after the first",
+                  "--cwd", rig["repo"], "--runs-root", rig["tmp"]],
+                 env=rig["env"])
+        out = proc.stdout + proc.stderr
+        self.assertEqual(proc.returncode, 0, out)
+        self.assertIn("repository moved since the checkpoint:", out, out)
+        self.assertIn(drift_rev[:12], out, out)
+
+        changed = sh(["git", "diff", "--name-only", drift_rev + "~1", drift_rev],
+                    cwd=rig["repo"]).stdout.split()
+        self.assertEqual(sorted(changed), ["base.txt", "drift-2026-09-06.txt"],
+                         "the drift commit named on resume does not carry "
+                         "the expected changed files")
+
+        found = False
+        journal_path = os.path.join(rig["run_dir"], "journal.jsonl")
+        with open(journal_path, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                event = json.loads(line)
+                if event.get("type") == "run.drift_detected":
+                    found = True
+                    self.assertEqual(event["payload"].get("after"), drift_rev)
+        self.assertTrue(found, "no run.drift_detected event in the journal")
+
+    def test_no_repository_change_between_kill_and_resume_claims_no_drift(self):
+        """Negative case, 2026-09-06: a resume against an UNCHANGED
+        repository must never print or journal a drift line. Same rig as
+        the positive case above, minus the repository edit, so the only
+        variable is whether the repository actually moved."""
+        import product_acceptance as pa
+        rig, fail_verdict, fail_evidence = pa._run_and_kill_mid_second_unit(
+            "test-no-drift-detect-crash-")
+        self.assertIsNotNone(rig, fail_evidence)
+        self.assertIsNotNone(rig.get("killed_pid"), "no pid recorded for the kill")
+        self.assertFalse(pa.brother_run.claim_store.pid_alive(rig["killed_pid"]),
+                         "the recorded pid is still alive after the kill")
+
+        pa._edit_expires_at(rig["claims_path"], "A2", time.time() - 5)
+        unchanged_rev = sh(["git", "rev-parse", "HEAD"],
+                           cwd=rig["repo"]).stdout.strip()
+
+        proc = sh([sys.executable, BROTHER_RUN,
+                  "two files exist, the second after the first",
+                  "--cwd", rig["repo"], "--runs-root", rig["tmp"]],
+                 env=rig["env"])
+        out = proc.stdout + proc.stderr
+        self.assertEqual(proc.returncode, 0, out)
+        self.assertNotIn("repository moved since the checkpoint:", out, out)
+
+        journal_path = os.path.join(rig["run_dir"], "journal.jsonl")
+        with open(journal_path, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                event = json.loads(line)
+                self.assertNotEqual(event.get("type"), "run.drift_detected",
+                                    "a drift event was journaled against an "
+                                    "unchanged repository (still at %s)"
+                                    % unchanged_rev)
 
 
 if __name__ == "__main__":

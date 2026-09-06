@@ -39,12 +39,35 @@ def _payload(command, exit_code=None, stdout="", stderr="", timed_out=False,
     }
 
 
-def run_hook(payload_obj, store):
+#: One shared "setup_complete: true" config fixture, written once. The
+#: hook now gates every write on scripts/setup.py's own is_consented()
+#: (mirrors vault_recall_hook.py's private _consented()), so a subprocess
+#: test must say so explicitly rather than riding on whatever
+#: ~/.brotherme/config.json happens to say on the machine running it.
+_CONSENTED_CONFIG = []
+
+
+def _consented_config_path():
+    if not _CONSENTED_CONFIG:
+        fd, path = tempfile.mkstemp(prefix="attempt-hook-test-consent-",
+                                     suffix=".json")
+        with os.fdopen(fd, "w") as fh:
+            json.dump({"setup_complete": True}, fh)
+        _CONSENTED_CONFIG.append(path)
+    return _CONSENTED_CONFIG[0]
+
+
+def _base_env(store):
     env = dict(os.environ)
     env["ATTEMPT_LEDGER"] = store
+    env["BROTHERME_CONFIG"] = _consented_config_path()
+    return env
+
+
+def run_hook(payload_obj, store):
     return subprocess.run(
         [sys.executable, HOOK], input=json.dumps(payload_obj),
-        capture_output=True, text=True, env=env)
+        capture_output=True, text=True, env=_base_env(store))
 
 
 class Fingerprint(unittest.TestCase):
@@ -133,10 +156,9 @@ class ThreeFailuresThenRefusal(unittest.TestCase):
         self.assertFalse(os.path.exists(self.store))
 
     def test_malformed_stdin_exits_0_one_stderr_line_writes_nothing(self):
-        env = dict(os.environ)
-        env["ATTEMPT_LEDGER"] = self.store
         r = subprocess.run([sys.executable, HOOK], input="not json at all",
-                           capture_output=True, text=True, env=env)
+                           capture_output=True, text=True,
+                           env=_base_env(self.store))
         self.assertEqual(r.returncode, 0)
         stderr_lines = [ln for ln in r.stderr.splitlines() if ln.strip()]
         self.assertEqual(len(stderr_lines), 1)
@@ -217,8 +239,7 @@ class ThirdFailureRunsFindOutItself(unittest.TestCase):
             os.remove(self.store)
 
     def _env(self, vault=None, patterns=None, memory=None):
-        env = dict(os.environ)
-        env["ATTEMPT_LEDGER"] = self.store
+        env = _base_env(self.store)
         if vault is not None:
             env["FIND_OUT_VAULT"] = vault
         if patterns is not None:
@@ -301,8 +322,7 @@ class AlternatingClassesAreALoop(unittest.TestCase):
                 os.remove(path)
 
     def _env(self):
-        env = dict(os.environ)
-        env["ATTEMPT_LEDGER"] = self.store
+        env = _base_env(self.store)
         env["BM_HOOK_OUTCOMES"] = self.outcomes
         # No vault, no patterns, no memory: the find_out branch must not make
         # these tests depend on this machine's real notes.
@@ -422,6 +442,116 @@ class AlternationIsAPureFunction(unittest.TestCase):
         rows = self._rows(("a", "failed"), ("b", "failed"), ("a", "failed"),
                           ("b", "failed"), ("c", "failed"), ("c", "failed"))
         self.assertIsNone(H.alternating_classes(rows))
+
+
+class LedgerResolvesUnderTheConfigDir(unittest.TestCase):
+    """LL-1 item (2): an installed copy's ledger lives under the client's
+    own config directory, never a literal ~/.claude and never the
+    repository. Driven as a fresh subprocess (not an in-process import)
+    because attempt_ledger.STORE is computed once at import time, so
+    a module already imported by this test file would not re-resolve."""
+
+    def test_default_store_resolves_under_brother_config_dir_not_the_repo(self):
+        env = dict(os.environ)
+        env.pop("ATTEMPT_LEDGER", None)
+        config_dir = tempfile.mkdtemp(prefix="attempt-ledger-config-dir-")
+        env["BROTHER_CONFIG_DIR"] = config_dir
+        try:
+            r = subprocess.run(
+                [sys.executable, "-c",
+                 "import sys; sys.path.insert(0, %r); import attempt_ledger "
+                 "as A; print(A.STORE)" % HERE],
+                capture_output=True, text=True, env=env)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            want = os.path.join(config_dir, "attempt-ledger", "attempts.jsonl")
+            self.assertEqual(r.stdout.strip(), want)
+            self.assertNotIn(HERE, r.stdout,
+                             "the ledger resolved inside the repository, "
+                             "not the client's config directory")
+        finally:
+            os.rmdir(config_dir)
+
+
+class UnwritableLedgerIsNoDataNeverABlock(unittest.TestCase):
+    """LL-1 item (2): a missing or unwritable ledger prints one NO-DATA
+    line and never blocks the tool call (the hook still exits 0)."""
+
+    def setUp(self):
+        fd, self.blocker = tempfile.mkstemp(prefix="attempt-hook-blocker-")
+        os.close(fd)
+
+    def tearDown(self):
+        if os.path.exists(self.blocker):
+            os.remove(self.blocker)
+
+    def test_a_ledger_whose_parent_is_a_file_prints_one_no_data_line(self):
+        # A regular file sitting exactly where the ledger's PARENT
+        # directory needs to be: record()'s own p.parent.mkdir(parents=
+        # True, exist_ok=True) raises FileExistsError (an OSError) rather
+        # than silently succeeding, because exist_ok only forgives an
+        # existing DIRECTORY, never an existing file.
+        store = os.path.join(self.blocker, "attempts.jsonl")
+        r = run_hook(_payload("widget-build.sh --sha a1b2c3d4",
+                              exit_code=1, stderr="boom: exit 1"), store)
+        self.assertEqual(r.returncode, 0, "an unwritable ledger must never "
+                         "block the tool call")
+        stderr_lines = [ln for ln in r.stderr.splitlines() if ln.strip()]
+        self.assertEqual(len(stderr_lines), 1, r.stderr)
+        self.assertIn("NO-DATA", r.stderr)
+        self.assertIn("ledger unwritable", r.stderr)
+
+
+class TheInstalledCopyWorksStandalone(unittest.TestCase):
+    """LL-1 item (1)'s whole point: the breaker ships in every install, so
+    the copy under products/brothermode/tools/ (not this file's own
+    scripts/ sibling) must resolve every one of its imports
+    (brother_paths, attempt_ledger, find_out, and find_out's own
+    pattern_note) from ITS directory and produce the identical third-
+    failure refusal plus research branch. A driven proof in a tempfile,
+    never assumed from the scripts/ copy passing."""
+
+    INSTALLED_HOOK = os.path.join(
+        os.path.dirname(HERE), "products", "brothermode",
+        "tools", "attempt_hook.py")
+
+    def setUp(self):
+        self.assertTrue(os.path.isfile(self.INSTALLED_HOOK),
+                        "the installed copy is missing: %s" % self.INSTALLED_HOOK)
+        fd, self.store = tempfile.mkstemp(prefix="installed-attempt-hook-")
+        os.close(fd)
+        os.remove(self.store)
+
+    def tearDown(self):
+        if os.path.exists(self.store):
+            os.remove(self.store)
+
+    def _fail(self, sha, env):
+        return subprocess.run(
+            [sys.executable, self.INSTALLED_HOOK],
+            input=json.dumps(_payload("widget-build.sh --sha %s" % sha,
+                                      exit_code=1, stderr="boom: exit 1")),
+            capture_output=True, text=True, env=env)
+
+    def test_three_failing_payloads_refuse_on_the_third_with_find_out(self):
+        env = _base_env(self.store)
+        v, pd, m = TF.vault(), TF.pattern_store(), TF.memory_file()
+        env["FIND_OUT_VAULT"] = v
+        env["FIND_OUT_PATTERNS"] = pd
+        env["FIND_OUT_MEMORY"] = m
+        r1 = self._fail("a1b2c3d4", env)
+        r2 = self._fail("998877ff", env)
+        r3 = self._fail("00c0ffee", env)
+        self.assertEqual(r1.returncode, 0, r1.stderr)
+        self.assertEqual(r2.returncode, 0, r2.stderr)
+        self.assertEqual(r3.returncode, 0, r3.stderr)
+        self.assertNotIn("ATTEMPT LEDGER", r1.stdout)
+        self.assertNotIn("ATTEMPT LEDGER", r2.stdout)
+        self.assertIn("ATTEMPT LEDGER", r3.stdout)
+        self.assertIn("REFUSE", r3.stdout)
+        self.assertIn("find_out:", r3.stdout)
+        rows = A.read(self.store)
+        self.assertEqual(len(rows), 3)
+        self.assertTrue(all(row["outcome"] == "failed" for row in rows))
 
 
 if __name__ == "__main__":

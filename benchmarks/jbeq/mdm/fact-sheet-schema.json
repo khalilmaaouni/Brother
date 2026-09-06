@@ -1,9 +1,31 @@
 {
- "_doc": "Worked example of one JBEQ-MDM fact sheet, the input scripts/jbeq_decide.py decide() reads. Full field documentation lives in the module docstring at the top of scripts/jbeq_decide.py. A real fact-sheets.json file passed to the CLI is a JSON object of {\"CASE-ID\": {fact sheet, without this _doc key}, ...}; this file shows one entry's shape plus three worked variants below it so the same file demonstrates the rules that fire on real cases.",
+ "_doc": "Worked example of one JBEQ-MDM fact sheet, the input scripts/jbeq_decide.py decide() reads. Full field documentation lives in the module docstring at the top of scripts/jbeq_decide.py. A real fact-sheets.json file passed to the CLI is a JSON object of {\"CASE-ID\": {fact sheet, without this _doc key}, ...}; this file shows one entry's shape plus four worked variants below it so the same file demonstrates the rules that fire on real cases. Round 5 (2026-09-06) grew the schema with the identity-kind fields (object_type_a/object_type_b, lifecycle, requested_action, requested_relation_type, authoritative_identifier, contradicted_attributes, distinct_operational_attributes, location_comparison, effective_dates); every example below carries them at a value that does not change which rule fires, so each example still demonstrates only the one rule its name and _comment say. Round 6 (2026-09-06) added one further OPTIONAL key, requested_parent (string or null, absent from every example below): the entity a request asks to become the parent, read only when requested_relation_type matches a stated hierarchy TYPE but the input asks to reverse which side is the PARENT (see scripts/jbeq_decide.py's module docstring and rule link_vs_reject). Round 7 (2026-09-06, per ~/.claude/evidence/review-u1-2026-09-06.md section F and FIX-DIRECTIVE-2026-09-06.md section 15) widened requested_action's enum to match_on_stated_basis and record_write (no rule gates on either value yet: this widening is a schema-and-prompt-only second pass, pending a fresh re-extraction of the frozen 70 before anything reads it) and added one new location_comparison value, same_area_renamed, which rule L DOES already read, exactly like notation_variant_only.",
+ "_enums": {
+  "_doc": "One source of truth for every closed-vocabulary field decide() and validate() enforce (round 5 repair, 2026-09-06, closing the L12 gap the design review found: validate used to check key presence only, never value membership, so 20 of 45 round 5 sheets carried off-enum free text in stated_relation and stated_difference that matched no rule and silently fell to the default). Read by scripts/jbeq_decide.py's _load_enums(). identifier domain and identifier status are deliberately NOT enumerated here: the real fact sheets already carry many legitimate domain-like values (crm_guid, customer_code, site_id, store_id and more) far beyond the five illustrative values named in the module docstring, so treating that field as closed would refuse sheets for a reason unrelated to this repair. tenant_boundary is a two-value field decide() does not branch on for anything this repair touches, and is left unenforced for the same reason: this list enforces exactly the fields the design review named as load-bearing for the L12 fix, not every field that happens to have a small value set.",
+  "stated_relation": ["none", "corporate_number_shared", "parent_child", "role_pair", "trade_flow", "same_site_only", "group_company_code_shared_entity"],
+  "stated_difference": ["none", "different_legal_entity", "different_tenant", "contractual_wall", "different_identifier_domain", "different_hierarchy_dimension"],
+  "evidence_strength": ["strong", "medium", "weak"],
+  "evidence_reasons": ["unexplained_conflict", "explained_conflict", "unvalidated_crosswalk", "score_only", "missing_identifier"],
+  "object_type": ["legal_entity", "commercial_account", "payer", "sold_to", "ship_to", "store", "site", "hierarchy_node", "address"],
+  "lifecycle": ["active", "closed", "relocated", "identifier_reused"],
+  "requested_action": ["none", "assignment", "match_on_stated_basis", "record_write"],
+  "requested_relation_type": ["capital", "trade_flow", "reporting"],
+  "authoritative_identifier": ["aligned", "conflicting", "absent"],
+  "location_comparison": ["notation_variant_only", "same_chiban_different_notation", "different_administrative_area", "different_unit_in_building", "internally_inconsistent", "same_area_renamed"],
+  "legal_person_type": ["corporation", "individual", "unknown"]
+ },
  "example_rule_5_keep_separate": {
   "_comment": "Same address only, one side a one-to-many consolidation point: boundary rule 5 fires KEEP SEPARATE.",
   "track": "entity-object",
-  "allowed_answers": ["AUTO-MERGE", "SUGGEST MERGE", "LINK AS RELATED", "KEEP SEPARATE", "REJECT MATCH", "ESCALATE", "NO-DATA"],
+  "allowed_answers": [
+   "AUTO-MERGE",
+   "SUGGEST MERGE",
+   "LINK AS RELATED",
+   "KEEP SEPARATE",
+   "REJECT MATCH",
+   "ESCALATE",
+   "NO-DATA"
+  ],
   "identifiers": [],
   "stated_relation": "same_site_only",
   "stated_difference": "none",
@@ -15,14 +37,41 @@
   "irreversible": false,
   "history_exists": false,
   "hierarchy_parents": [],
-  "one_to_many_object": true
+  "one_to_many_object": true,
+  "object_type_a": "legal_entity",
+  "object_type_b": "legal_entity",
+  "lifecycle": "active",
+  "requested_action": "none",
+  "requested_relation_type": null,
+  "authoritative_identifier": "aligned",
+  "contradicted_attributes": [],
+  "distinct_operational_attributes": false,
+  "location_comparison": null,
+  "effective_dates": {
+   "as_of": null,
+   "candidate_effective_date": null,
+   "conflict": false
+  }
  },
  "example_rule_C_reject_match": {
   "_comment": "A candidate crosses a stated tenant wall: boundary rule C fires REJECT MATCH before any merge ladder runs.",
   "track": "match-or-no-merge",
-  "allowed_answers": ["AUTO-MERGE", "SUGGEST MERGE", "LINK AS RELATED", "KEEP SEPARATE", "REJECT MATCH", "ESCALATE", "NO-DATA"],
+  "allowed_answers": [
+   "AUTO-MERGE",
+   "SUGGEST MERGE",
+   "LINK AS RELATED",
+   "KEEP SEPARATE",
+   "REJECT MATCH",
+   "ESCALATE",
+   "NO-DATA"
+  ],
   "identifiers": [
-   {"value": "9876543210987", "domain": "corporate_number", "legal_person_type": "corporation", "status": "valid"}
+   {
+    "value": "9876543210987",
+    "domain": "corporate_number",
+    "legal_person_type": "corporation",
+    "status": "valid"
+   }
   ],
   "stated_relation": "none",
   "stated_difference": "none",
@@ -34,29 +83,70 @@
   "irreversible": false,
   "history_exists": false,
   "hierarchy_parents": [],
-  "one_to_many_object": false
+  "one_to_many_object": false,
+  "object_type_a": "legal_entity",
+  "object_type_b": "legal_entity",
+  "lifecycle": "active",
+  "requested_action": "none",
+  "requested_relation_type": null,
+  "authoritative_identifier": "aligned",
+  "contradicted_attributes": [],
+  "distinct_operational_attributes": false,
+  "location_comparison": null,
+  "effective_dates": {
+   "as_of": null,
+   "candidate_effective_date": null,
+   "conflict": false
+  }
  },
  "example_rule_B_weak_escalate": {
   "_comment": "A 0.83 name-match score only, no corporate number, an irreversible delete: boundary rule B fires ESCALATE, never a merge, because evidence_strength is weak.",
   "track": "match-or-no-merge",
-  "allowed_answers": ["AUTO-MERGE", "SUGGEST MERGE", "ESCALATE", "NO-DATA"],
+  "allowed_answers": [
+   "AUTO-MERGE",
+   "SUGGEST MERGE",
+   "ESCALATE",
+   "NO-DATA"
+  ],
   "identifiers": [],
   "stated_relation": "none",
   "stated_difference": "none",
   "tenant_boundary": "none",
   "evidence_strength": "weak",
-  "evidence_reasons": ["score_only", "missing_identifier"],
+  "evidence_reasons": [
+   "score_only",
+   "missing_identifier"
+  ],
   "corroborating_facts": [],
   "blank_fields": [],
   "irreversible": true,
   "history_exists": false,
   "hierarchy_parents": [],
-  "one_to_many_object": false
+  "one_to_many_object": false,
+  "object_type_a": "legal_entity",
+  "object_type_b": "legal_entity",
+  "lifecycle": "active",
+  "requested_action": "none",
+  "requested_relation_type": null,
+  "authoritative_identifier": "aligned",
+  "contradicted_attributes": [],
+  "distinct_operational_attributes": false,
+  "location_comparison": null,
+  "effective_dates": {
+   "as_of": null,
+   "candidate_effective_date": null,
+   "conflict": false
+  }
  },
  "example_rule_D_hierarchy_keep_separate": {
   "_comment": "Capital parent, trade-flow parent and reporting parent all valid and different: boundary rule D fires KEEP SEPARATE, since the three hierarchy types are independent and none of them conflicts with another.",
   "track": "hierarchy",
-  "allowed_answers": ["LINK AS RELATED", "KEEP SEPARATE", "ESCALATE", "NO-DATA"],
+  "allowed_answers": [
+   "LINK AS RELATED",
+   "KEEP SEPARATE",
+   "ESCALATE",
+   "NO-DATA"
+  ],
   "identifiers": [],
   "stated_relation": "parent_child",
   "stated_difference": "none",
@@ -68,27 +158,120 @@
   "irreversible": false,
   "history_exists": false,
   "hierarchy_parents": [
-   {"type": "capital", "parent": "癸ホールディングス"},
-   {"type": "trade_flow", "parent": "子丑物産"},
-   {"type": "reporting", "parent": "東日本統括部"}
+   {
+    "type": "capital",
+    "parent": "癸ホールディングス"
+   },
+   {
+    "type": "trade_flow",
+    "parent": "子丑物産"
+   },
+   {
+    "type": "reporting",
+    "parent": "東日本統括部"
+   }
   ],
-  "one_to_many_object": false
+  "one_to_many_object": false,
+  "object_type_a": "legal_entity",
+  "object_type_b": "legal_entity",
+  "lifecycle": "active",
+  "requested_action": "none",
+  "requested_relation_type": null,
+  "authoritative_identifier": "aligned",
+  "contradicted_attributes": [],
+  "distinct_operational_attributes": false,
+  "location_comparison": null,
+  "effective_dates": {
+   "as_of": null,
+   "candidate_effective_date": null,
+   "conflict": false
+  }
  },
  "example_rule_A_blank_field_escalate": {
   "_comment": "A prefecture field is blank, but the banchi and postal code corroborate without confirming: boundary rule A fires ESCALATE, not NO-DATA.",
   "track": "address",
-  "allowed_answers": ["LINK AS RELATED", "KEEP SEPARATE", "ESCALATE", "NO-DATA"],
+  "allowed_answers": [
+   "LINK AS RELATED",
+   "KEEP SEPARATE",
+   "ESCALATE",
+   "NO-DATA"
+  ],
   "identifiers": [],
   "stated_relation": "none",
   "stated_difference": "none",
   "tenant_boundary": "none",
   "evidence_strength": null,
   "evidence_reasons": [],
-  "corroborating_facts": ["banchi_and_postal_code_match_the_candidate_record"],
-  "blank_fields": ["prefecture"],
+  "corroborating_facts": [
+   "banchi_and_postal_code_match_the_candidate_record"
+  ],
+  "blank_fields": [
+   "prefecture"
+  ],
   "irreversible": false,
   "history_exists": false,
   "hierarchy_parents": [],
-  "one_to_many_object": false
+  "one_to_many_object": false,
+  "object_type_a": "legal_entity",
+  "object_type_b": "legal_entity",
+  "lifecycle": "active",
+  "requested_action": "none",
+  "requested_relation_type": null,
+  "authoritative_identifier": "aligned",
+  "contradicted_attributes": [],
+  "distinct_operational_attributes": false,
+  "location_comparison": null,
+  "effective_dates": {
+   "as_of": null,
+   "candidate_effective_date": null,
+   "conflict": false
+  }
+ }
+,
+ "example_rule_r_authoritative_identifier_conflicting_reject_match": {
+  "_comment": "authoritative_identifier=conflicting covers TWO shapes, not only two different valid identifiers disagreeing outright: (1) a reused identifier now pointing at a different entity than the one it used to identify (lifecycle=identifier_reused on the side that reused it), and (2) two identifiers that carry the SAME value but in different domains, which decide()'s rule_r reads as a conflict on its own even when authoritative_identifier itself is left aligned. authoritative_identifier=absent means no authoritative identifier is available on EITHER side, never merely that the two sides disagree. This example shows shape (1): a corporate number the input states was reused after the original holder dissolved, now naming an unrelated successor entity. With a proposal on record (requested_action=match_on_stated_basis), rule_r fires REJECT MATCH via gated_reject; without one, the identical facts would answer KEEP SEPARATE instead (review-u1-2026-09-06.md section A).",
+  "track": "identifier",
+  "allowed_answers": [
+   "AUTO-MERGE",
+   "SUGGEST MERGE",
+   "LINK AS RELATED",
+   "KEEP SEPARATE",
+   "REJECT MATCH",
+   "ESCALATE",
+   "NO-DATA"
+  ],
+  "identifiers": [
+   {
+    "value": "1010401987654",
+    "domain": "corporate_number",
+    "legal_person_type": "corporation",
+    "status": "valid"
+   }
+  ],
+  "stated_relation": "none",
+  "stated_difference": "none",
+  "tenant_boundary": "none",
+  "evidence_strength": null,
+  "evidence_reasons": [],
+  "corroborating_facts": [],
+  "blank_fields": [],
+  "irreversible": false,
+  "history_exists": false,
+  "hierarchy_parents": [],
+  "one_to_many_object": false,
+  "object_type_a": "legal_entity",
+  "object_type_b": "legal_entity",
+  "lifecycle": "identifier_reused",
+  "requested_action": "match_on_stated_basis",
+  "requested_relation_type": null,
+  "authoritative_identifier": "conflicting",
+  "contradicted_attributes": [],
+  "distinct_operational_attributes": false,
+  "location_comparison": null,
+  "effective_dates": {
+   "as_of": null,
+   "candidate_effective_date": null,
+   "conflict": false
+  }
  }
 }

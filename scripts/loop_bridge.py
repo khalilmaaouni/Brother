@@ -163,6 +163,16 @@ def runtime_candidates(env=None):
     if override:
         out.append(os.path.join(override, "tools") if not override.endswith("tools")
                    else override)
+    # Portability release (2026-09-06): the brother plugin carries the
+    # brothermode tools itself, mirrored by scripts/bundle_runtime.py to
+    # <plugin>/runtime/hooks/brothermode/tools beside this very file once
+    # installed. A Codex or Claude home holding ONLY brother@brother (no
+    # brothermode plugin, no standalone skill) finds its worker adapter
+    # here, which is the E84 class of failure closed for the one-plugin
+    # end state. In the hub checkout this path does not exist and is
+    # simply skipped like every other absent candidate.
+    out.append(os.path.normpath(
+        os.path.join(HERE, "hooks", "brothermode", "tools")))
     out.append(HUB_CANDIDATE)
     # config_root is CLAUDE_CONFIG_DIR when set, else $HOME/.claude: the
     # claude CLI's ACTUAL config directory, which is where it places an
@@ -309,6 +319,45 @@ def write_usage_sidecar(path, data):
     except OSError as exc:
         print("loop_bridge: could not write usage sidecar %s: %s"
               % (path, exc), file=sys.stderr)
+
+
+def machine_wide_refusal(plan):
+    """The one sentence a human needs when NOTHING got dispatched, or "".
+
+    WHY THIS EXISTS. On 2026-08-31 eleven units were ready, none was claimed,
+    and every refusal said 'no free slot: capacity is 0' because free disk had
+    fallen under graph_loop's floor. The scheduler was right and it printed its
+    reasons per unit, but the run READ as a normal quiet round, so the watchdog
+    looked asleep, the agents looked unassigned, and the whole EVAD follow-up
+    track sat untouched for a day before a human asked why. The founder found
+    it, not the tooling.
+
+    The distinction that matters, and the reason this is not just a louder
+    print: a unit deferred BLOCKED-BY another unit is the plan working, and a
+    quiet round then is correct. A round where nothing dispatched and the
+    refusals are NOT dependencies is the machine refusing, which is actionable
+    and belongs in front of a person. Reports only the second case, so the
+    alert cannot become noise that gets tuned out.
+    """
+    if dispatchable(plan):
+        return ""
+    reasons = [why for _nid, why in refused(plan)]
+    if not reasons:
+        return ""
+    non_dependency = [r for r in reasons if not r.startswith("BLOCKED-BY")]
+    if not non_dependency:
+        return ""
+    # The shared reason, when there is one, is the actionable sentence.
+    unique = sorted(set(non_dependency))
+    if len(unique) == 1:
+        return ("%d unit(s) were ready and NONE could start, every one refused "
+                "for the same reason: %s. This is the machine refusing, not the "
+                "plan waiting, so it needs a person rather than another round."
+                % (len(reasons), unique[0]))
+    return ("%d unit(s) were ready and NONE could start. %d of the refusals are "
+            "not dependency waits: %s. This is the machine refusing, not the "
+            "plan waiting, so it needs a person rather than another round."
+            % (len(reasons), len(non_dependency), "; ".join(unique[:3])))
 
 
 def _head(cwd):
@@ -756,6 +805,10 @@ def main(argv=None):
               % len(refused(plan)))
         for nid, why in refused(plan):
             print("  %-8s %s" % (nid, why[:90]))
+        alert = machine_wide_refusal(plan)
+        if alert:
+            print("")
+            print("ALERT: %s" % alert)
         print("nothing was claimed: this is a dry run")
         return 0
 
@@ -821,6 +874,11 @@ def main(argv=None):
     for nid, problem in blocked:
         print("NOT CLAIMED %-10s %s" % (nid, problem[:100]))
     if not claimed:
+        # Same alert as the dry run, on the path that actually matters: a real
+        # round that dispatched nothing is the one a human never sees.
+        alert = machine_wide_refusal(plan)
+        if alert:
+            print("ALERT: %s" % alert, file=sys.stderr)
         print("nothing was claimable: %d unit(s) were ready and every one is "
               "held elsewhere or unclaimable" % len(batch), file=sys.stderr)
         return 2

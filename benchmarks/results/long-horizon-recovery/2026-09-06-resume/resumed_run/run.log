@@ -1,0 +1,98 @@
+brother_run: an unfinished run already covers 'two files exist, the second after the first'; resuming it instead of starting a new one
+brother_run: resumed under harness 50f28522da88; the record was created under harness 50f28522da88
+---- intent screen ----
+Proceed with this outcome
+This is what this run is about to act on before anything is claimed or run, one line per piece of work, exactly as the planning model wrote it:
+
+A1: create file one. done_check: `test -f one.txt`. depends on: none. evidence family: NO-DATA, oracle: NO-DATA, independence: unverified
+A2: create file two. done_check: `test -f two.txt`. depends on: A1. evidence family: NO-DATA, oracle: NO-DATA, independence: unverified
+
+Bounds, before any work starts: each piece of work gets at most 3 attempt(s), and one attempt's worker is stopped after 900 seconds.
+
+Price, before anything is claimed or run: this run opens 3 model session(s), one to plan the work and one for each of the 2 piece(s) of work in the plan. The expected wall clock reads NO-DATA: no earlier run against this target left a measured one, and this estate will not invent a duration. What it has timed, elsewhere and with an instrument named beside each figure: a genuinely tiny task driven through this same entry point cost the engine itself under 5 seconds of wall clock (scripts/tiny_task_cost.py), and the one tiny task ever timed end to end against a real model took 568.03 seconds on 2026-09-04, nearly all of it the model answering rather than this code. Neither figure is a prediction for this run: they are what the wait has been. What the same edit would cost you by hand is not measured here, and nothing below claims to beat it: the run proves what it does.
+
+Rollback: 408bd531fd0ceb2f7d31ffca6aa92dbe359445bc
+Is this the outcome you meant, and are these the checks that should decide it?
+   7.50/10  Proceed as decomposed: 'two files exist, the second after the first', 2 piece(s) of work
+   0.00/10  Refuse: nothing is claimed: stop here, before any unit is claimed or run
+  the full screen: <SCRATCH_ROOT>/lhr-fixture-9osf69ha/docs/plan/runs/20260906T091934-two-files-exist-the-second-after-the-fir/screens/intent-screen.html
+brother_run: intent: 2 option(s) considered, Proceed as decomposed recommended at 7.50/10
+brother_run: intent resolved: chose 'Proceed as decomposed', recorded by brother_run (recorded default: the top-ranked option)
+brother_run: intent resolution, depends_on per unit: A1: none; A2: A1
+brother_run: 2 piece(s) of work, none finished yet. How long this takes is not knowable in advance, so no estimate is given; each piece reports as it lands. Each piece gets at most 3 attempt(s), and one attempt's worker is stopped after 900 seconds.
+brother_run: waiting on A1, A2 since 09:20:36; nothing else is running
+abandoned   A2         owner pid 20525 is dead on this host, with 1138s still left on the lease while still in state cl
+ABANDONED  A2         <OS_TMPDIR> owner=brother-run-20525  the lane is still on disk but owner pid 20525 is dead on this host, with 1138s still left on the lease while still claimed for unit A2. It is removed only by a human or by a future unit that names it
+CLAIMED (1): brother-run-25585/A2/2
+  lane-cleanup A2         removed lane lane/A2 removed
+  integrate A2         INTEGRATED                 applied to 408bd531f and its own check passed ON canonical at 20682048b
+  A2         done     scope=CLEAN      integrated=True
+isolation: per-writer worktrees
+worktree_lane: stale lane lane/A2 from an earlier run exists at 4cd78db04, not reused: it was removed
+brother_run: loop_bridge round 1 exited 0
+brother_run: round 1 done, 2 of 2 piece(s) finished, 0 to go
+brother_run: done waiting, 2.7s elapsed
+brother_run: A2's check re-run at 20682048b0f7 with A1's change to one.txt reverted: exited 0
+brother_run: A1 was not reviewed: NO-DATA: this unit crossed no risk boundary, so no reviewer was dispatched
+brother_run: A2 was not reviewed: NO-DATA: this unit crossed no risk boundary, so no reviewer was dispatched
+---- A1: test -f one.txt exited 0 ----
+(the check printed nothing)
+---- A2: test -f two.txt exited 0 ----
+(the check printed nothing)
+---- acceptance screen ----
+Accept this delivery, or do not
+This run is finished. Below is what it delivered and how each piece was checked, one line per piece. The score is not an opinion: a piece whose check ran and exited 0 is marked 10, a refused piece is marked 0, and a piece with no captured exit code is left unmarked with its reason. exit 0 means no check failed. It does not mean everything is proven: only the checks named above ran, and a check nobody wrote cannot fail.
+Is this the result you wanted? Accepting and holding are both yours to choose, and neither is scored here, because scoring your own decision would be an opinion wearing arithmetic's clothes. What is scored is the evidence.
+   5.00/10  The delivery as it stands: every piece of this run, with the check that decided it
+  the full screen: <SCRATCH_ROOT>/lhr-fixture-9osf69ha/docs/plan/runs/20260906T091934-two-files-exist-the-second-after-the-fir/screens/acceptance-screen.html
+brother_run: acceptance: 1 option(s) considered, The delivery as it stands recommended at 5.00/10
+brother_run: acceptance: not yet recorded (nobody yet; loom.py's own rule is no default acceptor for this screen)
+brother_run: delivery report for 'two files exist, the second after the first'
+  work_id: W-two-files-exist-the-second-after-the-fir
+  canonical revision before: 408bd531fd0ceb2f7d31ffca6aa92dbe359445bc
+  canonical revision after:  20682048b0f78673642a4bc288c3f9473bf994db
+  files changed (1): two.txt
+  integrated (2):
+    A1         verified by: test -f one.txt
+    A2         verified by: test -f two.txt
+  refused (0):
+
+  what this run proved, one line per piece of work:
+    A1 delivered: the check test -f one.txt was run and exited 0 (no dependency declared: this check proves its own change only), and its full output is in <SCRATCH_ROOT>/lhr-fixture-9osf69ha/docs/plan/runs/20260906T091934-two-files-exist-the-second-after-the-fir/run.log. Evidence family NO-DATA, oracle NO-DATA, independence unverified. Target revision 20682048b0f78673642a4bc288c3f9473bf994db, environment lock NO-DATA: none of requirements.txt, uv.lock, poetry.lock, environment.yml exist in the target, data identity NO-DATA: this unit declares no data_inputs. Check written by the planning model, harness 50f28522da88 (private hub revision). Resumed by harness 50f28522da88. verdict: PASS
+    A2 is NO-DATA: the check still passes with A1's change to one.txt reverted, so it does not exercise that change. The check it named was test -f two.txt. Evidence family NO-DATA, oracle NO-DATA, independence unverified. Target revision 20682048b0f78673642a4bc288c3f9473bf994db, environment lock NO-DATA: none of requirements.txt, uv.lock, poetry.lock, environment.yml exist in the target, data identity NO-DATA: this unit declares no data_inputs. Check written by the planning model, harness 50f28522da88 (private hub revision). Resumed by harness 50f28522da88. verdict: NO-DATA
+
+  exit 0 means no check failed. It does not mean everything is proven: only the checks named above ran, and a check nobody wrote cannot fail.
+
+  price (said before the run):
+    model_sessions: 3
+    previous_runs_measured: 0
+    wall_clock_seconds_expected: NO-DATA: no earlier run against this target left a measured wall clock, and none is guessed
+    wall_clock_seconds_range: NO-DATA: nothing measured to take a range from
+
+  cost:
+    tokens_in: NO-DATA: no worker in this run recorded tokens_in; the adapter at <BROTHER_HUB_LANE_ROOT>/products/brothermode/tools/bm_worker_spawn.py forwards usage, so the worker's own answer carried none: a model command whose stdout is not the claude CLI's --output-format json object (a stub, another CLI) reports no token counts
+    tokens_out: NO-DATA: no worker in this run recorded tokens_out; the adapter at <BROTHER_HUB_LANE_ROOT>/products/brothermode/tools/bm_worker_spawn.py forwards usage, so the worker's own answer carried none: a model command whose stdout is not the claude CLI's --output-format json object (a stub, another CLI) reports no token counts
+    tokens_cached: NO-DATA: no worker in this run recorded tokens_cached; the adapter at <BROTHER_HUB_LANE_ROOT>/products/brothermode/tools/bm_worker_spawn.py forwards usage, so the worker's own answer carried none: a model command whose stdout is not the claude CLI's --output-format json object (a stub, another CLI) reports no token counts
+    tokens_cache_write: NO-DATA: no worker in this run recorded tokens_cache_write; the adapter at <BROTHER_HUB_LANE_ROOT>/products/brothermode/tools/bm_worker_spawn.py forwards usage, so the worker's own answer carried none: a model command whose stdout is not the claude CLI's --output-format json object (a stub, another CLI) reports no token counts
+    turns: 3
+    wall_clock_seconds: 3.047969
+    cache_hit_rate: NO-DATA: cannot compute a cache hit rate without real tokens_in and tokens_cached, which this run did not record; the adapter at <BROTHER_HUB_LANE_ROOT>/products/brothermode/tools/bm_worker_spawn.py forwards usage, so the worker's own answer carried none: a model command whose stdout is not the claude CLI's --output-format json object (a stub, another CLI) reports no token counts
+    failure_category: none
+    harness_version: v3.4.2-4011-g50f28522-dirty
+    harness_revision: 50f28522da8893800dd8386f8b067fa3e1975661
+
+  verdicts: 1 PASS, 0 FAIL, 1 NO-DATA
+  your acceptance screen: <SCRATCH_ROOT>/lhr-fixture-9osf69ha/docs/plan/runs/20260906T091934-two-files-exist-the-second-after-the-fir/screens/acceptance-screen.html
+  no release screen: a plain change
+  the receipt for this delivery, in eight answers:
+    What changed? 2 file(s) changed by 2 unit(s): one.txt, two.txt. 0 declared path(s) were left untouched on purpose: none
+    Why was this run made? two files exist, the second after the first. The units asked for: A1 (create file one); A2 (create file two)
+    What proves it? 1 unit(s) proved by their own re-executed check: A1 ran 'test -f one.txt', exit 0, author the planning model, family NO-DATA, independence unverified
+    What does not have proof? 1 unit(s) without proof, each unmarked rather than scored: A2 (no-data: the check still passes with A1's change to one.txt reverted, so it does not exercise that change)
+    What failed and was repaired? 1 unit(s) were repaired: A2 (2 attempt(s), check rewritten: no)
+    What should I inspect first? risk classes named by the units themselves: none. Units without proof, worth a first look by definition: A2
+    Was the run contained? yes: every changed file sits inside the scope the unit that changed it declared
+    Can I reproduce this, or continue it? the run's own capsule is on disk, target revision NO-DATA, environment lock NO-DATA, integrated units: A1, A2
+    Which engine version ran this? git describe of the engine's own checkout: v3.4.2-4011-g50f28522-dirty
+    Which exact engine commit ran this? the exact commit of the engine that ran this: 50f28522da8893800dd8386f8b067fa3e1975661
+    the page: <SCRATCH_ROOT>/lhr-fixture-9osf69ha/docs/plan/runs/20260906T091934-two-files-exist-the-second-after-the-fir/screens/delivery-receipt.html

@@ -1,0 +1,85 @@
+JBEQ-MDM regression-2026-09-06-u1-proposal-gate, 2026-09-06. THIS IS A
+REGRESSION RUN ON THE SEEN SET U1, NOT A NEW QUALIFICATION RUN: U1
+(benchmarks/jbeq/mdm/runs/qualification-u1-2026-09-06/) was read and
+reasoned about by the same session that authored review-u1-2026-09-06.md,
+so from that moment U1 is a SEEN set. Every number below describes how
+the fixed engine performs on a set it has effectively been tuned against,
+never a fresh qualification figure. The next real qualification requires
+a new blind unseen set (U2), authored and audited blind against this
+fixed engine, per review-u1-2026-09-06.md's own closing line.
+
+WHAT CHANGED SINCE regression-2026-09-06-u1-rule-d. That run held the
+rule-D fix only. This run adds the REJECT-versus-KEEP proposal_gate fix
+(review-u1-2026-09-06.md section A; FIX-DIRECTIVE-2026-09-06.md section
+18): rules 2, L and rule_r now answer KEEP SEPARATE instead of REJECT
+MATCH when the case's own fact sheet records no proposal (requested_action
+in none, and requested_relation_type null).
+
+METHOD. U1's committed fact-sheets.json and direct-answers.json (copied
+here unchanged from qualification-u1-2026-09-06/) were re-decided with
+`python3 scripts/jbeq_decide.py decide fact-sheets.json --out
+engine-answers.json --decisions decisions.jsonl` under the proposal_gate-
+fixed engine. direct-answers.json (the 10 hand-answered requirements/
+survivorship cases) was merged over the engine's own answers for those
+same 10 ids, exactly as the original qualification run did, producing
+answers.json. That was scored with `python3 scripts/jbeq_mdm.py score
+answers.json --seed ../../unseen-2026-09-06.json` (read-only; not
+modified), full output in score.txt beside this file.
+
+RESULT, key lines from score.txt:
+
+  engine-decided: 24 of 30 (down from 25 of 30 in
+    regression-2026-09-06-u1-rule-d)
+  critical false merges: 0 of 26 (unchanged)
+  critical wrong: 6 of 26 (U-14, U-16, U-20, U-22, U-29, U-39; up from 5)
+  conservative wrongs: 0 (down from 2)
+
+EVERY CASE THAT CHANGED (diff of engine-answers.json against
+regression-2026-09-06-u1-rule-d/engine-answers.json; 5 cases, all
+REJECT MATCH becoming KEEP SEPARATE):
+
+  U-01: REJECT MATCH -> KEEP SEPARATE. FIXED. Expected KEEP SEPARATE
+    (unseen-2026-09-06.json); this case's own question is open ("統合ま
+    たは関連付けの対象とすべきか", nothing proposed), and its sheet
+    correctly carries requested_action=none. Was a CONSERVATIVE wrong
+    before this fix (review-u1-2026-09-06.md section A's own U-01 versus
+    AD-10 collision); is now correct.
+  U-03: REJECT MATCH -> KEEP SEPARATE. FIXED. Same shape as U-01. Was a
+    CONSERVATIVE wrong before; is now correct. (U-03 also carries a
+    separate, still-open extraction defect named in review section A:
+    its location_comparison should read same_area_renamed rather than
+    different_administrative_area, unrelated to this fix and unchanged
+    here.)
+  U-16: REJECT MATCH -> KEEP SEPARATE. NEWLY WRONG. Expected REJECT
+    MATCH. Its question ("顧客コード「C-88123」を鍵として...同一顧客と
+    して扱ってよいか") explicitly proposes a match on a stated basis
+    (a customer code), exactly the match_on_stated_basis shape review
+    section A defines, but the sheet's requested_action reads "none".
+    EXTRACTION GAP on U1's blind sheet, not a rule defect: reported by
+    id, not tuned around.
+  U-20: REJECT MATCH -> KEEP SEPARATE. NEWLY WRONG. Expected REJECT
+    MATCH. Its question ("この二つの登録番号は同一の課税主体を指すと
+    みなせるか") proposes treating two registration numbers as the same
+    taxable entity on the stated basis of those numbers; requested_action
+    reads "none". Same EXTRACTION GAP shape as U-16.
+  U-22: REJECT MATCH -> KEEP SEPARATE. NEWLY WRONG. Expected REJECT
+    MATCH. Its question ("この二つのレコードを同一の課税主体として統
+    合してよいか") proposes merging on the stated tax-subject basis;
+    requested_action reads "none". Same EXTRACTION GAP shape as U-16
+    and U-20.
+
+U-36 (named in the brief as an expected KEEP SEPARATE turn): UNCHANGED,
+already correct at KEEP SEPARATE in both runs, via rule_r's lifecycle
+clause (rule_r_lifecycle_keep, round 7), which this fix does not touch;
+its sheet also carries requested_action=none, consistent with the brief.
+
+WHAT THIS DOES NOT PROVE. U-14, U-29 and U-39 remain wrong for the same
+reasons named in regression-2026-09-06-u1-rule-d/RECORD.txt, unrelated to
+this fix. U-16, U-20 and U-22's extraction gap is the SAME shape found on
+fixture b's AD-03, AD-04 and EO-04 (see commit "Gate the refutation rules
+on whether a proposal was ever made"): the fix is a fresh re-extraction
+that records the proposal these questions plainly state, never a rule
+change. None of this run's numbers should be read as approaching the
+directive's own exit gate (section 21: critical wrong 0 of 33), and no
+claim of qualification should be made on any re-run of U1: it is a
+regression number on a seen set, not a qualification number.

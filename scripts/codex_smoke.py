@@ -172,14 +172,16 @@ def documented_shell_command():
 
 
 #: THE RUNS ROOT, DEFINED ONCE, for the skill, the runbook and this script.
-#: $TMPDIR and NOT `$PWD/.brother-runs`, and the reason is measured twice
-#: over. A workspace-write turn prints its own writable roots, "workdir,
-#: /tmp, $TMPDIR", so the temp root is granted and reachable. Inside the
-#: repository the records are untracked files in the tree integration checks
-#: for cleanliness: pointed there once, on 2026-08-30, a run spun 11 rounds
-#: of live worker calls against a permanently dirty canonical and had to be
-#: killed by hand.
-DOCUMENTED_RUNS_ROOT = "$TMPDIR/brother-runs"
+#: `${CODEX_HOME:-$HOME/.codex}/brother/runs`, NOT `$PWD/.brother-runs` and
+#: NOT a temp directory. Inside the repository the records are untracked
+#: files the tree integration check reads as dirt: pointed there once, on
+#: 2026-08-30, a run spun 11 rounds of live worker calls against a
+#: permanently dirty canonical and had to be killed by hand. A temp
+#: directory (the earlier choice here) is reachable under a workspace-write
+#: turn but is gone at the next reboot, which is exactly what happened to
+#: the founder's own last real receipt (portability A1, 2026-09-06); the
+#: Codex home is durable and already writable by the signed-in user.
+DOCUMENTED_RUNS_ROOT = "${CODEX_HOME:-$HOME/.codex}/brother/runs"
 
 
 def documented_runs_root_flag():
@@ -559,18 +561,25 @@ def main(argv=None):
     if report("2 plugin add", step2) != 0:
         failures.append("plugin add")
 
+    # Since the portability release the Codex marketplace offers ONE plugin:
+    # brother@brother carries the runtime, the skills, the commands and both
+    # products' hooks itself (bundle/hooks/hooks.json, mirrored tools under
+    # bundle/runtime/hooks/). brothermode@brother must therefore be REFUSED
+    # here, and a marketplace that still offers it is the defect.
     step2b = sh([args.codex_bin, "plugin", "add", "brothermode@brother",
                 "--json"], env=env)
-    if report("2b plugin add brothermode", step2b) != 0:
-        failures.append("plugin add brothermode")
+    report("2b plugin add brothermode (expected refusal)", step2b)
+    if step2b.returncode == 0:
+        failures.append("plugin add brothermode@brother succeeded; the "
+                        "marketplace must offer brother@brother only")
 
     step3 = sh([args.codex_bin, "plugin", "list", "--available", "--json"],
                env=env)
     report("3 plugin list --available --json", step3, tail=3)
     if step3.returncode != 0 or '"brother@brother"' not in (step3.stdout or ""):
         failures.append("plugin list did not report pluginId brother@brother")
-    if step3.returncode != 0 or '"brothermode@brother"' not in (step3.stdout or ""):
-        failures.append("plugin list did not report pluginId brothermode@brother")
+    if step3.returncode == 0 and '"brothermode@brother"' in (step3.stdout or ""):
+        failures.append("plugin list still offers pluginId brothermode@brother")
 
     why = build_toy(toy)
     if why:

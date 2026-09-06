@@ -403,5 +403,188 @@ class PreStartSessionIsExcluded(unittest.TestCase):
         self.assertIn("recall off: 1 session(s), 1 tool call(s), 0 lesson(s) shown", out)
 
 
+class RowTsIsTolerant(unittest.TestCase):
+    """learning_loop item 5: both logs this script reads now carry an
+    optional "ts" field. row_ts() must parse a real one and read a missing
+    or malformed one as unknown, never as an error, since a real log mixes
+    rows minted before the field existed with rows minted after."""
+
+    def test_a_vault_recall_row_with_ts_and_sig_parses(self):
+        row = {"hook": "vault_recall", "session": "s1", "lessons_shown": 1,
+               "recall_chars": 40, "recall_tokens_est": 10,
+               "ts": "2026-09-06T12:34:56Z", "sig": "0123456789abcdef",
+               "trigger": ["a-lesson"]}
+        parsed = R.row_ts(row)
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed.year, 2026)
+        self.assertEqual(parsed.hour, 12)
+
+    def test_a_repeat_guard_row_with_ts_parses(self):
+        row = {"sig": "0123456789abcdef", "approach": "git status",
+               "ok": True, "exit_code": 0, "timed_out": False,
+               "success": None, "inferred_fail": False, "err": "",
+               "ts": "2026-09-06T00:00:01Z"}
+        parsed = R.row_ts(row)
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed.day, 6)
+
+    def test_a_row_with_no_ts_reads_as_unknown_not_an_error(self):
+        old_row = {"sig": "0123456789abcdef", "approach": "git status",
+                   "ok": True, "exit_code": 0}
+        self.assertIsNone(R.row_ts(old_row))
+
+    def test_a_malformed_ts_reads_as_unknown_not_an_error(self):
+        bad_row = {"sig": "0123456789abcdef", "ts": "not-a-timestamp"}
+        self.assertIsNone(R.row_ts(bad_row))
+class AbandonmentDetectorA(unittest.TestCase):
+    """Detector A (founder ruling 2026-09-06, "A, abandonment, then B as its
+    check"): a vault_recall outcome row carrying "ts" and "sig" counts as
+    prevented when that sig never runs again in the same session's own
+    repeat-guard log after the recall's ts, not prevented when it does.
+    Exercises compute_abandonment directly against the two hook row shapes
+    the sibling lane (wbs/learning-loop-hook-rows-carry-ts-sig-trigger) adds:
+    "ts"/"sig"/"trigger" on the recall row, "ts" on the guard row."""
+
+    def test_one_abandons_one_repeats(self):
+        sessions = {
+            "abandon-session": {"mtime": 1.0, "rows": [
+                {"sig": "sigA", "ok": True, "ts": "2026-09-05T22:00:00Z"},
+            ]},
+            "repeat-session": {"mtime": 2.0, "rows": [
+                {"sig": "sigB", "ok": False, "ts": "2026-09-06T01:30:00Z"},
+            ]},
+        }
+        outcome_rows = [
+            {"hook": "vault_recall", "session": "abandon-session", "sig": "sigA",
+             "ts": "2026-09-05T23:00:00Z", "trigger": ["lesson-1"]},
+            {"hook": "vault_recall", "session": "repeat-session", "sig": "sigB",
+             "ts": "2026-09-06T01:00:00Z", "trigger": ["lesson-2"]},
+        ]
+        _, without_fields, per_session, totals = R.compute_abandonment(
+            sessions, outcome_rows)
+        self.assertEqual(without_fields, 0)
+        # DRIVEN BACKWARDS FIRST: asserting prevented == 2, not_prevented ==
+        # 0 failed with "AssertionError: 1 != 2" (real run pasted in the PR
+        # body); the fixture proves one abandonment and one repeat, so the
+        # correct read is 1 and 1.
+        self.assertEqual(totals["prevented"], 1)
+        self.assertEqual(totals["not_prevented"], 1)
+        self.assertEqual(per_session["abandon-session"]["prevented"], 1)
+        self.assertEqual(per_session["repeat-session"]["not_prevented"], 1)
+
+    def test_rows_missing_ts_or_sig_are_excluded(self):
+        outcome_rows = [
+            {"hook": "vault_recall", "session": "s1", "sig": "sigA",
+             "ts": "2026-09-06T00:00:00Z"},
+            {"hook": "vault_recall", "session": "s1", "sig": "sigB"},  # no ts
+            {"hook": "vault_recall", "session": "s1",
+             "ts": "2026-09-06T00:00:00Z"},  # no sig
+            {"hook": "other_hook", "session": "s1", "sig": "sigC",
+             "ts": "2026-09-06T00:00:00Z"},  # not a recall row at all
+        ]
+        with_fields, without_fields, _, _ = R.compute_abandonment({}, outcome_rows)
+        self.assertEqual(without_fields, 2)
+        self.assertEqual(len(with_fields), 1)
+
+    def test_tie_counts_as_not_prevented(self):
+        sessions = {
+            "s1": {"mtime": 1.0, "rows": [
+                {"sig": "sigA", "ok": False, "ts": "2026-09-06T00:00:00Z"},
+            ]},
+        }
+        outcome_rows = [
+            {"hook": "vault_recall", "session": "s1", "sig": "sigA",
+             "ts": "2026-09-06T00:00:00Z"},
+        ]
+        _, _, _, totals = R.compute_abandonment(sessions, outcome_rows)
+        self.assertEqual(totals["not_prevented"], 1)
+        self.assertEqual(totals["prevented"], 0)
+
+
+class AbandonmentBelowFloorIsNoData(unittest.TestCase):
+    """Fewer than 5 recall rows carrying ts and sig prints NO-DATA naming the
+    floor, through a real R.run() call, never a computed count."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="repeat-control-test-")
+        self.guard_dir = os.path.join(self.tmp, "repeat-guard")
+        os.makedirs(self.guard_dir)
+        self.seen_path = os.path.join(self.tmp, ".vault_recall_seen")
+        self.outcomes_path = os.path.join(self.tmp, "hook-outcomes.jsonl")
+        self.no_evidence = os.path.join(self.tmp, "no-evidence")
+        self.no_lessons = os.path.join(self.tmp, "no-lessons.jsonl")
+        with open(self.outcomes_path, "w", encoding="utf-8") as f:
+            for i in range(2):
+                f.write(json.dumps({"hook": "vault_recall", "session": "s%d" % i,
+                                     "sig": "sig%d" % i,
+                                     "ts": "2026-09-06T00:0%d:00Z" % i}) + "\n")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_below_floor_prints_no_data(self):
+        buf = io.StringIO()
+        R.run(guard_dir=self.guard_dir, recall_log=self.seen_path,
+              ledger=os.path.join(self.tmp, "no-ledger.jsonl"),
+              outcomes=self.outcomes_path, out=buf,
+              evidence_store=self.no_evidence, repeat_lessons=self.no_lessons)
+        out = buf.getvalue()
+        self.assertIn("abandonment signal (detector A, founder ruling 2026-09-06):", out)
+        self.assertIn("rows without fields: 0", out)
+        self.assertIn("NO-DATA: only 2 recall row(s) carry ts and sig, fewer than 5",
+                       out)
+
+
+class AbandonmentSignalIntegration(unittest.TestCase):
+    """Full R.run() integration: one session abandons, one repeats, read
+    through the real outcomes file and guard directory, --min-sessions
+    lowered to 1 the same way the existing small fixtures above do."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="repeat-control-test-")
+        self.guard_dir = os.path.join(self.tmp, "repeat-guard")
+        os.makedirs(self.guard_dir)
+        self.seen_path = os.path.join(self.tmp, ".vault_recall_seen")
+        self.outcomes_path = os.path.join(self.tmp, "hook-outcomes.jsonl")
+        self.no_evidence = os.path.join(self.tmp, "no-evidence")
+        self.no_lessons = os.path.join(self.tmp, "no-lessons.jsonl")
+        base_t = time.time() - 100000
+
+        _write_session(self.guard_dir, "abandon-session",
+                        [{"sig": "sigA", "ok": True, "exit_code": 0,
+                          "ts": "2026-09-05T22:00:00Z"}], mtime=base_t + 10)
+        _write_session(self.guard_dir, "repeat-session",
+                        [{"sig": "sigB", "ok": False, "exit_code": 1,
+                          "ts": "2026-09-06T01:30:00Z"}], mtime=base_t + 20)
+        _write_seen(self.seen_path, [("abandon-session", "f.py"),
+                                       ("repeat-session", "f.py")])
+        with open(self.outcomes_path, "w", encoding="utf-8") as f:
+            f.write(json.dumps({"hook": "vault_recall", "session": "abandon-session",
+                                 "sig": "sigA", "ts": "2026-09-05T23:00:00Z",
+                                 "trigger": ["lesson-1"], "lessons_shown": 1}) + "\n")
+            f.write(json.dumps({"hook": "vault_recall", "session": "repeat-session",
+                                 "sig": "sigB", "ts": "2026-09-06T01:00:00Z",
+                                 "trigger": ["lesson-2"], "lessons_shown": 1}) + "\n")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_totals_and_arm_line(self):
+        buf = io.StringIO()
+        R.run(guard_dir=self.guard_dir, recall_log=self.seen_path,
+              ledger=os.path.join(self.tmp, "no-ledger.jsonl"),
+              outcomes=self.outcomes_path, min_sessions=1, out=buf,
+              evidence_store=self.no_evidence, repeat_lessons=self.no_lessons)
+        out = buf.getvalue()
+        self.assertIn("rows without fields: 0", out)
+        self.assertIn(
+            "total: 2 recall row(s) with ts and sig, 1 prevented, 1 not prevented",
+            out)
+        self.assertIn("recall on: 2 session(s)", out)
+        self.assertIn("recall off: no recall row(s) by definition", out)
+
+
 if __name__ == "__main__":
     unittest.main()

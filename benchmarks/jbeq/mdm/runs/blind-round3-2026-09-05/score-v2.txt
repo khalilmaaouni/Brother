@@ -1,0 +1,21 @@
+scorer: 2026-09-06.2 (REJECT MATCH and KEEP SEPARATE score as one class for a refuted identity, founder ruling 2026-09-06)
+address              8 of 10
+entity-object        9 of 10
+hierarchy            9 of 10
+identifier           3 of 5
+match-or-no-merge    8 of 10
+requirements         5 of 5
+survivorship         10 of 10
+temporal             10 of 10
+equivalence class MM-08: expected REJECT MATCH, engine said KEEP SEPARATE (scored correct, scorer 2026-09-06.2)
+equivalence class ID-01: expected REJECT MATCH, engine said KEEP SEPARATE (scored correct, scorer 2026-09-06.2)
+engine-decided: 37 of 45
+direct-answered (not blind, not evidence about the engine): 25 of 25
+critical WRONG MM-02 [WRONG TAX IDENTITY] expected REJECT MATCH, answered LINK AS RELATED
+critical WRONG MM-05 [UNREVERSIBLE MERGE WITHOUT EVIDENCE] expected ESCALATE, answered SUGGEST MERGE  FALSE MERGE
+critical WRONG HI-01 [HIERARCHY REVERSAL] expected LINK AS RELATED, answered ESCALATE  CONSERVATIVE
+critical WRONG ID-02 [WRONG TAX IDENTITY] expected ESCALATE, answered NO-DATA
+critical false merges: 1 of 33 (MM-05)
+critical wrong: 4 of 33 (MM-02, MM-05, HI-01, ID-02)
+conservative wrongs: 1 (HI-01)
+JBEQ-MDM NOT READY

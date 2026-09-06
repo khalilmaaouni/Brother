@@ -27,6 +27,24 @@ import unittest
 
 HOOK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vault_recall_hook.py")
 
+#: tools/repeat-guard/repeat_guard.py, four directories up from this file
+#: (products/brothermode/tools -> products/brothermode -> products -> repo
+#: root), the same repo-root shape as HOOK's own dirname.
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.dirname(os.path.abspath(__file__)))))
+REPEAT_GUARD = os.path.join(_REPO_ROOT, "tools", "repeat-guard", "repeat_guard.py")
+
+
+def REPEAT_GUARD_SIGNATURE(tool_name, tool_input):
+    """tools/repeat-guard/repeat_guard.py's own signature(), imported rather
+    than reimplemented here, because two parsers of one format drift and
+    neither side finds out (the same rationale test_repeat_guard.py's own
+    signature_of() already uses)."""
+    spec = importlib.util.spec_from_file_location("_rg_for_vault_recall_test", REPEAT_GUARD)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.signature(tool_name, tool_input or {})[0]
+
 
 def load_hook(env=None, consented=True):
     """Import the hook fresh under a chosen environment, since TOOL is
@@ -53,6 +71,44 @@ def load_hook(env=None, consented=True):
     finally:
         os.environ.clear()
         os.environ.update(saved)
+
+
+def _real_outcomes_path():
+    """The REAL default hook-outcomes.jsonl location, read straight off
+    _config_dir() rather than through the BM_HOOK_OUTCOMES override every
+    isolated test above sets: a guard checking whether the founder's actual
+    log changed has to look at the actual log, not at whatever override the
+    test in progress happened to install. load_hook() with no env argument
+    restores the ambient environment afterward (see its own finally block
+    above), so this never leaves BM_TOOLS or anything else mutated."""
+    mod = load_hook()
+    return os.path.join(mod._config_dir(), "hook-outcomes.jsonl")
+
+
+def _outcomes_size_or_none():
+    path = _real_outcomes_path()
+    return os.path.getsize(path) if os.path.exists(path) else None
+
+
+#: PR 458 fixed a defect where several tests in this module reached
+#: _append_outcome without redirecting BM_HOOK_OUTCOMES, so every run of this
+#: suite appended real rows to the founder's actual ~/.claude/hook-outcomes.jsonl.
+#: setUpModule/tearDownModule bracket the WHOLE module (every class below,
+#: regardless of load order) so a future test that reintroduces the same gap
+#: fails here rather than shipping silently again.
+def setUpModule():
+    global _REAL_OUTCOMES_SIZE_BEFORE
+    _REAL_OUTCOMES_SIZE_BEFORE = _outcomes_size_or_none()
+
+
+def tearDownModule():
+    after = _outcomes_size_or_none()
+    if after != _REAL_OUTCOMES_SIZE_BEFORE:
+        raise AssertionError(
+            "the real outcomes log (%s) changed during this test module: "
+            "%r before, %r after. A test above reached _append_outcome "
+            "without redirecting BM_HOOK_OUTCOMES to an isolated path."
+            % (_real_outcomes_path(), _REAL_OUTCOMES_SIZE_BEFORE, after))
 
 
 class TheTimeoutMustClearTheMeasuredWorstCase(unittest.TestCase):
@@ -290,7 +346,8 @@ class TheRecalledNotesAreFramedAsUntrustedData(unittest.TestCase):
             fake_tool = os.path.join(tmp, "bm_vault.py")
             with open(fake_tool, "w", encoding="utf-8") as f:
                 f.write("print(%r)\n" % self.CLEAN_OUT)
-            mod = load_hook({"BM_TOOLS": tmp})
+            mod = load_hook({"BM_TOOLS": tmp,
+                             "BM_HOOK_OUTCOMES": os.path.join(tmp, "hook-outcomes.jsonl")})
             mod.TOOL = fake_tool
             mod.SEEN = os.path.join(tmp, "seen")
             saved_in, saved_out = sys.stdin, sys.stdout
@@ -319,7 +376,8 @@ class TheRecalledNotesAreFramedAsUntrustedData(unittest.TestCase):
             fake_tool = os.path.join(tmp, "bm_vault.py")
             with open(fake_tool, "w", encoding="utf-8") as f:
                 f.write("print(%r)\n" % self.CLEAN_OUT)
-            mod = load_hook({"BM_TOOLS": tmp})
+            mod = load_hook({"BM_TOOLS": tmp,
+                             "BM_HOOK_OUTCOMES": os.path.join(tmp, "hook-outcomes.jsonl")})
             mod.TOOL = fake_tool
             mod.SEEN = os.path.join(tmp, "seen")
             saved_in, saved_out = sys.stdin, sys.stdout
@@ -344,7 +402,8 @@ class TheRecalledNotesAreFramedAsUntrustedData(unittest.TestCase):
             fake_tool = os.path.join(tmp, "bm_vault.py")
             with open(fake_tool, "w", encoding="utf-8") as f:
                 f.write("print('no notes here')\n")
-            mod = load_hook({"BM_TOOLS": tmp})
+            mod = load_hook({"BM_TOOLS": tmp,
+                             "BM_HOOK_OUTCOMES": os.path.join(tmp, "hook-outcomes.jsonl")})
             mod.TOOL = fake_tool
             mod.SEEN = os.path.join(tmp, "seen")
             saved_in, saved_out = sys.stdin, sys.stdout
@@ -370,7 +429,8 @@ class TheRecalledNotesAreFramedAsUntrustedData(unittest.TestCase):
             fake_tool = os.path.join(tmp, "bm_vault.py")
             with open(fake_tool, "w", encoding="utf-8") as f:
                 f.write("print(%r, end='')\n" % self.NO_DATA_OUT)
-            mod = load_hook({"BM_TOOLS": tmp})
+            mod = load_hook({"BM_TOOLS": tmp,
+                             "BM_HOOK_OUTCOMES": os.path.join(tmp, "hook-outcomes.jsonl")})
             mod.TOOL = fake_tool
             mod.SEEN = os.path.join(tmp, "seen")
             saved_in, saved_out = sys.stdin, sys.stdout
@@ -395,10 +455,19 @@ class TheRecalledNotesAreFramedAsUntrustedData(unittest.TestCase):
             fake_tool = os.path.join(tmp, "bm_vault.py")
             with open(fake_tool, "w", encoding="utf-8") as f:
                 f.write("print(%r, end='')\n" % self.TWO_TITLE_OUT)
-            mod = load_hook({"BM_TOOLS": tmp})
+            mod = load_hook({"BM_TOOLS": tmp,
+                             "BM_HOOK_OUTCOMES": os.path.join(tmp, "hook-outcomes.jsonl")})
             mod.TOOL = fake_tool
             mod.SEEN = os.path.join(tmp, "seen")
             saved_in, saved_out = sys.stdin, sys.stdout
+            # The payload carries no session_id, so the seen key must fall
+            # all the way to "nosession". The hook's own fallbacks read
+            # CLAUDE_SESSION_ID and CODEX_SESSION_ID from the environment,
+            # and a suite run from inside a Codex turn inherits the latter
+            # (measured 2026-09-06); clear both for this one call.
+            saved_env = {k: os.environ.pop(k) for k in
+                         ("CLAUDE_SESSION_ID", "CODEX_SESSION_ID")
+                         if k in os.environ}
             sys.stdin = io.StringIO(json.dumps(
                 {"tool_input": {"file_path": "/tmp/a-file-handle-leak.md"}}))
             sys.stdout = io.StringIO()
@@ -407,6 +476,7 @@ class TheRecalledNotesAreFramedAsUntrustedData(unittest.TestCase):
                 out = sys.stdout.getvalue()
             finally:
                 sys.stdin, sys.stdout = saved_in, saved_out
+                os.environ.update(saved_env)
             self.assertEqual(rc, 0)
             context = json.loads(out)["hookSpecificOutput"]["additionalContext"]
             self.assertTrue(
@@ -432,7 +502,8 @@ class TheRecalledNotesAreFramedAsUntrustedData(unittest.TestCase):
             fake_tool = os.path.join(tmp, "bm_vault.py")
             with open(fake_tool, "w", encoding="utf-8") as f:
                 f.write("print(%r, end='')\n" % self.CLEAN_OUT)
-            mod = load_hook({"BM_TOOLS": tmp})
+            mod = load_hook({"BM_TOOLS": tmp,
+                             "BM_HOOK_OUTCOMES": os.path.join(tmp, "hook-outcomes.jsonl")})
             mod.TOOL = fake_tool
             mod.SEEN = os.path.join(tmp, "seen")
             saved_in, saved_out = sys.stdin, sys.stdout
@@ -493,7 +564,9 @@ class TheHookIsGatedOnConsent(unittest.TestCase):
                      encoding="utf-8") as f:
                 f.write("import sys\nsys.stderr.write('should never run\\n')\n"
                        "sys.exit(3)\n")
-            mod = load_hook({"BM_TOOLS": tmp}, consented=False)
+            mod = load_hook({"BM_TOOLS": tmp,
+                             "BM_HOOK_OUTCOMES": os.path.join(tmp, "hook-outcomes.jsonl")},
+                            consented=False)
             rc, out = self._run(mod, tmp)
             self.assertEqual(rc, 0, "the gate must never turn into a block")
             self.assertEqual(out, "", "no consent means no output, ever")
@@ -509,7 +582,9 @@ class TheHookIsGatedOnConsent(unittest.TestCase):
             with open(os.path.join(tmp, "bm_vault.py"), "w",
                      encoding="utf-8") as f:
                 f.write("print(%r, end='')\n" % self.CLEAN_OUT)
-            mod = load_hook({"BM_TOOLS": tmp}, consented=True)
+            mod = load_hook({"BM_TOOLS": tmp,
+                             "BM_HOOK_OUTCOMES": os.path.join(tmp, "hook-outcomes.jsonl")},
+                            consented=True)
             rc, out = self._run(mod, tmp)
             self.assertEqual(rc, 0)
             self.assertIn("BEGIN RETRIEVED MEMORY", out)
@@ -528,7 +603,9 @@ class TheHookIsGatedOnConsent(unittest.TestCase):
             with open(os.path.join(tmp, "bm_vault.py"), "w",
                      encoding="utf-8") as f:
                 f.write("print(%r, end='')\n" % self.CLEAN_OUT)
-            mod = load_hook({"BM_TOOLS": tmp}, consented=False)
+            mod = load_hook({"BM_TOOLS": tmp,
+                             "BM_HOOK_OUTCOMES": os.path.join(tmp, "hook-outcomes.jsonl")},
+                            consented=False)
             rc, out = self._run(mod, tmp)
             self.assertEqual(rc, 0, "the gate must never turn into a block")
             self.assertEqual(out, "",
@@ -637,6 +714,124 @@ class TheRecallReportsItsOwnOutcomeNumber(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertIn("BEGIN RETRIEVED MEMORY", out,
                           "an unwritable outcome log swallowed the recall itself")
+
+
+class TheOutcomeRowCarriesTsSigAndTrigger(unittest.TestCase):
+    """learning_loop item 5: an opus navigator proved no hook row anywhere
+    carried a timestamp, a lesson identity, or a command signature, so
+    "a repeat was shown before the command it repeats" was unorderable. This
+    is the no-regret half: add the three fields, change nothing else.
+
+    Never a detector: this suite proves the fields exist and parse, not that
+    any repeat is caught by them."""
+
+    SHOWN_OUT = TheHookIsGatedOnConsent.CLEAN_OUT
+
+    def _run(self, tmp, payload):
+        with open(os.path.join(tmp, "bm_vault.py"), "w", encoding="utf-8") as fh:
+            fh.write("print(%r, end='')\n" % self.SHOWN_OUT)
+        outcomes = os.path.join(tmp, "hook-outcomes.jsonl")
+        mod = load_hook({"BM_TOOLS": tmp, "BM_HOOK_OUTCOMES": outcomes})
+        mod.TOOL = os.path.join(tmp, "bm_vault.py")
+        mod.SEEN = os.path.join(tmp, "seen")
+        saved_in, saved_out = sys.stdin, sys.stdout
+        sys.stdin = io.StringIO(json.dumps(payload))
+        sys.stdout = io.StringIO()
+        try:
+            rc = mod.main()
+        finally:
+            sys.stdin, sys.stdout = saved_in, saved_out
+        rows = []
+        if os.path.exists(outcomes):
+            with io.open(outcomes, encoding="utf-8") as fh:
+                rows = [json.loads(line) for line in fh if line.strip()]
+        return mod, rc, rows
+
+    def test_a_shown_recall_writes_ts_sig_and_trigger(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mod, rc, rows = self._run(tmp, {
+                "session_id": "sess-e57", "tool_name": "Edit",
+                "tool_input": {"file_path": "/tmp/a-file-handle-leak.md",
+                               "old_string": "a", "new_string": "b"}})
+            self.assertEqual(rc, 0)
+            self.assertEqual(len(rows), 1)
+            row = rows[0]
+            # ts: ISO 8601 UTC with seconds, and it must actually parse.
+            import datetime
+            parsed = datetime.datetime.strptime(row["ts"], "%Y-%m-%dT%H:%M:%SZ")
+            self.assertIsInstance(parsed, datetime.datetime)
+            # sig: the 16-character fingerprint, sixteen lowercase hex digits.
+            self.assertRegex(row["sig"], r"^[0-9a-f]{16}$")
+            # trigger: the identifier of each lesson actually shown, as a list,
+            # the same titles _note_titles(out) extracted for the count already
+            # asserted by TheRecallReportsItsOwnOutcomeNumber.
+            self.assertIsInstance(row["trigger"], list)
+            self.assertEqual(len(row["trigger"]), row["lessons_shown"])
+
+    def test_sig_matches_the_repeat_guards_own_signature_for_the_same_call(self):
+        """The whole point of "sig" is that it can be joined against
+        tools/repeat-guard/repeat_guard.py's own rows. Proven here for a Bash
+        call, since the hook can carry any tool_name on its own PreToolUse
+        payload even though it is normally registered on Edit|Write|
+        NotebookEdit."""
+        with tempfile.TemporaryDirectory() as tmp:
+            # cmd_check keys its lesson lookup off tool_input.file_path, so a
+            # Bash payload needs one too, to still trigger a recall for this
+            # fixture; a Bash sig itself is computed off "command" only.
+            payload = {"session_id": "sess-e57", "tool_name": "Bash",
+                       "tool_input": {"command": "git status",
+                                     "file_path": "/tmp/a-file-handle-leak.md"}}
+            mod, rc, rows = self._run(tmp, payload)
+            self.assertEqual(rc, 0)
+            self.assertEqual(len(rows), 1)
+            expected = REPEAT_GUARD_SIGNATURE("Bash", payload["tool_input"])
+            self.assertEqual(rows[0]["sig"], expected)
+
+    def test_a_broken_sig_or_clock_leaves_the_row_as_it_was_before(self):
+        """Never raises: a failure in ts/sig/trigger computation must not cost
+        the row _append_outcome would otherwise have written."""
+        with tempfile.TemporaryDirectory() as tmp:
+            mod, _, _ = self._run(tmp, {
+                "session_id": "sess-e57",
+                "tool_input": {"file_path": "/tmp/a-file-handle-leak.md"}})
+            mod._repeat_guard_signature = lambda *a, **k: (_ for _ in ()).throw(
+                RuntimeError("boom"))
+            outcomes2 = os.path.join(tmp, "hook-outcomes2.jsonl")
+            mod.OUTCOMES = outcomes2
+            mod._append_outcome("sess-x", 1, 100, tool_name="Edit",
+                                tool_input={"file_path": "x"}, trigger=["a"])
+            with io.open(outcomes2, encoding="utf-8") as fh:
+                rows = [json.loads(line) for line in fh if line.strip()]
+            self.assertEqual(len(rows), 1)
+            row = rows[0]
+            self.assertNotIn("ts", row)
+            self.assertNotIn("sig", row)
+            self.assertNotIn("trigger", row)
+            self.assertEqual(row["hook"], "vault_recall")
+            self.assertEqual(row["lessons_shown"], 1)
+
+
+class TheSigAgreesWithTheRepeatGuard(unittest.TestCase):
+    """Two independent copies of one masking-and-hashing scheme drift the
+    moment one changes without the other, and a drifted "sig" cannot be
+    joined against tools/repeat-guard/repeat_guard.py's own rows, which is
+    the whole reason the field exists. Proven on three sample Bash commands
+    and one Edit path, the shapes signature() itself branches on."""
+
+    def test_three_bash_commands_and_one_edit_path_agree(self):
+        mod = load_hook()
+        cases = [
+            ("Bash", {"command": "git status"}),
+            ("Bash", {"command": "pytest -q /tmp/xyz123 2>&1 | tail -20"}),
+            ("Bash", {"command": "echo abc123def4567 && sleep 5"}),
+            ("Edit", {"file_path": "/tmp/a-file-handle-leak.md",
+                      "old_string": "a", "new_string": "b"}),
+        ]
+        for tool_name, tool_input in cases:
+            got = mod._repeat_guard_signature(tool_name, tool_input)
+            want = REPEAT_GUARD_SIGNATURE(tool_name, tool_input)
+            self.assertEqual(got, want,
+                             "drifted on %s %r" % (tool_name, tool_input))
 
 
 class TheHookNeverBlocksAnEdit(unittest.TestCase):

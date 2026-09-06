@@ -1,0 +1,40 @@
+{"case_id": "U-01", "answer": "REJECT MATCH", "rule_fired": "2", "why": "stated_difference=different_legal_entity refutes the proposed identity outright"}
+{"case_id": "U-02", "answer": "NO-DATA", "rule_fired": "A", "why": "blank field(s) ['prefecture', 'city'] and nothing observable corroborates them"}
+{"case_id": "U-03", "answer": "REJECT MATCH", "rule_fired": "L", "why": "location_comparison=different_administrative_area: the two addresses disagree at the administrative-area level despite any town or lot number match"}
+{"case_id": "U-04", "answer": "ESCALATE", "rule_fired": "A", "why": "blank field(s) ['prefecture'] but an observable fact supports without confirming (corroborating_facts=['postal_code_matches_the_candidate_record'], identifiers=[], contradicted_attributes=[], effective_dates={'as_of': None, 'candidate_effective_date': None, 'conflict': False}, hierarchy_parents=[])"}
+{"case_id": "U-05", "answer": "NO-DATA", "rule_fired": "safety-net", "why": "rule L chose 'AUTO-MERGE' but the case's own allowed_answers does not carry it: ['LINK AS RELATED', 'KEEP SEPARATE', 'REJECT MATCH', 'ESCALATE', 'NO-DATA']"}
+{"case_id": "U-06", "answer": "LINK AS RELATED", "rule_fired": "1", "why": "stated_relation='corporate_number_shared': the input itself states a relation"}
+{"case_id": "U-07", "answer": "LINK AS RELATED", "rule_fired": "1", "why": "stated_relation='role_pair': the input itself states a relation"}
+{"case_id": "U-08", "answer": "LINK AS RELATED", "rule_fired": "1", "why": "stated_relation='role_pair': the input itself states a relation"}
+{"case_id": "U-09", "answer": "REJECT MATCH", "rule_fired": "C", "why": "tenant_boundary='stated', stated_difference='different_tenant' states the two are not the same or must never link"}
+{"case_id": "U-10", "answer": "ESCALATE", "rule_fired": "B", "why": "evidence_strength=weak; irreversibility or history never upgrade weak evidence into a merge, and nothing here refutes or clears it either"}
+{"case_id": "U-11", "answer": "LINK AS RELATED", "rule_fired": "1", "why": "stated_relation='parent_child': the input itself states a relation"}
+{"case_id": "U-12", "answer": "LINK AS RELATED", "rule_fired": "1", "why": "stated_relation='parent_child': the input itself states a relation"}
+{"case_id": "U-13", "answer": "KEEP SEPARATE", "rule_fired": "D", "why": "hierarchy_parents states 3 distinct types (capital, reporting, trade_flow), each valid; hierarchy types are independent, not one conflict"}
+{"case_id": "U-14", "answer": "KEEP SEPARATE", "rule_fired": "1", "why": "stated_relation=none: the input states no relation"}
+{"case_id": "U-15", "answer": "ESCALATE", "rule_fired": "B", "why": "evidence_reasons carries ['unexplained_conflict'] even though evidence_strength is null (not a merge candidate): a stated reason must not be silently discarded"}
+{"case_id": "U-16", "answer": "REJECT MATCH", "rule_fired": "2", "why": "stated_difference=different_legal_entity refutes the proposed identity outright"}
+{"case_id": "U-17", "answer": "SUGGEST MERGE", "rule_fired": "B", "why": "evidence_strength=medium, reasons=['unvalidated_crosswalk'], irreversible=False, history_exists=False: enough to merge but a person should confirm"}
+{"case_id": "U-18", "answer": "LINK AS RELATED", "rule_fired": "7", "why": "records are kept apart by company code operationally, but both name the same external entity, which is itself the relation"}
+{"case_id": "U-19", "answer": "REJECT MATCH", "rule_fired": "C", "why": "tenant_boundary='none', stated_difference='different_identifier_domain' states the two are not the same or must never link"}
+{"case_id": "U-20", "answer": "REJECT MATCH", "rule_fired": "2", "why": "stated_difference=different_legal_entity refutes the proposed identity outright"}
+{"case_id": "U-21", "answer": "LINK AS RELATED", "rule_fired": "site_store", "why": "distinct_operational_attributes=true: each side carries its own delivery, booking or pricing target, so the records relate but never merge into one"}
+{"case_id": "U-22", "answer": "REJECT MATCH", "rule_fired": "2", "why": "stated_difference=different_legal_entity refutes the proposed identity outright"}
+{"case_id": "U-23", "answer": "NO-DATA", "rule_fired": "safety-net", "why": "rule B chose 'NO-DATA' but the case's own allowed_answers does not carry it: ['AUTO-MERGE', 'SUGGEST MERGE', 'LINK AS RELATED', 'KEEP SEPARATE', 'REJECT MATCH', 'ESCALATE']"}
+{"case_id": "U-24", "answer": "ESCALATE", "rule_fired": "B", "why": "evidence_strength=weak; irreversibility or history never upgrade weak evidence into a merge, and nothing here refutes or clears it either"}
+{"case_id": "U-25", "answer": "AUTO-MERGE", "rule_fired": "B", "why": "evidence_strength=strong with no conflicting or confirmation reason, and no merge-safety gate blocked it"}
+{"case_id": "U-26", "answer": "NO-DATA", "rule_fired": "track-unsupported", "why": "track 'requirements' answers from its own vocabulary; no rule handed to this module defines it"}
+{"case_id": "U-27", "answer": "NO-DATA", "rule_fired": "track-unsupported", "why": "track 'requirements' answers from its own vocabulary; no rule handed to this module defines it"}
+{"case_id": "U-28", "answer": "NO-DATA", "rule_fired": "track-unsupported", "why": "track 'requirements' answers from its own vocabulary; no rule handed to this module defines it"}
+{"case_id": "U-29", "answer": "NO-DATA", "rule_fired": "track-unsupported", "why": "track 'requirements' answers from its own vocabulary; no rule handed to this module defines it"}
+{"case_id": "U-30", "answer": "NO-DATA", "rule_fired": "track-unsupported", "why": "track 'requirements' answers from its own vocabulary; no rule handed to this module defines it"}
+{"case_id": "U-31", "answer": "NO-DATA", "rule_fired": "track-unsupported", "why": "track 'survivorship' answers from its own vocabulary; no rule handed to this module defines it"}
+{"case_id": "U-32", "answer": "NO-DATA", "rule_fired": "track-unsupported", "why": "track 'survivorship' answers from its own vocabulary; no rule handed to this module defines it"}
+{"case_id": "U-33", "answer": "NO-DATA", "rule_fired": "track-unsupported", "why": "track 'survivorship' answers from its own vocabulary; no rule handed to this module defines it"}
+{"case_id": "U-34", "answer": "NO-DATA", "rule_fired": "track-unsupported", "why": "track 'survivorship' answers from its own vocabulary; no rule handed to this module defines it"}
+{"case_id": "U-35", "answer": "NO-DATA", "rule_fired": "track-unsupported", "why": "track 'survivorship' answers from its own vocabulary; no rule handed to this module defines it"}
+{"case_id": "U-36", "answer": "REJECT MATCH", "rule_fired": "rule_r", "why": "stated_relation=none and lifecycle='closed': a closed, relocated or reused-identifier record is never the same live object"}
+{"case_id": "U-37", "answer": "AUTO-MERGE", "rule_fired": "B", "why": "evidence_strength=strong with no conflicting or confirmation reason, and no merge-safety gate blocked it"}
+{"case_id": "U-38", "answer": "NO-DATA", "rule_fired": "safety-net", "why": "rule rule_r chose 'REJECT MATCH' but the case's own allowed_answers does not carry it: ['LINK AS RELATED', 'KEEP SEPARATE', 'ESCALATE', 'NO-DATA']"}
+{"case_id": "U-39", "answer": "KEEP SEPARATE", "rule_fired": "1", "why": "stated_relation=none: the input states no relation"}
+{"case_id": "U-40", "answer": "ESCALATE", "rule_fired": "B", "why": "evidence_reasons carries ['unexplained_conflict'] even though evidence_strength is null (not a merge candidate): a stated reason must not be silently discarded"}

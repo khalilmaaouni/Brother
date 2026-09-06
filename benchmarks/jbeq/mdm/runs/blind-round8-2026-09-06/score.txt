@@ -1,0 +1,16 @@
+address              9 of 10
+entity-object        8 of 10
+hierarchy            8 of 10
+identifier           3 of 5
+match-or-no-merge    10 of 10
+requirements         5 of 5
+survivorship         10 of 10
+temporal             10 of 10
+engine-decided: 53 of 60
+direct-answered (not blind, not evidence about the engine): 10 of 10
+critical WRONG ID-02 [WRONG TAX IDENTITY] expected ESCALATE, answered KEEP SEPARATE
+critical WRONG ID-05 [CROSS-CUSTOMER CONTAMINATION] expected REJECT MATCH, answered KEEP SEPARATE
+critical false merges: 0 of 33
+critical wrong: 2 of 33 (ID-02, ID-05)
+conservative wrongs: 0
+JBEQ-MDM NOT READY

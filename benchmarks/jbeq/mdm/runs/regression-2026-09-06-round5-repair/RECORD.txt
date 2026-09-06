@@ -1,0 +1,29 @@
+run: 2026-09-06, REGRESSION CHECK, offline re-decision of blind round 5's own committed sheets (benchmarks/jbeq/mdm/runs/blind-round5-2026-09-06/fact-sheets.json), NOT a blind qualification and NOT a new extraction. This proves the round 5 repair (validation, rule_r, site_store promotion, the link_vs_reject and rule A fixes, the stated_relation AUTO-MERGE gate) against the exact sheets that motivated it, which is the definition of fitting the test set: it says the rules work on the cases that found them, never that they generalize. The gate in FIX-DIRECTIVE-2026-09-06.md section 21 needs a fresh unseen set, not this run.
+
+command: `python3 scripts/jbeq_decide.py decide benchmarks/jbeq/mdm/runs/blind-round5-2026-09-06/fact-sheets.json --allow-unrecognized --out engine-answers.json --decisions decisions.jsonl`, then engine-answers.json merged with blind-round5-2026-09-06/direct-answers.json (the 25 RQ/SV/TM cases the same round 5 extractor answered directly once no longer blind, unchanged) into answers.json, then `python3 scripts/jbeq_mdm.py score answers.json --seed benchmarks/jbeq/mdm/seed-2026-09-05.json`.
+
+--allow-unrecognized is required here and only here: the round 5 extractor wrote free text into stated_difference on 19 of 45 engine-covered sheets and into stated_relation on 2, so the repaired validator refuses all 21 outright (see the reproducibility note appended to blind-round5-2026-09-06/RECORD.txt). This flag skips that refusal and runs the rule table on the sheet's raw values anyway; the off-enum field itself still matches no rule keyed on its literal value, but every OTHER field the round 5 extractor DID get right (authoritative_identifier, object_type, lifecycle, location_comparison, identifiers) is on-enum and reaches the new rules normally. Every sheet decided this way carries its off-enum field(s) on its decisions.jsonl row under "unrecognized_values", never silently dropped.
+
+engine at hub commit a145fa7a (this branch's own rules commit; the validation commit 8b080457 alone would refuse these sheets with no answer at all, which is the point of --allow-unrecognized). fact sheets sha256 248927fffbcb9d4be29896281a3f4fc7aecd68eac945e455f8154db3d72a1f25 (byte-identical to blind-round5-2026-09-06/fact-sheets.json; this run never re-extracted or hand-edited a sheet). seed sha256 872b7eec479fe006fc4b4b76f47a2af60be8bbe792a703191c57205aac2b95c4 (unchanged, the frozen seed-2026-09-05.json). answers sha256 9216181fe0054d9910662c4db9c4308c2324abefa7b79bc8d3d122655cf3ebe2.
+
+result: 60 of 70 (up from round 5's original 47 of 70, and above round 4's 50 of 70), engine-decided 35 of 45 (up from round 5's 22 of 45 and round 4's 25 of 45), direct-answered 25 of 25 (unchanged, the same non-blind SV/RQ/TM answers every round has carried and is not evidence about this engine), critical wrong 2 of 33 (MM-06, HI-02; down from round 5's 14 and round 4's 8), critical false merges 0 of 33 (down from round 4's 1, MM-01; round 5 already read 0), conservative wrongs 1 (MM-06), JBEQ-MDM NOT READY, exit 1. Full detail in score.txt.
+
+engine-decided across the three points of comparison, the number FIX-DIRECTIVE-2026-09-06.md section 15's release gate should read, per the design review section G ("the engine's own half, beside the corpus name and the tree"):
+  round 4 (blind-round4-2026-09-05, original engine):        25 of 45
+  round 5 (blind-round5-2026-09-06, original engine):        22 of 45
+  round 5 repair (this run, repaired engine, --allow-unrecognized): 35 of 45
+
+what closed and why, matched against the design review's own eight-case list (section A) plus the four named separately (section B, C):
+  EO-04, MM-02, MM-03, AD-10, ID-04, ID-05  KEEP SEPARATE -> REJECT MATCH  rule_r clause (a), authoritative_identifier=conflicting fires independent of the off-enum stated_difference on every one of these six
+  ID-01                                     KEEP SEPARATE -> REJECT MATCH  rule_r clause (b), two identifiers share a value across domains
+  AD-04                                     KEEP SEPARATE -> REJECT MATCH  rule_r clause (e), location_comparison=different_unit_in_building
+  ID-02                                     NO-DATA -> ESCALATE            rule A widened, identifiers non-empty
+  MM-10, HI-08                              KEEP SEPARATE -> LINK AS RELATED  site_store promoted to a top-level rule (both had evidence_strength null, unreachable by the old gate)
+  MM-01 (round 4's false merge)             AUTO-MERGE -> LINK AS RELATED  site_store, unaffected by --allow-unrecognized since distinct_operational_attributes is a boolean, not an enum field
+  EO-05 (an unflagged false merge the seed marks non-critical)  AUTO-MERGE -> LINK AS RELATED  the new stated_relation AUTO-MERGE gate
+
+what stays wrong, honestly, and why (the two named residuals the design review section G predicted before this run existed):
+  MM-06  ESCALATE (expected KEEP SEPARATE)   needs the extractor to emit contradicted_attributes for the kanji/banchi disagreement; the fact lives only in extractor-notes.md prose today, on a field decide() cannot read from prose
+  HI-02  LINK AS RELATED (expected REJECT MATCH)  a schema gap, not a rule bug: HI-02's refutation is DIRECTION (the request reverses parent and child inside the same capital hierarchy) and no field in this schema carries direction; the link_vs_reject branch correctly does not fire because requested_relation_type and the stated hierarchy type agree
+
+what this run does NOT prove: it does not show the repaired rules generalize past the round 5 corpus (see the run's own opening line), and it does not show a fresh extraction under the repaired prompt would reproduce round 4's clean field values on these seventy cases (the flip condition the design review names in its own closing section). Both need a new blind extraction pass, which is out of this run's scope.

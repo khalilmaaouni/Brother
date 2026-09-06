@@ -38,6 +38,11 @@
 # environment proof runs IN the public repo (dispatch only, ubuntu only, free on
 # a public repository). linux-smoke.yml is hub-only and deliberately NOT listed.
 .github/workflows/virgin-install.yml
+# Added 2026-09-06 under the founder's ruling (question UI, "A: One named
+# exception"): required-fast.yml may fire on pull_request to main on the
+# public repository, ubuntu-latest only, 20 minute timeout, no matrix, no
+# other trigger; every other workflow file keeps the full refusal.
+.github/workflows/required-fast.yml
 .gitignore
 # Named as leaf paths, not the bare .sbe directory (security finding,
 # 2026-09-04): a bare directory entry sweeps in whatever the hub happens to
@@ -168,6 +173,14 @@ docs/for-engineers/DAY-ONE.md
 docs/for-engineers/END-TO-END.md
 docs/for-analysts/A-WORKED-EXAMPLE.md
 docs/for-analysts/DAY-ONE.md
+# Added 2026-09-07, row S31: CONTRIBUTING.md's own "Where to start" section
+# points a stranger at these three drafted good first issues. Named leaf by
+# leaf, never as a directory (the 2026-09-04 security finding above), so a
+# future file added under this folder never exports until it is named here
+# too. All three scanned clean of the private terms before being added.
+docs/onboarding/good-first-issues/01-register-orphaned-suites-check-all.md
+docs/onboarding/good-first-issues/02-denylist-duplicate-guard.md
+docs/onboarding/good-first-issues/03-register-acceptance-trial-suite.md
 scripts
 tests
 tools

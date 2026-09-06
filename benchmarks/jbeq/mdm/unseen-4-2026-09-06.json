@@ -1,0 +1,748 @@
+{
+  "_doc": "JBEQ-MDM unseen qualification set U4, authored blind by a fourth session that never opened the frozen seed, unseen-1, unseen-2, unseen-3, any RECORD file, any runs directory, or scripts/jbeq_decide.py. Same shape scripts/jbeq_mdm.py's load_seed and write_prompts read: cases carry id, track, critical, critical_class, input, question, allowed, expected, rationale. Every company, store, person, address and identifier below is invented; no real corporation, no client term, no team member name appears anywhere in this file.",
+  "authored_at": "2026-09-06",
+  "critical_classes": [
+    "CROSS-CUSTOMER CONTAMINATION",
+    "CROSS-TENANT DATA LEAK",
+    "HIERARCHY REVERSAL",
+    "HISTORICAL REASSIGNMENT",
+    "SOURCE PRECEDENCE VIOLATION",
+    "UNREVERSIBLE MERGE WITHOUT EVIDENCE",
+    "WRONG LEGAL ENTITY",
+    "WRONG PAYER",
+    "WRONG STORE ASSIGNMENT",
+    "WRONG TAX IDENTITY"
+  ],
+  "cases": [
+    {
+      "id": "W4-01",
+      "track": "entity-object",
+      "critical": true,
+      "critical_class": "WRONG STORE ASSIGNMENT",
+      "input": "水産加工協同組合の店舗台帳に、法人番号1010001112223を共有する2件の店舗レコードがある。一方は函館市内の加工場、他方は苫小牧市内の加工場で、それぞれ別の設備台帳と別の従業員名簿を持つ。台帳には法人番号以外に両者を結び付ける記載は無い。",
+      "question": "この2件の店舗レコードを、単一の店舗マスタとして統合してよいか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "LINK AS RELATED",
+      "rationale": "Same corporate number links two records that are stores, not the legal entity itself; the two stores keep separate equipment and staff rosters (distinct operational attributes), so merging would misattribute one site's inventory to the other. The shared number is a real relation worth recording, so KEEP SEPARATE is also wrong; LINK AS RELATED fits."
+    },
+    {
+      "id": "W4-02",
+      "track": "entity-object",
+      "critical": true,
+      "critical_class": "CROSS-CUSTOMER CONTAMINATION",
+      "input": "路線バス事業者の顧客マスタに、法人番号3020005556667を持つ企業の記録が2件ある。1件はウェブポータルからの新規申込、もう1件はコールセンターでの新規申込により別々に作成された。代表者名、本店所在地、法人番号のいずれも完全に一致しており、両方とも現在有効な状態である。店舗や拠点の区別を示す記載は無い。",
+      "question": "名寄せ処理により、この2件を1件の顧客マスタへ統合してよいか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "AUTO-MERGE",
+      "rationale": "Two intake channels created a duplicate registration of the same legal entity: identical valid corporate number, identical registrant name and address, no site distinction, no confirmation reason stated. Evidence is strong and unexplained, so AUTO-MERGE; leaving the duplicate active contaminates any customer-level reporting."
+    },
+    {
+      "id": "W4-03",
+      "track": "entity-object",
+      "critical": true,
+      "critical_class": "HISTORICAL REASSIGNMENT",
+      "input": "学生服メーカーの店舗台帳に、法人番号1122003334445を共有する2件の店舗レコードがある。一方は札幌市内の直営店(店舗コードR-11)、他方は旭川市内の直営店(店舗コードR-19)であり、閉店した札幌店の保証請求履歴を旭川店へ付け替える申請が出ている。台帳の注記は、保証請求履歴は各店舗コードに個別に紐づけて管理すると明記している。",
+      "question": "法人番号が一致していることを根拠に、閉店した店舗の保証請求履歴を、別の店舗コードへ付け替えるべきか。",
+      "allowed": [
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "REJECT MATCH",
+      "rationale": "The shared corporate number identifies the legal entity, not the store objects; the ledger states plainly that warranty history is tracked per store code, a stated fact that refutes moving one store's history onto a different store's code. REJECT MATCH."
+    },
+    {
+      "id": "W4-04",
+      "track": "entity-object",
+      "critical": true,
+      "critical_class": "WRONG PAYER",
+      "input": "水産加工協同組合連合会のマスタでは、出荷先(ship-to)の役割は連合会本体、支払人(payer)の役割は別の銀行系決済代行法人が担っている。両者は同一の商流に属する取引の当事者だが、決済口座と与信枠はそれぞれ別に管理されている。",
+      "question": "同一の取引に紐づくことを根拠に、支払人コードを出荷先の連合会コードと同一に変更してよいか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "REJECT MATCH",
+      "rationale": "The input states a role pair, ship-to and payer, tied to one transaction, but the payer role is explicitly held by a separate, distinct legal entity, a bank-affiliated payment agency, not the federation itself. That stated separate legal entity refutes the proposed identity: REJECT MATCH, not a write to the payer field. The separate settlement account and credit line are themselves the kind of distinct operational attributes rule 7 treats as a relationship signal, not a refutation, so any relation between them is recorded separately, never collapsed into one code."
+    },
+    {
+      "id": "W4-05",
+      "track": "entity-object",
+      "critical": false,
+      "critical_class": null,
+      "input": "歯科クリニックグループを名乗る2つの記録がある。片方は「はまなす歯科クリニック」、もう片方は「浜梨歯科クリニック」で、どちらも同じ市内にある。登録法人番号、開設者、所在地はいずれも別々であり、共通する記載は市名のみである。",
+      "question": "この2件を統合すべきか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "KEEP SEPARATE",
+      "rationale": "Nothing beyond a loosely similar name and the same city is stated; corporate number, opener and address all differ. No relation is stated to link them and nothing refutes their being simply two unrelated clinics, so KEEP SEPARATE."
+    },
+    {
+      "id": "W4-06",
+      "track": "match-or-no-merge",
+      "critical": true,
+      "critical_class": "WRONG LEGAL ENTITY",
+      "input": "路線バス事業者の仕入先台帳に、法人番号4030009991112を持つ整備部品業者の記録が2件ある。代表者名、登記住所とも完全に一致し、矛盾する記載は無い。拠点の区別や与信条件の違いを示す記載は無い。",
+      "question": "この2件の仕入先マスタとして統合してよいか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "AUTO-MERGE",
+      "rationale": "An unexplained, conflict-free corporate number match plus identical registrant details, with no site distinction and no confirmation reason, is exactly the strong-evidence shape that answers AUTO-MERGE."
+    },
+    {
+      "id": "W4-07",
+      "track": "match-or-no-merge",
+      "critical": true,
+      "critical_class": "UNREVERSIBLE MERGE WITHOUT EVIDENCE",
+      "input": "水産加工協同組合の仕入先台帳に、法人番号5040001231234を共有する2件の記録がある。台帳の注記によれば、この法人番号の一致は旧汎用機システムからの未検証の移行対応表を経由して判明したもので、検証済みとの記載は無い。片方の記録には3年分の継続した仕入取引履歴がある。",
+      "question": "この2件を統合してよいか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "SUGGEST MERGE",
+      "rationale": "A migration crosswalk that the input never states was validated is medium evidence, never strong, and three years of transaction history is a confirmation reason: medium evidence plus a confirmation reason is SUGGEST MERGE, not AUTO-MERGE, so a data steward confirms before any tax reporting is consolidated."
+    },
+    {
+      "id": "W4-08",
+      "track": "match-or-no-merge",
+      "critical": true,
+      "critical_class": "UNREVERSIBLE MERGE WITHOUT EVIDENCE",
+      "input": "学生服メーカーの外注業者マスタで、名寄せアルゴリズムが2件の業者名について類似度0.81のスコアを出した。どちらの記録にも法人番号その他の識別子は記載されていない。台帳の注記には、本日中に解消しなければ深夜バッチでどちらかの業者コードが自動的に削除され復元できなくなる、とある。",
+      "question": "この2件を統合してよいか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "ESCALATE",
+      "rationale": "The only evidence is a similarity score with no identifier on either side, which is weak evidence; the coming irreversible purge never upgrades weak evidence into a merge. ESCALATE regardless of the deadline."
+    },
+    {
+      "id": "W4-09",
+      "track": "match-or-no-merge",
+      "critical": true,
+      "critical_class": "WRONG LEGAL ENTITY",
+      "input": "歯科クリニックグループの法人台帳に2件の記録がある。読み方は同じ「サガミ歯科ホールディングス」だが、一方は法人番号6050002223344、他方は法人番号6050009998887として個別に登記されており、どちらも現に有効な登記である。",
+      "question": "本店所在地が一致していることを根拠に、この2件を統合してよいか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "REJECT MATCH",
+      "rationale": "Two distinct, currently valid corporate numbers is a stated fact that refutes the proposed identity outright; a shared head office address does not override two different valid legal registrations. REJECT MATCH."
+    },
+    {
+      "id": "W4-10",
+      "track": "match-or-no-merge",
+      "critical": false,
+      "critical_class": null,
+      "input": "仕入先マスタに2件の記録があり、どちらも読み方は「トーヨー物産」だが、一方は「東洋物産」、他方は「桐葉物産」と漢字表記が異なる。それ以外の記載は無い。",
+      "question": "この2件は同一の業者とみなせるか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "KEEP SEPARATE",
+      "rationale": "A shared reading with different kanji is, on its own, neither a stated relation nor a refuting fact; with nothing else stated, the default holds: KEEP SEPARATE."
+    },
+    {
+      "id": "W4-11",
+      "track": "hierarchy",
+      "critical": true,
+      "critical_class": "HIERARCHY REVERSAL",
+      "input": "路線バス事業者の子会社である車両整備法人は、商業登記簿上、持株会社甲の資本上の子会社として登記されている。データスチュワードからの申請書は、配送ルート集計表で整備法人が先頭に来るという理由だけで、逆に持株会社甲を整備法人の子会社として記録するよう求めている。",
+      "question": "配送ルート集計表の並び順を根拠に、資本関係の親子を逆にして記録してよいか。",
+      "allowed": [
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "REJECT MATCH",
+      "rationale": "The registered capital hierarchy is a stated fact; a routing table's listing order is not a capital relation and directly contradicts the registered direction. The reversal proposal must be rejected."
+    },
+    {
+      "id": "W4-12",
+      "track": "hierarchy",
+      "critical": true,
+      "critical_class": "HIERARCHY REVERSAL",
+      "input": "水産加工協同組合連合会の会員組合について、資本上の親は県のホールディング協同組合、商流上の親はすべての商品が経由する卸売市場連合会、レポーティング上の親は地方農政局の統計部門であり、それぞれ独立に有効な記載として台帳にある。",
+      "question": "単一の親を選んで記録すべきか、それとも複数の関係として記録すべきか。",
+      "allowed": [
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "LINK AS RELATED",
+      "rationale": "Capital, trade-flow and reporting parents are independent hierarchy types; three different valid parents for three different types is evidence that supports several relations, not a conflict to resolve to one. Forcing a single master-parent field would silently drop two true relations, so LINK AS RELATED."
+    },
+    {
+      "id": "W4-13",
+      "track": "hierarchy",
+      "critical": true,
+      "critical_class": "HIERARCHY REVERSAL",
+      "input": "学生服メーカーの直営店は、レポーティング上の親として関東販売ブロックに現在紐づいている。台帳には、この店舗の商流上の経由がすでに中部販売ブロックであると明記されている。新しい変更申請は、この商流上の事実のみを根拠に、レポーティング上の親を中部販売ブロックへ変更するよう求めている。",
+      "question": "商流上の経路のみを根拠に、レポーティング上の親をブロックを跨いで変更してよいか。",
+      "allowed": [
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "LINK AS RELATED",
+      "rationale": "Trade-flow and reporting are independent hierarchy types; the trade-flow parent is stated as the Chubu sales block itself, a valid parent under a different hierarchy type from the current reporting parent, so rule 11 governs the entities actually in question rather than a third party. Record the trade-flow relation alongside the existing reporting parent rather than overwriting it, so LINK AS RELATED."
+    },
+    {
+      "id": "W4-14",
+      "track": "hierarchy",
+      "critical": true,
+      "critical_class": "HIERARCHY REVERSAL",
+      "input": "歯科クリニックグループの登記簿には、クリニックBがクリニックホールディングス社の資本上の子会社である旨が明記されている。一方、運用メモには、クリニックホールディングス社の請求システムがクリニックBの情報システム部門によって運用管理されているとある。",
+      "question": "情報システムの運用実態に合わせて、資本関係を逆にすべきか。",
+      "allowed": [
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "REJECT MATCH",
+      "rationale": "An operational or technical dependency (who administers the billing system) is not capital evidence, and the registry's stated capital direction directly contradicts the proposed reversal. REJECT MATCH."
+    },
+    {
+      "id": "W4-15",
+      "track": "hierarchy",
+      "critical": false,
+      "critical_class": null,
+      "input": "路線バス事業者の新設ルート企画子会社の台帳には、親会社の欄が設けられているが記入が無い。",
+      "question": "この子会社について、親会社との関係を記録すべきか。",
+      "allowed": [
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "NO-DATA",
+      "rationale": "Nothing in the input corroborates any parent fact at all, not even partially; the parent field is simply never filled and no other document is mentioned. That is the honest NO-DATA case, not ESCALATE, since nothing exists to weigh."
+    },
+    {
+      "id": "W4-16",
+      "track": "identifier",
+      "critical": true,
+      "critical_class": "WRONG LEGAL ENTITY",
+      "input": "水産加工協同組合の仕入先コードS-4021は、2019年に解散した「北見水産物株式会社」に割り当てられていた。同じコードS-4021は2021年、無関係の新規業者「十和田沿岸フーズ株式会社」に再割当された。未処理の古い発注書が1件、S-4021を参照したまま残っている。",
+      "question": "コードが一致していることのみを根拠に、この未処理発注をS-4021の現在の保有企業に照合してよいか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "REJECT MATCH",
+      "rationale": "The code was reused after the original holder dissolved and now names an unrelated successor; matching the old order to the current holder on the reused code alone would attribute it to the wrong legal entity. REJECT MATCH."
+    },
+    {
+      "id": "W4-17",
+      "track": "identifier",
+      "critical": true,
+      "critical_class": "HISTORICAL REASSIGNMENT",
+      "input": "学生服メーカーの社内顧客連番C-00456は、2015年に取引先の学校が閉校した際に廃番となった。同じ連番C-00456は2022年、ERPの自動採番により全く無関係の新規顧客に再利用された。旧取引の請求相違が今になって発覚し、2015年分の出荷履歴の扱いが問題になっている。",
+      "question": "同一コードであることを根拠に、2015年の出荷履歴を2022年の顧客記録へ付け替えるべきか。",
+      "allowed": [
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "REJECT MATCH",
+      "rationale": "The code is stated as reused by an unrelated new customer, not as a continuing identity; reassigning historical shipment data to the current holder on the shared code alone would misattribute someone else's history. REJECT MATCH."
+    },
+    {
+      "id": "W4-18",
+      "track": "identifier",
+      "critical": true,
+      "critical_class": "WRONG TAX IDENTITY",
+      "input": "歯科クリニックグループの一方のクリニックの適格請求書発行事業者番号と、全く別のクリニックの院内会計システム上の内部連番が、由来の異なる番号でありながら同じ文字列T1234567890123に一致している。業者間の照合ツールはこの一致を検出して両者を同一請求主体として提示した。",
+      "question": "番号の文字列が一致していることを根拠に、両者を同一の請求主体として統合してよいか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "REJECT MATCH",
+      "rationale": "The two values come from different identifier domains, a tax registration number on one side and an internal accounting sequence on the other, and agree only by numeric coincidence; a match on that basis is invalid. REJECT MATCH."
+    },
+    {
+      "id": "W4-19",
+      "track": "identifier",
+      "critical": true,
+      "critical_class": "CROSS-CUSTOMER CONTAMINATION",
+      "input": "路線バス事業者の経費精算業者マスタに、2件の記録がある。法人番号は下4桁のみが一致し、上位桁は台帳の転記ミスの可能性があるため未確認のままである。支払口座は完全に一致しており、片方の記録には5年分の継続した請求履歴がある。両方とも現在有効、拠点や与信条件の区別を示す記載は無い。",
+      "question": "この2件を統合してよいか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "SUGGEST MERGE",
+      "rationale": "The corporate number matches only in its last four digits, with the leading digits unconfirmed because of a possible transcription error, medium evidence rather than a clean full-number match; the matching payment account and five years of continuous invoice history are a confirmation reason. Medium evidence plus a confirmation reason is SUGGEST MERGE, so a steward confirms before payments are consolidated onto one record."
+    },
+    {
+      "id": "W4-20",
+      "track": "identifier",
+      "critical": false,
+      "critical_class": null,
+      "input": "歯科クリニックグループの患者ポータルの会員番号が2件、先頭6桁が一致している。台帳の注記によれば、この先頭6桁は共通の地域事務局を示す区分コードであり、それ以外に共通する記載は無い。",
+      "question": "会員番号の前方一致のみを理由に、この2件を統合すべきか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "KEEP SEPARATE",
+      "rationale": "The shared prefix is stated to denote only a regional office code, not an identity fact, and nothing else ties the two records. KEEP SEPARATE."
+    },
+    {
+      "id": "W4-21",
+      "track": "address",
+      "critical": true,
+      "critical_class": "WRONG STORE ASSIGNMENT",
+      "input": "水産加工協同組合の加工場の所在地は、ある書類では「みなと町3丁目」、別の書類では2020年の住居表示変更後の「みなと栄3丁目」と記載されている。両方の書類とも、指しているのは同一の加工施設であると明記している。",
+      "question": "この2通りの住所表記を、同一施設のものとして記録してよいか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "LINK AS RELATED",
+      "rationale": "The input itself states both names refer to the same facility after an administrative renaming; this is the same-area-renamed shape, recorded as one place under two notations. LINK AS RELATED."
+    },
+    {
+      "id": "W4-22",
+      "track": "address",
+      "critical": true,
+      "critical_class": "WRONG STORE ASSIGNMENT",
+      "input": "学生服メーカーの地域配送センターは2021年、旧住所から地番も郵便番号も異なる2キロ先の新住所へ移転したが、ERP上の拠点コードは変更されていない。移転日より後の日付の入庫記録1件が、旧住所の拠点として記載されている。",
+      "question": "移転後の入庫記録を、旧住所の拠点として記録してよいか。",
+      "allowed": [
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "ESCALATE",
+      "rationale": "The genuinely different post-move address is a real site change, and a delivery dated after the move still names the old address, an unexplained conflict between the stated relocation date and the record's own address field. That needs a person to confirm which site actually received the goods: ESCALATE."
+    },
+    {
+      "id": "W4-23",
+      "track": "address",
+      "critical": true,
+      "critical_class": "CROSS-TENANT DATA LEAK",
+      "input": "歯科クリニックグループの2件の記録は、同一のクリニックであると主張されているが、一方の書類は「第3ビル2階、テナントA」、他方は「第3ビル5階、テナントB」と記載している。同じビル内だが階とテナントが異なる。",
+      "question": "同一施設として、この2件を統合してよいか。",
+      "allowed": [
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "REJECT MATCH",
+      "rationale": "The two floors are stated to be held by different named tenants, a stated fact that refutes the claim that both records describe one clinic. REJECT MATCH."
+    },
+    {
+      "id": "W4-24",
+      "track": "address",
+      "critical": true,
+      "critical_class": "WRONG STORE ASSIGNMENT",
+      "input": "路線バス事業者の車庫は、2005年の賃貸契約書では旧町名「北村」、現在の納税書類では2010年の市町村合併後の名称「北町」として記載されている。台帳の注記は、合併後もこの車庫が指す場所は変わっていないと明記している。",
+      "question": "この2通りの住所表記を、同一拠点のものとして記録してよいか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "LINK AS RELATED",
+      "rationale": "The input explicitly states the merger did not change which site is meant; two names for one place after a municipal renaming is the same-area-renamed shape. LINK AS RELATED."
+    },
+    {
+      "id": "W4-25",
+      "track": "address",
+      "critical": false,
+      "critical_class": null,
+      "input": "水産加工協同組合の新設支所について、地番と建物名は台帳に記載されているが、都道府県名も市区町村名も、どの書類にも一度も記載されていない。",
+      "question": "本社所在地と同一地域とみなしてよいか。",
+      "allowed": [
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "NO-DATA",
+      "rationale": "Nothing anywhere in the input corroborates a prefecture or city; the fact is simply never stated, not merely one blank field among several corroborating ones. NO-DATA."
+    },
+    {
+      "id": "W4-26",
+      "track": "temporal",
+      "critical": true,
+      "critical_class": "HISTORICAL REASSIGNMENT",
+      "input": "学生服メーカーの地域営業所は4月1日に登記上の本店所在地を移転した。登記簿は、移転後は新住所のみが有効な本店所在地であると明記しており、移転前後を通じて同一の営業所であることも記載されている。他に矛盾する記載は無い。",
+      "question": "旧住所の記録と新住所の記録を、時系列上同一拠点の記録として統合してよいか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "AUTO-MERGE",
+      "rationale": "The registry confirms this is the same legal office across the move, with no site distinction and no contradictory identifier, and it states plainly that the old and new address records both mean the same office; strong, unexplained evidence with no confirmation reason is AUTO-MERGE, keeping one continuous timeline instead of a fragmented duplicate."
+    },
+    {
+      "id": "W4-27",
+      "track": "temporal",
+      "critical": true,
+      "critical_class": "SOURCE PRECEDENCE VIOLATION",
+      "input": "歯科クリニックグループの2018年付け手動上書き指示は「次回の基幹システム移行までは、クリニックID881はサトウ医師の診療所に固定する」とし、有効期限を移行時までと明記している。2023年に基幹システムの全面移行が完了し、以後の自動照合は現行の登記情報に基づく、矛盾の無い有効な法人番号の一致によりクリニックID881の再割当を提示している。",
+      "question": "期限付きの手動上書き指示が失効した後、移行後の自動照合結果を優先して統合してよいか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "AUTO-MERGE",
+      "rationale": "The override explicitly expired at the stated migration, and the post-migration match rests on an unexplained, conflict-free corporate number, strong evidence with no confirmation reason. The expired override no longer blocks it: AUTO-MERGE."
+    },
+    {
+      "id": "W4-28",
+      "track": "temporal",
+      "critical": true,
+      "critical_class": "HISTORICAL REASSIGNMENT",
+      "input": "水産加工協同組合の季節価格協定の記録は、今年の単価の発効日を3月1日としている。別途提出された修正書も同じく3月1日を発効日としているが、単価の金額が異なり、食い違いを説明する記載はどこにも無い。",
+      "question": "発効日が競合するこの2件の記録を、同一の取り決めとして統合してよいか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "ESCALATE",
+      "rationale": "Two records state the same effective date for the same agreement but disagree on the value, an unexplained conflict within stated facts. That is something to judge, not something to auto-resolve either way: ESCALATE."
+    },
+    {
+      "id": "W4-29",
+      "track": "temporal",
+      "critical": true,
+      "critical_class": "UNREVERSIBLE MERGE WITHOUT EVIDENCE",
+      "input": "路線バス事業者の路線契約書は、契約の効力発生日を署名後最初の年度初日と定めている。一方、貨物提携先の記録は、その契約でしか存在しない条件を参照しながら、契約の効力発生日より前の日付で作成されている。",
+      "question": "時系列上矛盾するこの2件の記録を、同一契約の履歴として統合してよいか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "ESCALATE",
+      "rationale": "The freight-partner record cites terms that only exist in the later contract while being dated before that contract took effect, an internally inconsistent timeline the input does not explain. ESCALATE."
+    },
+    {
+      "id": "W4-30",
+      "track": "temporal",
+      "critical": false,
+      "critical_class": null,
+      "input": "学生服メーカーのカタログには、春物と秋物という別々の商品ラインに対する2件のコードがあり、同じ年度ラベルが付されている。それ以外に共通する記載は無い。",
+      "question": "年度ラベルが同じであることを理由に、この2件を統合すべきか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "KEEP SEPARATE",
+      "rationale": "A shared year label across two stated, different product lines is not a relation and not a refuting fact; nothing else ties them. KEEP SEPARATE."
+    },
+    {
+      "id": "W4-31",
+      "track": "survivorship",
+      "critical": true,
+      "critical_class": "SOURCE PRECEDENCE VIOLATION",
+      "input": "歯科クリニックグループの人事システムは法人名の唯一の権威ソースと定められており、「医療法人社団甲会」と記録している。CRMシステムは権威ソースではないが、同一のクリニックIDについて独自に「医療法人社団乙会」と記録している。ガバナンス方針は、CRMの値が人事システムの値を上書きすることは無いと明記している。",
+      "question": "更新日時がCRM側で新しいことを根拠に、法人名マスタをCRMの値で上書きしてよいか。",
+      "allowed": [
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "REJECT MATCH",
+      "rationale": "Governance names HR as the sole authority for legal name and explicitly forbids CRM from overriding it; recency of the CRM update is not a stated exception. The proposed write is wrong and must not be recorded: REJECT MATCH."
+    },
+    {
+      "id": "W4-32",
+      "track": "survivorship",
+      "critical": true,
+      "critical_class": "SOURCE PRECEDENCE VIOLATION",
+      "input": "水産加工協同組合のロットID LOT-2024-0091について、認証済み計量器システム(方針上、重量の権威ソースと定める)は1240キログラム、手入力の集計表(権威ソースではない)は1310キログラムと記録しており、どちらも同一のロットIDを参照している。",
+      "question": "重量の数値が一致しないことを理由に、この2件を別ロットとして扱うべきか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "AUTO-MERGE",
+      "rationale": "Both records state the same lot identifier; a disagreement on one attribute value, weight, is a survivorship question to resolve afterward, not a confirmation reason under rule 9's enumerated list (transaction history, irreversibility, an unvalidated crosswalk) and not a fact that refutes shared identity. The identifier match is strong and unexplained, and the policy already names which source governs the weight value: AUTO-MERGE, with the weight itself a separate survivorship question, the same shape as W4-34."
+    },
+    {
+      "id": "W4-33",
+      "track": "survivorship",
+      "critical": true,
+      "critical_class": "SOURCE PRECEDENCE VIOLATION",
+      "input": "路線バス事業者の運転者資格記録について、方針上の権威ソースである運輸局データフィードは有効期限を2025年6月30日、権威ソースではない社内人事表計算シートは2026年6月30日と記録しており、食い違いを説明する記載は無い。配車計画の都合が良いという理由で、人事表計算シートの日付を採用する案が出ている。",
+      "question": "運用上の都合を理由に、権威ソースではない側の日付を採用してよいか。",
+      "allowed": [
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "REJECT MATCH",
+      "rationale": "Governance names the transport authority feed as the source of record for expiry dates; adopting the non-authoritative spreadsheet's date for scheduling convenience is exactly the proposal that must not be recorded. REJECT MATCH."
+    },
+    {
+      "id": "W4-34",
+      "track": "survivorship",
+      "critical": true,
+      "critical_class": "WRONG LEGAL ENTITY",
+      "input": "学生服メーカーの仕入先マスタに、法人番号8070004445556を共有する2件の記録がある。認定済み業者ポータル(方針上の権威ソース)は主担当部署を「営業部」、古い紙台帳(権威ソースではない)は「物流部」と記録しており、法人番号の一致には矛盾する記載は無い。",
+      "question": "担当部署名が食い違うことを理由に、統合を見送るべきか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "AUTO-MERGE",
+      "rationale": "The identifier match is strong and unexplained; a differing contact department is a minor attribute disagreement, not a confirmation reason under the merge ladder and not a refuting fact. Withholding the merge over it is unjustified: AUTO-MERGE, with the department value itself a separate survivorship question."
+    },
+    {
+      "id": "W4-35",
+      "track": "survivorship",
+      "critical": false,
+      "critical_class": null,
+      "input": "歯科クリニックグループの患者満足度調査で、権威ソースである予約システムはある患者の連絡先電話番号を090-1111-2222と記録し、権威ソースではない紙のアンケート回収票は090-3333-4444と記載している。両方が同一の患者を指しているという記載はどこにも無い。",
+      "question": "この2件の回答記録は同一の患者のものとして統合すべきか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "KEEP SEPARATE",
+      "rationale": "The phone numbers disagree between an authoritative and a non-authoritative source, but nothing in the input states these two records refer to the same patient at all; without a stated identity link, a source-priority rule for resolving an attribute conflict never comes into play. KEEP SEPARATE."
+    },
+    {
+      "id": "W4-36",
+      "track": "requirements",
+      "critical": true,
+      "critical_class": "WRONG STORE ASSIGNMENT",
+      "input": "歯科クリニックグループのデータガバナンス要件は「有効な法人番号が完全に一致する契約者記録は、拠点数を問わず自動的に一本化する」と定めている。新たに照合された2件の契約者記録は、法人番号6070001112223こそ完全に一致しているものの、一方は市内中心部の診療所、他方は郊外の分院であり、それぞれ独立した予約枠と独立した診療録番号体系を運用していると台帳に明記されている。",
+      "question": "この要件を文字どおりに適用し、この2件を一本化してよいか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "LINK AS RELATED",
+      "rationale": "The written requirement is phrased broadly, but the input states these are two operationally distinct sites, each running its own booking calendar and its own chart numbering scheme; applying the requirement literally would misattribute one site's charts to the other. The shared corporate number is still a real relation worth recording, so LINK AS RELATED, not a literal AUTO-MERGE."
+    },
+    {
+      "id": "W4-37",
+      "track": "requirements",
+      "critical": true,
+      "critical_class": "WRONG PAYER",
+      "input": "路線バス事業者の新方針は「支払人(payer)役と販売先(sold-to)役が別であると明記された記録は統合してはならない」と定めている。新たに提示された2件の仕入先記録は、どちらも単に「仕入先」とのみ記載されており、支払人と販売先の役割分担は一切述べられていない。両者は有効かつ矛盾の無い法人番号9080005556667を共有し、拠点の区別を示す記載は無い。",
+      "question": "この方針はこの2件に適用されるか、統合してよいか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "AUTO-MERGE",
+      "rationale": "The policy's carve-out is stated for a payer versus sold-to role pair, which this input never states; both records are plainly suppliers with no role distinction. The carve-out does not apply, and the identifier evidence is strong and unexplained: AUTO-MERGE."
+    },
+    {
+      "id": "W4-38",
+      "track": "requirements",
+      "critical": true,
+      "critical_class": "SOURCE PRECEDENCE VIOLATION",
+      "input": "学生服メーカーのガバナンス要件は「配送経路の共有のみを根拠に提案された階層関係は、自動的に記録せず、必ず物流データスチュワードへエスカレーションする」と定めている。ある子会社について、資本関係も商流上の経由も役割の対も一切述べられておらず、配送経路が共有されているという事実のみを根拠にレポーティング上の親の変更が申請されている。",
+      "question": "この要件に従い、このレポーティング上の親の変更申請をどのように処理すべきか。",
+      "allowed": [
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "ESCALATE",
+      "rationale": "The stated basis is delivery-route sharing alone, with no capital, trade-flow or role-pair fact given, which is exactly the shape the governance requirement names for mandatory escalation rather than automatic recording. ESCALATE."
+    },
+    {
+      "id": "W4-39",
+      "track": "requirements",
+      "critical": true,
+      "critical_class": "WRONG LEGAL ENTITY",
+      "input": "歯科クリニックグループのデータ品質要件は「法人の解散後に再割当された識別子は、照合上の同一性の継続とみなしてはならない」と定めている。保留中の業者照合バッチが、現在活動中のクリニック法人を古い記録に照合する提案を出しているが、その根拠となる登録番号2011001112223は、2017年に元の保有者が解散した後に再割当されたものであると台帳に明記されている。",
+      "question": "この要件に従い、この照合提案を承認すべきか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "REJECT MATCH",
+      "rationale": "The governance requirement directly forbids treating a post-dissolution reused identifier as continuing identity, and the input states exactly that shape; applying the requirement rejects the proposed match. REJECT MATCH."
+    },
+    {
+      "id": "W4-40",
+      "track": "requirements",
+      "critical": false,
+      "critical_class": null,
+      "input": "水産加工協同組合の表記要件は「すべてのマスタ記録で、法人名にカタカナ読みを併記する」という純粋な書式上の取り決めであり、識別や関係については一切言及していない。この要件の適用対象となる2件の仕入先記録は、それ以外の点では互いに何の関連も無い。",
+      "question": "この表記要件を理由に、この2件を統合すべきか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "KEEP SEPARATE",
+      "rationale": "The requirement is purely a formatting convention with no bearing on identity or relation, and nothing else ties the two unrelated records. KEEP SEPARATE."
+    }
+  ],
+  "scoring": {
+    "merge_answers": [
+      "AUTO-MERGE",
+      "SUGGEST MERGE"
+    ]
+  }
+}

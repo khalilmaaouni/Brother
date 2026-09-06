@@ -1,0 +1,66 @@
+{
+ "outcome": "two files exist, the second after the first",
+ "started_at": 1788653974.407228,
+ "kill_time": 1788653976.2959528,
+ "gap_seconds": 60.01005697250366,
+ "drift_commit": "408bd531fd0ceb2f7d31ffca6aa92dbe359445bc",
+ "resume_command": [
+  "<HOME>/.local/bin/python3",
+  "<BROTHER_SCRIPTS>/brother_run.py",
+  "two files exist, the second after the first",
+  "--cwd",
+  "<SCRATCH_ROOT>/lhr-fixture-9osf69ha/repo",
+  "--runs-root",
+  "<SCRATCH_ROOT>/lhr-fixture-9osf69ha"
+ ],
+ "resume_returncode": 0,
+ "resume_wall_seconds": 3.547163248062134,
+ "first_correct_line": "brother_run: an unfinished run already covers 'two files exist, the second after the first'; resuming it instead of starting a new one",
+ "a2_canonical_rev_after_resume": "20682048b0f78673642a4bc288c3f9473bf994db",
+ "a1_canonical_rev_at_kill": "4cd78db049560233283138ea7704288925bebd73",
+ "ran_on_drifted_tree": true,
+ "drift_seen_live_before_resume": true,
+ "merges": [
+  "A1",
+  "A2"
+ ],
+ "verdict": "PARTIAL",
+ "verdict_reason": "the 24 to 72 hour temporal arm (workload family 8) stays NO-DATA per the gauntlet's own scoring rubric; drift_detection is NO-DATA",
+ "measures": {
+  "repeated_work": 0,
+  "lost_decisions": 1,
+  "lost_evidence": 0,
+  "wrong_resumed_state": false,
+  "human_interventions": 1,
+  "recovery_time_seconds": 2.6857221126556396,
+  "false_claims_after_recovery": [
+   "A2 (printed as verified by, but its own verdict reads NO-DATA)"
+  ]
+ },
+ "resume_acknowledgment_seconds": 0.055480003356933594,
+ "exposure_window_seconds": 1.0082576274871826,
+ "drift_detection": "NO-DATA: no engine output or journal event names the repository change. The run proves drift tolerance, that the resumed unit built on the new HEAD, not drift detection.",
+ "intent_resolution_retaken": true,
+ "pre_kill_intent_lines": [
+  "brother_run: intent resolved: chose 'Proceed as decomposed', recorded by brother_run (recorded default: the top-ranked option)"
+ ],
+ "post_resume_intent_lines": [
+  "brother_run: intent resolved: chose 'Proceed as decomposed', recorded by brother_run (recorded default: the top-ranked option)"
+ ],
+ "reclaim_evidence_run_log": [
+  "abandoned   A2         owner pid 20525 is dead on this host, with 1138s still left on the lease while still in state cl",
+  "ABANDONED  A2         <OS_TMPDIR> owner=brother-run-20525  the lane is still on disk but owner pid 20525 is dead on this host, with 1138s still left on the lease while still claimed for unit A2. It is removed only by a human or by a future unit that names it"
+ ],
+ "reclaim_evidence_journal": [
+  "{\"at\": \"2026-09-06T00:19:35.273920+00:00\", \"event_id\": \"0b5a3c45ce8242ab9475316165ec8058\", \"parent_ids\": [\"ece41c8bc5f14614b834aec295dbacdb\"], \"payload\": {\"attempt\": 1, \"owner\": \"brother-run-20525\", \"reclaimed_from\": null}, \"run_id\": \"20260906T091934-two-files-exist-the-second-after-the-fir\", \"session_id\": null, \"type\": \"claim.acquired\", \"unit_id\": \"A2\"}",
+  "{\"at\": \"2026-09-06T00:20:36.857282+00:00\", \"event_id\": \"3e922ac42d3e417eb2fbca47b4ba4986\", \"parent_ids\": [\"5488dec27b964fd498bd73461f087be7\"], \"payload\": {\"attempt\": 2, \"owner\": \"brother-run-25585\", \"reclaimed_from\": \"brother-run-20525\"}, \"run_id\": \"20260906T091934-two-files-exist-the-second-after-the-fir\", \"session_id\": null, \"type\": \"claim.acquired\", \"unit_id\": \"A2\"}"
+ ],
+ "per_unit_verdicts": {
+  "A1": "PASS",
+  "A2": "NO-DATA"
+ },
+ "tmp": "<SCRATCH_ROOT>/lhr-fixture-9osf69ha",
+ "repo": "<SCRATCH_ROOT>/lhr-fixture-9osf69ha/repo",
+ "run_dir": "<SCRATCH_ROOT>/lhr-fixture-9osf69ha/docs/plan/runs/20260906T091934-two-files-exist-the-second-after-the-fir",
+ "killed_run_dir": "<SCRATCH_ROOT>/killed_run"
+}

@@ -1,0 +1,14 @@
+address              10 of 10
+entity-object        9 of 10
+hierarchy            7 of 10
+identifier           4 of 5
+match-or-no-merge    9 of 10
+requirements         5 of 5
+survivorship         10 of 10
+temporal             10 of 10
+engine-decided: 39 of 45
+direct-answered (not blind, not evidence about the engine): 25 of 25
+critical false merges: 0 of 33
+critical wrong: 0 of 33
+conservative wrongs: 0
+JBEQ-MDM SEED: 64 of 70

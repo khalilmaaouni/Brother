@@ -1,0 +1,20 @@
+address              6 of 10
+entity-object        7 of 10
+hierarchy            8 of 10
+identifier           3 of 5
+match-or-no-merge    7 of 10
+requirements         5 of 5
+survivorship         10 of 10
+temporal             10 of 10
+engine-decided: 31 of 45
+direct-answered (not blind, not evidence about the engine): 25 of 25
+critical WRONG EO-04 [CROSS-CUSTOMER CONTAMINATION] expected REJECT MATCH, answered KEEP SEPARATE
+critical WRONG MM-06 [FALSE-MERGE RISK, not merged] expected KEEP SEPARATE, answered ESCALATE  CONSERVATIVE
+critical WRONG AD-03 [WRONG STORE ASSIGNMENT] expected REJECT MATCH, answered KEEP SEPARATE
+critical WRONG AD-04 [WRONG STORE ASSIGNMENT] expected REJECT MATCH, answered KEEP SEPARATE
+critical WRONG ID-02 [WRONG TAX IDENTITY] expected ESCALATE, answered KEEP SEPARATE
+critical WRONG ID-05 [CROSS-CUSTOMER CONTAMINATION] expected REJECT MATCH, answered KEEP SEPARATE
+critical false merges: 0 of 33
+critical wrong: 6 of 33 (EO-04, MM-06, AD-03, AD-04, ID-02, ID-05)
+conservative wrongs: 1 (MM-06)
+JBEQ-MDM NOT READY

@@ -103,3 +103,42 @@ for the entry written as `"./bundle"`.
   pointing at a missing file. No placeholder assets were invented.
 - `interface.privacyPolicyURL` and `termsOfServiceURL`: this project publishes
   neither. An absent optional field is honest; a URL that 404s is not.
+
+## One plugin, and the verbs that keep it current (portability release, 2026-09-06)
+
+Since 1.0.9 the Codex marketplace (`.agents/plugins/marketplace.json`) offers ONE
+plugin, `brother@brother`. It carries the runtime, the skills, the commands and
+both products' hooks itself: `bundle/hooks/hooks.json` (19 hook commands, 11
+from brothermode and 8 from brothersbe) points at tools mirrored under
+`bundle/runtime/hooks/<product>/tools/`, regenerated and checked by
+`python3 scripts/bundle_runtime.py --check`. Codex runs those hooks from the
+plugin cache, a durable path; `python3 scripts/codex_hooks_install.py --product
+<plugin root> --trust` writes the same 19 into the user-scope file and records
+their trust hashes. `brothermode@brother` is no longer offered, and a home that
+still holds it, or a standalone brothermode skill, is cleaned by the upgrade.
+
+`python3 scripts/brother_install.py <verb> --codex-home <home> --ref <tag>`:
+
+- `install`: marketplace at the ref, `brother@brother` added, `brothermode@brother`
+  and any standalone brothermode skill removed, stale Brother hooks (missing or
+  temp-dir targets) pruned, then a verification read. Every write is atomic and a
+  second run prints NO-CHANGE per item.
+- `upgrade --from-ref OLD --ref NEW`: snapshots config, hooks and the plugin
+  cache hashes under `<home>/brother/rollback/`, then installs at NEW and proves
+  the version moved while user state (sessions, memories, auth) is untouched.
+- `rollback [--to <snapshot>]`: restores the newest or the named snapshot;
+  NO-DATA when none exists.
+- `uninstall`: removes everything of Brother's except `brother/rollback` and
+  `brother/runs`, which are user data. A second uninstall prints
+  `NO-DATA: nothing of Brother's is installed` at exit 0, never PASS.
+- `status`: read-only, verdict END-STATE, PARTIAL or ABSENT.
+
+Run roots are durable too: the shipped skills tell the model to pass
+`--runs-root "${CODEX_HOME:-$HOME/.codex}/brother/runs"`, and the engine's own
+fallback moved from the process temp directory to the same place, so a receipt
+is never written where a reboot deletes it.
+
+`python3 scripts/keep_current.py --tag <tag> [--install]` is the gate in front of
+an update: signature, source reproduction, manifest, conformance, X1 to X7, virgin
+CI and the real-provider smoke must all read PASS before `--install` runs the
+upgrade. See docs/codex/KEEP-CURRENT.md.

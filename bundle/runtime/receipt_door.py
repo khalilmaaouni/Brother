@@ -536,8 +536,24 @@ def applied_memory(recalled):
     lessons this run trusted, which it refused, and why. An unrecognized
     state is dropped rather than guessed into one of the three, and reported
     once on stderr: a receipt that silently reclassifies a fourth state is
-    worse than one that says nothing about it."""
+    worse than one that says nothing about it.
+
+    Row P0-M (security finding, 2026-09-06): a rec carrying a "mutation"
+    key (vault_recall_hook.py's lesson_states() attaches one to every
+    record while a BM_VAULT_DISABLE_* seam is active) is never turned into
+    a fourth MEMORY_STATES value -- its own state (applied/stale/
+    unverified) is untouched, and the entry simply gains a "mutation"
+    field carrying the same {"disabled": [...]} the hook recorded. This
+    function never reads os.environ itself; it only reports what the hook
+    already decided, the same rule the rest of this docstring already
+    states for state/type/line. Whenever any entry carries one, the
+    returned section also gains a top-level "mutation" string reading
+    "MUTATION SEAM ACTIVE (vault protections disabled: ...)", so a reader
+    of the section as a whole sees the same words the hook's own stderr
+    banner and bm_vault.py's own hit markers already use, without having
+    to scan every entry for the field."""
     section = {state: [] for state in MEMORY_STATES}
+    disabled_seams = set()
     for rec in recalled or []:
         state = rec.get("state")
         if state not in MEMORY_STATES:
@@ -550,7 +566,14 @@ def applied_memory(recalled):
             entry["type"] = rec.get("note_type")
         if rec.get("line"):
             entry["line"] = rec.get("line")
+        mutation = rec.get("mutation")
+        if mutation and mutation.get("disabled"):
+            entry["mutation"] = mutation
+            disabled_seams.update(mutation["disabled"])
         section[state].append(entry)
+    if disabled_seams:
+        section["mutation"] = ("MUTATION SEAM ACTIVE (vault protections "
+                               "disabled: %s)" % ", ".join(sorted(disabled_seams)))
     return section
 
 

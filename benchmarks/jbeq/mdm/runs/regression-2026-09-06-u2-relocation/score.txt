@@ -1,0 +1,16 @@
+address              5 of 5
+entity-object        5 of 5
+hierarchy            5 of 5
+identifier           5 of 5
+match-or-no-merge    5 of 5
+requirements         4 of 5
+survivorship         5 of 5
+temporal             4 of 5
+engine-decided: 33 of 35
+direct-answered (not blind, not evidence about the engine): 5 of 5
+critical WRONG V-22 [HISTORICAL REASSIGNMENT] expected REJECT MATCH, answered KEEP SEPARATE
+critical WRONG V-37 [UNREVERSIBLE MERGE WITHOUT EVIDENCE] expected ESCALATE, answered KEEP SEPARATE
+critical false merges: 0 of 33
+critical wrong: 2 of 33 (V-22, V-37)
+conservative wrongs: 0
+JBEQ-MDM NOT READY

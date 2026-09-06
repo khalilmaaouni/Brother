@@ -52,6 +52,22 @@ class Verdicts(unittest.TestCase):
         self.assertIn("MISMATCH", out)
         self.assertIn("3.4.1", out)
 
+    def test_declaration_ahead_of_leaf_is_no_data_not_a_failure(self):
+        """The bump lands (scripts/cut_v1.0.0.sh commits it and stops on
+        purpose) before the founder pushes the tag. That window must not
+        read as the same defect as test_todays_real_defect_exits_one above,
+        which is the umbrella pointing BEHIND the leaf."""
+        with mock.patch.object(lpc, "newest_published_tag", return_value="1.0.8"), \
+             mock.patch.object(lpc, "declared",
+                               return_value={"brothermode": [("a", "1.0.9")],
+                                             "brothersbe": [("b", "1.0.8")]}):
+            code, out = run_main()
+        self.assertNotEqual(code, 0, "a cut in flight is not a clean pass")
+        self.assertEqual(code, 2, out)
+        self.assertIn("NO-DATA", out)
+        self.assertIn("cut precedes the tag", out)
+        self.assertNotIn("MISMATCH", out)
+
     def test_unreadable_tags_exit_two_and_two_is_not_zero(self):
         """NO-DATA is never a pass. The assertion that matters is that this is
         NOT 0; that it is 2 rather than 1 is the second-order detail."""

@@ -1,0 +1,75 @@
+JBEQ-MDM regression-2026-09-06-u2-relocation, 2026-09-06. THIS IS A
+REGRESSION RUN ON THE SEEN SET U2, NOT A NEW QUALIFICATION RUN: U2
+(benchmarks/jbeq/mdm/runs/qualification-u2-2026-09-06/) was read and
+reasoned about by the same session that authored review-u2-2026-09-06.md,
+so from that moment U2 is a SEEN set, exactly as U1 became one after
+review-u1-2026-09-06.md. Every number below describes how the engine
+performs on a set it has effectively been tuned against, never a fresh
+qualification figure. The next real qualification requires a new blind
+unseen set (U3), authored and audited blind against this engine, per
+review-u2-2026-09-06.md's own closing line.
+
+WHAT CHANGED SINCE qualification-u2-2026-09-06, under the rules written
+from U1's and U2's own review (review-u1-2026-09-06.md and
+review-u2-2026-09-06.md section B; FIX-DIRECTIVE-2026-09-06.md section
+18): a relocated record is a compatible lifecycle of the SAME object, not
+a different object the way closed and identifier_reused are, so it now
+bars AUTO-MERGE only. rule_r's lifecycle clause no longer fires at all on
+a relocated record (it falls through to the merge ladder instead), and
+the merge ladder's own AUTO-MERGE safety gate (_auto_merge_blocked)
+answers SUGGEST MERGE for relocated rather than KEEP SEPARATE. Closed and
+identifier_reused are unchanged. The new id relocated_not_a_bar isolates
+the split at both call sites.
+
+Also folded in from hub main since qualification-u2-2026-09-06 was filed
+(PRs 408 through 412, merged into this branch before this run): the
+REJECT-versus-KEEP proposal_gate fix (closes V-02, V-30, V-36) and the
+track-name canonicalisation. Neither is new work of this change; both
+were already on hub main and are included here because this run re-
+decides against the current engine, not a frozen point in its history.
+
+METHOD. U2's committed fact-sheets.json and direct-answers.json (copied
+here unchanged from qualification-u2-2026-09-06/) were re-decided with
+`python3 scripts/jbeq_decide.py decide fact-sheets.json --out
+engine-answers.json --decisions decisions.jsonl` under the current
+engine. direct-answers.json (the 5 hand-answered survivorship cases,
+V-16 through V-20, the only exact UNSUPPORTED_TRACKS match at the time
+U2 was filed) was merged over the engine's own answers for those same 5
+ids, exactly as the original qualification run did, producing
+answers.json. That was scored with `python3 scripts/jbeq_mdm.py score
+answers.json --seed ../../unseen-2-2026-09-06.json` (read-only; not
+modified), full output in score.txt beside this file.
+
+RESULT, key lines from score.txt:
+
+  engine-decided: 33 of 35 (up from 29 of 35 in qualification-u2-2026-09-06)
+  critical false merges: 0 of 33 (unchanged)
+  critical wrong: 2 of 33 (V-22, V-37; down from 5, V-02, V-03, V-30 and
+    V-36 all fixed)
+  conservative wrongs: 0 (down from 2, V-02 and V-36 dropped off)
+
+EVERY CASE THAT CHANGED FROM qualification-u2-2026-09-06:
+
+  V-02: REJECT MATCH -> KEEP SEPARATE. FIXED. requested_action=none and
+    requested_relation_type=null record no proposal; the proposal gate
+    (already on hub main) closes this, unrelated to the relocation rule.
+  V-03: KEEP SEPARATE -> SUGGEST MERGE. FIXED by this change.
+    lifecycle=relocated no longer fires rule_r's bar-both clause, so this
+    case falls through to rule B, which reads evidence_strength=strong
+    with history_exists=true and answers SUGGEST MERGE directly (rule
+    "B"), matching the seed.
+  V-30: REJECT MATCH -> KEEP SEPARATE. FIXED. Same proposal-gate shape as
+    V-02, address flavour; unrelated to the relocation rule.
+  V-36: REJECT MATCH -> KEEP SEPARATE. FIXED. Same proposal-gate shape;
+    unrelated to the relocation rule.
+
+WHAT THIS DOES NOT PROVE. V-22 and V-37 remain wrong, both outside this
+change's scope per review-u2-2026-09-06.md section C: V-22 is a
+schema-and-prompt gap (its sheet carries no field that can state "the
+request contradicts a stated rule", so no re-decision of the same sheet
+can close it; it needs a fresh extraction). V-37 is a rule-ordering gap
+(rule B's "a stated reason must not be silently discarded" branch reads
+evidence_reasons only, not contradicted_attributes) that the review
+flagged as NOT free to fix (many frozen sheets carry non-empty
+contradicted_attributes) and explicitly left out of this change. Neither
+number meets the directive's section 21 exit gate (critical wrong 0).

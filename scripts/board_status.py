@@ -294,6 +294,76 @@ def _print_vault_counters(counters):
             print("%s: %d (%s)" % (c["label"].capitalize(), c["count"], c["command"]))
 
 
+# ---------------------------------------------------------------------------
+# THE FOUNDER QUEUE (founder ruling 2026-09-06, "One founder queue card"):
+# actions only the founder can take were ageing at the bottom of long reports.
+# One file, one place both this tool and the readiness board read it from, so
+# neither can drift from the other. A missing or malformed file is NO-DATA,
+# never an empty queue: an empty queue means nothing is waiting on him, a
+# missing file means this tool cannot tell.
+# ---------------------------------------------------------------------------
+
+FOUNDER_QUEUE_PATH = os.path.join(ROOT, "docs", "plan", "FOUNDER-QUEUE.json")
+
+
+def load_founder_queue(path=None):
+    """(items_or_None, error_or_None). `path=None` resolves to
+    FOUNDER_QUEUE_PATH at call time, never bound into the default, so a
+    caller (or a test) can point the module constant at a fixture. `items`
+    is the raw list from the file, every status included; callers filter
+    for OPEN themselves."""
+    if path is None:
+        path = FOUNDER_QUEUE_PATH
+    if not os.path.isfile(path):
+        return None, "no such file: %s" % path
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError) as exc:
+        return None, str(exc)
+    if not isinstance(data, list):
+        return None, "expected a JSON list, got %s" % type(data).__name__
+    return data, None
+
+
+def open_founder_queue_items(path=None):
+    """(open_items_or_None, error_or_None). Only status OPEN counts; a DONE
+    item stays in the file as history but is not a queue entry."""
+    items, err = load_founder_queue(path)
+    if items is None:
+        return None, err
+    return [it for it in items if isinstance(it, dict)
+            and str(it.get("status") or "").upper() == "OPEN"], None
+
+
+def founder_queue_age_days(since, today=None):
+    """Days since an ISO `YYYY-MM-DD` string, or None if it does not parse."""
+    today = today or datetime.date.today()
+    try:
+        y, m, d = (int(x) for x in str(since).split("-"))
+        return (today - datetime.date(y, m, d)).days
+    except (ValueError, TypeError):
+        return None
+
+
+def founder_queue_status_line(path=None, today=None):
+    """The one line board_status prints and gen_readiness_board reuses for
+    its card section header, so the two surfaces can never disagree."""
+    items, err = open_founder_queue_items(path)
+    if items is None:
+        return "Founder queue: %s (%s)" % (NODATA, err)
+    if not items:
+        return "Founder queue: 0 open"
+    aged = [(founder_queue_age_days(it.get("since"), today), it) for it in items]
+    known = [(a, it) for a, it in aged if a is not None]
+    ids = ", ".join(str(it.get("id")) for it in items)
+    if not known:
+        return "Founder queue: %d open, oldest since %s: %s" % (len(items), NODATA, ids)
+    age, oldest = max(known, key=lambda pair: pair[0])
+    return ("Founder queue: %d open, oldest since %s (%d days): %s"
+            % (len(items), oldest.get("since"), age, ids))
+
+
 def has_evidence(item):
     return bool(str(item.get("evidence") or "").strip())
 
@@ -454,6 +524,7 @@ def main(argv=None):
               "Nothing on this board claims done without it.")
     print("")
     _print_vault_counters(vault_counters())
+    print(founder_queue_status_line())
     return rc
 
 

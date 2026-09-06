@@ -152,9 +152,29 @@ def main(argv=None):
             nodata_count += 1
 
     print()
+    pass_count = len(results) - fail_count - nodata_count
     print("{} area(s): {} pass, {} fail, {} no-data".format(
-        len(results), len(results) - fail_count - nodata_count, fail_count, nodata_count))
-    return 1 if fail_count else 0
+        len(results), pass_count, fail_count, nodata_count))
+    if fail_count:
+        return 1
+    # NO-DATA IS NEVER A PASS, and that law has to survive COMPOSITION, not
+    # only hold inside this script. Found by an adversarial reviewer and then
+    # driven backwards here: delete every scripts/acceptance_*.py and this
+    # command printed "0 pass, 0 fail, 11 no-data" and exited 0. check_all.sh's
+    # run_check maps exit 0 to PASS, so a repository whose entire acceptance
+    # suite had vanished read GREEN in the consolidated battery. A run that
+    # proved nothing must not be indistinguishable from a run that proved
+    # everything.
+    #
+    # Exit 2 is this estate's NO-DATA code, and check_all.sh already treats 2
+    # as NO-DATA, which does not turn the battery red. So this closes the false
+    # PASS without inventing a FAIL that nobody measured.
+    if not pass_count:
+        print("NO-DATA: no area returned a verdict, so this run proved "
+              "nothing. Reporting NO-DATA rather than exiting 0, which "
+              "check_all.sh would read as PASS.")
+        return 2
+    return 0
 
 
 if __name__ == "__main__":

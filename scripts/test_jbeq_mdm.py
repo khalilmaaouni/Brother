@@ -241,10 +241,16 @@ class Scoring(unittest.TestCase):
         heading `critical false merges`, so a run with nine non-merge wrongs
         read as nine false merges. This drives that backwards.
         """
+        # KEEP SEPARATE no longer stands in here for a wrong answer: since
+        # the 2026-09-06 founder ruling (SCORER_VERSION 2026-09-06.2) it is
+        # in the same equivalence class as REJECT MATCH and would score
+        # correct (see test_reject_match_and_keep_separate_score_as_one_
+        # class_both_ways below). ESCALATE is outside that class and still a
+        # genuine non-merge wrong answer.
         answers = {c["id"]: c["expected"] for c in self.seed["cases"]}
         victim = next(c for c in self.seed["cases"]
                       if c["critical"] and c["expected"] == "REJECT MATCH")
-        answers[victim["id"]] = "KEEP SEPARATE"
+        answers[victim["id"]] = "ESCALATE"
         path = self._write(answers)
         code, out = run("score", path)
         self.assertEqual(code, 1, out)
@@ -253,6 +259,28 @@ class Scoring(unittest.TestCase):
         self.assertIn("critical wrong: 1 of", out)
         self.assertIn(victim["id"], out)
         self.assertNotIn("FALSE MERGE", out)
+
+    def test_a_non_merge_wrong_answer_on_a_false_merge_class_case_is_not_tagged_false_merge(self):
+        # 2026-09-06: critical_class is the case's OWN fixed danger label,
+        # not a computed diagnosis of the given answer. ID-01 and ID-04 are
+        # both classed FALSE MERGE but expect REJECT MATCH; answering either
+        # with ESCALATE (not a merge) must never print the literal phrase
+        # "FALSE MERGE" (a downstream grep for the exit-gate phrase would
+        # read it as a real one, section D's own finding, reproduced here
+        # for MM-06's own case in test_a_critical_wrong_that_is_not_a_merge_
+        # is_counted_apart above, which happens not to be classed that way).
+        answers = {c["id"]: c["expected"] for c in self.seed["cases"]}
+        victim = next(c for c in self.seed["cases"]
+                      if c["critical"] and c["critical_class"] == "FALSE MERGE"
+                      and c["expected"] not in ("AUTO-MERGE", "SUGGEST MERGE"))
+        answers[victim["id"]] = "ESCALATE"
+        path = self._write(answers)
+        code, out = run("score", path)
+        self.assertEqual(code, 1, out)
+        self.assertIn("critical wrong: 1 of", out)
+        self.assertIn("critical false merges: 0 of", out)
+        self.assertNotIn("FALSE MERGE", out)
+        self.assertIn(victim["id"], out)
 
     def test_a_more_cautious_wrong_answer_is_named_conservative(self):
         answers = {c["id"]: c["expected"] for c in self.seed["cases"]}
@@ -276,6 +304,57 @@ class Scoring(unittest.TestCase):
         self.assertIn("critical wrong: 1 of", out)
         self.assertIn("conservative wrongs: 0", out)
         self.assertNotIn("CONSERVATIVE", out)
+
+    def test_the_scorer_version_string_appears_in_the_output(self):
+        answers = {c["id"]: c["expected"] for c in self.seed["cases"]}
+        path = self._write(answers)
+        code, out = run("score", path)
+        self.assertEqual(code, 0, out)
+        self.assertIn("scorer: %s" % jbeq_mdm.SCORER_VERSION, out)
+        self.assertIn("REJECT MATCH and KEEP SEPARATE score as one class "
+                      "for a refuted identity, founder ruling 2026-09-06", out)
+
+    def test_reject_match_and_keep_separate_score_as_one_class_both_ways(self):
+        """Founder ruling 2026-09-06 (question UI): one equivalence class
+        for scoring, and the engine's proposal gate still decides which of
+        the two it says. Both directions score correct, and the record
+        names which answer the engine actually gave."""
+        answers = {c["id"]: c["expected"] for c in self.seed["cases"]}
+        to_keep_separate = next(c for c in self.seed["cases"]
+                                if c["critical"] and c["expected"] == "REJECT MATCH")
+        to_reject_match = next(c for c in self.seed["cases"]
+                               if c["critical"] and c["expected"] == "KEEP SEPARATE")
+        answers[to_keep_separate["id"]] = "KEEP SEPARATE"
+        answers[to_reject_match["id"]] = "REJECT MATCH"
+        path = self._write(answers)
+        code, out = run("score", path)
+        self.assertEqual(code, 0, out)
+        self.assertIn("JBEQ-MDM SEED: 70 of 70", out)
+        self.assertNotIn("NOT READY", out)
+        self.assertIn("critical wrong: 0 of", out)
+        self.assertIn(
+            "equivalence class %s: expected REJECT MATCH, engine said "
+            "KEEP SEPARATE" % to_keep_separate["id"], out)
+        self.assertIn(
+            "equivalence class %s: expected KEEP SEPARATE, engine said "
+            "REJECT MATCH" % to_reject_match["id"], out)
+
+    def test_a_merge_against_a_keep_separate_expectation_still_scores_wrong(self):
+        """The equivalence class holds only REJECT MATCH and KEEP SEPARATE;
+        a merge answer is in neither, so it is unchanged by the ruling:
+        still wrong, and still a false merge when the case is critical."""
+        answers = {c["id"]: c["expected"] for c in self.seed["cases"]}
+        victim = next(c for c in self.seed["cases"]
+                      if c["critical"] and c["expected"] == "KEEP SEPARATE")
+        answers[victim["id"]] = "AUTO-MERGE"
+        path = self._write(answers)
+        code, out = run("score", path)
+        self.assertEqual(code, 1, out)
+        self.assertIn("JBEQ-MDM NOT READY", out)
+        self.assertIn("critical false merges: 1 of", out)
+        self.assertIn("critical wrong: 1 of", out)
+        self.assertIn(victim["id"], out)
+        self.assertIn("FALSE MERGE", out)
 
     def test_a_non_critical_case_answered_wrong_still_scores(self):
         answers = {c["id"]: c["expected"] for c in self.seed["cases"]}
@@ -310,6 +389,189 @@ class Scoring(unittest.TestCase):
         code, out = run("score", os.path.join(self.dir, "no-such-file.json"))
         self.assertEqual(code, 3, out)
         self.assertIn("NO-DATA", out)
+
+
+class EngineDecidedDerivation(unittest.TestCase):
+    """review-u1-2026-09-06.md finding 1: engine-decided is derived from a
+    decisions.jsonl beside the answers file (rule_fired != "track-
+    unsupported"), a per-case fact about what the engine actually
+    returned, never from the ENGINE_TRACKS hardcoded track-name set, which
+    is wrong the moment the engine learns to decide a track that set does
+    not name (temporal, since round 5 of scripts/jbeq_decide.py)."""
+
+    def setUp(self):
+        self.seed = load()
+        self.dir = tempfile.mkdtemp(prefix="jbeq-engine-decided-")
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def _write(self, answers, decisions_rows=None):
+        path = os.path.join(self.dir, "answers.json")
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(answers, fh, ensure_ascii=False)
+        if decisions_rows is not None:
+            with open(os.path.join(self.dir, "decisions.jsonl"), "w",
+                      encoding="utf-8") as fh:
+                for row in decisions_rows:
+                    fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+        return path
+
+    def test_temporal_track_counts_as_engine_decided_when_rule_fired_says_so(self):
+        # The exact defect: ENGINE_TRACKS never names "temporal", but the
+        # engine has decided that track since round 5. A decisions.jsonl
+        # naming an ordinary rule id for every case (temporal included)
+        # must count every one of them as engine-decided.
+        answers = {c["id"]: c["expected"] for c in self.seed["cases"]}
+        decisions_rows = [
+            {"case_id": c["id"], "answer": answers[c["id"]],
+             "rule_fired": "1", "why": "x"}
+            for c in self.seed["cases"]
+        ]
+        path = self._write(answers, decisions_rows)
+        code, out = run("score", path)
+        self.assertEqual(code, 0, out)
+        self.assertIn("engine-decided: 70 of 70", out)
+        self.assertIn(
+            "direct-answered (not blind, not evidence about the engine): 0 of 0",
+            out,
+        )
+
+    def test_track_unsupported_rows_stay_direct_answered_even_when_correct(self):
+        answers = {c["id"]: c["expected"] for c in self.seed["cases"]}
+        unsupported_ids = {c["id"] for c in self.seed["cases"]
+                           if c["track"] in ("requirements", "survivorship")}
+        decisions_rows = [
+            {"case_id": c["id"], "answer": answers[c["id"]],
+             "rule_fired": ("track-unsupported" if c["id"] in unsupported_ids
+                            else "1"),
+             "why": "x"}
+            for c in self.seed["cases"]
+        ]
+        path = self._write(answers, decisions_rows)
+        code, out = run("score", path)
+        self.assertEqual(code, 0, out)
+        n = len(unsupported_ids)
+        total = len(self.seed["cases"])
+        self.assertIn("engine-decided: %d of %d" % (total - n, total - n), out)
+        self.assertIn(
+            "direct-answered (not blind, not evidence about the engine): "
+            "%d of %d" % (n, n),
+            out,
+        )
+
+    def test_falls_back_to_engine_tracks_when_no_decisions_file_present(self):
+        answers = {c["id"]: c["expected"] for c in self.seed["cases"]}
+        path = self._write(answers, decisions_rows=None)
+        code, out = run("score", path)
+        self.assertEqual(code, 0, out)
+        engine_total = sum(1 for c in self.seed["cases"]
+                          if c["track"] in jbeq_mdm.ENGINE_TRACKS)
+        self.assertIn("engine-decided: %d of %d" % (engine_total, engine_total), out)
+
+    def test_an_engine_decided_equivalence_hit_counts_toward_engine_decided(self):
+        # Regression for a bug this same 2026-09-06 change introduced and
+        # caught before landing: engine_passed here used to compare with a
+        # bare ==, never answers_equivalent(), so an engine-decided
+        # equivalence hit inflated `passed` (via score()) without inflating
+        # `engine_passed`, and direct_passed = passed - engine_passed
+        # absorbed the difference as a phantom direct-answered case
+        # (observed on a real run: "direct-answered ... 28 of 25", more
+        # answers than the seed has direct-answered cases).
+        answers = {c["id"]: c["expected"] for c in self.seed["cases"]}
+        victim = next(c for c in self.seed["cases"]
+                      if c["track"] in jbeq_mdm.ENGINE_TRACKS
+                      and c["expected"] == "REJECT MATCH")
+        answers[victim["id"]] = "KEEP SEPARATE"
+        decisions_rows = [
+            {"case_id": c["id"], "answer": answers[c["id"]],
+             "rule_fired": "1", "why": "x"}
+            for c in self.seed["cases"]
+        ]
+        path = self._write(answers, decisions_rows)
+        code, out = run("score", path)
+        self.assertEqual(code, 0, out)
+        self.assertIn("engine-decided: 70 of 70", out)
+        self.assertIn(
+            "direct-answered (not blind, not evidence about the engine): "
+            "0 of 0", out,
+        )
+
+
+class CanonicalTrackNames(unittest.TestCase):
+    """A seed with an unknown track name is refused at load, not scored.
+
+    U2's five requirements cases spelled "requirements-understanding",
+    which is neither the seed's own vocabulary nor
+    scripts/jbeq_decide.py's UNSUPPORTED_TRACKS, so the engine ran its
+    general rule table over them instead of refusing them as
+    track-unsupported (hub PR 411, cases V-22 and V-37). This drives the
+    fix backwards: load_seed must catch the typo, distinguishing it from
+    an omission by naming the offending case id and value.
+    """
+
+    EIGHT_TRACKS = {
+        "address", "entity-object", "hierarchy", "identifier",
+        "match-or-no-merge", "requirements", "survivorship", "temporal",
+    }
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="jbeq-track-names-")
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def _write_seed(self, track):
+        path = os.path.join(self.dir, "seed.json")
+        seed = {
+            "cases": [{
+                "id": "Z-01",
+                "track": track,
+                "input": "x",
+                "question": "x",
+                "allowed": ["NO-DATA"],
+                "expected": "NO-DATA",
+                "critical": False,
+                "critical_class": None,
+                "rationale_ja": "x",
+            }],
+        }
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(seed, fh, ensure_ascii=False)
+        return path
+
+    def test_the_eight_canonical_tracks_load(self):
+        self.assertEqual(jbeq_mdm.CANONICAL_TRACKS, self.EIGHT_TRACKS)
+        for track in self.EIGHT_TRACKS:
+            path = self._write_seed(track)
+            seed = jbeq_mdm.load_seed(path)
+            self.assertIsNotNone(seed, track)
+            self.assertEqual(seed["cases"][0]["track"], track)
+
+    def test_an_unknown_track_is_refused_naming_the_case_and_value(self):
+        bad_seed = self._write_seed("requirements-understanding")
+        answers_path = os.path.join(self.dir, "answers.json")
+        with open(answers_path, "w", encoding="utf-8") as fh:
+            json.dump({"Z-01": "NO-DATA"}, fh)
+        code, out = run("score", answers_path, "--seed", bad_seed)
+        self.assertEqual(code, jbeq_mdm.EXIT_NODATA, out)
+        self.assertIn("NO-DATA", out)
+        self.assertIn("Z-01", out)
+        self.assertIn("requirements-understanding", out)
+
+    def test_load_seed_returns_none_for_an_unknown_track(self):
+        path = self._write_seed("requirements-understanding")
+        self.assertIsNone(jbeq_mdm.load_seed(path))
+
+    def test_the_real_seed_files_carry_only_canonical_track_names(self):
+        for rel in (
+            "benchmarks/jbeq/mdm/seed-2026-09-05.json",
+            "benchmarks/jbeq/mdm/unseen-2026-09-06.json",
+            "benchmarks/jbeq/mdm/unseen-2-2026-09-06.json",
+        ):
+            path = os.path.join(REPO, rel)
+            seed = jbeq_mdm.load_seed(path)
+            self.assertIsNotNone(seed, rel)
 
 
 if __name__ == "__main__":

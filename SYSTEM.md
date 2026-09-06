@@ -13,10 +13,10 @@ to run the battery.
 
 | | |
 |---|---:|
-| Parts | 155 |
-| Parts with a purpose written in the file | 155 |
-| Parts with a suite wired into the battery | 130 |
-| Checks in the battery | 212 |
+| Parts | 163 |
+| Parts with a purpose written in the file | 163 |
+| Parts with a suite wired into the battery | 132 |
+| Checks in the battery | 218 |
 
 ## Every part, what it is for, and what proves it
 
@@ -37,6 +37,7 @@ to run the battery.
 | `acceptance_9` | Acceptance test for capability area 9: crash recovery and resumable | `acceptance`, `acceptance-self`, `system-doc-current`, `system-doc-self` |
 | `acceptance_time` | The Acceptance Time benchmark harness (S11, roadmap row S11; protocol | `acceptance`, `acceptance-self`, `acceptance-time`, `system-doc-current`, `system-doc-self` |
 | `acceptance_trial_assign` | Acceptance Compression trial: reviewer assignment and results validation | **NO-DATA**, nothing in the battery runs it |
+| `adapter_conformance` | ONE ordered suite, unchanged across every provider. | **NO-DATA**, nothing in the battery runs it |
 | `attempt_hook` | a PostToolUse hook on Bash that writes to scripts/attempt_ledger.py | `attempt-hook-tests` |
 | `attempt_ledger` | stop the third attempt at a technique that failed twice. | `attempt-ledger-self` |
 | `authority_path_coverage` | R1: does one event receive two independent enforcing decisions? | `authority-path-coverage-self` |
@@ -45,16 +46,19 @@ to run the battery.
 | `benchmark_atomic` | Atomic benchmark harness: this estate against the host harness's main | `benchmark-atomic-self` |
 | `blocker_freshness` | Re-measure every release blocker's own done-check, cheaply, on demand. | `blocker-fresh` |
 | `board_status` | what is ACTUALLY done, counted from evidence. | `board-status-self` |
+| `brother_install` | A2: one tool that takes a Codex home from an unknown state to Brother's | **NO-DATA**, nothing in the battery runs it |
 | `brother_paths` | C3: the one place Brother resolves its plugin root, its config directory, | **NO-DATA**, nothing in the battery runs it |
 | `brother_run` | a plain outcome in, a verified delivery report out. | `brother-run-self`, `bundle-runtime-self`, `codex-smoke`, `codex-smoke-self`, `fault-lab-self`, `limit-watch-self`, `product-acceptance-self`, `release-closeout-self`, `release-invariant`, `release-invariant-self`, `tiny-task-cost-self`, `virgin-unit-proof`, `virgin-unit-proof-self` |
 | `bundle_runtime` | package brother_run.py's own execution engine into | `bundle-runtime-self` |
 | `capability_probe` | what this machine can actually do, measured not remembered. | **NO-DATA**, nothing in the battery runs it |
+| `changelog_from_commits` | .py: a changelog generated from git history, never | **NO-DATA**, nothing in the battery runs it |
 | `charter_paths` | every repository path docs/CHARTER.md names must exist here. | `charter-paths`, `charter-paths-self` |
 | `check_filtering_spec` | Does docs/plan/PRIVACY-FILTERING-SPEC.md still classify every content | `filtering-spec`, `filtering-spec-self` |
 | `check_installed_surface` | does a clean install really deliver the manifest? | `installed-surface` |
 | `check_l5_commands` | the plan's L5 commands must be real commands. | `l5-commands`, `l5-self` |
 | `claim_store` | no worker starts before its claim exists, and two never own one unit. | `claim-store-self`, `fault-lab-self`, `mutation-gate`, `mutation-gate-self` |
 | `close_ceremony_check` | The closing ceremony law's enforcer (founder order 2026-08-30 at close). | `close-ceremony`, `close-ceremony-tests` |
+| `codex_battery` | X8/C7.2 Codex battery: proves the public Brother plugin works on a real | **NO-DATA**, nothing in the battery runs it |
 | `codex_hooks_install` | C3: wire Brother's hooks into Codex's OWN hooks configuration. | `codex-hooks-self`, `codex-smoke`, `codex-smoke-self`, `release-closeout-self` |
 | `codex_skills` | generate bundle/codex-skills/ from bundle/skills/, with the | **NO-DATA**, nothing in the battery runs it |
 | `codex_smoke` | the clean-install Codex smoke test, run in an isolated home. | `codex-smoke`, `codex-smoke-self` |
@@ -80,7 +84,7 @@ to run the battery.
 | `gauntlet_delegation_truth` | the false-green rate as a running number. | `delegation-truth-self` |
 | `gauntlet_frozen` | refuse to score a corpus whose hash moved since the | `gauntlet-frozen-self` |
 | `gauntlet_hostile_ja` | EXECUTE the frozen Hostile Japanese Identity gauntlet. | `gauntlet-hostile-ja`, `gauntlet-hostile-ja-self` |
-| `gauntlet_memory_poisoning` | The memory poisoning gauntlet: twelve planted lessons against the real | **NO-DATA**, nothing in the battery runs it |
+| `gauntlet_memory_poisoning` | The memory poisoning gauntlet: thirteen planted lessons against the real | **NO-DATA**, nothing in the battery runs it |
 | `gauntlet_memory_recurrence` | The memory recurrence gauntlet: five seeded conditions against the real recall path. | `memory-recurrence-self` |
 | `gauntlet_memoryagentbench_conflict` | The MemoryAgentBench conflict resolution and selective forgetting self score. Row LL-6. | **NO-DATA**, nothing in the battery runs it |
 | `gen_command_center` | Render GANTT.html, the Brother command center, from the plan data files. | `gen-board-self` |
@@ -93,11 +97,13 @@ to run the battery.
 | `identity_guard` | refuse NEW commits whose author or committer email domain | `export-public-self`, `identity-guard`, `identity-guard-self` |
 | `intake_score` | Scoring harness for the Intake 9.5 rubric (docs/plan/INTAKE-9.5-DESIGN.md | `intake-record-diagrams`, `intake-score-self` |
 | `integrate` | workers parallel, truth serial. | `integrate-self` |
-| `jbeq_decide` | JBEQ-MDM decision module: a deterministic engine that decides once a | **NO-DATA**, nothing in the battery runs it |
+| `jbeq_decide` | JBEQ-MDM decision module: a deterministic engine that decides once a | `jbeq-decide-self` |
 | `jbeq_e2e_check` | Checker for the JBEQ-MDM end to end scenario (benchmarks/jbeq/mdm/e2e-001). | `jbeq-e2e-check-self` |
 | `jbeq_mdm` | JBEQ-MDM seed suite: write the blind prompts, score a blind answer file. | `jbeq-mdm-seed` |
+| `jbeq_regression` | JBEQ-MDM regression harness: re-decide the pinned round 6 fact sheets | `jbeq-regression-round6-self` |
 | `journal` | one append-only causal log per run, fed by the writers that | `journal-self` |
 | `journal_projection` | the delivery report, receipts-bound and a live | `journal-projection-self` |
+| `keep_current` | update a Codex install only after every link reads PASS. | **NO-DATA**, nothing in the battery runs it |
 | `laws_audit` | R28.1, the law auditor (docs/plan/READINESS-ROADMAP-2026-08-29.json). | `laws-audit`, `laws-audit-self` |
 | `leaf_pin_check` | Does the umbrella promise the release tag the leaf actually published? | `leaf-pins`, `leaf-pins-self` |
 | `lesson_repeat_trial` | was the lesson SHOWN before the failure it describes. | `lesson-repeat-trial-tests` |
@@ -129,6 +135,7 @@ to run the battery.
 | `product_acceptance` | P0.4 of docs/plan/P0-COMPOSITION-WAVE-2026-08-30.md. | `product-acceptance-self` |
 | `progress_deadline` | alive is not advancing, and output is not progress. | `progress-deadline-self` |
 | `prove_guide_claude` | S23's real done_check: prove docs/how-to/USE-WITH-CLAUDE-CODE.md runs | `prove-guide-claude-self` |
+| `provider_adapter` | ONE provider-neutral core, THIN adapters. | **NO-DATA**, nothing in the battery runs it |
 | `readiness_gate` | the review's enterprise readiness gate as a checkable surface. | `export-public-self`, `readiness-gate`, `readiness-gate-self` |
 | `readme_receipt_sample` | the README's per-file receipt sample, rendered by | **NO-DATA**, nothing in the battery runs it |
 | `recall_coverage` | R28.3, learnings at the point of need, measured | **NO-DATA**, nothing in the battery runs it |
@@ -171,6 +178,7 @@ to run the battery.
 | `vault_correct` | Vault correction: fix a wrong vault note with one sentence (row V13, | `vault-correct` |
 | `verify_advisor` | a local page for checking work before a commit. | `verify-advisor-self` |
 | `verify_task_estate` | Run every task's OWN verifyCommand and produce real verdicts. | **NO-DATA**, nothing in the battery runs it |
+| `version_source` | One version and manifest source for this repository's umbrella package. | **NO-DATA**, nothing in the battery runs it |
 | `virgin_unit_proof` | the gate the v1.0.6 defect proved was missing. | `virgin-unit-proof`, `virgin-unit-proof-self` |
 | `wbs` | The decomposition standard: no node may be dispatched that nobody broke down. | `wbs-granularity`, `wbs-self` |
 | `wisdom_capture` | Turn a session's recorded lessons into vault notes the archive can search. | `wisdom-capture` |
@@ -304,6 +312,11 @@ to run the battery.
 - `memory-recurrence-self`: `python3 scripts/test_gauntlet_memory_recurrence.py`
 - `delegation-truth-self`: `python3 scripts/test_gauntlet_delegation_truth.py`
 - `jbeq-mdm-seed`: `python3 scripts/test_jbeq_mdm.py`
+- `jbeq-identity-classes-self`: `python3 scripts/test_jbeq_identity_classes.py -v`
+- `jbeq-decide-self`: `python3 scripts/test_jbeq_decide.py -v`
+- `jbeq-mutation-seams-self`: `python3 scripts/test_jbeq_mutation_seams.py -v`
+- `jbeq-generalization-self`: `python3 scripts/test_jbeq_mdm_generalization.py`
+- `jbeq-regression-round6-self`: `python3 scripts/jbeq_regression.py`
 - `fable-authority`: `python3 scripts/fable_authority.py --selftest`
 - `tenancy-isolation`: `python3 scripts/test_tenancy_isolation.py`
 - `policy-fail-closed`: `python3 scripts/test_policy_fail_closed.py`
@@ -359,6 +372,7 @@ to run the battery.
 - `continuity-matrix-self`: `python3 scripts/test_continuity_matrix.py -v`
 - `capsule-items-self`: `python3 scripts/test_capsule_items.py -v`
 - `lhr-checkpoint-self`: `python3 scripts/test_lhr_checkpoint.py`
+- `lhr-resume-record-self`: `python3 scripts/test_lhr_resume_record.py`
 - `cleanse-self`: `python3 scripts/test_cleanse.py -v`
 - `gen-command-center-md-self`: `python3 scripts/test_gen_command_center_md.py -v`
 - `identity-guard-self`: `python3 scripts/test_identity_guard.py -v`

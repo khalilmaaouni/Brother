@@ -78,23 +78,64 @@ PRODUCER: this module is the sole producer of its own records. generate()
 directory file, the brother-run launcher, and RUNTIME-MANIFEST.json, all
 through _write_if_changed() (defined at line 332), whose actual write is
 open(path, "wb") plus fh.write(data) at lines 341-342.
+
+HOOKS (portability A1, 2026-09-06). Codex 0.153 runs plugin-delivered hooks
+straight from the installed plugin's own hooks/hooks.json (measured on a
+real signed-in run: <CODEX_HOME>/plugins/cache/brother/brothermode/3.4.4/
+hooks/hooks.json fired SessionStart, PreToolUse, PostToolUse and Stop). The
+brother bundle ships no hooks/ at all today, so a Codex home holding only
+brother@brother has zero Brother hooks. This module now also mirrors every
+hook TOOL that products/brothermode/hooks/hooks.json and
+products/brothersbe/hooks/hooks.json name, plus every local module or
+sibling script each one reaches (the same closure walk compute_closure
+already does for brother_run.py, generalized in _closure_from_entries to
+start from more than one entry file), into bundle/runtime/hooks/<product>/
+tools/, and writes bundle/hooks/hooks.json: the union of both products'
+hooks.json, brothermode's own event order first then brothersbe's, every
+`${CLAUDE_PLUGIN_ROOT}/tools/` rewritten to
+`${CLAUDE_PLUGIN_ROOT}/runtime/hooks/<product>/tools/` so the mirrored copy
+is what actually runs.
+
+WHY A SEPARATE MANIFEST (bundle/runtime/hooks/HOOKS-MANIFEST.json) RATHER
+THAN ADDING TO RUNTIME-MANIFEST.json's OWN "files" LIST: ManifestMatchesThe
+Closure's own regression asserts that RUNTIME-MANIFEST.json's "files" name
+EXACTLY the scripts/ closure plus the launcher and the verifier, "no more
+and no less". Folding the hook mirror in there would break a true claim
+about the engine's own manifest in order to serve a second, unrelated
+question (does the hook mirror match products/). Same file family, same
+technique (a sorted file list with sha256 hashes, no timestamp, checked by
+--check exactly like the closure files), separate manifest.
+
+Python 3, standard library only. No network.
 """
 import argparse
 import ast
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
 SCRIPTS_DIR = HERE
+PRODUCTS_DIR = os.path.join(REPO_ROOT, "products")
 RUNTIME_DIR = os.path.join(REPO_ROOT, "bundle", "runtime")
 ENTRY = "brother_run.py"
 MANIFEST_NAME = "RUNTIME-MANIFEST.json"
 LAUNCHER_NAME = "brother-run"
 VERIFIER_NAME = "verify_runtime.py"
+#: The two products whose hooks.json a Codex-only or Claude-only install
+#: must still carry, in the order their commands appear in the merged
+#: bundle/hooks/hooks.json (brothermode first, per the brief).
+HOOK_PRODUCTS = ("brothermode", "brothersbe")
+HOOKS_JSON_NAME = "hooks.json"
+HOOKS_MANIFEST_NAME = "HOOKS-MANIFEST.json"
+#: Matches the exact command shape every hook in both products uses:
+#: `... "${CLAUDE_PLUGIN_ROOT}/tools/<name>.py" ...`.
+_HOOK_TOOL_RE = re.compile(
+    r"\$\{CLAUDE_PLUGIN_ROOT\}/tools/([A-Za-z0-9_.\-]+\.py)")
 #: Named data directories under scripts/ (no .py inside) that a closure file
 #: reads at run time. Mirrored only when a closure file references the
 #: directory by a bare string constant, the same rule the closure already
@@ -280,22 +321,27 @@ if __name__ == "__main__":
 
 
 def _script_files(scripts_dir):
-    return {f for f in os.listdir(scripts_dir) if f.endswith(".py")}
+    return {f for f in os.listdir(scripts_dir)
+            if f.endswith(".py") and not f.startswith("test_")}
 
 
-def compute_closure(entry=ENTRY, scripts_dir=SCRIPTS_DIR):
-    """BFS from `entry` over local imports and local script-path string
-    literals, both read from the same AST walk of each file as it is
-    visited. Returns a sorted list of scripts/ basenames (with .py)."""
-    existing = _script_files(scripts_dir)
+def _closure_from_entries(entries, files_dir):
+    """BFS from every name in `entries` over local imports and local
+    script-path string literals, both read from the same AST walk of each
+    file as it is visited. Returns a sorted list of files_dir basenames
+    (with .py). Generalized out of compute_closure (portability A1,
+    2026-09-06) so a hooks.json naming several independent tool files, none
+    of which import each other, seeds the walk from all of them at once
+    rather than losing every entry but the first."""
+    existing = _script_files(files_dir)
     seen = set()
-    queue = [entry]
+    queue = list(entries)
     while queue:
         current = queue.pop(0)
         if current in seen or current not in existing:
             continue
         seen.add(current)
-        path = os.path.join(scripts_dir, current)
+        path = os.path.join(files_dir, current)
         with open(path, encoding="utf-8") as fh:
             tree = ast.parse(fh.read(), filename=path)
         for node in ast.walk(tree):
@@ -313,15 +359,202 @@ def compute_closure(entry=ENTRY, scripts_dir=SCRIPTS_DIR):
                 # A bare 'name.py' string constant is how a subprocess or
                 # path target names a sibling script (brother_run.py's own
                 # os.path.join(HERE, "door.py"), loop_bridge.py's
-                # os.path.join(HERE, "model_worker.py")): never a Python
-                # import, so ast.Import/ImportFrom never sees it. Matched
-                # against the real file list, not a suffix check, so a long
-                # docstring cannot be mistaken for a reference.
+                # os.path.join(HERE, "model_worker.py"), bm_fence_hook.py's
+                # own os.path.join(HERE, "bm_store.py") loaded through
+                # importlib.util.spec_from_file_location rather than a plain
+                # import): never a Python import, so ast.Import/ImportFrom
+                # never sees it. Matched against the real file list, not a
+                # suffix check, so a long docstring cannot be mistaken for a
+                # reference.
                 if node.value in existing:
                     candidate = node.value
             if candidate and candidate in existing and candidate not in seen:
                 queue.append(candidate)
     return sorted(seen)
+
+
+def compute_closure(entry=ENTRY, scripts_dir=SCRIPTS_DIR):
+    """BFS from `entry` over local imports and local script-path string
+    literals, both read from the same AST walk of each file as it is
+    visited. Returns a sorted list of scripts/ basenames (with .py)."""
+    return _closure_from_entries([entry], scripts_dir)
+
+
+def _load_hooks_json(product, products_dir=PRODUCTS_DIR):
+    """The hooks.json `product` ships, or None when it is absent or not
+    readable JSON. Never raises: a product carrying no hooks/hooks.json
+    contributes nothing to the mirror rather than failing the whole run."""
+    path = os.path.join(products_dir, product, "hooks", HOOKS_JSON_NAME)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return None
+
+
+def _hook_tool_names(hooks_doc):
+    """Ordered, de-duplicated tool basenames named by every
+    `${CLAUDE_PLUGIN_ROOT}/tools/<name>` command in `hooks_doc`, in
+    first-seen order (event, then matcher group, then command)."""
+    names = []
+    seen = set()
+    for groups in hooks_doc.get("hooks", {}).values():
+        for group in groups:
+            for h in group.get("hooks", []):
+                m = _HOOK_TOOL_RE.search(h.get("command", ""))
+                if m and m.group(1) not in seen:
+                    seen.add(m.group(1))
+                    names.append(m.group(1))
+    return names
+
+
+def count_hook_commands(hooks_doc):
+    """Every leaf hook command object across every event and matcher group
+    of `hooks_doc`: what actually fires, never the count of distinct tool
+    files (bm_bash_audit.py alone fires twice, pre and post)."""
+    return sum(len(group.get("hooks", []))
+              for groups in hooks_doc.get("hooks", {}).values()
+              for group in groups)
+
+
+def compute_hook_closure(product, products_dir=PRODUCTS_DIR):
+    """(tools_dir, closure) for `product`: the tool files its own
+    hooks.json commands name, plus every local module or sibling script
+    each one reaches, via the same walk compute_closure uses for
+    brother_run.py. closure is [] when the product carries no hooks.json."""
+    tools_dir = os.path.join(products_dir, product, "tools")
+    hooks_doc = _load_hooks_json(product, products_dir)
+    if hooks_doc is None:
+        return tools_dir, []
+    return tools_dir, _closure_from_entries(_hook_tool_names(hooks_doc),
+                                            tools_dir)
+
+
+def _rewrite_plugin_root_command(command, product):
+    """`${CLAUDE_PLUGIN_ROOT}/tools/` moved to where this module mirrors
+    `product`'s tools once installed, so the command that actually ships
+    points at bytes that actually exist in the plugin."""
+    return command.replace(
+        "${CLAUDE_PLUGIN_ROOT}/tools/",
+        "${CLAUDE_PLUGIN_ROOT}/runtime/hooks/%s/tools/" % product)
+
+
+def merged_hooks_doc(products=HOOK_PRODUCTS, products_dir=PRODUCTS_DIR):
+    """bundle/hooks/hooks.json's content: the union of every named
+    product's own hooks.json, each command rewritten to its mirrored
+    location, `products`' own order preserved (brothermode's event order
+    first, then any event brothersbe alone carries); within one event,
+    brothermode's matcher groups first, then brothersbe's. A product
+    carrying no hooks.json contributes nothing."""
+    docs = [(p, d) for p, d in
+           ((p, _load_hooks_json(p, products_dir)) for p in products)
+           if d is not None]
+    order = []
+    for _, doc in docs:
+        for event in doc.get("hooks", {}):
+            if event not in order:
+                order.append(event)
+    merged = {}
+    for event in order:
+        groups = []
+        for product, doc in docs:
+            for group in doc.get("hooks", {}).get(event, []):
+                new_group = {k: v for k, v in group.items() if k != "hooks"}
+                new_group["hooks"] = [
+                    dict(h, command=_rewrite_plugin_root_command(
+                        h.get("command", ""), product))
+                    for h in group.get("hooks", [])]
+                groups.append(new_group)
+        merged[event] = groups
+    return {"hooks": merged}
+
+
+def _hooks_manifest_bytes(products=HOOK_PRODUCTS, products_dir=PRODUCTS_DIR):
+    files = []
+    for product in products:
+        tools_dir, closure = compute_hook_closure(product, products_dir)
+        for name in closure:
+            data = _read_bytes(os.path.join(tools_dir, name))
+            files.append({"path": "%s/tools/%s" % (product, name),
+                         "sha256": _sha256(data)})
+    files.sort(key=lambda f: f["path"])
+    return (json.dumps({"generated_by": "scripts/bundle_runtime.py",
+                        "products": list(products), "files": files},
+                       indent=1, sort_keys=True) + "\n").encode("utf-8")
+
+
+def _hooks_json_bytes(products=HOOK_PRODUCTS, products_dir=PRODUCTS_DIR):
+    return (json.dumps(merged_hooks_doc(products, products_dir), indent=2)
+           + "\n").encode("utf-8")
+
+
+def generate_hooks(products=HOOK_PRODUCTS, products_dir=PRODUCTS_DIR,
+                   runtime_dir=RUNTIME_DIR):
+    """Mirrors every named product's hook-tool closure into
+    bundle/runtime/hooks/<product>/tools/, writes their manifest
+    (bundle/runtime/hooks/HOOKS-MANIFEST.json), and writes
+    bundle/hooks/hooks.json. Returns (hook_counts, changed): hook_counts is
+    {product: command_count reported by that product's own hooks.json},
+    changed is the list of paths (relative to the bundle root) written or
+    updated."""
+    changed = []
+    hook_counts = {}
+    for product in products:
+        tools_dir, closure = compute_hook_closure(product, products_dir)
+        doc = _load_hooks_json(product, products_dir)
+        hook_counts[product] = count_hook_commands(doc) if doc else 0
+        for name in closure:
+            data = _read_bytes(os.path.join(tools_dir, name))
+            dst = os.path.join(runtime_dir, "hooks", product, "tools", name)
+            if _write_if_changed(dst, data):
+                changed.append("runtime/hooks/%s/tools/%s" % (product, name))
+    manifest_path = os.path.join(runtime_dir, "hooks", HOOKS_MANIFEST_NAME)
+    if _write_if_changed(manifest_path,
+                         _hooks_manifest_bytes(products, products_dir)):
+        changed.append("runtime/hooks/" + HOOKS_MANIFEST_NAME)
+    bundle_dir = os.path.dirname(runtime_dir)
+    hooks_json_path = os.path.join(bundle_dir, "hooks", HOOKS_JSON_NAME)
+    if _write_if_changed(hooks_json_path,
+                         _hooks_json_bytes(products, products_dir)):
+        changed.append("hooks/" + HOOKS_JSON_NAME)
+    return hook_counts, changed
+
+
+def check_hooks(products=HOOK_PRODUCTS, products_dir=PRODUCTS_DIR,
+               runtime_dir=RUNTIME_DIR):
+    """Read-only: do bundle/runtime/hooks/ and bundle/hooks/hooks.json
+    match products/*/hooks/ right now? Returns (ok, problems); never
+    writes anything."""
+    problems = []
+    for product in products:
+        tools_dir, closure = compute_hook_closure(product, products_dir)
+        for name in closure:
+            src = os.path.join(tools_dir, name)
+            dst = os.path.join(runtime_dir, "hooks", product, "tools", name)
+            if not os.path.isfile(dst):
+                problems.append("runtime/hooks/%s/tools/%s: missing from "
+                                "bundle/runtime" % (product, name))
+            elif _read_bytes(src) != _read_bytes(dst):
+                problems.append("runtime/hooks/%s/tools/%s: bundle/runtime "
+                                "copy does not match its products/ source"
+                                % (product, name))
+    manifest_path = os.path.join(runtime_dir, "hooks", HOOKS_MANIFEST_NAME)
+    if not os.path.isfile(manifest_path):
+        problems.append("runtime/hooks/%s: missing" % HOOKS_MANIFEST_NAME)
+    elif _read_bytes(manifest_path) != _hooks_manifest_bytes(products,
+                                                             products_dir):
+        problems.append("runtime/hooks/%s: stale, does not match a fresh "
+                        "generation" % HOOKS_MANIFEST_NAME)
+    bundle_dir = os.path.dirname(runtime_dir)
+    hooks_json_path = os.path.join(bundle_dir, "hooks", HOOKS_JSON_NAME)
+    if not os.path.isfile(hooks_json_path):
+        problems.append("hooks/%s: missing" % HOOKS_JSON_NAME)
+    elif _read_bytes(hooks_json_path) != _hooks_json_bytes(products,
+                                                            products_dir):
+        problems.append("hooks/%s: stale, does not match a fresh "
+                        "generation from the products' own hooks.json"
+                        % HOOKS_JSON_NAME)
+    return (not problems), problems
 
 
 def compute_data_files(closure, scripts_dir=SCRIPTS_DIR):
@@ -554,13 +787,19 @@ def main(argv=None):
     if args.check:
         ok, problems, closure = check()
         cs_ok, cs_problems = CS.check()
-        if ok and cs_ok:
+        hooks_ok, hooks_problems = check_hooks()
+        if ok and cs_ok and hooks_ok:
+            total_hook_commands = sum(
+                count_hook_commands(_load_hooks_json(p) or {"hooks": {}})
+                for p in HOOK_PRODUCTS)
             print("bundle_runtime: bundle/runtime matches scripts/ for all "
-                  "%d closure file(s) and %d data file(s), and "
-                  "bundle/codex-skills matches bundle/skills"
-                  % (len(closure), len(compute_data_files(closure))))
+                  "%d closure file(s) and %d data file(s), bundle/codex-skills "
+                  "matches bundle/skills, and bundle/hooks/hooks.json matches "
+                  "%d hook command(s) across %d product(s)"
+                  % (len(closure), len(compute_data_files(closure)),
+                     total_hook_commands, len(HOOK_PRODUCTS)))
             return 0
-        for problem in problems + cs_problems:
+        for problem in problems + cs_problems + hooks_problems:
             print("bundle_runtime: DRIFT: %s" % problem, file=sys.stderr)
         return 1
 
@@ -571,7 +810,9 @@ def main(argv=None):
         return 1
 
     closure, changed = generate()
-    changed = changed + ["codex-skills/" + c for c in cs_changed]
+    hook_counts, hooks_changed = generate_hooks()
+    changed = (changed + ["codex-skills/" + c for c in cs_changed]
+              + hooks_changed)
     if changed:
         print("bundle_runtime: wrote %d file(s): %s"
               % (len(changed), ", ".join(changed)))
@@ -579,6 +820,10 @@ def main(argv=None):
         print("bundle_runtime: no changes; bundle/runtime already matches "
               "scripts/ for %d closure file(s) and %d data file(s)"
               % (len(closure), len(compute_data_files(closure))))
+    print("bundle_runtime: bundle/hooks/hooks.json carries %d hook "
+          "command(s) across %d product(s) (%s)"
+          % (sum(hook_counts.values()), len(hook_counts),
+             ", ".join("%s=%d" % (p, n) for p, n in hook_counts.items())))
     return 0
 
 

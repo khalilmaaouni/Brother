@@ -1,0 +1,57 @@
+{
+  "spec_version": "2026-09-06",
+  "source": {
+    "document": "docs/plan/FIX-DIRECTIVE-2026-09-06.md",
+    "sections": [26, 27, 28, 29, 30]
+  },
+  "gate_before_use": "Directive section 31: no new benchmark work, and per section 26 this round itself, until the P0 rows on docs/plan/READINESS-ROADMAP-2026-08-29.json close. Row P1-4's status stays PARTIAL until then.",
+  "model_id": "NO-DATA: named once, identical across every competitor arm, by whoever runs the round; write the exact id here before the round starts (directive section 26, control 'same model').",
+  "start_commit": "NO-DATA: produced by the Setup section of TASK.md, which was run and verified during harness preparation (commit ce3f05034d593e784fdaf75e07200024c375f13c on this machine, on 2026-09-06, from this fixture's current tree with a fixed author/committer identity and date). A later session must re-run Setup itself and record the hash it prints here rather than reuse this one blindly, in case the fixture tree has since changed.",
+  "token_budget": "NO-DATA: named once, identical across every arm, before the round starts (directive section 26, control 'same token budget'). No default is assumed here.",
+  "intervention_budget": "NO-DATA: the maximum number of human interventions allowed per arm, named once before the round starts, identical across every arm (directive section 26, control 'same intervention budget').",
+  "machine": {
+    "descriptor_fields": ["hostname", "os", "os_version", "cpu_model", "cpu_count", "memory_gb", "measured_at"],
+    "how_to_capture": "uname -a; on macOS also sysctl -n machdep.cpu.brand_string hw.ncpu hw.memsize; on Linux also lscpu and free -h. Record the actual command output beside the run record, never assumed from a prior round.",
+    "example_capture_2026-09-06": {
+      "note": "Captured on THIS machine while preparing the harness, for illustration only. Not a claim that any competitor arm ran here; re-capture per round.",
+      "uname_a": "NO-DATA: not captured for this prep session; run `uname -a` at round time"
+    }
+  },
+  "competitors": {
+    "gsd": {
+      "plugin_id": "gsd-core",
+      "verified_source": "github: open-gsd/gsd-core (read from this machine's ~/.claude/plugins/known_marketplaces.json, an install already present here)",
+      "start_command": "NO-DATA: do not guess the install/invoke command for a fresh machine; read the repository's own README at the URL above before the round.",
+      "check_url": "https://github.com/open-gsd/gsd-core"
+    },
+    "compound": {
+      "plugin_id": "compound-engineering",
+      "verified_source": "github: EveryInc/compound-engineering-plugin (read from this machine's ~/.claude/plugins/known_marketplaces.json, an install already present here)",
+      "start_command": "NO-DATA: do not guess the install/invoke command for a fresh machine; read the repository's own README at the URL above before the round.",
+      "check_url": "https://github.com/EveryInc/compound-engineering-plugin"
+    },
+    "superpowers": {
+      "plugin_id": "superpowers",
+      "verified_source": "github: obra/superpowers-marketplace (read from this machine's ~/.claude/plugins/known_marketplaces.json; installed here as a skills-dir checkout at ~/.claude/skills/superpowers, not a marketplace plugin install)",
+      "start_command": "NO-DATA: do not guess the install/invoke command for a fresh machine; read the repository's own README at the URL above before the round.",
+      "check_url": "https://github.com/obra/superpowers-marketplace"
+    },
+    "bmad": {
+      "plugin_id": "NO-DATA: not installed on this machine",
+      "verified_source": "github: bmad-code-org/BMAD-METHOD, confirmed 2026-09-06 by web search (title: 'GitHub - bmad-code-org/BMAD-METHOD: Breakthrough Method for Agile Ai Driven Development'); not installed anywhere on this machine, so nothing here was read from a local config the way the other three were.",
+      "start_command": "NO-DATA: do not guess the install/invoke command; read the repository's own README at the URL above before the round.",
+      "check_url": "https://github.com/bmad-code-org/BMAD-METHOD"
+    },
+    "vanilla_claude_code": {
+      "plugin_id": null,
+      "verified_source": "the same claude binary already on this machine, no plugins enabled; verified by running `claude --version` during harness preparation on 2026-09-06, which printed 2.1.251 (Claude Code)",
+      "start_command": "claude (with every plugin from every other arm disabled; verify with `claude plugin list` showing no relevant plugin as enabled before the arm starts)",
+      "check_url": "NO-DATA: no install needed on this machine; a fresh machine's install command is at https://docs.claude.com/en/docs/claude-code"
+    }
+  },
+  "raw_artifacts": {
+    "convention": "One run directory per competitor arm, contract documented in RUBRIC.md and read by scripts/competitive_score.py: diff.patch, meta.json (declared_files, tokens_used, interventions), optionally receipt.json and transcript.txt.",
+    "root": "NO-DATA: named per round; a dated directory under benchmarks/results/ following the existing benchmarks/results/long-horizon-recovery/ convention is the closest sibling on this estate."
+  },
+  "publish_rule": "Directive section 26: publish raw artifacts, never only a composite score. scripts/competitive_score.py enforces this mechanically by refusing to print a composite unless every dimension in RUBRIC.md is measured."
+}

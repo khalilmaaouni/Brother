@@ -49,6 +49,7 @@ recorder put the id.
 Python 3.9 floor, standard library only, no network.
 """
 import argparse
+import importlib.util
 import json
 import os
 import sqlite3
@@ -60,18 +61,23 @@ MIN_DENOMINATOR = 5
 
 
 def resolve_root(start):
-    """Walk up for a .brothermode or .git marker, mirroring bm_store.py and bm_gate.py so this
-    tool's receipts live under the same estate as everything else, never in a temp directory.
-    This estate has already lost a deliverable whose only home was a scratch path."""
-    path = os.path.abspath(start)
-    while True:
-        if os.path.isdir(os.path.join(path, '.brothermode')) or \
-           os.path.exists(os.path.join(path, '.git')):
-            return path
-        parent = os.path.dirname(path)
-        if parent == path:
-            return os.path.abspath(start)
-        path = parent
+    """The estate root bm_store.py resolves from `start` (BROTHERMODE_ROOT, then the nearest
+    initialised .brothermode/ anywhere up the tree, then .git), falling back to `start` itself
+    when nothing anchors a project, so this tool's receipts live under the same estate as the
+    fence, never in a temp directory or a lane worktree.
+
+    2026-09-04: the private copy this replaced checked .git at EVERY level before walking
+    further, so from a lane worktree (whose .git is a file) it stopped at the worktree, wrote
+    .brothermode/recurrence.sqlite3 there, and that bare directory then read as a store marker
+    to bm_store.py and repointed the single-writer fence at the worktree. One resolver, one
+    answer. Loaded by path, the same importlib pattern bm_playbook.py uses for this file."""
+    spec = importlib.util.spec_from_file_location(
+        'bm_store_for_recurrence',
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), 'bm_store.py'))
+    store = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(store)
+    root, _source = store.resolve_root(start=start)
+    return root if root else os.path.abspath(start)
 
 
 def default_db_path():

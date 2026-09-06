@@ -1,0 +1,119 @@
+JBEQ-MDM blind round 9, 2026-09-06, over the frozen 70 with the proposal and conflicting definitions of hub PR 413. Extractor: a fresh Claude subagent (sonnet, effort high) reading only the prompt, the schema and the seventy prompts; hashes before any answer; engine of hub branch wbs/jbeq-reject-vs-keep at ed2a1886cd71811c58d811d4da8565e11ad37520. A REGRESSION CHECK on the frozen 70; not a qualification; its sheets are pinned as fixture c.
+
+Note on where this extraction ran: the task asked for a throwaway worktree at
+/private/tmp/bh-lane-round9 branched from ~/brother-hub. That worktree was not
+visible to this agent's own git checkout and the file-write guard refused
+writes there (this agent's own worktree-isolation fence), so per the task's
+own fallback instruction this instead branched wbs/jbeq-round9-extraction
+from hub/wbs/jbeq-reject-vs-keep directly inside the agent's assigned
+worktree (which already carries a "hub" remote pointed at
+https://github.com/khalilmaaouni/brother-hub.git alongside "origin", the
+public Brother repo with push disabled) and pushes to hub by name. The prompt
+and schema content was verified byte-identical between the two checkouts
+(same commit, ed2a1886c) before any extraction was written.
+
+Hashes (recorded before Phase 2, before any answer file was read):
+  fact-sheets.json     sha256 974ec7449a753d597b3eedeea8131675493a1e391fa8d826659bb85738a48992
+  extractor-notes.md   sha256 2f15885858ad8bbd507ddf45bd4efc9f7a97375af029e5e974c84d6bbca40d98
+Rerun after Phase 2 (files untouched since hashing, confirming no edit occurred between phases):
+  fact-sheets.json     sha256 974ec7449a753d597b3eedeea8131675493a1e391fa8d826659bb85738a48992   MATCH
+  extractor-notes.md   sha256 2f15885858ad8bbd507ddf45bd4efc9f7a97375af029e5e974c84d6bbca40d98   MATCH
+
+validate: 70 fact sheet(s) OK (exit 0), zero off-enum values, zero fixes needed.
+
+Score (scripts/jbeq_mdm.py score benchmarks/jbeq/mdm/runs/blind-round9-2026-09-06/answers.json --seed benchmarks/jbeq/mdm/seed-2026-09-05.json, exit 1):
+  address              6 of 10
+  entity-object        7 of 10
+  hierarchy            8 of 10
+  identifier           3 of 5
+  match-or-no-merge    7 of 10
+  requirements         5 of 5
+  survivorship         10 of 10
+  temporal             10 of 10
+  engine-decided: 31 of 45
+  direct-answered (not blind, not evidence about the engine): 25 of 25
+  critical WRONG EO-04 [CROSS-CUSTOMER CONTAMINATION] expected REJECT MATCH, answered KEEP SEPARATE
+  critical WRONG MM-06 [FALSE-MERGE RISK, not merged] expected KEEP SEPARATE, answered ESCALATE  CONSERVATIVE
+  critical WRONG AD-03 [WRONG STORE ASSIGNMENT] expected REJECT MATCH, answered KEEP SEPARATE
+  critical WRONG AD-04 [WRONG STORE ASSIGNMENT] expected REJECT MATCH, answered KEEP SEPARATE
+  critical WRONG ID-02 [WRONG TAX IDENTITY] expected ESCALATE, answered KEEP SEPARATE
+  critical WRONG ID-05 [CROSS-CUSTOMER CONTAMINATION] expected REJECT MATCH, answered KEEP SEPARATE
+  critical false merges: 0 of 33
+  critical wrong: 6 of 33 (EO-04, MM-06, AD-03, AD-04, ID-02, ID-05)
+  conservative wrongs: 1 (MM-06)
+  JBEQ-MDM NOT READY
+  JBEQ-MDM SEED total: 56 of 70
+
+requested_action distribution (70 sheets):
+  none                     59
+  assignment                4  (HI-02, HI-04, HI-05, HI-10)
+  match_on_stated_basis     7  (AD-10, ID-01, ID-04, MM-01, MM-02, MM-03, MM-06)
+  record_write              0
+
+requested_action on the seven frozen REJECT MATCH cases:
+  AD-03   none                    (no "を根拠に" clause; generic "統合してよいか")
+  AD-04   none                    (no "を根拠に" clause; generic "統合してよいか")
+  AD-10   match_on_stated_basis   ("住所の一致を根拠に...照合してよいか")
+  EO-04   none                    (proposes matching "as the same legal entity"
+                                   but names no evidentiary basis)
+  ID-05   none                    (open question, "この候補をどう扱うべきか")
+  MM-02   match_on_stated_basis   ("この数字の一致を根拠に...照合してよいか")
+  MM-03   match_on_stated_basis   ("電話番号とビル名の一致を根拠に照合してよいか")
+
+requested_parent (non-null only):
+  HI-02: 株式会社ヒノデ薬品
+
+Fixture c: benchmarks/jbeq/mdm/regression-sheets-2026-09-06c.json (byte-for-
+byte copy of this run's fact-sheets.json, sha256 above), header at
+regression-sheets-2026-09-06c.origin.txt, baseline written via
+`python3 scripts/jbeq_regression.py --write-baseline --fixture c`
+(engine-decided 31 of 45, matching the score above) at
+regression-baseline-2026-09-06c.json. scripts/jbeq_regression.py's
+DEFAULT_FIXTURE stays "b": fixture c's engine-decided score (31 of 45) is
+BELOW fixture b's pre-proposal_gate baseline score (40 of 45), so the switch
+condition in the task brief is not met and the default is left unchanged,
+documented in that file and in regression-sheets-2026-09-06c.origin.txt.
+
+THE FINDING THIS ROUND SURFACES. Of the seven frozen REJECT MATCH cases, only
+the three phrased with an explicit "〜を根拠に照合/統合してよいか" clause
+(AD-10, MM-02, MM-03) extract to requested_action=match_on_stated_basis and
+resolve correctly through the engine's gated_reject path. The other four
+(AD-03, AD-04, EO-04, ID-05) ask a bare identity or open question with no
+named evidentiary basis; EXTRACTOR-PROMPT.md's own rule ("Set
+match_on_stated_basis when the question itself PROPOSES a match... AND NAMES
+the basis it rests on") and the task's own framing ("an open question...
+records none") both point a literal, blind reading toward
+requested_action=none for these four, which never reaches gated_reject and
+falls through to KEEP SEPARATE instead of the expected REJECT MATCH. This
+reproduces, for a different reason, the same three misses (AD-03, AD-04,
+EO-04) that fixture b's own default-fixture regression run shows regressed
+against fixture b's pre-proposal_gate baseline this same session (see
+`python3 scripts/jbeq_regression.py` output, 3 regressions), plus ID-05 as a
+fourth case in the same family this round's extraction did not flip. Whether
+the fix belongs in the PROMPT (treat a bare identity/open question over a
+case that also carries a stated-difference or reused/cross-domain identifier
+fact as match_on_stated_basis too) or in the ENGINE (let gated_reject fire on
+authoritative_identifier=conflicting alone, without requiring
+requested_action=match_on_stated_basis) is a decision for the rule lane, not
+this extraction; this run reports the four misses and their common shape
+rather than re-guessing an extraction value to force a different score.
+
+MM-06 is a new, distinct miss (expected KEEP SEPARATE, answered ESCALATE):
+its sheet sets requested_action=match_on_stated_basis (explicit "読みの一致を
+根拠に") AND authoritative_identifier=absent (both corporate numbers
+未取得/blank per decision-rules-addendum.md rule 6's own reading: a shared
+reading with different kanji, plus a differing banchi, are absence-of-
+support facts, not refuting facts). The combination of a stated basis plus no
+authoritative identifier at all appears to route through a weak-evidence
+ESCALATE path rather than gated_reject's REJECT MATCH or boundary rule 6's
+KEEP SEPARATE; flagged for the rule lane rather than re-extracted to remove
+the “を根拠に” clause the input plainly carries.
+
+ID-02 (expected ESCALATE, answered KEEP SEPARATE) repeats round 8's own
+diagnosed gap (see runs/blind-round8-2026-09-06/RECORD.txt): this round's
+sheet sets authoritative_identifier=absent and effective_dates recording the
+2026-06-30 expiry against 2026-09-05, matching round 7's authoritative_
+identifier choice, but does not also set evidence_reasons=[missing_identifier]
+the way round 7's apparently-correct sheet did; extractor-notes.md was not
+revised to add that signal after Phase 1 was hashed, consistent with this
+round's rule against re-extracting after seeing the score.

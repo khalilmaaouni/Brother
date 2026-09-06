@@ -134,7 +134,7 @@ def runtime_env_var_name(loop_bridge_path):
     try:
         with open(loop_bridge_path, encoding="utf-8") as fh:
             text = fh.read()
-    except OSError:
+    except OSError:  # sbe: allow-silent caller turns None into NO-DATA, docstring above
         return None
     m = _RUNTIME_ENV_VAR_RE.search(text)
     return m.group(1) if m else None
@@ -351,13 +351,20 @@ def classify_bundle_alone(status, message):
     FAIL for an unrelated reason, meaning the calibration itself broke) is
     a real FAIL. Pure, so scripts/test_virgin_unit_proof.py can drive it
     without running an export or a Codex binary."""
+    # Portability release (2026-09-06): the design this function translated
+    # for is GONE. brother@brother now carries the engine and both products'
+    # hook tools itself (bundle/runtime/hooks/<product>/tools, mirrored from
+    # the already-public products/ tree by scripts/bundle_runtime.py), so
+    # the bundle alone integrating a unit is the EXPECTED shape and the pass.
+    # A bundle alone that finds nothing is the E84 defect returning, and
+    # reads FAIL, never NO-DATA. The "private engine leaked" reading is
+    # closed by the export dry run's own allowlist, not by this leg.
     if status == "PASS":
-        return "FAIL", ("bundle alone unexpectedly integrated a unit; the "
-                        "private engine may have leaked into the public bundle")
+        return "PASS", "bundle alone integrated a unit: the one-plugin end state holds"
     if status == "FAIL" and NODATA_SIGNATURE in (message or ""):
-        return "NO-DATA", ("bundle alone finds nothing, as designed: %s" % message)
-    return "FAIL", ("bundle alone failed for a reason other than the "
-                    "expected NO-DATA signature: %s" % message)
+        return "FAIL", ("bundle alone finds no worker adapter, which the "
+                        "one-plugin end state must never do: %s" % message)
+    return "FAIL", ("bundle alone failed: %s" % message)
 
 
 def install_plugins(codex_bin, export_dir, env):
@@ -590,7 +597,7 @@ def run_bundle_alone_leg(export_dir, throwaway, runtime_var):
     message = extra[-1] if extra else ""
     verdict, explanation = classify_bundle_alone(status, message)
     say("%s: %s" % (verdict, explanation))
-    return {"PASS": 1, "FAIL": 1, "NO-DATA": 0}[verdict], lines
+    return {"PASS": 0, "FAIL": 1, "NO-DATA": 1}[verdict], lines
 
 
 def run(work=None, keep=False, root=None):
@@ -652,7 +659,7 @@ def run(work=None, keep=False, root=None):
             overall = 1
         say("OVERALL: leg1=%s leg2=%s"
            % (("PASS" if leg1_code == 0 else "FAIL" if leg1_code == 1 else "NO-DATA"),
-              ("NO-DATA(expected)" if leg2_code == 0
+              ("PASS" if leg2_code == 0
                else "FAIL" if leg2_code == 1 else "NO-DATA(unexpected)")))
         return overall, lines
     finally:

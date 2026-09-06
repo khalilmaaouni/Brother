@@ -104,6 +104,28 @@ second implementation of the same rule) as read_e53_5_signal's primary line,
 printed once, corpus-wide: the run_evidence store carries no session id, so this
 signal cannot be split into the on/off arms the way the secondary signal is.
 
+THE ABANDONMENT signal, DETECTOR A, added 2026-09-06 by the founder's own
+ruling in the question UI on decision record
+~/.claude/evidence/decision-learning-loop-item5-detector-2026-09-06.json: "A,
+abandonment, then B as its check". A vault_recall outcome row that carries
+"ts" (ISO 8601 UTC) and "sig" (repeat_guard's own 16-character signature of
+the tool call the recall fired for) counts as PREVENTED when no row in that
+session's own repeat-guard log shares that sig at a timestamp strictly later
+than the recall's own ts, and NOT PREVENTED when one does; a tie (the same
+timestamp on both sides) counts as NOT PREVENTED, since "did not run again"
+cannot be proven from an equal clock reading. A recall row missing either
+field is excluded and counted on its own "rows without fields" line, never
+folded into either bucket. This needs the sibling fields
+wbs/learning-loop-hook-rows-carry-ts-sig-trigger is adding to both hook
+writers (the vault_recall outcome row and the repeat-guard row); until real
+sessions carry them this prints NO-DATA by name, never a zero. The floor
+(reusing --min-sessions, default 5) applies to the COUNT OF FIELD-BEARING
+ROWS first; the "recall on" arm then keeps the existing --min-sessions
+semantics on SESSION count, same as the secondary signal above. "recall off"
+has no recall rows by definition (recall off means no lesson was ever shown
+in that session), so that is printed as its own line, never treated as an
+error or a missing case.
+
 NO-DATA is never a zero. An absent guard directory, an absent recall-seen file,
 an absent ledger file, an absent evidence store, or an absent lesson store each
 print their own NO-DATA line naming the path they looked for, and an arm short
@@ -156,6 +178,24 @@ UNCONFIGURED_SENTINEL = "__unconfigured__"
 #: "session", "refusals", "kind"}. Read-only here, like every other source
 #: this script reads.
 DEFAULT_OUTCOMES = brother_paths.config_path("hook-outcomes.jsonl")
+
+
+def row_ts(row):
+    """learning_loop item 5: both the guard's own rows and the vault_recall
+    row in the shared hook-outcome log now carry a "ts" field (ISO 8601 UTC
+    with seconds). This is the one tolerant reader for it: a row minted
+    before the field existed, or one carrying a malformed value, parses as
+    None (unknown), never as an error -- this script's own read_guard_sessions
+    and read_hook_outcomes already read a mix of old and new rows off one
+    real log, and neither may crash on the older half. No detector reads
+    this value yet; it exists so the field can be relied on once one does."""
+    ts = row.get("ts")
+    if not ts:
+        return None
+    try:
+        return datetime.datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ")
+    except (ValueError, TypeError):
+        return None
 
 
 def read_guard_sessions(guard_dir):
@@ -339,6 +379,69 @@ def compute_repeats(sessions):
     return repeats_by_session
 
 
+def _parse_ts(value):
+    """A parsed UTC timestamp from an ISO 8601 string, tolerating the
+    trailing "Z" datetime.fromisoformat cannot parse on Python 3.9, or None
+    on anything missing, non-string, or unparsable. Treated identically to a
+    missing field by every caller: a malformed timestamp is not a fact this
+    detector can use."""
+    if not value or not isinstance(value, str):
+        return None
+    text = value[:-1] + "+00:00" if value.endswith("Z") else value
+    try:
+        return datetime.datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def compute_abandonment(sessions, outcome_rows):
+    """Detector A (founder ruling 2026-09-06, "A, abandonment, then B as its
+    check"): a vault_recall outcome row showing a lesson for signature S in
+    session B at time T counts as PREVENTED when S never runs again in B's
+    own repeat-guard log after T, NOT PREVENTED when it does; a tie (same
+    timestamp) counts as NOT PREVENTED. Returns (with_fields, without_fields,
+    per_session, totals): with_fields is the list of (session, sig, ts)
+    triples that carried both fields; without_fields counts the vault_recall
+    rows that did not; per_session maps session id to
+    {"rows", "prevented", "not_prevented"}; totals sums the same three keys
+    across every session. sessions is read_guard_sessions's own return
+    shape (session id -> {"mtime", "rows"}); outcome_rows may be None (no
+    hook-outcome log at all), treated as empty."""
+    recall_rows = [r for r in (outcome_rows or []) if r.get("hook") == "vault_recall"]
+    with_fields = []
+    without_fields = 0
+    for r in recall_rows:
+        ts = _parse_ts(r.get("ts"))
+        sig = r.get("sig")
+        if ts is None or not sig:
+            without_fields += 1
+            continue
+        with_fields.append((r.get("session"), sig, ts))
+
+    per_session = {}
+    totals = {"rows": 0, "prevented": 0, "not_prevented": 0}
+    for session, sig, ts in with_fields:
+        guard_rows = sessions.get(session, {}).get("rows", []) if sessions else []
+        ran_again = False
+        for row in guard_rows:
+            if row.get("sig") != sig:
+                continue
+            row_ts = _parse_ts(row.get("ts"))
+            if row_ts is None:
+                continue
+            if row_ts >= ts:  # a tie counts as NOT PREVENTED, the conservative read
+                ran_again = True
+                break
+        bucket = "not_prevented" if ran_again else "prevented"
+        entry = per_session.setdefault(
+            session, {"rows": 0, "prevented": 0, "not_prevented": 0})
+        entry["rows"] += 1
+        entry[bucket] += 1
+        totals["rows"] += 1
+        totals[bucket] += 1
+    return with_fields, without_fields, per_session, totals
+
+
 def arm_report(label, session_ids, sessions, shown_map, repeats_by_session,
                min_sessions, corpus_zero_collisions):
     """(line, stats-or-None). stats is None exactly when this arm is
@@ -489,6 +592,38 @@ def run(guard_dir=DEFAULT_GUARD_DIR, recall_log=DEFAULT_RECALL_LOG,
                               repeats_by_session, min_sessions, corpus_zero_collisions)
         print(line, file=out)
         stats[key] = s
+
+    print("abandonment signal (detector A, founder ruling 2026-09-06):", file=out)
+    with_fields, without_fields, per_session, totals = compute_abandonment(
+        included, outcome_rows)
+    print("rows without fields: %d" % without_fields, file=out)
+    if len(with_fields) < min_sessions:
+        print("NO-DATA: only %d recall row(s) carry ts and sig, fewer than %d "
+              "(the floor)" % (len(with_fields), min_sessions), file=out)
+    else:
+        for session_id in sorted(per_session):
+            s = per_session[session_id]
+            print("  session %s: %d recall row(s) with ts and sig, %d prevented, "
+                  "%d not prevented" % (session_id, s["rows"], s["prevented"],
+                                          s["not_prevented"]), file=out)
+        print("total: %d recall row(s) with ts and sig, %d prevented, %d not "
+              "prevented" % (totals["rows"], totals["prevented"],
+                              totals["not_prevented"]), file=out)
+        on_ids = arms["on"]
+        if len(on_ids) < min_sessions:
+            print("NO-DATA: recall on has %d session(s), fewer than %d"
+                  % (len(on_ids), min_sessions), file=out)
+        else:
+            on_rows = sum(per_session.get(s, {}).get("rows", 0) for s in on_ids)
+            on_prevented = sum(per_session.get(s, {}).get("prevented", 0)
+                                for s in on_ids)
+            on_not_prevented = sum(per_session.get(s, {}).get("not_prevented", 0)
+                                    for s in on_ids)
+            print("recall on: %d session(s), %d recall row(s) with ts and sig, "
+                  "%d prevented, %d not prevented"
+                  % (len(on_ids), on_rows, on_prevented, on_not_prevented), file=out)
+        print("recall off: no recall row(s) by definition (recall off means no "
+              "lesson was shown)", file=out)
 
     if stats["on"] and stats["off"]:
         if corpus_zero_collisions:

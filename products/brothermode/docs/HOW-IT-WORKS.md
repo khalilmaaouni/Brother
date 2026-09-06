@@ -71,9 +71,16 @@ The vault is a plain folder of markdown and JSONL, default `~/BrotherModeVault`,
   50-Reference/founder-model.md           the living founder model (optional)
   10-Projects/<name>/Sessions/*.md        one human-written log per work session
   10-Projects/<name>/OUTCOMES.md          one human line per substantial run
+  10-Projects/<name>/Profile.md           plain lines: role, level, and preferences, read at intake
 ```
 
 Session logs and OUTCOMES lines are written by the model as part of its close-out duties. The telemetry JSONL files are written only by hooks. That split is deliberate: the human-readable record can editorialize, the machine record cannot.
+
+`Profile.md` is written by `tools/bm_profile.py` (`read`, `record`, `promoted`): the `start`
+skill reads it before the first question so a returning person is not asked what a prior
+session already answered, and skips only what it read. A preference promotes to a default
+after the same value is recorded three times, not before; the person corrects any line by
+appending `correct: <key>: <value>`, which always wins.
 
 ## 5. `bm_telemetry.py`, subcommand by subcommand
 

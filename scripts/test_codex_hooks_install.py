@@ -84,12 +84,15 @@ class TestTranslation(unittest.TestCase):
                          ["NotAnEventCodexHas"])
 
     def test_both_products_merge_into_one_document(self):
+        # 18 to 19 on 2026-09-05 (LL-1): brothermode's PostToolUse Bash
+        # group gained a second entry, tools/attempt_hook.py, beside
+        # bm_bash_audit.py post.
         built = chi.build([BROTHERMODE, BROTHERSBE])
         self.assertEqual(built["problems"], [])
         commands = [hook["command"]
                     for blocks in built["document"]["hooks"].values()
                     for block in blocks for hook in block["hooks"]]
-        self.assertEqual(len(commands), 18, commands)
+        self.assertEqual(len(commands), 19, commands)
         self.assertTrue(any("bm_fence_hook.py" in c for c in commands))
         self.assertTrue(any("sbe_fence_hook.py" in c for c in commands))
 
@@ -300,7 +303,7 @@ class TestUninstall(unittest.TestCase):
         self._write_installed(with_foreign=True)
         code, output = self._run()
         self.assertEqual(code, 0, output)
-        self.assertIn("removed 18 Brother hook command(s)", output)
+        self.assertIn("removed 19 Brother hook command(s)", output)
         with io.open(chi.hooks_json_path(self.tmp), encoding="utf-8") as handle:
             left = json.load(handle)
         remaining = [hook["command"] for blocks in left["hooks"].values()

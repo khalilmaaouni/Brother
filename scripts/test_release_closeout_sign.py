@@ -85,6 +85,15 @@ def _repo_with_commit(root):
     for key in ("tag.gpgSign", "commit.gpgsign"):
         subprocess.run(["git", "-C", root, "config", key, "false"],
                        check=True)
+    # SAME REASON, one config key wider (2026-09-06): this machine's global
+    # config also names a real signingkey under gpg.format ssh (S5, its own
+    # release signing setup). Left alone, the "unsigned" fixtures below
+    # would have tag_signature_verified's ssh retry resolve THAT real key
+    # and read its real public key file to try verifying a tag that never
+    # carries a signature at all. Blanking it locally, empty overriding
+    # non-empty exactly as above, keeps every fixture here throwaway.
+    subprocess.run(["git", "-C", root, "config", "user.signingkey", ""],
+                   check=True)
     with open(os.path.join(root, "f.txt"), "w", encoding="utf-8") as fh:
         fh.write("hi\n")
     subprocess.run(["git", "-C", root, "add", "-A"], check=True)
@@ -195,6 +204,98 @@ class TheTagSignatureLegReadsARealSignature(unittest.TestCase):
             with mock.patch.dict(os.environ, {"GNUPGHOME": gnupghome}):
                 verdict, why = rc.tag_signature_verified(gate, ev, checkout,
                                                           "v9.9.9")
+            self.assertEqual(verdict, "FAIL", why)
+
+
+SSH_KEYGEN_BIN = shutil.which("ssh-keygen")
+
+
+def _make_throwaway_ssh_key(path):
+    """Generates one throwaway ed25519 keypair at `path` (and `path.pub`)
+    with no passphrase. Thrown away with the temp directory that holds
+    it; never the founder's own key."""
+    gen = subprocess.run(
+        [SSH_KEYGEN_BIN, "-t", "ed25519", "-N", "", "-f", path, "-C", ""],
+        capture_output=True, text=True, timeout=60)
+    if gen.returncode != 0:
+        raise RuntimeError("ssh-keygen -t ed25519 failed: %s" % gen.stderr)
+
+
+def _configure_ssh_signing(root, key_path):
+    subprocess.run(["git", "-C", root, "config", "gpg.format", "ssh"],
+                   check=True)
+    subprocess.run(["git", "-C", root, "config", "user.signingkey",
+                    key_path], check=True)
+
+
+@unittest.skipUnless(
+    SSH_KEYGEN_BIN, "NO-DATA: no ssh-keygen on PATH on this machine, so "
+                    "the ssh-format legs of row S5 cannot run here")
+class TheTagSignatureLegHonorsSshFormat(unittest.TestCase):
+    """This machine signs releases with gpg.format=ssh (S5, founder note
+    2026-09-06), which `git tag -v` cannot check without a
+    gpg.ssh.allowedSignersFile. These three cases are the whole shape:
+    a good ssh signature is a PASS, an unsigned tag under ssh format is
+    still NO-DATA (S5 stays founder gated), and a signature that does
+    not match the configured signing key is a FAIL, never mistaken for
+    an absent one."""
+
+    def test_a_good_ssh_signature_is_a_pass(self):
+        with tempfile.TemporaryDirectory() as work:
+            checkout = os.path.join(work, "tag")
+            _repo_with_commit(checkout)
+            key = os.path.join(work, "keyA")
+            _make_throwaway_ssh_key(key)
+            _configure_ssh_signing(checkout, key + ".pub")
+            tag = subprocess.run(
+                ["git", "-C", checkout, "tag", "-s", "v9.9.9", "-m", "test"],
+                capture_output=True, text=True)
+            self.assertEqual(tag.returncode, 0, tag.stderr)
+            gate, ev = _gate(work)
+            verdict, why = rc.tag_signature_verified(gate, ev, checkout,
+                                                      "v9.9.9")
+            self.assertEqual(verdict, "PASS", why)
+
+    def test_an_unsigned_tag_under_ssh_format_is_no_data(self):
+        with tempfile.TemporaryDirectory() as work:
+            checkout = os.path.join(work, "tag")
+            _repo_with_commit(checkout)
+            key = os.path.join(work, "keyA")
+            _make_throwaway_ssh_key(key)
+            _configure_ssh_signing(checkout, key + ".pub")
+            tag = subprocess.run(
+                ["git", "-C", checkout, "tag", "-a", "v9.9.9", "-m", "test"],
+                capture_output=True, text=True)
+            self.assertEqual(tag.returncode, 0, tag.stderr)
+            gate, ev = _gate(work)
+            verdict, why = rc.tag_signature_verified(gate, ev, checkout,
+                                                      "v9.9.9")
+            self.assertEqual(verdict, "NO-DATA", why)
+            self.assertIn("S5, founder", why)
+
+    def test_a_signature_not_matching_the_configured_key_is_a_fail(self):
+        with tempfile.TemporaryDirectory() as work:
+            checkout = os.path.join(work, "tag")
+            _repo_with_commit(checkout)
+            key_a = os.path.join(work, "keyA")
+            key_b = os.path.join(work, "keyB")
+            _make_throwaway_ssh_key(key_a)
+            _make_throwaway_ssh_key(key_b)
+            # Sign with key A, then point user.signingkey at key B: the
+            # allowed-signers file this builds names key B for the same
+            # tagger identity, so ssh-keygen -Y verify finds a good
+            # cryptographic signature (it IS key A's) but no principal
+            # matching the allowed key, exactly the "different key" case.
+            _configure_ssh_signing(checkout, key_a + ".pub")
+            tag = subprocess.run(
+                ["git", "-C", checkout, "tag", "-s", "v9.9.9", "-m", "test"],
+                capture_output=True, text=True)
+            self.assertEqual(tag.returncode, 0, tag.stderr)
+            subprocess.run(["git", "-C", checkout, "config",
+                            "user.signingkey", key_b + ".pub"], check=True)
+            gate, ev = _gate(work)
+            verdict, why = rc.tag_signature_verified(gate, ev, checkout,
+                                                      "v9.9.9")
             self.assertEqual(verdict, "FAIL", why)
 
 

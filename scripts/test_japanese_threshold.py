@@ -124,6 +124,43 @@ def find_bmu_tools():
         "repository is not sitting on a branch that contains them right now" % where)
 
 
+def provenance_line(tools_dir):
+    """One line naming the tree this score was measured on, printed on EVERY
+    path including the passing one.
+
+    WHY THIS EXISTS. BROTHERMODEUP_TOOLS redirects this check at any sibling
+    directory, including an UNMERGED pull request's worktree. Driven both ways
+    2026-08-31: unset, this check exits 2 NO-DATA on this machine; pointed at
+    an unmerged PR's tools directory, it exits 0 PASS with 245/245. The score
+    was honest in both cases, but the PASSING output named no tree at all, so a
+    reader could not tell which bytes produced it. The estate's own law is that
+    every score names its corpus and its tree; this restores that on the path
+    where it actually matters. It does not restrict the override (a NO-DATA
+    would be worse than a measured number from a named tree); it makes the
+    override VISIBLE.
+
+    Reports the resolved directory, whether it came from the environment or
+    the conventional path, and that tree's git commit. Git failures degrade to
+    a stated 'commit unknown' rather than crashing a check that is otherwise
+    fine, because provenance that cannot be read is still worth saying out
+    loud.
+    """
+    source = ("BROTHERMODEUP_TOOLS" if os.environ.get("BROTHERMODEUP_TOOLS")
+              else "conventional path")
+    commit = "commit unknown (not a git tree, or git unavailable)"
+    try:
+        p = subprocess.run(["git", "-C", tools_dir, "rev-parse", "HEAD"],
+                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                           timeout=15)
+        if p.returncode == 0:
+            sha = p.stdout.decode("utf-8", "replace").strip()
+            if sha:
+                commit = "commit %s" % sha
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return ("measured on: %s (resolved from %s), %s" % (tools_dir, source, commit))
+
+
 def parse_output(text):
     """({class_name: (hits, total) or None for NO-DATA}, (hits, total) or
     None for overall). Never raises: an output shape this did not expect
@@ -172,6 +209,7 @@ def main(argv=None):
         print(fixture_or_err)
         return NODATA
     fixture = fixture_or_err
+    print(provenance_line(tools_dir))
 
     try:
         proc = subprocess.run([sys.executable, jbench, "run", "--cases", fixture],

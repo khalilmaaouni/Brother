@@ -623,6 +623,28 @@ nobody watching. This hook is the sentence turned into a control.
   match is textual; the safe direction is refusal; the escape is the env
   override, typed per launch.
 
+## The attempt breaker (LL-1, added 2026-09-05)
+
+`tools/attempt_hook.py` answers a question none of the hooks above ask:
+"has this exact technique already failed here". A ledger nobody writes to
+only helps whoever remembers to write to it, and the person least likely to
+remember is the one on their sixth attempt, so this hook is the mechanical
+write the ledger (`tools/attempt_ledger.py`) never had.
+
+- **PostToolUse** (`Bash` matcher, wired beside `bm_bash_audit.py post`):
+  fingerprints the command into a technique class, infers failure from
+  `exit_code` or, when that field is absent (the overwhelming majority of
+  real payloads), from a failure signature in the last 20 lines of output.
+- **On the THIRD failure of one class it refuses**, via
+  `tools/attempt_ledger.py`'s own two-strike check: the additionalContext
+  it hands back names the limit reached and says CHANGE THE CLASS or STOP
+  GUESSING AND GO AND FIND OUT, never "try again".
+- **That research branch runs itself**: the refusal already calls
+  `tools/find_out.py` (its own copy, shipped beside this hook) and quotes
+  the top hits from the vault's failure notes, LEARNED.md, the pattern
+  store, and this machine's memory index, so the third failure's own output
+  carries a reference to reread rather than an instruction nobody follows.
+
 ## What a follow-up change to bm_store.py would need to add
 
 `tools/bm_store.py` was **not** modified by this work: it is owned by another record, and

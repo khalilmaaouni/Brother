@@ -163,6 +163,11 @@ def scratch_estate():
         }, f)
     env = dict(os.environ)
     env["HOME"] = tmp
+    # The server's stores live under brother_paths.config_dir, which is
+    # <HOME>/.claude only when the client resolves to Claude; a suite run
+    # from inside a Codex turn inherits CODEX_CI and friends and reads None
+    # for a reason unrelated to what it proves (measured 2026-09-06). Pin it.
+    env["BROTHER_CLIENT"] = "claude"
     env["BM_VAULT_ROOT"] = vault
     env.pop("BROTHERMODE_VAULT", None)
     os.makedirs(os.path.join(tmp, ".claude"))
@@ -411,6 +416,11 @@ class EmptyQueueIsHonestNoData(unittest.TestCase):
             queue_path = os.path.join(tmp, "nonexistent_queue.json")
             env = dict(os.environ)
             env["HOME"] = tmp
+            # The server's stores live under brother_paths.config_dir, which is
+            # <HOME>/.claude only when the client resolves to Claude; a suite run
+            # from inside a Codex turn inherits CODEX_CI and friends and reads None
+            # for a reason unrelated to what it proves (measured 2026-09-06). Pin it.
+            env["BROTHER_CLIENT"] = "claude"
             env["BM_VAULT_ROOT"] = vault
             env.pop("BROTHERMODE_VAULT", None)
             os.makedirs(os.path.join(tmp, ".claude"))
@@ -450,6 +460,11 @@ def _sod_estate():
                    "queue": [], "rejections": [], "audit": []}, f)
     env = dict(os.environ)
     env["HOME"] = tmp
+    # The server's stores live under brother_paths.config_dir, which is
+    # <HOME>/.claude only when the client resolves to Claude; a suite run
+    # from inside a Codex turn inherits CODEX_CI and friends and reads None
+    # for a reason unrelated to what it proves (measured 2026-09-06). Pin it.
+    env["BROTHER_CLIENT"] = "claude"
     env["BM_VAULT_ROOT"] = vault
     env.pop("BROTHERMODE_VAULT", None)
     os.makedirs(os.path.join(tmp, ".claude"))

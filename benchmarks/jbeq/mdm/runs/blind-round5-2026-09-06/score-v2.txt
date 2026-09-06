@@ -1,0 +1,31 @@
+scorer: 2026-09-06.2 (REJECT MATCH and KEEP SEPARATE score as one class for a refuted identity, founder ruling 2026-09-06)
+address              5 of 10
+entity-object        9 of 10
+hierarchy            4 of 10
+identifier           4 of 5
+match-or-no-merge    8 of 10
+requirements         5 of 5
+survivorship         10 of 10
+temporal             10 of 10
+equivalence class EO-04: expected REJECT MATCH, engine said KEEP SEPARATE (scored correct, scorer 2026-09-06.2)
+equivalence class MM-02: expected REJECT MATCH, engine said KEEP SEPARATE (scored correct, scorer 2026-09-06.2)
+equivalence class MM-03: expected REJECT MATCH, engine said KEEP SEPARATE (scored correct, scorer 2026-09-06.2)
+equivalence class HI-09: expected REJECT MATCH, engine said KEEP SEPARATE (scored correct, scorer 2026-09-06.2)
+equivalence class AD-04: expected REJECT MATCH, engine said KEEP SEPARATE (scored correct, scorer 2026-09-06.2)
+equivalence class AD-10: expected REJECT MATCH, engine said KEEP SEPARATE (scored correct, scorer 2026-09-06.2)
+equivalence class ID-01: expected REJECT MATCH, engine said KEEP SEPARATE (scored correct, scorer 2026-09-06.2)
+equivalence class ID-04: expected REJECT MATCH, engine said KEEP SEPARATE (scored correct, scorer 2026-09-06.2)
+equivalence class ID-05: expected REJECT MATCH, engine said KEEP SEPARATE (scored correct, scorer 2026-09-06.2)
+engine-decided: 45 of 60
+direct-answered (not blind, not evidence about the engine): 10 of 10
+critical WRONG MM-06 [FALSE-MERGE RISK, not merged] expected KEEP SEPARATE, answered ESCALATE  CONSERVATIVE
+critical WRONG MM-10 [WRONG PAYER] expected LINK AS RELATED, answered KEEP SEPARATE  CONSERVATIVE
+critical WRONG HI-01 [HIERARCHY REVERSAL] expected LINK AS RELATED, answered KEEP SEPARATE  CONSERVATIVE
+critical WRONG HI-02 [HIERARCHY REVERSAL] expected REJECT MATCH, answered LINK AS RELATED
+critical WRONG HI-05 [WRONG LEGAL ENTITY] expected REJECT MATCH, answered LINK AS RELATED
+critical WRONG HI-08 [FALSE-MERGE RISK, not merged] expected LINK AS RELATED, answered KEEP SEPARATE  CONSERVATIVE
+critical WRONG ID-02 [WRONG TAX IDENTITY] expected ESCALATE, answered NO-DATA
+critical false merges: 0 of 33
+critical wrong: 7 of 33 (MM-06, MM-10, HI-01, HI-02, HI-05, HI-08, ID-02)
+conservative wrongs: 4 (MM-06, MM-10, HI-01, HI-08)
+JBEQ-MDM NOT READY

@@ -34,6 +34,14 @@
       "review_by": "2026-09-12",
       "removal_condition": "the battery sets BROTHER_LONG_CHECKS=1 on release cuts and the check reads PASS there",
       "failing_tests": "none: the check is one script, not a unittest suite, and it is not run at all in the default battery, so its NO-DATA line names no test"
+    },
+    "release-closeout-sign-self": {
+      "class": "known_no_data",
+      "reason": "row S5, the tag signature leg of gate X7: scripts/test_release_closeout_sign.py skips TheTagSignatureLegReadsARealSignature's two cases (a good signature is a PASS, a tampered one is a FAIL) with 'NO-DATA: no gpg or gpg2 on PATH on this machine, so the signed and bad-signature legs of row S5 cannot run here'. check_all.sh's own comment above this row states the design: an unsigned tag must never read FAIL, because the signing key is the founder's alone, so the suite exits 0 with skipped=2 rather than inventing a signature this machine has no gpg binary to verify.",
+      "recorded": "2026-09-05",
+      "review_by": "2026-09-19",
+      "removal_condition": "gpg or gpg2 is installed on the machine that runs the battery, so TheTagSignatureLegReadsARealSignature's two cases run instead of skipping; then delete this entry",
+      "last_reverified": "2026-09-05: `which gpg gpg2` found neither on PATH; re-ran python3 scripts/test_release_closeout_sign.py -v, exit 0, 'OK (skipped=2)', same two tests skipped for the same reason."
     }
   }
 }

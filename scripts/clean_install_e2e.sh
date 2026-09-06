@@ -26,9 +26,26 @@
 # --live drops the stubs so the launcher falls back to its own environment
 # defaults (the real `claude` CLI), for a founder-run proof.
 #
+# THE CUT PRECEDES THE TAG, same accommodation release_invariant.py and
+# leaf_pin_check.py already carry: scripts/cut_v1.0.0.sh bumps the manifests'
+# pinned tag before the founder pushes that tag, on purpose, so a candidate
+# tree with no matching public tag yet is not a defect, it is the ordinary
+# window between the cut and the push. Before touching the network for a
+# real `claude plugin install`, this script reads the pinned tag from
+# bundle/.claude-plugin/plugin.json and compares it against
+# `git ls-remote --tags` on the public remote:
+#   - pinned tag present on the remote: an ordinary install, proceeds below.
+#   - pinned tag absent AND the pinned version is newer than the remote's
+#     newest vX.Y.Z tag: a genuine candidate, NO-DATA, exit 2.
+#   - pinned tag absent AND the pinned version is NOT newer (older than or
+#     equal to the newest remote tag): a real packaging defect, FAIL, exit 1.
+#   - the remote could not be read at all: NO-DATA naming the network,
+#     exit 2 (never mistaken for "no tags exist").
+#
 # Exit 0: every ledger line is PASS or NO-DATA. Exit 1: at least one FAIL.
-# Exit 2 BLOCKED: no claude binary, matching bundle-install-smoke.sh's own
-# contract (a BLOCKED exit is not a pass).
+# Exit 2 BLOCKED/NO-DATA: no claude binary, or the cut-precedes-the-tag or
+# unreachable-remote cases above, matching bundle-install-smoke.sh's own
+# contract (neither exit is a pass).
 # No em or en dashes.
 set -u
 
@@ -45,6 +62,63 @@ LIVE=0
 REAL_HOME="$HOME"
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 SELF=$(cd "$(dirname "$0")" && pwd)/$(basename "$0")
+
+# ---------------------------------------------------------------------------
+# THE CUT PRECEDES THE TAG, checked before any network install is attempted
+# (see the module docstring above). Read the pin, then the public remote's
+# own tags, never a typed guess at either.
+# ---------------------------------------------------------------------------
+WANT_VERSION=$(python3 -c "
+import json, sys
+print(json.load(open(sys.argv[1]))['version'])
+" "$ROOT/bundle/.claude-plugin/plugin.json") || {
+  say "FAIL: could not read the bundle's own promised version from bundle/.claude-plugin/plugin.json"
+  exit 1
+}
+PINNED_TAG="v$WANT_VERSION"
+
+# CLEAN_INSTALL_E2E_LS_REMOTE_CMD, the same seam shape as DOOR_MODEL_CMD /
+# MODEL_WORKER_CMD below: a full command line, run in place of the real
+# network call, so scripts/test_clean_install_e2e.py can drive all three
+# shapes (candidate, real defect, unreachable remote) without touching the
+# network or a real tag list.
+LS_REMOTE_CMD="${CLEAN_INSTALL_E2E_LS_REMOTE_CMD:-git ls-remote --tags https://github.com/khalilmaaouni/Brother}"
+LS_REMOTE_OUT=$(eval "$LS_REMOTE_CMD" 2>&1)
+LS_REMOTE_EXIT=$?
+if [ "$LS_REMOTE_EXIT" -ne 0 ]; then
+  say "NO-DATA: the public remote could not be read (exit $LS_REMOTE_EXIT): $LS_REMOTE_OUT"
+  exit 2
+fi
+
+if ! printf '%s\n' "$LS_REMOTE_OUT" | grep -q "refs/tags/${PINNED_TAG}\$"; then
+  NEWEST_TAG=$(printf '%s\n' "$LS_REMOTE_OUT" | python3 -c "
+import re, sys
+best = None
+for line in sys.stdin:
+    m = re.search(r'refs/tags/v(\d+)\.(\d+)\.(\d+)\$', line.strip())
+    if not m:
+        continue
+    t = tuple(int(g) for g in m.groups())
+    if best is None or t > best:
+        best = t
+print('.'.join(str(n) for n in best) if best else '')
+")
+  if [ -z "$NEWEST_TAG" ]; then
+    say "FAIL: pinned tag $PINNED_TAG is not on the public remote, and the remote carries no parseable vX.Y.Z tag to compare it against"
+    exit 1
+  fi
+  IS_CANDIDATE=$(python3 -c "
+def t(s):
+    return tuple(int(p) for p in s.split('.'))
+print('1' if t('$WANT_VERSION') > t('$NEWEST_TAG') else '0')
+")
+  if [ "$IS_CANDIDATE" = "1" ]; then
+    say "NO-DATA: the cut precedes the tag: the manifests pin v$WANT_VERSION and the public remote's newest tag is v$NEWEST_TAG"
+    exit 2
+  fi
+  say "FAIL: pinned tag $PINNED_TAG is missing on the public remote, and the remote's newest tag v$NEWEST_TAG is not older than the pin; this is a packaging defect, not a pending cut"
+  exit 1
+fi
 
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/brother-clean-install-e2e.XXXXXX") || {
   say "FAIL: mktemp"
@@ -102,7 +176,16 @@ say "sandbox CLAUDE_CONFIG: $CLAUDE_CONFIG_DIR"
 say "target repo:           $TARGET"
 say "mode:                  $([ "$LIVE" -eq 1 ] && echo live || echo hermetic-stubs)"
 
-# the fresh target repository with a seed commit
+# the fresh target repository with a seed commit. Masked here even though
+# HOME is already the throwaway HOME_DIR above: this machine's own global git
+# config sets tag.gpgsign/gpg.format for the real signed release (the same
+# ambient-signing defect scripts/test_reproduce_export.py and two other
+# fixtures were bitten by, fixed 2026-09-05 by masking GIT_CONFIG_GLOBAL and
+# forcing commit.gpgsign=false on the commit itself), so a throwaway repo's
+# seed commit is never left depending on HOME isolation alone.
+GIT_CONFIG_GLOBAL=/dev/null
+GIT_CONFIG_NOSYSTEM=1
+export GIT_CONFIG_GLOBAL GIT_CONFIG_NOSYSTEM
 (
   cd "$TARGET" || exit 1
   git init -q -b main
@@ -110,7 +193,7 @@ say "mode:                  $([ "$LIVE" -eq 1 ] && echo live || echo hermetic-st
   git config user.name "clean-install-e2e"
   printf 'seed\n' >seed.txt
   git add -A
-  git commit -q -m "seed"
+  git -c commit.gpgsign=false commit -q -m "seed"
 ) || {
   say "FAIL: could not seed the throwaway target repository"
   exit 1
@@ -138,15 +221,9 @@ ledger "PASS   bundle-install"
 
 # ---------------------------------------------------------------------------
 # RESOLVE THE INSTALLED LAUNCHER, by the manifest, never a typed version.
+# WANT_VERSION was already read above (the cut-precedes-the-tag check needs
+# it before the install even runs); reused here rather than read twice.
 # ---------------------------------------------------------------------------
-WANT_VERSION=$(python3 -c "
-import json, sys
-print(json.load(open(sys.argv[1]))['version'])
-" "$ROOT/bundle/.claude-plugin/plugin.json") || {
-  ledger "FAIL   launcher-resolve: could not read the bundle's own promised version from bundle/.claude-plugin/plugin.json"
-  finish
-}
-
 LAUNCHER_HITS=$(find "$CLAUDE_CONFIG_DIR/plugins/cache" -path "*/brother/*/runtime/brother-run" -type f 2>/dev/null)
 LAUNCHER_COUNT=$(printf '%s\n' "$LAUNCHER_HITS" | grep -c .)
 if [ "$LAUNCHER_COUNT" -ne 1 ]; then

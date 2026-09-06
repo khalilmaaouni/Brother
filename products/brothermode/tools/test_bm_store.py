@@ -3329,6 +3329,31 @@ class TestResolveRoot(unittest.TestCase):
             self.assertEqual(os.path.realpath(root), os.path.realpath(d))
             self.assertEqual(source, "marker")
 
+    def test_stray_marker_dir_without_a_store_cannot_repoint_past_an_initialised_store(self):
+        """2026-09-04: a lane worktree acquired a .brothermode/ holding only
+        recurrence.sqlite3 (a sibling tool's database, never `init`). The
+        bare directory read as a marker, the store resolved to the worktree
+        instead of the shared root, and the lane was told to run `init`,
+        which would have split the single-writer fence into two stores.
+        A .brothermode/ that holds no store.sqlite3 has never been
+        initialised, so it cannot outrank an initialised store above it."""
+        with tempfile.TemporaryDirectory() as d:
+            parent = os.path.realpath(d)
+            os.makedirs(bs.store_dir(parent))
+            with io.open(bs.store_path(parent), "wb"):
+                pass
+            child = os.path.join(parent, ".claude", "worktrees", "lane")
+            os.makedirs(bs.store_dir(child))
+            with io.open(os.path.join(bs.store_dir(child), "recurrence.sqlite3"), "wb"):
+                pass
+            with io.open(os.path.join(child, ".git"), "w") as fh:
+                fh.write("gitdir: elsewhere\n")
+            with mock.patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("BROTHERMODE_ROOT", None)
+                root, source = bs.resolve_root(start=child)
+            self.assertEqual(os.path.realpath(root), parent)
+            self.assertEqual(source, "marker")
+
     def test_nothing_found_returns_none(self):
         with tempfile.TemporaryDirectory() as d:
             # Pin the walk to exactly one directory (this tempdir) so the

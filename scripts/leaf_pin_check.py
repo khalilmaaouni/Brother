@@ -119,9 +119,22 @@ def declared():
     return sites
 
 
+def _version_tuple(s):
+    """(major, minor, patch) ints from a plain 'X.Y.Z' string, or None if it
+    does not parse that way. A declaration that fails to parse falls through
+    to the strict mismatch below rather than being silently waved through."""
+    parts = s.split(".")
+    if len(parts) != 3:
+        return None
+    try:
+        return tuple(int(p) for p in parts)
+    except ValueError:
+        return None
+
+
 def main():
     sites = declared()
-    failures, nodata, checked = [], [], 0
+    failures, nodata, pretag, checked = [], [], [], 0
 
     for name, url in sorted(LEAVES.items()):
         published = newest_published_tag(url)
@@ -133,23 +146,44 @@ def main():
             nodata.append(name)
             print(f"leaf-pin-check: NO-DATA: {name} is declared nowhere in this umbrella")
             continue
+        published_t = _version_tuple(published)
         for where, ver in sites[name]:
             checked += 1
-            if ver != published:
+            if ver == published:
+                continue
+            declared_t = _version_tuple(ver)
+            # A declaration AHEAD of the leaf's newest tag is the mechanical
+            # version bump landing before the (founder-only, irreversible)
+            # tag push that completes a cut -- scripts/cut_v1.0.0.sh commits
+            # this bump and then stops on purpose. release_invariant.py
+            # already treats that exact window as NO-DATA ("the cut precedes
+            # the tag"); this check was missing the same accommodation and
+            # was FAILING a normal in-progress release instead. A declaration
+            # BEHIND the leaf's newest tag is the original defect this file
+            # was written for (2026-08-24) and still fails hard.
+            if declared_t is not None and published_t is not None and declared_t > published_t:
+                pretag.append(f"{name}: {where} declares {ver}, the leaf's "
+                              f"newest published tag is still {published}; "
+                              f"the cut precedes the tag")
+            else:
                 failures.append(f"{name}: {where} says {ver}, the leaf published {published}")
         print(f"leaf-pin-check: {name} published {published}, "
               f"{len(sites[name])} declaration site(s) checked")
 
-    if nodata:
-        print(f"leaf-pin-check: NO-DATA for {', '.join(nodata)}; "
-              f"this is NOT a pass, it is a check that could not look")
-        return 2
     if failures:
         for f in failures:
             print(f"leaf-pin-check: MISMATCH: {f}")
         print(f"leaf-pin-check: FAILED: {len(failures)} of {checked} declarations "
               f"disagree with the leaf")
         return 1
+    if pretag:
+        for p in pretag:
+            print(f"leaf-pin-check: NO-DATA: {p}")
+    if nodata:
+        print(f"leaf-pin-check: NO-DATA for {', '.join(nodata)}; "
+              f"this is NOT a pass, it is a check that could not look")
+    if nodata or pretag:
+        return 2
     print(f"leaf-pin-check: PASSED: all {checked} declarations match the "
           f"leaves' newest published tags")
     return 0
