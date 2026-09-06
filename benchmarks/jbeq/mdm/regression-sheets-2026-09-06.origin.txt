@@ -1,0 +1,6 @@
+benchmarks/jbeq/mdm/regression-sheets-2026-09-06.json is a byte-for-byte copy of benchmarks/jbeq/mdm/runs/blind-round6-2026-09-06/fact-sheets.json, pinned 2026-09-06 as a frozen regression fixture per ~/.claude/evidence/review-round6-2026-09-06.md section E.
+
+origin: benchmarks/jbeq/mdm/runs/blind-round6-2026-09-06/fact-sheets.json
+sha256: ecc3402e18a5f0ca87163174b571fa94db23ddec60f74238af8a86bcc67794c3
+
+NEVER edit this fixture or the run directory it was copied from (FIX-DIRECTIVE-2026-09-06.md section 31: do not solve individual fixtures). Rule changes are measured against scripts/jbeq_regression.py, which reads this file read-only.

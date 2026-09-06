@@ -1,0 +1,199 @@
+{
+ "gauntlet": "long-horizon-recovery",
+ "spec": "benchmarks/gauntlets/long-horizon-recovery.json",
+ "predecessor": "benchmarks/results/long-horizon-recovery/2026-09-05-checkpoint/",
+ "revision": "wbs/lhr-resume-2026-09-06 off origin/main, corrected after ~/.claude/evidence/audit-383-lhr-2026-09-06.md",
+ "route": "replay: the 2026-09-05-checkpoint's own throwaway fixture and runs root did not survive between sessions (tempfile.mkdtemp, scrubbed to placeholders before commit), so this run replayed the checkpoint's own frozen phases into a fresh mkdtemp using the identical stub seam, then ran the corrected resume phases. See RECORD.md 'Route taken' and 'The seven fixes'.",
+ "gap_seconds_this_replay": 60.01005697250366,
+ "gap_note": "the 2026-09-05-checkpoint carries the real calendar gap (crash 2026-09-04, resume not before 2026-09-05T21:22:39Z per its own MANIFEST.json, actually resumed 2026-09-06); this replay's own fixture is fresh, so its gap is a real 60 second sleep, named honestly rather than rounded up to 24-72 hours",
+ "phase_completed": [
+  "replayed: started run through the real engine (brother_run.py/door.py/loop_bridge.py/integrate.py)",
+  "replayed: captured canonical state before interruption, 1.0s into the worker's slow body so a real kill-mid-flight was possible (audit fix 7)",
+  "replayed: performed the first integration (unit A1 reached DONE)",
+  "replayed: injected the interruption named by the spec's seeded_conditions_note: SIGKILL of the whole run's process group, mid unit A2",
+  "new: captured the killed run's own run.log and journal.jsonl into killed_run/ before the resume could overwrite run.log (audit fix 1)",
+  "new: waited a real 60 second wall-clock gap",
+  "new: changed repository state with one recorded drift commit on the canonical branch",
+  "new: resumed via the documented bare re-invocation, with no lease backdating and no wait (audit fix 2)",
+  "new: measured drift detection honestly as NO-DATA, excluding known HEAD-readback false positives (audit fix 6)",
+  "new: observed canonical objective recovery (the resumed unit's own canonical_rev descends from the drift commit; git merge-base --is-ancestor exit 0)",
+  "new: observed safe continuation to a receipt (exit 0, delivery report, receipt.txt)",
+  "new: compared false claims against git's own merges and flagged the printed-verified-but-NO-DATA shape (audit fix 3)",
+  "new: measured recovery time to the recovered verified state (A2's integrate.merged journal event), acknowledgment time reported separately (audit fix 4)",
+  "new: compared the intent-resolution decision record before and after the resume by content (audit fix 5)"
+ ],
+ "phase_not_attempted": [
+  "the real 24-72 hour clock of workload family 8, on this SAME fixture: the 2026-09-05-checkpoint's fixture did not survive between sessions, so the calendar gap that elapsed (2026-09-04 to 2026-09-06) could not be exercised against one continuous fixture. Reported NO-DATA per the gauntlet's own scoring rubric, never scored from this short-crash arm."
+ ],
+ "resume_command": [
+  "<PYTHON3>",
+  "<BROTHER_SCRIPTS>/brother_run.py",
+  "two files exist, the second after the first",
+  "--cwd",
+  "<SCRATCH_ROOT>/lhr-fixture-.../repo",
+  "--runs-root",
+  "<SCRATCH_ROOT>/lhr-fixture-..."
+ ],
+ "resume_command_source": "copied verbatim from 2026-09-05-checkpoint/MANIFEST.json's own \"resume_command\" field: a bare re-invocation, same outcome sentence, no --resume, no --continue. Also the gauntlet's own 'context loss' seeded condition.",
+ "test_surgery": "none. The first version of this record backdated A2's lease with product_acceptance.py's own _edit_expires_at; the audit found this unnecessary because scripts/claim_store.py's dead_reason() reclaims on a dead pid regardless of remaining lease time, and this rerun proves it fires unaided (see result.json's reclaim_evidence_run_log / reclaim_evidence_journal).",
+ "measures": {
+  "repeated_work": 0,
+  "lost_decisions": 1,
+  "lost_evidence": 0,
+  "wrong_resumed_state": false,
+  "human_interventions": 1,
+  "recovery_time_seconds": 2.6857221126556396,
+  "false_claims_after_recovery": [
+   "A2 (printed as verified by, but its own verdict reads NO-DATA)"
+  ]
+ },
+ "resume_acknowledgment_seconds": 0.055480003356933594,
+ "exposure_window_seconds": 1.0082576274871826,
+ "drift_detection": "NO-DATA: no engine output or journal event names the repository change. The run proves drift tolerance, that the resumed unit built on the new HEAD, not drift detection.",
+ "known_limit_found": "A2's own per-unit verdict in the receipt reads NO-DATA (not PASS): its done_check (test -f two.txt) still passes with A1's change reverted, so the engine's own independence check cannot credit it as proven by that check alone. Pre-existing property of the stub decomposer's check-writing, unrelated to crash-recovery. Per the 2026-09-06 audit's own words, this is now surfaced as a named entry in false_claims_after_recovery rather than only a prose paragraph the measure could not see.",
+ "roadmap_row": "none: same finding as the 2026-09-05-checkpoint and the first version of this record, docs/plan/READINESS-ROADMAP-2026-08-29.json has no row scoped to benchmarks/gauntlets/long-horizon-recovery.json itself",
+ "audited_by": "~/.claude/evidence/audit-383-lhr-2026-09-06.md (opus evidence audit of the first version of this record, which found the PASS held only with seven named limits and was not mergeable as written); fixed per ~/.claude/evidence/FIX-DIRECTIVE-2026-09-06.md section 24",
+ "artefacts": [
+  {
+   "path": "RECORD.md",
+   "sha256": "220a4e2f5ddf181fee70db91885886acc8be01f287569723e3a8baf4e327fb96"
+  },
+  {
+   "path": "continuity_capsule_after_kill.json",
+   "sha256": "1d9c20420369e6b5df83fe25d6deb985dacbebc93a4198b970de938a96aa121a"
+  },
+  {
+   "path": "continuity_capsule_after_resume.json",
+   "sha256": "fea2224c6fab7257f1b385d406c86d8fca413522f53f0ea230f6ef21077322f7"
+  },
+  {
+   "path": "continuity_capsule_before_resume.json",
+   "sha256": "13021b4c13b2e9fe9ea2e97d84f5c57e5bec6e3476e6d68d5faee59d1879160d"
+  },
+  {
+   "path": "continuity_screen_after_kill.txt",
+   "sha256": "eb6d57bbc656e5e9b895b9eab59943a55c87805714c17909ccc860e470637f1a"
+  },
+  {
+   "path": "continuity_screen_after_resume.txt",
+   "sha256": "24e54a3913a4b1d73afdd4239d68603785a4e9cfa76272ff7c5aef5a4828b5c7"
+  },
+  {
+   "path": "driver.log",
+   "sha256": "e303f01e3e947e7a412e6d2e8e43559185426251a223449fae70068c9456f8cf"
+  },
+  {
+   "path": "driver.py",
+   "sha256": "a05f7173521f1ff0263c3028f9531493d4449571f9f45301a578fa48ac685bc2"
+  },
+  {
+   "path": "final_git_log.txt",
+   "sha256": "d27d04c7ad9fde501d8b81b5f7c1cc3cf6a26cbeb8532deec87d9e34a5ab2a6f"
+  },
+  {
+   "path": "receipt.txt",
+   "sha256": "d92508cd841c9c4d2a2dc623ec65c48ae7afdd994c6570bf6b62100634fd6278"
+  },
+  {
+   "path": "result.json",
+   "sha256": "28a184960e69574e38984b604194ea3fba0eb4ce20afc7672cb43e96516eff9b"
+  },
+  {
+   "path": "canonical_state_before_kill/W-two-files-exist-the-second-after-the-fir.json",
+   "sha256": "06ffd0428048b9bbc9f0e1ff950401a7d527e00751a74ee7b58a0bc2905bd3ca"
+  },
+  {
+   "path": "canonical_state_before_kill/capsule.json",
+   "sha256": "7b139cbe81dee494e789ed8127d0f057bd7188cb802ba2b31d1c266fa1e58986"
+  },
+  {
+   "path": "canonical_state_before_kill/claims.json",
+   "sha256": "45bdd0c71652c74c67fe5ff294107324db92cd0366af766157cb87970abf307a"
+  },
+  {
+   "path": "canonical_state_before_kill/target.json",
+   "sha256": "c224a6213b55698fd031c30a864081a29c5604a50d68eb45f4c2c1f55d0b07fd"
+  },
+  {
+   "path": "canonical_state_before_kill/attempts/A1-16a36e86/attempt-1/claim.json",
+   "sha256": "7910d97afcf23d7ca7a2f56edbcc9bbe40ff05d42c8d8fdae141863d9293662b"
+  },
+  {
+   "path": "canonical_state_before_kill/attempts/A1-16a36e86/attempt-1/engine_output.txt",
+   "sha256": "0304c6bc38c51bda9c105fd91f5fb4e6c4db4a58e40926787e103e7c5b44d4f9"
+  },
+  {
+   "path": "canonical_state_before_kill/attempts/A1-16a36e86/attempt-1/tree_state.txt",
+   "sha256": "3437c1e6dcb773e27faa46de8c226de8e27f5badc448e6f71d988e4cac1f8c6e"
+  },
+  {
+   "path": "killed_run/W-two-files-exist-the-second-after-the-fir.json",
+   "sha256": "06ffd0428048b9bbc9f0e1ff950401a7d527e00751a74ee7b58a0bc2905bd3ca"
+  },
+  {
+   "path": "killed_run/capsule.json",
+   "sha256": "7b139cbe81dee494e789ed8127d0f057bd7188cb802ba2b31d1c266fa1e58986"
+  },
+  {
+   "path": "killed_run/claims.json",
+   "sha256": "45bdd0c71652c74c67fe5ff294107324db92cd0366af766157cb87970abf307a"
+  },
+  {
+   "path": "killed_run/journal.jsonl",
+   "sha256": "57a1779610246c9eb3889c30aad6108088b1cb359e58d795272c04b86988fbd4"
+  },
+  {
+   "path": "killed_run/run.log",
+   "sha256": "7b34931556360c459455c04f106c2144dbd9a362558eef19ca37ed9ac55e18da"
+  },
+  {
+   "path": "killed_run/target.json",
+   "sha256": "c224a6213b55698fd031c30a864081a29c5604a50d68eb45f4c2c1f55d0b07fd"
+  },
+  {
+   "path": "killed_run/attempts/A1-16a36e86/attempt-1/claim.json",
+   "sha256": "7910d97afcf23d7ca7a2f56edbcc9bbe40ff05d42c8d8fdae141863d9293662b"
+  },
+  {
+   "path": "killed_run/attempts/A1-16a36e86/attempt-1/engine_output.txt",
+   "sha256": "0304c6bc38c51bda9c105fd91f5fb4e6c4db4a58e40926787e103e7c5b44d4f9"
+  },
+  {
+   "path": "killed_run/attempts/A1-16a36e86/attempt-1/tree_state.txt",
+   "sha256": "3437c1e6dcb773e27faa46de8c226de8e27f5badc448e6f71d988e4cac1f8c6e"
+  },
+  {
+   "path": "killed_run/screens/intent-screen.html",
+   "sha256": "3aa97dcf741880142574391dd27d22b4d4e35f8a74dd5f99679dc5dea6317608"
+  },
+  {
+   "path": "killed_run/screens/intent-screen.json",
+   "sha256": "29b310526a06cf36c66f8173238100fefa0355f7b309fec9c9755e1e794eb695"
+  },
+  {
+   "path": "resumed_run/W-two-files-exist-the-second-after-the-fir.json",
+   "sha256": "8ec6add0771be8af80578fdf28abc06e80e7111a42871747f91fcc22b81083d5"
+  },
+  {
+   "path": "resumed_run/capsule.json",
+   "sha256": "2a861ec2e2b1cec2890284dba2aa543f004c8bbc0a31f728cb1af6838d121f8a"
+  },
+  {
+   "path": "resumed_run/claims.json",
+   "sha256": "590a86f6e17d6be613c299669bf9a93a8d51c91d7488536957b35645b57284fa"
+  },
+  {
+   "path": "resumed_run/journal.jsonl",
+   "sha256": "c50446f3878a870b98225c6fce5ba668c0a9e939e5fca4178fcaf2cfb939a0b3"
+  },
+  {
+   "path": "resumed_run/run.log",
+   "sha256": "ff9ee7dad9b898a6eb9271c081d4a095a92a221df85aa571b7de0ebbe7b6f8ca"
+  },
+  {
+   "path": "resumed_run/target.json",
+   "sha256": "c224a6213b55698fd031c30a864081a29c5604a50d68eb45f4c2c1f55d0b07fd"
+  }
+ ],
+ "verdict": "PARTIAL: the crash-during-execution arm (workload family 7) is now measured against all seven audit findings, with lost_decisions=1 and one false-claims entry surfacing that the pre-audit driver could not see; drift detection reads NO-DATA rather than a false readback match; workload family 8's 24-72 hour arm on one continuous fixture stays NO-DATA per the gauntlet's own rubric"
+}

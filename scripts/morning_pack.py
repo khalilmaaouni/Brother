@@ -428,14 +428,17 @@ def gather_gauntlets():
         summary = d.get("summary", {})
         line = summary.get("line", "")
         no_data_conditions = summary.get("no_data") or []
-        prevented = summary.get("prevented")
-        counted = summary.get("conditions_counted")
-        if no_data_conditions:
+        # Read the gauntlet's OWN verdict (scripts/gauntlet_memory_recurrence.py
+        # gauntlet_verdict(), 2026-09-06) rather than re-deriving one from
+        # prevented == counted: the 'memory off' condition is an isolation
+        # control that is DESIGNED to stay silent (see its own note in
+        # gauntlet_memory_recurrence.py), so prevented never equals counted on
+        # a healthy run and that shortcut would read every good run as FAIL
+        # forever. A record filed before this field existed has no "verdict"
+        # key; that is reported NO-DATA rather than guessed.
+        verdict = summary.get("verdict")
+        if verdict not in ("PASS", "FAIL", NO_DATA):
             verdict = NO_DATA
-        elif prevented == counted:
-            verdict = "PASS"
-        else:
-            verdict = "FAIL"
         extra = ("; no-data condition(s): %s" % ", ".join(no_data_conditions)
                  if no_data_conditions else "")
         lines.append("MEMORY RECURRENCE: %s (%s%s, from %s)"

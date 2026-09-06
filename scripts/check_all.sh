@@ -744,6 +744,41 @@ run_check "delegation-truth-self" python3 scripts/test_gauntlet_delegation_truth
 # gauntlet sibling above, per this estate's own recorded lesson that an
 # unregistered tool is invisible to every check the project owns.
 run_check "jbeq-mdm-seed" python3 scripts/test_jbeq_mdm.py
+# jbeq-identity-classes-self: 13 written-first classes for jbeq_decide.py's
+# decide(), per FIX-DIRECTIVE-2026-09-06 sections 15 to 20. All 13 are
+# green as of the round 5 schema growth (2026-09-06): IC-10 (temporal
+# identity change) used to be the one known red case, since decide() had
+# no TM answer vocabulary; the temporal track now decides from the
+# effective_dates field like every other track. See
+# scripts/test_jbeq_identity_classes.py's own docstring for the history.
+run_check "jbeq-identity-classes-self" python3 scripts/test_jbeq_identity_classes.py -v
+# J1a/J1b: the decision engine (scripts/jbeq_decide.py) and its own
+# generalization proof. Design review design-p0-3-mdm-merge-safety-2026-09-06
+# section E found neither suite ran in this battery, so the P0.3 mutation
+# proof (each safety rule breaks its own test when disabled) was unverified
+# by anything a push actually runs. Registered the same way as their J1
+# sibling above.
+run_check "jbeq-decide-self" python3 scripts/test_jbeq_decide.py -v
+# jbeq-mutation-seams-self: hub PR 386 security finding (2026-09-06).
+# JBEQ_DECIDE_DISABLE_RULES is a fail-open test hook the mutation tests
+# above need; this proves it fails loud (every decide() result while a
+# seam is active carries a "mutation" marker, the decide CLI banners it,
+# decisions.jsonl and answers.json both carry it) and fails closed (the
+# scorer refuses a marked answers file, and decide/extract both refuse to
+# write into benchmarks/jbeq/mdm/runs/ while a seam is active). Registered
+# beside its jbeq-decide-self sibling, same reason: an unregistered check
+# is invisible to every gate this repository runs.
+run_check "jbeq-mutation-seams-self" python3 scripts/test_jbeq_mutation_seams.py -v
+run_check "jbeq-generalization-self" python3 scripts/test_jbeq_mdm_generalization.py
+# jbeq-regression-round6-self: opus review round6-2026-09-06.md's fix, pinned
+# 2026-09-06. Re-decides the FROZEN round 6 fact sheets (never the frozen 70's
+# own runs/ directory) against the CURRENT engine and refuses if any case the
+# 2026-09-06 baseline had correct now answers wrong, so a rule change is
+# measured against one fixed extraction instead of conflating a rule change
+# with a different blind reading of the same prompts. Registered beside its
+# jbeq-decide-self sibling, same reason: an unregistered check is invisible to
+# every gate this repository runs.
+run_check "jbeq-regression-round6-self" python3 scripts/jbeq_regression.py
 run_check "fable-authority"      python3 scripts/fable_authority.py --selftest
 
 # B3 and B4: black-box proofs that VB3-03 (tenancy) and VB3-04 (policy
@@ -1095,6 +1130,14 @@ run_check "capsule-items-self"           python3 scripts/test_capsule_items.py -
 # missing one listed artefact must fail, not pass. Registered beside its
 # continuity and capsule neighbours above.
 run_check "lhr-checkpoint-self"          python3 scripts/test_lhr_checkpoint.py
+# lhr-resume-record-self: the 2026-09-06 resume record's own manifest
+# (benchmarks/results/long-horizon-recovery/2026-09-06-resume/MANIFEST.json),
+# proven the same way as its lhr-checkpoint-self neighbour above, plus a
+# regression test that killed_run/run.log was captured before the resume
+# could overwrite run.log in place (the gap the 2026-09-06 opus evidence
+# audit found in the first version of this record). Registered beside its
+# neighbour.
+run_check "lhr-resume-record-self"       python3 scripts/test_lhr_resume_record.py
 # test_cleanse.py: the regression test for the 2026-08-30 close-ceremony
 # leak (a team member's name reached the public repo past cleanse's own
 # force-add exclude). The 23 tests here are the mechanical proof that leak

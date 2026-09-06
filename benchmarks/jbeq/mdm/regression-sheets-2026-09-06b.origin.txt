@@ -1,0 +1,6 @@
+benchmarks/jbeq/mdm/regression-sheets-2026-09-06b.json is a byte-for-byte copy of benchmarks/jbeq/mdm/runs/blind-round8-2026-09-06/fact-sheets.json, pinned 2026-09-06 as a frozen regression fixture (fixture b), the round 8 blind extraction over the frozen 70 with the widened requested_action vocabulary and requested_parent field (hub PR 408).
+
+origin: benchmarks/jbeq/mdm/runs/blind-round8-2026-09-06/fact-sheets.json
+sha256: 9dfa5897de1c352f2476f33cb46a609afc36fbd5bb5bef35a43e1dc1709534c3
+
+NEVER edit this fixture or the run directory it was copied from. Rule changes are measured against scripts/jbeq_regression.py; this fixture is pinned for a later lane to switch that script's default onto, once the REJECT-versus-KEEP rule pass reads it. scripts/jbeq_regression.py's FIXTURE constant is left unchanged by this commit; only a later, separate change points it at fixture b.

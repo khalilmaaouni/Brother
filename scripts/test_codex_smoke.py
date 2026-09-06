@@ -50,6 +50,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import brother_paths  # noqa: E402
 import brother_run  # noqa: E402
 import codex_skills  # noqa: E402
 import codex_smoke  # noqa: E402
@@ -376,7 +377,12 @@ class TheDocumentedCommand(unittest.TestCase):
         with contextlib.redirect_stdout(buf):
             root = brother_run._resolve_runs_root(
                 None, default="/dev/null/not-writable")
-        self.assertTrue(root.startswith(tempfile.gettempdir()), root)
+        # Durable (portability A1, 2026-09-06), never a temp directory: a
+        # receipt under $TMPDIR is gone at the next reboot.
+        self.assertEqual(
+            root, os.path.join(brother_paths.config_dir(),
+                               brother_run.FALLBACK_RUNS_DIR))
+        self.assertNotIn("/tmp", root)
         self.assertIn("cannot be written", buf.getvalue())
         self.assertIn(root, buf.getvalue())
 

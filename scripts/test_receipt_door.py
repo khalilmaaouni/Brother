@@ -1917,6 +1917,51 @@ class AppliedMemoryPrintsTheTypeBesideTheSlug(unittest.TestCase):
         self.assertEqual(section["applied"], [{"slug": "plain-lesson"}])
 
 
+class AppliedMemoryCarriesTheMutationSeamMarker(unittest.TestCase):
+    """Row P0-M (security finding, 2026-09-06): a rec carrying a
+    "mutation" key (vault_recall_hook.py's lesson_states() attaches one to
+    every record while a BM_VAULT_DISABLE_* seam is active) is never
+    turned into a fourth MEMORY_STATES value; it stays exactly where its
+    own state already put it, with a "mutation" field added, and the
+    section as a whole gains a top-level "mutation" string reading
+    "MUTATION SEAM ACTIVE (...)" so a reader of the section never has to
+    scan every entry for the field."""
+
+    def test_no_mutation_key_with_no_seam(self):
+        section = RD.applied_memory([
+            {"slug": "plain-lesson", "path": "z.md", "state": "applied",
+             "line": None, "note_type": None},
+        ])
+        self.assertNotIn("mutation", section)
+        self.assertNotIn("mutation", section["applied"][0])
+
+    def test_an_entry_carrying_mutation_keeps_its_own_state_and_gains_the_field(self):
+        section = RD.applied_memory([
+            {"slug": "seam-hit", "path": "y.md", "state": "unverified",
+             "line": "recall: UNVERIFIED", "note_type": None,
+             "mutation": {"disabled": ["BM_VAULT_DISABLE_ANCHOR_CHECK"]}},
+        ])
+        self.assertEqual(section["unverified"],
+                         [{"slug": "seam-hit", "line": "recall: UNVERIFIED",
+                           "mutation": {"disabled": ["BM_VAULT_DISABLE_ANCHOR_CHECK"]}}])
+        self.assertEqual(section["applied"], [])
+        self.assertEqual(section["stale"], [])
+
+    def test_the_section_gains_a_top_level_banner_naming_every_disabled_seam(self):
+        section = RD.applied_memory([
+            {"slug": "a", "path": "a.md", "state": "unverified", "line": None,
+             "note_type": None,
+             "mutation": {"disabled": ["BM_VAULT_DISABLE_ANCHOR_CHECK"]}},
+            {"slug": "b", "path": "b.md", "state": "stale", "line": None,
+             "note_type": None,
+             "mutation": {"disabled": ["BM_VAULT_DISABLE_LIFECYCLE_GATE"]}},
+        ])
+        self.assertEqual(
+            section["mutation"],
+            "MUTATION SEAM ACTIVE (vault protections disabled: "
+            "BM_VAULT_DISABLE_ANCHOR_CHECK, BM_VAULT_DISABLE_LIFECYCLE_GATE)")
+
+
 def _seed_two_unit_run(case, run_dir):
     """One unit repaired once then delivered (A), one zero-change unit
     (B, files_changed_by_unit stays empty): claim_store.acquire/release

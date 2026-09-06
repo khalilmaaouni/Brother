@@ -106,6 +106,43 @@ class ReadingIsHonest(unittest.TestCase):
         self.assertTrue(any("not a date" in p for p in problems))
 
 
+class CapturedNoteDualRead(unittest.TestCase):
+    """bm_vault_intake.py's cmd_capture writes `lifecycle: candidate` on
+    every captured note, never `promotion:` (the two fields have always
+    been different tools' vocabularies). Before this dual-read,
+    read_promotion saw no `promotion:` field and returned "legacy" no
+    matter what `lifecycle:` said, so bm_vault.py's D12 candidate withhold
+    (which reads read_promotion's own state) never fired for a captured
+    note at all."""
+
+    def test_a_captured_note_with_only_lifecycle_candidate_reads_candidate(self):
+        text = ("---\ntype: capture\nstatus: open\nlifecycle: candidate\n"
+                "captured_by: someone\n---\n\n# a captured thought\n")
+        state, record, problems = lc.read_promotion(text)
+        self.assertEqual(state, "candidate")
+        self.assertEqual(record, {})
+        self.assertEqual(problems, [])
+
+    def test_an_explicit_promotion_field_wins_over_a_stray_lifecycle_field(self):
+        """A note that has actually been promoted must never be demoted back
+        to candidate by a leftover `lifecycle: candidate` line from capture."""
+        text = ("---\ntype: capture\nlifecycle: candidate\n"
+                "promotion: validated\npromoted_by: khalil\n"
+                "promoted_at: 2026-09-06\n---\n\n# a captured thought\n")
+        state, _record, problems = lc.read_promotion(text)
+        self.assertEqual(state, "validated")
+        self.assertEqual(problems, [])
+
+    def test_a_non_candidate_lifecycle_value_with_no_promotion_stays_legacy(self):
+        """Only the literal `lifecycle: candidate` shape is dual-read; any
+        other lifecycle: value with no promotion: field is unrankable by
+        this contract and reads as legacy, never invented."""
+        text = "---\ntype: capture\nlifecycle: archived\n---\n\n# a note\n"
+        state, _record, problems = lc.read_promotion(text)
+        self.assertEqual(state, "legacy")
+        self.assertEqual(problems, [])
+
+
 class TheCheckReadsARealTree(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="bm-lifecycle-")

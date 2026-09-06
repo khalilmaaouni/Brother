@@ -95,7 +95,28 @@ fi
 # opened, PASS" when nothing had actually been examined.
 count="$(printf '%s\n' "$files" | grep -v "^$SELF$" | grep -c . || true)"
 commits="$(git rev-list --count --all $HIST_NOT 2>/dev/null || echo 0)"
-echo "scope: $count file(s), $commits commit(s) of history"
+# WHICH HISTORY, said out loud. The scans below walk `--all`, which reaches
+# every ref THIS CHECKOUT holds, including local branches and worktree
+# branches that were never pushed and never will be. That is the right scope
+# for "could anything here leak if every ref were pushed", and it is NOT the
+# same question as "is the published repository clean". Measured 2026-08-31 on
+# one repository, same script and the same 1402 files: a fresh clone reached
+# 924 commits and PASSED, while the canonical checkout reached 2716 and
+# REFUSED, because this laptop carried roughly 1800 extra commits on
+# local-only branches. A reader who does not know which number they are
+# looking at concludes the repository is unpublishable when it is not.
+#
+# So the scope line names both reaches. The verdict is unchanged: a hit
+# anywhere still REFUSES, because an object on a local branch is one push away
+# from being published, which is this gate's whole reason for existing.
+remote_commits="$(git rev-list --count --remotes $HIST_NOT 2>/dev/null || echo 0)"
+echo "scope: $count file(s), $commits commit(s) of history reachable from ALL local refs"
+if [ "$commits" -gt "$remote_commits" ]; then
+  echo "scope note: $remote_commits of those are reachable from remote-tracking refs. The" \
+       "$(( commits - remote_commits )) commit(s) beyond that sit on local-only refs and are" \
+       "not in the published repository. A hit could be in either; re-run in a fresh clone to" \
+       "tell them apart."
+fi
 if [ "$count" -eq 0 ]; then
   echo "NO-DATA: this gate opened no file it is allowed to scan, so it proved nothing. Not a pass."
   exit 2

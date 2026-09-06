@@ -1,0 +1,59 @@
+JBEQ-MDM regression-2026-09-06-u1-rule-d, 2026-09-06. THIS IS A REGRESSION
+RUN ON THE SEEN SET U1, NOT A NEW QUALIFICATION RUN: U1
+(benchmarks/jbeq/mdm/runs/qualification-u1-2026-09-06/) was read and
+reasoned about by the same session that authored review-u1-2026-09-06.md,
+so from that moment U1 is a SEEN set. Every number below describes how the
+fixed engine performs on a set it has effectively been tuned against,
+never a fresh qualification figure. The next real qualification requires
+a new blind unseen set (U2), authored and audited blind against this
+fixed engine.
+
+WHAT CHANGED SINCE regression-2026-09-06-u1-pass. That earlier run left
+rule D (hierarchy types independent) UNCHANGED at KEEP SEPARATE on
+purpose, pending the founder's ruling on the HI-01/U-13 label trade
+(review-u1-2026-09-06.md section B). The founder ruled 2026-09-06 about
+12:3x JST in the question UI: "LINK AS RELATED wins; correct HI-01 as a
+recorded benchmark defect (Recommended)", recorded at
+docs/decisions/decision-p0-3-rule-d-hi01-2026-09-06.json. Rule D
+(scripts/jbeq_decide.py) now returns LINK AS RELATED for 2 or more
+hierarchy_parents of distinct types, with its existing reason text plus
+"(founder ruling 2026-09-06: a relationship is recorded as a link)".
+HI-01's frozen seed label (benchmarks/jbeq/mdm/seed-2026-09-05.json) was
+corrected to LINK AS RELATED in the same pass, net zero on the frozen
+regression fixture's own count (both the engine's answer and the seed's
+expected label flipped together, so the case that already passed under
+the old symmetric KEEP SEPARATE pair still passes under the new symmetric
+LINK AS RELATED pair; measured via python3 scripts/jbeq_regression.py,
+still 40 of 45, zero regressions).
+
+METHOD. U1's committed fact-sheets.json (copied here unchanged from
+qualification-u1-2026-09-06/) was re-decided with `python3
+scripts/jbeq_decide.py decide` under the rule-D-fixed engine, writing
+engine-answers.json and decisions.jsonl. U1's committed direct-answers.json
+(the 10 hand-answered requirements/survivorship cases, copied here
+unchanged) was merged over the engine's own answers for those same 10
+ids, exactly as the original qualification run did, producing
+answers.json. That was scored with `python3 scripts/jbeq_mdm.py score
+answers.json --seed ../../unseen-2026-09-06.json` (read-only; not
+modified), full output in score.txt beside this file.
+
+RESULT, key lines from score.txt:
+
+  engine-decided: 25 of 30 (up from 24 of 30 in regression-2026-09-06-u1-pass;
+    this run gains U-13, the only case rule D's flip touches)
+  critical false merges: 0 of 26 (unchanged)
+  critical wrong: 5 of 26 (U-01, U-03, U-14, U-29, U-39; down from 6,
+    U-13 dropped off this list)
+  conservative wrongs: 2 (U-01, U-03; down from 3, U-13 dropped off)
+
+WHAT THIS DOES NOT PROVE. U-01, U-03, U-14, U-29 and U-39 remain wrong,
+for the same reasons named in regression-2026-09-06-u1-pass/RECORD.txt:
+U-01, U-03 and U-14 are the requested_action/requested_parent extraction
+gap (review section A), which needs the schema's widened enum GATED (not
+done here) plus a fresh blind re-extraction of the frozen 70 and a new
+baseline before it is safe to gate. U-29 and U-39 are requirements/
+temporal-vocabulary gaps outside this pass's one fix. None of this run's
+numbers should be read as approaching the directive's own exit gate
+(section 21: critical wrong 0 of 33), and no claim of qualification
+should be made on any re-run of U1: it is a regression number on a seen
+set, not a qualification number.

@@ -1,0 +1,19 @@
+address              9 of 10
+entity-object        10 of 10
+hierarchy            6 of 10
+identifier           3 of 5
+match-or-no-merge    9 of 10
+requirements         5 of 5
+survivorship         10 of 10
+temporal             2 of 10
+engine-decided: 44 of 60
+direct-answered (not blind, not evidence about the engine): 10 of 10
+critical WRONG TM-01 [HISTORICAL REASSIGNMENT] expected R1, answered NO-DATA
+critical WRONG TM-04 [HISTORICAL REASSIGNMENT] expected R2, answered NO-DATA
+critical WRONG TM-07 [HISTORICAL REASSIGNMENT] expected R1, answered NO-DATA
+critical WRONG TM-10 [HISTORICAL REASSIGNMENT] expected R1, answered NO-DATA
+critical WRONG ID-02 [WRONG TAX IDENTITY] expected ESCALATE, answered KEEP SEPARATE
+critical false merges: 0 of 33
+critical wrong: 5 of 33 (TM-01, TM-04, TM-07, TM-10, ID-02)
+conservative wrongs: 0
+JBEQ-MDM NOT READY

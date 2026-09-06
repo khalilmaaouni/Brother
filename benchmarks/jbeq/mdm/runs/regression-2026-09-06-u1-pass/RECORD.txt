@@ -1,0 +1,66 @@
+JBEQ-MDM regression-2026-09-06-u1-pass, 2026-09-06. THIS IS A REGRESSION
+RUN ON U1, NOT A NEW QUALIFICATION RUN: U1 (benchmarks/jbeq/mdm/runs/
+qualification-u1-2026-09-06/) was read and reasoned about by the same
+session that authored review-u1-2026-09-06.md, so from that moment U1 is
+a SEEN set. Every number below describes how the fixed engine performs on
+a set it has effectively been tuned against, never a fresh qualification
+figure. The next real qualification requires a new blind unseen set (U2),
+authored and audited blind against this fixed engine.
+
+WHAT CHANGED. scripts/jbeq_decide.py, four general fixes from
+~/.claude/evidence/review-u1-2026-09-06.md and FIX-DIRECTIVE-2026-09-06.md
+sections 15-22 and 36:
+  1. rule_r_lifecycle_keep: rule_r's lifecycle clause now answers KEEP
+     SEPARATE, matching gate-lifecycle's answer for the identical fact
+     instead of contradicting it with REJECT MATCH (fixes U-36).
+  2. rule_r_blank_fields_guard, widened to blank_fields OR
+     evidence_reasons OR contradicted_attributes, and now guards the
+     lifecycle clause as well as the object_type clause: a STATED
+     conflict is never outranked by rule_r's inference-based clauses
+     (fixes U-38).
+  3. allowed_answers_remap: finish()'s safety net now walks
+     jbeq_mdm.CAUTION_RANK to the nearest member of the case's own
+     allowed_answers instead of jumping straight to NO-DATA, which was
+     itself sometimes disallowed (fixes U-05 and U-23).
+  4. Rule D (hierarchy types independent) is LEFT UNCHANGED at KEEP
+     SEPARATE, deliberately: flipping it to LINK AS RELATED would fix
+     U-13 here but trades away HI-01's frozen seed label in the regular
+     regression fixture, a seed-label decision reserved for the founder.
+     U-13 therefore stays WRONG in this run, on purpose.
+  Plus, additive and ungated: same_area_renamed, a new location_
+  comparison value rule L reads exactly like notation_variant_only (no
+  U1 case uses it; carried for the record).
+
+METHOD. U1's committed fact-sheets.json (copied here unchanged) was
+re-decided with `python3 scripts/jbeq_decide.py decide` under the FIXED
+engine, writing engine-answers.json and decisions.jsonl. U1's committed
+direct-answers.json (the 10 hand-answered requirements/survivorship
+cases, copied here unchanged) was merged over the engine's own answers
+for those same 10 ids, exactly as the original qualification run did,
+producing answers.json. That was scored with the CORRECTED scorer
+(engine-decided derived from decisions.jsonl's own rule_fired) against
+benchmarks/jbeq/mdm/unseen-2026-09-06.json (read-only; not modified).
+
+RESULT, `python3 scripts/jbeq_mdm.py score answers.json --seed
+../../unseen-2026-09-06.json`, full output in score.txt beside this file,
+key lines:
+
+  engine-decided: 24 of 30 (U1 as filed, corrected scorer: 20 of 30;
+    this run gains U-05, U-23, U-36 and U-38, all four fixed by rules 1
+    through 3 above)
+  critical false merges: 0 of 26 (unchanged)
+  critical wrong: 6 of 26 (U-01, U-03, U-13, U-14, U-29, U-39; down from
+    8, U-36 and U-38 dropped off this list)
+  conservative wrongs: 3 (U-01, U-03, U-13; down from 4, U-36 dropped
+    off)
+
+WHAT THIS DOES NOT PROVE. U-01, U-03, U-14, U-29 and U-39 remain wrong:
+U-01, U-03 and U-14 are the requested_action/requested_parent extraction
+gap (review section A), which needs the schema's widened enum GATED (not
+yet done: this pass left it ungated on purpose) plus a fresh blind
+re-extraction of the frozen 70 and a new baseline before it is safe to
+gate. U-29 and U-39 are requirements/temporal-vocabulary gaps outside
+this pass's four fixes. U-13 is rule D, left unchanged pending the
+founder's ruling on the HI-01/U-13 label trade. None of this run's
+numbers should be read as approaching the directive's own exit gate
+(section 21: critical wrong 0 of 33).

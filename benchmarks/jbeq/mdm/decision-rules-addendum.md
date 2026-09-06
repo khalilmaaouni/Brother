@@ -57,6 +57,30 @@ gaps, and the note right after rule 7 closes the collision.
    were a stated relation: merging or linking a one-to-many object into a
    single-site record misattributes every other site's records to the one
    that absorbed it.
+   この規則は所在地の一致度合いより先に判定する(round 10 repair,
+   2026-09-06, review-u3-2026-09-06.md W-04)。所在地が表記違いに過ぎない
+   一致(notation_variant_only)であっても、一対多の対象を吸収してよい理由
+   にはならない: 統合の安全確認より先に規則5が答える。
+   EN: This rule is decided before how closely the two addresses match
+   (round 10 repair, 2026-09-06, review-u3-2026-09-06.md W-04). Even when
+   the address match is merely a notation variant (notation_variant_only),
+   that closeness is never a reason to absorb a one-to-many object: rule 5
+   answers before the merge-safety checks that a close address match would
+   otherwise trigger.
+   規則5の原則は一対多の場合だけに限らない(round 11 repair, 2026-09-06,
+   review-u4-2026-09-06.md W4-23, engine mutation id
+   same_site_only_never_a_relation)。stated_relation が same_site_only
+   (所在地の共有のみ)である場合、それは境界規則1が問う「関係」そのもの
+   ではない。rule_r の判定と境界規則1の既定判定は、stated_relation が
+   none の場合と同じ扱いを same_site_only にも与え、所在地の共有のみを
+   もって LINK AS RELATED へ落ちることを防ぐ。
+   EN, round 11 (2026-09-06, review-u4-2026-09-06.md W4-23, engine mutation
+   id same_site_only_never_a_relation): rule 5's principle is not limited
+   to the one-to-many case. Wherever the engine asks "is there a stated
+   relation at all" (rule_r's own stated_relation=="none" guard, and
+   boundary rule 1's default), same_site_only reads exactly like "none":
+   a shared address alone is never the stated relation, so it must not
+   fall through to LINK AS RELATED on its own.
 
 6. KEEP SEPARATE か REJECT MATCH か(読みの一致または表記の近さのみの場合)。
    商号の読み(ヨミ)が一致していても、表記(漢字)が異なることは、それだけで
@@ -147,6 +171,29 @@ the answer is REJECT MATCH.
    confirmation reason: SUGGEST MERGE. Weak evidence: ESCALATE regardless of
    the confirmation reason; irreversibility never upgrades weak evidence into
    a merge.
+   中程度の証拠であっても、確認理由(取引履歴または処理の不可逆性)がその
+   証拠自体とは別に述べられていなければ SUGGEST MERGE ではなく ESCALATE と
+   する(round 10 repair, 2026-09-06, review-u3-2026-09-06.md W-19)。未検証
+   の移行対応表は、それ自体が中程度の証拠であり、同時に自らの確認理由として
+   二重に数えてはならない。
+   EN: Medium evidence with no such separately stated confirmation reason
+   anywhere in the input gives ESCALATE, not SUGGEST MERGE (round 10 repair,
+   2026-09-06, review-u3-2026-09-06.md W-19). An unvalidated migration
+   crosswalk must never be counted twice, once as the medium evidence and
+   again as its own confirmation reason.
+
+   証拠が中程度で、かつその証拠自体とは別に確認理由(取引履歴、処理の不可
+   逆性など)が入力に述べられている場合は SUGGEST MERGE。証拠が中程度で
+   あっても、その証拠とは別の確認理由がどこにも述べられていない場合は
+   ESCALATE と答える。未検証の移行対応表そのものを、証拠であると同時に
+   その確認理由として二重に数えてはならない。
+   EN: Medium evidence together with a confirmation reason stated
+   separately from that evidence itself (transaction history, an
+   irreversible step, and the like) gives SUGGEST MERGE. Medium evidence
+   with no such separately stated confirmation reason anywhere in the
+   input gives ESCALATE. An unvalidated migration crosswalk must never be
+   counted twice, once as the medium evidence and again as its own
+   confirmation reason.
 
 10. KEEP SEPARATE か REJECT MATCH か(税務・法人番号の体系不一致、または
     テナント境界の場合)。数字そのものが一致していても、入力がその値を別の
@@ -167,18 +214,94 @@ the answer is REJECT MATCH.
     reason; rule 10 applies when the input states outright that the two are
     not the same, or must never reference each other.
 
-11. KEEP SEPARATE か ESCALATE か(資本、商流、レポーティングなど階層の種類
+    round 10 追加 (2026-09-06, engine rule C, mutation id
+    rule_c_hierarchy_dimension): 同名の階層ノード同士であっても、入力が
+    両者は別の階層次元に属すると明記している場合(例えば地理的地域の階層と
+    販売組織の階層)、名称が一致しているという事実は同一性を裏付けない。
+    この場合も規則10と同じく REJECT MATCH と答える。階層次元が異なる二つの
+    ノードは、名称がどうであれ同じノードではない。
+    EN, round 10 addition (2026-09-06, engine rule C, mutation id
+    rule_c_hierarchy_dimension): the same reject-match logic covers two
+    hierarchy nodes that share a name when the input states outright that
+    they belong to different hierarchy dimensions (a geographic area
+    hierarchy versus a sales organisation hierarchy, for instance). A
+    shared name never refutes that distinction: two nodes from different
+    hierarchy dimensions are not the same node whatever they are called.
+    Answer REJECT MATCH, exactly as rule 10 already does for a stated
+    different identifier domain or tenant boundary.
+
+11. LINK AS RELATED か ESCALATE か(資本、商流、レポーティングなど階層の種類
     が異なる複数の親を持つ場合)。資本上の親、商流上の親、レポーティング上
     の親は互いに独立した階層である。入力がそれぞれの階層について別の有効な
-    親を述べている場合、それは一つに決着すべき矛盾ではなく、各階層はそれぞ
-    れの親とレコードをそのまま保持してよい。一つの「親」欄にどれか一つだけ
-    を選ばせるのはシステムの実装上の制約であって、事実を一つに集約させる
-    根拠にはならない。この場合は KEEP SEPARATE と答え、業務側の判断を要する
-    本当の矛盾がある場合に限り ESCALATE を残す。
+    親を述べている場合、それは一つに決着すべき矛盾ではなく、識別ではなく
+    関係を裏付ける証拠である。一つの「親」欄にどれか一つだけを選ばせるのは
+    システムの実装上の制約であって、記録すべき関係を消す根拠にはならない。
+    この場合は LINK AS RELATED と答え、業務側の判断を要する本当の矛盾がある
+    場合に限り ESCALATE を残す(founder ruling 2026-09-06,
+    decision-p0-3-rule-d-hi01: 識別ではなく関係を裏付ける証拠は LINK AS
+    RELATED であり、KEEP SEPARATE は記録すべき関係が無いことを意味する)。
     EN: Capital, trade-flow and reporting parents are independent hierarchy
     types. When the input states a different valid parent for each type,
-    that is not one conflict needing a single resolution: each hierarchy
-    type keeps its own parent and its own record as they stand. A single
-    master-parent field that forces one choice is an implementation limit,
-    never a fact to collapse into one relation. Answer KEEP SEPARATE; reserve
-    ESCALATE for an actual conflict that needs a business decision.
+    that is not one conflict needing a single resolution: it is evidence
+    that supports a relationship, not identity. A single master-parent
+    field that forces one choice is an implementation limit, never a reason
+    to erase a relationship that should be recorded. Answer LINK AS
+    RELATED; reserve ESCALATE for an actual conflict that needs a business
+    decision. (Founder ruling 2026-09-06, decision-p0-3-rule-d-hi01-2026-09-06:
+    evidence that supports a relationship without supporting identity is
+    LINK AS RELATED, and KEEP SEPARATE means no relationship to record; see
+    docs/decisions/decision-p0-3-rule-d-hi01-2026-09-06.json.)
+
+12. 移転(lifecycle=relocated)における所在地の相違は、境界規則2のいう同一性
+    を否定する事実ではない(round 10 repair, 2026-09-06,
+    review-u3-2026-09-06.md W-01)。移転そのものが所在地の相違を生じさせる
+    のであって、相違が移転を否定するのではない。したがって lifecycle が
+    relocated であるレコードについては、location_comparison=
+    different_administrative_area だけを理由に REJECT MATCH と答えては
+    ならず、証拠の強さと確認理由に関する規則9の判定へ進む。これはあくまで
+    抽出漏れに対する後備の規則であり、本来の修正は location_comparison の
+    語彙そのもの(同一行政区域内の二つの実在する住所は
+    different_administrative_area ではなく null とすること)にある。
+    EN: A location difference under lifecycle=relocated is not, by itself,
+    a fact that refutes identity under boundary rule 2 (round 10 repair,
+    2026-09-06, review-u3-2026-09-06.md W-01). The relocation is what
+    produces the address difference; the difference does not refute the
+    relocation. So a record with lifecycle=relocated must not be answered
+    REJECT MATCH on location_comparison=different_administrative_area
+    alone: it proceeds to rule 9's evidence-strength and confirmation-reason
+    test instead. This is a backstop for an extraction gap; the primary fix
+    is in the location_comparison vocabulary itself (two real addresses
+    inside one administrative area read null, not
+    different_administrative_area).
+
+
+13. LINK AS RELATED か REJECT MATCH か(記録の書き込みが提案されている場合)。
+    stated_relation が none 以外の値を述べていても、それは「関係が何である
+    か」を答えるものであって、一方のコードを他方に上書きして書き込んでよい
+    という許可ではない。requested_action=record_write(書き込みの提案)の
+    場合に限り、入力自身が述べる否定する事実(規則2の different_legal_
+    entity、site_store の distinct_operational_attributes)は、それと同時に
+    述べられている関係よりも優先する。否定する事実が書き込みの提案そのもの
+    を否定しているのであって、単に関係を述べているのではないためである。
+    この場合は LINK AS RELATED ではなく REJECT MATCH と答える(提案が無い
+    場合は KEEP SEPARATE。boundary rule "proposal_gate" と同じ判定)。
+    requested_action が none、assignment、match_on_stated_basis である場合
+    は、この規則の対象外であり、規則2および site_store は変更前と同じ答え
+    を返す。
+    EN: LINK AS RELATED versus REJECT MATCH, when the input proposes a
+    WRITE. A stated relation (stated_relation != "none") answers "what is
+    the relation", it is never a license to write one code over the other.
+    Only when requested_action=record_write (a proposal to write) does a
+    stated refuting fact (rule 2's different_legal_entity, site_store's
+    distinct_operational_attributes) outrank a relation stated alongside
+    it: the refuting fact refutes the write proposal itself, not merely a
+    relation. Answer REJECT MATCH, not LINK AS RELATED (or KEEP SEPARATE
+    when there is no proposal at all, the same boundary the proposal_gate
+    id already applies elsewhere). requested_action values none,
+    assignment and match_on_stated_basis are unaffected: rule 2 and
+    site_store return the same answer they always did for those. (Round
+    11, 2026-09-06, review-u4-2026-09-06.md W4-03 and W4-04; engine
+    mutation ids site_store_write_refutes and
+    link_vs_reject_write_refutes. One principle: a refuting fact beats a
+    stated relation when the proposal is a write, and a shared address is
+    never the relation.)

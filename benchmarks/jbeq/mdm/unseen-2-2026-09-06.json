@@ -1,0 +1,786 @@
+{
+  "_doc": "JBEQ-MDM second unseen qualification set (U2), authored blind to the frozen seed, blind to the first unseen set, and blind to the engine. Written to become the qualification set once the rules authored against U1 land.",
+  "authored_at": "2026-09-06",
+  "critical_classes": [
+    "CROSS-CUSTOMER CONTAMINATION",
+    "CROSS-TENANT DATA LEAK",
+    "FALSE MERGE",
+    "HIERARCHY REVERSAL",
+    "HISTORICAL REASSIGNMENT",
+    "MERGE CAPABILITY GAP",
+    "SOURCE PRECEDENCE VIOLATION",
+    "UNREVERSIBLE MERGE WITHOUT EVIDENCE",
+    "WRONG LEGAL ENTITY",
+    "WRONG PAYER",
+    "WRONG STORE ASSIGNMENT",
+    "WRONG TAX IDENTITY"
+  ],
+  "cases": [
+    {
+      "id": "V-01",
+      "track": "entity-object",
+      "input": "東海酪農協同組合の本部登録では、法人番号5010001112223のもとに「みなと店」と「丘の上店」という2つの店舗コードが独立して存在する。両店舗は所在地も従業員配置も別であり、仕入計上は店舗ごとに分けて行われている。",
+      "question": "この2件の店舗レコードは1件に統合してよいか、それとも別の記録として関係だけを残すべきか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "LINK AS RELATED",
+      "critical": true,
+      "critical_class": "WRONG PAYER",
+      "rationale": "A shared corporate number identifies the legal entity, not the operational store object, so the two stores keep separate records under a recorded parent relation."
+    },
+    {
+      "id": "V-02",
+      "track": "entity-object",
+      "input": "北関東産業ガス株式会社の配送拠点である「栃木集約センター」と、得意先である「たかはら燃料店」は、住所欄がいずれも栃木県宇都宮市朝日町3丁目5番地と記載されている。集約センターは周辺の複数の販売店向けにボンベをまとめて配送する拠点であり、たかはら燃料店とは資本関係も取引上の経由関係も入力には記載されていない。",
+      "question": "住所が一致するこの2件は、同一の対象として扱ってよいか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "KEEP SEPARATE",
+      "critical": true,
+      "critical_class": "FALSE MERGE",
+      "rationale": "A shared address alone is not a stated relation when one side performs a one to many consolidation function, per boundary rule 5."
+    },
+    {
+      "id": "V-03",
+      "track": "entity-object",
+      "input": "さくら薬局チェーン株式会社の店舗コードST-114は、旧住所(千葉県船橋市本町2丁目1番)で営業していたが、同じ店舗コードのまま同市内の新住所(本町4丁目9番)へ移転したと記録されている。旧住所での取引に基づく請求と入金の履歴が既に計上されている。",
+      "question": "移転前後のこの2件のレコードは、1件の店舗として統合してよいか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "SUGGEST MERGE",
+      "critical": true,
+      "critical_class": "UNREVERSIBLE MERGE WITHOUT EVIDENCE",
+      "rationale": "Identifiers and the store code align with strong evidence, but existing transaction history means a steward confirms before merging, per boundary rule 9."
+    },
+    {
+      "id": "V-04",
+      "track": "entity-object",
+      "input": "名寄せエンジンは「北関東産業ガス株式会社」(法人番号5010002223334)と「北関東産業瓦斯有限会社」(法人番号5010002223341)の読みが同一であることから、両者を同一取引先として統合するよう提案した。両社の法人番号はいずれも有効な値として個別に記載されている。",
+      "question": "名寄せエンジンの統合提案は認めてよいか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "REJECT MATCH",
+      "critical": true,
+      "critical_class": "CROSS-TENANT DATA LEAK",
+      "rationale": "Differing valid corporate numbers stated on both sides refute the identity under boundary rule 6, regardless of a matching reading."
+    },
+    {
+      "id": "V-05",
+      "track": "entity-object",
+      "input": "信越建材卸株式会社に関して、請求先としての記録と、配送先としての記録が別々のレコードで管理されている。入力には、この2件が同一取引先の請求役割と配送役割の対であることが明記されている。",
+      "question": "役割の異なるこの2件のレコードをどのように扱うべきか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "LINK AS RELATED",
+      "critical": false,
+      "critical_class": null,
+      "rationale": "A stated role pair for one legal entity is the relation boundary rule 1 asks for, kept as separate role records."
+    },
+    {
+      "id": "V-06",
+      "track": "match-or-no-merge",
+      "input": "データスチュワードの重複点検で、中国青果流通株式会社の顧客マスタに同一の法人番号5010005556667を持つレコードが2件見つかった。両レコードとも法人格の種別、識別子、役割、登録住所が完全に一致しており、同じ年次更新作業の中で同一の担当者がどちらも登録した記録である。",
+      "question": "この2件を統合してよいか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "AUTO-MERGE",
+      "critical": true,
+      "critical_class": "MERGE CAPABILITY GAP",
+      "rationale": "Strong identifier agreement (matching legal-entity type, identifier, role, and registered address) plus the same registrar and update batch meets the AUTO-MERGE threshold, with no confirmation reason present."
+    },
+    {
+      "id": "V-07",
+      "track": "match-or-no-merge",
+      "input": "四国精密部品株式会社について、法人番号5010006667778が一致する2件の仕入先レコードが見つかった。識別子は矛盾なく一致しているが、一方のレコードには既に発行済みの請求書と入金消込の履歴が存在する。",
+      "question": "この2件のレコードは統合してよいか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "SUGGEST MERGE",
+      "critical": true,
+      "critical_class": "UNREVERSIBLE MERGE WITHOUT EVIDENCE",
+      "rationale": "Strong evidence plus existing transaction history calls for a steward to confirm before merging, per boundary rule 9."
+    },
+    {
+      "id": "V-08",
+      "track": "match-or-no-merge",
+      "input": "名寄せスコアが0.92と算出された2件の取引先候補が提示されたが、いずれのレコードにも法人番号や得意先コードなどの識別子は記載されていない。片方のレコードには、統合すると取り消しのできない請求先の一括変更処理が予定されている。",
+      "question": "この2件の候補を統合してよいか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "ESCALATE",
+      "critical": true,
+      "critical_class": "UNREVERSIBLE MERGE WITHOUT EVIDENCE",
+      "rationale": "A match score alone with no identifier is weak evidence, and boundary rule 9 holds that an irreversible step never upgrades weak evidence into a merge."
+    },
+    {
+      "id": "V-09",
+      "track": "match-or-no-merge",
+      "input": "重複統合バッチは、甲信ガラス加工株式会社の社内連番「5010014445556」と、別の取引先の法人番号「5010014445556」が数字として一致することを根拠に、両者を統合するよう提案した。入力には、前者が社内で採番した連番であり、後者が国税庁登録の法人番号であることが明記されている。",
+      "question": "このバッチ提案の統合は認めてよいか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "REJECT MATCH",
+      "critical": true,
+      "critical_class": "WRONG TAX IDENTITY",
+      "rationale": "A numeric match across different identifier domains invalidates itself under boundary rule 10, regardless of the digits agreeing."
+    },
+    {
+      "id": "V-10",
+      "track": "match-or-no-merge",
+      "input": "「まつした事務機」と「にしお印刷」は、いずれも郵便番号と建物名(コーポラス大手)が同一の住所として記録されている。両者の間に資本関係、役割の対、商流上の経由のいずれも入力には記載がない。",
+      "question": "住所が同一であるこの2件をどう扱うべきか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "KEEP SEPARATE",
+      "critical": false,
+      "critical_class": null,
+      "rationale": "A shared building address with no stated relation and no one to many function stays two ordinary separate records under boundary rule 1."
+    },
+    {
+      "id": "V-11",
+      "track": "hierarchy",
+      "input": "「東北セラミック工業株式会社」は、子会社「東北セラミック販売株式会社」について、資本上の親会社、商流上の親会社、レポーティング上の親会社のすべてを兼ねていると記載されている。3種類の階層はいずれも同一の親会社を指しており、矛盾は記載されていない。",
+      "question": "親子にあたるこの2件のレコードをどのように扱うべきか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "LINK AS RELATED",
+      "critical": true,
+      "critical_class": "SOURCE PRECEDENCE VIOLATION",
+      "rationale": "All three independent hierarchy types point at one stated parent, which is the relation boundary rule 1 records, without collapsing the two legal entities into one."
+    },
+    {
+      "id": "V-12",
+      "track": "temporal",
+      "input": "過去の登録では「九州酪農機械株式会社」が「甲南酪農資材株式会社」の資本上の親会社であると明記されている。今回のリクエストは、逆に「甲南酪農資材株式会社」を親会社として登録し直すよう求めている。",
+      "question": "このリクエストの親子の入れ替えは認めてよいか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "REJECT MATCH",
+      "critical": true,
+      "critical_class": "HIERARCHY REVERSAL",
+      "rationale": "The request reverses a direction the input already states, which is a proposal the stated facts refute under boundary rule 2."
+    },
+    {
+      "id": "V-13",
+      "track": "hierarchy",
+      "input": "商流の記録では、「関西紙器製造株式会社」から「北陸食品ロジスティクス株式会社」へ商品が経由すると明記されており、関西紙器製造株式会社が商流上の親であるとされている。今回のリクエストは、北陸食品ロジスティクス株式会社を商流上の親として登録するよう求めている。",
+      "question": "このリクエストの向きは認めてよいか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "REJECT MATCH",
+      "critical": true,
+      "critical_class": "HIERARCHY REVERSAL",
+      "rationale": "The requested trade flow direction contradicts the direction the input already states, refuting the proposal under boundary rule 2."
+    },
+    {
+      "id": "V-14",
+      "track": "hierarchy",
+      "input": "「近畿包装資材株式会社」と、その子会社である「近畿包装資材ロジスティクス株式会社」は、いずれも本店所在地として同一の住所が登録されている。入力には、後者が前者の子会社であることが明記されている。",
+      "question": "住所が重なるこの親子2件をどう扱うべきか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "LINK AS RELATED",
+      "critical": true,
+      "critical_class": "SOURCE PRECEDENCE VIOLATION",
+      "rationale": "A parent child relation is explicitly stated, so the shared registered address is not the deciding fact; the two remain separate records under a recorded relation."
+    },
+    {
+      "id": "V-15",
+      "track": "hierarchy",
+      "input": "「東北鋼材商会株式会社」と「東北鋼材テクノ株式会社」はいずれも同じ企業団地内の代表所在地を登録しているが、入力にはこの2社を結びつける親子関係や商流上の経由は一切記載されていない。",
+      "question": "同じ団地の住所を持つこの2件の関係をどう扱うべきか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "KEEP SEPARATE",
+      "critical": false,
+      "critical_class": null,
+      "rationale": "A shared campus address with no stated hierarchy or trade flow between the two records stays KEEP SEPARATE under boundary rule 1."
+    },
+    {
+      "id": "V-16",
+      "track": "survivorship",
+      "input": "データスチュワードは「甲信ガラス加工株式会社」の配送リードタイム欄について、期限を定めない手動上書きを設定したと記録されている。その後、地域物流フィードからの自動更新が、同じ欄を自動計算値に戻すよう提案している。",
+      "question": "自動フィード側の提案どおりに欄を上書きしてよいか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "REJECT MATCH",
+      "critical": true,
+      "critical_class": "SOURCE PRECEDENCE VIOLATION",
+      "rationale": "A standing, unexpired manual override outranks an automated feed's later claim to precedence, so the proposed overwrite is rejected."
+    },
+    {
+      "id": "V-17",
+      "track": "survivorship",
+      "input": "「四国青果センター株式会社」の税区分欄について、POS系ソースは「標準税率」、ERP系ソースは「非課税」と記録している。データガバナンス方針では、税区分欄はPOS系ソースを優先すると定められている。今回のバッチは、より新しいという理由でERP系の値を採用するよう提案している。",
+      "question": "この採用提案は認めてよいか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "REJECT MATCH",
+      "critical": true,
+      "critical_class": "SOURCE PRECEDENCE VIOLATION",
+      "rationale": "A designated authoritative source outranks mere recency, so a proposal to adopt the newer non authoritative value is rejected."
+    },
+    {
+      "id": "V-18",
+      "track": "survivorship",
+      "input": "「山陽包装資材株式会社」の複数の代理店は、いずれも同一のコールセンター住所を連絡先として登録している。各代理店には別々の代理店コードが割り当てられており、この住所以外に共通する事実は入力に記載がない。",
+      "question": "住所を共有するこれらの代理店レコードをどう扱うべきか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "KEEP SEPARATE",
+      "critical": true,
+      "critical_class": "FALSE MERGE",
+      "rationale": "A shared call center address serving many agents is a one to many function, not a relation, per boundary rule 5."
+    },
+    {
+      "id": "V-19",
+      "track": "survivorship",
+      "input": "「東海精密機械株式会社」と「北海道酪農資材株式会社」は、いずれも回収代行を委託している地方銀行のエスクロー口座番号が同一である。入力には、両社を結びつける資本関係や役割の対は一切記載されていない。",
+      "question": "口座番号が一致するこの2社をどう扱うべきか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "KEEP SEPARATE",
+      "critical": false,
+      "critical_class": null,
+      "rationale": "A shared collection escrow account explained by a common bank service is not itself a stated relation between the two companies."
+    },
+    {
+      "id": "V-20",
+      "track": "survivorship",
+      "input": "「九州セラミック建材株式会社」の登録資本金について、いずれも権威あるソースとして指定された2つの系統が、それぞれ異なる金額を記載している。どちらを優先するかを定めた方針は入力に記載されていない。",
+      "question": "この資本金の食い違いはどう扱うべきか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "ESCALATE",
+      "critical": true,
+      "critical_class": "UNREVERSIBLE MERGE WITHOUT EVIDENCE",
+      "rationale": "Two designated authoritative sources genuinely conflict with no stated precedence rule, which needs a business decision rather than a rule the engine can close."
+    },
+    {
+      "id": "V-21",
+      "track": "temporal",
+      "input": "「中部ガラス流通株式会社」の階層登録について、契約書は親会社の変更を2026年4月1日付で有効とし、社内システムの記録は同じ変更を2026年1月1日付で有効としており、それぞれ異なる親会社を指している。",
+      "question": "発効日が食い違うこの階層変更をどう扱うべきか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "ESCALATE",
+      "critical": true,
+      "critical_class": "HISTORICAL REASSIGNMENT",
+      "rationale": "Two stated effective dates conflict on which parent governs today with no fact resolving it, which needs a business decision."
+    },
+    {
+      "id": "V-22",
+      "track": "temporal",
+      "input": "「西日本紙器工業株式会社」の担当営業所は、2025年9月1日付で旧営業所から新営業所へ変更されたと記録されている。今回のリクエストは、この日付より前に計上済みの取引についても、遡って新営業所に付け替えるよう求めている。入力には、発効日より前の取引は旧営業所のまま据え置くと明記されている。",
+      "question": "過去の取引を遡って付け替える今回のリクエストは認めてよいか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "REJECT MATCH",
+      "critical": true,
+      "critical_class": "HISTORICAL REASSIGNMENT",
+      "rationale": "The input states pre effective date transactions stay with the old office, which refutes the retroactive reassignment proposal."
+    },
+    {
+      "id": "V-23",
+      "track": "hierarchy",
+      "input": "「中部ガラス流通株式会社」について、資本上の親会社は「中部ホールディングス株式会社」、商流上の親会社は「中部流通センター株式会社」、レポーティング上の親会社は「中部グループ経営管理株式会社」とそれぞれ別に記載されており、いずれも現在有効な記載として矛盾なく成立している。",
+      "question": "資本、商流、レポーティングでそれぞれ異なる親会社を持つこの記録をどう扱うべきか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "LINK AS RELATED",
+      "critical": true,
+      "critical_class": "HIERARCHY REVERSAL",
+      "rationale": "Capital, trade-flow and reporting parents are independent hierarchy types, and three different, currently valid parents are stated, one per type. Per boundary rule 11 (founder ruling 2026-09-06, decision-p0-3-rule-d-hi01), this is evidence of a relationship, not a conflict to collapse into one master-parent field: LINK AS RELATED to each stated parent, never KEEP SEPARATE."
+    },
+    {
+      "id": "V-24",
+      "track": "temporal",
+      "input": "得意先コード「C-7042」は、「四国鋼材卸株式会社」が2023年に取引を終了した際に廃止されたと記録されている。2026年になって、まったく別の業態である「近畿産業ガス販売株式会社」に同じコード「C-7042」が新規に割り当てられたと記載されている。重複解消バッチは、コードの一致を根拠に旧取引履歴を新会社に引き継ぐよう提案している。",
+      "question": "取引履歴を引き継ぐこの提案は認めてよいか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "REJECT MATCH",
+      "critical": true,
+      "critical_class": "HISTORICAL REASSIGNMENT",
+      "rationale": "An explicitly reissued code assigned to an unrelated later company refutes the identity a shared code alone would suggest."
+    },
+    {
+      "id": "V-25",
+      "track": "temporal",
+      "input": "「山陰酪農協同組合」の運営会社コード変更について、権威あるとされる2つの系統がそれぞれ発効日を記載しているが、一方は2025年10月1日、もう一方は2025年11月15日としており、日付が一致しない。",
+      "question": "発効日が一致しないこの変更をどう扱うべきか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "ESCALATE",
+      "critical": true,
+      "critical_class": "HISTORICAL REASSIGNMENT",
+      "rationale": "Two authoritative sources conflict on the governing effective date with nothing in the input to resolve it."
+    },
+    {
+      "id": "V-26",
+      "track": "address",
+      "input": "自動ジオコーダーは、「北陸精密工業株式会社」の旧レコードと新レコードの住所欄が文字列として完全に一致することから、両者を同一地点として統合するよう提案した。入力には、この地域で住居表示の変更が行われ、同じ表記が現在では別の街区を指すようになったことが明記されている。",
+      "question": "ジオコーダーの統合提案は認めてよいか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "REJECT MATCH",
+      "critical": true,
+      "critical_class": "WRONG STORE ASSIGNMENT",
+      "rationale": "An explicit administrative renumbering that makes the same address text point at a different block refutes the identity the matching string suggests."
+    },
+    {
+      "id": "V-27",
+      "track": "address",
+      "input": "出荷先レコードは、宛先名を「東北包装資材株式会社 資材センター」と記録している。",
+      "question": "この出荷先の都道府県と市区町村はどこか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "NO-DATA",
+      "critical": true,
+      "critical_class": "WRONG STORE ASSIGNMENT",
+      "rationale": "The passage states no prefecture, city, or corroborating clue at all, so the request returns unanswered rather than guessed."
+    },
+    {
+      "id": "V-28",
+      "track": "address",
+      "input": "「秋田建材センター株式会社」の住所欄は都道府県が空欄のまま登録されているが、番地と郵便番号は候補レコードのものと一致している。",
+      "question": "都道府県が空欄のこのレコードはどう扱うべきか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "ESCALATE",
+      "critical": true,
+      "critical_class": "WRONG STORE ASSIGNMENT",
+      "rationale": "A blank field corroborated by a matching banchi and postal code is something to judge, not nothing to judge, per boundary rule 8."
+    },
+    {
+      "id": "V-29",
+      "track": "address",
+      "input": "顧客マスタの重複点検で、候補となる2件のレコードが見つかった。いずれも社名を「九州青果流通株式会社」と記載しているが、建物名は一方が「たちばな第一ビル」、もう一方が「橘第一ビル」と、読みは同じだが漢字表記が異なっている。番地についても、一方は5番3号、もう一方は5番8号と食い違っている。",
+      "question": "建物名と番地が食い違うこの2件をどう扱うべきか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "KEEP SEPARATE",
+      "critical": true,
+      "critical_class": "WRONG LEGAL ENTITY",
+      "rationale": "A kanji spelling variant sharing one reading, plus a differing lot number, is an absence of support rather than a fact that refutes identity, per boundary rule 6."
+    },
+    {
+      "id": "V-30",
+      "track": "address",
+      "input": "「関東ガラス建材株式会社」の営業所と、別の取引先「甲信酪農機械株式会社」の営業所は、いずれも同じビルの住所を登録しているが、一方は3階、もう一方は8階の別の部屋であると記載されている。",
+      "question": "同じビルの異なる階にあるこの2件をどう扱うべきか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "KEEP SEPARATE",
+      "critical": false,
+      "critical_class": null,
+      "rationale": "Sharing a building level address while occupying different units in it states no relation worth recording between the two tenants."
+    },
+    {
+      "id": "V-31",
+      "track": "identifier",
+      "input": "顧客マスタの重複点検で、法人番号の識別子登録に関する2件の候補レコードが見つかった。1件目は登録名を「株式会社さくら」と記載し、2件目は読みは同じだが表記の異なる「株式会社櫻」と記載している。地番についても、一方は5番3号、もう一方は5番9号と食い違って記載されている。",
+      "question": "名称の表記と地番が食い違うこの2件をどう扱うべきか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "KEEP SEPARATE",
+      "critical": true,
+      "critical_class": "WRONG LEGAL ENTITY",
+      "rationale": "A same reading kanji variant together with a differing lot number remains unsupported rather than refuted, per boundary rule 6."
+    },
+    {
+      "id": "V-32",
+      "track": "identifier",
+      "input": "「中部薬品チェーン株式会社」の重複データ解消を進めるデータスチュワードが、法人番号5010033334445が一致する2件のレコードを統合するよう提案している。役割と法人格の種別、識別子の記載はすべて一致しているが、片方のレコードにのみ直近の取引履歴が記録されている。",
+      "question": "この統合提案は妥当か。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "SUGGEST MERGE",
+      "critical": true,
+      "critical_class": "UNREVERSIBLE MERGE WITHOUT EVIDENCE",
+      "rationale": "Identifier and legal-entity-type agreement support merging, but one record carries its own transaction history that the other lacks, a confirmation reason under boundary rule 9: medium-to-strong evidence plus a confirmation reason is SUGGEST MERGE, not AUTO-MERGE, and the proposal here is correctly accepted rather than rejected."
+    },
+    {
+      "id": "V-33",
+      "track": "identifier",
+      "input": "マージ提案は、個人事業主として登録された「たかはし燃料店」の適格請求書発行事業者番号と、法人として登録された「北関東鋼材商会株式会社」の法人番号が数字として一致することを根拠に、両者を統合するよう求めている。入力には、前者が個人の登録番号、後者が法人の法人番号であることが明記されている。",
+      "question": "この統合提案は認めてよいか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "REJECT MATCH",
+      "critical": true,
+      "critical_class": "WRONG TAX IDENTITY",
+      "rationale": "A numeric coincidence between an individual's invoice registration number and a corporate number crosses identifier domains, invalidating the match under boundary rule 10."
+    },
+    {
+      "id": "V-34",
+      "track": "identifier",
+      "input": "「山陽青果センター株式会社」について、旧ERPの得意先IDと新CRMのGUIDを対応付ける移行対応表が使われているが、この対応表自体は未検証であると明記されている。旧IDには既に計上済みの取引履歴がある。",
+      "question": "対応付けられたこの2件のレコードは統合してよいか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "SUGGEST MERGE",
+      "critical": true,
+      "critical_class": "UNREVERSIBLE MERGE WITHOUT EVIDENCE",
+      "rationale": "An unvalidated migration crosswalk is medium evidence, and existing history calls for a steward to confirm, per boundary rule 9."
+    },
+    {
+      "id": "V-35",
+      "track": "identifier",
+      "input": "「北陸精密工業株式会社」と「九州酪農機械株式会社」は、識別子も所在地も一切重ならない別々の取引先として登録されている。両社を結びつける記載は入力のどこにもない。",
+      "question": "この2社の関係をどう扱うべきか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "KEEP SEPARATE",
+      "critical": false,
+      "critical_class": null,
+      "rationale": "With no shared identifier, address, or stated relation, the two records are simply ordinary separate entities."
+    },
+    {
+      "id": "V-36",
+      "track": "requirements",
+      "input": "要件定義書のレビュー対象として、ポイント会員レコード「会員番号88123」と「会員番号88456」が並べて記載されているが、両者を結びつける記載は要件定義書のどこにもない。",
+      "question": "並べて提示されたこの2件の会員レコードをどう扱うべきか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "KEEP SEPARATE",
+      "critical": true,
+      "critical_class": "FALSE MERGE",
+      "rationale": "Two records merely listed together with no stated relation between them stay separate under boundary rule 1."
+    },
+    {
+      "id": "V-37",
+      "track": "requirements",
+      "input": "要件定義書は、請求先レコードの通貨コードが食い違う場合の統合可否について、判断基準を明記していない。「東海精密機械株式会社」の2件の請求先レコードは、通貨コードがそれぞれ異なると記載されている。",
+      "question": "通貨コードが食い違うこの2件はどう扱うべきか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "ESCALATE",
+      "critical": true,
+      "critical_class": "UNREVERSIBLE MERGE WITHOUT EVIDENCE",
+      "rationale": "The requirements leave no rule for this exact disagreement, so it is material for judgment that the business must decide."
+    },
+    {
+      "id": "V-38",
+      "track": "requirements",
+      "input": "引き継ぎ資料には、仕入先「北陸食品ロジスティクス株式会社」のレコードに担当部署欄があるという記載がある。",
+      "question": "この仕入先の担当部署はどこか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "NO-DATA",
+      "critical": true,
+      "critical_class": "CROSS-CUSTOMER CONTAMINATION",
+      "rationale": "The passage names the field but states no value and nothing else corroborates it, so the request returns unanswered."
+    },
+    {
+      "id": "V-39",
+      "track": "requirements",
+      "input": "移行方針は、廃止済みの旧ベンダーID体系を新しいERPベンダーID体系と紐付けてはならないと明記している。今回の移行スクリプトは、廃止済みの旧ベンダーID「V-2091」を新しいERPベンダーID「E-5588」に対応付けるよう提案している。",
+      "question": "このマッピング提案は認めてよいか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "REJECT MATCH",
+      "critical": true,
+      "critical_class": "CROSS-CUSTOMER CONTAMINATION",
+      "rationale": "A stated migration policy explicitly prohibits this cross reference, which refutes the proposed mapping outright."
+    },
+    {
+      "id": "V-40",
+      "track": "requirements",
+      "input": "要件定義書は、レポーティング専用のコストセンターレコードを、その所属法人のレコードと常に関係として記録すべきと定めている。「甲信ガラス加工株式会社」のコストセンターレコードには、所属法人との対応関係が明記されている。",
+      "question": "このコストセンターレコードをどう扱うべきか。",
+      "allowed": [
+        "AUTO-MERGE",
+        "SUGGEST MERGE",
+        "LINK AS RELATED",
+        "KEEP SEPARATE",
+        "REJECT MATCH",
+        "ESCALATE",
+        "NO-DATA"
+      ],
+      "expected": "LINK AS RELATED",
+      "critical": false,
+      "critical_class": null,
+      "rationale": "The requirement itself calls for recording this reporting relation between the two records rather than merging or ignoring it."
+    }
+  ],
+  "scoring": {
+    "merge_answers": [
+      "AUTO-MERGE",
+      "SUGGEST MERGE"
+    ]
+  }
+}

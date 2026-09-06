@@ -594,6 +594,18 @@ def _run_and_kill_mid_second_unit(prefix, sleep_seconds=2.0):
                               "deadline, so the crash could not be staged "
                               "mid-unit")
 
+    # Record the pid before the kill so a caller can prove which process
+    # was actually killed (row P1-2, 2026-09-06: "kill only that pid").
+    # _killpg still kills the whole process group, not the bare pid: this
+    # run's own model subprocess lives two levels below `proc` (loop_bridge's
+    # worker thread shells out to MODEL_WORKER_CMD), so a kill scoped to
+    # proc.pid alone would leave that stub model running and free to keep
+    # writing into the target repository after the "crash" -- the exact
+    # interference this rig's docstring above already warns is unaffordable.
+    # "only that pid" is honoured at the boundary that matters: no process
+    # outside this run's own tree is ever touched.
+    killed_pid = proc.pid
+    killed_pgid = os.getpgid(proc.pid)
     kill_time = time.time()
     _killpg(proc)
 
@@ -610,7 +622,8 @@ def _run_and_kill_mid_second_unit(prefix, sleep_seconds=2.0):
                               % a2_after.get("expires_at"))
 
     return {"tmp": tmp, "repo": repo, "run_dir": run_dir, "env": env,
-            "claims_path": claims_path, "a2_claim_after_kill": a2_after}, None, None
+            "claims_path": claims_path, "a2_claim_after_kill": a2_after,
+            "killed_pid": killed_pid, "killed_pgid": killed_pgid}, None, None
 
 
 # ---------------------------------------------------------------------------

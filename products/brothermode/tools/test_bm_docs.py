@@ -987,6 +987,26 @@ def _tag_exists(tag):
     return code == 0
 
 
+_SIMPLE_VERSION_TAG = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
+
+
+def _previous_patch_tag(tag):
+    """The tag one patch behind `tag` (v1.0.9 -> v1.0.8), or None when `tag`
+    is not a plain vX.Y.Z tag or its patch is already 0 (no lower patch in
+    the same minor to name). PUBLIC_INSTALL_TAG is bumped by hand one patch
+    ahead of the last cut tag in the same change that names the next
+    release candidate (docs/RELEASE.md, "The version law"), so that gap
+    between install_target_tag and the last real tag is an expected,
+    momentary release state, not a defect."""
+    m = _SIMPLE_VERSION_TAG.match(tag)
+    if not m:
+        return None
+    major, minor, patch = (int(g) for g in m.groups())
+    if patch == 0:
+        return None
+    return "v%d.%d.%d" % (major, minor, patch - 1)
+
+
 class TestReleaseTruth(unittest.TestCase):
     """Loop 1, requirement 3: a release-truth test, extended for the
     release-closure program (Loop 0) to protect BOTH identities a tree can
@@ -1056,13 +1076,35 @@ class TestReleaseTruth(unittest.TestCase):
         never of a published clone: outside the private hub, an absent tag
         is withheld history (see tools/bm_export_seam.py), not a broken
         pin, and the check reports what it could not test instead of
-        failing on an empty comparison."""
+        failing on an empty comparison.
+
+        A SECOND, INSIDE-THE-HUB gap needs the same NO-DATA treatment: the
+        version bump PUBLIC_INSTALL_TAG names (release invariant, version
+        truth) lands one commit before the tag is actually cut, and cutting
+        it is a founder-gated step (docs/RELEASE.md). A candidate ahead of
+        its tag is not a broken pin, it is the release process caught
+        mid-step, and the previous tag still resolving is what proves the
+        gap is that and not an abandoned bump. Recorded lesson (Kay Vault
+        40-Failures, "a tag-pinned test shipped into an export that carries
+        no tags reads red a public reader cannot act on"): a check whose
+        precondition is a tag not yet cut reads NO-DATA, decided from the
+        repository's own state, never a pass and never a red the reader
+        cannot act on. When neither the target tag nor the previous patch
+        tag resolves, this still fails: that is not a release in progress,
+        it is a broken pin."""
         target = FACTS["install_target_tag"]
         ref = "refs/tags/%s" % target
         _seam.no_data_for_absent_names(
             [] if _tag_exists(target) else [ref])
-        self.assertTrue(
-            _tag_exists(target),
+        if _tag_exists(target):
+            return
+        previous = _previous_patch_tag(target)
+        if previous and _tag_exists(previous):
+            self.skipTest(
+                "NO-DATA: install target tag %s not cut yet; the previous "
+                "tag %s resolves; a cut without this tag is refused by the "
+                "release gates" % (target, previous))
+        self.fail(
             "install_target_tag %s does not exist in this repository"
             % target)
 
@@ -6253,6 +6295,68 @@ class TestTheAbsentPageSeamIsDrivenBothWays(unittest.TestCase):
         self.assertIn("test_bm_no_such_suite.py", printed,
                       "the gate did not name the suite it could not run")
         self.assertIn("NO-DATA is not a pass", printed)
+
+
+class TestTheInstallTargetTagCandidateIsNoDataNotFail(unittest.TestCase):
+    """A candidate install_target_tag one patch ahead of the last cut tag
+    (v1.0.9 named while only v1.0.8 is cut) used to read FAIL inside the
+    hub, colliding with the version-truth invariant that demands the bump
+    land the moment VERSION does. test_the_public_install_target_tag_
+    resolves_in_git now tells that state apart from a genuinely broken pin
+    by checking whether the previous patch tag resolves; these two cases
+    drive that branch both ways against a faked tag list, rather than
+    against whichever tags this checkout happens to carry.
+
+    The seam faked here is _tag_exists itself: a plain module-level
+    function this suite already resolves by name at call time (see
+    TestTheAbsentPageSeamIsDrivenBothWays._with_marker for the same trick
+    played on IN_PRIVATE_HUB), so swapping the module global for the
+    duration of one call is obeyed by the real test method without it
+    needing an injection parameter of its own."""
+
+    def _with_fake_tags(self, present, fn):
+        original = globals()["_tag_exists"]
+        globals()["_tag_exists"] = lambda tag: tag in present
+        try:
+            return fn()
+        finally:
+            globals()["_tag_exists"] = original
+
+    def _target_and_previous(self):
+        target = FACTS["install_target_tag"]
+        previous = _previous_patch_tag(target)
+        self.assertIsNotNone(
+            previous, "install_target_tag %s is not a plain vX.Y.Z tag, so "
+            "this test cannot construct the candidate case" % target)
+        return target, previous
+
+    def test_a_candidate_one_patch_ahead_of_a_cut_tag_is_no_data(self):
+        target, previous = self._target_and_previous()
+        case = TestReleaseTruth(
+            "test_the_public_install_target_tag_resolves_in_git")
+        with self.assertRaises(unittest.SkipTest) as ctx:
+            self._with_fake_tags(
+                {previous},
+                case.test_the_public_install_target_tag_resolves_in_git)
+        reason = str(ctx.exception)
+        self.assertIn("NO-DATA", reason)
+        self.assertIn(target, reason,
+                      "the NO-DATA reason does not name the tag that is not "
+                      "cut yet")
+        self.assertIn(previous, reason,
+                      "the NO-DATA reason does not name the previous tag "
+                      "that proves this is a release in progress")
+
+    def test_neither_the_target_nor_the_previous_tag_resolving_still_fails(self):
+        target, _previous = self._target_and_previous()
+        case = TestReleaseTruth(
+            "test_the_public_install_target_tag_resolves_in_git")
+        with self.assertRaises(AssertionError) as ctx:
+            self._with_fake_tags(
+                set(), case.test_the_public_install_target_tag_resolves_in_git)
+        self.assertIn(target, str(ctx.exception),
+                      "a genuinely missing tag with no previous tag either "
+                      "must still fail, naming the tag it could not find")
 
 
 if __name__ == "__main__":

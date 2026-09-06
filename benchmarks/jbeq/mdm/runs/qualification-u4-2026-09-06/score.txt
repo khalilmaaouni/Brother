@@ -1,0 +1,26 @@
+scorer: 2026-09-06.2 (REJECT MATCH and KEEP SEPARATE score as one class for a refuted identity, founder ruling 2026-09-06)
+address              1 of 5
+entity-object        3 of 5
+hierarchy            5 of 5
+identifier           4 of 5
+match-or-no-merge    5 of 5
+requirements         4 of 5
+survivorship         5 of 5
+temporal             3 of 5
+equivalence class W4-05: expected KEEP SEPARATE, engine said REJECT MATCH (scored correct, scorer 2026-09-06.2)
+equivalence class W4-35: expected KEEP SEPARATE, engine said REJECT MATCH (scored correct, scorer 2026-09-06.2)
+equivalence class W4-40: expected KEEP SEPARATE, engine said REJECT MATCH (scored correct, scorer 2026-09-06.2)
+engine-decided: 21 of 30
+direct-answered (not blind, not evidence about the engine): 9 of 10
+critical WRONG W4-03 [HISTORICAL REASSIGNMENT] expected REJECT MATCH, answered LINK AS RELATED
+critical WRONG W4-04 [WRONG PAYER] expected REJECT MATCH, answered LINK AS RELATED
+critical WRONG W4-21 [WRONG STORE ASSIGNMENT] expected LINK AS RELATED, answered AUTO-MERGE  FALSE MERGE
+critical WRONG W4-22 [WRONG STORE ASSIGNMENT] expected ESCALATE, answered KEEP SEPARATE
+critical WRONG W4-23 [CROSS-TENANT DATA LEAK] expected REJECT MATCH, answered LINK AS RELATED
+critical WRONG W4-24 [WRONG STORE ASSIGNMENT] expected LINK AS RELATED, answered AUTO-MERGE  FALSE MERGE
+critical WRONG W4-26 [HISTORICAL REASSIGNMENT] expected AUTO-MERGE, answered SUGGEST MERGE  CONSERVATIVE
+critical WRONG W4-36 [WRONG STORE ASSIGNMENT] expected LINK AS RELATED, answered KEEP SEPARATE  CONSERVATIVE
+critical false merges: 2 of 32 (W4-21, W4-24)
+critical wrong: 8 of 32 (W4-03, W4-04, W4-21, W4-22, W4-23, W4-24, W4-26, W4-36)
+conservative wrongs: 2 (W4-26, W4-36)
+JBEQ-MDM NOT READY

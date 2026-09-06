@@ -462,6 +462,80 @@ class GateCounts(unittest.TestCase):
                          ("NO-DATA", "NO-DATA"))
 
 
+class BindVerb(unittest.TestCase):
+    """bind is the one first-run binding step (row V2): it writes
+    {"vault": PATH} into bm_vault.py's own CONFIG_PATH, so a scratch HOME
+    proves the write never touches the real machine's config."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="bm-vault-cli-bind-")
+        self.home = os.path.join(self.tmp, "home")
+        os.makedirs(self.home)
+        self.env = _scratch_env(self.home)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_bind_writes_config_pointing_at_the_chosen_folder(self):
+        chosen = os.path.join(self.tmp, "a-non-default-folder")
+        code, out = run(["bind", chosen], env=self.env)
+        self.assertEqual(code, 0, out)
+        cfg_path = os.path.join(self.home, ".claude", "bm_vault.json")
+        with open(cfg_path, encoding="utf-8") as f:
+            cfg = json.load(f)
+        self.assertEqual(cfg.get("vault"), chosen)
+        self.assertTrue(os.path.isdir(chosen))
+
+    def test_bind_creates_the_folder_if_missing(self):
+        chosen = os.path.join(self.tmp, "not-yet-created", "nested")
+        self.assertFalse(os.path.isdir(chosen))
+        code, out = run(["bind", chosen], env=self.env)
+        self.assertEqual(code, 0, out)
+        self.assertTrue(os.path.isdir(chosen))
+
+    def test_bind_merges_rather_than_replaces_the_existing_config(self):
+        cfg_dir = os.path.join(self.home, ".claude")
+        os.makedirs(cfg_dir)
+        with open(os.path.join(cfg_dir, "bm_vault.json"), "w", encoding="utf-8") as f:
+            json.dump({"vault": "/old/path", "other_key": "keep-me"}, f)
+        chosen = os.path.join(self.tmp, "new-folder")
+        code, out = run(["bind", chosen], env=self.env)
+        self.assertEqual(code, 0, out)
+        with open(os.path.join(cfg_dir, "bm_vault.json"), encoding="utf-8") as f:
+            cfg = json.load(f)
+        self.assertEqual(cfg.get("vault"), chosen)
+        self.assertEqual(cfg.get("other_key"), "keep-me")
+
+    def test_bind_then_default_vault_resolves_to_the_bound_folder(self):
+        """The done_check's own words: the config points at the chosen
+        folder with no manual step. Proven by asking bm_vault.py's own
+        resolver, the same one doctor and every other verb calls."""
+        chosen = os.path.join(self.tmp, "resolved-folder")
+        code, out = run(["bind", chosen], env=self.env)
+        self.assertEqual(code, 0, out)
+        code, out = run(["doctor"], env=self.env)
+        self.assertEqual(code, 0, out)
+        self.assertIn("resolved: %s" % chosen, out)
+
+    def test_bind_no_data_when_config_path_cannot_be_written(self):
+        # A file where the config DIRECTORY should be makes os.makedirs
+        # (and therefore the write) fail with a real OSError, exercising the
+        # boundary-call failure path rather than only its happy path.
+        claude_dir = os.path.join(self.home, ".claude")
+        with open(claude_dir, "w", encoding="utf-8") as f:
+            f.write("not a directory")
+        chosen = os.path.join(self.tmp, "irrelevant-folder")
+        code, out = run(["bind", chosen], env=self.env)
+        self.assertEqual(code, 1, out)
+        self.assertIn("NO-DATA", out)
+
+    def test_bind_wrong_argument_count_exits_two(self):
+        code, out = run(["bind"], env=self.env)
+        self.assertEqual(code, 2, out)
+        code, out = run(["bind", "a", "b"], env=self.env)
+        self.assertEqual(code, 2, out)
+
+
 class DoctorVerb(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="bm-vault-cli-doctor-")
@@ -500,6 +574,84 @@ class DoctorVerb(unittest.TestCase):
         code, out = run(["doctor"], env=_scratch_env(home))
         self.assertEqual(code, 0, out)
         self.assertIn("NO-DATA", out)
+
+
+class OneDocumentedSurface(unittest.TestCase):
+    """Row V2: doctor, census and recall reach a person through one
+    documented surface, and the same command through the skill prints the
+    same output as the script called directly.
+
+    The skill files never reimplement doctor/census/recall: references/
+    memory.md and skills/start/SKILL.md instruct running this exact CLI
+    verb, verbatim, so "through the skill" and "the script called directly"
+    are the same subprocess call. This proves both halves: the docs name
+    the CLI route for all three verbs (so a reader is never sent to a
+    second implementation), and the CLI itself is deterministic across two
+    independent invocations under the same fixture, so whichever surface a
+    call arrives from, it prints identical output."""
+
+    REFS_DIR = os.path.join(os.path.dirname(HERE), "references")
+    SKILLS_DIR = os.path.join(os.path.dirname(HERE), "skills")
+
+    def _read(self, path):
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+
+    def test_memory_reference_names_the_cli_route_for_all_three_verbs(self):
+        # Whitespace-normalized: prose wraps a quoted phrase across a
+        # source line break, which would otherwise defeat a literal
+        # substring check without changing what a reader sees rendered.
+        text = " ".join(self._read(os.path.join(self.REFS_DIR, "memory.md")).split())
+        for phrase in ("vault doctor", "vault census", "vault recall",
+                       "bm_vault_cli.py"):
+            self.assertIn(phrase, text)
+
+    def test_start_skill_names_the_bind_and_route_commands(self):
+        text = self._read(os.path.join(self.SKILLS_DIR, "start", "SKILL.md"))
+        self.assertIn("bm_vault_cli.py", text)
+        self.assertIn("bind", text)
+
+    def test_doctor_output_is_identical_whichever_surface_calls_it(self):
+        tmp = tempfile.mkdtemp(prefix="bm-vault-cli-parity-")
+        try:
+            home = os.path.join(tmp, "home")
+            os.makedirs(os.path.join(home, ".claude"))
+            vault = os.path.join(tmp, "v")
+            _clean_vault(vault)
+            with open(os.path.join(home, ".claude", "bm_vault.json"),
+                      "w", encoding="utf-8") as f:
+                json.dump({"vault": vault}, f)
+            env = _scratch_env(home)
+            # "the script called directly" and "through the skill" are the
+            # same command (the skill's own text is `bm_vault_cli.py
+            # doctor`, nothing else); two independent calls stand in for
+            # the two callers and must print byte-identical output.
+            code_a, out_a = run(["doctor"], env=env)
+            code_b, out_b = run(["doctor"], env=env)
+            self.assertEqual(code_a, 0, out_a)
+            self.assertEqual(code_a, code_b)
+            self.assertEqual(out_a, out_b)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_census_output_is_identical_whichever_surface_calls_it(self):
+        tmp = tempfile.mkdtemp(prefix="bm-vault-cli-parity-census-")
+        try:
+            home = os.path.join(tmp, "home")
+            os.makedirs(os.path.join(home, ".claude"))
+            vault = os.path.join(tmp, "v")
+            _clean_vault(vault)
+            env = _scratch_env(home)
+            p = subprocess.run([sys.executable, BM_VAULT, "index", "--vault", vault],
+                               env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                               universal_newlines=True)
+            self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+            code_a, out_a = run(["census", "--vault", vault], env=env)
+            code_b, out_b = run(["census", "--vault", vault], env=env)
+            self.assertEqual(code_a, 0, out_a)
+            self.assertEqual(out_a, out_b)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
 
 if __name__ == "__main__":

@@ -70,12 +70,20 @@ WHAT IT DOES, in order:
      prints that it did) for every subprocess call that pushes, and pushes
      that commit to its OWN branch (release/<version> for a tagged
      release, export/<commit> otherwise) with a plain (non-force) push,
-     then opens a pull request against <branch> with gh and merges it.
+     then opens a pull request against <branch> with gh, WAITS for the
+     ruleset's own required-fast check to conclude (wait_for_required_fast:
+     polls every 30 seconds, up to a 25 minute timeout), and merges it only
+     on a passing conclusion. A failing check refuses (FAIL, exit nonzero)
+     without merging and without closing the pull request; a check that
+     never appears within 3 minutes, or never concludes within the 25
+     minute timeout, refuses as NO-DATA (exit 2), same reasoning. Either
+     way the pull request is left open, unmerged, for a human to read.
      THE PULL REQUEST IS NOT CEREMONY: since the ruleset of row E64 the
-     public repository requires a pull request on main, refuses non
-     fast-forward and deletion, and grants no bypass, so the direct push
-     this exporter used to make is refused with GH013 and the honest route
-     is the one a contributor takes. NEVER --force at any step: an append
+     public repository requires a pull request on main with a passing
+     required-fast check, refuses non fast-forward and deletion, and
+     grants no bypass, so the direct push this exporter used to make is
+     refused with GH013 and the honest route is the one a contributor
+     takes, required check included. NEVER --force at any step: an append
      that is not a fast-forward is a design assumption that broke, not a
      reason to overwrite history. The gates are NOT re-run on this second tree: its
      file content is byte-identical to the orphan already gated in step 3,
@@ -103,13 +111,16 @@ Python 3, standard library only. No network beyond git's own fetch/push.
 """
 import argparse
 import difflib
+import glob
 import importlib.util
+import json
 import os
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -196,6 +207,16 @@ README_PROVE_RE = re.compile(r"python3 scripts/test_[A-Za-z0-9_]+\.py")
 #: tree's root exactly as a fresh clone would run it.
 READINESS_GATE_REL = os.path.join("scripts", "readiness_gate.py")
 
+#: Every product battery the export ships. A products/<name>/tools/
+#: test_all.py REFUSES TO START while its SUITES names a test_*.py the tree
+#: lacks, so a suite the denylist withholds (or the allowlist never
+#: carried) turns the whole public battery red at a line a reader cannot
+#: act on: the E70 class again. test_bm_vault_contract.py did exactly
+#: this on the public tip from 2026-08-31 to 2026-09-04. `--check-only`
+#: asks the inventory question without running a suite, so run_gates asks
+#: it of every battery in the candidate tree on every export.
+BATTERY_GLOB = os.path.join("products", "*", "tools", "test_all.py")
+
 #: The GitHub CLI. Since the ruleset of row E64 (pull request required on
 #: main, non fast-forward and deletion refused, no bypass) a direct push to
 #: main is refused with GH013, so the release route runs through a pull
@@ -207,6 +228,24 @@ GH_BIN = "gh"
 #: cut from the MERGED tip of the protected branch, never from this one.
 RELEASE_BRANCH_PREFIX = "release/"
 EXPORT_BRANCH_PREFIX = "export/"
+
+#: Ruleset 22191180 on the public repository: pull request required on
+#: main, required status check "required-fast", no bypass. A merge
+#: attempted while that check is still pending either gets refused by the
+#: ruleset or, worse, races a check that has not finished yet, so
+#: wait_for_required_fast below polls it before push_appended ever calls
+#: `gh pr merge`.
+REQUIRED_CHECK_NAME = "required-fast"
+REQUIRED_CHECK_REPO = "khalilmaaouni/Brother"
+#: Constants, not guesses, per this module's own documentation rule.
+#: 30 seconds between polls; a 25 minute total budget before this exporter
+#: reports NO-DATA rather than merge on a check it never saw conclude; 3
+#: minutes' grace before a check that has not even been SCHEDULED yet is
+#: treated as "the workflow is not wired to this branch" rather than
+#: "still queued".
+REQUIRED_CHECK_POLL_SECONDS = 30
+REQUIRED_CHECK_TIMEOUT_SECONDS = 25 * 60
+REQUIRED_CHECK_APPEAR_GRACE_SECONDS = 3 * 60
 
 
 def load_allowlist(path=None):
@@ -1044,7 +1083,12 @@ def run_gates(export_dir, identity_dir, baseline_dir=None):
     BROTHER_PRIVATE_TERMS in its environment (cleanse.sh and
     identity_guard.py read that variable, private_terms_scan.py also gets
     it as --terms), so the three can never disagree about which file they
-    checked. Returns (all_ok, [verdict lines])."""
+    checked. The fifth gate, battery_inventory, runs `tools/test_all.py
+    --check-only` from every products/<name> in the candidate tree that
+    ships one (BATTERY_GLOB): a battery whose SUITES names a file the
+    export withholds refuses to start, and that refusal belongs here, at
+    export time, never on a public reader's screen. Returns (all_ok,
+    [verdict lines])."""
     terms_file = (os.environ.get("BROTHER_PRIVATE_TERMS")
                   or DEFAULT_TERMS_FILE)
     gate_env = dict(os.environ)
@@ -1069,12 +1113,24 @@ def run_gates(export_dir, identity_dir, baseline_dir=None):
                      "--terms", terms_file, "--range", "HEAD"],
                     export_dir))
 
+    batteries = sorted(glob.glob(os.path.join(export_dir, BATTERY_GLOB)))
+    for battery in batteries:
+        product_dir = os.path.dirname(os.path.dirname(battery))
+        checks.append(("battery_inventory %s"
+                       % os.path.relpath(product_dir, export_dir),
+                       [sys.executable, os.path.join("tools", "test_all.py"),
+                        "--check-only"],
+                       product_dir))
+
     all_ok = True
     lines = []
     for name, cmd, cwd in checks:
         ok, verdict = run_gate(cmd, cwd, name, env=gate_env)
         lines.append(verdict)
         all_ok = all_ok and ok
+    if not batteries:
+        lines.append("battery_inventory: no %s in the candidate tree, "
+                     "nothing to check" % BATTERY_GLOB)
 
     secrets_ok, secrets_lines = check_secrets(export_dir, baseline_dir)
     lines.extend(secrets_lines)
@@ -1094,8 +1150,132 @@ def release_branch_name(tag, export_rev):
     return EXPORT_BRANCH_PREFIX + (export_rev or "unknown")[:12]
 
 
+def _pr_number_from_ref(pr_ref):
+    """The pull request number out of `pr_ref`, the same string
+    push_appended already tracks for `gh pr merge` (a URL when gh printed
+    one, the branch name as its own fallback when it did not). `gh pr
+    checks` accepts a number, a URL or a branch name alike (gh pr checks
+    --help), so a plain URL works there too; this only matters so the
+    printed FAIL/NO-DATA lines below can name the pull request the way a
+    human reading them expects, a bare number, rather than the full URL a
+    second time."""
+    match = re.search(r"/pull/(\d+)", pr_ref)
+    return match.group(1) if match else pr_ref
+
+
+def _required_fast_check(pr_ref, repo, cwd, run):
+    """One `gh pr checks --json` read of REQUIRED_CHECK_NAME on `pr_ref`.
+    Returns (found, bucket, link, verdict_line).
+
+    `found` is False when REQUIRED_CHECK_NAME is not in the JSON at all
+    yet (the ruleset's workflow can take a few seconds to even get
+    scheduled after `gh pr create` returns, or gh itself failed to answer),
+    never conflated with a bucket the JSON did report. `bucket` is gh's
+    own pass/fail/pending/skipping/cancel categorization (`gh pr checks
+    --help`: "the bucket field... categorizes the state field into pass,
+    fail, pending, skipping, or cancel"), read from --json rather than the
+    bare exit code: `gh help exit-codes` documents 0/1/2/4 for the CLI in
+    general and `gh pr checks --help` adds exit 8 for "pending" in its own
+    non-json summary mode, but neither says anything about ONE named check
+    against however many OTHERS a pull request happens to carry, and this
+    exporter must act on required-fast alone. `link` is that check's own
+    html url, printed verbatim in the FAIL line so a human can open the
+    exact run that failed."""
+    proc = run([GH_BIN, "pr", "checks", pr_ref, "-R", repo, "--json",
+                "name,bucket,link,state"], cwd)
+    stdout = proc.stdout or ""
+    stderr = proc.stderr or ""
+    text = (stdout + stderr).strip()
+    try:
+        rows = json.loads(stdout) if stdout.strip() else []
+    except ValueError:
+        verdict = text.splitlines()[-1] if text else "(no output)"
+        return False, None, None, ("gh pr checks: could not parse its "
+                                    "--json output (exit %s, %s)"
+                                    % (proc.returncode, verdict))
+    for row in rows:
+        if row.get("name") == REQUIRED_CHECK_NAME:
+            return True, row.get("bucket"), row.get("link"), (
+                "gh pr checks: %s bucket=%s" % (REQUIRED_CHECK_NAME,
+                                                 row.get("bucket")))
+    return (False, None, None,
+            "gh pr checks: %s not yet listed on %s" % (
+                REQUIRED_CHECK_NAME, pr_ref))
+
+
+def wait_for_required_fast(pr_ref, repo=REQUIRED_CHECK_REPO, cwd=None,
+                            run=None, sleep=None, clock=None):
+    """Wait for the required-fast check to CONCLUDE on the release pull
+    request `pr_ref`, and act on its result honestly rather than merging
+    blind: ruleset 22191180 on the public repository requires a passing
+    required-fast check and grants no bypass, so push_appended calls this
+    between `gh pr create` and `gh pr merge`.
+
+    Polls `gh pr checks <pr_ref> -R <repo> --json ...` (see
+    _required_fast_check) every REQUIRED_CHECK_POLL_SECONDS, for up to
+    REQUIRED_CHECK_TIMEOUT_SECONDS. Three non-passing outcomes, each
+    printed and returned as an exit code for the caller to return
+    directly, never silently retried past:
+
+      - the check concludes with a bucket other than "pass": FAIL, quoting
+        the check's own html url. EXIT_REFUSED. Nothing is merged and the
+        pull request is left open exactly as `gh pr create` left it: the
+        evidence stays for a human to read, this exporter closes nothing.
+      - the check never even appears within REQUIRED_CHECK_APPEAR_GRACE_
+        SECONDS: NO-DATA, EXIT_NODATA. Most likely the required workflow
+        is not wired to run on this base branch at all, a repository
+        configuration problem this exporter cannot fix by waiting longer.
+      - the check appears but never concludes (stays "pending") within
+        REQUIRED_CHECK_TIMEOUT_SECONDS: NO-DATA, EXIT_NODATA. A slow or
+        stuck run is not a pass, and this exporter treats "I could not
+        tell" and "it is fine" as the same non-pass everywhere else in
+        this module (see run_gates' own docstring); this wait is no
+        exception.
+
+    `run`, `sleep` and `clock` are seams, the same shape as the `run` seam
+    push_appended's own docstring already documents: they default to this
+    module's `_run`, `time.sleep` and `time.monotonic`, so a test can drive
+    the whole 25 minute budget against a fake gh in well under a second.
+    Returns (exit_code, [lines]): exit_code is EXIT_OK when required-fast
+    passed and the caller should proceed to merge."""
+    run = run or _run
+    sleep = sleep or time.sleep
+    clock = clock or time.monotonic
+    pr_number = _pr_number_from_ref(pr_ref)
+    lines = []
+    start = clock()
+    appeared = False
+    while True:
+        found, bucket, link, verdict = _required_fast_check(
+            pr_ref, repo, cwd, run)
+        lines.append(verdict)
+        if found:
+            appeared = True
+            if bucket == "pass":
+                lines.append("required-fast: PASS on pull request %s"
+                              % pr_number)
+                return EXIT_OK, lines
+            if bucket not in (None, "pending"):
+                lines.append("FAIL: required-fast failed on the release "
+                              "pull request %s: %s"
+                              % (pr_number, link or "(no check url)"))
+                return EXIT_REFUSED, lines
+        elapsed = clock() - start
+        if not appeared and elapsed >= REQUIRED_CHECK_APPEAR_GRACE_SECONDS:
+            lines.append("NO-DATA: no required-fast check appeared on "
+                          "pull request %s (is the workflow on main?)"
+                          % pr_number)
+            return EXIT_NODATA, lines
+        if elapsed >= REQUIRED_CHECK_TIMEOUT_SECONDS:
+            lines.append("NO-DATA: required-fast did not conclude within "
+                          "25 minutes on pull request %s" % pr_number)
+            return EXIT_NODATA, lines
+        sleep(REQUIRED_CHECK_POLL_SECONDS)
+
+
 def push_appended(allowlist, remote, branch, root=ROOT, tag=None,
-                   bootstrap=False, run=None, require_signed=False):
+                   bootstrap=False, run=None, require_signed=False,
+                   wait_sleep=None, wait_clock=None):
     """The real push path, kept separate from gating (see module docstring:
     ORPHAN ON PURPOSE). Fetches `remote`'s current tip, rebuilds the same
     allowlisted content as a new commit ON TOP of it (an honest append),
@@ -1104,7 +1284,10 @@ def push_appended(allowlist, remote, branch, root=ROOT, tag=None,
     requires a pull request on main, refuses non fast-forward and deletion,
     and grants no bypass, so a direct push is refused with GH013 and the
     only honest route is the one a human contributor takes. Nothing is
-    forced, at any step.
+    forced, at any step. Between opening the pull request and merging it,
+    this waits for the ruleset's own required-fast check via
+    wait_for_required_fast: a FAIL or a NO-DATA (never appeared, or never
+    concluded) refuses the merge and leaves the pull request open.
 
     `bootstrap=True` is the one exception: when the remote has no branch at
     all there is no protected branch to open a pull request against, so
@@ -1128,7 +1311,13 @@ def push_appended(allowlist, remote, branch, root=ROOT, tag=None,
     `require_signed`, with `tag` only: refuse rather than create an
     unsigned tag when no signing key is configured (S5, roadmap; founder
     gated, see signing_configured above). Without it an unsigned tag is
-    still created, and the returned lines say so."""
+    still created, and the returned lines say so.
+
+    `wait_sleep` and `wait_clock` are passed straight through to
+    wait_for_required_fast as its own `sleep` and `clock` seams (default
+    time.sleep and time.monotonic); named separately from `run` here
+    because a test that wants to fast-forward the 25 minute wait without
+    also replacing every git/gh subprocess call needs the two seams apart."""
     run = run or _run
     lines = []
     with tempfile.TemporaryDirectory(prefix="brother-export-push-") as d:
@@ -1289,6 +1478,17 @@ def push_appended(allowlist, remote, branch, root=ROOT, tag=None,
                     if l.strip().startswith("http")]
             pr_ref = urls[-1] if urls else target
             lines.append("PULL-REQUEST: %s" % pr_ref)
+            # Ruleset 22191180: main requires the required-fast check and
+            # grants no bypass, so this waits for it to CONCLUDE rather
+            # than let `gh pr merge` below race a check still pending or
+            # merge past one that already failed. FAIL and NO-DATA alike
+            # refuse without merging and without closing the pull request:
+            # the evidence stays open for a human to read.
+            wait_code, wait_lines = wait_for_required_fast(
+                pr_ref, cwd=d, run=run, sleep=wait_sleep, clock=wait_clock)
+            lines.extend(wait_lines)
+            if wait_code != EXIT_OK:
+                return wait_code, lines
             merge = run([GH_BIN, "pr", "merge", pr_ref, "--merge",
                           "--delete-branch"], d, env=env)
             merge_out = ((merge.stdout or "") + (merge.stderr or "")).strip()

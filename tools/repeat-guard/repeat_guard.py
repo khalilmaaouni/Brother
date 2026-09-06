@@ -67,6 +67,7 @@ counting loop treats UNKNOWN as a no-op: it neither resets a real
 failure streak (unlike an actual success) nor extends one (unlike an
 actual failure).
 """
+import datetime
 import hashlib
 import json
 import os
@@ -159,6 +160,13 @@ def read_attempts(path, sig):
             if rec.get("sig") == sig:
                 out.append(rec)
     return out
+
+
+def _now_ts():
+    """ISO 8601 UTC with seconds, e.g. "2026-09-06T12:34:56Z". Matches
+    products/brothermode/tools/vault_recall_hook.py's own _iso_ts() so both
+    hooks' rows share one clock format."""
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def record(path, rec):
@@ -310,7 +318,7 @@ def post(payload):
         ok, note = False, "inferred: " + inferred_line
     else:
         ok, note = None, "no exit code and no failure signature in output"
-    record(state_path(payload.get("session_id")), {
+    row = {
         "sig": sig,
         "approach": shown,
         "ok": ok,
@@ -319,7 +327,16 @@ def post(payload):
         "success": success,
         "inferred_fail": inferred_line is not None,
         "err": note,
-    })
+    }
+    # "ts" (learning_loop item 5): no row here ever carried a timestamp, so a
+    # repeat could not be ordered against the lesson shown for it. Assigned
+    # after the row above is built, so a broken clock leaves the row exactly
+    # as it was before this addition rather than losing it.
+    try:
+        row["ts"] = _now_ts()
+    except Exception:  # sbe: allow-silent a broken clock must never cost the row
+        pass
+    record(state_path(payload.get("session_id")), row)
     return 0
 
 

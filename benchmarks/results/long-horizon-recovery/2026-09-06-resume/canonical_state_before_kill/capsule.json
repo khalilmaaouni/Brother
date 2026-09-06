@@ -1,0 +1,68 @@
+{
+ "buckets": {
+  "abandoned": [],
+  "active": [],
+  "integrated": [
+   "A1"
+  ],
+  "pending": [
+   "A2"
+  ],
+  "unclear": []
+ },
+ "canonical_revision": "4cd78db049560233283138ea7704288925bebd73",
+ "environment": {
+  "model_adapter": "the product's own worker adapter",
+  "runs_root": "<SCRATCH_ROOT>/lhr-fixture-9osf69ha",
+  "slots": 3,
+  "target_cwd": "<SCRATCH_ROOT>/lhr-fixture-9osf69ha/repo"
+ },
+ "next_action": "resume: claim and run A2, the next pending unit",
+ "objective": "two files exist, the second after the first",
+ "run_dir": "<SCRATCH_ROOT>/lhr-fixture-9osf69ha/docs/plan/runs/20260906T091934-two-files-exist-the-second-after-the-fir",
+ "units": [
+  {
+   "attempt": 1,
+   "bucket": "integrated",
+   "claim_state": "done",
+   "detail": "",
+   "id": "A1",
+   "title": "create file one"
+  },
+  {
+   "attempt": null,
+   "bucket": "pending",
+   "claim_state": "not-started",
+   "detail": "",
+   "id": "A2",
+   "title": "create file two"
+  }
+ ],
+ "zone3": {
+  "ACTIVE / FINISHED WORKTREES": "no worktree beyond the target checkout itself; any per-unit scratch worktree already finished and was removed",
+  "CANONICAL COMMIT": "4cd78db049560233283138ea7704288925bebd73",
+  "CHANGED FILES": "clean: no uncommitted changes in the target checkout",
+  "CURRENT OBJECTIVE": "two files exist, the second after the first",
+  "ENVIRONMENT ASSUMPTIONS": {
+   "model_adapter": "the product's own worker adapter",
+   "runs_root": "<SCRATCH_ROOT>/lhr-fixture-9osf69ha",
+   "slots": 3,
+   "target_cwd": "<SCRATCH_ROOT>/lhr-fixture-9osf69ha/repo"
+  },
+  "EXPECTED SERVICES": "NO-DATA: this engine runs no background service (stdlib-only, no network); nothing is expected to be up",
+  "IMPORTANT COMMANDS": [
+   "test -f one.txt",
+   "test -f two.txt"
+  ],
+  "KNOWN FAILURES": "no refused or failing unit recorded in this run",
+  "REJECTED APPROACHES": "no unit's claim has been abandoned mid-attempt in this run",
+  "RELEVANT LESSONS": "NO-DATA: no vault.recall event recorded for this run yet",
+  "SAFE NEXT ACTION": "resume: claim and run A2, the next pending unit",
+  "UNFINISHED WORK": [
+   "A2"
+  ],
+  "VERIFICATION STATE": "1 integrated, 0 active, 1 pending, 0 abandoned, 0 unclear",
+  "WHERE WE WERE": "last recorded activity: unit.done on A1 at 2026-09-06T00:19:35.183272+00:00",
+  "WHY WE WERE THERE": "create file one"
+ }
+}

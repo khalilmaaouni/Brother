@@ -11,16 +11,34 @@ Plus negative tests for the rules the diagnosis this module was built from
 named by hand: a weak-evidence irreversible merge never yields a merge term,
 a stated tenant boundary always yields REJECT MATCH, a blank field with a
 corroborating fact yields ESCALATE and without one yields NO-DATA, three
-hierarchy parents of different types yield KEEP SEPARATE, and a fact sheet
+hierarchy parents of different types yield LINK AS RELATED, and a fact sheet
 missing a required field yields NO-DATA naming it.
 
 MUTATION CONTROL. This suite is also run once with JBEQ_DECIDE_DISABLE_RULES
-set, which is the standing hook jbeq_decide.decide() checks (see its
-docstring) to skip the rule table entirely. That run is not part of this
-file's own pass/fail contract: it is invoked separately
+set to "1" (bare, no comma), which is the standing hook jbeq_decide.decide()
+checks (see its docstring) to skip the rule table entirely. That run is not
+part of this file's own pass/fail contract: it is invoked separately
 (`JBEQ_DECIDE_DISABLE_RULES=1 python3 scripts/test_jbeq_decide.py -v`) to
 prove the rule table matters, and at least one test here is expected to fail
 under it.
+
+PER-RULE MUTATION. TestPerRuleMutation below drives the finer-grained switch
+added 2026-09-06 (FIX-DIRECTIVE section 20): JBEQ_DECIDE_DISABLE_RULES also
+takes a comma list of individual rule ids, so a test can disable exactly ONE
+rule and show that the case it protects flips to a different answer, rather
+than only that the whole table matters. Each test sets and restores the
+environment variable itself, run inline in this same process.
+
+MUTATION SEAM MARKER (hub PR 386 security finding, 2026-09-06):
+JBEQ_DECIDE_DISABLE_RULES was a fail-open test hook with nothing to tell a
+mutated decide() result from a real one apart. _decide_with_disabled below
+now asserts, on every call, that the mutated result carries "mutation":
+{"disabled": [...]} and a "why" prefixed "MUTATION SEAM ACTIVE (rules
+disabled: ...): ", so every test in TestPerRuleMutation proves the marker
+as well as the flipped answer it already checked. See
+scripts/test_jbeq_mutation_seams.py for the marker's absence when no rule
+is disabled, the CLI banner, the scorer's refusal, and the runs/-directory
+write refusal.
 """
 import json
 import os
@@ -57,6 +75,19 @@ BASE_SHEET = {
     "history_exists": False,
     "hierarchy_parents": [],
     "one_to_many_object": False,
+    # Identity-kind fields, promoted to required round 5 (2026-09-06). All
+    # default to a value that never trips a new rule or gate, so every test
+    # written before round 5 keeps its own answer unless it overrides one.
+    "object_type_a": "legal_entity",
+    "object_type_b": "legal_entity",
+    "lifecycle": "active",
+    "requested_action": "none",
+    "requested_relation_type": None,
+    "authoritative_identifier": "aligned",
+    "contradicted_attributes": [],
+    "distinct_operational_attributes": False,
+    "location_comparison": None,
+    "effective_dates": {"as_of": None, "candidate_effective_date": None, "conflict": False},
 }
 
 
@@ -198,6 +229,21 @@ class TestNegatives(unittest.TestCase):
         self.assertEqual(result["answer"], "REJECT MATCH")
         self.assertEqual(result["rule_fired"], "C")
 
+    def test_stated_hierarchy_dimension_difference_rejects(self):
+        # Round 10 (2026-09-06, HI-09): two hierarchy nodes that share a
+        # name but the input states live in different hierarchy dimensions
+        # (a location hierarchy versus an organisation hierarchy) refute
+        # identity even though no other stated_difference value fits.
+        result = jbeq_decide.decide(sheet(
+            track="match-or-no-merge",
+            object_type_a="hierarchy_node",
+            object_type_b="hierarchy_node",
+            stated_difference="different_hierarchy_dimension",
+            evidence_strength="strong",
+        ))
+        self.assertEqual(result["answer"], "REJECT MATCH")
+        self.assertEqual(result["rule_fired"], "C")
+
     def test_blank_field_with_corroboration_escalates(self):
         result = jbeq_decide.decide(sheet(
             track="address",
@@ -216,7 +262,12 @@ class TestNegatives(unittest.TestCase):
         self.assertEqual(result["answer"], "NO-DATA")
         self.assertEqual(result["rule_fired"], "A")
 
-    def test_three_hierarchy_types_keep_separate(self):
+    def test_three_hierarchy_types_link_as_related(self):
+        # Round 8 (2026-09-06): rule D used to answer KEEP SEPARATE here;
+        # the founder's ruling (docs/decisions/
+        # decision-p0-3-rule-d-hi01-2026-09-06.json) flipped it to LINK AS
+        # RELATED, since the rule just found three valid relations and
+        # KEEP SEPARATE means no relation to record.
         result = jbeq_decide.decide(sheet(
             track="hierarchy",
             hierarchy_parents=[
@@ -225,7 +276,7 @@ class TestNegatives(unittest.TestCase):
                 {"type": "reporting", "parent": "C"},
             ],
         ))
-        self.assertEqual(result["answer"], "KEEP SEPARATE")
+        self.assertEqual(result["answer"], "LINK AS RELATED")
         self.assertEqual(result["rule_fired"], "D")
 
     def test_missing_required_field_is_nodata_naming_it(self):
@@ -241,14 +292,1305 @@ class TestNegatives(unittest.TestCase):
         self.assertEqual(result["answer"], "NO-DATA")
         self.assertEqual(result["rule_fired"], "track-unsupported")
 
-    def test_answer_outside_allowed_set_is_nodata(self):
+    def test_answer_outside_allowed_set_remaps_along_caution_rank(self):
+        # Round 7 repair (2026-09-06, review section C, id
+        # allowed_answers_remap): rule 7 fires LINK AS RELATED, which this
+        # case's own allowed_answers does not carry; walking CAUTION_RANK
+        # toward the conservative end lands on ESCALATE (the next allowed
+        # member), never the old immediate NO-DATA, and rule_fired stays
+        # "7", the rule that actually decided.
         result = jbeq_decide.decide(sheet(
             track="hierarchy",
             allowed_answers=["ESCALATE", "NO-DATA"],
             stated_relation="group_company_code_shared_entity",
         ))
+        self.assertEqual(result["answer"], "ESCALATE")
+        self.assertEqual(result["rule_fired"], "7")
+
+    def test_answer_outside_allowed_set_is_nodata_only_when_nothing_reachable(self):
+        # The old safety-net NO-DATA behaviour still applies when
+        # allowed_answers carries nothing this ordering recognizes at all.
+        result = jbeq_decide.decide(sheet(
+            track="hierarchy",
+            allowed_answers=["R1", "R2"],
+            stated_relation="group_company_code_shared_entity",
+        ))
         self.assertEqual(result["answer"], "NO-DATA")
         self.assertEqual(result["rule_fired"], "safety-net")
+
+    def test_finish_never_returns_an_answer_outside_allowed(self):
+        # FIX-DIRECTIVE review section C, U-23's own shape: rule A's honest
+        # refusal would choose NO-DATA, which this case's own
+        # allowed_answers does not carry at all. The old safety net
+        # returned NO-DATA here anyway (itself outside allowed), exactly
+        # the invariant this engine exists to hold.
+        s = sheet(
+            track="match-or-no-merge",
+            stated_relation="none",
+            allowed_answers=["ESCALATE", "LINK AS RELATED"],
+            blank_fields=["priority_source"],
+        )
+        result = jbeq_decide.decide(s)
+        self.assertIn(result["answer"], s["allowed_answers"])
+        self.assertNotEqual(result["answer"], "NO-DATA")
+        self.assertEqual(result["answer"], "ESCALATE")
+        self.assertEqual(result["rule_fired"], "A")
+
+    # 2026-09-06, FIX-DIRECTIVE section 18/21 and the design review section
+    # C: REJECT MATCH is for a proposal the input's own facts refute, never
+    # for a case that also states a relation. EO-02 and EO-09's shape:
+    # stated_difference=different_legal_entity (which used to be an
+    # unconditional REJECT MATCH) alongside a stated_relation that is not
+    # "none".
+    def test_stated_relation_beats_different_legal_entity_for_link(self):
+        result = jbeq_decide.decide(sheet(
+            track="entity-object",
+            stated_relation="role_pair",
+            stated_difference="different_legal_entity",
+        ))
+        self.assertEqual(result["answer"], "LINK AS RELATED")
+        self.assertEqual(result["rule_fired"], "link_vs_reject")
+
+    def test_different_legal_entity_alone_still_rejects(self):
+        # No stated relation at all: boundary rule 2's original generic case
+        # is unchanged (EO-04, AD-04, AD-10, ID-05, MM-03, HI-05 in the round
+        # 4 fact sheets all have this shape and must keep REJECT MATCH).
+        # requested_action=match_on_stated_basis records the proposal rule
+        # 2's REJECT MATCH now requires (round 8, proposal_gate); see
+        # TestPerRuleMutation for the no-proposal KEEP SEPARATE case.
+        result = jbeq_decide.decide(sheet(
+            track="entity-object",
+            stated_relation="none",
+            stated_difference="different_legal_entity",
+            requested_action="match_on_stated_basis",
+        ))
+        self.assertEqual(result["answer"], "REJECT MATCH")
+        self.assertEqual(result["rule_fired"], "2")
+
+    # 2026-09-06, FIX-DIRECTIVE section 15/AD-06: evidence_reasons must not
+    # be discarded just because evidence_strength is null (not a merge
+    # candidate at all).
+    def test_unexplained_conflict_without_a_score_still_escalates(self):
+        result = jbeq_decide.decide(sheet(
+            track="address",
+            evidence_strength=None,
+            evidence_reasons=["unexplained_conflict"],
+        ))
+        self.assertEqual(result["answer"], "ESCALATE")
+        self.assertEqual(result["rule_fired"], "B")
+
+    # Round 6 repair (2026-09-06, review section A ID-02): the branch above
+    # used to key on "unexplained_conflict" specifically, so a DIFFERENT
+    # stated reason (missing_identifier, ID-02's own) on a null-strength
+    # sheet was silently discarded instead of forcing ESCALATE. Any stated
+    # reason must not be discarded, not just this one value.
+    def test_any_reason_without_a_score_still_escalates(self):
+        result = jbeq_decide.decide(sheet(
+            track="identifier",
+            evidence_strength=None,
+            evidence_reasons=["missing_identifier"],
+        ))
+        self.assertEqual(result["answer"], "ESCALATE")
+        self.assertEqual(result["rule_fired"], "B")
+
+    # 2026-09-06, FIX-DIRECTIVE section 15/MM-09: weak evidence reduced to
+    # nothing but a bare match score, with no irreversibility or history to
+    # force a human look, is NO-DATA rather than an automatic ESCALATE.
+    def test_weak_evidence_score_only_with_nothing_else_is_nodata(self):
+        result = jbeq_decide.decide(sheet(
+            track="match-or-no-merge",
+            evidence_strength="weak",
+            evidence_reasons=["score_only", "missing_identifier"],
+            irreversible=False,
+            history_exists=False,
+        ))
+        self.assertEqual(result["answer"], "NO-DATA")
+        self.assertEqual(result["rule_fired"], "B")
+
+    def test_weak_evidence_contradicted_attributes_keeps_separate(self):
+        # contradicted_attributes is the OPTIONAL, not-yet-schema-carried
+        # field from the module docstring; exercised here so the branch is
+        # proven even though no fact sheet in the wild sets it today.
+        result = jbeq_decide.decide(sheet(
+            track="match-or-no-merge",
+            evidence_strength="weak",
+            evidence_reasons=["missing_identifier"],
+            contradicted_attributes=["registered_address"],
+        ))
+        self.assertEqual(result["answer"], "KEEP SEPARATE")
+        self.assertEqual(result["rule_fired"], "B")
+
+    def test_requested_relation_type_conflicts_with_stated_hierarchy_type(self):
+        # Renamed 2026-09-06 (round 5 repair, review section F): four real
+        # round 5 sheets (HI-02, HI-04, HI-05, HI-10) now fill
+        # requested_relation_type, so "inert today" was stale even before
+        # this fix; this test itself never claimed inertness (the field
+        # was always exercisable by hand), only the name and comment did.
+        result = jbeq_decide.decide(sheet(
+            track="hierarchy",
+            stated_relation="trade_flow",
+            hierarchy_parents=[{"type": "trade_flow", "parent": "X"}],
+            requested_relation_type="capital",
+        ))
+        self.assertEqual(result["answer"], "REJECT MATCH")
+        self.assertEqual(result["rule_fired"], "link_vs_reject")
+
+    def test_requested_relation_type_against_empty_hierarchy_rejects(self):
+        # HI-05 fix (round 5 repair, 2026-09-06): before, the guard required
+        # stated_hierarchy_types be non-empty before checking membership, so
+        # a requested_relation_type asked against NOTHING stated at all
+        # (hierarchy_parents=[]) short-circuited past this rule instead of
+        # being seen as a refuted proposal.
+        result = jbeq_decide.decide(sheet(
+            track="hierarchy",
+            stated_relation="role_pair",
+            hierarchy_parents=[],
+            requested_relation_type="capital",
+        ))
+        self.assertEqual(result["answer"], "REJECT MATCH")
+        self.assertEqual(result["rule_fired"], "link_vs_reject")
+
+    # requested_parent (round 6 repair, 2026-09-06, review section C HI-02):
+    # requested_relation_type matching a stated TYPE is not the same as
+    # matching its DIRECTION. HI-02 asks to reverse parent and child inside
+    # the same capital hierarchy; the type check alone cannot see that.
+    def test_requested_parent_reverses_stated_hierarchy_direction(self):
+        result = jbeq_decide.decide(sheet(
+            track="hierarchy",
+            stated_relation="parent_child",
+            hierarchy_parents=[{"type": "capital", "parent": "HD Holdings"}],
+            requested_relation_type="capital",
+            requested_parent="Subsidiary Co",
+        ))
+        self.assertEqual(result["answer"], "REJECT MATCH")
+        self.assertEqual(result["rule_fired"], "link_vs_reject")
+
+    def test_requested_parent_matching_the_stated_parent_does_not_reject(self):
+        # The type matches AND the direction matches: no reversal, so this
+        # clause must not fire (the type-mismatch branch above it already
+        # covers a genuine conflict).
+        result = jbeq_decide.decide(sheet(
+            track="hierarchy",
+            stated_relation="parent_child",
+            hierarchy_parents=[{"type": "capital", "parent": "HD Holdings"}],
+            requested_relation_type="capital",
+            requested_parent="HD Holdings",
+        ))
+        self.assertNotEqual(result["rule_fired"], "link_vs_reject")
+
+    def test_requested_parent_absent_is_a_noop(self):
+        # Every sheet in the wild before round 6 lacks this OPTIONAL key
+        # entirely; .get() must return None and change nothing.
+        result = jbeq_decide.decide(sheet(
+            track="hierarchy",
+            stated_relation="parent_child",
+            hierarchy_parents=[{"type": "capital", "parent": "HD Holdings"}],
+            requested_relation_type="capital",
+        ))
+        self.assertNotEqual(result["rule_fired"], "link_vs_reject")
+
+    # Round 5 (2026-09-06), design-p0-3-mdm-merge-safety section C: rule L
+    # reads the new location_comparison field, closing AD-03.
+    def test_location_different_administrative_area_rejects(self):
+        # requested_action records the proposal rule L's REJECT MATCH now
+        # requires (round 8, proposal_gate).
+        result = jbeq_decide.decide(sheet(
+            track="address",
+            location_comparison="different_administrative_area",
+            requested_action="match_on_stated_basis",
+        ))
+        self.assertEqual(result["answer"], "REJECT MATCH")
+        self.assertEqual(result["rule_fired"], "L")
+
+    def test_location_internally_inconsistent_escalates(self):
+        result = jbeq_decide.decide(sheet(
+            track="address",
+            location_comparison="internally_inconsistent",
+        ))
+        self.assertEqual(result["answer"], "ESCALATE")
+        self.assertEqual(result["rule_fired"], "L")
+
+    # Round 5 AUTO-MERGE safety gate (design section C): a case that rule B
+    # alone would call AUTO-MERGE (strong evidence, no reasons, not
+    # irreversible, no history) is blocked by each gate item in turn.
+    def _strong_no_reason_sheet(self, **overrides):
+        return sheet(
+            track="entity-object",
+            evidence_strength="strong",
+            evidence_reasons=[],
+            irreversible=False,
+            history_exists=False,
+            **overrides,
+        )
+
+    def test_auto_merge_stands_with_no_gate_blocking(self):
+        result = jbeq_decide.decide(self._strong_no_reason_sheet())
+        self.assertEqual(result["answer"], "AUTO-MERGE")
+        self.assertEqual(result["rule_fired"], "B")
+
+    def test_object_type_mismatch_without_stated_relation_rejects_via_rule_r(self):
+        # Round 5 repair (2026-09-06): rule_r now fires for object_type
+        # mismatch WHENEVER stated_relation == "none" (the default here),
+        # ahead of the merge ladder entirely, and REJECT MATCH is the
+        # stronger, safer verdict when nothing states a relation at all.
+        # This sheet used to reach the merge ladder's own "gate-object-
+        # type" item (see the next test for that item, still reachable
+        # when a relation IS stated).
+        result = jbeq_decide.decide(self._strong_no_reason_sheet(
+            object_type_a="legal_entity", object_type_b="store",
+            requested_action="match_on_stated_basis",
+        ))
+        self.assertEqual(result["answer"], "REJECT MATCH")
+        self.assertEqual(result["rule_fired"], "rule_r")
+
+    def test_gate_object_type_mismatch_links_instead_of_merging(self):
+        # A stated relation ("role_pair") keeps rule_r's stated_relation=="
+        # none" gate closed, so this exercises the merge ladder's own
+        # object-type gate instead.
+        result = jbeq_decide.decide(self._strong_no_reason_sheet(
+            stated_relation="role_pair",
+            object_type_a="legal_entity", object_type_b="store",
+        ))
+        self.assertEqual(result["answer"], "LINK AS RELATED")
+        self.assertEqual(result["rule_fired"], "gate-object-type")
+
+    def test_lifecycle_closed_without_stated_relation_keeps_separate_via_rule_r(self):
+        # Round 7 repair (2026-09-06, review section D, U-36): rule_r's own
+        # lifecycle clause used to answer REJECT MATCH here while the
+        # merge-ladder's gate-lifecycle answers KEEP SEPARATE for the
+        # identical fact (see test_gate_lifecycle_closed_keeps_separate
+        # below); rule_r now agrees with it instead of contradicting it.
+        result = jbeq_decide.decide(self._strong_no_reason_sheet(
+            lifecycle="closed",
+        ))
+        self.assertEqual(result["answer"], "KEEP SEPARATE")
+        self.assertEqual(result["rule_fired"], "rule_r")
+
+    def test_gate_lifecycle_closed_keeps_separate(self):
+        result = jbeq_decide.decide(self._strong_no_reason_sheet(
+            stated_relation="role_pair",
+            lifecycle="closed",
+        ))
+        self.assertEqual(result["answer"], "KEEP SEPARATE")
+        self.assertEqual(result["rule_fired"], "gate-lifecycle")
+
+    def test_lifecycle_relocated_without_stated_relation_reaches_merge_ladder(self):
+        # Round 9 repair (2026-09-06, review-u2-2026-09-06.md section B, id
+        # relocated_not_a_bar): unlike closed above, a relocated record no
+        # longer stops at rule_r at all; it falls through to the merge
+        # ladder's own gate-lifecycle item, which answers SUGGEST MERGE
+        # rather than KEEP SEPARATE (see test_gate_lifecycle_relocated_
+        # suggests_merge below for the isolated form of the same gate).
+        result = jbeq_decide.decide(self._strong_no_reason_sheet(
+            lifecycle="relocated",
+        ))
+        self.assertEqual(result["answer"], "SUGGEST MERGE")
+        self.assertEqual(result["rule_fired"], "gate-lifecycle")
+
+    def test_gate_lifecycle_relocated_suggests_merge(self):
+        # A relocated record is a compatible lifecycle of the SAME object,
+        # not a different object the way closed and identifier_reused are,
+        # so it bars AUTO-MERGE only: a person still confirms with SUGGEST
+        # MERGE instead of KEEP SEPARATE.
+        result = jbeq_decide.decide(self._strong_no_reason_sheet(
+            stated_relation="role_pair",
+            lifecycle="relocated",
+        ))
+        self.assertEqual(result["answer"], "SUGGEST MERGE")
+        self.assertEqual(result["rule_fired"], "gate-lifecycle")
+
+    def test_gate_authoritative_identifier_absent_suggests_merge(self):
+        # "absent" (not "conflicting") on purpose: rule_r's own
+        # authoritative_identifier trigger only matches "conflicting" (see
+        # test_rule_r_authoritative_identifier_conflicting_rejects below),
+        # so "absent" reaches the merge ladder's own gate unshadowed.
+        result = jbeq_decide.decide(self._strong_no_reason_sheet(
+            authoritative_identifier="absent",
+        ))
+        self.assertEqual(result["answer"], "SUGGEST MERGE")
+        self.assertEqual(result["rule_fired"], "gate-authoritative-identifier")
+
+    def test_stated_relation_beats_strong_evidence_for_auto_merge(self):
+        # EO-05 fix (round 5 repair, 2026-09-06, design review section E):
+        # an unflagged false AUTO-MERGE, cleared on neutral defaults never
+        # read from the input. A stated relation must record the relation
+        # instead of silently merging past it, even with strong,
+        # unconflicted evidence.
+        result = jbeq_decide.decide(self._strong_no_reason_sheet(
+            stated_relation="role_pair",
+        ))
+        self.assertEqual(result["answer"], "LINK AS RELATED")
+        self.assertEqual(result["rule_fired"], "gate-stated-relation")
+
+    def test_gate_site_store_distinct_operational_attributes_links(self):
+        # Promoted round 5 repair (2026-09-06) from a gate reachable only
+        # inside this strong-evidence AUTO-MERGE candidate to a top-level
+        # rule (closing MM-10, HI-08, both evidence_strength=null and so
+        # never reaching the old gate at all); rule_fired is now the
+        # top-level id "site_store", not "gate-site-store".
+        result = jbeq_decide.decide(self._strong_no_reason_sheet(
+            distinct_operational_attributes=True,
+        ))
+        self.assertEqual(result["answer"], "LINK AS RELATED")
+        self.assertEqual(result["rule_fired"], "site_store")
+
+    def test_gate_temporal_conflict_keeps_separate(self):
+        result = jbeq_decide.decide(self._strong_no_reason_sheet(
+            effective_dates={"as_of": "2026-01-01",
+                             "candidate_effective_date": "2026-03-01",
+                             "conflict": True},
+        ))
+        self.assertEqual(result["answer"], "KEEP SEPARATE")
+        self.assertEqual(result["rule_fired"], "gate-temporal")
+
+    def test_temporal_track_no_longer_blanket_nodata(self):
+        # Round 5: "temporal" left UNSUPPORTED_TRACKS. A plain temporal-track
+        # case with nothing else stated falls through to the ordinary
+        # default rule, not to the old track-unsupported NO-DATA.
+        result = jbeq_decide.decide(sheet(track="temporal"))
+        self.assertEqual(result["answer"], "KEEP SEPARATE")
+        self.assertEqual(result["rule_fired"], "1")
+
+    def test_survivorship_and_requirements_still_unsupported(self):
+        for track in ("survivorship", "requirements"):
+            with self.subTest(track=track):
+                result = jbeq_decide.decide(sheet(track=track))
+                self.assertEqual(result["answer"], "NO-DATA")
+                self.assertEqual(result["rule_fired"], "track-unsupported")
+
+    # Round 5 repair (2026-09-06), rule_r (design review section A): fires
+    # only when stated_relation == "none", closing the eight REJECT-versus-
+    # KEEP cases the round 5 regression lost (EO-04, MM-02, MM-03, AD-04,
+    # AD-10, ID-01, ID-04, ID-05).
+    # requested_action=match_on_stated_basis records the proposal rule_r's
+    # REJECT MATCH branches now require (round 8, proposal_gate); see
+    # TestPerRuleMutation for the no-proposal KEEP SEPARATE case.
+    def test_rule_r_authoritative_identifier_conflicting_rejects(self):
+        result = jbeq_decide.decide(sheet(
+            track="entity-object",
+            stated_relation="none",
+            authoritative_identifier="conflicting",
+            requested_action="match_on_stated_basis",
+        ))
+        self.assertEqual(result["answer"], "REJECT MATCH")
+        self.assertEqual(result["rule_fired"], "rule_r")
+
+    def test_rule_r_identifiers_same_value_different_domain_rejects(self):
+        result = jbeq_decide.decide(sheet(
+            track="identifier",
+            stated_relation="none",
+            requested_action="match_on_stated_basis",
+            identifiers=[
+                {"value": "7010001234567", "domain": "internal_customer_number",
+                 "legal_person_type": None, "status": "valid"},
+                {"value": "7010001234567", "domain": "corporate_number",
+                 "legal_person_type": "corporation", "status": "valid"},
+            ],
+        ))
+        self.assertEqual(result["answer"], "REJECT MATCH")
+        self.assertEqual(result["rule_fired"], "rule_r")
+
+    def test_rule_r_identifiers_different_legal_person_type_rejects(self):
+        result = jbeq_decide.decide(sheet(
+            track="match-or-no-merge",
+            stated_relation="none",
+            requested_action="match_on_stated_basis",
+            identifiers=[
+                {"value": "A", "domain": "tax_id",
+                 "legal_person_type": "individual", "status": "valid"},
+                {"value": "B", "domain": "corporate_number",
+                 "legal_person_type": "corporation", "status": "valid"},
+            ],
+        ))
+        self.assertEqual(result["answer"], "REJECT MATCH")
+        self.assertEqual(result["rule_fired"], "rule_r")
+
+    def test_rule_r_object_type_mismatch_rejects(self):
+        result = jbeq_decide.decide(sheet(
+            track="entity-object",
+            stated_relation="none",
+            object_type_a="legal_entity",
+            object_type_b="store",
+            requested_action="match_on_stated_basis",
+        ))
+        self.assertEqual(result["answer"], "REJECT MATCH")
+        self.assertEqual(result["rule_fired"], "rule_r")
+
+    def test_rule_r_lifecycle_reused_keeps_separate(self):
+        # Round 7 repair (2026-09-06, review section D, id
+        # rule_r_lifecycle_keep): see
+        # test_lifecycle_closed_without_stated_relation_keeps_separate_via_
+        # rule_r above for the self-contradiction this closes.
+        result = jbeq_decide.decide(sheet(
+            track="identifier",
+            stated_relation="none",
+            lifecycle="identifier_reused",
+        ))
+        self.assertEqual(result["answer"], "KEEP SEPARATE")
+        self.assertEqual(result["rule_fired"], "rule_r")
+
+    def test_rule_r_location_different_unit_in_building_rejects(self):
+        result = jbeq_decide.decide(sheet(
+            track="address",
+            stated_relation="none",
+            location_comparison="different_unit_in_building",
+            requested_action="match_on_stated_basis",
+        ))
+        self.assertEqual(result["answer"], "REJECT MATCH")
+        self.assertEqual(result["rule_fired"], "rule_r")
+
+    def test_rule_r_gate_requires_stated_relation_none(self):
+        # Load-bearing per the design review: EO-09 states parent_child
+        # with a conflicting authoritative_identifier and must keep LINK,
+        # never flip to REJECT, because a relation IS stated.
+        result = jbeq_decide.decide(sheet(
+            track="hierarchy",
+            stated_relation="parent_child",
+            authoritative_identifier="conflicting",
+        ))
+        self.assertEqual(result["answer"], "LINK AS RELATED")
+        self.assertEqual(result["rule_fired"], "1")
+
+    def test_rule_r_does_not_fire_on_a_neutral_no_relation_sheet(self):
+        # IC-04-shaped: nothing stated, no trigger; the KEEP SEPARATE
+        # default must still stand, not rule_r.
+        result = jbeq_decide.decide(sheet(track="entity-object", stated_relation="none"))
+        self.assertEqual(result["answer"], "KEEP SEPARATE")
+        self.assertEqual(result["rule_fired"], "1")
+
+    # Round 5 repair (2026-09-06), rule A widened (design review section B):
+    # observable now covers identifiers, contradicted_attributes,
+    # effective_dates and hierarchy_parents, not only corroborating_facts.
+    def test_blank_field_with_only_identifiers_observable_escalates(self):
+        result = jbeq_decide.decide(sheet(
+            track="identifier",
+            blank_fields=["replacement_identifier"],
+            corroborating_facts=[],
+            identifiers=[{"value": "T3010005555555",
+                          "domain": "qualified_invoice_issuer_number",
+                          "legal_person_type": None, "status": "expired"}],
+        ))
+        self.assertEqual(result["answer"], "ESCALATE")
+        self.assertEqual(result["rule_fired"], "A")
+
+    def test_blank_field_with_nothing_observable_at_all_stays_nodata(self):
+        # AD-08-shaped: the widening does not manufacture an observable
+        # fact where the sheet states none.
+        result = jbeq_decide.decide(sheet(
+            track="address",
+            blank_fields=["prefecture"],
+            corroborating_facts=[],
+        ))
+        self.assertEqual(result["answer"], "NO-DATA")
+        self.assertEqual(result["rule_fired"], "A")
+
+    # Round 5 repair (2026-09-06), the L12 enum-validation fix.
+    def test_decide_refuses_unrecognized_stated_relation(self):
+        result = jbeq_decide.decide(sheet(stated_relation="bogus_relation"))
+        self.assertEqual(result["answer"], "NO-DATA")
+        self.assertEqual(result["rule_fired"], "unrecognized-value")
+        self.assertIn("stated_relation", result["why"])
+        self.assertIn("bogus_relation", result["why"])
+
+    def test_decide_allow_unrecognized_runs_the_rule_table_anyway(self):
+        # A historical re-decision: the off-enum stated_relation matches no
+        # rule keyed on the literal value "none" (rule_r's own gate stays
+        # closed, same as before this fix), so the sheet falls through to
+        # boundary rule 1's default (any non-"none" string states A
+        # relation); the sheet's own off-enum field is recorded rather
+        # than dropped.
+        result = jbeq_decide.decide(
+            sheet(stated_relation="bogus_relation"),
+            allow_unrecognized=True,
+        )
+        self.assertEqual(result["answer"], "LINK AS RELATED")
+        self.assertEqual(result["rule_fired"], "1")
+        self.assertIn("unrecognized_values", result)
+        self.assertIn("stated_relation='bogus_relation'", str(result["unrecognized_values"]))
+
+
+class TestPerRuleMutation(unittest.TestCase):
+    """FIX-DIRECTIVE section 20: disabling ONE safety rule must break the
+    case that rule protects, or the rule is not actually proven. Before
+    2026-09-06, JBEQ_DECIDE_DISABLE_RULES was all-or-nothing, which the
+    design review (design-p0-3-mdm-merge-safety section E) named as a gap:
+    disabling every rule at once cannot show any ONE rule is load-bearing.
+    Each test here disables exactly one rule id (see the module docstring
+    for the full list) and checks the answer flips.
+    """
+
+    def _decide_with_disabled(self, rule_id, fact_sheet):
+        old = os.environ.get("JBEQ_DECIDE_DISABLE_RULES")
+        os.environ["JBEQ_DECIDE_DISABLE_RULES"] = rule_id
+        try:
+            result = jbeq_decide.decide(fact_sheet)
+        finally:
+            if old is None:
+                os.environ.pop("JBEQ_DECIDE_DISABLE_RULES", None)
+            else:
+                os.environ["JBEQ_DECIDE_DISABLE_RULES"] = old
+        # Hub PR 386 security finding (2026-09-06): every result decide()
+        # returns while a mutation seam is active must carry the marker,
+        # not only the flipped answer. Checked once here so every test in
+        # this class proves it, not only the answer it names.
+        expected_ids = sorted({tok.strip() for tok in rule_id.split(",") if tok.strip()})
+        self.assertEqual(result.get("mutation"), {"disabled": expected_ids})
+        self.assertTrue(
+            result["why"].startswith(
+                "MUTATION SEAM ACTIVE (rules disabled: %s): " % ", ".join(expected_ids)
+            ),
+            result["why"],
+        )
+        return result
+
+    def test_disabling_rule_C_flips_stated_tenant_boundary(self):
+        s = sheet(
+            track="match-or-no-merge",
+            tenant_boundary="stated",
+            evidence_strength="strong",
+        )
+        baseline = jbeq_decide.decide(s)
+        self.assertEqual(baseline["answer"], "REJECT MATCH")
+        self.assertEqual(baseline["rule_fired"], "C")
+        mutated = self._decide_with_disabled("C", s)
+        self.assertNotEqual(mutated["answer"], "REJECT MATCH")
+
+    def test_disabling_rule_c_hierarchy_dimension_flips_hierarchy_dimension_difference(self):
+        # Round 10 (2026-09-06, HI-09): rule_c_hierarchy_dimension gates
+        # only the new stated_difference value, so disabling it must flip
+        # this specific case while leaving the tenant-boundary case above
+        # (and a plain different_identifier_domain case) firing rule C.
+        s = sheet(
+            track="match-or-no-merge",
+            object_type_a="hierarchy_node",
+            object_type_b="hierarchy_node",
+            stated_difference="different_hierarchy_dimension",
+            evidence_strength="strong",
+        )
+        baseline = jbeq_decide.decide(s)
+        self.assertEqual(baseline["answer"], "REJECT MATCH")
+        self.assertEqual(baseline["rule_fired"], "C")
+        mutated = self._decide_with_disabled("rule_c_hierarchy_dimension", s)
+        self.assertNotEqual(mutated["answer"], "REJECT MATCH")
+
+        other = sheet(
+            track="match-or-no-merge",
+            stated_difference="different_identifier_domain",
+            evidence_strength="strong",
+        )
+        still_fires = self._decide_with_disabled("rule_c_hierarchy_dimension", other)
+        self.assertEqual(still_fires["answer"], "REJECT MATCH")
+        self.assertEqual(still_fires["rule_fired"], "C")
+
+    def test_disabling_rule_5_flips_site_only_one_to_many(self):
+        s = sheet(
+            track="entity-object",
+            stated_relation="same_site_only",
+            one_to_many_object=True,
+        )
+        baseline = jbeq_decide.decide(s)
+        self.assertEqual(baseline["answer"], "KEEP SEPARATE")
+        self.assertEqual(baseline["rule_fired"], "5")
+        # Round 11 (2026-09-06, id same_site_only_never_a_relation): boundary
+        # rule 1 now reads same_site_only like "none" too (F2), so disabling
+        # rule 5 ALONE still answers KEEP SEPARATE off rule "1" instead of
+        # falling through to the old LINK AS RELATED default; that is the
+        # fix working as intended (defense in depth), not a regression.
+        # Both ids must be off together to see the pre-F2 behaviour.
+        mutated_rule_5_only = self._decide_with_disabled("5", s)
+        self.assertEqual(mutated_rule_5_only["answer"], "KEEP SEPARATE")
+        self.assertEqual(mutated_rule_5_only["rule_fired"], "1")
+        mutated = self._decide_with_disabled(
+            "5,same_site_only_never_a_relation", s
+        )
+        self.assertNotEqual(mutated["answer"], "KEEP SEPARATE")
+
+    def test_disabling_rule_7_flips_group_company_code_under_weak_evidence(self):
+        # A bare group_company_code_shared_entity sheet cannot prove rule 7
+        # is load-bearing on its own: boundary rule 1's default also answers
+        # LINK AS RELATED for any non-none stated_relation, so removing rule
+        # 7 alone would change nothing. Pairing it with weak evidence makes
+        # rule 7's placement ahead of the merge ladder the only reason the
+        # answer isn't ESCALATE.
+        s = sheet(
+            track="hierarchy",
+            stated_relation="group_company_code_shared_entity",
+            evidence_strength="weak",
+        )
+        baseline = jbeq_decide.decide(s)
+        self.assertEqual(baseline["answer"], "LINK AS RELATED")
+        self.assertEqual(baseline["rule_fired"], "7")
+        mutated = self._decide_with_disabled("7", s)
+        self.assertNotEqual(mutated["answer"], "LINK AS RELATED")
+        self.assertEqual(mutated["answer"], "ESCALATE")
+
+    def test_disabling_link_vs_reject_flips_stated_relation_under_different_legal_entity(self):
+        # requested_action records the proposal rule 2's REJECT MATCH now
+        # requires once link_vs_reject stops intercepting it.
+        s = sheet(
+            track="entity-object",
+            stated_relation="role_pair",
+            stated_difference="different_legal_entity",
+            requested_action="match_on_stated_basis",
+        )
+        baseline = jbeq_decide.decide(s)
+        self.assertEqual(baseline["answer"], "LINK AS RELATED")
+        self.assertEqual(baseline["rule_fired"], "link_vs_reject")
+        mutated = self._decide_with_disabled("link_vs_reject", s)
+        self.assertEqual(mutated["answer"], "REJECT MATCH")
+        self.assertEqual(mutated["rule_fired"], "2")
+
+    def test_disabling_rule_D_flips_three_hierarchy_types(self):
+        # Proves the founder-ruling flip (round 8, 2026-09-06) is still
+        # rule D's own doing: with "D" disabled, the same three-type
+        # hierarchy sheet falls through to boundary rule 1's default
+        # (stated_relation == "none": KEEP SEPARATE), never LINK AS
+        # RELATED.
+        s = sheet(
+            track="hierarchy",
+            hierarchy_parents=[
+                {"type": "capital", "parent": "A"},
+                {"type": "trade_flow", "parent": "B"},
+                {"type": "reporting", "parent": "C"},
+            ],
+        )
+        baseline = jbeq_decide.decide(s)
+        self.assertEqual(baseline["answer"], "LINK AS RELATED")
+        self.assertEqual(baseline["rule_fired"], "D")
+        mutated = self._decide_with_disabled("D", s)
+        self.assertNotEqual(mutated["answer"], "LINK AS RELATED")
+        self.assertEqual(mutated["answer"], "KEEP SEPARATE")
+        self.assertEqual(mutated["rule_fired"], "1")
+
+    # Round 5 AUTO-MERGE safety gate mutation tests (FIX-DIRECTIVE section
+    # 20 / design section E): disabling exactly one gate id must flip the
+    # class it protects back to AUTO-MERGE.
+    def _strong_no_reason_sheet(self, **overrides):
+        s = dict(BASE_SHEET)
+        s.update(track="entity-object", evidence_strength="strong",
+                 evidence_reasons=[], irreversible=False, history_exists=False)
+        s.update(overrides)
+        return s
+
+    def test_disabling_gate_object_type_alone_is_still_blocked_by_rule_r(self):
+        # Round 5 repair (2026-09-06): with stated_relation=="none" (the
+        # default), rule_r ALSO rejects an object-type mismatch, ahead of
+        # the merge ladder entirely. Disabling the merge ladder's own
+        # "object_type" gate alone therefore does not reach AUTO-MERGE:
+        # rule_r still blocks it first. Both must be disabled together to
+        # prove neither is redundant (see the next test).
+        s = self._strong_no_reason_sheet(
+            object_type_a="legal_entity", object_type_b="store",
+            requested_action="match_on_stated_basis",
+        )
+        baseline = jbeq_decide.decide(s)
+        self.assertEqual(baseline["answer"], "REJECT MATCH")
+        self.assertEqual(baseline["rule_fired"], "rule_r")
+        mutated = self._decide_with_disabled("object_type", s)
+        self.assertEqual(mutated["answer"], "REJECT MATCH")
+        self.assertEqual(mutated["rule_fired"], "rule_r")
+
+    def test_disabling_gate_object_type_and_rule_r_together_flips_to_auto_merge(self):
+        s = self._strong_no_reason_sheet(object_type_a="legal_entity", object_type_b="store")
+        mutated = self._decide_with_disabled("object_type,rule_r", s)
+        self.assertEqual(mutated["answer"], "AUTO-MERGE")
+        # disabling rule_r alone still leaves the merge-ladder gate standing
+        rule_r_only = self._decide_with_disabled("rule_r", s)
+        self.assertEqual(rule_r_only["answer"], "LINK AS RELATED")
+        self.assertEqual(rule_r_only["rule_fired"], "gate-object-type")
+
+    def test_disabling_gate_lifecycle_alone_is_still_blocked_by_rule_r(self):
+        # Round 7 (2026-09-06): both baseline and mutated now answer KEEP
+        # SEPARATE, not REJECT MATCH, since rule_r's own lifecycle clause
+        # was fixed to agree with gate-lifecycle (rule_r_lifecycle_keep);
+        # rule_r still fires first either way, which is what this test
+        # proves.
+        s = self._strong_no_reason_sheet(lifecycle="closed")
+        baseline = jbeq_decide.decide(s)
+        self.assertEqual(baseline["answer"], "KEEP SEPARATE")
+        self.assertEqual(baseline["rule_fired"], "rule_r")
+        mutated = self._decide_with_disabled("lifecycle", s)
+        self.assertEqual(mutated["answer"], "KEEP SEPARATE")
+        self.assertEqual(mutated["rule_fired"], "rule_r")
+
+    def test_disabling_gate_lifecycle_and_rule_r_together_flips_to_auto_merge(self):
+        s = self._strong_no_reason_sheet(lifecycle="closed")
+        mutated = self._decide_with_disabled("lifecycle,rule_r", s)
+        self.assertEqual(mutated["answer"], "AUTO-MERGE")
+        rule_r_only = self._decide_with_disabled("rule_r", s)
+        self.assertEqual(rule_r_only["answer"], "KEEP SEPARATE")
+        self.assertEqual(rule_r_only["rule_fired"], "gate-lifecycle")
+
+    # Round 9 repair (2026-09-06, review-u2-2026-09-06.md section B): a
+    # relocated record now bars AUTO-MERGE only, answering SUGGEST MERGE
+    # both when rule_r would otherwise fall through to the merge ladder
+    # (stated_relation=="none") and when the merge ladder's own
+    # gate-lifecycle item is reached directly (a stated relation keeps
+    # rule_r closed). id relocated_not_a_bar isolates the split at both
+    # call sites: disabling it reverts relocated to the old bar-both
+    # behaviour, proving the split is load-bearing rather than free.
+    def test_disabling_relocated_not_a_bar_flips_relocation_via_rule_r(self):
+        s = self._strong_no_reason_sheet(lifecycle="relocated")
+        baseline = jbeq_decide.decide(s)
+        self.assertEqual(baseline["answer"], "SUGGEST MERGE")
+        self.assertEqual(baseline["rule_fired"], "gate-lifecycle")
+        mutated = self._decide_with_disabled("relocated_not_a_bar", s)
+        self.assertEqual(mutated["answer"], "KEEP SEPARATE")
+        self.assertEqual(mutated["rule_fired"], "rule_r")
+
+    def test_disabling_relocated_not_a_bar_flips_relocation_via_gate_lifecycle(self):
+        s = self._strong_no_reason_sheet(
+            stated_relation="role_pair", lifecycle="relocated",
+        )
+        baseline = jbeq_decide.decide(s)
+        self.assertEqual(baseline["answer"], "SUGGEST MERGE")
+        self.assertEqual(baseline["rule_fired"], "gate-lifecycle")
+        mutated = self._decide_with_disabled("relocated_not_a_bar", s)
+        self.assertEqual(mutated["answer"], "KEEP SEPARATE")
+        self.assertEqual(mutated["rule_fired"], "gate-lifecycle")
+
+    def test_disabling_gate_authoritative_identifier_flips_to_auto_merge(self):
+        # "absent", not "conflicting": rule_r's own authoritative_identifier
+        # trigger only matches "conflicting" (see TestNegatives), so
+        # "absent" isolates the merge-ladder gate alone.
+        s = self._strong_no_reason_sheet(authoritative_identifier="absent")
+        baseline = jbeq_decide.decide(s)
+        self.assertEqual(baseline["answer"], "SUGGEST MERGE")
+        self.assertEqual(baseline["rule_fired"], "gate-authoritative-identifier")
+        mutated = self._decide_with_disabled("authoritative_identifier", s)
+        self.assertEqual(mutated["answer"], "AUTO-MERGE")
+
+    def test_disabling_gate_stated_relation_flips_to_auto_merge(self):
+        # EO-05 fix (round 5 repair, 2026-09-06): the false AUTO-MERGE the
+        # design review found uncaught until this gate existed.
+        s = self._strong_no_reason_sheet(stated_relation="role_pair")
+        baseline = jbeq_decide.decide(s)
+        self.assertEqual(baseline["answer"], "LINK AS RELATED")
+        self.assertEqual(baseline["rule_fired"], "gate-stated-relation")
+        mutated = self._decide_with_disabled("stated_relation_gate", s)
+        self.assertEqual(mutated["answer"], "AUTO-MERGE")
+
+    def test_disabling_gate_site_store_flips_to_auto_merge(self):
+        s = self._strong_no_reason_sheet(distinct_operational_attributes=True)
+        baseline = jbeq_decide.decide(s)
+        self.assertEqual(baseline["answer"], "LINK AS RELATED")
+        self.assertEqual(baseline["rule_fired"], "site_store")
+        mutated = self._decide_with_disabled("site_store", s)
+        self.assertEqual(mutated["answer"], "AUTO-MERGE")
+
+    def test_disabling_gate_temporal_flips_to_auto_merge(self):
+        s = self._strong_no_reason_sheet(effective_dates={
+            "as_of": "2026-01-01", "candidate_effective_date": "2026-03-01",
+            "conflict": True,
+        })
+        baseline = jbeq_decide.decide(s)
+        self.assertEqual(baseline["answer"], "KEEP SEPARATE")
+        self.assertEqual(baseline["rule_fired"], "gate-temporal")
+        mutated = self._decide_with_disabled("temporal", s)
+        self.assertEqual(mutated["answer"], "AUTO-MERGE")
+
+    def test_disabling_rule_L_flips_different_administrative_area(self):
+        s = sheet(track="address", location_comparison="different_administrative_area",
+                   requested_action="match_on_stated_basis")
+        baseline = jbeq_decide.decide(s)
+        self.assertEqual(baseline["answer"], "REJECT MATCH")
+        self.assertEqual(baseline["rule_fired"], "L")
+        mutated = self._decide_with_disabled("L", s)
+        self.assertNotEqual(mutated["answer"], "REJECT MATCH")
+
+    # Round 6 repair (2026-09-06, review section B group 3, flagged the
+    # weakest of the round's changes): two location_comparison values no
+    # rule read at all.
+    def test_disabling_rule_L_flips_notation_variant_only(self):
+        # evidence_strength stays null (AD-01's own shape: no score at all)
+        # so the answer comes from rule L alone, not from the ordinary
+        # merge ladder falling through to the same AUTO-MERGE by luck.
+        s = sheet(track="address", location_comparison="notation_variant_only")
+        baseline = jbeq_decide.decide(s)
+        self.assertEqual(baseline["answer"], "AUTO-MERGE")
+        self.assertEqual(baseline["rule_fired"], "L")
+        mutated = self._decide_with_disabled("L", s)
+        self.assertNotEqual(mutated["answer"], "AUTO-MERGE")
+
+    def test_notation_variant_only_still_clears_the_auto_merge_gate(self):
+        # The gate must still block it exactly like a strong-evidence
+        # AUTO-MERGE candidate: a lifecycle event blocks the merge here too.
+        s = sheet(track="address", location_comparison="notation_variant_only",
+                   lifecycle="closed")
+        result = jbeq_decide.decide(s)
+        self.assertEqual(result["answer"], "KEEP SEPARATE")
+        self.assertEqual(result["rule_fired"], "gate-lifecycle")
+
+    def test_disabling_rule_L_flips_same_chiban_different_notation(self):
+        s = sheet(track="address", location_comparison="same_chiban_different_notation")
+        baseline = jbeq_decide.decide(s)
+        self.assertEqual(baseline["answer"], "SUGGEST MERGE")
+        self.assertEqual(baseline["rule_fired"], "L")
+        mutated = self._decide_with_disabled("L", s)
+        self.assertNotEqual(mutated["answer"], "SUGGEST MERGE")
+
+    def test_disabling_rule_r_flips_authoritative_identifier_conflicting(self):
+        s = sheet(track="entity-object", stated_relation="none",
+                   authoritative_identifier="conflicting",
+                   requested_action="match_on_stated_basis")
+        baseline = jbeq_decide.decide(s)
+        self.assertEqual(baseline["answer"], "REJECT MATCH")
+        self.assertEqual(baseline["rule_fired"], "rule_r")
+        mutated = self._decide_with_disabled("rule_r", s)
+        self.assertNotEqual(mutated["answer"], "REJECT MATCH")
+
+    # Round 6 repair (2026-09-06, review section A AD-10 and section B group
+    # 1): one disable id, relation_partition, protects TWO call sites. Both
+    # halves are proven in one test so the id's own scope (both, not either)
+    # is what the mutation demonstrates.
+    def test_disabling_relation_partition_flips_ad10_and_group1_cases(self):
+        # AD-10 shape: different_legal_entity + same_site_only must reach
+        # rule 2's REJECT MATCH, never link_vs_reject's LINK AS RELATED.
+        ad10_like = sheet(
+            track="address",
+            stated_difference="different_legal_entity",
+            stated_relation="same_site_only",
+            authoritative_identifier="conflicting",
+            requested_action="match_on_stated_basis",
+        )
+        baseline = jbeq_decide.decide(ad10_like)
+        self.assertEqual(baseline["answer"], "REJECT MATCH")
+        self.assertEqual(baseline["rule_fired"], "2")
+        mutated = self._decide_with_disabled("relation_partition", ad10_like)
+        self.assertEqual(mutated["answer"], "LINK AS RELATED")
+        self.assertEqual(mutated["rule_fired"], "link_vs_reject")
+
+        # Group 1 shape: corporate_number_shared plus otherwise-clean strong
+        # evidence must reach AUTO-MERGE, never gate-stated-relation's
+        # downgrade to LINK AS RELATED.
+        group1_like = self._strong_no_reason_sheet(
+            stated_relation="corporate_number_shared",
+        )
+        baseline2 = jbeq_decide.decide(group1_like)
+        self.assertEqual(baseline2["answer"], "AUTO-MERGE")
+        mutated2 = self._decide_with_disabled("relation_partition", group1_like)
+        self.assertEqual(mutated2["answer"], "LINK AS RELATED")
+        self.assertEqual(mutated2["rule_fired"], "gate-stated-relation")
+
+    # Round 6 repair (2026-09-06, review section B group 2 AD-09): an
+    # inferred object-type difference must never outrank a stated absence.
+    def test_disabling_rule_r_blank_fields_guard_flips_ad09_shape(self):
+        s = sheet(
+            track="address",
+            object_type_a="address",
+            object_type_b="site",
+            blank_fields=["prefecture"],
+            requested_action="match_on_stated_basis",
+        )
+        baseline = jbeq_decide.decide(s)
+        self.assertEqual(baseline["answer"], "NO-DATA")
+        self.assertEqual(baseline["rule_fired"], "A")
+        mutated = self._decide_with_disabled("rule_r_blank_fields_guard", s)
+        self.assertEqual(mutated["answer"], "REJECT MATCH")
+        self.assertEqual(mutated["rule_fired"], "rule_r")
+
+    # Round 6 repair (2026-09-06, review section B group 2 EO-07): weak
+    # evidence never asserts a relation, even under
+    # distinct_operational_attributes=true.
+    def test_disabling_site_store_weak_guard_flips_eo07_shape(self):
+        s = sheet(
+            track="entity-object",
+            distinct_operational_attributes=True,
+            evidence_strength="weak",
+            evidence_reasons=["missing_identifier"],
+        )
+        baseline = jbeq_decide.decide(s)
+        self.assertEqual(baseline["answer"], "ESCALATE")
+        self.assertEqual(baseline["rule_fired"], "B")
+        mutated = self._decide_with_disabled("site_store_weak_guard", s)
+        self.assertEqual(mutated["answer"], "LINK AS RELATED")
+        self.assertEqual(mutated["rule_fired"], "site_store")
+
+    # Round 7 repair (2026-09-06, review section D, U-36): rule_r's own
+    # lifecycle clause used to answer REJECT MATCH while gate-lifecycle
+    # answers KEEP SEPARATE for the identical fact, an engine self-
+    # contradiction. id rule_r_lifecycle_keep isolates just this clause's
+    # own answer, independent of whether rule_r fires at all. Uses
+    # identifier_reused, not relocated: round 9 dropped relocated from
+    # this clause entirely (id relocated_not_a_bar, see
+    # TestPerRuleMutation below), so identifier_reused is the fact that
+    # still reaches it by default.
+    def test_disabling_rule_r_lifecycle_keep_flips_to_reject_match(self):
+        s = sheet(track="temporal", stated_relation="none",
+                   lifecycle="identifier_reused",
+                   requested_action="match_on_stated_basis")
+        baseline = jbeq_decide.decide(s)
+        self.assertEqual(baseline["answer"], "KEEP SEPARATE")
+        self.assertEqual(baseline["rule_fired"], "rule_r")
+        mutated = self._decide_with_disabled("rule_r_lifecycle_keep", s)
+        self.assertEqual(mutated["answer"], "REJECT MATCH")
+        self.assertEqual(mutated["rule_fired"], "rule_r")
+
+    # Round 7 repair (2026-09-06, review section D, U-38): the AD-09
+    # blank_fields guard is widened to also cover evidence_reasons and
+    # contradicted_attributes, and now guards rule_r's object_type clause
+    # too (extending the reasoning AD-09 already established for it).
+    def test_disabling_rule_r_blank_fields_guard_widened_flips_object_type_shape(self):
+        s = sheet(
+            track="temporal",
+            stated_relation="none",
+            object_type_a="legal_entity",
+            object_type_b="store",
+            contradicted_attributes=["relocation_date"],
+            evidence_reasons=["unexplained_conflict"],
+            requested_action="match_on_stated_basis",
+        )
+        baseline = jbeq_decide.decide(s)
+        self.assertEqual(baseline["answer"], "ESCALATE")
+        self.assertEqual(baseline["rule_fired"], "B")
+        mutated = self._decide_with_disabled("rule_r_blank_fields_guard", s)
+        self.assertEqual(mutated["answer"], "REJECT MATCH")
+        self.assertEqual(mutated["rule_fired"], "rule_r")
+
+    # Same widened guard, proven against the lifecycle clause specifically:
+    # this is the exact mechanism U-38 needed (a STATED conflict must not
+    # be outranked by rule_r's lifecycle clause either). Uses
+    # identifier_reused, not relocated: round 9 dropped relocated from
+    # this clause entirely (id relocated_not_a_bar), so identifier_reused
+    # is the fact that still reaches it by default.
+    def test_disabling_rule_r_blank_fields_guard_widened_flips_lifecycle_shape(self):
+        s = sheet(
+            track="temporal",
+            stated_relation="none",
+            lifecycle="identifier_reused",
+            contradicted_attributes=["relocation_date"],
+            evidence_reasons=["unexplained_conflict"],
+        )
+        baseline = jbeq_decide.decide(s)
+        self.assertEqual(baseline["answer"], "ESCALATE")
+        self.assertEqual(baseline["rule_fired"], "B")
+        mutated = self._decide_with_disabled("rule_r_blank_fields_guard", s)
+        # rule_r_lifecycle_keep is still active (only the guard above it
+        # was disabled), so the lifecycle clause fires with its OWN fixed
+        # answer, KEEP SEPARATE, not the pre-round-7 REJECT MATCH.
+        self.assertEqual(mutated["answer"], "KEEP SEPARATE")
+        self.assertEqual(mutated["rule_fired"], "rule_r")
+
+    # Round 8 repair (2026-09-06, review-u1-2026-09-06.md section A, id
+    # proposal_gate): REJECT MATCH is for a proposed match or write the
+    # facts refute; with no proposal on record at all, the same refutation
+    # is KEEP SEPARATE instead. Disabling proposal_gate restores REJECT
+    # MATCH unconditionally, exactly as every rule behaved before this fix.
+    # One sheet per gated rule (2, L, rule_r) proves the id protects all
+    # three, not just one.
+    def test_disabling_proposal_gate_flips_no_proposal_cases_to_reject_match(self):
+        no_proposal_cases = [
+            ("2", sheet(track="entity-object", stated_relation="none",
+                        stated_difference="different_legal_entity")),
+            ("L", sheet(track="address",
+                        location_comparison="different_administrative_area")),
+            ("rule_r", sheet(track="entity-object", stated_relation="none",
+                              authoritative_identifier="conflicting")),
+        ]
+        for rule_fired, s in no_proposal_cases:
+            with self.subTest(rule_fired=rule_fired):
+                self.assertEqual(s["requested_action"], "none")
+                self.assertIsNone(s["requested_relation_type"])
+                baseline = jbeq_decide.decide(s)
+                self.assertEqual(baseline["answer"], "KEEP SEPARATE")
+                self.assertEqual(baseline["rule_fired"], rule_fired)
+                mutated = self._decide_with_disabled("proposal_gate", s)
+                self.assertEqual(mutated["answer"], "REJECT MATCH")
+                self.assertEqual(mutated["rule_fired"], rule_fired)
+
+    # With a proposal on record, proposal_gate must not change anything:
+    # the refuted proposal is REJECT MATCH whether or not the gate is
+    # active, so disabling it here has no observable effect.
+    def test_proposal_gate_is_a_noop_when_a_proposal_is_recorded(self):
+        s = sheet(track="entity-object", stated_relation="none",
+                   stated_difference="different_legal_entity",
+                   requested_action="match_on_stated_basis")
+        baseline = jbeq_decide.decide(s)
+        self.assertEqual(baseline["answer"], "REJECT MATCH")
+        self.assertEqual(baseline["rule_fired"], "2")
+        mutated = self._decide_with_disabled("proposal_gate", s)
+        self.assertEqual(mutated["answer"], "REJECT MATCH")
+        self.assertEqual(mutated["rule_fired"], "2")
+
+    # Round 7 repair (2026-09-06, review section C, id
+    # allowed_answers_remap): disabling it reverts finish() to the old
+    # immediate-NO-DATA safety net, exactly the behaviour U-23 showed was
+    # itself capable of returning an answer outside the case's own
+    # allowed_answers.
+    def test_disabling_allowed_answers_remap_flips_to_old_safety_net(self):
+        s = sheet(
+            track="hierarchy",
+            allowed_answers=["ESCALATE", "NO-DATA"],
+            stated_relation="group_company_code_shared_entity",
+        )
+        baseline = jbeq_decide.decide(s)
+        self.assertEqual(baseline["answer"], "ESCALATE")
+        self.assertEqual(baseline["rule_fired"], "7")
+        mutated = self._decide_with_disabled("allowed_answers_remap", s)
+        self.assertEqual(mutated["answer"], "NO-DATA")
+        self.assertEqual(mutated["rule_fired"], "safety-net")
+
+    # Round 7 repair (2026-09-06, review section F): same_area_renamed
+    # (one place under an old and a new administrative name) is read by
+    # rule L exactly like notation_variant_only.
+    def test_disabling_rule_L_flips_same_area_renamed(self):
+        s = sheet(track="address", location_comparison="same_area_renamed")
+        baseline = jbeq_decide.decide(s)
+        self.assertEqual(baseline["answer"], "AUTO-MERGE")
+        self.assertEqual(baseline["rule_fired"], "L")
+        mutated = self._decide_with_disabled("L", s)
+        self.assertNotEqual(mutated["answer"], "AUTO-MERGE")
+
+    def test_same_area_renamed_still_clears_the_auto_merge_gate(self):
+        # Rule L runs ahead of rule_r (see
+        # test_notation_variant_only_still_clears_the_auto_merge_gate
+        # above for the identical shape): a lifecycle event blocks the
+        # merge here through the merge-ladder's own gate-lifecycle item,
+        # never reaching rule_r at all.
+        s = sheet(track="address", location_comparison="same_area_renamed",
+                   lifecycle="closed")
+        result = jbeq_decide.decide(s)
+        self.assertEqual(result["answer"], "KEEP SEPARATE")
+        self.assertEqual(result["rule_fired"], "gate-lifecycle")
+
+    # Round 10 repair (2026-09-06, review-u3-2026-09-06.md W-04): rule 5
+    # (id "5", unchanged) is hoisted above the location ladder so it
+    # answers before a notation-variant-only address match can reach rule
+    # L's AUTO-MERGE gates. Before the hoist this exact shape (a shared,
+    # one-to-many object whose address is a notation variant, with a
+    # different object_type on each side) answered LINK AS RELATED off
+    # gate-object-type without rule 5 ever being read.
+    def test_rule_5_answers_before_location_ladder_on_notation_variant(self):
+        s = sheet(
+            track="entity-object",
+            stated_relation="same_site_only",
+            one_to_many_object=True,
+            location_comparison="notation_variant_only",
+            object_type_a="site",
+            object_type_b="store",
+        )
+        result = jbeq_decide.decide(s)
+        self.assertEqual(result["answer"], "KEEP SEPARATE")
+        self.assertEqual(result["rule_fired"], "5")
+
+    def test_disabling_rule_5_flips_notation_variant_shared_hub_to_link_as_related(self):
+        s = sheet(
+            track="entity-object",
+            stated_relation="same_site_only",
+            one_to_many_object=True,
+            location_comparison="notation_variant_only",
+            object_type_a="site",
+            object_type_b="store",
+        )
+        baseline = jbeq_decide.decide(s)
+        self.assertEqual(baseline["answer"], "KEEP SEPARATE")
+        self.assertEqual(baseline["rule_fired"], "5")
+        mutated = self._decide_with_disabled("5", s)
+        self.assertEqual(mutated["answer"], "LINK AS RELATED")
+        self.assertEqual(mutated["rule_fired"], "gate-object-type")
+
+    # Round 10 repair (2026-09-06, review-u3-2026-09-06.md W-01): a
+    # relocation's own address difference never refutes identity, so rule
+    # L's different_administrative_area branch exempts lifecycle=relocated
+    # (id relocated_address_not_a_refutation) and falls through to the
+    # merge ladder instead of REJECT MATCH / KEEP SEPARATE.
+    def test_relocated_exempts_different_administrative_area_from_rule_L(self):
+        s = sheet(
+            track="address",
+            lifecycle="relocated",
+            location_comparison="different_administrative_area",
+            evidence_strength="strong",
+            history_exists=True,
+        )
+        result = jbeq_decide.decide(s)
+        self.assertEqual(result["answer"], "SUGGEST MERGE")
+        self.assertEqual(result["rule_fired"], "B")
+
+    def test_disabling_relocated_address_not_a_refutation_flips_to_rule_L(self):
+        s = sheet(
+            track="address",
+            lifecycle="relocated",
+            location_comparison="different_administrative_area",
+            evidence_strength="strong",
+            history_exists=True,
+        )
+        baseline = jbeq_decide.decide(s)
+        self.assertEqual(baseline["answer"], "SUGGEST MERGE")
+        self.assertEqual(baseline["rule_fired"], "B")
+        mutated = self._decide_with_disabled("relocated_address_not_a_refutation", s)
+        self.assertEqual(mutated["answer"], "KEEP SEPARATE")
+        self.assertEqual(mutated["rule_fired"], "L")
+
+    # Round 10 repair (2026-09-06, review-u3-2026-09-06.md W-19, addendum
+    # rule 9): medium evidence with no confirmation reason stated
+    # separately from that evidence itself (irreversible=False,
+    # history_exists=False) must ESCALATE, not fall through to SUGGEST
+    # MERGE. id medium_needs_confirmation isolates the branch.
+    def test_medium_evidence_with_no_confirmation_reason_escalates(self):
+        s = sheet(
+            track="identifier",
+            evidence_strength="medium",
+            evidence_reasons=["unvalidated_crosswalk"],
+            irreversible=False,
+            history_exists=False,
+        )
+        result = jbeq_decide.decide(s)
+        self.assertEqual(result["answer"], "ESCALATE")
+        self.assertEqual(result["rule_fired"], "B")
+
+    def test_disabling_medium_needs_confirmation_flips_to_suggest_merge(self):
+        s = sheet(
+            track="identifier",
+            evidence_strength="medium",
+            evidence_reasons=["unvalidated_crosswalk"],
+            irreversible=False,
+            history_exists=False,
+        )
+        baseline = jbeq_decide.decide(s)
+        self.assertEqual(baseline["answer"], "ESCALATE")
+        self.assertEqual(baseline["rule_fired"], "B")
+        mutated = self._decide_with_disabled("medium_needs_confirmation", s)
+        self.assertEqual(mutated["answer"], "SUGGEST MERGE")
+        self.assertEqual(mutated["rule_fired"], "B")
+
+    # Round 11 repair (2026-09-06, review-u4-2026-09-06.md W4-03, id
+    # site_store_write_refutes): a per-object operational split REFUTES a
+    # proposed write, it does not merely record a relation alongside it.
+    def test_site_store_record_write_rejects_not_links(self):
+        s = sheet(
+            track="entity-object",
+            distinct_operational_attributes=True,
+            requested_action="record_write",
+        )
+        result = jbeq_decide.decide(s)
+        self.assertEqual(result["answer"], "REJECT MATCH")
+        self.assertEqual(result["rule_fired"], "site_store")
+
+    def test_disabling_site_store_write_refutes_flips_to_link(self):
+        s = sheet(
+            track="entity-object",
+            distinct_operational_attributes=True,
+            requested_action="record_write",
+        )
+        baseline = jbeq_decide.decide(s)
+        self.assertEqual(baseline["answer"], "REJECT MATCH")
+        mutated = self._decide_with_disabled("site_store_write_refutes", s)
+        self.assertEqual(mutated["answer"], "LINK AS RELATED")
+        self.assertEqual(mutated["rule_fired"], "site_store")
+
+    # Round 11 repair (2026-09-06, review-u4-2026-09-06.md W4-04, id
+    # link_vs_reject_write_refutes): a stated relation answers what the
+    # relation is, it does not license a write; requested_action=
+    # record_write lets the refuting stated_difference win instead.
+    def test_link_vs_reject_record_write_rejects_not_links(self):
+        s = sheet(
+            track="entity-object",
+            stated_difference="different_legal_entity",
+            stated_relation="role_pair",
+            requested_action="record_write",
+        )
+        result = jbeq_decide.decide(s)
+        self.assertEqual(result["answer"], "REJECT MATCH")
+        self.assertEqual(result["rule_fired"], "2")
+
+    def test_disabling_link_vs_reject_write_refutes_flips_to_link(self):
+        s = sheet(
+            track="entity-object",
+            stated_difference="different_legal_entity",
+            stated_relation="role_pair",
+            requested_action="record_write",
+        )
+        baseline = jbeq_decide.decide(s)
+        self.assertEqual(baseline["answer"], "REJECT MATCH")
+        self.assertEqual(baseline["rule_fired"], "2")
+        mutated = self._decide_with_disabled("link_vs_reject_write_refutes", s)
+        self.assertEqual(mutated["answer"], "LINK AS RELATED")
+        self.assertEqual(mutated["rule_fired"], "link_vs_reject")
+
+    # Round 11 repair (2026-09-06, review-u4-2026-09-06.md W4-23, id
+    # same_site_only_never_a_relation): same_site_only reads like "none"
+    # at rule_r's guard and boundary rule 1, exactly as rule 5 already
+    # reads it for the one-to-many case; a shared address alone never
+    # falls through to LINK AS RELATED on its own.
+    def test_same_site_only_alone_keeps_separate_not_link(self):
+        s = sheet(
+            track="entity-object",
+            stated_relation="same_site_only",
+        )
+        result = jbeq_decide.decide(s)
+        self.assertEqual(result["answer"], "KEEP SEPARATE")
+        self.assertEqual(result["rule_fired"], "1")
+
+    def test_disabling_same_site_only_never_a_relation_flips_to_link(self):
+        s = sheet(
+            track="entity-object",
+            stated_relation="same_site_only",
+        )
+        baseline = jbeq_decide.decide(s)
+        self.assertEqual(baseline["answer"], "KEEP SEPARATE")
+        self.assertEqual(baseline["rule_fired"], "1")
+        mutated = self._decide_with_disabled("same_site_only_never_a_relation", s)
+        self.assertEqual(mutated["answer"], "LINK AS RELATED")
+        self.assertEqual(mutated["rule_fired"], "1")
+
+
+class BlankFieldsWithAStatedRelation(unittest.TestCase):
+    """Regression for a crash two lanes hit independently the same day
+    (2026-09-06): rule A's ESCALATE branch built its "why" string from the
+    bare local `identifiers`, which rule_r binds only inside its own
+    branch (stated_relation == "none"). Any fact sheet that reaches rule
+    A's observable-blank-field ESCALATE without rule_r having run raised
+    UnboundLocalError instead of answering, whether because stated_relation
+    already states a relation (never "none", so rule_r's body never runs
+    at all) or because JBEQ_DECIDE_DISABLE_RULES turns rule_r off. The fix
+    reads fact_sheet["identifiers"] directly, matching what rule A's own
+    `observable` check already reads. See the comment beside that line in
+    scripts/jbeq_decide.py.
+    """
+
+    def _sheet(self, **overrides):
+        # stated_relation is a RELATIONSHIP_ONLY_RELATIONS value, never
+        # "none", so rule_r's whole branch is skipped and its local
+        # `identifiers` name is never bound. blank_fields plus a
+        # corroborating fact makes rule A's `observable` true, which is
+        # what routes into the ESCALATE branch the old code crashed on.
+        base = {
+            "stated_relation": "parent_child",
+            "blank_fields": ["effective_dates"],
+            "corroborating_facts": ["a shared invoice number is stated"],
+        }
+        base.update(overrides)
+        return sheet(**base)
+
+    def test_stated_relation_with_no_rule_r_trigger_escalates_without_raising(self):
+        result = jbeq_decide.decide(self._sheet())
+        self.assertEqual(result["answer"], "ESCALATE")
+        self.assertEqual(result["rule_fired"], "A")
+
+    def test_disabling_rule_r_still_answers_with_the_mutation_marker(self):
+        s = self._sheet()
+        old = os.environ.get("JBEQ_DECIDE_DISABLE_RULES")
+        os.environ["JBEQ_DECIDE_DISABLE_RULES"] = "rule_r"
+        try:
+            result = jbeq_decide.decide(s)
+        finally:
+            if old is None:
+                os.environ.pop("JBEQ_DECIDE_DISABLE_RULES", None)
+            else:
+                os.environ["JBEQ_DECIDE_DISABLE_RULES"] = old
+        self.assertEqual(result.get("mutation"), {"disabled": ["rule_r"]})
+        self.assertTrue(
+            result["why"].startswith(
+                "MUTATION SEAM ACTIVE (rules disabled: rule_r): "
+            ),
+            result["why"],
+        )
+        self.assertEqual(result["answer"], "ESCALATE")
+
+    def test_every_observable_empty_is_no_data_not_a_crash(self):
+        result = jbeq_decide.decide(self._sheet(corroborating_facts=[]))
+        self.assertEqual(result["answer"], "NO-DATA")
+        self.assertEqual(result["rule_fired"], "A")
 
 
 class TestCLI(unittest.TestCase):
@@ -310,6 +1652,48 @@ class TestCLI(unittest.TestCase):
                  "validate", sheets_path]
             )
             self.assertEqual(rc, jbeq_decide.EXIT_NOT_DECIDED)
+
+    def test_validate_refuses_unrecognized_enum_value(self):
+        # Round 5 repair (2026-09-06), the L12 fix: validate now checks
+        # value membership, not only key presence.
+        import subprocess
+        import tempfile
+
+        s = sheet(stated_difference="no_capital_relationship")
+        with tempfile.TemporaryDirectory() as tmp:
+            sheets_path = os.path.join(tmp, "fact-sheets.json")
+            with open(sheets_path, "w", encoding="utf-8") as fh:
+                json.dump({"X-02": s}, fh)
+            result = subprocess.run(
+                [sys.executable, os.path.join(REPO, "scripts", "jbeq_decide.py"),
+                 "validate", sheets_path],
+                capture_output=True, text=True,
+            )
+            self.assertEqual(result.returncode, jbeq_decide.EXIT_NOT_DECIDED)
+            self.assertIn("stated_difference", result.stdout)
+            self.assertIn("no_capital_relationship", result.stdout)
+
+    def test_validate_refuses_stated_difference_outside_grown_enum(self):
+        # Round 10 (2026-09-06): stated_difference grew a sixth value,
+        # different_hierarchy_dimension. Proves the growth did not loosen
+        # validation into accepting a lookalike string that is still not
+        # on the list.
+        import subprocess
+        import tempfile
+
+        s = sheet(stated_difference="different_hierarchy")
+        with tempfile.TemporaryDirectory() as tmp:
+            sheets_path = os.path.join(tmp, "fact-sheets.json")
+            with open(sheets_path, "w", encoding="utf-8") as fh:
+                json.dump({"X-03": s}, fh)
+            result = subprocess.run(
+                [sys.executable, os.path.join(REPO, "scripts", "jbeq_decide.py"),
+                 "validate", sheets_path],
+                capture_output=True, text=True,
+            )
+            self.assertEqual(result.returncode, jbeq_decide.EXIT_NOT_DECIDED)
+            self.assertIn("stated_difference", result.stdout)
+            self.assertIn("different_hierarchy", result.stdout)
 
 
 if __name__ == "__main__":

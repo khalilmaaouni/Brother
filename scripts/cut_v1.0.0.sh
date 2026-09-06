@@ -28,53 +28,14 @@ export VERSION
 TAG="v$VERSION"
 PUBLIC_REMOTE=https://github.com/khalilmaaouni/Brother
 
-echo "== 1. bump both manifests to $VERSION and point refs at the tag =="
-python3 - <<'PY'
-import json, os, re
-VERSION = os.environ['VERSION']
-TAG = 'v' + VERSION
-# bundle plugin.json
-p = 'bundle/.claude-plugin/plugin.json'
-d = json.load(open(p))
-d['version'] = VERSION
-json.dump(d, open(p, 'w'), indent=2); open(p, 'a').write('\n')
-print('bundle/.claude-plugin/plugin.json -> %s' % VERSION)
-# bundle/.codex-plugin/plugin.json: the Codex half of the same package, which
-# ships the same bytes under a second manifest, so a cut that moved only the
-# Claude manifest would publish a package declaring two different versions of
-# itself. Bumped here rather than by hand for the same reason as the one above.
-p = 'bundle/.codex-plugin/plugin.json'
-d = json.load(open(p))
-d['version'] = VERSION
-json.dump(d, open(p, 'w'), indent=2); open(p, 'a').write('\n')
-print('bundle/.codex-plugin/plugin.json -> %s' % VERSION)
-# marketplace.json: the brother entry version, and every ref pinned to the tag
-p = '.claude-plugin/marketplace.json'
-s = open(p).read()
-m = json.loads(s)
-m['metadata']['version'] = VERSION
-for plug in m['plugins']:
-    if plug['name'] == 'brother':
-        plug['version'] = VERSION
-    src = plug.get('source')
-    if isinstance(src, dict) and src.get('ref'):
-        src['ref'] = TAG
-json.dump(m, open(p, 'w'), indent=2); open(p, 'a').write('\n')
-print('.claude-plugin/marketplace.json -> metadata %s, brother %s, refs %s' % (VERSION, VERSION, TAG))
-# docs/VERSIONING.md: keep its stated umbrella version in agreement
-p = 'docs/VERSIONING.md'
-with open(p) as fh:
-    s = fh.read()
-s2 = re.sub(r'Current version: [0-9.]+\.', 'Current version: %s.' % VERSION, s)
-# A re-run of the same cut (after merging main, say, so the note describes the
-# merged tree) leaves this file byte-identical, which is agreement, not a
-# missing line. Only an absent line refuses.
-if s2 == s and ('Current version: %s.' % VERSION) not in s:
-    raise SystemExit('docs/VERSIONING.md: "Current version: X." line not found, refusing to bump silently')
-with open(p, 'w') as fh:
-    fh.write(s2)
-print('docs/VERSIONING.md -> Current version: %s.' % VERSION)
-PY
+echo "== 1. bump the source of truth and every carrier to $VERSION and point refs at the tag =="
+# scripts/version_source.py is the one place that knows every carrier
+# (.claude-plugin/marketplace.json's metadata.version, the brother plugin
+# entry's version, every plugin entry's source.ref, the two bundle
+# plugin.json files, and docs/VERSIONING.md's "Current version:" line). It
+# reuses that same logic for scripts/test_version_source.py's drift check,
+# so the cut and the check can never drift apart from each other.
+python3 scripts/version_source.py --write --version "$VERSION"
 
 echo "== 1b. re-pin the product's public install tag to $TAG =="
 # Row BAT-103. The 1.0.3 cut moved products/brothermode/README.md's pinned

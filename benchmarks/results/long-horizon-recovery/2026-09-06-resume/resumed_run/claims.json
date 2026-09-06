@@ -1,0 +1,50 @@
+{
+ "A1": {
+  "attempt": 1,
+  "claimed_at": 1788653974.727227,
+  "evidence": {
+   "canonical_rev": "4cd78db049560233283138ea7704288925bebd73",
+   "check_command": "test -f one.txt",
+   "exit_code": 0,
+   "files_changed": [
+    "one.txt"
+   ],
+   "output": "",
+   "output_truncated": false
+  },
+  "expires_at": 0,
+  "hostname": "<HOSTNAME>",
+  "owner": "brother-run-20525",
+  "pid": 20525,
+  "reclaimed_from": null,
+  "released_at": 1788653975.109858,
+  "state": "done",
+  "unit_id": "A1",
+  "work_id": "",
+  "worker_id": "brother-run-20525/A1/1"
+ },
+ "A2": {
+  "attempt": 2,
+  "claimed_at": 1788654036.856811,
+  "evidence": {
+   "canonical_rev": "20682048b0f78673642a4bc288c3f9473bf994db",
+   "check_command": "test -f two.txt",
+   "exit_code": 0,
+   "files_changed": [
+    "two.txt"
+   ],
+   "output": "",
+   "output_truncated": false
+  },
+  "expires_at": 0,
+  "hostname": "<HOSTNAME>",
+  "owner": "brother-run-25585",
+  "pid": 25585,
+  "reclaimed_from": "brother-run-20525",
+  "released_at": 1788654039.348644,
+  "state": "done",
+  "unit_id": "A2",
+  "work_id": "",
+  "worker_id": "brother-run-25585/A2/2"
+ }
+}

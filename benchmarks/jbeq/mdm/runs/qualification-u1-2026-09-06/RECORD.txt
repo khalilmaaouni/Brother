@@ -1,0 +1,125 @@
+JBEQ-MDM qualification run U1, 2026-09-06, over the unseen set of 40 (26 critical) authored blind and audited blind. Extractor: a fresh Claude subagent (sonnet, effort high) reading only the extractor prompt, the schema and the 40 prompts; hashes recorded before any answer was read; engine of hub main 6c9f4067c6f0423002f01d3627ba0769341432ed. This is the first number that is not a regression on the frozen 70; the engine-decided half describes the engine, the direct-answered half does not. The rules were authored against the frozen 70 and never against these 40.
+
+PHASE 1 FILES OPENED (blind, before any hash was taken): benchmarks/jbeq/mdm/prompts/EXTRACTOR-PROMPT.md, benchmarks/jbeq/mdm/fact-sheet-schema.json, and the 40 files benchmarks/jbeq/mdm/unseen-prompts/U-01.md through U-40.md. No other file under benchmarks/jbeq/mdm was opened before the hashes below were recorded.
+
+HASHES (sha256, phase 1, before validate/decide ran):
+fact-sheets.json    81af46000b4b64fd109f11766aefc30d696ef8aaf5e0b3614b3a12e2a0e3475d
+extractor-notes.md  df5e491d4626f806a7164c0eb237ba6867fa1b35e3b875308d17ed9c7b71ce81
+
+RERUN OF THE SAME HASHES (after phase 2, unchanged files, confirming no post-hoc edit):
+fact-sheets.json    81af46000b4b64fd109f11766aefc30d696ef8aaf5e0b3614b3a12e2a0e3475d
+extractor-notes.md  df5e491d4626f806a7164c0eb237ba6867fa1b35e3b875308d17ed9c7b71ce81
+
+VALIDATE: `python3 scripts/jbeq_decide.py validate benchmarks/jbeq/mdm/runs/qualification-u1-2026-09-06/fact-sheets.json`
+  validate: 40 fact sheet(s) OK
+  exit=0
+No off-enum values were found; zero fixes were needed. All 40 fact sheets validated on the first pass.
+
+DECIDE: `python3 scripts/jbeq_decide.py decide benchmarks/jbeq/mdm/runs/qualification-u1-2026-09-06/fact-sheets.json --out engine-answers.json --decisions decisions.jsonl` exited 0 and wrote 40 answers. Ten of those forty came back NO-DATA with rule_fired=track-unsupported, because UNSUPPORTED_TRACKS in scripts/jbeq_decide.py names "survivorship" and "requirements": U-26 through U-30 (requirements) and U-31 through U-35 (survivorship). Those ten were answered DIRECTLY from the prompts by the same session, after blindness had already ended, using only the decision vocabulary and the four boundary rules printed in each prompt file, and written to direct-answers.json:
+
+  U-26 ESCALATE       (internal record self-contradiction: product-name text vs lot-code lookup table name two different factories; something to judge, no id to resolve it)
+  U-27 ESCALATE       (requirement text permits a name-only auto-merge, but no identifier of any kind is recorded on either side: weak evidence forces ESCALATE regardless of the requirement)
+  U-28 KEEP SEPARATE  (same-address-only tie to a shared many-store consolidation hub, no corporate number or parent-child fact; the one-to-many consolidation pattern)
+  U-29 LINK AS RELATED (same group, shared entity, but each side manages its own credit limit and payment terms independently; a relation worth recording, never a merge signal)
+  U-30 NO-DATA        (the requirement needs a priority-source flag this record does not carry, and nothing else corroborates)
+  U-31 REJECT MATCH   (input states the ERP holds a different, current value superseding the expired override: a fact that refutes keeping the expired value linked as though still valid)
+  U-32 LINK AS RELATED (an explicit, stated item-level split of authority between two current, valid systems for the same customer)
+  U-33 SUGGEST MERGE  (an unvalidated crosswalk is medium evidence; medium evidence plus an irreversible absorption of billing history means a person should look, not machine auto-merge)
+  U-34 LINK AS RELATED (two effective-dated values of the same attribute, one stated as newer than the other: a stated temporal relation worth recording)
+  U-35 ESCALATE       (priority-source flag blank, but corroborated by a more recent ERP timestamp and a separately stated documented practice: something to judge, not nothing)
+
+merged into answers.json (all 40 keys, engine's own answer used for the 30 supported-track cases, the ten direct answers above used for the unsupported-track cases).
+
+SCORE: `python3 scripts/jbeq_mdm.py score benchmarks/jbeq/mdm/runs/qualification-u1-2026-09-06/answers.json --seed benchmarks/jbeq/mdm/unseen-2026-09-06.json`
+exit=1, JBEQ-MDM NOT READY. Full output in score.txt, reproduced below.
+
+PER-TRACK TABLE
+  address               2 of 5   (engine-decided)
+  entity-object         5 of 5   (engine-decided)
+  hierarchy             3 of 5   (engine-decided)
+  identifier            5 of 5   (engine-decided)
+  match-or-no-merge     4 of 5   (engine-decided)
+  requirements          3 of 5   (direct-answered)
+  survivorship          5 of 5   (direct-answered)
+  temporal              1 of 5   (engine-decided)
+
+  engine-decided: 19 of 25
+  direct-answered (not blind, not evidence about the engine): 9 of 15
+
+CRITICAL WRONG (8 of 26 critical cases), with the engine's own rule_fired where the case was engine-decided:
+  U-01 [WRONG LEGAL ENTITY]         expected KEEP SEPARATE, answered REJECT MATCH  (CONSERVATIVE)
+       engine-decided; rule_fired=2; why: "stated_difference=different_legal_entity refutes the proposed identity outright"
+  U-03 [WRONG STORE ASSIGNMENT]     expected KEEP SEPARATE, answered REJECT MATCH  (CONSERVATIVE)
+       engine-decided; rule_fired=L; why: "location_comparison=different_administrative_area: the two addresses disagree at the administrative-area level despite any town or lot number match"
+  U-13 [SOURCE PRECEDENCE VIOLATION] expected LINK AS RELATED, answered KEEP SEPARATE  (CONSERVATIVE)
+       engine-decided; rule_fired=D; why: "hierarchy_parents states 3 distinct types (capital, reporting, trade_flow), each valid; hierarchy types are independent, not one conflict"
+  U-14 [HIERARCHY REVERSAL]         expected REJECT MATCH, answered KEEP SEPARATE
+       engine-decided; rule_fired=1; why: "stated_relation=none: the input states no relation"
+  U-29 [CROSS-CUSTOMER CONTAMINATION] expected REJECT MATCH, answered LINK AS RELATED
+       direct-answered by this session, not the engine; the engine has no rule for the requirements track.
+  U-36 [HISTORICAL REASSIGNMENT]    expected KEEP SEPARATE, answered REJECT MATCH  (CONSERVATIVE)
+       engine-decided; rule_fired=rule_r; why: "stated_relation=none and lifecycle='closed': a closed, relocated or reused-identifier record is never the same live object"
+  U-38 [HISTORICAL REASSIGNMENT]    expected ESCALATE, answered NO-DATA
+       engine-decided; rule_fired=safety-net; why: "rule rule_r chose 'REJECT MATCH' but the case's own allowed_answers does not carry it: ['LINK AS RELATED', 'KEEP SEPARATE', 'ESCALATE', 'NO-DATA']"
+  U-39 [HISTORICAL REASSIGNMENT]    expected REJECT MATCH, answered KEEP SEPARATE
+       engine-decided; rule_fired=1; why: "stated_relation=none: the input states no relation"
+
+  critical false merges: 0 of 26 (no critical case was ever answered AUTO-MERGE or SUGGEST MERGE where the expected answer was not a merge)
+  critical wrong: 8 of 26 (U-01, U-03, U-13, U-14, U-29, U-36, U-38, U-39)
+  conservative wrongs: 4 (U-01, U-03, U-13, U-36): the engine chose a MORE CAUTIOUS label than expected in these four, never a false merge.
+
+READING THIS NUMBER HONESTLY: seven of the eight critical wrongs came from the engine's own rules (2, L, D, 1 twice, rule_r twice, one of which fell through to the safety-net because rule_r's own chosen answer was not in that case's allowed_answers list, itself a defect worth a separate look). Only U-29 came from this session's own direct, non-blind answer on an unsupported track, so it is not evidence about the engine at all. Zero critical false merges is the one clean result: whatever else the rules get wrong on unseen input, they did not merge anything a person would have to unwind. The four conservative wrongs (too cautious, never too aggressive) and the one safety-net fallthrough (U-38, where rule_r's own answer was not a legal answer for that case) both point at the same shape of gap: rules 2, L, D, 1 and rule_r, tuned against the frozen 70, generalize toward caution on input that difers from the training set's own phrasing, sometimes past the point of matching the newly authored expected answer.
+
+FULL SCORE.TXT (verbatim):
+------------------------------------------------------------
+address               2 of 5
+entity-object         5 of 5
+hierarchy             3 of 5
+identifier            5 of 5
+match-or-no-merge     4 of 5
+requirements          3 of 5
+survivorship          5 of 5
+temporal              1 of 5
+engine-decided: 19 of 25
+direct-answered (not blind, not evidence about the engine): 9 of 15
+critical WRONG U-01 [WRONG LEGAL ENTITY] expected KEEP SEPARATE, answered REJECT MATCH  CONSERVATIVE
+critical WRONG U-03 [WRONG STORE ASSIGNMENT] expected KEEP SEPARATE, answered REJECT MATCH  CONSERVATIVE
+critical WRONG U-13 [SOURCE PRECEDENCE VIOLATION] expected LINK AS RELATED, answered KEEP SEPARATE  CONSERVATIVE
+critical WRONG U-14 [HIERARCHY REVERSAL] expected REJECT MATCH, answered KEEP SEPARATE
+critical WRONG U-29 [CROSS-CUSTOMER CONTAMINATION] expected REJECT MATCH, answered LINK AS RELATED
+critical WRONG U-36 [HISTORICAL REASSIGNMENT] expected KEEP SEPARATE, answered REJECT MATCH  CONSERVATIVE
+critical WRONG U-38 [HISTORICAL REASSIGNMENT] expected ESCALATE, answered NO-DATA
+critical WRONG U-39 [HISTORICAL REASSIGNMENT] expected REJECT MATCH, answered KEEP SEPARATE
+critical false merges: 0 of 26
+critical wrong: 8 of 26 (U-01, U-03, U-13, U-14, U-29, U-36, U-38, U-39)
+conservative wrongs: 4 (U-01, U-03, U-13, U-36)
+JBEQ-MDM NOT READY
+------------------------------------------------------------
+
+CORRECTION, appended 2026-09-06, review-u1-2026-09-06.md finding 1 (a
+reporting defect, not a rule fix; nothing above this line is changed):
+scripts/jbeq_mdm.py hardcoded ENGINE_TRACKS to five track names and never
+included "temporal", even though scripts/jbeq_decide.py has decided the
+temporal track since round 5 (2026-09-06). So the five temporal cases the
+engine actually decided (rule_r on U-36/U-38, rule B on U-37/U-40, rule 1
+on U-39; decisions.jsonl lines for those ids) were filed under
+"direct-answered" above, and the engine's own worst track (1 of 5) never
+counted against the engine-decided figure. cmd_score now derives
+engine-decided PER CASE from decisions.jsonl's own rule_fired
+(rule_fired != "track-unsupported") instead of the hardcoded track set.
+
+Re-scoring the SAME committed answers.json and decisions.jsonl above (no
+fact sheet, no rule, no answer changed) with the corrected scorer, written
+to score-corrected.txt beside score.txt in this same directory:
+
+  engine-decided: 19 of 25 as filed (ENGINE_TRACKS bug: temporal counted
+    as direct-answered)
+  engine-decided: 20 of 30 corrected (temporal's 5 cases now counted
+    where the engine actually decided them; 1 of 5 correct there, so the
+    corrected total is 19+1=20 of 25+5=30)
+
+critical wrong, critical false merges and conservative wrongs are
+unchanged by this correction (8 of 26, 0 of 26, 4): the correction is
+purely which subtotal line a case's score is filed under, never a
+critical-case verdict. score.txt is left exactly as filed; this note and
+score-corrected.txt are the only additions.

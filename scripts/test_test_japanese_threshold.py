@@ -165,5 +165,42 @@ class FindBmuToolsNeverFabricatesAPath(unittest.TestCase):
         self.assertTrue(os.path.isfile(fixture), fixture)
 
 
+class ProvenanceLineNamesTheTreeAScoreCameFrom(unittest.TestCase):
+    """A passing score that names no tree is the defect this closes: an
+    adversarial reviewer showed BROTHERMODEUP_TOOLS can point this check at an
+    unmerged pull request's worktree and turn NO-DATA into PASS, with nothing
+    in the passing output saying which bytes produced the number."""
+
+    def _line(self, tools_dir, override):
+        old = os.environ.pop("BROTHERMODEUP_TOOLS", None)
+        try:
+            if override is not None:
+                os.environ["BROTHERMODEUP_TOOLS"] = override
+            return TJT.provenance_line(tools_dir)
+        finally:
+            os.environ.pop("BROTHERMODEUP_TOOLS", None)
+            if old is not None:
+                os.environ["BROTHERMODEUP_TOOLS"] = old
+
+    def test_it_names_the_directory_and_says_the_override_was_used(self):
+        line = self._line("/somewhere/tools", "/somewhere/tools")
+        self.assertIn("/somewhere/tools", line)
+        self.assertIn("BROTHERMODEUP_TOOLS", line)
+
+    def test_it_says_conventional_when_no_override_is_set(self):
+        line = self._line("/somewhere/tools", None)
+        self.assertIn("conventional path", line)
+        self.assertNotIn("resolved from BROTHERMODEUP_TOOLS", line)
+
+    def test_a_non_git_directory_degrades_to_a_stated_unknown_never_a_crash(self):
+        import tempfile
+        line = self._line(tempfile.mkdtemp(), None)
+        self.assertIn("commit unknown", line)
+
+    def test_a_real_git_tree_reports_its_commit(self):
+        line = self._line(os.path.dirname(os.path.abspath(TJT.__file__)), None)
+        self.assertRegex(line, r"commit [0-9a-f]{40}")
+
+
 if __name__ == "__main__":
     unittest.main()

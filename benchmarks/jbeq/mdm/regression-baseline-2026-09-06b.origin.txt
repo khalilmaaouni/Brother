@@ -1,0 +1,21 @@
+benchmarks/jbeq/mdm/regression-baseline-2026-09-06b.json is the per-case
+answer of scripts/jbeq_decide.py against fixture b
+(regression-sheets-2026-09-06b.json), computed from the engine exactly as it
+stood at hub commit 552439421 (the tip of wbs/jbeq-round8-extraction this
+lane branched from), BEFORE the REJECT-versus-KEEP proposal_gate fix landed
+(review-u1-2026-09-06.md section A; FIX-DIRECTIVE-2026-09-06.md section 18).
+
+Written by re-decide-ing every fixture b sheet with that pre-fix engine
+(scripts/jbeq_decide.py as of hub commit 552439421, imported from a
+throwaway copy so the working tree's already-applied proposal_gate change
+was not read), not via jbeq_regression.py --write-baseline, because that
+flag always uses the CURRENT (post-fix) engine and this baseline exists
+specifically to measure the fix's own effect.
+
+Every later run of scripts/jbeq_regression.py --fixture b compares the
+current engine's per-case answer against this baseline: a case this
+baseline had RIGHT that the current engine now gets WRONG is a regression.
+
+NEVER edit this file by hand. Regenerate only by checking out the pre-fix
+commit's scripts/jbeq_decide.py and scripts/jbeq_mdm.py and re-running
+decide() over every fixture b sheet, exactly as this file was produced.

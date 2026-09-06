@@ -1,0 +1,187 @@
+JBEQ-MDM qualification run U2, 2026-09-06, over the second unseen set of 40
+(33 critical, 5 critical merge positives) authored blind and audited blind
+(37 of 40 agreement, six structural corrections). Extractor: a fresh Claude
+subagent (sonnet, effort high) reading only the extractor prompt, the schema
+and the 40 prompts; hashes recorded before any answer was read; engine of
+hub main 09eb751478e5c84e3a6170b4b623769b1234c6ec (after PRs 408 and 409).
+This is the qualification number for the engine as it stands; U1 and the
+frozen 70 are regression sets. The engine-decided half describes the
+engine; the direct-answered half does not.
+
+## Files opened during Phase 1 (blind), in order
+
+1. benchmarks/jbeq/mdm/prompts/EXTRACTOR-PROMPT.md
+2. benchmarks/jbeq/mdm/fact-sheet-schema.json
+3. benchmarks/jbeq/mdm/unseen-2-prompts/V-01.md through V-40.md (all 40, id
+   order)
+
+No other staged file was opened before every fact sheet was written and
+hashed. A bare directory listing of benchmarks/jbeq/mdm/ was run once, to
+locate the prompts subdirectory; only names were seen, no content.
+
+## Phase 1 hashes (scratch directory, before any answer was read)
+
+fact-sheets.json    02453e36e91a99571ca57ae302239c6062da155f0819d2db6c8cdd0d08808a16
+extractor-notes.md  4f702e2e64d740ed32bf6a7b92f95a7a62f5f0b4c3c3b320a953bb223b93cb32
+
+Rerun in the run directory, unchanged:
+
+fact-sheets.json    02453e36e91a99571ca57ae302239c6062da155f0819d2db6c8cdd0d08808a16
+extractor-notes.md  4f702e2e64d740ed32bf6a7b92f95a7a62f5f0b4c3c3b320a953bb223b93cb32
+
+## validate
+
+$ python3 scripts/jbeq_decide.py validate benchmarks/jbeq/mdm/runs/qualification-u2-2026-09-06/fact-sheets.json
+validate: 40 fact sheet(s) OK
+exit=0
+
+No off-enum values were produced by the extraction; zero repairs were
+needed.
+
+## UNSUPPORTED_TRACKS finding (read at decide time, before any answer)
+
+scripts/jbeq_decide.py's UNSUPPORTED_TRACKS = {"survivorship", "requirements"}
+(exact string match). The second unseen set's own prompt files carry
+TRACK: requirements-understanding (verbatim, all five of V-36..V-40), not
+TRACK: requirements as U1's corpus did. Because the check is an exact
+string match, "requirements-understanding" does NOT fall into
+UNSUPPORTED_TRACKS: the engine ran its ordinary rule table against V-36
+through V-40 instead of returning the track-unsupported NO-DATA it gives
+every survivorship case. This is a genuine corpus/engine naming drift, not
+an extractor error (TRACK is copied verbatim from each prompt file per the
+extractor prompt's own instruction). Per the run's own charter ("direct
+answers for the tracks the engine does not decide, read UNSUPPORTED_TRACKS
+now"), only survivorship (V-16 through V-20, all five of which the engine
+returned as NO-DATA/track-unsupported) received direct answers from me;
+requirements-understanding was left as engine-decided, since by the
+current, actually-read value of UNSUPPORTED_TRACKS it is not an
+unsupported track. This means requirements-understanding's 3 of 5 score
+below is a real property of the engine's general rule table being applied
+to a track it was not written for, not a gap I chose to paper over with a
+direct answer.
+
+## Direct answers (survivorship, V-16..V-20; the only exact UNSUPPORTED_TRACKS match)
+
+V-16 REJECT MATCH  (steward's indefinite manual override outranks the
+                    automatic feed's proposal to overwrite the same field)
+V-17 REJECT MATCH  (governance policy names POS as authoritative for this
+                    field; the batch's proposal to adopt ERP instead, only
+                    because it is newer, contradicts the stated policy)
+V-18 KEEP SEPARATE (a shared call-center address is the only common fact
+                    across distinct agent codes; no relation is stated)
+V-19 KEEP SEPARATE (the shared escrow account number is a third-party
+                    collection-bank fact, not a relation stated between
+                    the two companies themselves)
+V-20 ESCALATE      (two authoritative sources disagree on capital with no
+                    priority policy stated: the facts are there, the rule
+                    set cannot close it)
+
+All five direct answers scored correct against the seed (5 of 5).
+
+## decide
+
+$ python3 scripts/jbeq_decide.py decide benchmarks/jbeq/mdm/runs/qualification-u2-2026-09-06/fact-sheets.json --out engine-answers.json --decisions decisions.jsonl
+wrote 40 answer(s) to engine-answers.json and decisions.jsonl
+exit=0
+
+## score (full output, verbatim)
+
+address              4 of 5
+entity-object        3 of 5
+hierarchy            5 of 5
+identifier           5 of 5
+match-or-no-merge    5 of 5
+requirements-understanding 3 of 5
+survivorship         5 of 5
+temporal             4 of 5
+engine-decided: 29 of 35
+direct-answered (not blind, not evidence about the engine): 5 of 5
+critical WRONG V-02 [FALSE-MERGE RISK, not merged] expected KEEP SEPARATE, answered REJECT MATCH  CONSERVATIVE
+critical WRONG V-03 [UNREVERSIBLE MERGE WITHOUT EVIDENCE] expected SUGGEST MERGE, answered KEEP SEPARATE  CONSERVATIVE
+critical WRONG V-22 [HISTORICAL REASSIGNMENT] expected REJECT MATCH, answered KEEP SEPARATE
+critical WRONG V-36 [FALSE-MERGE RISK, not merged] expected KEEP SEPARATE, answered REJECT MATCH  CONSERVATIVE
+critical WRONG V-37 [UNREVERSIBLE MERGE WITHOUT EVIDENCE] expected ESCALATE, answered KEEP SEPARATE
+critical false merges: 0 of 33
+critical wrong: 5 of 33 (V-02, V-03, V-22, V-36, V-37)
+conservative wrongs: 3 (V-02, V-03, V-36)
+JBEQ-MDM NOT READY
+
+## Critical wrong cases, with the engine's own rule_fired (from decisions.jsonl)
+
+V-02  answered REJECT MATCH, expected KEEP SEPARATE
+      rule_fired: rule_r
+      why: stated_relation=none and object_type_a='site' !=
+      object_type_b='sold_to': two different kinds of record are never
+      the same operational object.
+      Trace: my fact sheet set object_type_a="site" (the delivery/
+      aggregation base) and object_type_b="sold_to" (the customer store),
+      which is what triggered rule_r's REJECT MATCH rather than the
+      seed's KEEP SEPARATE (a same-address-only, no-stated-relation
+      case). A same-address case with distinguishable object kinds and no
+      other refuting fact reads, on this evidence, as KEEP SEPARATE to
+      the seed rather than REJECT MATCH; rule_r is stricter about
+      differing object kinds than the seed's own answer for this shape.
+
+V-03  answered KEEP SEPARATE, expected SUGGEST MERGE
+      rule_fired: rule_r
+      why: stated_relation=none and lifecycle='relocated': a closed,
+      relocated or reused-identifier record is never folded into a live
+      one.
+      Trace: my fact sheet set lifecycle="relocated" for the pre/post
+      move store records (same store code, moved within the same city,
+      billing and payment history already booked). rule_r treats any
+      "relocated" lifecycle as a hard stop against merging. The seed
+      reads a same-store-code relocation with existing history as strong
+      identity evidence for a person-confirmed SUGGEST MERGE rather than
+      a lifecycle bar to any merge at all.
+
+V-22  answered KEEP SEPARATE, expected REJECT MATCH
+      rule_fired: rule 1
+      why: stated_relation=none: the input states no relation.
+      Trace: this is a requirements-understanding case run through the
+      general rule table (see the UNSUPPORTED_TRACKS finding above); the
+      case is actually a retroactive-reassignment request that the
+      input's own migration policy explicitly forbids (transactions
+      before the effective date are to stay with the old office). My
+      sheet did not carry a field the general rule table reads as a
+      policy-violation refutation, so it fell through to rule 1's
+      default (no stated relation) instead of a REJECT MATCH.
+
+V-36  answered REJECT MATCH, expected KEEP SEPARATE
+      rule_fired: rule_r
+      why: stated_relation=none and authoritative_identifier=conflicting:
+      the identifiers that should govern this decision disagree outright.
+      Trace: my fact sheet set authoritative_identifier="conflicting" for
+      two side-by-side loyalty-member records with two different, plainly
+      distinct member numbers and nothing connecting them. rule_r reads
+      two disagreeing identifiers as a refutation (REJECT MATCH); the
+      seed reads two merely-different, never-linked member numbers as
+      KEEP SEPARATE (nothing to reject, nothing to record). In hindsight
+      "absent" (no shared identifier exists at all between two unrelated
+      records) fits this case better than "conflicting" (which I have
+      otherwise reserved for two identifiers stated as directly disputing
+      the SAME claim, e.g. two valid corporate numbers for what a
+      dedup engine proposed as one entity).
+
+V-37  answered KEEP SEPARATE, expected ESCALATE
+      rule_fired: rule 1
+      why: stated_relation=none: the input states no relation.
+      Trace: another requirements-understanding case on the general rule
+      table. The case states the requirements doc has NO decision rule
+      for disagreeing currency codes, and the two billing records'
+      currency codes disagree. My sheet recorded the disagreement in
+      contradicted_attributes but carried no evidence_reasons entry the
+      general rule table reads as escalation-worthy, so it fell through
+      to rule 1's no-stated-relation default (KEEP SEPARATE) instead of
+      the seed's ESCALATE (facts exist, no rule closes it).
+
+false merges: 0 of 33 critical cases (no AUTO-MERGE or SUGGEST MERGE was
+returned where the seed required KEEP SEPARATE, REJECT MATCH or ESCALATE;
+every critical miss above is conservative or a same-severity-class miss,
+never a false positive toward merging).
+
+Per-track: address 4/5, entity-object 3/5, hierarchy 5/5, identifier 5/5,
+match-or-no-merge 5/5, requirements-understanding 3/5, survivorship 5/5
+(direct-answered), temporal 4/5.
+
+Correction 2026-09-06: V-22 is a temporal case in both the set and the sheet; the requirements mislabel above is the record's error, not the run's.

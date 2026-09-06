@@ -1,0 +1,38 @@
+objective: two files exist, the second after the first
+canonical revision: 4cd78db049560233283138ea7704288925bebd73
+environment:
+  runs root:     <SCRATCH_ROOT>/lhr-fixture-9osf69ha
+  target cwd:    <SCRATCH_ROOT>/lhr-fixture-9osf69ha/repo
+  slots:         3
+  model adapter: the product's own worker adapter
+units (2):
+  A1                       integrated  attempt=1
+  A2                       abandoned   attempt=1 -- owner pid 20525 is dead on this host, with 1199s still left on the lease while still in state claimed, so the owner did not finish and did not release. Whether this unit may be retried depends on whether its side effects are safe to repeat, which this cannot decide
+
+next action: resume: A2's claim expired while still marked claimed (owner pid 20525 is dead on this host, with 1199s still left on the lease while still in state claimed, so the owner did not finish and did not release. Whether this unit may be retried depends on whether its side effects are safe to repeat, which this cannot decide); a resume can safely re-run it
+
+zone 3 (15 items):
+  WHERE WE WERE: last recorded activity: lane.acquired on A2 at 2026-09-06T00:19:35.335474+00:00
+  WHY WE WERE THERE: create file two
+  CANONICAL COMMIT: 4cd78db049560233283138ea7704288925bebd73
+  CURRENT OBJECTIVE: two files exist, the second after the first
+  ACTIVE / FINISHED WORKTREES:
+    - <OS_TMPDIR>
+  CHANGED FILES: clean: no uncommitted changes in the target checkout
+  IMPORTANT COMMANDS:
+    - test -f one.txt
+    - test -f two.txt
+  EXPECTED SERVICES: NO-DATA: this engine runs no background service (stdlib-only, no network); nothing is expected to be up
+  VERIFICATION STATE: 1 integrated, 0 active, 0 pending, 1 abandoned, 0 unclear
+  KNOWN FAILURES: no refused or failing unit recorded in this run
+  REJECTED APPROACHES:
+    - A2: owner pid 20525 is dead on this host, with 1199s still left on the lease while still in state claimed, so the owner did not finish and did not release. Whether this unit may be retried depends on whether its side effects are safe to repeat, which this cannot decide
+  ENVIRONMENT ASSUMPTIONS:
+    runs_root: <SCRATCH_ROOT>/lhr-fixture-9osf69ha
+    target_cwd: <SCRATCH_ROOT>/lhr-fixture-9osf69ha/repo
+    slots: 3
+    model_adapter: the product's own worker adapter
+  UNFINISHED WORK:
+    - A2
+  RELEVANT LESSONS: NO-DATA: no vault.recall event recorded for this run yet
+  SAFE NEXT ACTION: resume: A2's claim expired while still marked claimed (owner pid 20525 is dead on this host, with 1199s still left on the lease while still in state claimed, so the owner did not finish and did not release. Whether this unit may be retried depends on whether its side effects are safe to repeat, which this cannot decide); a resume can safely re-run it

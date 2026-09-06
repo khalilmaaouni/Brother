@@ -56,12 +56,14 @@ if os.environ.get("BM_CONTRADICTION_MUTATION_CHECK") == "1":
 def _note(lesson_id, statement, scope, status="unverified", source="fixture",
           source_type="transcript", verified_at="NO-DATA",
           verified_against="NO-DATA", evidence_locator=None, contradicts=None,
-          supersedes=None):
+          supersedes=None, applies_to=None):
     lines = ["---", "lesson_id: %s" % lesson_id, "statement: %s" % statement,
               "scope: %s" % scope, "source: %s" % source,
               "source_type: %s" % source_type, "status: %s" % status,
               "verified_at: %s" % verified_at,
               "verified_against: %s" % verified_against]
+    if applies_to:
+        lines.append("applies_to: [%s]" % ", ".join(applies_to))
     if evidence_locator is not None:
         lines.append("evidence_locator: %s" % evidence_locator)
     if contradicts:
@@ -96,12 +98,18 @@ class BmVaultContradictionTenCases(unittest.TestCase):
 
     # C1: two opposite lessons, current test proves A, apply A only.
     def test_c1_current_test_proves_a_apply_a_only(self):
-        self._write("check_timeout.py", "import sys\nsys.exit(0)\n")
+        # A test: locator is only accepted as evidence when the target
+        # script references the lesson's own applies_to claim and carries
+        # a real assertion (bm_vault_contradiction's WEAK verdict,
+        # FIX-DIRECTIVE-2026-09-06 item 3): a script that merely exits 0
+        # unconditionally, naming nothing, proves nothing about TIMEOUT.
+        self._write("check_timeout.py",
+                     "import config\nassert config.TIMEOUT == 30\n")
         self._write("config.py", "TIMEOUT = 30\n")
         self._write("a.md", _note("L1", "the widget alpha timeout is 30 seconds",
                                     "widget-alpha-timeout",
                                     evidence_locator="test:check_timeout.py",
-                                    contradicts=["L2"]))
+                                    contradicts=["L2"], applies_to=["config.py"]))
         self._write("b.md", _note("L2", "the widget alpha timeout is 60 seconds",
                                     "widget-alpha-timeout",
                                     evidence_locator="grep:config.py:TIMEOUT = 60",
@@ -281,6 +289,65 @@ class BmVaultContradictionTenCases(unittest.TestCase):
                                     "widget-alpha-timeout"))
         rc = contradiction.main(["resolve", self.vault])
         self.assertEqual(rc, 0)
+
+
+class EscapesTreeAllowedRoots(unittest.TestCase):
+    """FIX-DIRECTIVE-2026-09-06 section 5: an absolute evidence_locator used
+    to be exempted from _escapes_tree outright (proven on this branch:
+    make_evidence_probe(tempdir)({"evidence_locator": "path:/etc/hosts"})
+    read HOLDS). It now HOLDS only when its realpath sits under base_dir or
+    under one of allowed_roots; every other absolute locator ESCAPES, the
+    same as a relative one that walks out with ../ segments."""
+
+    def setUp(self):
+        self.base = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.base, ignore_errors=True)
+        self.other_root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.other_root, ignore_errors=True)
+
+    def test_absolute_locator_inside_base_holds(self):
+        target = os.path.join(self.base, "proof.txt")
+        with open(target, "w", encoding="utf-8") as fh:
+            fh.write("ok\n")
+        probe = contradiction.make_evidence_probe(self.base)
+        self.assertEqual(probe({"evidence_locator": "path:" + target}),
+                          contradiction.HOLDS)
+
+    def test_absolute_locator_inside_an_allowed_root_holds(self):
+        target = os.path.join(self.other_root, "proof.txt")
+        with open(target, "w", encoding="utf-8") as fh:
+            fh.write("ok\n")
+        probe = contradiction.make_evidence_probe(
+            self.base, allowed_roots=[self.other_root])
+        self.assertEqual(probe({"evidence_locator": "path:" + target}),
+                          contradiction.HOLDS)
+
+    def test_absolute_locator_outside_every_root_escapes(self):
+        # Real file, genuinely outside both base_dir and the one allowed
+        # root: exactly the shape FIX-DIRECTIVE-2026-09-06 section 5 names,
+        # and the shape proven live on this branch before this fix landed.
+        probe = contradiction.make_evidence_probe(
+            self.base, allowed_roots=[self.other_root])
+        self.assertEqual(probe({"evidence_locator": "path:/etc/hosts"}),
+                          contradiction.ESCAPES)
+        self.assertEqual(probe({"evidence_locator": "grep:/etc/hosts:localhost"}),
+                          contradiction.ESCAPES)
+
+    def test_symlink_inside_base_pointing_outside_escapes(self):
+        outside_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, outside_dir, ignore_errors=True)
+        outside_target = os.path.join(outside_dir, "secret.txt")
+        with open(outside_target, "w", encoding="utf-8") as fh:
+            fh.write("outside\n")
+        link_path = os.path.join(self.base, "looks-local.txt")
+        os.symlink(outside_target, link_path)
+        probe = contradiction.make_evidence_probe(self.base)
+        # A RELATIVE locator naming the symlink by its in-tree name: realpath
+        # on the resolved target follows the symlink out of base_dir before
+        # the commonpath check runs, so laundering an escape through a
+        # symlink is caught the same way a bare ../.. escape already is.
+        self.assertEqual(probe({"evidence_locator": "path:looks-local.txt"}),
+                          contradiction.ESCAPES)
 
 
 if __name__ == "__main__":

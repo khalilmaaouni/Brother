@@ -11,7 +11,7 @@
   },
   {
    "path": "brother_run.py",
-   "sha256": "f723c9953a1d8a8c118f765d69616791488069058d52eee385c01f104b4edc24"
+   "sha256": "4a83f36b03eee66f7fecc655546fceed74fd3be2fbca63b5bc1b4bd8cf3ea361"
   },
   {
    "path": "claim_store.py",
@@ -51,7 +51,7 @@
   },
   {
    "path": "loop_bridge.py",
-   "sha256": "2bb43afebc629d0da1c3b2c23945048b281c9c553b2824ee5fb9448605c94ad5"
+   "sha256": "37cd33f148c86cb860d86c8283ab3b502a43674737c3f9da11ddf10b24c1131a"
   },
   {
    "path": "model_worker.py",
@@ -111,7 +111,7 @@
   },
   {
    "path": "receipt_door.py",
-   "sha256": "967274f35476d24bae7347a00646721c3310c1f6a65c7bd025aff87e5b9b2b19"
+   "sha256": "8dfb68449701fa000ec79d1c174a2f9c72e1a4f0ac9be617f0fe11b4b8b6f31f"
   },
   {
    "path": "review_pass.py",
@@ -139,6 +139,6 @@
   }
  ],
  "generated_by": "scripts/bundle_runtime.py",
- "source_describe": "v0.9.6-4039-ge206c3f9",
- "source_revision": "e206c3f98ed211a74a87fa9420122ee3b060e379"
+ "source_describe": "v0.9.6-4313-gfd7aaca0",
+ "source_revision": "fd7aaca048bf9a572f0315d49904ab85bc75746e"
 }

@@ -212,19 +212,26 @@ class PromptsAndScoring(unittest.TestCase):
         # case's answer for the single most tempting wrong label the round 2
         # rationale showed the rules arm reaching for, and confirm the scorer
         # calls it a critical wrong. Never runs against the frozen seed.
+        #
+        # G6 is the exception since the 2026-09-06 founder ruling
+        # (jbeq_mdm.SCORER_VERSION, REFUTED_IDENTITY_CLASS): rule 6's own
+        # axis IS KEEP SEPARATE versus REJECT MATCH (decision-rules-
+        # addendum.md's own words: "rule 6 sits on a different axis, KEEP
+        # SEPARATE versus REJECT MATCH"), and that is exactly the pair the
+        # ruling now scores as one equivalence class for a refuted identity.
+        # The scorer can no longer catch that swap as wrong; it is asserted
+        # separately below as an equivalence hit, not folded into wrong_swap.
         wrong_swap = {
             "G5-01": "LINK AS RELATED",
             "G5-02": "LINK AS RELATED",
             "G5-03": "LINK AS RELATED",
-            "G6-01": "REJECT MATCH",
-            "G6-02": "REJECT MATCH",
-            "G6-03": "REJECT MATCH",
             "G7-01": "KEEP SEPARATE",
             "G7-02": "KEEP SEPARATE",
             "G7-03": "KEEP SEPARATE",
         }
+        g6_ids = [c["id"] for c in self.gen["cases"] if c["id"].startswith("G6")]
         ids = [c["id"] for c in self.gen["cases"]]
-        self.assertEqual(sorted(wrong_swap), sorted(ids))
+        self.assertEqual(sorted(list(wrong_swap) + g6_ids), sorted(ids))
         for cid, wrong in wrong_swap.items():
             gold = {c["id"]: c["expected"] for c in self.gen["cases"]}
             gold[cid] = wrong
@@ -234,6 +241,18 @@ class PromptsAndScoring(unittest.TestCase):
             code, out = run("score", answers_path, "--seed", GEN_PATH)
             self.assertEqual(code, 1, "%s: %s" % (cid, out))
             self.assertIn(cid, out, out)
+        for cid in g6_ids:
+            gold = {c["id"]: c["expected"] for c in self.gen["cases"]}
+            self.assertEqual(gold[cid], "KEEP SEPARATE", cid)
+            gold[cid] = "REJECT MATCH"
+            answers_path = os.path.join(self.answers_dir, "%s.json" % cid)
+            with open(answers_path, "w", encoding="utf-8") as fh:
+                json.dump(gold, fh, ensure_ascii=False)
+            code, out = run("score", answers_path, "--seed", GEN_PATH)
+            self.assertEqual(code, 0, "%s: %s" % (cid, out))
+            self.assertIn(
+                "equivalence class %s: expected KEEP SEPARATE, engine said "
+                "REJECT MATCH" % cid, out, out)
 
     def test_an_empty_answer_file_is_no_data_never_a_pass(self):
         answers_path = os.path.join(self.answers_dir, "empty.json")
@@ -352,18 +371,24 @@ class PromptsAndScoringRules8to11(unittest.TestCase):
         # scorer calls the critical ones a critical wrong (the two rule 8
         # cases are not critical, so a wrong answer there is still counted
         # wrong but never flips the verdict to NOT READY on its own).
+        #
+        # G10-02 is the exception since the 2026-09-06 founder ruling
+        # (jbeq_mdm.SCORER_VERSION, REFUTED_IDENTITY_CLASS): rule 10 sits on
+        # the same KEEP SEPARATE versus REJECT MATCH axis as rule 6
+        # (decision-rules-addendum.md: "rule 6 (and rule 10 below) governs"),
+        # which the ruling now scores as one equivalence class. Asserted
+        # separately below as an equivalence hit, not folded into wrong_swap.
         wrong_swap = {
             "G8-01": "NO-DATA",
             "G8-02": "NO-DATA",
             "G9-01": "SUGGEST MERGE",
             "G9-02": "AUTO-MERGE",
             "G10-01": "LINK AS RELATED",
-            "G10-02": "KEEP SEPARATE",
             "G11-01": "ESCALATE",
             "G11-02": "ESCALATE",
         }
         ids = [c["id"] for c in self.gen["cases"]]
-        self.assertEqual(sorted(wrong_swap), sorted(ids))
+        self.assertEqual(sorted(list(wrong_swap) + ["G10-02"]), sorted(ids))
         critical_ids = set(c["id"] for c in self.gen["cases"] if c["critical"])
         for cid, wrong in wrong_swap.items():
             gold = {c["id"]: c["expected"] for c in self.gen["cases"]}
@@ -378,6 +403,19 @@ class PromptsAndScoringRules8to11(unittest.TestCase):
             else:
                 self.assertEqual(code, 0, "%s: %s" % (cid, out))
                 self.assertIn("JBEQ-MDM SEED: 7 of 8", out, out)
+
+        self.assertIn("G10-02", critical_ids)
+        gold = {c["id"]: c["expected"] for c in self.gen["cases"]}
+        self.assertEqual(gold["G10-02"], "REJECT MATCH")
+        gold["G10-02"] = "KEEP SEPARATE"
+        answers_path = os.path.join(self.answers_dir, "G10-02.json")
+        with open(answers_path, "w", encoding="utf-8") as fh:
+            json.dump(gold, fh, ensure_ascii=False)
+        code, out = run("score", answers_path, "--seed", GEN2_PATH)
+        self.assertEqual(code, 0, out)
+        self.assertIn(
+            "equivalence class G10-02: expected REJECT MATCH, engine said "
+            "KEEP SEPARATE", out, out)
 
     def test_an_empty_answer_file_is_no_data_never_a_pass(self):
         answers_path = os.path.join(self.answers_dir, "empty.json")

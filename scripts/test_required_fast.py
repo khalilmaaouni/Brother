@@ -51,8 +51,12 @@ def build_stub_script(stub_lines):
     return path
 
 
-def run(path):
-    proc = subprocess.run(["sh", path], capture_output=True, text=True, timeout=20)
+def run(path, extra_env=None):
+    env = dict(os.environ)
+    if extra_env:
+        env.update(extra_env)
+    proc = subprocess.run(["sh", path], capture_output=True, text=True,
+                          timeout=20, env=env)
     return proc.returncode, proc.stdout + proc.stderr
 
 
@@ -94,6 +98,58 @@ class RequiredFastScript(unittest.TestCase):
         m = re.search(r"\[full: (\S+)\]", out)
         self.assertIsNotNone(m, out)
         self.assertTrue(os.path.exists(m.group(1)), out)
+        os.remove(m.group(1))
+
+    def test_failure_detail_is_silent_by_default(self):
+        """The gap this closes: on a GitHub runner the [full: /tmp/...]
+        file is discarded with the job, so without the opt-in a failure's
+        real output is unreachable. Plain local runs must stay unchanged:
+        the detail block only appears when asked for."""
+        path = build_stub_script([
+            'run_check "stub-fails" sh -c "echo boom-detail-line; exit 1"',
+        ])
+        try:
+            code, out = run(path, extra_env={"REQUIRED_FAST_PRINT_FAILURES": "",
+                                             "GITHUB_ACTIONS": ""})
+        finally:
+            os.remove(path)
+        self.assertEqual(code, 1, out)
+        self.assertNotIn("failure detail", out, out)
+        m = re.search(r"\[full: (\S+)\]", out)
+        self.assertIsNotNone(m, out)
+        os.remove(m.group(1))
+
+    def test_print_failures_env_var_prints_the_saved_detail(self):
+        path = build_stub_script([
+            'run_check "stub-fails" sh -c "echo boom-detail-line; exit 1"',
+        ])
+        try:
+            code, out = run(path, extra_env={"REQUIRED_FAST_PRINT_FAILURES": "1"})
+        finally:
+            os.remove(path)
+        self.assertEqual(code, 1, out)
+        self.assertIn("---- stub-fails failure detail ----", out, out)
+        self.assertIn("boom-detail-line", out, out)
+        m = re.search(r"\[full: (\S+)\]", out)
+        self.assertIsNotNone(m, out)
+        os.remove(m.group(1))
+
+    def test_github_actions_alone_also_prints_the_saved_detail(self):
+        """The runner sets GITHUB_ACTIONS itself; nobody there types the
+        opt-in flag, so it must trigger the same as the explicit var."""
+        path = build_stub_script([
+            'run_check "stub-fails" sh -c "echo boom-detail-line; exit 1"',
+        ])
+        try:
+            code, out = run(path, extra_env={"GITHUB_ACTIONS": "true",
+                                             "REQUIRED_FAST_PRINT_FAILURES": ""})
+        finally:
+            os.remove(path)
+        self.assertEqual(code, 1, out)
+        self.assertIn("---- stub-fails failure detail ----", out, out)
+        self.assertIn("boom-detail-line", out, out)
+        m = re.search(r"\[full: (\S+)\]", out)
+        self.assertIsNotNone(m, out)
         os.remove(m.group(1))
 
     def test_no_data_is_reported_and_never_fails_the_run(self):

@@ -21,3 +21,15 @@ when discovered, because a memory system that only grows becomes noise itself.
 Obsidian links ([[note]]) connect every new note to what it builds on, supersedes,
 or contradicts, so recall follows edges instead of scanning folders.
 
+## The one CLI surface, and the words that reach it
+
+`tools/bm_vault_cli.py` is the vault's one front door: `doctor` (read-only
+health and resolution report), `census` (retrieval-index census), `recall
+<query>` (the query above, as a command), `bind PATH` (the one first-run
+binding step, row V2), plus `check`, `measure`, `lint`, `contract`, `curate`
+and `commit`. Never a new command of its own: the plain words "vault
+doctor", "vault census" and "vault recall <query>" typed to `start` or
+`brotherme` route straight to `bm_vault_cli.py doctor` / `census` / `recall`
+and print exactly what that call itself would, since nothing sits between
+the word and the same subprocess call either way.
+

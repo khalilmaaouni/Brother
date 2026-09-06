@@ -61,6 +61,7 @@ sys.path.insert(0, HERE)
 
 import codex_smoke  # noqa: E402  (its sh, isolation witness and stub provider)
 import virgin_unit_proof  # noqa: E402  (X1: proves a unit closes through the exported bundle alone)
+import export_public  # noqa: E402  (signing_configured: reused, not reimplemented)
 
 DEFAULT_CODEX = codex_smoke.DEFAULT_CODEX
 PUBLIC_URL = "https://github.com/khalilmaaouni/Brother"
@@ -1485,12 +1486,114 @@ def manifest_against_source(args, ev, gate, checkout):
                     "names" % (rev, args.version))
 
 
+def _ssh_signing_public_key(key_id, run, cwd):
+    """The 'type base64' half of an ssh public key named by
+    user.signingkey, however that config names it: a literal `key::`
+    value, a public key file, or (falling back) a private key file whose
+    public half is derived read-only via `ssh-keygen -y`. None when
+    nothing here resolves to a readable key."""
+    if key_id.startswith("key::"):
+        return key_id[len("key::"):].strip()
+    candidates = [key_id] if key_id.endswith(".pub") else \
+        [key_id, key_id + ".pub"]
+    for cand in candidates:
+        if os.path.isfile(cand):
+            try:
+                with open(cand, encoding="utf-8") as fh:
+                    content = fh.read().strip()
+            except OSError:
+                continue
+            if content.split(" ", 1)[0].startswith(
+                    ("ssh-", "ecdsa-", "sk-")):
+                return content
+    if os.path.isfile(key_id):
+        derived = run(["ssh-keygen", "-y", "-f", key_id], cwd)
+        if derived.returncode == 0 and (derived.stdout or "").strip():
+            return derived.stdout.strip()
+    return None
+
+
+def _tag_object_principal(checkout, tag, run):
+    """The tagger email inside the tag object: the identity
+    `ssh-keygen -Y verify` (via git's allowed-signers lookup) checks the
+    signature against. None when the tag has no readable tagger line."""
+    obj = run(["git", "cat-file", "tag", tag], checkout)
+    for line in (obj.stdout or "").splitlines():
+        if line.startswith("tagger "):
+            m = re.search(r"<([^>]+)>", line)
+            return m.group(1) if m else None
+    return None
+
+
+def _retry_ssh_verify(gate, ev, checkout, tag):
+    """Retries `git tag -v` with a throwaway gpg.ssh.allowedSignersFile
+    naming the key this checkout actually signs with. Returns the retry
+    `proc`, or None when this checkout has no ssh signing key configured
+    at all, in which case the caller's original reading stands.
+
+    Called unconditionally whenever gpg.format is ssh, never only when
+    the first attempt's error text happens to mention
+    gpg.ssh.allowedSignersFile: an ambient allowedSignersFile can already
+    be configured (this machine has one, pointed at the founder's real
+    key) and would otherwise make the first attempt fail with "No
+    principal matched" instead, which reads identically to a real bad
+    signature and would skip the retry that finds the true answer.
+
+    export_public.signing_configured(cwd, run) is the exact function
+    `export_public.py --require-signed` already uses to decide a checkout
+    is ready to sign (non-empty user.signingkey plus gpg.format set, or a
+    matching gpg secret key); it is reused here, never a second verifier,
+    to find the key this machine actually signs with. A throwaway file
+    naming that key for the tag's own tagger identity is then handed to
+    `git -c gpg.ssh.allowedSignersFile=...`, never written to any real
+    git config."""
+    def run(cmd, cwd):
+        return codex_smoke.sh(cmd, cwd=cwd, timeout=30)
+
+    fmt = run(["git", "config", "--get", "gpg.format"], checkout)
+    if (fmt.stdout or "").strip() != "ssh":
+        return None
+    signed, key_id = export_public.signing_configured(checkout, run=run)
+    if not signed or not key_id:
+        return None
+    principal = _tag_object_principal(checkout, tag, run)
+    if not principal:
+        return None
+    pubkey_line = _ssh_signing_public_key(key_id, run, checkout)
+    if not pubkey_line:
+        return None
+    fd, allowed_path = tempfile.mkstemp(prefix="brother-allowed-signers-")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write("%s %s\n" % (principal, pubkey_line))
+        return step(gate, ev, "tag signature (ssh, allowed-signers retry)",
+                    ["git", "-c",
+                     "gpg.ssh.allowedSignersFile=%s" % allowed_path,
+                     "tag", "-v", tag],
+                    cwd=checkout, timeout=120,
+                    needles=("Good", "BAD", "error", "principal"))
+    finally:
+        try:
+            os.remove(allowed_path)
+        except OSError:
+            pass
+
+
 def tag_signature_verified(gate, ev, checkout, tag):
-    """(verdict, why): does the published tag carry a GPG signature that
+    """(verdict, why): does the published tag carry a signature that
     verifies? Row S5 (roadmap) is founder gated: the signing key is his
     alone, so a tag with no signature at all is NO-DATA, never a FAIL. FAIL
     is reserved for a signature that IS present but does not check out,
     which is the only shape that means something actually went wrong.
+
+    HONORS gpg.format=ssh. `git tag -v` on an ssh-signed tag fails on a
+    machine with no gpg.ssh.allowedSignersFile configured even though the
+    tag verifies fine, which is exactly the shape that made X7 measure the
+    wrong signer on this machine (it signs with ssh, not gpg): the tag
+    checked out is here re-verified with a throwaway allowed-signers file
+    built from whatever this checkout already trusts to sign with (see
+    _retry_ssh_verify), rather than reading NO-DATA on a signature that is
+    actually there and good.
 
     THIS IS AN INFORMATIONAL READING, NOT A LEG OF X7, since 1.0.5. It was
     folded in as a required leg, and because no key exists the leg could not
@@ -1503,13 +1606,22 @@ def tag_signature_verified(gate, ev, checkout, tag):
     proc = step(gate, ev, "tag signature", ["git", "tag", "-v", tag],
                 cwd=checkout, timeout=120,
                 needles=("gpg", "Good signature", "BAD", "error",
-                         "no signature"))
+                         "no signature", "allowedSignersFile"))
     combined = ((proc.stdout or "") + "\n" + (proc.stderr or "")).lower()
+    if proc.returncode != 0:
+        fmt = codex_smoke.sh(["git", "config", "--get", "gpg.format"],
+                             cwd=checkout, timeout=30)
+        if (fmt.stdout or "").strip() == "ssh":
+            retry = _retry_ssh_verify(gate, ev, checkout, tag)
+            if retry is not None:
+                proc = retry
+                combined = ((proc.stdout or "") + "\n" +
+                            (proc.stderr or "")).lower()
     if proc.returncode == 0:
         return ("PASS", "git tag -v %s verifies a good signature" % tag)
-    if "bad signature" in combined:
-        return ("FAIL", "git tag -v %s reports a BAD signature, not "
-                        "merely an absent one" % tag)
+    if "bad signature" in combined or "no principal matched" in combined:
+        return ("FAIL", "git tag -v %s reports a signature that does NOT "
+                        "verify, not merely an absent one" % tag)
     last = combined.strip().splitlines()[-1] if combined.strip() else \
         "no output"
     return ("NO-DATA", "tag signing: NO-DATA: no signing key configured "

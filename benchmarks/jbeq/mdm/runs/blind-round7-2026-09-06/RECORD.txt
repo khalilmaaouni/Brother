@@ -1,0 +1,75 @@
+JBEQ-MDM blind round 7, 2026-09-06, over the frozen 70 with the final extractor prompt (hub PR 401). Extractor: a fresh Claude subagent (sonnet, effort high) reading only the prompt, the schema and the seventy case prompts; hashes recorded before any answer file was read; engine of hub main 6c9f4067c6f0423002f01d3627ba0769341432ed. A REGRESSION CHECK on the frozen 70 whose rules were authored after reading rounds 4 to 6; not a qualification; the qualification set is unseen-2026-09-06.json. The engine-decided half describes the engine; the direct-answered half does not.
+
+Hashes (recorded before Phase 2, before any answer file was read):
+  fact-sheets.json     sha256 4f1de1eabe00749a66df724f15989add641c26c80de6a4b81ecbb131e9ba6ebb
+  extractor-notes.md   sha256 3266c64c001e8fad6f37addc0d41ff51abd6a305267d3f17dda4fbb28d7a858e
+
+validate: 70 fact sheet(s) OK (exit 0), zero off-enum values, zero fixes needed.
+
+Score (scripts/jbeq_mdm.py score, exit 0):
+  address              10 of 10
+  entity-object        9 of 10
+  hierarchy            7 of 10
+  identifier           4 of 5
+  match-or-no-merge    9 of 10
+  requirements         5 of 5
+  survivorship         10 of 10
+  temporal             10 of 10
+  engine-decided: 39 of 45
+  direct-answered (not blind, not evidence about the engine): 25 of 25
+  critical false merges: 0 of 33
+  critical wrong: 0 of 33
+  conservative wrongs: 0
+  JBEQ-MDM SEED: 64 of 70
+
+Comparison against round 6 (blind-round6-2026-09-06/answers.json), rounds 4-7 engine-decided track:
+  round 4: unavailable in this run directory (not compared here)
+  round 5: 47 of 70 (per the round-5 repair note in scripts/jbeq_decide.py's docstring)
+  round 6: engine-decided 29 of 45, direct-answered 25 of 25, total 54 of 70, verdict JBEQ-MDM NOT READY
+           (critical wrong: MM-06, HI-02, AD-10, ID-02; conservative wrongs: 1, MM-06)
+  round 7: engine-decided 39 of 45, direct-answered 25 of 25, total 64 of 70, verdict JBEQ-MDM SEED
+           (critical wrong: 0; conservative wrongs: 0)
+
+15 cases changed answer from round 6 to round 7:
+  AD-01: KEEP SEPARATE -> AUTO-MERGE
+  AD-02: KEEP SEPARATE -> AUTO-MERGE
+  AD-05: KEEP SEPARATE -> SUGGEST MERGE
+  AD-07: KEEP SEPARATE -> AUTO-MERGE
+  AD-09: REJECT MATCH -> NO-DATA
+  AD-10: LINK AS RELATED -> REJECT MATCH  (was critical wrong in round 6, now correct)
+  EO-03: LINK AS RELATED -> AUTO-MERGE
+  EO-07: LINK AS RELATED -> ESCALATE
+  EO-10: SUGGEST MERGE -> LINK AS RELATED
+  HI-02: LINK AS RELATED -> REJECT MATCH  (was critical wrong in round 6, now correct)
+  ID-02: KEEP SEPARATE -> ESCALATE        (was critical wrong in round 6, now correct)
+  ID-03: SUGGEST MERGE -> REJECT MATCH
+  MM-04: LINK AS RELATED -> AUTO-MERGE
+  MM-06: ESCALATE -> KEEP SEPARATE        (was critical wrong AND the conservative wrong in round 6, now correct)
+  MM-07: LINK AS RELATED -> SUGGEST MERGE
+
+MM-06, HI-02, HI-03 (named in the dispatch as needing a fresh extraction):
+  MM-06: round 6 answered ESCALATE (flagged critical WRONG [FALSE MERGE], expected KEEP SEPARATE,
+    and the run's one conservative wrong). Round 7's fresh extraction reads the case as the
+    extractor prompt's own two rule-4 worked examples landing on one case at once (a kanji
+    variant with the same reading: 電器 vs 電機, both read "Aoi Denki"; and a lot number that
+    differs between the two records, same city). contradicted_attributes =
+    ["company_name_kanji_variant", "lot_number"], both corporate numbers unobtained ->
+    evidence_strength weak, evidence_reasons [missing_identifier], authoritative_identifier
+    absent. The engine's weak-evidence split (2026-09-06, closing MM-09) now reads
+    contradicted_attributes non-empty as KEEP SEPARATE. Round 7 answers KEEP SEPARATE: FIXED,
+    matches the score.txt expectation, no longer critical wrong or conservative wrong.
+  HI-02: round 6 answered LINK AS RELATED (flagged critical WRONG [HIERARCHY REVERSAL],
+    expected REJECT MATCH). Round 7's fresh extraction records the existing stated capital
+    hierarchy (subsidiary under parent), the request as requested_action=assignment,
+    requested_relation_type=capital, and populates the round-6 optional requested_parent with
+    the subsidiary's name, since the request asks to REVERSE which side is parent within the
+    SAME hierarchy type already stated (sales-performance argument, not an actual ownership
+    change) rather than write a new type. Round 7 answers REJECT MATCH: FIXED, matches the
+    score.txt expectation.
+  HI-03: unchanged, LINK AS RELATED in both round 6 and round 7; score.txt reports zero
+    critical wrong in round 7, so this case is not flagged as wrong (whether or not it was
+    already right in round 6, the fresh extraction reproduces the same, currently-correct,
+    answer). The fresh extraction recorded effective_dates.candidate_effective_date =
+    2026-07-01 (the business-transfer cutover date) with conflict=false, and left
+    requested_action at "none" since the question is about the correctness of historical,
+    pre-cutover hierarchy rows rather than a request to write a new assignment.

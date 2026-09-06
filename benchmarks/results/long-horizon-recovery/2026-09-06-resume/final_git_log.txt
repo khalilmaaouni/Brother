@@ -1,0 +1,10 @@
+*   2068204 Brother integrated A2 from lane/A2
+|\  
+| * d32a019 unit A2: model worker
+|/  
+* 408bd53 repository drift: a change the killed run never saw
+*   4cd78db Brother integrated A1 from lane/A1
+|\  
+| * 52fa324 unit A1: model worker
+|/  
+* 592c855 R0

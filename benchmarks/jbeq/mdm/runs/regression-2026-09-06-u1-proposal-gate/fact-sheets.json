@@ -1,0 +1,1641 @@
+{
+ "U-01": {
+  "allowed_answers": [
+   "AUTO-MERGE",
+   "SUGGEST MERGE",
+   "LINK AS RELATED",
+   "KEEP SEPARATE",
+   "REJECT MATCH",
+   "ESCALATE",
+   "NO-DATA"
+  ],
+  "authoritative_identifier": "conflicting",
+  "blank_fields": [],
+  "contradicted_attributes": [],
+  "corroborating_facts": [],
+  "distinct_operational_attributes": false,
+  "effective_dates": {
+   "as_of": null,
+   "candidate_effective_date": null,
+   "conflict": false
+  },
+  "evidence_reasons": [],
+  "evidence_strength": null,
+  "hierarchy_parents": [],
+  "history_exists": false,
+  "identifiers": [
+   {
+    "domain": "corporate_number",
+    "legal_person_type": "corporation",
+    "status": "valid",
+    "value": "4180001012345"
+   },
+   {
+    "domain": "corporate_number",
+    "legal_person_type": "corporation",
+    "status": "valid",
+    "value": "5120001098765"
+   }
+  ],
+  "irreversible": false,
+  "lifecycle": "active",
+  "location_comparison": null,
+  "object_type_a": "site",
+  "object_type_b": "site",
+  "one_to_many_object": true,
+  "requested_action": "none",
+  "requested_relation_type": null,
+  "stated_difference": "different_legal_entity",
+  "stated_relation": "same_site_only",
+  "tenant_boundary": "none",
+  "track": "address"
+ },
+ "U-02": {
+  "allowed_answers": [
+   "LINK AS RELATED",
+   "KEEP SEPARATE",
+   "ESCALATE",
+   "NO-DATA"
+  ],
+  "authoritative_identifier": "absent",
+  "blank_fields": [
+   "prefecture",
+   "city"
+  ],
+  "contradicted_attributes": [],
+  "corroborating_facts": [],
+  "distinct_operational_attributes": false,
+  "effective_dates": {
+   "as_of": null,
+   "candidate_effective_date": null,
+   "conflict": false
+  },
+  "evidence_reasons": [],
+  "evidence_strength": null,
+  "hierarchy_parents": [],
+  "history_exists": false,
+  "identifiers": [],
+  "irreversible": false,
+  "lifecycle": "active",
+  "location_comparison": null,
+  "object_type_a": "address",
+  "object_type_b": "store",
+  "one_to_many_object": false,
+  "requested_action": "none",
+  "requested_relation_type": null,
+  "stated_difference": "none",
+  "stated_relation": "none",
+  "tenant_boundary": "none",
+  "track": "address"
+ },
+ "U-03": {
+  "allowed_answers": [
+   "AUTO-MERGE",
+   "SUGGEST MERGE",
+   "LINK AS RELATED",
+   "KEEP SEPARATE",
+   "REJECT MATCH",
+   "ESCALATE",
+   "NO-DATA"
+  ],
+  "authoritative_identifier": "absent",
+  "blank_fields": [],
+  "contradicted_attributes": [],
+  "corroborating_facts": [],
+  "distinct_operational_attributes": false,
+  "effective_dates": {
+   "as_of": null,
+   "candidate_effective_date": null,
+   "conflict": false
+  },
+  "evidence_reasons": [],
+  "evidence_strength": null,
+  "hierarchy_parents": [],
+  "history_exists": false,
+  "identifiers": [],
+  "irreversible": false,
+  "lifecycle": "active",
+  "location_comparison": "different_administrative_area",
+  "object_type_a": "site",
+  "object_type_b": "site",
+  "one_to_many_object": false,
+  "requested_action": "none",
+  "requested_relation_type": null,
+  "stated_difference": "none",
+  "stated_relation": "none",
+  "tenant_boundary": "none",
+  "track": "address"
+ },
+ "U-04": {
+  "allowed_answers": [
+   "LINK AS RELATED",
+   "KEEP SEPARATE",
+   "ESCALATE",
+   "NO-DATA"
+  ],
+  "authoritative_identifier": "aligned",
+  "blank_fields": [
+   "prefecture"
+  ],
+  "contradicted_attributes": [],
+  "corroborating_facts": [
+   "postal_code_matches_the_candidate_record"
+  ],
+  "distinct_operational_attributes": false,
+  "effective_dates": {
+   "as_of": null,
+   "candidate_effective_date": null,
+   "conflict": false
+  },
+  "evidence_reasons": [],
+  "evidence_strength": null,
+  "hierarchy_parents": [],
+  "history_exists": false,
+  "identifiers": [],
+  "irreversible": false,
+  "lifecycle": "active",
+  "location_comparison": null,
+  "object_type_a": "address",
+  "object_type_b": "address",
+  "one_to_many_object": false,
+  "requested_action": "none",
+  "requested_relation_type": null,
+  "stated_difference": "none",
+  "stated_relation": "none",
+  "tenant_boundary": "none",
+  "track": "address"
+ },
+ "U-05": {
+  "allowed_answers": [
+   "LINK AS RELATED",
+   "KEEP SEPARATE",
+   "REJECT MATCH",
+   "ESCALATE",
+   "NO-DATA"
+  ],
+  "authoritative_identifier": "aligned",
+  "blank_fields": [],
+  "contradicted_attributes": [],
+  "corroborating_facts": [],
+  "distinct_operational_attributes": false,
+  "effective_dates": {
+   "as_of": null,
+   "candidate_effective_date": null,
+   "conflict": false
+  },
+  "evidence_reasons": [],
+  "evidence_strength": "strong",
+  "hierarchy_parents": [],
+  "history_exists": false,
+  "identifiers": [
+   {
+    "domain": "corporate_number",
+    "legal_person_type": "corporation",
+    "status": "valid",
+    "value": "6250001034567"
+   }
+  ],
+  "irreversible": false,
+  "lifecycle": "active",
+  "location_comparison": "notation_variant_only",
+  "object_type_a": "site",
+  "object_type_b": "site",
+  "one_to_many_object": false,
+  "requested_action": "none",
+  "requested_relation_type": null,
+  "stated_difference": "none",
+  "stated_relation": "none",
+  "tenant_boundary": "none",
+  "track": "address"
+ },
+ "U-06": {
+  "allowed_answers": [
+   "LINK AS RELATED",
+   "KEEP SEPARATE",
+   "REJECT MATCH",
+   "ESCALATE",
+   "NO-DATA"
+  ],
+  "authoritative_identifier": "aligned",
+  "blank_fields": [],
+  "contradicted_attributes": [],
+  "corroborating_facts": [],
+  "distinct_operational_attributes": false,
+  "effective_dates": {
+   "as_of": null,
+   "candidate_effective_date": null,
+   "conflict": false
+  },
+  "evidence_reasons": [],
+  "evidence_strength": null,
+  "hierarchy_parents": [],
+  "history_exists": false,
+  "identifiers": [
+   {
+    "domain": "corporate_number",
+    "legal_person_type": "corporation",
+    "status": "valid",
+    "value": "7310001045678"
+   }
+  ],
+  "irreversible": false,
+  "lifecycle": "active",
+  "location_comparison": null,
+  "object_type_a": "commercial_account",
+  "object_type_b": "commercial_account",
+  "one_to_many_object": false,
+  "requested_action": "none",
+  "requested_relation_type": null,
+  "stated_difference": "none",
+  "stated_relation": "corporate_number_shared",
+  "tenant_boundary": "none",
+  "track": "entity-object"
+ },
+ "U-07": {
+  "allowed_answers": [
+   "LINK AS RELATED",
+   "KEEP SEPARATE",
+   "REJECT MATCH",
+   "ESCALATE",
+   "NO-DATA"
+  ],
+  "authoritative_identifier": "aligned",
+  "blank_fields": [],
+  "contradicted_attributes": [],
+  "corroborating_facts": [],
+  "distinct_operational_attributes": false,
+  "effective_dates": {
+   "as_of": null,
+   "candidate_effective_date": null,
+   "conflict": false
+  },
+  "evidence_reasons": [],
+  "evidence_strength": null,
+  "hierarchy_parents": [],
+  "history_exists": false,
+  "identifiers": [],
+  "irreversible": false,
+  "lifecycle": "active",
+  "location_comparison": null,
+  "object_type_a": "payer",
+  "object_type_b": "sold_to",
+  "one_to_many_object": false,
+  "requested_action": "none",
+  "requested_relation_type": null,
+  "stated_difference": "none",
+  "stated_relation": "role_pair",
+  "tenant_boundary": "none",
+  "track": "entity-object"
+ },
+ "U-08": {
+  "allowed_answers": [
+   "LINK AS RELATED",
+   "KEEP SEPARATE",
+   "REJECT MATCH",
+   "ESCALATE",
+   "NO-DATA"
+  ],
+  "authoritative_identifier": "conflicting",
+  "blank_fields": [],
+  "contradicted_attributes": [],
+  "corroborating_facts": [],
+  "distinct_operational_attributes": false,
+  "effective_dates": {
+   "as_of": null,
+   "candidate_effective_date": null,
+   "conflict": false
+  },
+  "evidence_reasons": [],
+  "evidence_strength": null,
+  "hierarchy_parents": [],
+  "history_exists": false,
+  "identifiers": [],
+  "irreversible": false,
+  "lifecycle": "active",
+  "location_comparison": null,
+  "object_type_a": "ship_to",
+  "object_type_b": "store",
+  "one_to_many_object": false,
+  "requested_action": "none",
+  "requested_relation_type": null,
+  "stated_difference": "none",
+  "stated_relation": "role_pair",
+  "tenant_boundary": "none",
+  "track": "entity-object"
+ },
+ "U-09": {
+  "allowed_answers": [
+   "LINK AS RELATED",
+   "KEEP SEPARATE",
+   "REJECT MATCH",
+   "ESCALATE",
+   "NO-DATA"
+  ],
+  "authoritative_identifier": "conflicting",
+  "blank_fields": [],
+  "contradicted_attributes": [],
+  "corroborating_facts": [],
+  "distinct_operational_attributes": false,
+  "effective_dates": {
+   "as_of": null,
+   "candidate_effective_date": null,
+   "conflict": false
+  },
+  "evidence_reasons": [
+   "explained_conflict"
+  ],
+  "evidence_strength": null,
+  "hierarchy_parents": [],
+  "history_exists": false,
+  "identifiers": [
+   {
+    "domain": "phone_number",
+    "legal_person_type": "unknown",
+    "status": "reassigned",
+    "value": "076-XXX-1234"
+   }
+  ],
+  "irreversible": false,
+  "lifecycle": "identifier_reused",
+  "location_comparison": null,
+  "object_type_a": "legal_entity",
+  "object_type_b": "legal_entity",
+  "one_to_many_object": false,
+  "requested_action": "none",
+  "requested_relation_type": null,
+  "stated_difference": "different_tenant",
+  "stated_relation": "none",
+  "tenant_boundary": "stated",
+  "track": "entity-object"
+ },
+ "U-10": {
+  "allowed_answers": [
+   "AUTO-MERGE",
+   "SUGGEST MERGE",
+   "ESCALATE",
+   "NO-DATA"
+  ],
+  "authoritative_identifier": "absent",
+  "blank_fields": [],
+  "contradicted_attributes": [],
+  "corroborating_facts": [],
+  "distinct_operational_attributes": false,
+  "effective_dates": {
+   "as_of": null,
+   "candidate_effective_date": null,
+   "conflict": false
+  },
+  "evidence_reasons": [
+   "score_only",
+   "missing_identifier"
+  ],
+  "evidence_strength": "weak",
+  "hierarchy_parents": [],
+  "history_exists": false,
+  "identifiers": [],
+  "irreversible": true,
+  "lifecycle": "active",
+  "location_comparison": null,
+  "object_type_a": "legal_entity",
+  "object_type_b": "legal_entity",
+  "one_to_many_object": false,
+  "requested_action": "none",
+  "requested_relation_type": null,
+  "stated_difference": "none",
+  "stated_relation": "none",
+  "tenant_boundary": "none",
+  "track": "entity-object"
+ },
+ "U-11": {
+  "allowed_answers": [
+   "LINK AS RELATED",
+   "KEEP SEPARATE",
+   "ESCALATE",
+   "NO-DATA"
+  ],
+  "authoritative_identifier": "aligned",
+  "blank_fields": [],
+  "contradicted_attributes": [],
+  "corroborating_facts": [],
+  "distinct_operational_attributes": false,
+  "effective_dates": {
+   "as_of": null,
+   "candidate_effective_date": null,
+   "conflict": false
+  },
+  "evidence_reasons": [],
+  "evidence_strength": null,
+  "hierarchy_parents": [
+   {
+    "parent": "四国ホールディングス株式会社",
+    "type": "capital"
+   }
+  ],
+  "history_exists": false,
+  "identifiers": [],
+  "irreversible": false,
+  "lifecycle": "active",
+  "location_comparison": null,
+  "object_type_a": "legal_entity",
+  "object_type_b": "legal_entity",
+  "one_to_many_object": false,
+  "requested_action": "none",
+  "requested_relation_type": null,
+  "stated_difference": "none",
+  "stated_relation": "parent_child",
+  "tenant_boundary": "none",
+  "track": "hierarchy"
+ },
+ "U-12": {
+  "allowed_answers": [
+   "LINK AS RELATED",
+   "KEEP SEPARATE",
+   "ESCALATE",
+   "NO-DATA"
+  ],
+  "authoritative_identifier": "aligned",
+  "blank_fields": [],
+  "contradicted_attributes": [],
+  "corroborating_facts": [],
+  "distinct_operational_attributes": false,
+  "effective_dates": {
+   "as_of": null,
+   "candidate_effective_date": null,
+   "conflict": false
+  },
+  "evidence_reasons": [],
+  "evidence_strength": null,
+  "hierarchy_parents": [
+   {
+    "parent": "東海ビバレッジ物産株式会社 本社",
+    "type": "reporting"
+   }
+  ],
+  "history_exists": false,
+  "identifiers": [],
+  "irreversible": false,
+  "lifecycle": "active",
+  "location_comparison": null,
+  "object_type_a": "site",
+  "object_type_b": "site",
+  "one_to_many_object": false,
+  "requested_action": "none",
+  "requested_relation_type": null,
+  "stated_difference": "none",
+  "stated_relation": "parent_child",
+  "tenant_boundary": "none",
+  "track": "hierarchy"
+ },
+ "U-13": {
+  "allowed_answers": [
+   "AUTO-MERGE",
+   "SUGGEST MERGE",
+   "LINK AS RELATED",
+   "KEEP SEPARATE",
+   "ESCALATE",
+   "NO-DATA"
+  ],
+  "authoritative_identifier": "aligned",
+  "blank_fields": [],
+  "contradicted_attributes": [],
+  "corroborating_facts": [],
+  "distinct_operational_attributes": false,
+  "effective_dates": {
+   "as_of": null,
+   "candidate_effective_date": null,
+   "conflict": false
+  },
+  "evidence_reasons": [],
+  "evidence_strength": null,
+  "hierarchy_parents": [
+   {
+    "parent": "北陸フィナンシャルグループ株式会社",
+    "type": "capital"
+   },
+   {
+    "parent": "中部日用品卸株式会社",
+    "type": "trade_flow"
+   },
+   {
+    "parent": "西日本営業統括部",
+    "type": "reporting"
+   }
+  ],
+  "history_exists": false,
+  "identifiers": [],
+  "irreversible": false,
+  "lifecycle": "active",
+  "location_comparison": null,
+  "object_type_a": "legal_entity",
+  "object_type_b": "legal_entity",
+  "one_to_many_object": false,
+  "requested_action": "none",
+  "requested_relation_type": null,
+  "stated_difference": "none",
+  "stated_relation": "parent_child",
+  "tenant_boundary": "none",
+  "track": "hierarchy"
+ },
+ "U-14": {
+  "allowed_answers": [
+   "LINK AS RELATED",
+   "KEEP SEPARATE",
+   "REJECT MATCH",
+   "ESCALATE",
+   "NO-DATA"
+  ],
+  "authoritative_identifier": "aligned",
+  "blank_fields": [],
+  "contradicted_attributes": [],
+  "corroborating_facts": [],
+  "distinct_operational_attributes": false,
+  "effective_dates": {
+   "as_of": null,
+   "candidate_effective_date": null,
+   "conflict": false
+  },
+  "evidence_reasons": [],
+  "evidence_strength": null,
+  "hierarchy_parents": [
+   {
+    "parent": "東北ホールディングス株式会社",
+    "type": "capital"
+   }
+  ],
+  "history_exists": false,
+  "identifiers": [],
+  "irreversible": false,
+  "lifecycle": "active",
+  "location_comparison": null,
+  "object_type_a": "legal_entity",
+  "object_type_b": "legal_entity",
+  "one_to_many_object": false,
+  "requested_action": "assignment",
+  "requested_relation_type": "capital",
+  "stated_difference": "none",
+  "stated_relation": "none",
+  "tenant_boundary": "none",
+  "track": "hierarchy"
+ },
+ "U-15": {
+  "allowed_answers": [
+   "LINK AS RELATED",
+   "KEEP SEPARATE",
+   "ESCALATE",
+   "NO-DATA"
+  ],
+  "authoritative_identifier": "conflicting",
+  "blank_fields": [],
+  "contradicted_attributes": [
+   "reporting_parent"
+  ],
+  "corroborating_facts": [],
+  "distinct_operational_attributes": false,
+  "effective_dates": {
+   "as_of": null,
+   "candidate_effective_date": null,
+   "conflict": false
+  },
+  "evidence_reasons": [
+   "unexplained_conflict"
+  ],
+  "evidence_strength": null,
+  "hierarchy_parents": [
+   {
+    "parent": "中国地方統括本部",
+    "type": "reporting"
+   },
+   {
+    "parent": "山陰エリア本部",
+    "type": "reporting"
+   }
+  ],
+  "history_exists": false,
+  "identifiers": [],
+  "irreversible": false,
+  "lifecycle": "active",
+  "location_comparison": null,
+  "object_type_a": "legal_entity",
+  "object_type_b": "legal_entity",
+  "one_to_many_object": false,
+  "requested_action": "none",
+  "requested_relation_type": null,
+  "stated_difference": "none",
+  "stated_relation": "parent_child",
+  "tenant_boundary": "none",
+  "track": "hierarchy"
+ },
+ "U-16": {
+  "allowed_answers": [
+   "LINK AS RELATED",
+   "KEEP SEPARATE",
+   "REJECT MATCH",
+   "ESCALATE",
+   "NO-DATA"
+  ],
+  "authoritative_identifier": "conflicting",
+  "blank_fields": [],
+  "contradicted_attributes": [],
+  "corroborating_facts": [],
+  "distinct_operational_attributes": false,
+  "effective_dates": {
+   "as_of": null,
+   "candidate_effective_date": null,
+   "conflict": false
+  },
+  "evidence_reasons": [
+   "explained_conflict"
+  ],
+  "evidence_strength": null,
+  "hierarchy_parents": [],
+  "history_exists": false,
+  "identifiers": [
+   {
+    "domain": "customer_code",
+    "legal_person_type": "unknown",
+    "status": "reassigned",
+    "value": "C-88123"
+   }
+  ],
+  "irreversible": false,
+  "lifecycle": "identifier_reused",
+  "location_comparison": null,
+  "object_type_a": "legal_entity",
+  "object_type_b": "legal_entity",
+  "one_to_many_object": false,
+  "requested_action": "none",
+  "requested_relation_type": null,
+  "stated_difference": "different_legal_entity",
+  "stated_relation": "none",
+  "tenant_boundary": "none",
+  "track": "identifier"
+ },
+ "U-17": {
+  "allowed_answers": [
+   "AUTO-MERGE",
+   "SUGGEST MERGE",
+   "ESCALATE",
+   "NO-DATA"
+  ],
+  "authoritative_identifier": "aligned",
+  "blank_fields": [],
+  "contradicted_attributes": [],
+  "corroborating_facts": [],
+  "distinct_operational_attributes": false,
+  "effective_dates": {
+   "as_of": null,
+   "candidate_effective_date": null,
+   "conflict": false
+  },
+  "evidence_reasons": [
+   "unvalidated_crosswalk"
+  ],
+  "evidence_strength": "medium",
+  "hierarchy_parents": [],
+  "history_exists": false,
+  "identifiers": [
+   {
+    "domain": "legacy_customer_id",
+    "legal_person_type": "unknown",
+    "status": "unvalidated",
+    "value": "OLD-4521"
+   },
+   {
+    "domain": "new_customer_id",
+    "legal_person_type": "unknown",
+    "status": "unvalidated",
+    "value": "NEW-9910"
+   }
+  ],
+  "irreversible": false,
+  "lifecycle": "active",
+  "location_comparison": null,
+  "object_type_a": "legal_entity",
+  "object_type_b": "legal_entity",
+  "one_to_many_object": false,
+  "requested_action": "none",
+  "requested_relation_type": null,
+  "stated_difference": "none",
+  "stated_relation": "none",
+  "tenant_boundary": "none",
+  "track": "identifier"
+ },
+ "U-18": {
+  "allowed_answers": [
+   "AUTO-MERGE",
+   "SUGGEST MERGE",
+   "LINK AS RELATED",
+   "KEEP SEPARATE",
+   "REJECT MATCH",
+   "ESCALATE",
+   "NO-DATA"
+  ],
+  "authoritative_identifier": "aligned",
+  "blank_fields": [],
+  "contradicted_attributes": [],
+  "corroborating_facts": [],
+  "distinct_operational_attributes": true,
+  "effective_dates": {
+   "as_of": null,
+   "candidate_effective_date": null,
+   "conflict": false
+  },
+  "evidence_reasons": [],
+  "evidence_strength": null,
+  "hierarchy_parents": [],
+  "history_exists": false,
+  "identifiers": [],
+  "irreversible": false,
+  "lifecycle": "active",
+  "location_comparison": null,
+  "object_type_a": "commercial_account",
+  "object_type_b": "commercial_account",
+  "one_to_many_object": false,
+  "requested_action": "none",
+  "requested_relation_type": null,
+  "stated_difference": "none",
+  "stated_relation": "group_company_code_shared_entity",
+  "tenant_boundary": "none",
+  "track": "identifier"
+ },
+ "U-19": {
+  "allowed_answers": [
+   "LINK AS RELATED",
+   "KEEP SEPARATE",
+   "REJECT MATCH",
+   "ESCALATE",
+   "NO-DATA"
+  ],
+  "authoritative_identifier": "conflicting",
+  "blank_fields": [],
+  "contradicted_attributes": [],
+  "corroborating_facts": [],
+  "distinct_operational_attributes": false,
+  "effective_dates": {
+   "as_of": null,
+   "candidate_effective_date": null,
+   "conflict": false
+  },
+  "evidence_reasons": [],
+  "evidence_strength": null,
+  "hierarchy_parents": [],
+  "history_exists": false,
+  "identifiers": [
+   {
+    "domain": "corporate_number",
+    "legal_person_type": "corporation",
+    "status": "valid",
+    "value": "4180001099999"
+   },
+   {
+    "domain": "internal_serial_number",
+    "legal_person_type": "unknown",
+    "status": "valid",
+    "value": "4180001099999"
+   }
+  ],
+  "irreversible": false,
+  "lifecycle": "active",
+  "location_comparison": null,
+  "object_type_a": "legal_entity",
+  "object_type_b": "legal_entity",
+  "one_to_many_object": false,
+  "requested_action": "none",
+  "requested_relation_type": null,
+  "stated_difference": "different_identifier_domain",
+  "stated_relation": "none",
+  "tenant_boundary": "none",
+  "track": "identifier"
+ },
+ "U-20": {
+  "allowed_answers": [
+   "LINK AS RELATED",
+   "KEEP SEPARATE",
+   "REJECT MATCH",
+   "ESCALATE",
+   "NO-DATA"
+  ],
+  "authoritative_identifier": "conflicting",
+  "blank_fields": [],
+  "contradicted_attributes": [
+   "legal_person_type"
+  ],
+  "corroborating_facts": [],
+  "distinct_operational_attributes": false,
+  "effective_dates": {
+   "as_of": null,
+   "candidate_effective_date": null,
+   "conflict": false
+  },
+  "evidence_reasons": [],
+  "evidence_strength": null,
+  "hierarchy_parents": [],
+  "history_exists": false,
+  "identifiers": [
+   {
+    "domain": "invoice_registration_number",
+    "legal_person_type": "individual",
+    "status": "valid",
+    "value": "T2180001056789"
+   },
+   {
+    "domain": "invoice_registration_number",
+    "legal_person_type": "corporation",
+    "status": "valid",
+    "value": "T3180001056789"
+   }
+  ],
+  "irreversible": false,
+  "lifecycle": "active",
+  "location_comparison": null,
+  "object_type_a": "legal_entity",
+  "object_type_b": "legal_entity",
+  "one_to_many_object": false,
+  "requested_action": "none",
+  "requested_relation_type": null,
+  "stated_difference": "different_legal_entity",
+  "stated_relation": "none",
+  "tenant_boundary": "none",
+  "track": "identifier"
+ },
+ "U-21": {
+  "allowed_answers": [
+   "AUTO-MERGE",
+   "SUGGEST MERGE",
+   "LINK AS RELATED",
+   "KEEP SEPARATE",
+   "REJECT MATCH",
+   "ESCALATE"
+  ],
+  "authoritative_identifier": "aligned",
+  "blank_fields": [],
+  "contradicted_attributes": [],
+  "corroborating_facts": [],
+  "distinct_operational_attributes": true,
+  "effective_dates": {
+   "as_of": null,
+   "candidate_effective_date": null,
+   "conflict": false
+  },
+  "evidence_reasons": [],
+  "evidence_strength": null,
+  "hierarchy_parents": [],
+  "history_exists": false,
+  "identifiers": [
+   {
+    "domain": "corporate_number",
+    "legal_person_type": "corporation",
+    "status": "valid",
+    "value": "5120001098765"
+   }
+  ],
+  "irreversible": false,
+  "lifecycle": "active",
+  "location_comparison": null,
+  "object_type_a": "store",
+  "object_type_b": "store",
+  "one_to_many_object": true,
+  "requested_action": "none",
+  "requested_relation_type": null,
+  "stated_difference": "none",
+  "stated_relation": "corporate_number_shared",
+  "tenant_boundary": "none",
+  "track": "match-or-no-merge"
+ },
+ "U-22": {
+  "allowed_answers": [
+   "AUTO-MERGE",
+   "SUGGEST MERGE",
+   "LINK AS RELATED",
+   "KEEP SEPARATE",
+   "REJECT MATCH",
+   "ESCALATE"
+  ],
+  "authoritative_identifier": "conflicting",
+  "blank_fields": [],
+  "contradicted_attributes": [],
+  "corroborating_facts": [],
+  "distinct_operational_attributes": false,
+  "effective_dates": {
+   "as_of": null,
+   "candidate_effective_date": null,
+   "conflict": false
+  },
+  "evidence_reasons": [
+   "explained_conflict"
+  ],
+  "evidence_strength": null,
+  "hierarchy_parents": [],
+  "history_exists": false,
+  "identifiers": [
+   {
+    "domain": "invoice_registration_number",
+    "legal_person_type": "unknown",
+    "status": "valid",
+    "value": null
+   }
+  ],
+  "irreversible": false,
+  "lifecycle": "active",
+  "location_comparison": null,
+  "object_type_a": "legal_entity",
+  "object_type_b": "legal_entity",
+  "one_to_many_object": false,
+  "requested_action": "none",
+  "requested_relation_type": null,
+  "stated_difference": "different_legal_entity",
+  "stated_relation": "none",
+  "tenant_boundary": "none",
+  "track": "match-or-no-merge"
+ },
+ "U-23": {
+  "allowed_answers": [
+   "AUTO-MERGE",
+   "SUGGEST MERGE",
+   "LINK AS RELATED",
+   "KEEP SEPARATE",
+   "REJECT MATCH",
+   "ESCALATE"
+  ],
+  "authoritative_identifier": "aligned",
+  "blank_fields": [],
+  "contradicted_attributes": [],
+  "corroborating_facts": [],
+  "distinct_operational_attributes": false,
+  "effective_dates": {
+   "as_of": null,
+   "candidate_effective_date": null,
+   "conflict": false
+  },
+  "evidence_reasons": [
+   "score_only",
+   "missing_identifier"
+  ],
+  "evidence_strength": "weak",
+  "hierarchy_parents": [],
+  "history_exists": false,
+  "identifiers": [],
+  "irreversible": false,
+  "lifecycle": "active",
+  "location_comparison": null,
+  "object_type_a": "legal_entity",
+  "object_type_b": "legal_entity",
+  "one_to_many_object": false,
+  "requested_action": "none",
+  "requested_relation_type": null,
+  "stated_difference": "none",
+  "stated_relation": "none",
+  "tenant_boundary": "none",
+  "track": "match-or-no-merge"
+ },
+ "U-24": {
+  "allowed_answers": [
+   "AUTO-MERGE",
+   "SUGGEST MERGE",
+   "ESCALATE",
+   "NO-DATA"
+  ],
+  "authoritative_identifier": "aligned",
+  "blank_fields": [],
+  "contradicted_attributes": [],
+  "corroborating_facts": [],
+  "distinct_operational_attributes": false,
+  "effective_dates": {
+   "as_of": null,
+   "candidate_effective_date": null,
+   "conflict": false
+  },
+  "evidence_reasons": [
+   "score_only",
+   "missing_identifier"
+  ],
+  "evidence_strength": "weak",
+  "hierarchy_parents": [],
+  "history_exists": false,
+  "identifiers": [],
+  "irreversible": true,
+  "lifecycle": "active",
+  "location_comparison": null,
+  "object_type_a": "legal_entity",
+  "object_type_b": "legal_entity",
+  "one_to_many_object": false,
+  "requested_action": "none",
+  "requested_relation_type": null,
+  "stated_difference": "none",
+  "stated_relation": "none",
+  "tenant_boundary": "none",
+  "track": "match-or-no-merge"
+ },
+ "U-25": {
+  "allowed_answers": [
+   "AUTO-MERGE",
+   "SUGGEST MERGE",
+   "LINK AS RELATED",
+   "KEEP SEPARATE",
+   "REJECT MATCH",
+   "ESCALATE"
+  ],
+  "authoritative_identifier": "aligned",
+  "blank_fields": [],
+  "contradicted_attributes": [],
+  "corroborating_facts": [],
+  "distinct_operational_attributes": false,
+  "effective_dates": {
+   "as_of": null,
+   "candidate_effective_date": null,
+   "conflict": false
+  },
+  "evidence_reasons": [],
+  "evidence_strength": "strong",
+  "hierarchy_parents": [],
+  "history_exists": false,
+  "identifiers": [
+   {
+    "domain": "corporate_number",
+    "legal_person_type": "corporation",
+    "status": "valid",
+    "value": "8450001089012"
+   }
+  ],
+  "irreversible": false,
+  "lifecycle": "active",
+  "location_comparison": null,
+  "object_type_a": "legal_entity",
+  "object_type_b": "legal_entity",
+  "one_to_many_object": false,
+  "requested_action": "none",
+  "requested_relation_type": null,
+  "stated_difference": "none",
+  "stated_relation": "none",
+  "tenant_boundary": "none",
+  "track": "match-or-no-merge"
+ },
+ "U-26": {
+  "allowed_answers": [
+   "LINK AS RELATED",
+   "KEEP SEPARATE",
+   "ESCALATE",
+   "NO-DATA"
+  ],
+  "authoritative_identifier": "aligned",
+  "blank_fields": [],
+  "contradicted_attributes": [
+   "manufacturing_plant"
+  ],
+  "corroborating_facts": [],
+  "distinct_operational_attributes": false,
+  "effective_dates": {
+   "as_of": null,
+   "candidate_effective_date": null,
+   "conflict": false
+  },
+  "evidence_reasons": [
+   "unexplained_conflict"
+  ],
+  "evidence_strength": null,
+  "hierarchy_parents": [],
+  "history_exists": false,
+  "identifiers": [],
+  "irreversible": false,
+  "lifecycle": "active",
+  "location_comparison": null,
+  "object_type_a": "site",
+  "object_type_b": "site",
+  "one_to_many_object": false,
+  "requested_action": "none",
+  "requested_relation_type": null,
+  "stated_difference": "none",
+  "stated_relation": "none",
+  "tenant_boundary": "none",
+  "track": "requirements"
+ },
+ "U-27": {
+  "allowed_answers": [
+   "AUTO-MERGE",
+   "SUGGEST MERGE",
+   "ESCALATE",
+   "NO-DATA"
+  ],
+  "authoritative_identifier": "absent",
+  "blank_fields": [],
+  "contradicted_attributes": [],
+  "corroborating_facts": [],
+  "distinct_operational_attributes": false,
+  "effective_dates": {
+   "as_of": null,
+   "candidate_effective_date": null,
+   "conflict": false
+  },
+  "evidence_reasons": [
+   "missing_identifier"
+  ],
+  "evidence_strength": "weak",
+  "hierarchy_parents": [],
+  "history_exists": false,
+  "identifiers": [],
+  "irreversible": false,
+  "lifecycle": "active",
+  "location_comparison": null,
+  "object_type_a": "legal_entity",
+  "object_type_b": "legal_entity",
+  "one_to_many_object": false,
+  "requested_action": "none",
+  "requested_relation_type": null,
+  "stated_difference": "none",
+  "stated_relation": "none",
+  "tenant_boundary": "none",
+  "track": "requirements"
+ },
+ "U-28": {
+  "allowed_answers": [
+   "AUTO-MERGE",
+   "SUGGEST MERGE",
+   "LINK AS RELATED",
+   "KEEP SEPARATE",
+   "REJECT MATCH",
+   "ESCALATE",
+   "NO-DATA"
+  ],
+  "authoritative_identifier": "aligned",
+  "blank_fields": [],
+  "contradicted_attributes": [],
+  "corroborating_facts": [],
+  "distinct_operational_attributes": false,
+  "effective_dates": {
+   "as_of": null,
+   "candidate_effective_date": null,
+   "conflict": false
+  },
+  "evidence_reasons": [],
+  "evidence_strength": null,
+  "hierarchy_parents": [],
+  "history_exists": false,
+  "identifiers": [],
+  "irreversible": false,
+  "lifecycle": "active",
+  "location_comparison": null,
+  "object_type_a": "store",
+  "object_type_b": "site",
+  "one_to_many_object": true,
+  "requested_action": "none",
+  "requested_relation_type": null,
+  "stated_difference": "none",
+  "stated_relation": "same_site_only",
+  "tenant_boundary": "none",
+  "track": "requirements"
+ },
+ "U-29": {
+  "allowed_answers": [
+   "AUTO-MERGE",
+   "SUGGEST MERGE",
+   "LINK AS RELATED",
+   "KEEP SEPARATE",
+   "REJECT MATCH",
+   "ESCALATE",
+   "NO-DATA"
+  ],
+  "authoritative_identifier": "aligned",
+  "blank_fields": [],
+  "contradicted_attributes": [],
+  "corroborating_facts": [],
+  "distinct_operational_attributes": true,
+  "effective_dates": {
+   "as_of": null,
+   "candidate_effective_date": null,
+   "conflict": false
+  },
+  "evidence_reasons": [],
+  "evidence_strength": null,
+  "hierarchy_parents": [],
+  "history_exists": false,
+  "identifiers": [],
+  "irreversible": false,
+  "lifecycle": "active",
+  "location_comparison": null,
+  "object_type_a": "legal_entity",
+  "object_type_b": "legal_entity",
+  "one_to_many_object": false,
+  "requested_action": "none",
+  "requested_relation_type": null,
+  "stated_difference": "none",
+  "stated_relation": "group_company_code_shared_entity",
+  "tenant_boundary": "none",
+  "track": "requirements"
+ },
+ "U-30": {
+  "allowed_answers": [
+   "LINK AS RELATED",
+   "KEEP SEPARATE",
+   "ESCALATE",
+   "NO-DATA"
+  ],
+  "authoritative_identifier": "absent",
+  "blank_fields": [
+   "priority_source_flag"
+  ],
+  "contradicted_attributes": [],
+  "corroborating_facts": [],
+  "distinct_operational_attributes": false,
+  "effective_dates": {
+   "as_of": null,
+   "candidate_effective_date": null,
+   "conflict": false
+  },
+  "evidence_reasons": [],
+  "evidence_strength": null,
+  "hierarchy_parents": [],
+  "history_exists": false,
+  "identifiers": [],
+  "irreversible": false,
+  "lifecycle": "active",
+  "location_comparison": null,
+  "object_type_a": "legal_entity",
+  "object_type_b": "legal_entity",
+  "one_to_many_object": false,
+  "requested_action": "none",
+  "requested_relation_type": null,
+  "stated_difference": "none",
+  "stated_relation": "none",
+  "tenant_boundary": "none",
+  "track": "requirements"
+ },
+ "U-31": {
+  "allowed_answers": [
+   "LINK AS RELATED",
+   "KEEP SEPARATE",
+   "REJECT MATCH",
+   "ESCALATE",
+   "NO-DATA"
+  ],
+  "authoritative_identifier": "aligned",
+  "blank_fields": [],
+  "contradicted_attributes": [],
+  "corroborating_facts": [],
+  "distinct_operational_attributes": false,
+  "effective_dates": {
+   "as_of": "2023",
+   "candidate_effective_date": "2024",
+   "conflict": false
+  },
+  "evidence_reasons": [],
+  "evidence_strength": null,
+  "hierarchy_parents": [],
+  "history_exists": false,
+  "identifiers": [],
+  "irreversible": false,
+  "lifecycle": "active",
+  "location_comparison": null,
+  "object_type_a": "legal_entity",
+  "object_type_b": "legal_entity",
+  "one_to_many_object": false,
+  "requested_action": "none",
+  "requested_relation_type": null,
+  "stated_difference": "none",
+  "stated_relation": "none",
+  "tenant_boundary": "none",
+  "track": "survivorship"
+ },
+ "U-32": {
+  "allowed_answers": [
+   "LINK AS RELATED",
+   "KEEP SEPARATE",
+   "ESCALATE",
+   "NO-DATA"
+  ],
+  "authoritative_identifier": "aligned",
+  "blank_fields": [],
+  "contradicted_attributes": [],
+  "corroborating_facts": [],
+  "distinct_operational_attributes": false,
+  "effective_dates": {
+   "as_of": null,
+   "candidate_effective_date": null,
+   "conflict": false
+  },
+  "evidence_reasons": [],
+  "evidence_strength": null,
+  "hierarchy_parents": [],
+  "history_exists": false,
+  "identifiers": [],
+  "irreversible": false,
+  "lifecycle": "active",
+  "location_comparison": null,
+  "object_type_a": "legal_entity",
+  "object_type_b": "legal_entity",
+  "one_to_many_object": false,
+  "requested_action": "none",
+  "requested_relation_type": null,
+  "stated_difference": "none",
+  "stated_relation": "none",
+  "tenant_boundary": "none",
+  "track": "survivorship"
+ },
+ "U-33": {
+  "allowed_answers": [
+   "AUTO-MERGE",
+   "SUGGEST MERGE",
+   "ESCALATE",
+   "NO-DATA"
+  ],
+  "authoritative_identifier": "aligned",
+  "blank_fields": [],
+  "contradicted_attributes": [],
+  "corroborating_facts": [],
+  "distinct_operational_attributes": false,
+  "effective_dates": {
+   "as_of": null,
+   "candidate_effective_date": null,
+   "conflict": false
+  },
+  "evidence_reasons": [
+   "unvalidated_crosswalk"
+  ],
+  "evidence_strength": "medium",
+  "hierarchy_parents": [],
+  "history_exists": true,
+  "identifiers": [],
+  "irreversible": true,
+  "lifecycle": "active",
+  "location_comparison": null,
+  "object_type_a": "legal_entity",
+  "object_type_b": "legal_entity",
+  "one_to_many_object": false,
+  "requested_action": "none",
+  "requested_relation_type": null,
+  "stated_difference": "none",
+  "stated_relation": "none",
+  "tenant_boundary": "none",
+  "track": "survivorship"
+ },
+ "U-34": {
+  "allowed_answers": [
+   "LINK AS RELATED",
+   "KEEP SEPARATE",
+   "ESCALATE",
+   "NO-DATA"
+  ],
+  "authoritative_identifier": "aligned",
+  "blank_fields": [],
+  "contradicted_attributes": [],
+  "corroborating_facts": [],
+  "distinct_operational_attributes": false,
+  "effective_dates": {
+   "as_of": "2024-04-01",
+   "candidate_effective_date": "2024-10-01",
+   "conflict": false
+  },
+  "evidence_reasons": [],
+  "evidence_strength": null,
+  "hierarchy_parents": [],
+  "history_exists": false,
+  "identifiers": [],
+  "irreversible": false,
+  "lifecycle": "active",
+  "location_comparison": null,
+  "object_type_a": "legal_entity",
+  "object_type_b": "legal_entity",
+  "one_to_many_object": false,
+  "requested_action": "none",
+  "requested_relation_type": null,
+  "stated_difference": "none",
+  "stated_relation": "none",
+  "tenant_boundary": "none",
+  "track": "survivorship"
+ },
+ "U-35": {
+  "allowed_answers": [
+   "LINK AS RELATED",
+   "KEEP SEPARATE",
+   "ESCALATE",
+   "NO-DATA"
+  ],
+  "authoritative_identifier": "aligned",
+  "blank_fields": [
+   "priority_source_flag"
+  ],
+  "contradicted_attributes": [],
+  "corroborating_facts": [
+   "erp_timestamp_is_more_recent",
+   "documented_practice_prefers_most_recently_updated_system"
+  ],
+  "distinct_operational_attributes": false,
+  "effective_dates": {
+   "as_of": null,
+   "candidate_effective_date": null,
+   "conflict": false
+  },
+  "evidence_reasons": [],
+  "evidence_strength": null,
+  "hierarchy_parents": [],
+  "history_exists": false,
+  "identifiers": [],
+  "irreversible": false,
+  "lifecycle": "active",
+  "location_comparison": null,
+  "object_type_a": "legal_entity",
+  "object_type_b": "legal_entity",
+  "one_to_many_object": false,
+  "requested_action": "none",
+  "requested_relation_type": null,
+  "stated_difference": "none",
+  "stated_relation": "none",
+  "tenant_boundary": "none",
+  "track": "survivorship"
+ },
+ "U-36": {
+  "allowed_answers": [
+   "AUTO-MERGE",
+   "SUGGEST MERGE",
+   "LINK AS RELATED",
+   "KEEP SEPARATE",
+   "REJECT MATCH",
+   "ESCALATE",
+   "NO-DATA"
+  ],
+  "authoritative_identifier": "aligned",
+  "blank_fields": [],
+  "contradicted_attributes": [],
+  "corroborating_facts": [],
+  "distinct_operational_attributes": false,
+  "effective_dates": {
+   "as_of": null,
+   "candidate_effective_date": null,
+   "conflict": false
+  },
+  "evidence_reasons": [],
+  "evidence_strength": null,
+  "hierarchy_parents": [],
+  "history_exists": true,
+  "identifiers": [],
+  "irreversible": false,
+  "lifecycle": "closed",
+  "location_comparison": null,
+  "object_type_a": "store",
+  "object_type_b": "store",
+  "one_to_many_object": false,
+  "requested_action": "none",
+  "requested_relation_type": null,
+  "stated_difference": "none",
+  "stated_relation": "none",
+  "tenant_boundary": "none",
+  "track": "temporal"
+ },
+ "U-37": {
+  "allowed_answers": [
+   "AUTO-MERGE",
+   "SUGGEST MERGE",
+   "LINK AS RELATED",
+   "KEEP SEPARATE",
+   "REJECT MATCH",
+   "ESCALATE"
+  ],
+  "authoritative_identifier": "aligned",
+  "blank_fields": [],
+  "contradicted_attributes": [],
+  "corroborating_facts": [],
+  "distinct_operational_attributes": false,
+  "effective_dates": {
+   "as_of": null,
+   "candidate_effective_date": null,
+   "conflict": false
+  },
+  "evidence_reasons": [],
+  "evidence_strength": "strong",
+  "hierarchy_parents": [],
+  "history_exists": false,
+  "identifiers": [
+   {
+    "domain": "corporate_number",
+    "legal_person_type": "corporation",
+    "status": "valid",
+    "value": "9630001078234"
+   }
+  ],
+  "irreversible": false,
+  "lifecycle": "active",
+  "location_comparison": null,
+  "object_type_a": "legal_entity",
+  "object_type_b": "legal_entity",
+  "one_to_many_object": false,
+  "requested_action": "none",
+  "requested_relation_type": null,
+  "stated_difference": "none",
+  "stated_relation": "none",
+  "tenant_boundary": "none",
+  "track": "temporal"
+ },
+ "U-38": {
+  "allowed_answers": [
+   "LINK AS RELATED",
+   "KEEP SEPARATE",
+   "ESCALATE",
+   "NO-DATA"
+  ],
+  "authoritative_identifier": "aligned",
+  "blank_fields": [],
+  "contradicted_attributes": [
+   "relocation_date"
+  ],
+  "corroborating_facts": [],
+  "distinct_operational_attributes": false,
+  "effective_dates": {
+   "as_of": "2024-06-01",
+   "candidate_effective_date": "2024-07-01",
+   "conflict": true
+  },
+  "evidence_reasons": [
+   "unexplained_conflict"
+  ],
+  "evidence_strength": null,
+  "hierarchy_parents": [],
+  "history_exists": false,
+  "identifiers": [],
+  "irreversible": false,
+  "lifecycle": "relocated",
+  "location_comparison": null,
+  "object_type_a": "site",
+  "object_type_b": "site",
+  "one_to_many_object": false,
+  "requested_action": "none",
+  "requested_relation_type": null,
+  "stated_difference": "none",
+  "stated_relation": "none",
+  "tenant_boundary": "none",
+  "track": "temporal"
+ },
+ "U-39": {
+  "allowed_answers": [
+   "LINK AS RELATED",
+   "KEEP SEPARATE",
+   "REJECT MATCH",
+   "ESCALATE",
+   "NO-DATA"
+  ],
+  "authoritative_identifier": "aligned",
+  "blank_fields": [],
+  "contradicted_attributes": [],
+  "corroborating_facts": [],
+  "distinct_operational_attributes": false,
+  "effective_dates": {
+   "as_of": "2023-04-01",
+   "candidate_effective_date": null,
+   "conflict": false
+  },
+  "evidence_reasons": [],
+  "evidence_strength": null,
+  "hierarchy_parents": [],
+  "history_exists": true,
+  "identifiers": [],
+  "irreversible": false,
+  "lifecycle": "active",
+  "location_comparison": null,
+  "object_type_a": "commercial_account",
+  "object_type_b": "commercial_account",
+  "one_to_many_object": false,
+  "requested_action": "none",
+  "requested_relation_type": null,
+  "stated_difference": "none",
+  "stated_relation": "none",
+  "tenant_boundary": "none",
+  "track": "temporal"
+ },
+ "U-40": {
+  "allowed_answers": [
+   "LINK AS RELATED",
+   "KEEP SEPARATE",
+   "ESCALATE",
+   "NO-DATA"
+  ],
+  "authoritative_identifier": "aligned",
+  "blank_fields": [],
+  "contradicted_attributes": [
+   "effective_date"
+  ],
+  "corroborating_facts": [],
+  "distinct_operational_attributes": false,
+  "effective_dates": {
+   "as_of": null,
+   "candidate_effective_date": null,
+   "conflict": true
+  },
+  "evidence_reasons": [
+   "unexplained_conflict"
+  ],
+  "evidence_strength": null,
+  "hierarchy_parents": [],
+  "history_exists": false,
+  "identifiers": [],
+  "irreversible": false,
+  "lifecycle": "active",
+  "location_comparison": null,
+  "object_type_a": "legal_entity",
+  "object_type_b": "legal_entity",
+  "one_to_many_object": false,
+  "requested_action": "none",
+  "requested_relation_type": null,
+  "stated_difference": "none",
+  "stated_relation": "none",
+  "tenant_boundary": "none",
+  "track": "temporal"
+ }
+}

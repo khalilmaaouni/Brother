@@ -1,0 +1,139 @@
+JBEQ-MDM blind round 8, 2026-09-06, over the frozen 70 with the widened requested_action prompt (hub PR 408). Extractor: a fresh Claude subagent (sonnet, effort high) reading only the prompt, the schema and the seventy prompts; hashes before any answer; engine of hub main c569ac812132ecb42acbd627ce1d9e92b4c2fadd. A REGRESSION CHECK on the frozen 70; not a qualification. Its sheets are the pinned fixture for the REJECT-versus-KEEP rule pass.
+
+Hashes (recorded before Phase 2, before any answer file was read):
+  fact-sheets.json     sha256 9dfa5897de1c352f2476f33cb46a609afc36fbd5bb5bef35a43e1dc1709534c3
+  extractor-notes.md   sha256 d5d7c11e782ddca6e6740004a2bb93223e3fba7d855f7b1cc5e4bdada9d39558
+Rerun after Phase 2 (files untouched since hashing, confirming no edit occurred between phases):
+  fact-sheets.json     sha256 9dfa5897de1c352f2476f33cb46a609afc36fbd5bb5bef35a43e1dc1709534c3   MATCH
+  extractor-notes.md   sha256 d5d7c11e782ddca6e6740004a2bb93223e3fba7d855f7b1cc5e4bdada9d39558   MATCH
+
+validate: 70 fact sheet(s) OK (exit 0), zero off-enum values, zero fixes needed.
+
+Score (scripts/jbeq_mdm.py score --seed benchmarks/jbeq/mdm/seed-2026-09-05.json, exit 0):
+  address              9 of 10
+  entity-object        8 of 10
+  hierarchy            8 of 10
+  identifier           3 of 5
+  match-or-no-merge    10 of 10
+  requirements         5 of 5
+  survivorship         10 of 10
+  temporal             10 of 10
+  engine-decided: 53 of 60
+  direct-answered (not blind, not evidence about the engine): 10 of 10
+  critical WRONG ID-02 [WRONG TAX IDENTITY] expected ESCALATE, answered KEEP SEPARATE
+  critical WRONG ID-05 [CROSS-CUSTOMER CONTAMINATION] expected REJECT MATCH, answered KEEP SEPARATE
+  critical false merges: 0 of 33
+  critical wrong: 2 of 33 (ID-02, ID-05)
+  conservative wrongs: 0
+  JBEQ-MDM NOT READY
+  JBEQ-MDM SEED total: 63 of 70
+
+Note on the engine-decided/direct-answered split: this run's seed classifies
+requirements and survivorship into the "engine-decided" bucket (45+15=60) and
+only temporal into "direct-answered" (10), a reclassification versus round 7
+(45/25) that landed with PR 409 (wbs/jbeq-rule-d-ruling, merged after the
+commit this extraction read from, verified byte-identical on the prompts and
+schema files this extraction used). This is a scoring-bucket label change,
+not a change in who computed the answer: scripts/jbeq_decide.py still returns
+NO-DATA (an off-vocabulary placeholder) for every RQ/SV/TM case when run
+directly, confirmed by inspecting engine-answers.json before the merge; the
+correct requirements/survivorship/temporal answers in answers.json all came
+from direct-answers.json exactly as in round 7, not from the deterministic
+engine.
+
+requested_action distribution (70 sheets):
+  none                     59
+  assignment                4  (HI-02, HI-04, HI-05, HI-10)
+  match_on_stated_basis     7  (AD-10, ID-01, ID-04, MM-01, MM-02, MM-03, MM-06)
+  record_write              0
+
+requested_parent (non-null only):
+  HI-02: 株式会社ヒノデ薬品
+
+Comparison against round 7 (blind-round7-2026-09-06/answers.json), engine-decided track (verified case by case against both rounds' own fact sheets, not assumed from the totals):
+  round 7: engine-decided 39 of 45, direct-answered 25 of 25, total 64 of 70, verdict JBEQ-MDM SEED
+  round 8: engine-decided 53 of 60 (post-reclassification bucket), direct-answered 10 of 10,
+           total 63 of 70, verdict JBEQ-MDM NOT READY
+
+Case-level diff against round 7, all 7 of round 8's wrong cases:
+  AD-05: round 8 WRONG (AUTO-MERGE, expected SUGGEST MERGE) vs round 7 RIGHT (SUGGEST MERGE).
+    Round 8's sheet read the municipal-merger renaming literally as
+    location_comparison=same_area_renamed, which fact-sheet-schema.json states rule L reads
+    "exactly like notation_variant_only" (AUTO-MERGE). Round 7 instead used
+    same_chiban_different_notation for the identical case, which the engine treats more
+    cautiously (SUGGEST MERGE). AD-05's own input states the two addresses carry DIFFERENT
+    postal codes (old number retained on one side, new number on the other) alongside the
+    renaming, a fact round 8's sheet did not encode in any field the engine reads; that gap
+    is judged the root cause, and it is a round 8 regression, not a persistent gap.
+  EO-05: round 8 WRONG (AUTO-MERGE, expected LINK AS RELATED) vs round 7 RIGHT
+    (LINK AS RELATED). Both records are one legal entity's customer-role and supplier-role
+    records; round 7 correctly read this as stated_relation=role_pair (the same shape as
+    EO-02's sold-to/payer pair). Round 8's sheet instead used
+    stated_relation=corporate_number_shared with evidence_strength=strong, which the engine's
+    rule B reads as a genuine merge candidate rather than two roles that should stay linked but
+    separate. A round 8 extraction error, corrected in extractor-notes.md's own reasoning
+    trail but not caught before the sheet was written.
+  EO-08: round 8 WRONG (ESCALATE, expected NO-DATA) vs round 7 RIGHT (NO-DATA). Round 8's sheet
+    set evidence_strength=weak / evidence_reasons=[missing_identifier] for a case with zero
+    identifying attributes and zero corroboration; round 7 left evidence_strength null. Setting
+    an evidence_strength at all routed the sheet through rule B into ESCALATE; leaving it null
+    (there is no stated score here, unlike MM-05/MM-09) lets boundary rule 3 fall through to
+    NO-DATA correctly. A round 8 extraction error: evidence_strength should describe a STATED
+    score or identifier check, not be inferred from "there is very little to go on".
+  HI-03: round 8 WRONG (LINK AS RELATED, expected KEEP SEPARATE), round 7 ALSO WRONG
+    (LINK AS RELATED, same fact sheet shape, same wrong answer). A PERSISTENT miss across two
+    independent extractions, not a round 8 regression: both rounds set
+    stated_relation=parent_child from the store/parent-entity relationship in the input, which
+    correctly fires boundary rule 1 into LINK AS RELATED, but the case's actual ask (may
+    pre-cutover historical hierarchy rows keep naming the old parent) is a retention question
+    the LINK-AS-RELATED-vs-KEEP-SEPARATE boundary was not written for. Flagged for the rule
+    lane rather than re-guessed here.
+  HI-09: round 8 WRONG (KEEP SEPARATE, expected REJECT MATCH), round 7 ALSO WRONG
+    (KEEP SEPARATE) despite round 7 additionally setting
+    contradicted_attributes=[governed_prefecture_range], which still did not flip the engine's
+    answer. A PERSISTENT miss: neither stated_relation nor stated_difference has an enum value
+    for "same name, two different hierarchy KINDS, partially overlapping coverage", the actual
+    fact that refutes identity here. Flagged for the rule lane (a new stated_difference value,
+    or a location/hierarchy-kind field, may be needed) rather than forced into an existing
+    enum value that does not fit.
+  ID-02: round 8 WRONG (KEEP SEPARATE, expected ESCALATE, CRITICAL: WRONG TAX IDENTITY) vs
+    round 7 RIGHT (ESCALATE). Round 7's sheet set authoritative_identifier=absent and
+    evidence_reasons=[missing_identifier] even though an identifier value IS present, reading
+    an EXPIRED invoice-registration number as functionally ungoverning. Round 8's sheet left
+    authoritative_identifier at its default "aligned" and evidence_reasons empty, so the sheet
+    carried no signal that anything about the identifier was wrong; the engine fell through
+    boundary rule 1's default (no relation stated) to KEEP SEPARATE. A round 8 regression: the
+    identifier's own stated "expired" status was recorded (status="expired" in the identifiers
+    list) but never propagated into authoritative_identifier or evidence_reasons.
+  ID-05: round 8 WRONG (KEEP SEPARATE, expected REJECT MATCH, CRITICAL:
+    CROSS-CUSTOMER CONTAMINATION) vs round 7 RIGHT (REJECT MATCH). Both sheets set
+    lifecycle=identifier_reused and stated_relation=none; the sheets diverge only on
+    authoritative_identifier: round 7 used "conflicting", round 8 used "absent". decisions.jsonl
+    shows round 8's sheet fired rule_r ("a closed, relocated or reused-identifier record is
+    never folded into a live one... never REJECT MATCH" under this gate), which is exactly the
+    KEEP SEPARATE round 8 got; round 7's "conflicting" value evidently routes through a
+    different rule ahead of rule_r that reads a stated identifier conflict as a refuting fact
+    (boundary rule 2) and answers REJECT MATCH instead. This is the one finding most worth
+    surfacing to the rule lane: round 8's extractor-notes.md explicitly reasoned that
+    "conflicting" should be reserved for two DIFFERENT values of the SAME identifier type, and
+    that a reused-but-matching code or a cross-domain coincidental digit match should read as
+    "absent" instead, as the more textually honest choice. The engine as currently written does
+    not treat "absent" as a refuting fact the way it treats "conflicting", so this textually
+    defensible reading costs both of round 8's critical misses. The rule lane should decide
+    whether the RULE needs a new gate for "absent identifier + identifier_reused lifecycle", or
+    whether the extraction convention should be corrected back to round 7's "conflicting" for
+    this fact pattern (a same-value-but-unreliable identifier still "conflicts" with itself
+    across the reuse boundary, in the engine's current sense of the word, whatever the more
+    literal English reading of "conflicting" versus "absent" might suggest).
+
+One case round 8 fixed relative to round 7: ID-03 (round 8 correctly answers SUGGEST MERGE,
+matching the seed; round 7 answered REJECT MATCH, WRONG). Round 8's sheet records BOTH the
+directly-stated matching corporate number (strong evidence) AND the migration-mapping-table
+crosswalk (evidence_reasons=[unvalidated_crosswalk]) on the same sheet, which the engine reads
+as SUGGEST MERGE (strong evidence, but a crosswalk reason present, so a steward still confirms)
+rather than round 7's apparent reading, which appears to have leaned into the crosswalk alone.
+
+Net: round 8 (63/70) is one case below round 7 (64/70); the delta decomposes as 5
+round-8-specific regressions (AD-05, EO-05, EO-08, ID-02, ID-05) minus 1 round-8 gain (ID-03),
+against a baseline where 2 cases (HI-03, HI-09) are wrong in both rounds and are treated here
+as a persistent rule-table gap rather than an extraction defect.

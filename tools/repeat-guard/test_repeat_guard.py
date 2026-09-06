@@ -54,6 +54,17 @@ def signature_of(payload):
     return mod.signature(payload.get("tool_name", ""), payload.get("tool_input") or {})[0]
 
 
+def _load_rg_module():
+    """A fresh import of repeat_guard.py by path, for the one test below that
+    needs to monkeypatch a function inside it (_now_ts) and call post()
+    directly rather than through a subprocess."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("_rg_direct", HOOK)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def pre_edit(path):
     """A PreToolUse payload for Edit. This suite had NO non-Bash case before
     2026-08-24, which is exactly why the defect pinned below shipped: the hook
@@ -337,6 +348,41 @@ def main():
         code, _, _ = run(pre(mixed), home)
         check("15b an unknown outcome between failures does not reset the streak",
               code, 2)
+
+        # 16. "ts" (learning_loop item 5): no row here ever carried a
+        #     timestamp, so a repeat could not be ordered against the
+        #     command it repeats. Every recorded row now does, and it must
+        #     actually parse as ISO 8601 UTC with seconds.
+        ts_cmd = "echo ts-check"
+        run(post(ts_cmd, 0), home)
+        row = last_row(home, pre(ts_cmd))
+        ts_parses = False
+        if row and "ts" in row:
+            try:
+                import datetime as _dt
+                _dt.datetime.strptime(row["ts"], "%Y-%m-%dT%H:%M:%SZ")
+                ts_parses = True
+            except (ValueError, TypeError):
+                ts_parses = False
+        check("16a a recorded row carries a parseable ts", ts_parses, True)
+
+        # 17. NEVER RAISES: a broken clock must leave the row exactly as it
+        #     was before this addition, never lose it. Direct import (not
+        #     subprocess) so _now_ts can be monkeypatched for one call.
+        rg = _load_rg_module()
+        rg.STATE_DIR = pathlib.Path(home) / ".claude" / "repeat-guard"
+        rg._now_ts = lambda: (_ for _ in ()).throw(RuntimeError("boom"))
+        broken_cmd = "echo broken-clock-check"
+        rg.post({"hook_event_name": "PostToolUse", "session_id": "s1",
+                 "tool_name": "Bash", "tool_input": {"command": broken_cmd},
+                 "tool_response": {"stdout": "", "stderr": "",
+                                   "exit_code": 0, "timed_out": False}})
+        row2 = last_row(home, pre(broken_cmd))
+        check("17a a broken clock still writes the row", row2 is not None, True)
+        check("17b a broken clock leaves ts absent rather than crashing",
+              (row2 or {}).get("ts"), None)
+        check("17c the rest of the row is unaffected by the broken clock",
+              (row2 or {}).get("ok"), True)
 
     bad = results.count(False)
     print(f"\n{len(results)} cases, {bad} failures")

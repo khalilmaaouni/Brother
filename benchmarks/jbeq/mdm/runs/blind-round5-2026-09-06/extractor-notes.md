@@ -1,0 +1,74 @@
+# JBEQ-MDM blind round 5, extractor notes
+
+One line per case naming what the input states that decides the round 5 fields (object types, requested action, location comparison, lifecycle, contradictions). Written blind, before any answer file was opened.
+
+- AD-01: Full-width vs half-width digit notation of the same banchi, identical postal code 103-0027 both sides.
+- AD-02: Kanji-numeral vs arabic-numeral chome/banchi notation, no building/room stated either side.
+- AD-03: Town name and chiban match but city/ward differs (Yokohama Naka-ku vs Kawasaki Kawasaki-ku), stated explicitly.
+- AD-04: Same building same address, floor 3 vs floor 8, input states different tenants occupy each floor.
+- AD-05: Pre-merger old town name vs post-merger new city name, postal codes differ (old/new), input states same chiban.
+- AD-06: Single record: registered address text says Fukuoka, but the record's own postal code (060-0001) belongs to Sapporo -- an internal contradiction within one input.
+- AD-07: Difference is only the small vs regular katakana ke (ヱ vs ケ) in the town name, otherwise identical.
+- AD-08: Side A's prefecture field is blank; side B names Tokyo. Input itself notes Fuchu-shi exists in both Tokyo and Hiroshima prefectures, which is an ambiguity, not a corroborating fact for either.
+- AD-09: Ship-to address field holds only the two characters honsha (head office); prefecture, city, banchi and postal code are all blank, no other fact given.
+- AD-10: Identical address and floor (a shared office), but two distinct valid corporate numbers are stated, and the input explains the floor is a share-office housing multiple registered head offices.
+- EO-01: HQ and branch sold-to records share one stated corporate number (7010001234567); branch explicitly carries its own credit limit and its own billing target.
+- EO-02: Sold-to and payer records for the same trading name; input states the payer is registered under the parent holding company's name with its own separately-set payment terms -- a stated role pair, not an identity claim.
+- EO-03: Two records registered same day by the same purchasing department; corporate number, address, contact and role all stated to match; one is a known double-submission; neither has any order or invoice attached.
+- EO-04: Same trade name (Hamano Shokai) but two distinct valid corporate numbers and two distinct locations (Niigata vs Shizuoka); input explicitly states there is no capital relationship between them.
+- EO-05: Same legal entity holds both a customer (storage-fee billing) role and a supplier (delivery) role; input states the corporate number and the contact window are the same for both roles.
+- EO-06: Store master and a ship-to master sit on the same site, but the ship-to is explicitly a joint consolidation point receiving goods for five nearby stores -- matches the schema's own same-site, one-to-many worked example.
+- EO-07: Same trade name and same address on both records; A's corporate number field is blank, B carries 7010002345678; both show order history in the last year; assigned sales reps differ.
+- EO-08: New-registration request names only "Mikasa Food Service"; address, corporate number, contact and phone are all blank; three existing candidates share that name and nothing else distinguishes them.
+- EO-09: Parent (Hokuto Bakery) and its wholly-owned sales subsidiary carry two distinct valid corporate numbers; input states the 100 percent capital relationship and that the registered HQ is the same building and floor.
+- EO-10: Same corporate number, same customer role, same billing target stated on both; one record dates from an old-ERP migration with full-width vs half-width name notation only; both carry several orders of history.
+- HI-01: Three independent, valid hierarchy parents stated (capital: Kawasemi Holdings; trade-flow: Toukai Logistics as supplier; reporting: West Japan HQ); the master has only one parent slot -- matches the schema's own three-parent worked example.
+- HI-02: Subsidiary's revenue now exceeds the parent's; request explicitly asks to flip the capital-hierarchy parent-child to match internal sales figures, not capital ownership.
+- HI-03: A 2026-07-01 business transfer moved 3 stores to a new parent; revenue for the period before that date was already aggregated under the old parent, and that historical aggregation is stated to exist.
+- HI-04: Sales-office assignment changed (Nagoya to Hamamatsu); the request explicitly asks to write that change into the capital hierarchy's parent company field.
+- HI-05: Franchisee shares brand name and store signage with the franchisor but the input explicitly states no capital relationship and no interlocking officers; request asks to register it as a subsidiary in the capital hierarchy.
+- HI-06: A new sub-holding company was explicitly established underneath an existing holding company as part of a holding-company reorganization; the matching engine flagged the two on name similarity alone, no corporate numbers given.
+- HI-07: Hierarchy note says only "is a group company" of a named group; the input explicitly states it does not specify whether the relation is capital, trade-flow, or reporting.
+- HI-08: Two business units of one group each hold their own company-code-specific customer record against the same supplier; credit limit and price terms are stated to differ per company code.
+- HI-09: A location-hierarchy node and an organization-hierarchy node share the same name (Tokai), but the input states their prefecture coverage only partially overlaps.
+- HI-10: Store deliveries are routed through a named wholesaler (a stated trade-flow fact); the request asks to write that wholesaler into the stores' capital-hierarchy parent field, which is a different hierarchy type from the one actually stated.
+- ID-01: The same 13 digits appear as an internally sequential customer number on A and as a corporate number on B; input explicitly states these are different numbering systems.
+- ID-02: The billing party's qualified-invoice-issuer number lapsed 2026-06-30; today is stated as 2026-09-05; no replacement number has been obtained.
+- ID-03: Old-ERP customer ID and CRM GUID are linked only via a migration crosswalk table; separately, both records state the same corporate number (7010002345678) and the same customer role.
+- ID-04: Store ID and site ID use the same 6-digit numbering format and happen to share the value 100234, but the input explicitly states they point to different targets; the dedup engine only detected the numeric coincidence.
+- ID-05: Customer code 400123 was reused for a different legal entity on 2023-10-01; the dedup engine presented both the pre-reuse and post-reuse records as candidates on the strength of the code alone.
+- MM-01: Three stores share one stated corporate number, but each has its own delivery destination, shelf allocation and sales-booking target -- named in the extractor prompt itself as the round-4 miss.
+- MM-02: A's qualified-invoice-issuer number and B's corporate number share the same 13 digits, but A is stated to be a sole proprietor (individual) and B a corporation -- different legal-person types.
+- MM-03: Phone number and building name match exactly, but the input explains both companies lease space in the same building and share the landlord's own representative phone line; corporate numbers are stated to differ.
+- MM-04: Same corporate number, role, address and billing target stated on both; one record has zero transaction history, was created three days after the other, and its own creator's comment says it was re-registered out of uncertainty whether the first registration existed.
+- MM-05: Merge is implemented as a physical delete of the losing record with no un-merge path; the only stated evidence is a 0.83 match score, and both sides' corporate-number fields are blank -- matches the schema's own weak-evidence worked example.
+- MM-06: Two trade names read identically (Aoi Denki) but are written with different kanji, sit at different banchi in the same city, and neither side has ever obtained a corporate number.
+- MM-07: Two different stated trade names share one corporate number (5010007654321); the registry itself records an official trade-name change effective 2025-04-01; customer role and billing target are stated identical.
+- MM-08: One of the two dedup candidates belongs to a different business unit's tenant, and the input states the two tenants cannot reference each other's data under contract -- matches the schema's own tenant-wall worked example.
+- MM-09: One side of the candidate pair has its attributes hidden by access control; the only thing presented is a 0.91 match score.
+- MM-10: Two payer records for the same stated legal entity: one tied to a head-office bulk contract with one payment-term string, the other to a store-level individual contract with a different payment-term string, both explicitly named.
+- RQ-01: 2026-08-20 governance-meeting minutes record an explicit approval of the 0.95 auto-merge threshold with no objections; the extracted rule restates that approved threshold verbatim.
+- RQ-02: Migration ticket says existing payment terms carry over as-is and that payment terms are managed in ERP alongside the contract; the extracted rule states ERP as the authoritative source, a step beyond the ticket's own wording of "managed in".
+- RQ-03: Requirements doc states records sharing a corporate number are merged and explicitly does not address store records; the extracted rule extends that general rule to store records specifically.
+- RQ-04: BRD defers the address-normalization rule to a separate, later decision and states no decision record exists; the extracted rule nonetheless states a specific full-width normalization rule.
+- RQ-05: A 2026-09-01 decision record states the payment-terms source is fixed as ERP, naming the approver (the business-department head); the extracted rule restates that fixed source verbatim.
+- SV-01: Attribute: official legal name. Corporate registry and CRM state the same entity's name in different notations (full legal form vs abbreviated), same corporate number implied by context; no timestamps given either side.
+- SV-02: Attribute: qualified-invoice-issuer number. ERP holds T7010001234560, the tax authority's own registration holds T7010001234567 -- a genuine digit-level disagreement, not mere notation; no timestamps given.
+- SV-03: Attribute: payment terms. ERP and CRM state two different terms; input states the underlying contract document is attached in ERP.
+- SV-04: Attribute: sales representative. CRM names the current rep, ERP still shows the predecessor; input states CRM's update date is more recent than ERP's (no absolute dates given).
+- SV-05: Attribute: commercial display name. A data steward set a manual override on 2026-08-01 expiring 2026-12-31; today is stated as 2026-09-05, inside that window; the override value differs from the sales master's value.
+- SV-06: Attribute: official legal name. A manual override lapsed 2026-03-31; today is stated as 2026-09-05; the corporate registry already reflects an official name change effective 2026-04-01, after the override lapsed.
+- SV-07: Attribute: golden ID. The MDM-assigned value and CRM's own independently-issued internal management number are stated to be in competition; no timestamps or override given.
+- SV-08: Attribute: official legal name. An ERP update arrived today but its own source_timestamp is stated as 2026-02-10; the corporate registry already reflects a 2026-04-01 name change.
+- SV-09: Attribute: commercial display name. Sales master carries a name; CRM's value is blank, and the input explicitly clarifies that blank means not-yet-entered, not a deletion instruction.
+- SV-10: Attribute: billing address. Two values conflict, and neither record carries a source type, an updater, or a timestamp.
+- TM-01: R1 (Konan store) valid 2019-04-01 to 2024-03-31, stated closed; R2 (Konan-chuo store) valid from 2024-06-01 at a different banchi a two-minute walk away, per the input's own words. Query date 2024-02 falls inside R1's own range, before either the closure or the two-month gap to R2.
+- TM-02: R1 (trade name Shinonome Sozai) valid to 2025-03-31; R2 (Shinonome Material) valid from 2025-04-01, adjacent with no gap. Query date 2025-02-10 falls inside R1's own range.
+- TM-03: R1 (Fuji-shi HQ) valid to 2026-01-14; R2 (Numazu-shi HQ) valid from 2026-01-15, adjacent with no gap. Query date is stated as 2026-09-05, well inside R2's range.
+- TM-04: R1 and R2 were merged into R3 on 2026-05-01; the merge was found in error on 2026-06-10 and undone, restoring R1/R2 and invalidating R3; the transaction in question is stated to have been tied to R2 before the merge.
+- TM-05: R1 payment terms valid from 2023-04-01; R2 states a different payment-term string with valid_from 2026-12-01, explicitly noted as a future-dated registration already on file. Query date is stated as 2026-09-05, before R2 takes effect.
+- TM-06: R1 and R2 both have valid_from, valid_to, source_timestamp and created_at entirely blank; input explicitly states there is no information at all indicating update order.
+- TM-07: Customer code 400123 assigned to R1 (Kawasemi Industries) 2018-04-01 to 2023-09-30 (cancellation); reused for R2 (Sunrise Trading) from 2023-10-01. Query date is an invoice dated 2023-05-20, inside R1's own range.
+- TM-08: R1 carries a superseded flag with valid_to 2026-06-30; successor R2 is valid from 2026-07-01, adjacent with no gap. Query date is stated as 2026-08-01, inside R2's range.
+- TM-09: Store R1 went dormant with valid_to 2025-12-31; the same store reopened with R2 valid from 2026-04-01. Query date 2026-03-15 falls inside the gap between the two -- neither record's own range covers it.
+- TM-10: R1 (billing address) valid 2024-04-01 to 2025-11-30; R2 valid from 2025-12-01, adjacent with no gap. The request is to reissue an invoice for the August 2025 period, which falls inside R1's own range; no date is given for the reissue action itself.

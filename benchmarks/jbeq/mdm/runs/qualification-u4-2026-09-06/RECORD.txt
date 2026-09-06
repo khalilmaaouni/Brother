@@ -1,0 +1,63 @@
+JBEQ-MDM qualification run U4, 2026-09-06, over the fourth unseen set of 40 (32 critical, 9 critical merge positives) authored blind and audited blind (35 of 40 agreement under the one-class ruling, corrections applied). Extractor: a fresh Claude subagent (sonnet, effort high) reading only the extractor prompt, the schema and the 40 prompts; hashes recorded before any answer was read; engine and scorer of tree 454e66424cae75c73d55124a968aba74092930d6, which is hub main plus PRs 428, 435, 454 and 457. This is the qualification number for the engine as it stands after the U3 fixes; U1 to U3 and the frozen 70 are regression sets.
+
+Extractor hashes (shasum -a 256), recorded before any answer was read:
+9e44623930344a20281a4a848af2d662ffc9f46d0a4f72de5210b9a82890fb5f  fact-sheets.json
+4ad19a50bdf8a235a1b26cbac7cc04d66efcd5982a22873c7434dd9f07f1c2da  extractor-notes.md
+Rerun in the run directory, identical:
+9e44623930344a20281a4a848af2d662ffc9f46d0a4f72de5210b9a82890fb5f  fact-sheets.json
+4ad19a50bdf8a235a1b26cbac7cc04d66efcd5982a22873c7434dd9f07f1c2da  extractor-notes.md
+
+validate: 40 fact sheet(s) OK (exit 0, zero off-enum fixes needed)
+
+## SCORE (score.txt, in full)
+
+scorer: 2026-09-06.2 (REJECT MATCH and KEEP SEPARATE score as one class for a refuted identity, founder ruling 2026-09-06)
+address              1 of 5
+entity-object        3 of 5
+hierarchy            5 of 5
+identifier           4 of 5
+match-or-no-merge    5 of 5
+requirements         4 of 5
+survivorship         5 of 5
+temporal             3 of 5
+equivalence class W4-05: expected KEEP SEPARATE, engine said REJECT MATCH (scored correct, scorer 2026-09-06.2)
+equivalence class W4-35: expected KEEP SEPARATE, engine said REJECT MATCH (scored correct, scorer 2026-09-06.2)
+equivalence class W4-40: expected KEEP SEPARATE, engine said REJECT MATCH (scored correct, scorer 2026-09-06.2)
+engine-decided: 21 of 30
+direct-answered (not blind, not evidence about the engine): 9 of 10
+critical WRONG W4-03 [HISTORICAL REASSIGNMENT] expected REJECT MATCH, answered LINK AS RELATED
+critical WRONG W4-04 [WRONG PAYER] expected REJECT MATCH, answered LINK AS RELATED
+critical WRONG W4-21 [WRONG STORE ASSIGNMENT] expected LINK AS RELATED, answered AUTO-MERGE  FALSE MERGE
+critical WRONG W4-22 [WRONG STORE ASSIGNMENT] expected ESCALATE, answered KEEP SEPARATE
+critical WRONG W4-23 [CROSS-TENANT DATA LEAK] expected REJECT MATCH, answered LINK AS RELATED
+critical WRONG W4-24 [WRONG STORE ASSIGNMENT] expected LINK AS RELATED, answered AUTO-MERGE  FALSE MERGE
+critical WRONG W4-26 [HISTORICAL REASSIGNMENT] expected AUTO-MERGE, answered SUGGEST MERGE  CONSERVATIVE
+critical WRONG W4-36 [WRONG STORE ASSIGNMENT] expected LINK AS RELATED, answered KEEP SEPARATE  CONSERVATIVE
+critical false merges: 2 of 32 (W4-21, W4-24)
+critical wrong: 8 of 32 (W4-03, W4-04, W4-21, W4-22, W4-23, W4-24, W4-26, W4-36)
+conservative wrongs: 2 (W4-26, W4-36)
+JBEQ-MDM NOT READY
+
+exit code of the score command: 1
+
+## Every critical wrong, with rule_fired (from decisions.jsonl)
+
+W4-03 (engine-decided): answer LINK AS RELATED, rule_fired=site_store. why: distinct_operational_attributes=true: each side carries its own delivery, booking or pricing target, so the records relate but never merge into one. Expected REJECT MATCH: the ledger's own note that warranty-claim history is managed per store code individually is a fact refuting the requested history transfer, not merely an unsupported relation.
+
+W4-04 (engine-decided): answer LINK AS RELATED, rule_fired=link_vs_reject. why: stated_difference=different_legal_entity refutes identity, but stated_relation='role_pair' states a relation the input itself confirms, so link_vs_reject read this as a stated relation rather than a refuted proposal. Expected REJECT MATCH: the requested_action here is record_write (changing the payer code to the ship-to code), and distinct_operational_attributes=true (separate settlement account and credit limit) refutes that specific write, independent of the role-pair relation.
+
+W4-21 (engine-decided): answer AUTO-MERGE, rule_fired=L. why: location_comparison='same_area_renamed' reads like notation_variant_only and no merge-safety gate blocked it. Expected LINK AS RELATED: this is a processing-facility (site) identity fact recorded across two administrative-name eras, not a plain address notation case; a site rename appears intended to link the two facility records rather than auto-merge them as one master record without review.
+
+W4-22 (engine-decided): answer KEEP SEPARATE, rule_fired=1. why: stated_relation=none. Expected ESCALATE: a real relocation (lifecycle=relocated) with a receiving record dated after the move but filed under the old site code is a live data-quality question needing a person, not a plain "no relation, both valid" case.
+
+W4-23 (engine-decided): answer LINK AS RELATED, rule_fired=1. why: stated_relation='same_site_only' is read as a stated relation. Expected REJECT MATCH: contradicted_attributes (floor, tenant) inside the same building name a different tenant on a different floor, which refutes the claimed identity rather than merely relating two same-building records.
+
+W4-24 (engine-decided): answer AUTO-MERGE, rule_fired=L. why: location_comparison='same_area_renamed', no merge-safety gate blocked it. Expected LINK AS RELATED, for the same reason as W4-21: a depot's identity across a municipal-merger renaming reads as a link, not an unreviewed auto-merge of the two site records.
+
+W4-26 (engine-decided): answer SUGGEST MERGE, rule_fired=gate-lifecycle. why: lifecycle=relocated bars AUTO-MERGE only, so a person confirms. Expected AUTO-MERGE: the registry itself explicitly confirms it is the same office before and after the move and states only the new address is now valid, which is a stronger, self-resolving statement than an ordinary relocation gate anticipates; scored CONSERVATIVE (SUGGEST MERGE rather than a false merge).
+
+W4-36 (direct-answered, requirements track is unsupported by the engine; no rule_fired applies): my direct answer was KEEP SEPARATE, following boundary rule 5's one-to-many/distinct-operational-attributes pattern (one corp number, two clinics, each running independent reservation slots and independent medical record numbering) over the requirement's literal auto-consolidate text. Expected LINK AS RELATED: the requirements track apparently wants the literal-versus-safety tension resolved as "record the relation, do not auto-merge, and do not fully separate either," which is one notch more permissive than plain KEEP SEPARATE.
+
+## Pattern across the misses
+
+Every miss but W4-04 and W4-23 sits on the same seam: a stated fact that should refute or gate a proposal (rule_fired=1's plain "stated_relation" read, or rule L's location read) is close enough to the case that the engine's rule table resolves it toward LINK AS RELATED or AUTO-MERGE when the fuller fact pattern (an explicit per-object management note, a contradicted attribute inside the stated relation, a live post-relocation record) argues for REJECT MATCH or ESCALATE instead. Both W4-21 and W4-24 (the two false merges) are same_area_renamed site cases where rule L's notation-variant treatment may be too permissive once the compared objects are physical facilities rather than a single legal entity's registered address. This is reported as evidence for engine or rule-table review, not corrected here: the fact sheets above were written blind and are not being reshaded to match the seed after the fact.

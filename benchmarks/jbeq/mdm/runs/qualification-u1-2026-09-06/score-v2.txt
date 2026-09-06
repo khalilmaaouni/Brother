@@ -1,0 +1,23 @@
+scorer: 2026-09-06.2 (REJECT MATCH and KEEP SEPARATE score as one class for a refuted identity, founder ruling 2026-09-06)
+address              4 of 5
+entity-object        5 of 5
+hierarchy            4 of 5
+identifier           5 of 5
+match-or-no-merge    4 of 5
+requirements         3 of 5
+survivorship         5 of 5
+temporal             3 of 5
+equivalence class U-01: expected KEEP SEPARATE, engine said REJECT MATCH (scored correct, scorer 2026-09-06.2)
+equivalence class U-03: expected KEEP SEPARATE, engine said REJECT MATCH (scored correct, scorer 2026-09-06.2)
+equivalence class U-14: expected REJECT MATCH, engine said KEEP SEPARATE (scored correct, scorer 2026-09-06.2)
+equivalence class U-36: expected KEEP SEPARATE, engine said REJECT MATCH (scored correct, scorer 2026-09-06.2)
+equivalence class U-39: expected REJECT MATCH, engine said KEEP SEPARATE (scored correct, scorer 2026-09-06.2)
+engine-decided: 25 of 30
+direct-answered (not blind, not evidence about the engine): 8 of 10
+critical WRONG U-13 [SOURCE PRECEDENCE VIOLATION] expected LINK AS RELATED, answered KEEP SEPARATE  CONSERVATIVE
+critical WRONG U-29 [CROSS-CUSTOMER CONTAMINATION] expected REJECT MATCH, answered LINK AS RELATED
+critical WRONG U-38 [HISTORICAL REASSIGNMENT] expected ESCALATE, answered NO-DATA
+critical false merges: 0 of 26
+critical wrong: 3 of 26 (U-13, U-29, U-38)
+conservative wrongs: 1 (U-13)
+JBEQ-MDM NOT READY

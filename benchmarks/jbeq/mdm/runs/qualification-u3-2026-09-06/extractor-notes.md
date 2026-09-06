@@ -1,0 +1,34 @@
+# JBEQ-MDM U3 extractor notes
+
+Files opened during blind extraction, in this order, and nothing else:
+
+1. benchmarks/jbeq/mdm/prompts/EXTRACTOR-PROMPT.md
+2. benchmarks/jbeq/mdm/fact-sheet-schema.json
+3. benchmarks/jbeq/mdm/unseen-3-prompts/W-01.md through W-40.md (all 40, TRACK line and full 入力/設問/許容される回答 sections read for every file; the 決定語彙 and 境界 boilerplate sections were diffed across files first, confirmed byte-identical per track group, then read in full once per track from W-01, W-06, W-11, W-16 to avoid re-reading unchanged boilerplate 40 times)
+
+No other file under benchmarks/jbeq/mdm was opened. No RECORD file, no seed file, no runs directory, no decision-rules-addendum.md, no jbeq_decide.py or jbeq_mdm.py source was read.
+
+## Judgment calls where the input did not cleanly name a closed-vocabulary value
+
+- requested_action for a question phrased as "X match/similarity, should A and B be treated as one" without the literal "を根拠に"/"理由に" clause (W-02, W-03, W-07, W-09, W-10, W-14, W-18, W-19, W-20, W-24, W-32, W-34, W-40): treated as match_on_stated_basis because the question names a specific matching criterion (building, reading, digit match, score, tenant candidate, etc.) as the reason the two records are even being compared, matching the EXTRACTOR-PROMPT's own worked shapes ("an address match, a phone-and-building-name match, and similar"). W-04's "住所が一致する三次配送センターと三次店は...対象となるか" was read the same way (attributive "matching address" naming the basis) for consistency with the address-match example named explicitly in the prompt doc. W-08's "表記差のある2件の商号候補は...まとめるべきか" was read differently: the attributive clause names a DIFFERENCE (表記差), not a matching basis, so requested_action was left "none" there. This is a real inconsistency risk between W-04/W-09 and W-08 that a different blind reader could resolve the other way; flagging it rather than silently picking one.
+
+- location_comparison on three address-track cases had no exact enum fit:
+  - W-01 (relocation, 15-year-old warehouse to a new warehouse in a different town section of the same city, same corporate number, no ambiguity about identity): none of the enum values describe "genuinely different address due to a stated relocation, not a matching puzzle." Used different_administrative_area as the closest available value for "these are actually different places," and flag that this may be the wrong bucket since the enum's real purpose is to characterize an address-MATCHING ambiguity, which this case does not have.
+  - W-03 (same 2-chome, different banchi, different kanji notation for a same-reading name, no corroborating identifier): also has no enum value for "same neighborhood, different banchi, notation also differs." Used different_administrative_area again as the closest "these are different specific locations" bucket, though it is not literally a different administrative area.
+  - W-04 (distribution center and store stated as registered at the exact same banchi): used notation_variant_only as the closest value for "the two addresses are, as stated, the same," since none of the enum values describe a literal same-address (non-ambiguous) case directly.
+
+- authoritative_identifier "conflicting" via the round-8 shape 3 (same value in different domains) was applied to W-07 (last-8-digits of an individual's invoice registration number vs. a corporation's corporate number) and W-18 (first-11-digits of an internal supplier code vs. a corporate number), both explicitly framed in the input as digit-level coincidences across different identifier domains, not validated cross-domain identity claims.
+
+- authoritative_identifier "conflicting" was also applied to W-34, following the EXTRACTOR-PROMPT's own worked example ("two corporate numbers, one per side, both valid and both different" -> authoritative_identifier: conflicting), even though the case narrative frames the two corporate numbers as confirmatory evidence of two already-distinct legal entities rather than a disputed identity claim. Flagging that this reading treats "conflicting" as meaning "the identifiers disagree," full stop, matching the worked example's literal wording, not "identifiers that were proposed as the same and are not."
+
+- W-11, W-12, W-13, W-15 (hierarchy track): object_type_a/b left at the "legal_entity" default per the schema's own guidance for a comparison that does not distinguish a kind, except W-14 and W-15 where the compared objects are explicitly org-chart nodes (hierarchy_node used there).
+
+- W-23 (two group-company records of the same external supplier, keyed per company code): requested_action set to record_write because the ask is to record a relation between the two records, which is not a hierarchy-parent write; this is the least-bad fit among the four non-"none" values, since "assignment" is reserved for hierarchy-parent writes specifically.
+
+- Several requirements/survivorship/temporal-track cases (W-10, W-20, W-25, W-26, W-27, W-28) concern non-legal-entity objects (a materials code, an equipment contract, a requirements spec) that do not map onto the object_type enum's kinds at all; object_type_a/b were left at the "legal_entity" default per the schema's stated fallback for an undistinguished kind, understanding that this default was written with entity-identity cases in mind, not documents or equipment records.
+
+- stated_relation "none" was used for W-29 (two systems sharing one customer-code numbering scheme, per requirements doc, with a stated design mandate to cross-reference after migration) and W-34 (two distinct legal entities that happen to share the same value in a "responsible sales office" field): no enum value describes "share a code SCHEME by design" or "share an assigned-office attribute value" as a relation between the compared pair, and inventing a new value was avoided per the extractor prompt's own instruction to pick the closest existing value and note it here instead.
+
+- effective_dates.conflict was left false on W-36 and W-39 even though each case is a genuine two-source disagreement, because in both cases the two sources state the SAME date and disagree about the resulting VALUE, not about which of two different dates governs; per the schema's own wording, effective_dates.conflict is specifically for two different dates disagreeing about which one governs today. The value disagreement itself is captured in evidence_reasons ("unexplained_conflict") and contradicted_attributes instead.
+
+No fact was invented beyond what a stated passage supports; every "weak" evidence_strength reflects an explicitly named score-only, notation-only, or partial-digit-only signal with no supporting identifier, and every blank_fields / corroborating_facts pairing reflects an explicitly blank field paired only with a fact the same input actually states.

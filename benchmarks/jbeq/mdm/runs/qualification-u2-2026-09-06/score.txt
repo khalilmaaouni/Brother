@@ -1,0 +1,19 @@
+address              4 of 5
+entity-object        3 of 5
+hierarchy            5 of 5
+identifier           5 of 5
+match-or-no-merge    5 of 5
+requirements-understanding 3 of 5
+survivorship         5 of 5
+temporal             4 of 5
+engine-decided: 29 of 35
+direct-answered (not blind, not evidence about the engine): 5 of 5
+critical WRONG V-02 [FALSE-MERGE RISK, not merged] expected KEEP SEPARATE, answered REJECT MATCH  CONSERVATIVE
+critical WRONG V-03 [UNREVERSIBLE MERGE WITHOUT EVIDENCE] expected SUGGEST MERGE, answered KEEP SEPARATE  CONSERVATIVE
+critical WRONG V-22 [HISTORICAL REASSIGNMENT] expected REJECT MATCH, answered KEEP SEPARATE
+critical WRONG V-36 [FALSE-MERGE RISK, not merged] expected KEEP SEPARATE, answered REJECT MATCH  CONSERVATIVE
+critical WRONG V-37 [UNREVERSIBLE MERGE WITHOUT EVIDENCE] expected ESCALATE, answered KEEP SEPARATE
+critical false merges: 0 of 33
+critical wrong: 5 of 33 (V-02, V-03, V-22, V-36, V-37)
+conservative wrongs: 3 (V-02, V-03, V-36)
+JBEQ-MDM NOT READY

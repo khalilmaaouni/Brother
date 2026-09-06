@@ -508,6 +508,18 @@ class EveryShippedDeliveryRecordCarriesItsPerFileChecks(unittest.TestCase):
                 "the shipped delivery record %r carries no 'checks': a "
                 "reader cannot re-run anything it claims. Record it with "
                 "--run-dir or --checks-file." % entry.get("ref"))
+            if checks == ad.NODATA:
+                # E94's own documented shape (proved by
+                # test_a_record_with_no_receipt_reads_NO_DATA_in_its_checks_field):
+                # no receipt was given to accept-delivery, so checks reads the
+                # NO-DATA sentinel rather than a list. NO-DATA is not a pass
+                # and it is not a per-file violation either: checks_reason
+                # already names why nothing can be re-run.
+                self.assertTrue(
+                    str(entry.get("checks_reason") or "").strip(),
+                    "%s: NO-DATA checks with no checks_reason"
+                    % entry.get("ref"))
+                continue
             ok, reason = ad.receipt_door.require_per_file_checks(checks)
             self.assertTrue(ok, "%s: %s" % (entry.get("ref"), reason))
 
@@ -537,7 +549,13 @@ class EveryShippedDeliveryRecordCarriesItsPerFileChecks(unittest.TestCase):
 
     def test_each_check_names_a_file_and_a_command_a_stranger_could_run(self):
         for entry in ad.load_all():
-            for check in entry.get("checks") or []:
+            checks = entry.get("checks")
+            if not isinstance(checks, list):
+                # The NO-DATA sentinel (a plain string, not a list) is a
+                # legitimate shape covered by the per-file gate test above;
+                # iterating it here would walk its characters, not entries.
+                continue
+            for check in checks:
                 self.assertTrue(str(check.get("file") or "").strip(), check)
                 self.assertTrue(
                     str(check.get("check_command") or "").strip(), check)

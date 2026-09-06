@@ -38,11 +38,11 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GUIDE_PATH = os.path.join(REPO, "docs", "how-to", "USE-WITH-CLAUDE-CODE.md")
 PUBLIC_URL = "https://github.com/khalilmaaouni/Brother.git"
 
-#: The currently published release, read live 2026-09-05: `claude plugin
-#: marketplace update` against khalilmaaouni/Brother reported "brother is
-#: already at the latest version (1.0.3)", so the guide's two scripts/
-#: test_*.py commands are proven against this exact tag's own checkout.
-TAG = "v1.0.3"
+#: The currently published release, read live 2026-09-06 from the public
+#: tag list (`git ls-remote --tags https://github.com/khalilmaaouni/Brother.git`
+#: names v1.0.8 as the newest), so the guide's two scripts/test_*.py
+#: commands are proven against this exact tag's own checkout.
+TAG = "v1.0.8"
 
 SECTION_HEADING = "## Proven on a throwaway home, %s"
 SECTION_MARKER_RE = re.compile(

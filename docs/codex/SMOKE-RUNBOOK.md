@@ -259,14 +259,16 @@ Step 2, the plugin:
 
   PASS: JSON naming `"pluginId": "brother@brother"` and a version, exit 0.
 
-Step 2b, the brothermode plugin. It carries the engine Brother runs work
-through: Claude pulls it in through the dependency declared in
-`bundle/.claude-plugin/plugin.json`, and Codex has no dependency resolution,
-so it is installed by name:
+Step 2b, the second plugin, which since the portability release (1.0.9) must
+be REFUSED. `brother@brother` carries the engine, the skills and both
+products' hook tools itself (docs/codex/PACKAGE-SHAPE.md), and the Codex
+marketplace offers no other plugin:
 
     codex plugin add brothermode@brother --json
 
-  PASS: JSON naming `"pluginId": "brothermode@brother"` and a version, exit 0.
+  PASS: a refusal (not found in marketplace), nonzero exit. A run that
+  installs it names a marketplace still offering two plugins, which is the
+  defect.
 
 Step 3, the confirmation:
 
@@ -377,7 +379,7 @@ Step 6, the task:
   hand the engine the units through its documented seam, which makes no model
   call at all.
 
-      DOOR_MODEL_CMD="cat plan.json" python3 "$BROTHER_PLUGIN_ROOT/runtime/brother_run.py" "<outcome>" --cwd "$PWD" --runs-root "$TMPDIR/brother-runs"
+      DOOR_MODEL_CMD="cat plan.json" python3 "$BROTHER_PLUGIN_ROOT/runtime/brother_run.py" "<outcome>" --cwd "$PWD" --runs-root "${CODEX_HOME:-$HOME/.codex}/brother/runs"
 
   `plan.json` is a JSON list of units, each with `id`, `objective`,
   `done_check`, `writes` and `deps`. The engine still isolates every unit,
@@ -533,3 +535,13 @@ In the same shell (same `CODEX_HOME` if you used the throwaway one from step
    audit run drove `--uninstall`, including the foreign-hook-survives and
    second-run-NO-DATA cases; nobody has yet driven it inside this runbook's
    own signed-in Codex flow end to end.
+
+## Since the portability release (2026-09-06)
+
+Step 3 of this runbook now expects `codex plugin add brothermode@brother` to be
+REFUSED (not found in marketplace) and the available list to carry
+`brother@brother` only: the brother plugin ships both products' hooks itself
+(see docs/codex/PACKAGE-SHAPE.md). The signed-in battery scorer lives in the
+repository as `scripts/codex_battery.py` (`--selftest`, `--rescore`); a receipt
+under a temp directory fails B6, and on a tag after v1.0.8 an absent
+brothermode@brother is the pass for B8.

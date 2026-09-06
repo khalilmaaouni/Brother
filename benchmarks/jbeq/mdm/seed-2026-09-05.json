@@ -486,7 +486,8 @@
     "ESCALATE",
     "NO-DATA"
    ],
-   "expected": "KEEP SEPARATE",
+   "expected": "LINK AS RELATED",
+   "label_corrected": "2026-09-06 founder ruling A (docs/decisions/decision-p0-3-rule-d-hi01-2026-09-06.json): three valid hierarchy parents of different types are relations to record, not records to keep apart",
    "rationale_ja": "法人、商流、レポーティングの各階層は同時に有効な別々の関係であり、1つに統一するとどの階層かが失われる。"
   },
   {

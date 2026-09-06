@@ -358,6 +358,65 @@ def expired_exceptions(root=ROOT, today=None):
                   if BV._expired(entry, today))
 
 
+def battery_state(saved_run, root=ROOT, today=None):
+    """What the CONSOLIDATED battery says, folded into this gate's own verdict.
+
+    WHY THIS EXISTS, and it is the single most repeated finding across three
+    adversarial evaluation rounds: this gate scored six hand-listed items and
+    printed READY while scripts/battery_verdict.py, over the same tree, printed
+    product FAIL. Every evaluator read that pair the same way, and they were
+    right to: a headline that says READY while a wider check of the same tree
+    says FAIL is misleading even when both numbers are individually honest. The
+    estate's own law is that a gate never reads READY over a FAIL.
+
+    The battery takes many minutes, so this gate does NOT run it. It consumes a
+    saved `sh scripts/check_all.sh` output when the caller passes one, using
+    battery_verdict's own parser and classifier rather than a second opinion
+    here, so the two can never drift into disagreeing about the same bytes.
+
+    Returns (status, detail) where status is one of:
+      "BLOCK"   the battery reported unexpected failures; they are named.
+      "PASS"    the battery was consulted and reported none.
+      "NO-DATA" no saved run was given, or it could not be read or parsed.
+
+    NO-DATA does not block, per the estate's NO-DATA law, but it is never
+    silently treated as a pass either: main() below changes its own headline so
+    an unconsulted battery can never read as a whole-product green.
+    """
+    if not saved_run:
+        return "NO-DATA", ("the consolidated battery was not consulted "
+                           "(pass --battery <a saved scripts/check_all.sh run>)")
+    try:
+        import battery_verdict as BV
+    except ImportError as exc:
+        return "NO-DATA", "battery_verdict could not be imported (%s)" % exc
+    try:
+        with open(saved_run, encoding="utf-8") as fh:
+            text = fh.read()
+    except OSError as exc:
+        return "NO-DATA", "could not read %s (%s)" % (saved_run, exc)
+    results = BV.parse_check_all_output(text)
+    if not results:
+        return "NO-DATA", ("no run_check lines found in %s, so it is not a "
+                           "check_all.sh run" % saved_run)
+    try:
+        expectations = BV.load_expectations(
+            os.path.join(root, "docs", "plan", "BATTERY-EXPECTATIONS.json"))
+    except (OSError, ValueError):
+        expectations = {}
+    if today is None:
+        from datetime import date
+        today = date.today().isoformat()
+    verdict = BV.classify(results, expectations, today=today)
+    unexpected = verdict.get("unexpected_failures") or []
+    if unexpected:
+        return "BLOCK", ("the consolidated battery reports %d unexpected "
+                         "failure(s): %s" % (len(unexpected),
+                                             ", ".join(sorted(unexpected))))
+    return "PASS", ("the consolidated battery reports no unexpected failures "
+                    "(product %s)" % verdict.get("product", "unknown"))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--root", default=ROOT)
@@ -365,19 +424,30 @@ def main(argv=None):
     ap.add_argument("--today", default=None,
                     help="ISO date to compare declared-exception review_by "
                          "against (default: today); mirrors battery_verdict")
+    ap.add_argument("--battery", default=None,
+                    help="path to a saved `sh scripts/check_all.sh` run. When "
+                         "given, this gate consumes the consolidated battery "
+                         "verdict over it and refuses READY on any unexpected "
+                         "failure. When omitted, the battery is reported "
+                         "NO-DATA and the headline says so rather than "
+                         "claiming a whole-product green.")
     args = ap.parse_args(list(sys.argv[1:] if argv is None else argv))
 
     rows = apply_valid_exceptions(evaluate(args.root, args.today), args.root, args.today)
     block = blocking(rows)
     nc_fails = noncritical_fails(rows)
     expired = expired_exceptions(args.root, args.today)
+    bat_status, bat_detail = battery_state(args.battery, args.root, args.today)
 
     if args.json:
         print(json.dumps({"rows": rows, "blocking": [r["id"] for r in block],
                           "noncritical_failures": [r["id"] for r in nc_fails],
-                          "expired_exceptions": expired},
+                          "expired_exceptions": expired,
+                          "battery": {"status": bat_status,
+                                      "detail": bat_detail}},
                           indent=2, sort_keys=True))
-        return 1 if (block or nc_fails or expired) else 0
+        return 1 if (block or nc_fails or expired
+                     or bat_status == "BLOCK") else 0
 
     print("ENTERPRISE READINESS GATE")
     print("source of the six items: %s, row VB3-12" % WBS_SOURCE)
@@ -389,9 +459,14 @@ def main(argv=None):
     print("")
     print("fifteen-question PR bar: docs/plan/FIFTEEN-QUESTION-PR-BAR.md "
           "(source not found in this repository; see that file for the search log)")
+    print("  %-30s %-8s" % ("Consolidated battery", bat_status))
+    print("        %s" % bat_detail)
     print("")
-    if block or nc_fails or expired:
+    if block or nc_fails or expired or bat_status == "BLOCK":
         print("GATE: NOT READY.")
+        if bat_status == "BLOCK":
+            print("  the consolidated battery is not clean:")
+            print("  - %s" % bat_detail)
         if block:
             print("  %d critical item(s) unproven:" % len(block))
             for b in block:
@@ -407,8 +482,17 @@ def main(argv=None):
             for name in expired:
                 print("  - %s" % name)
         return 1
-    print("GATE: every critical item is proven, no item is FAILING, and no "
-          "declared exception is past its review date. A non-critical item may "
+    if bat_status == "NO-DATA":
+        print("GATE: READY ON THIS GATE'S OWN SIX ITEMS, and the consolidated "
+              "battery was NOT consulted, so this is not a whole-product "
+              "green. Every critical item is proven, no item is FAILING, and "
+              "no declared exception is past its review date. Re-run with "
+              "--battery <a saved scripts/check_all.sh run> for the wider "
+              "verdict.")
+        return 0
+    print("GATE: every critical item is proven, no item is FAILING, no "
+          "declared exception is past its review date, and the consolidated "
+          "battery reports no unexpected failures. A non-critical item may "
           "still read NO-DATA without blocking.")
     return 0
 

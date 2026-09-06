@@ -19,6 +19,11 @@ key excluded, since that key did not exist at the moment the hash was
 taken. A later edit to the spec's seed definition moves this hash exactly
 as a changed corpus file would move the other kind, which is the point.
 
+Run status never goes into a frozen spec's body: recording that a gauntlet
+was run, resumed, or scored belongs beside the results under
+benchmarks/results/<gauntlet id>/<run>/, never in a field this hash covers,
+since that is exactly the kind of edit this module exists to catch.
+
 Usage: python3 scripts/gauntlet_frozen.py <spec.json>
   exit 0, "frozen: OK <sha1>"                          -- hash matches
   exit 1, "REFUSED: corpus hash moved: spec <a> tree <b>" -- hash moved

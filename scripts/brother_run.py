@@ -116,6 +116,7 @@ import uuid
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
+import brother_paths  # noqa: E402
 import claim_store  # noqa: E402
 import decide  # noqa: E402
 import door  # noqa: E402
@@ -314,9 +315,14 @@ def run_dir_for(outcome, runs_root, clock=None):
 #: written. NOT `<cwd>/.brother-runs`: records inside the target are exactly
 #: what makes it dirty, and a run pointed there once spun 11 rounds of live
 #: worker calls against a permanently dirty canonical before a person killed
-#: it (vault, 2026-08-30). The temp root is a granted writable root under a
-#: Codex workspace-write turn, which is the install this fallback exists for.
-FALLBACK_RUNS_DIR = "brother-runs"
+#: it (vault, 2026-08-30). NOT a temp directory either (portability A1,
+#: 2026-09-06): a receipt written under $TMPDIR is gone at the next reboot,
+#: which is exactly what happened to the founder's last real receipt
+#: (/private/tmp/brother-add-qurf1rjg/...). brother_paths.config_dir()
+#: (~/.claude, ~/.codex, or an override) is durable across reboots and is
+#: already writable under a read-only plugin install, since it lives in the
+#: user's own home rather than beside the install.
+FALLBACK_RUNS_DIR = os.path.join("brother", "runs")
 
 
 def _resolve_runs_root(requested, default=None, probe=None):
@@ -340,7 +346,7 @@ def _resolve_runs_root(requested, default=None, probe=None):
         probe(os.path.join(root, "docs", "plan", "runs"))
         return root
     except OSError as exc:
-        fallback = os.path.join(tempfile.gettempdir(), FALLBACK_RUNS_DIR)
+        fallback = os.path.join(brother_paths.config_dir(), FALLBACK_RUNS_DIR)
         print("brother_run: the default run directory under %s cannot be "
               "written (%s), so this run's records go to %s instead. Pass "
               "--runs-root to choose your own; keep it outside the "
@@ -956,6 +962,43 @@ def _changed_files(before, after, cwd):
     if proc.returncode != 0:
         return []
     return [p for p in proc.stdout.splitlines() if p.strip()]
+
+
+def _commits_between(cwd, old_rev, new_rev):
+    """How many commits separate two revisions on `cwd`'s own history
+    (`git rev-list --count old..new`), for the drift-detection line below.
+    0 when the range cannot be read (either revision missing from this
+    checkout, or git failing outright): a count that cannot be measured is
+    never reported as a real number, but the line above it that a drift
+    was seen at all still stands on the two revisions themselves."""
+    try:
+        proc = subprocess.run(
+            ["git", "rev-list", "--count", "%s..%s" % (old_rev, new_rev)],
+            cwd=cwd, capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return 0
+    if proc.returncode != 0:
+        return 0
+    try:
+        return int(proc.stdout.strip())
+    except ValueError:
+        return 0
+
+
+def _checkpoint_canonical_revision(run_dir):
+    """P1-2 fix 3 (2026-09-06 resume defects): the canonical revision this
+    run's own continuity capsule (E73.1, CAPSULE_FILENAME) recorded at its
+    LAST checkpoint before whatever crashed it, read straight off disk.
+    MUST be read before _write_capsule runs again in this process: that
+    call rewrites capsule.json with a fresh read of the target's CURRENT
+    head (continuity._canonical_revision), which would make any comparison
+    against it read "no drift" no matter what actually happened between
+    the checkpoint and this resume. None when the file is missing,
+    unreadable, or carries no canonical_revision (a run from before
+    E73.1, or one whose only capsule write ever attempted failed)."""
+    doc = _read_claims(os.path.join(run_dir, CAPSULE_FILENAME))
+    revision = doc.get("canonical_revision")
+    return revision if isinstance(revision, str) and revision else None
 
 
 def _read_claims(path):
@@ -1617,6 +1660,28 @@ def build_report(record, claims, before, after, changed=None,
             reason += "; the engine's own words: %s" % detail
         refused.append((uid, reason))
 
+    # P1-2 fix 2 (2026-09-06 resume defects): the "integrated" block below
+    # used to print "verified by: <check>" for every unit whose row read
+    # DONE, whatever that unit's own per-unit verdict actually was. A
+    # NO-DATA unit (the check already passed before the work, or nothing
+    # shows it ran) or a refused-after-integration unit then read exactly
+    # like a proven PASS to anyone scanning the report. receipts_for is
+    # moved up here, ahead of that block, so the honest per-unit verdict
+    # (_verdict_for, below) is known before the line is written rather than
+    # only after it.
+    #
+    # P9 (doc 12.6): target_revision, env_lock and per-unit data_identity,
+    # computed once from `cwd` (this call's own docstring above), handed to
+    # receipts_for so every receipt below carries them beside harness_revision.
+    target_revision = after or NODATA
+    env_lock = _env_lock(cwd)
+    data_identity_by_id = {uid: _data_identity_for_row(rows.get(uid) or {}, cwd)
+                           for uid in rows}
+    receipts = receipt_door.receipts_for(
+        record, claims, refused, log_path, target_revision=target_revision,
+        env_lock=env_lock, data_identity_by_id=data_identity_by_id)
+    receipt_by_id = {r.get("id"): r for r in receipts}
+
     lines = ["brother_run: delivery report for %r" % record.get("outcome"),
              "  work_id: %s" % record.get("work_id"),
              "  canonical revision before: %s" % (before or NODATA),
@@ -1650,7 +1715,18 @@ def build_report(record, claims, before, after, changed=None,
         if integrated:
             for uid in integrated:
                 check = (rows.get(uid) or {}).get("done_check") or "no done_check"
-                lines.append("    %-10s verified by: %s" % (uid, check))
+                receipt = receipt_by_id.get(uid) or {}
+                verdict = _verdict_for(receipt)
+                if verdict == "PASS":
+                    lines.append("    %-10s verified by: %s" % (uid, check))
+                elif verdict == "FAIL":
+                    lines.append("    %-10s integrated, FAIL: %s"
+                                 % (uid, receipt.get("reason")
+                                    or "the receipt gives no reason"))
+                else:
+                    lines.append("    %-10s integrated, NOT PROVEN: %s"
+                                 % (uid, receipt.get("reason")
+                                    or "the receipt gives no reason"))
         else:
             lines.append("    none")
     lines.append("  refused (%d):" % len(refused))
@@ -1665,16 +1741,8 @@ def build_report(record, claims, before, after, changed=None,
     # comes from the claim store's own evidence or from the refusal list
     # this same function just built.
     #
-    # P9 (doc 12.6): target_revision, env_lock and per-unit data_identity,
-    # computed once from `cwd` (this call's own docstring above), handed to
-    # receipts_for so every receipt below carries them beside harness_revision.
-    target_revision = after or NODATA
-    env_lock = _env_lock(cwd)
-    data_identity_by_id = {uid: _data_identity_for_row(rows.get(uid) or {}, cwd)
-                           for uid in rows}
-    receipts = receipt_door.receipts_for(
-        record, claims, refused, log_path, target_revision=target_revision,
-        env_lock=env_lock, data_identity_by_id=data_identity_by_id)
+    # receipts/receipt_by_id were computed above the "integrated" block, so
+    # that block could print each unit's own verdict honestly (fix 2).
     # P12: the loop closes here, right beside the receipts it reads. One
     # recurrence receipt per unit (bm_recurrence.record_receipt) and, for
     # every unit that did not PASS, a drafted lesson file under this run's
@@ -2040,7 +2108,7 @@ def _receipt_file_sha256(path):
     try:
         with open(path, "rb") as fh:
             return hashlib.sha256(fh.read()).hexdigest()
-    except OSError:
+    except OSError:  # sbe: allow-silent boundary read of a file this process just wrote, never a rewrite
         return None
 
 
@@ -2579,6 +2647,26 @@ def _write_human_decision(record_path, pending, answer, also=None):
                              "answer": a} for p, a in also]
     doc["human_decision"] = decision
     doc["pending_challenge"] = None
+    work_record.write_record(record_path, doc)
+
+
+def _write_intent_resolution(record_path, choice):
+    """P1-2 fix 1 (2026-09-06 resume defects): the intent screen's own
+    resolution, stamped on the Work document the same load/mutate/write
+    shape _write_human_decision (above) already uses. A resume that
+    reloads this same file (--resume, --continue, or the bare-invocation
+    outcome match, all three read `record` off this exact path) can then
+    reuse the decision instead of re-posing the intent screen and taking a
+    second, independent auto-resolution. Stores exactly what the resolver
+    returned: choice id, display name, and who/what resolved it. Never
+    called for a refusal (main() only calls this when a "proceed" or
+    "otherwise" choice was actually made), so there is nothing here for a
+    resume to reuse into a stopped run."""
+    with open(record_path, "r", encoding="utf-8") as fh:
+        doc = json.load(fh)
+    doc["intent_resolution"] = {"choice": choice.get("choice"),
+                                "name": choice.get("name"),
+                                "by": choice.get("by")}
     work_record.write_record(record_path, doc)
 
 
@@ -3834,9 +3922,11 @@ def main(argv=None):
     ap.add_argument("--runs-root",
                     help="where the run's Work document and claim store live "
                          "(under docs/plan/runs); defaults to this tool's own "
-                         "repository, and to a brother-runs directory under "
-                         "the temp root when that one cannot be written (a "
-                         "read-only plugin install), never the target --cwd, "
+                         "repository, and to a brother/runs directory under "
+                         "the user's Claude or Codex config directory when "
+                         "that one cannot be written (a read-only plugin "
+                         "install), never a temp directory (a receipt there "
+                         "is lost at reboot) and never the target --cwd, "
                          "which integration requires to stay clean. WHAT CLEAN "
                          "MEANS HERE, exactly: every path git status reports "
                          "in the target counts, a tracked modification and "
@@ -4044,6 +4134,29 @@ def main(argv=None):
                     "units": len(record.get("rows")
                                  or record.get("units") or [])})
     if resumed:
+        # P1-2 fix 3 (2026-09-06 resume defects): DRIFT DETECTION. Read
+        # the checkpoint's own last-recorded canonical revision BEFORE
+        # anything below (the journal opening, _write_capsule) can
+        # overwrite capsule.json with a fresh read of the CURRENT head,
+        # which would make this comparison always read "no drift" no
+        # matter what actually happened on the target repository between
+        # the checkpoint and this resume. Nothing is printed or journalled
+        # when the two agree (or when either one could not be read): a
+        # silent match is not news, and NO-DATA is never manufactured into
+        # a drift that was not observed.
+        checkpoint_rev = _checkpoint_canonical_revision(run_dir)
+        current_rev = _head(cwd)
+        if checkpoint_rev and current_rev and checkpoint_rev != current_rev:
+            drift_line = (
+                "brother_run: repository moved since the checkpoint: %s to "
+                "%s, %d commit(s); resumed units build on the new revision"
+                % (checkpoint_rev[:12], current_rev[:12],
+                   _commits_between(cwd, checkpoint_rev, current_rev)))
+            log.say(drift_line)
+            journal.append(run_dir, "run.drift_detected",
+                           parent_ids=journal.previous(run_dir),
+                           payload={"before": checkpoint_rev,
+                                    "after": current_rev})
         # THE FENCE ON A FILE-SOURCED RECORD (security review 2026-09-04,
         # Critical). Every path above that reached here with `resumed` set
         # read its record off disk; a fresh run's record came from the door
@@ -4269,25 +4382,49 @@ def main(argv=None):
     price_block = build_price_block(1 + total_units, price_durations)
     summary_blocks.append(price_paragraph(price_block))
     summary_blocks.append(rollback_line)
-    intent_choice = _human_moment(log, "intent", _fact_spec(
-        title="Proceed with this outcome", eyebrow="Intent",
-        plain_summary="\n\n".join(summary_blocks),
-        question="Is this the outcome you meant, and are these the checks "
-                 "that should decide it?",
-        option_id="proceed", option_name="Proceed as decomposed",
-        one_liner="%r, %d piece(s) of work" % (record.get("outcome"),
-                                                total_units),
-        marks={
-            "matches_the_settled_outcome": (
-                0.5, 10.0,
-                "the outcome named here is copied verbatim from what this "
-                "run resolved to act on"),
-            "already_progressed": (
-                0.5, round(10.0 * already / total_units, 2) if total_units
-                else 10.0,
-                "%d of %d piece(s) already carry a verified DONE status on "
-                "this run's own Work document" % (already, total_units)),
-        }, extra_options=[refuse_option] + lens_options), resolver=live_resolver)
+    # P1-2 fix 1 (2026-09-06 resume defects): a resume (--resume,
+    # --continue, or the bare-invocation outcome match, all three read
+    # `record` off the same Work document) reuses the intent resolution
+    # recorded THERE the first time this outcome was decided, instead of
+    # posing the screen again and taking a second, independent
+    # auto-resolution that the first decision's own record of who/what
+    # resolved it cannot be told apart from. A resume whose record carries
+    # no stored resolution (a crash before intent was ever reached) still
+    # decides, and says so, exactly as before this fix.
+    stored_intent = record.get("intent_resolution") if resumed else None
+    if isinstance(stored_intent, dict) and stored_intent.get("choice"):
+        intent_choice = dict(stored_intent)
+        log.say("brother_run: intent resolution reused from %s: chose %r, "
+                "recorded by %s"
+                % (record.get("path") or NODATA,
+                   intent_choice.get("name") or intent_choice.get("choice"),
+                   intent_choice.get("by") or NODATA))
+    else:
+        intent_choice = _human_moment(log, "intent", _fact_spec(
+            title="Proceed with this outcome", eyebrow="Intent",
+            plain_summary="\n\n".join(summary_blocks),
+            question="Is this the outcome you meant, and are these the checks "
+                     "that should decide it?",
+            option_id="proceed", option_name="Proceed as decomposed",
+            one_liner="%r, %d piece(s) of work" % (record.get("outcome"),
+                                                    total_units),
+            marks={
+                "matches_the_settled_outcome": (
+                    0.5, 10.0,
+                    "the outcome named here is copied verbatim from what this "
+                    "run resolved to act on"),
+                "already_progressed": (
+                    0.5, round(10.0 * already / total_units, 2) if total_units
+                    else 10.0,
+                    "%d of %d piece(s) already carry a verified DONE status on "
+                    "this run's own Work document" % (already, total_units)),
+            }, extra_options=[refuse_option] + lens_options), resolver=live_resolver)
+        # Persisted only for a real decision (proceed or otherwise), never
+        # for a refusal (the run stops before anything is claimed, so there
+        # is nothing left to resume into) and never for "nobody yet" (an
+        # interactive resolver whose stream closed before an answer came).
+        if intent_choice.get("choice") in ("proceed", "otherwise"):
+            _write_intent_resolution(record["path"], intent_choice)
     if intent_choice.get("choice") == "refuse":
         print("brother_run: refused at the intent screen; nothing was "
               "claimed or run", file=sys.stderr)

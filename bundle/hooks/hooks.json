@@ -1,0 +1,177 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/runtime/hooks/brothermode/tools/bm_sessionstart.py\"",
+            "timeout": 30,
+            "statusMessage": "Loading your project memory"
+          },
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/runtime/hooks/brothermode/tools/bm_vault.py\" refresh",
+            "timeout": 30,
+            "statusMessage": "Refreshing the vault index"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/runtime/hooks/brothersbe/tools/sbe_sessionstart.py\""
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/runtime/hooks/brothermode/tools/bm_telemetry.py\" outcomes-append",
+            "timeout": 30,
+            "statusMessage": "Saving the session record"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/runtime/hooks/brothersbe/tools/sbe_telemetry.py\" outcomes-append"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/runtime/hooks/brothermode/tools/bm_hookchain.py\" stop",
+            "timeout": 30,
+            "statusMessage": "Checking for unfinished work"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/runtime/hooks/brothersbe/tools/sbe_session_reconcile.py\""
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/runtime/hooks/brothermode/tools/bm_hookchain.py\" precompact",
+            "timeout": 60,
+            "statusMessage": "Saving your work before the context is condensed"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/runtime/hooks/brothersbe/tools/sbe_autosave.py\" precompact",
+            "timeout": 120
+          },
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/runtime/hooks/brothersbe/tools/sbe_telemetry.py\" precompact-brief"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/runtime/hooks/brothermode/tools/bm_fence_hook.py\"",
+            "timeout": 10,
+            "statusMessage": "Checking that only one worker edits this file"
+          },
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/runtime/hooks/brothermode/tools/vault_recall_hook.py\" check",
+            "timeout": 10,
+            "statusMessage": "Checking the vault for recorded failures in this file"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/runtime/hooks/brothermode/tools/bm_bash_audit.py\" pre",
+            "timeout": 10,
+            "statusMessage": "Noting the fenced files before this shell command runs"
+          },
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/runtime/hooks/brothermode/tools/bm_session_cap.py\"",
+            "timeout": 10,
+            "statusMessage": "Checking how many sessions are already running"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|CreateDirectory|Delete|apply_patch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/runtime/hooks/brothersbe/tools/sbe_authority_hook.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|CreateDirectory|Delete|apply_patch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/runtime/hooks/brothersbe/tools/sbe_fence_hook.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/runtime/hooks/brothersbe/tools/sbe_bash_write_guard.py\""
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/runtime/hooks/brothermode/tools/bm_bash_audit.py\" post",
+            "timeout": 15,
+            "statusMessage": "Checking whether that shell command crossed a fence"
+          },
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/runtime/hooks/brothermode/tools/attempt_hook.py\"",
+            "timeout": 10,
+            "statusMessage": "Checking whether that is the third failed attempt at this technique"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,18 @@
+SCORE WITH REJECT MATCH / KEEP SEPARATE AS ONE CLASS (founder ruling 2026-09-06, hub PR wbs/jbeq-scorer-equivalence, not merged into this base; computed standalone, no engine change)
+address              3 of 5
+entity-object        4 of 5
+hierarchy            5 of 5
+identifier           4 of 5
+match-or-no-merge    5 of 5
+requirements         4 of 5
+survivorship         5 of 5
+temporal             5 of 5
+engine-decided: 26 of 30
+direct-answered (not blind, not evidence about the engine): 9 of 10
+critical WRONG W-01 [MERGE CAPABILITY GAP] expected SUGGEST MERGE, answered KEEP SEPARATE  CONSERVATIVE
+critical WRONG W-04 [WRONG STORE ASSIGNMENT] expected KEEP SEPARATE, answered LINK AS RELATED
+critical WRONG W-19 [MERGE CAPABILITY GAP] expected ESCALATE, answered SUGGEST MERGE  FALSE MERGE
+critical false merges: 1 of 30 (W-19)
+critical wrong: 3 of 30 (W-01, W-04, W-19)
+conservative wrongs: 1 (W-01)
+JBEQ-MDM NOT READY

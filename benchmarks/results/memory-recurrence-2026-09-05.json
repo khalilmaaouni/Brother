@@ -1,8 +1,8 @@
 {
   "gauntlet": "memory-recurrence",
   "spec": "benchmarks/gauntlets/memory-recurrence.json",
-  "run_at": "2026-09-05T18:01:35",
-  "revision": "43bed654bf8d66b7b483fdd118db477b4c78c3b0",
+  "run_at": "2026-09-05T21:39:49",
+  "revision": "3e87067f391686c279996b34a13ed62586f4823a",
   "fixture": {
     "target_file": "widget_parser.py",
     "workload_family": "1, tiny bug fix. One family, not three: this is a mechanism run and says so.",
@@ -49,7 +49,7 @@
       "id": "stale memory",
       "expected": "validate-before-return",
       "result": "surfaced",
-      "detail": "applied exactly [validate-before-return]; refused old-lexer-rule: recall: STALE old-lexer-rule: anchor gone_lexer.py not found in /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/gauntlet-memory-recurrence-_q2fetc2/tree; not applied",
+      "detail": "applied exactly [validate-before-return]; refused old-lexer-rule: recall: STALE old-lexer-rule: anchor gone_lexer.py not found in /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/gauntlet-memory-recurrence-g3fh0e6h/tree; not applied",
       "note": "a second lesson names a path that no longer exists; it must be refused BY NAME and the current one still applied.",
       "applied": [
         "validate-before-return"
@@ -57,7 +57,7 @@
       "stale": [
         {
           "slug": "old-lexer-rule",
-          "line": "recall: STALE old-lexer-rule: anchor gone_lexer.py not found in /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/gauntlet-memory-recurrence-_q2fetc2/tree; not applied"
+          "line": "recall: STALE old-lexer-rule: anchor gone_lexer.py not found in /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/gauntlet-memory-recurrence-g3fh0e6h/tree; not applied"
         }
       ],
       "unverified": [],

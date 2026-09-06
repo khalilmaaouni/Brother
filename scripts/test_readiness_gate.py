@@ -659,5 +659,64 @@ class TheFifteenQuestionReferenceIsHonestNotInvented(unittest.TestCase):
             self.assertNotIn("%d. " % n, text.split("### What was searched")[0])
 
 
+class TheGateConsumesTheConsolidatedBattery(unittest.TestCase):
+    """Three adversarial rounds all landed on the same sentence: this gate
+    printed READY while the consolidated battery, over the same tree, printed
+    product FAIL. Driven backwards here, in all three directions, because a
+    headline is the thing evaluators actually read."""
+
+    def _saved(self, body):
+        import tempfile
+        fh = tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False)
+        fh.write(body)
+        fh.close()
+        return fh.name
+
+    CLEAN = ("PASS    exit 0   surface                            OK\n"
+             "PASS    exit 0   another                            OK\n")
+    DIRTY = ("PASS    exit 0   surface                            OK\n"
+             "FAIL    exit 1   invented-check                     boom\n")
+
+    def test_an_unexpected_failure_blocks_ready(self):
+        status, detail = RG.battery_state(self._saved(self.DIRTY))
+        self.assertEqual(status, "BLOCK")
+        self.assertIn("invented-check", detail)
+
+    def test_a_clean_battery_passes(self):
+        status, _detail = RG.battery_state(self._saved(self.CLEAN))
+        self.assertEqual(status, "PASS")
+
+    def test_no_saved_run_is_no_data_and_never_a_pass(self):
+        status, detail = RG.battery_state(None)
+        self.assertEqual(status, "NO-DATA")
+        self.assertIn("not consulted", detail)
+
+    def test_an_unreadable_or_unparseable_run_is_no_data_never_a_pass(self):
+        self.assertEqual(RG.battery_state("/no/such/file/at/all.txt")[0],
+                         "NO-DATA")
+        self.assertEqual(RG.battery_state(self._saved("not a battery run\n"))[0],
+                         "NO-DATA")
+
+    def test_the_headline_never_claims_a_whole_product_green_unconsulted(self):
+        """The exit code is not the whole control here: the printed headline
+        is what an evaluator quotes. With no battery given the gate may still
+        exit 0 on its own six items, but it must say out loud that the wider
+        verdict was not consulted."""
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = RG.main([])
+        text = buf.getvalue()
+        self.assertEqual(code, 0)
+        self.assertIn("not a whole-product green", text)
+        self.assertIn("Consolidated battery", text)
+
+    def test_a_failing_battery_makes_the_gate_exit_nonzero(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = RG.main(["--battery", self._saved(self.DIRTY)])
+        self.assertEqual(code, 1)
+        self.assertIn("NOT READY", buf.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()

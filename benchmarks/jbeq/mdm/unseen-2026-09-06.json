@@ -1,0 +1,692 @@
+{
+ "_doc": "JBEQ-MDM unseen qualification set, authored 2026-09-06 by a Claude subagent (sonnet, effort high) blind to the frozen seed (benchmarks/jbeq/mdm/seed-2026-09-05.json), the runs directory, the case prompt files and scripts/jbeq_decide.py. Shape mirrors the seed case fields scripts/jbeq_mdm.py's write_prompts() and score() read: id, track, input, question, allowed, expected, critical, critical_class, plus rationale (not read by the scorer, carried the same way the frozen seed's own CHANGELOG entries carry one). Every company, store, person, address and identifier below is invented; none is a real corporation or a client term.",
+ "cases": [
+  {
+   "id": "U-01",
+   "track": "address",
+   "critical": true,
+   "critical_class": "WRONG LEGAL ENTITY",
+   "input": "東海ビバレッジ物産株式会社(法人番号4180001012345)の松本支店と、別法人である信州製菓株式会社(法人番号5120001098765)の長野営業所は、登記上の所在地がいずれも長野県松本市中央一丁目2番3号であり、同じビルの同じ階に事務所を構えている。両社の間に資本関係、役員兼任、取引上の経由関係を示す記述は入力のどこにもない。",
+   "question": "この二つのレコードは統合または関連付けの対象とすべきか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "KEEP SEPARATE",
+   "rationale": "same address is not the same business object: two distinct corporate numbers sharing one floor state no relation at all."
+  },
+  {
+   "id": "U-02",
+   "track": "address",
+   "critical": false,
+   "critical_class": null,
+   "input": "顧客マスタの候補レコードは、番地が「3番地」、建物名が「第一ビル」とのみ記載され、都道府県欄、市区町村欄とも空欄である。郵便番号の記載も無い。",
+   "question": "この候補レコードの所在地を、既存の東京都千代田区大手町の店舗レコードと同一とみなせるか。",
+   "allowed": [
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "NO-DATA",
+   "rationale": "insufficient evidence is ESCALATE only when something corroborates; here nothing in the input backs the blank prefecture and city fields, so the honest answer is NO-DATA."
+  },
+  {
+   "id": "U-03",
+   "track": "address",
+   "critical": true,
+   "critical_class": "WRONG STORE ASSIGNMENT",
+   "input": "北陸卸商事株式会社の倉庫レコードは「石川県かほく市宇野気ヨ100番地」、候補として提示された別レコードは「石川県河北郡宇野気町ヨ100番地」であり、番地の表記は同一だが、市町村合併により1990年代に河北郡宇野気町がかほく市へ移行したという行政区画の変更のみが両者の違いである。両レコードの法人番号や取引口座を結び付ける記述は入力にない。",
+   "question": "行政区画名が異なるこの二つのレコードは、同一の拠点として統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "KEEP SEPARATE",
+   "rationale": "same address is not the same business object by itself, and a municipal boundary rename states no corporate relation to record between the two rows."
+  },
+  {
+   "id": "U-04",
+   "track": "address",
+   "critical": false,
+   "critical_class": null,
+   "input": "候補レコードの都道府県欄は空欄だが、番地は「深川3丁目9番1号」、郵便番号は「135-0033」と記載されており、この郵便番号が指す地域は既存レコードの東京都江東区深川と一致する。",
+   "question": "都道府県欄が空欄のこの候補レコードは、既存の東京都江東区深川のレコードと関連付けられるか。",
+   "allowed": [
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "ESCALATE",
+   "rationale": "insufficient evidence is ESCALATE, not NO-DATA, once the banchi and the postal code corroborate the blank field without confirming it outright."
+  },
+  {
+   "id": "U-05",
+   "track": "address",
+   "critical": false,
+   "critical_class": null,
+   "input": "九州清涼飲料株式会社(法人番号6250001034567)の本社倉庫は、旧システムでは「福岡県久留米市津福本町2000番地」、新システムでは「福岡県久留米市津福本町二〇〇〇番地」と表記が異なるだけで、法人番号はいずれのレコードにも同一の値が記載されている。",
+   "question": "表記のみが異なるこの二つの倉庫レコードは関連付けの対象となるか。",
+   "allowed": [
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "LINK AS RELATED",
+   "rationale": "the input itself states a relation, a shared corporate number, so a mere notation difference in how the address is written never overrides it."
+  },
+  {
+   "id": "U-06",
+   "track": "entity-object",
+   "critical": false,
+   "critical_class": null,
+   "input": "甲信製菓株式会社(法人番号7310001045678)は、菓子卸事業のための請求先アカウントと、自動販売機事業のための保守契約アカウントを、それぞれ別の顧客コードで営業システムに登録している。両アカウントは同一の法人番号を共有し、担当営業所も同じ諏訪支店である。",
+   "question": "同一法人が持つこの二つのアカウントレコードは、関連として記録すべきか。",
+   "allowed": [
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "LINK AS RELATED",
+   "rationale": "same legal entity multiple accounts is exactly the shared-identity-fact case boundary rule 1 asks LINK AS RELATED for, even while each account stays a separate record."
+  },
+  {
+   "id": "U-07",
+   "track": "entity-object",
+   "critical": true,
+   "critical_class": "WRONG PAYER",
+   "input": "西関東機械商会株式会社の取引では、支払人(ペイヤー)レコードは本社の経理部宛て、販売先(ソルドトゥ)レコードは前橋支店宛てとして別々に登録されているが、入力にはこの二つが同一の取引に属する支払人と販売先の役割対であると明記されている。",
+   "question": "この支払人レコードと販売先レコードは関連として記録すべきか。",
+   "allowed": [
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "LINK AS RELATED",
+   "rationale": "a relationship without identity is LINK AS RELATED: the input states a payer and sold-to role pair, which is a relation even though the two roles never merge into one record."
+  },
+  {
+   "id": "U-08",
+   "track": "entity-object",
+   "critical": true,
+   "critical_class": "WRONG STORE ASSIGNMENT",
+   "input": "近畿産業機械株式会社の出荷先(シップトゥ)レコードは「大津配送センター」宛てで、入力にはこの出荷先が大津店という店舗マスタレコードに紐づく配送窓口であると明記されている。両レコードの店舗コードは一致していない。",
+   "question": "この出荷先レコードと大津店の店舗レコードは関連として記録すべきか。",
+   "allowed": [
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "LINK AS RELATED",
+   "rationale": "a relationship without identity is LINK AS RELATED: the input states the ship-to serves a specific store, which is a relation to record even without matching store codes."
+  },
+  {
+   "id": "U-09",
+   "track": "entity-object",
+   "critical": true,
+   "critical_class": "CROSS-TENANT DATA LEAK",
+   "input": "候補レコードの電話番号「076-XXX-1234」は、既存の顧客レコードと一致しているが、入力にはこの電話番号が2年前にテナント契約の解約により別事業者へ再割当てされたものであり、現在の契約者は既存レコードとは別のテナントであると明記されている。",
+   "question": "電話番号が一致するこの二つのレコードは同一の顧客として扱ってよいか。",
+   "allowed": [
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "REJECT MATCH",
+   "rationale": "a proposed write that the input's own facts refute is REJECT MATCH: a stated tenant reassignment invalidates a phone number match, whatever the numeric coincidence."
+  },
+  {
+   "id": "U-10",
+   "track": "entity-object",
+   "critical": true,
+   "critical_class": "UNREVERSIBLE MERGE WITHOUT EVIDENCE",
+   "input": "二つの顧客レコードの名寄せスコアは0.88とのみ記載され、法人番号や適格請求書発行事業者番号などの識別子は双方とも未記載である。統合すると片方のレコードはシステム上削除され、取り消しはできない。",
+   "question": "この二つのレコードを統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "ESCALATE",
+   "rationale": "insufficient evidence is ESCALATE regardless of irreversibility: a score alone with no identifier is weak evidence, and an irreversible delete never upgrades weak evidence into a merge."
+  },
+  {
+   "id": "U-11",
+   "track": "hierarchy",
+   "critical": false,
+   "critical_class": null,
+   "input": "四国建機販売株式会社の入力データには、同社の全株式を保有する親会社として「四国ホールディングス株式会社」が資本関係として明記されている。",
+   "question": "この親会社と子会社のレコードは階層関係として記録すべきか。",
+   "allowed": [
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "LINK AS RELATED",
+   "rationale": "a relationship without identity is LINK AS RELATED: a stated capital parent is a hierarchy fact to record, and the two legal entities remain separate records."
+  },
+  {
+   "id": "U-12",
+   "track": "hierarchy",
+   "critical": false,
+   "critical_class": null,
+   "input": "東海ビバレッジ物産株式会社の名古屋支店レコードには、本社が「東海ビバレッジ物産株式会社 本社」であり、支店は本社の組織下にある一拠点であると明記されている。",
+   "question": "この支店レコードと本社レコードは階層関係として記録すべきか。",
+   "allowed": [
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "LINK AS RELATED",
+   "rationale": "a relationship without identity is LINK AS RELATED: a stated branch-to-head-office link is a hierarchy fact, kept as two records rather than collapsed into one."
+  },
+  {
+   "id": "U-13",
+   "track": "hierarchy",
+   "critical": true,
+   "critical_class": "SOURCE PRECEDENCE VIOLATION",
+   "input": "北陸卸商事株式会社の入力には、資本上の親会社が「北陸フィナンシャルグループ株式会社」、商流上の親会社(仕入経由先)が「中部日用品卸株式会社」、レポーティング上の親会社が「西日本営業統括部」であると、それぞれ独立して明記されている。三者はいずれも現在有効である。",
+   "question": "この三つの異なる種類の親のうち、どれか一つに階層を一本化すべきか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "LINK AS RELATED",
+   "rationale": "a relationship without identity is LINK AS RELATED: the three independently valid parents (capital, trade-flow, reporting) are each a relation to record, and collapsing to any single one would drop the other two, which is data loss rather than conservative handling."
+  },
+  {
+   "id": "U-14",
+   "track": "hierarchy",
+   "critical": true,
+   "critical_class": "HIERARCHY REVERSAL",
+   "input": "データスチュワードからの依頼は、子会社である甲信製菓株式会社を、取引先である東北銘菓株式会社の親会社として書き込むことを求めているが、入力には東北銘菓株式会社の資本構成表があり、その筆頭株主は「東北ホールディングス株式会社」であって甲信製菓株式会社の名は一切登場しない。",
+   "question": "依頼どおり甲信製菓株式会社を東北銘菓株式会社の親会社として登録すべきか。",
+   "allowed": [
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "REJECT MATCH",
+   "rationale": "a proposed write that the input's own facts refute is REJECT MATCH: the resolution table names a different parent outright, which refutes the requested child-as-parent write."
+  },
+  {
+   "id": "U-15",
+   "track": "hierarchy",
+   "critical": true,
+   "critical_class": "SOURCE PRECEDENCE VIOLATION",
+   "input": "山陰総合卸株式会社のレポーティング上の親は、本社側システムでは「中国地方統括本部」、地域側システムでは「山陰エリア本部」と、いずれも現在有効な値として記録されており、どちらが優先するかを定める規程は入力に示されていない。",
+   "question": "レポーティング階層のこの矛盾はどう扱うべきか。",
+   "allowed": [
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "ESCALATE",
+   "rationale": "insufficient evidence is ESCALATE: two live, conflicting parents of the same single hierarchy type is a real conflict the rule set cannot close on its own, unlike two independent hierarchy types that simply coexist."
+  },
+  {
+   "id": "U-16",
+   "track": "identifier",
+   "critical": true,
+   "critical_class": "WRONG LEGAL ENTITY",
+   "input": "顧客コード「C-88123」は、過去に信州製菓株式会社へ割り当てられていたが、同社の取引終了に伴い2023年にコードが回収され、2024年に別法人である近畿産業機械株式会社へ再割当てされたと入力に明記されている。",
+   "question": "顧客コード「C-88123」を鍵として、信州製菓株式会社と近畿産業機械株式会社のレコードを同一顧客として扱ってよいか。",
+   "allowed": [
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "REJECT MATCH",
+   "rationale": "a proposed write that the input's own facts refute is REJECT MATCH: the input states the code was recycled to a different legal entity, so the identifier match is invalid, not merely unsupported."
+  },
+  {
+   "id": "U-17",
+   "track": "identifier",
+   "critical": false,
+   "critical_class": null,
+   "input": "移行対応表(クロスウォーク)には、旧システムの顧客ID「OLD-4521」と新システムの顧客ID「NEW-9910」が対応すると記載されているが、この対応表自体が検証済みであるとはどこにも書かれていない。",
+   "question": "この移行対応表のみを根拠に、二つのレコードを統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "ESCALATE",
+   "label_corrected": "2026-09-06 founder ruling A (docs/decisions/decision-p0-3-u17-crosswalk-2026-09-06.json): medium evidence with no separately stated confirmation reason gives ESCALATE, and an unvalidated crosswalk is never counted twice, once as the medium evidence and again as its own confirmation reason",
+   "rationale": "rule 9: an unvalidated migration crosswalk is medium evidence; medium evidence needs a confirmation reason stated separately from the evidence itself (transaction history, an irreversible step) before it becomes SUGGEST MERGE, and the crosswalk cannot supply that reason twice, once as the evidence and again as its own confirmation. With no separate confirmation reason here, medium evidence gives ESCALATE, not SUGGEST MERGE."
+  },
+  {
+   "id": "U-18",
+   "track": "identifier",
+   "critical": true,
+   "critical_class": "CROSS-CUSTOMER CONTAMINATION",
+   "input": "同一グループの二法人、北海道飲料工業株式会社と九州清涼飲料株式会社は、共通の仕入先である東海ビバレッジ物産株式会社について、それぞれ自社のグループ会社コードで個別の与信枠と価格条件を管理している。両レコードとも指している外部の仕入先実体は同一である。",
+   "question": "会社コードごとに管理されるこの二つの記録は統合すべきか、関連として残すべきか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "LINK AS RELATED",
+   "rationale": "a relationship without identity is LINK AS RELATED: naming the same external entity is the shared fact rule 1 asks for, while company-code-specific terms are an operational reason that never erases it."
+  },
+  {
+   "id": "U-19",
+   "track": "identifier",
+   "critical": true,
+   "critical_class": "WRONG TAX IDENTITY",
+   "input": "候補レコードの識別子は「4180001099999」で、既存レコードの社内連番「4180001099999」と数字の並びが完全に一致するが、入力には前者が法人番号の体系、後者が社内の連番管理台帳の体系から取られた値であると明記されている。",
+   "question": "数字が一致するこの二つの識別子を根拠に、両レコードを同一とみなしてよいか。",
+   "allowed": [
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "REJECT MATCH",
+   "rationale": "a proposed write that the input's own facts refute is REJECT MATCH: the input states the two values come from different identifier domains, so the numeric coincidence invalidates itself."
+  },
+  {
+   "id": "U-20",
+   "track": "identifier",
+   "critical": true,
+   "critical_class": "WRONG TAX IDENTITY",
+   "input": "適格請求書発行事業者番号「T2180001056789」は、入力によれば個人事業主である工藤商店の登録番号であり、候補として提示された法人「工藤商事株式会社」の登録番号「T3180001056789」とは末尾以外の桁が似ているだけで、法人格の種別(個人と法人)も明記のとおり異なる。",
+   "question": "この二つの登録番号は同一の課税主体を指すとみなせるか。",
+   "allowed": [
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "REJECT MATCH",
+   "rationale": "a proposed write that the input's own facts refute is REJECT MATCH: differing legal person types stated outright invalidate a numerically close registration number, never merely leave it unsupported."
+  },
+  {
+   "id": "U-21",
+   "track": "match-or-no-merge",
+   "critical": true,
+   "critical_class": "WRONG STORE ASSIGNMENT",
+   "input": "法人番号「5120001098765」は、信州製菓株式会社の岡谷店レコードと諏訪店レコードの両方に記載されている。両店舗は別々の店舗コードを持ち、それぞれ独自の在庫と納品先を管理している。",
+   "question": "同一法人番号を共有するこの二つの店舗レコードは統合すべきか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE"
+   ],
+   "expected": "LINK AS RELATED",
+   "rationale": "same corporate number is not the same store: the identifier states a legal relation, not physical identity, so the two site records stay separate while the relation is recorded."
+  },
+  {
+   "id": "U-22",
+   "track": "match-or-no-merge",
+   "critical": true,
+   "critical_class": "WRONG TAX IDENTITY",
+   "input": "適格請求書発行事業者番号は、法人成り前の個人事業主「佐伯商店」のレコードと、法人成り後の「佐伯商事株式会社」のレコードとで同一の番号が記載されているが、入力には法人成りの手続きがまだ税務署へ完了していないため、二つの登録は現時点で別の法人格として扱う旨が明記されている。",
+   "question": "この二つのレコードを同一の課税主体として統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE"
+   ],
+   "expected": "REJECT MATCH",
+   "rationale": "a proposed write that the input's own facts refute is REJECT MATCH: the input states the two remain distinct legal persons for now, whatever registration number they will eventually share."
+  },
+  {
+   "id": "U-23",
+   "track": "match-or-no-merge",
+   "critical": false,
+   "critical_class": null,
+   "input": "候補企業の商号は「カワグチ物産」、既存レコードの商号は「河口物産」であり、読み(ヨミ)はどちらも「カワグチブッサン」で一致するが、法人番号はいずれのレコードにも記載が無く、他に一致を裏付ける事実も入力には無い。",
+   "question": "読みが一致するこの二つのレコードは同一法人とみなせるか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE"
+   ],
+   "expected": "ESCALATE",
+   "rationale": "insufficient evidence is ESCALATE: a matching reading with different kanji corroborates without confirming identity, and identifiers missing on both sides is boundary 4's own weak-evidence trigger for ESCALATE, so the honest answer is ESCALATE rather than KEEP SEPARATE, which would assert the two are different objects that the input never establishes."
+  },
+  {
+   "id": "U-24",
+   "track": "match-or-no-merge",
+   "critical": true,
+   "critical_class": "UNREVERSIBLE MERGE WITHOUT EVIDENCE",
+   "input": "名寄せエンジンが算出した一致スコアは0.91とのみ記載され、法人番号その他の識別子は双方とも未記載である。この統合処理を実行すると、片方の口座は解約扱いとなり取り消しはできない。",
+   "question": "スコアが高いこの候補を統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "ESCALATE",
+   "rationale": "insufficient evidence is ESCALATE: a match score alone is weak evidence by definition, and an irreversible account closure never licenses treating weak evidence as sufficient."
+  },
+  {
+   "id": "U-25",
+   "track": "match-or-no-merge",
+   "critical": true,
+   "critical_class": "MERGE CAPABILITY GAP",
+   "input": "候補レコードと既存レコードは、法人番号「8450001089012」が完全に一致し、役割(いずれも仕入先レコード)も一致している。",
+   "question": "この二つのレコードは自動で統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE"
+   ],
+   "expected": "AUTO-MERGE",
+   "rationale": "AUTO-MERGE only when object type, lifecycle, authoritative identifiers, site distinction, temporal state and keep-separate rules all agree: a matching corporate number and a matching role, with nothing else in the input to contradict either, is exactly that case."
+  },
+  {
+   "id": "U-26",
+   "track": "requirements",
+   "critical": true,
+   "critical_class": "SOURCE PRECEDENCE VIOLATION",
+   "input": "一件の製品ロットレコードには、品名欄に漢字で「松本工場製造」と記載されている一方で、ロット番号の先頭2桁「07」は入力の対応表によれば「甲府工場」を示すコードであると明記されており、両者は同じレコード内で矛盾している。",
+   "question": "この記録上の矛盾はどのように扱うべきか。",
+   "allowed": [
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "ESCALATE",
+   "rationale": "insufficient evidence is ESCALATE: two stated facts inside one record disagree about which plant produced the lot, and nothing in the input says which source takes precedence."
+  },
+  {
+   "id": "U-27",
+   "track": "requirements",
+   "critical": true,
+   "critical_class": "UNREVERSIBLE MERGE WITHOUT EVIDENCE",
+   "input": "要件定義書の一文は「氏名の一致のみで自動統合してよい、外部キーの安定性を優先するため」と定めているが、統合対象のレコードには法人番号その他の識別子は一切記載されていない。",
+   "question": "この要件定義どおりに、氏名の一致だけで自動統合を実装してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "ESCALATE",
+   "rationale": "insufficient evidence is ESCALATE, and a requirement asking for a name-only auto-merge does not change what the underlying evidence actually supports."
+  },
+  {
+   "id": "U-28",
+   "track": "requirements",
+   "critical": false,
+   "critical_class": null,
+   "input": "要件定義書には「同一所在地に登録されている店舗レコードはすべて配送拠点レコードへ統合する」と定められているが、対象拠点は複数の店舗の荷物をまとめて受け持つ共同配送センターであり、法人番号や親子関係の一致は入力のどこにも記載されていない。",
+   "question": "この要件定義どおりに、所在地の一致のみで店舗レコードを配送拠点レコードへ統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "LINK AS RELATED",
+   "rationale": "a relationship without identity is LINK AS RELATED: boundary 1 names 商流上の経由 verbatim, and the shared delivery centre plainly handles freight for these stores, which is a relation to record even though no corporate number or parent link ties them together."
+  },
+  {
+   "id": "U-29",
+   "track": "requirements",
+   "critical": true,
+   "critical_class": "CROSS-CUSTOMER CONTAMINATION",
+   "input": "要件定義書は「重複する法人参照は排除し、レコードを一本化すること」とのみ定めているが、対象の二法人は同一グループ内で別々の会社コードにより与信枠と支払条件を個別管理しており、統合すると各社の会計処理が混在することになる。",
+   "question": "この要件定義どおりに、二法人のレコードを一本化してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "REJECT MATCH",
+   "rationale": "a proposed write that the input's own facts refute is REJECT MATCH: the requirement asks to unify two legal entities that separately manage credit limits and payment terms by company code, and the input states doing so would mix each company's accounting, which refutes the proposed unification outright, the same shape as U-14, U-22 and U-39."
+  },
+  {
+   "id": "U-30",
+   "track": "requirements",
+   "critical": false,
+   "critical_class": null,
+   "input": "要件定義書は「優先ソースフラグに従って値を採用すること」と定めているが、入力の対象レコードにはこのフラグ自体が記載されていない。",
+   "question": "この要件をこのレコードに適用できるか。",
+   "allowed": [
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "NO-DATA",
+   "rationale": "insufficient evidence is ESCALATE only when something corroborates; here the priority flag the requirement depends on is simply absent with nothing else to lean on, so the honest answer is NO-DATA."
+  },
+  {
+   "id": "U-31",
+   "track": "survivorship",
+   "critical": true,
+   "critical_class": "SOURCE PRECEDENCE VIOLATION",
+   "input": "ある顧客レコードの与信限度額には、2022年に登録され2023年に失効した手動上書き値が残っているが、上位権限を持つ基幹システム(ERP)は2024年時点でこれと異なる現行値を保持していると入力に明記されている。",
+   "question": "失効したこの手動上書き値を、なお有効な参照元として関連付けたままにしてよいか。",
+   "allowed": [
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "REJECT MATCH",
+   "rationale": "a proposed write that the input's own facts refute is REJECT MATCH: an override the input itself calls expired loses to the higher-authority source, and the stale link should be removed rather than kept."
+  },
+  {
+   "id": "U-32",
+   "track": "survivorship",
+   "critical": false,
+   "critical_class": null,
+   "input": "同一顧客について、ERPシステムは住所欄の優先権を持ち、CRMシステムは電話番号欄の優先権を持つと、入力にはそれぞれの項目レベルでの優先権が明記されている。二つのシステムのレコードはいずれも現在有効である。",
+   "question": "項目ごとに優先権が分かれるこの二つのシステムのレコードは関連として記録すべきか。",
+   "allowed": [
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "LINK AS RELATED",
+   "rationale": "a relationship without identity is LINK AS RELATED: field-level authority split between two systems for one customer is a stated relation, never a reason to reject or merge either source."
+  },
+  {
+   "id": "U-33",
+   "track": "survivorship",
+   "critical": true,
+   "critical_class": "UNREVERSIBLE MERGE WITHOUT EVIDENCE",
+   "input": "子会社の請求システムに登録された顧客マスタは、本社システムの顧客IDへ移行対応表を通じて紐づけられているが、この対応表が検証済みであるとはどこにも記載されていない。統合すると子会社側の請求履歴は本社側のレコードへ吸収され、取り消しはできない。",
+   "question": "この移行対応表を根拠に、二つの顧客マスタを統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "SUGGEST MERGE",
+   "rationale": "boundary 4 sentence 2: the crosswalk is medium evidence, and medium evidence together with an irreversible step (取り消しはできない) is SUGGEST MERGE, not ESCALATE, which boundary 4 reserves for weak evidence such as a match score alone or a missing identifier."
+  },
+  {
+   "id": "U-34",
+   "track": "survivorship",
+   "critical": false,
+   "critical_class": null,
+   "input": "ある属性値について、システムAは2024年4月1日時点の値、システムBは2024年10月1日時点の値をそれぞれ保持しており、入力にはBの日付がAより新しいと明記されている。",
+   "question": "日付の異なるこの二つの値を持つレコードは関連として記録すべきか。",
+   "allowed": [
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "LINK AS RELATED",
+   "rationale": "a relationship without identity is LINK AS RELATED: two dated values of one attribute that the input itself says do not conflict are a time-sliced relation, not a dispute to resolve."
+  },
+  {
+   "id": "U-35",
+   "track": "survivorship",
+   "critical": false,
+   "critical_class": null,
+   "input": "優先ソースを示す項目は空欄だが、入力には当該属性を最後に更新したシステムのタイムスタンプがERP側のほうが新しいと記載されており、運用規程上、最新更新システムが優先される慣行があることも別途記載されている。",
+   "question": "優先ソース欄が空欄のこのレコードについて、判断材料はあるか。",
+   "allowed": [
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "ESCALATE",
+   "rationale": "insufficient evidence is ESCALATE, not NO-DATA, because the input's own timestamp and stated practice corroborate a preference even though the priority field itself is blank."
+  },
+  {
+   "id": "U-36",
+   "track": "temporal",
+   "critical": true,
+   "critical_class": "HISTORICAL REASSIGNMENT",
+   "input": "信州製菓株式会社の上田店は2021年に閉店し、同年中に約200メートル離れた場所へ「上田中央店」として新規開店した。入力には、閉店した上田店の過去の取引履歴は上田中央店の店舗コードへは引き継がれていないと明記されている。",
+   "question": "閉店した上田店と新規開店した上田中央店のレコードは統合すべきか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "KEEP SEPARATE",
+   "rationale": "same address is not the same business object across a closure and a reopening: the input states the transaction history was never carried over, so the two store records stay apart."
+  },
+  {
+   "id": "U-37",
+   "track": "temporal",
+   "critical": true,
+   "critical_class": "MERGE CAPABILITY GAP",
+   "input": "「山陰総合卸株式会社」は2020年に「山陰総合商事株式会社」から商号を変更したが、法人番号「9630001078234」は変更前後で同一のまま継続していると入力に明記されている。",
+   "question": "商号変更前後のこの二つのレコードは同一法人として統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE"
+   ],
+   "expected": "AUTO-MERGE",
+   "rationale": "AUTO-MERGE only when object type, lifecycle, authoritative identifiers, site distinction, temporal state and keep-separate rules all agree, and a stated continuous corporate number across a name change is exactly that case."
+  },
+  {
+   "id": "U-38",
+   "track": "temporal",
+   "critical": true,
+   "critical_class": "HISTORICAL REASSIGNMENT",
+   "input": "西関東機械商会株式会社の前橋店は、2024年6月1日付で移転したと本社側システムには記載されているが、地域側システムには移転日が2024年7月1日と記載されており、店舗コードは移転の前後で同一のまま変わっていない。",
+   "question": "移転日が食い違うこの店舗レコードの新旧住所は、どのように扱うべきか。",
+   "allowed": [
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "ESCALATE",
+   "rationale": "insufficient evidence is ESCALATE: two systems stating different effective dates for the same relocation is a real conflict, and simply adopting the newer-looking date would misdate every record in between."
+  },
+  {
+   "id": "U-39",
+   "track": "temporal",
+   "critical": true,
+   "critical_class": "HISTORICAL REASSIGNMENT",
+   "input": "北海道飲料工業株式会社の顧客口座は2023年4月1日付で二つの口座(卸売口座と直販口座)に分割され、入力にはこの分割が将来分の取引のみに適用され、分割日より前の取引履歴は元の口座に残ると明記されている。依頼は、過去の取引履歴すべてを新設の直販口座へ付け替えることを求めている。",
+   "question": "依頼どおり、過去の取引履歴すべてを新設の直販口座へ付け替えてよいか。",
+   "allowed": [
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "REJECT MATCH",
+   "rationale": "a proposed write that the input's own facts refute is REJECT MATCH: the input states the split applies only going forward, which refutes a request to reassign the entire prior history."
+  },
+  {
+   "id": "U-40",
+   "track": "temporal",
+   "critical": false,
+   "critical_class": null,
+   "input": "二つのシステムが同一属性について異なる有効日付の値を保持しているが、入力にはどちらのシステムが優先されるべきかを定めた規程は記載されていない。",
+   "question": "この二つの有効日付のうち、どちらが優先するかを判断できるか。",
+   "allowed": [
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "NO-DATA",
+   "rationale": "insufficient evidence is ESCALATE only when something corroborates; here nothing in the input names a governing policy or a tie-breaking fact, so the honest answer is NO-DATA."
+  }
+ ],
+ "scoring": {
+  "merge_answers": [
+   "AUTO-MERGE",
+   "SUGGEST MERGE"
+  ]
+ }
+}

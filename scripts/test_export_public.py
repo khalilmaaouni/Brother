@@ -132,6 +132,16 @@ def _seed_bare_remote(remote_dir):
 #: leaves the remote in the state a merged pull request leaves it in, so
 #: the assertions below read the real thing. FAKE_GH_FAIL_CREATE and
 #: FAKE_GH_FAIL_MERGE drive the two refusal paths backwards.
+#:
+#: `pr checks` answers wait_for_required_fast's own `--json
+#: name,bucket,link,state` read (export_public.py's _required_fast_check).
+#: FAKE_GH_CHECK_BUCKET defaults to "pass" so every OTHER test in this
+#: module that drives push_appended through a full merge, written before
+#: the wait existed, still merges on the first poll with no delay: a
+#: default of "pending" or "missing" would make those tests block for
+#: real minutes on push_appended's own real time.sleep/time.monotonic.
+#: FAKE_GH_CHECK_MISSING=1 answers with an empty JSON array instead, the
+#: "no check ever appeared" shape.
 FAKE_GH = """#!/bin/sh
 set -e
 sub="$1 $2"
@@ -151,6 +161,15 @@ case "$sub" in
       esac
     done
     echo "https://example.invalid/pull/1 (head $head)"
+    ;;
+  "pr checks")
+    if [ -n "$FAKE_GH_CHECK_MISSING" ]; then
+      echo "[]"
+    else
+      bucket="${FAKE_GH_CHECK_BUCKET:-pass}"
+      link="${FAKE_GH_CHECK_LINK:-https://example.invalid/pull/1/checks/1}"
+      echo "[{\\"name\\": \\"required-fast\\", \\"bucket\\": \\"$bucket\\", \\"link\\": \\"$link\\", \\"state\\": \\"COMPLETED\\"}]"
+    fi
     ;;
   "pr merge")
     if [ -n "$FAKE_GH_FAIL_MERGE" ]; then
@@ -1360,57 +1379,6 @@ class ThePublishedFiguresDescribeTheExportedTree(unittest.TestCase):
                 self.assertEqual(fh.read(), body)
 
 
-def _diagnostic_run(log):
-    """A push_appended `run` seam that mirrors EP._run but also records
-    every command, and immediately after a `git add`, snapshots what row
-    E128 (2026-09-06, a CI-only regression a Mac could not reproduce
-    under any local condition tried) needs to diagnose: the runner's own
-    git version, its config and where each setting came from, and what
-    git itself thinks is staged versus ignored in that same working
-    tree. `log` collects (cmd, cwd, returncode, stdout, stderr) tuples
-    for a caller to print; this changes no return value push_appended
-    sees, it only watches."""
-    def run(cmd, cwd, env=None, timeout=120):
-        result = EP._run(cmd, cwd, env=env, timeout=timeout)
-        log.append((cmd, cwd, result.returncode,
-                     result.stdout or "", result.stderr or ""))
-        if cmd[:2] == ["git", "add"]:
-            for extra in (["git", "--version"],
-                          ["git", "config", "--list", "--show-origin"],
-                          ["git", "status", "--porcelain", "--ignored"],
-                          ["git", "ls-files", "-z"]):
-                r = EP._run(extra, cwd)
-                out = (r.stdout or "").replace("\0", " ")
-                log.append((extra, cwd, r.returncode, out, r.stderr or ""))
-        return result
-    return run
-
-
-def _print_export_diagnostics(log, clone_dir, root, label):
-    """Printed only when a TheCommitIsExactlyTheGatedTree test's
-    tracked.csv check is about to fail: everything row E128 asked for,
-    once, in the log a human reads afterward."""
-    print("---- %s: export-public diagnostics (row E128) ----" % label)
-    for cmd, cwd, rc, out, err in log:
-        print("$ %s   (cwd=%s, exit %s)" % (" ".join(cmd), cwd, rc))
-        if out.strip():
-            print(out.rstrip())
-        if err.strip():
-            print(err.rstrip())
-    fixture_dir = os.path.join(root, "products", "myproduct")
-    if os.path.isdir(fixture_dir):
-        ls = subprocess.run(["ls", "-la", fixture_dir],
-                             capture_output=True, text=True)
-        print("$ ls -la %s\n%s" % (fixture_dir,
-                                    (ls.stdout or "") + (ls.stderr or "")))
-    tree = subprocess.run(["git", "-C", clone_dir, "ls-tree", "-r", "HEAD"],
-                           capture_output=True, text=True)
-    print("$ git -C %s ls-tree -r HEAD (exit %s)\n%s"
-          % (clone_dir, tree.returncode,
-             (tree.stdout or "") + (tree.stderr or "")))
-    print("---- end %s diagnostics ----" % label)
-
-
 class TheCommitIsExactlyTheGatedTree(unittest.TestCase):
     """THE ALLOWLIST AND DENYLIST ARE THE ONLY FILTERS (module docstring).
     Measured 2026-09-02 on the public v1.0.0 tag itself: two tracked CSV
@@ -1475,19 +1443,13 @@ class TheCommitIsExactlyTheGatedTree(unittest.TestCase):
                 with open(manifest_path, encoding="utf-8") as fh:
                     self.assertIn("tracked.csv", fh.read())
 
-            diag_log = []
             with _fake_gh():
                 code, lines = EP.push_appended(self.ALLOWLIST, remote_dir,
-                                               "main", root=root,
-                                               run=_diagnostic_run(diag_log))
+                                               "main", root=root)
             self.assertEqual(code, EP.EXIT_OK, lines)
 
             subprocess.run(["git", "clone", "-q", remote_dir, clone_dir],
                             check=True, capture_output=True, text=True)
-            if not os.path.isfile(os.path.join(clone_dir, "products",
-                                                "myproduct", "tracked.csv")):
-                _print_export_diagnostics(diag_log, clone_dir, root,
-                                           self.id())
             self.assertTrue(
                 os.path.isfile(os.path.join(clone_dir, "products",
                                              "myproduct", "tracked.csv")),
@@ -1539,11 +1501,9 @@ class TheCommitIsExactlyTheGatedTree(unittest.TestCase):
                     probe, "products", "myproduct", "__pycache__")))
                 self.assertFalse(os.path.exists(os.path.join(probe, ".sbe")))
 
-            diag_log = []
             with _fake_gh():
                 code, lines = EP.push_appended(allowlist, remote_dir, "main",
-                                               root=root,
-                                               run=_diagnostic_run(diag_log))
+                                               root=root)
             self.assertEqual(code, EP.EXIT_OK, lines)
 
             subprocess.run(["git", "clone", "-q", remote_dir, clone_dir],
@@ -1553,10 +1513,6 @@ class TheCommitIsExactlyTheGatedTree(unittest.TestCase):
             self.assertFalse(os.path.exists(os.path.join(clone_dir, ".sbe")))
             # the tracked csv, unrelated to this test's untracked files,
             # still ships: this is about what stays out, not a new hole
-            if not os.path.isfile(os.path.join(
-                    clone_dir, "products", "myproduct", "tracked.csv")):
-                _print_export_diagnostics(diag_log, clone_dir, root,
-                                           self.id())
             self.assertTrue(os.path.isfile(os.path.join(
                 clone_dir, "products", "myproduct", "tracked.csv")))
 
@@ -1579,13 +1535,11 @@ class TheCommitIsExactlyTheGatedTree(unittest.TestCase):
                 fh.write("hub tracks this; the denylist withholds it\n")
             _git_track_all(root)
 
-            diag_log = []
             with _fake_gh(), mock.patch.object(
                     EP, "load_denylist",
                     return_value=["products/myproduct/withheld.md"]):
                 code, lines = EP.push_appended(self.ALLOWLIST, remote_dir,
-                                               "main", root=root,
-                                               run=_diagnostic_run(diag_log))
+                                               "main", root=root)
             self.assertEqual(code, EP.EXIT_OK, lines)
 
             subprocess.run(["git", "clone", "-q", remote_dir, clone_dir],
@@ -1593,10 +1547,6 @@ class TheCommitIsExactlyTheGatedTree(unittest.TestCase):
             self.assertFalse(os.path.isfile(os.path.join(
                 clone_dir, "products", "myproduct", "withheld.md")))
             # tracked and never denylisted: still ships alongside it
-            if not os.path.isfile(os.path.join(
-                    clone_dir, "products", "myproduct", "tracked.csv")):
-                _print_export_diagnostics(diag_log, clone_dir, root,
-                                           self.id())
             self.assertTrue(os.path.isfile(os.path.join(
                 clone_dir, "products", "myproduct", "tracked.csv")))
 
@@ -2599,6 +2549,135 @@ class TheExportTreeMustClearItsOwnRequiredFastCheck(unittest.TestCase):
                             lines)
 
 
+class _FakeWaitClock(object):
+    """A no-delay stand-in for time.sleep/time.monotonic, so a test can
+    drive wait_for_required_fast's whole 25 minute (or 3 minute) budget in
+    well under a second: `now` starts at 0.0 and only ever advances when
+    `sleep` is called, by exactly the amount asked, so the real
+    REQUIRED_CHECK_TIMEOUT_SECONDS and REQUIRED_CHECK_APPEAR_GRACE_SECONDS
+    constants govern the loop exactly as they do in production, never a
+    scaled-down test-only copy of them."""
+
+    def __init__(self):
+        self.t = 0.0
+
+    def now(self):
+        return self.t
+
+    def sleep(self, seconds):
+        self.t += seconds
+
+
+class TheReleasePullRequestWaitsForRequiredFast(unittest.TestCase):
+    """Ruleset 22191180 on the public repository (pull request required on
+    main, required status check "required-fast", no bypass): the merge the
+    old push route attempted right after `gh pr create` would either be
+    refused by the ruleset while the check is pending, or worse, race a
+    check that has not concluded. wait_for_required_fast polls `gh pr
+    checks --json` (through the module's own fake-gh seam, _fake_gh, the
+    same one every other push_appended test in this file already uses)
+    and push_appended now calls it between `gh pr create` and `gh pr
+    merge`. Three cases, driven backwards against a plain untagged push so
+    no readiness-gate or manifest fixture is needed: the merge only ever
+    needs to be exercised with tag=None."""
+
+    ALLOWLIST = ["scripts", "hello.md"]
+
+    def _export_root(self, root):
+        _make_fake_root(root, {"hello.md": "an ordinary allowlisted file\n"})
+
+    def _remote_main_count(self, remote_dir):
+        return subprocess.run(
+            ["git", "-C", remote_dir, "rev-list", "--count", "main"],
+            capture_output=True, text=True, check=True).stdout.strip()
+
+    def test_a_a_passing_check_lets_the_merge_proceed(self):
+        """FAKE_GH's own default (FAKE_GH_CHECK_BUCKET unset) answers
+        "pass" on the very first poll, no sleep needed at all, which is
+        also what keeps every OTHER push_appended test in this file (all
+        written before this wait existed) merging with no added delay."""
+        with tempfile.TemporaryDirectory() as remote_dir, \
+             tempfile.TemporaryDirectory() as root:
+            _seed_bare_remote(remote_dir)
+            self._export_root(root)
+            before = self._remote_main_count(remote_dir)
+            with _fake_gh():
+                code, lines = EP.push_appended(self.ALLOWLIST, remote_dir,
+                                               "main", root=root)
+            self.assertEqual(code, EP.EXIT_OK, lines)
+            self.assertTrue(any(l.startswith("required-fast: PASS")
+                                for l in lines), lines)
+            self.assertTrue(any(l.startswith("MERGED:") for l in lines),
+                            lines)
+            after = self._remote_main_count(remote_dir)
+            self.assertEqual(int(after), int(before) + 1,
+                             "the merge never reached main: %r" % lines)
+
+    def test_b_a_failing_check_refuses_and_never_merges(self):
+        """bucket="fail" on the very first poll: FAIL, quoting the check's
+        own html url, exit nonzero, no merge attempted at all (the fake
+        gh's "pr merge" case would push straight onto main, so an
+        unchanged main proves the merge call itself never happened, not
+        merely that it would have failed), and the pull request is left
+        exactly as opened, never closed (this module's fake gh has no
+        close verb to call in the first place)."""
+        with tempfile.TemporaryDirectory() as remote_dir, \
+             tempfile.TemporaryDirectory() as root:
+            _seed_bare_remote(remote_dir)
+            self._export_root(root)
+            before = self._remote_main_count(remote_dir)
+            with _fake_gh(FAKE_GH_CHECK_BUCKET="fail",
+                          FAKE_GH_CHECK_LINK="https://example.invalid/"
+                                              "pull/1/checks/9"):
+                code, lines = EP.push_appended(self.ALLOWLIST, remote_dir,
+                                               "main", root=root)
+            self.assertEqual(code, EP.EXIT_REFUSED, lines)
+            self.assertTrue(any(
+                l.startswith("FAIL: required-fast failed on the release "
+                             "pull request 1: "
+                             "https://example.invalid/pull/1/checks/9")
+                for l in lines), lines)
+            self.assertFalse(any(l.startswith("MERGED:") for l in lines),
+                             lines)
+            self.assertTrue(any(l.startswith("PULL-REQUEST:")
+                                for l in lines), lines)
+            after = self._remote_main_count(remote_dir)
+            self.assertEqual(after, before,
+                             "main moved even though the check failed: %r"
+                             % lines)
+
+    def test_c_no_check_ever_appearing_is_no_data(self):
+        """FAKE_GH_CHECK_MISSING makes every poll answer an empty checks
+        list, the "the workflow never even got scheduled" shape.
+        _FakeWaitClock fast-forwards past REQUIRED_CHECK_APPEAR_GRACE_
+        SECONDS (3 minutes) without a real sleep, so this proves the
+        constant's own value rather than a scaled-down copy of it."""
+        with tempfile.TemporaryDirectory() as remote_dir, \
+             tempfile.TemporaryDirectory() as root:
+            _seed_bare_remote(remote_dir)
+            self._export_root(root)
+            before = self._remote_main_count(remote_dir)
+            clock = _FakeWaitClock()
+            with _fake_gh(FAKE_GH_CHECK_MISSING="1"):
+                code, lines = EP.push_appended(
+                    self.ALLOWLIST, remote_dir, "main", root=root,
+                    wait_sleep=clock.sleep, wait_clock=clock.now)
+            self.assertEqual(code, EP.EXIT_NODATA, lines)
+            self.assertTrue(any(
+                l.startswith("NO-DATA: no required-fast check appeared "
+                             "on pull request 1 (is the workflow on "
+                             "main?)")
+                for l in lines), lines)
+            self.assertFalse(any(l.startswith("MERGED:") for l in lines),
+                             lines)
+            self.assertGreaterEqual(clock.now(),
+                                    EP.REQUIRED_CHECK_APPEAR_GRACE_SECONDS)
+            after = self._remote_main_count(remote_dir)
+            self.assertEqual(after, before,
+                             "main moved even though no check ever "
+                             "appeared: %r" % lines)
+
+
 class TheReleaseRecordShipsItsOwnSourceRevision(unittest.TestCase):
     """E6.1a: an external release-integrity reviewer confirmed
     reproduce_export.py rebuilds the export byte for byte from a hub
@@ -2715,6 +2794,74 @@ class TheReleaseRecordShipsItsOwnSourceRevision(unittest.TestCase):
             self.assertEqual(text, original)
 
 
+#: A stand-in for products/<name>/tools/test_all.py with the ONE behaviour
+#: the battery_inventory gate relies on: `--check-only` exits nonzero and
+#: names the suites its SUITES lists that are not on disk beside it.
+FAKE_BATTERY = (
+    "import os, sys\n"
+    "SUITES = ('test_present.py', 'test_withheld.py')\n"
+    "here = os.path.dirname(os.path.abspath(__file__))\n"
+    "missing = [s for s in SUITES if not os.path.isfile(os.path.join(here, s))]\n"
+    "if missing:\n"
+    "    print('test_all: REFUSING to run. These suites are in the gate but "
+    "not on disk: ' + ', '.join(missing))\n"
+    "    sys.exit(2)\n"
+    "print('inventory ok: every suite in SUITES is on disk')\n")
+
+
+class TheBatteryInventoryGateRefusesAnExportThatWithholdsASuite(unittest.TestCase):
+    """The fifth gate of run_gates(). The public tip refused its own
+    product battery from 2026-08-31 to 2026-09-04 because the denylist
+    withheld products/brothermode/tools/test_bm_vault_contract.py while
+    tools/test_all.py's SUITES still named it, and no export-time gate
+    asked the battery whether it could start. These cases drive the gate
+    with a stand-in battery so the real one's cost stays out of this
+    suite."""
+
+    def _gates_over(self, files, denylist):
+        with tempfile.TemporaryDirectory() as export_dir, \
+             tempfile.TemporaryDirectory() as identity_dir, \
+             tempfile.TemporaryDirectory() as root:
+            _make_fake_root(root, files)
+            with mock.patch.object(EP, "load_denylist",
+                                   return_value=list(denylist)):
+                EP.build_orphan_commit(export_dir, ["scripts", "products"],
+                                        root=root)
+            subprocess.run(["git", "init", "-q"], cwd=identity_dir,
+                            check=True)
+            return EP.run_gates(export_dir, identity_dir)
+
+    FILES = {
+        "products/fakeprod/tools/test_all.py": FAKE_BATTERY,
+        "products/fakeprod/tools/test_present.py": "# present\n",
+        "products/fakeprod/tools/test_withheld.py": "# shipped or withheld\n",
+    }
+
+    def _battery_line(self, lines):
+        return next(l for l in lines
+                    if l.startswith("battery_inventory products/fakeprod:"))
+
+    def test_a_battery_whose_suites_all_ship_clears_the_gate(self):
+        all_ok, lines = self._gates_over(self.FILES, [])
+        line = self._battery_line(lines)
+        self.assertIn("exit 0,", line, lines)
+        self.assertIn("inventory ok", line, lines)
+
+    def test_a_withheld_suite_refuses_at_export_time_naming_the_suite(self):
+        all_ok, lines = self._gates_over(
+            self.FILES, ["products/fakeprod/tools/test_withheld.py"])
+        self.assertFalse(all_ok, lines)
+        line = self._battery_line(lines)
+        self.assertNotIn("exit 0,", line, lines)
+        self.assertIn("test_withheld.py", line, lines)
+        self.assertIn("REFUSING", line, lines)
+
+    def test_a_tree_with_no_battery_says_so_rather_than_passing_silently(self):
+        all_ok, lines = self._gates_over(
+            {"products/fakeprod/README.md": "no battery here\n"}, [])
+        self.assertTrue(any(l.startswith("battery_inventory: no ")
+                            and "nothing to check" in l for l in lines),
+                        lines)
 class TheRealExportTreeIsWhatTheReadmeSendsAReaderTo(unittest.TestCase):
     """BO2, against the REAL allowlist and the REAL hub tree, because the
     2026-09-04 docs honesty audit found its defects in a fresh clone and

@@ -1,0 +1,17 @@
+SCORER_VERSION not found in scripts/jbeq_mdm.py (no such constant exists in the file); this is therefore NOT scorer 2026-09-06.2 (hub PR 428) by definition of absence, so this file re-scores answers.json treating REJECT MATCH and KEEP SEPARATE as one class, per instruction.
+
+address              9 of 10
+entity-object        10 of 10
+hierarchy            7 of 10
+identifier           3 of 5
+match-or-no-merge    9 of 10
+requirements         5 of 5
+survivorship         10 of 10
+temporal             2 of 10
+
+critical (oneclass): 28 of 33
+critical WRONG (oneclass) TM-01 [HISTORICAL REASSIGNMENT] expected R1, answered NO-DATA
+critical WRONG (oneclass) TM-04 [HISTORICAL REASSIGNMENT] expected R2, answered NO-DATA
+critical WRONG (oneclass) TM-07 [HISTORICAL REASSIGNMENT] expected R1, answered NO-DATA
+critical WRONG (oneclass) TM-10 [HISTORICAL REASSIGNMENT] expected R1, answered NO-DATA
+critical WRONG (oneclass) ID-02 [WRONG TAX IDENTITY] expected ESCALATE, answered KEEP SEPARATE

@@ -479,6 +479,30 @@ py-modules = [
     # directly via bm_vault._schema/_upsert_note. Declared here because
     # the packaging gate refuses it, same lesson as every entry above.
     "bm_vault_jbench",
+    # Eight tools shipped in tools/ with no py-modules entry, invisible to
+    # test_every_shipping_tool_is_in_py_modules until product-brothermode's
+    # own inventory gate (unregistered suites) stopped refusing to run at
+    # all and this suite executed for the first time in a while. Declared
+    # here because the packaging gate refuses it, same lesson as every
+    # entry above.
+    "attempt_hook",
+    "attempt_ledger",
+    "bm_profile",
+    "bm_vault_contradiction",
+    "bm_vault_heat_temporal",
+    "bm_vault_read_audit",
+    "find_out",
+    "pattern_note",
+    # P0.1 (2026-09-06): bm_vault_retier.py, the one-time re-tag tool for
+    # legacy vault notes under the strict-withhold flip. Declared here
+    # because the packaging gate refuses an undeclared shipping tool, same
+    # lesson as every entry above.
+    "bm_vault_retier",
+    # 2026-09-06: bm_vault_seams.py, the seam inventory tool for the
+    # vault's write and redaction boundaries. Declared here because the
+    # packaging gate refuses an undeclared shipping tool, same lesson as
+    # every entry above.
+    "bm_vault_seams",
 ]
 # brotherme/core/schema.py is library code tools/bm_store.py loads by path
 # (see _schema() there); without this the wheel/sdist never contain it and

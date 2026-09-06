@@ -165,8 +165,18 @@ def seed_off(vault, tree):
 
 
 def seed_on(vault, tree):
+    """LL-2, THE STRICT FLIP (2026-09-06, FIX-DIRECTIVE-2026-09-06.md
+    sections 3 and 4, "unknown means WITHHOLD"): a lesson with applies_to
+    alone, no evidence_locator and no status, now tiers UNVERIFIED at
+    recall rather than defaulting to applied. This arm's own lesson must
+    still surface for a genuine mechanism reason, so it carries the same
+    evidence_locator seed_contradictory already uses below: TARGET_FILE
+    genuinely has no validation right now, so EVIDENCE_HOLD_PATTERN holds
+    against its current text and the tier reads EVIDENCED."""
+    target_path = os.path.join(tree, TARGET_FILE)
     write_note(vault, LESSON_SLUG, LESSON_TITLE, LESSON_BODY,
-               applies_to=TARGET_FILE)
+               applies_to=TARGET_FILE,
+               evidence_locator="grep:%s:%s" % (target_path, EVIDENCE_HOLD_PATTERN))
 
 
 def seed_stale(vault, tree):
@@ -222,11 +232,17 @@ def seed_contradictory_absent_evidence(vault, tree):
 
 def seed_superseded(vault, tree):
     """An older lesson and the newer one that declares it superseded, both
-    retrievable, so the run must apply the newer."""
+    retrievable, so the run must apply the newer. LL-2, THE STRICT FLIP:
+    the newer note carries the same resolving evidence_locator seed_on
+    uses, so it reads EVIDENCED rather than the old any-lesson default;
+    the older note needs none, since bm_vault.py's own supersession check
+    withholds it before the evidence tier is ever computed."""
+    target_path = os.path.join(tree, TARGET_FILE)
     write_note(vault, OLD_SLUG, "old parse rule", OLD_BODY,
                applies_to=TARGET_FILE)
     write_note(vault, NEW_SLUG, NEW_TITLE, LESSON_BODY,
-               applies_to=TARGET_FILE, supersedes=OLD_SLUG)
+               applies_to=TARGET_FILE, supersedes=OLD_SLUG,
+               evidence_locator="grep:%s:%s" % (target_path, EVIDENCE_HOLD_PATTERN))
 
 
 def contradiction_unresolved(obs):
@@ -509,6 +525,50 @@ def run_contradictory_withheld_check(recall=None):
             "applied": obs["applied"]}
 
 
+def gauntlet_verdict(rows, withheld_row):
+    """(verdict, reason): PASS, FAIL or NO-DATA, the gauntlet's own honest
+    rule rather than a shortcut a consumer might re-derive. This mirrors
+    main()'s exit-code decision exactly (0/1/2), so a JSON record carrying
+    this field and a release gate reading it agree with the process exit
+    code by construction, and both stay a single source of truth.
+
+    WHY THIS EXISTS (the fifth-condition fix, 2026-09-06). 'memory off' is
+    the isolation control: seed_off plants nothing, so its own designed
+    outcome is 'silent', never 'surfaced' (see its note: 'a surfaced result
+    here would mean the arms are not isolated'). That means
+    summarize(rows) == (4, 5) is not a shortfall, it is the four real arms
+    surfacing plus the control correctly staying silent -- recorded 4 of 5
+    by design on 2026-09-05 (commit 8a1caa27). A verdict rule that requires
+    prevented == counted would read that healthy run as a FAIL forever,
+    which is the dishonesty this function fixes: PASS is decided by the
+    frozen rubric (no arm applied a stale/contradictory/superseded/poisoned
+    lesson it should have refused, and every arm was observable), never by
+    the control arm ever reaching 'surfaced'.
+
+    The withheld arm (the evidence-absent contradiction variant) STILL
+    COUNTS here even though it is not one of the frozen five and is never
+    folded into summarize(): its own 'wrong' result (a poisoned lesson
+    reached the applied section with no evidence to justify it) fails the
+    whole verdict exactly the way a frozen condition's 'wrong' result does."""
+    unobservable = [r for r in rows if r.get("unobservable")]
+    if withheld_row.get("unobservable"):
+        unobservable = unobservable + [withheld_row]
+    if unobservable:
+        return NODATA, ("%d condition(s) could not be observed at all; this "
+                         "is not a pass" % len(unobservable))
+    failed = [r for r in rows if r["result"] == "wrong"]
+    if withheld_row["result"] == "wrong":
+        failed = failed + [withheld_row]
+    if failed:
+        return "FAIL", ("failed the frozen rubric: %s"
+                         % ", ".join("%s (%s)" % (r["id"], r["detail"])
+                                     for r in failed))
+    return "PASS", ("%s (memory off is the isolation control and is expected "
+                     "silent, not a shortfall); %s: %s"
+                     % (summary_line(rows), withheld_row["id"],
+                        withheld_row["detail"]))
+
+
 def _revision():
     """The commit sha of this checkout, or a NO-DATA string naming why. Never a
     fabricated value, the same posture scripts/brother_run.py's own
@@ -529,6 +589,12 @@ def _revision():
 
 def record(rows, path, withheld_check=None):
     prevented, counted = summarize(rows)
+    if isinstance(withheld_check, dict):
+        verdict, verdict_reason = gauntlet_verdict(rows, withheld_check)
+    else:
+        verdict, verdict_reason = (
+            NODATA, "withheld check was not supplied to record(): %s"
+                    % withheld_check)
     doc = {
         "gauntlet": "memory-recurrence",
         "spec": os.path.relpath(SPEC_PATH, REPO_ROOT),
@@ -549,6 +615,8 @@ def record(rows, path, withheld_check=None):
             "conditions_counted": counted,
             "line": summary_line(rows),
             "no_data": [r["id"] for r in rows if r["result"] == NODATA],
+            "verdict": verdict,
+            "verdict_reason": verdict_reason,
         },
         "conditions": rows,
         "contradiction_evidence_absent_check": (
@@ -606,19 +674,16 @@ def main(argv=None):
     shown = os.path.relpath(out, REPO_ROOT) if out.startswith(REPO_ROOT) else out
     print("record: %s" % shown)
 
-    unobservable = [r for r in rows if r.get("unobservable")]
-    if withheld_row.get("unobservable"):
-        unobservable = unobservable + [withheld_row]
-    if unobservable:
-        print("%s: %d condition(s) could not be observed at all; this is not a "
-              "pass" % (NODATA, len(unobservable)))
+    # Single source of truth for PASS/FAIL/NO-DATA (the 2026-09-06 fix): the
+    # exit code below is DERIVED from this same call, never recomputed
+    # separately, so the printed verdict line, the JSON record's own
+    # "verdict" field and the process exit code can never disagree with each
+    # other about the same run.
+    verdict, reason = gauntlet_verdict(rows, withheld_row)
+    print("verdict=%s reason=%s" % (verdict, reason))
+    if verdict == NODATA:
         return 2
-    failed = [r for r in rows if r["result"] == "wrong"]
-    if withheld_row["result"] == "wrong":
-        failed = failed + [withheld_row]
-    if failed:
-        print("FAILED the frozen rubric: %s"
-              % ", ".join("%s (%s)" % (r["id"], r["detail"]) for r in failed))
+    if verdict == "FAIL":
         return 1
     return 0
 

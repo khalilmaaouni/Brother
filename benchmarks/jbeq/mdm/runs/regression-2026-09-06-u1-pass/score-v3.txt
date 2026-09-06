@@ -1,0 +1,20 @@
+address              3 of 5
+entity-object        5 of 5
+hierarchy            3 of 5
+identifier           4 of 5
+match-or-no-merge    5 of 5
+requirements         3 of 5
+survivorship         5 of 5
+temporal             3 of 5
+engine-decided: 23 of 30
+direct-answered (not blind, not evidence about the engine): 8 of 10
+critical WRONG U-01 [WRONG LEGAL ENTITY] expected KEEP SEPARATE, answered REJECT MATCH  CONSERVATIVE
+critical WRONG U-03 [WRONG STORE ASSIGNMENT] expected KEEP SEPARATE, answered REJECT MATCH  CONSERVATIVE
+critical WRONG U-13 [SOURCE PRECEDENCE VIOLATION] expected LINK AS RELATED, answered KEEP SEPARATE  CONSERVATIVE
+critical WRONG U-14 [HIERARCHY REVERSAL] expected REJECT MATCH, answered KEEP SEPARATE
+critical WRONG U-29 [CROSS-CUSTOMER CONTAMINATION] expected REJECT MATCH, answered LINK AS RELATED
+critical WRONG U-39 [HISTORICAL REASSIGNMENT] expected REJECT MATCH, answered KEEP SEPARATE
+critical false merges: 0 of 26
+critical wrong: 6 of 26 (U-01, U-03, U-13, U-14, U-29, U-39)
+conservative wrongs: 3 (U-01, U-03, U-13)
+JBEQ-MDM NOT READY

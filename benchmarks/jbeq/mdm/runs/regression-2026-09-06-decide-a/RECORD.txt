@@ -1,0 +1,27 @@
+run: 2026-09-06, REGRESSION CHECK over round 4's own fact sheets, NOT a blind qualification. This is an offline re-decide of benchmarks/jbeq/mdm/runs/blind-round4-2026-09-05/fact-sheets.json with the engine fixed per the founder's 2026-09-06 FIX-DIRECTIVE section 15 to 22 and the design review design-p0-3-mdm-merge-safety-2026-09-06.md sections A, C, E, F, G. No new blind extraction ran: the rules were authored while reading round 4's own eight failures, which is the definition of fitting the test set, so this number is a check that the fix works on the cases that motivated it, never a claim the fix generalizes. Section G of the design review names this limit explicitly and it applies with more force here than to any earlier round.
+
+command: python3 scripts/jbeq_decide.py decide benchmarks/jbeq/mdm/runs/blind-round4-2026-09-05/fact-sheets.json --out r5-engine.json --decisions r5-decisions.jsonl, then r5-engine.json merged with blind-round4-2026-09-05/direct-answers.json (the 25 RQ/SV/TM cases a blind extractor answered directly, unchanged from round 4) into answers.json, then python3 scripts/jbeq_mdm.py score answers.json.
+
+engine at e4d6633e (this branch's own commit, the rules fix; the per-rule switches in the next commit do not change decide()'s answers), fact sheets sha256 c75542ff2e01c96aea4aeed572bff3e5162b10a6b0c409a7fa4e7f685126694b (byte-identical to round 4's own file, confirmed against RECORD.txt line 2 of that run; this regression never re-extracted or hand-edited a sheet); answers sha256 49c97377750b58028feab5a3aff9c1988a3ffe61e386a19749253f9302c8b270; seed sha256 872b7eec479fe006fc4b4b76f47a2af60be8bbe792a703191c57205aac2b95c4 (unchanged, the frozen seed-2026-09-05.json).
+
+result: 54 of 70 (up from round 4's 50 of 70), critical wrong 5 of 33 (down from 8 of 33), critical false merges 1 of 33 (MM-01, unchanged), conservative wrongs 1 (MM-06, down from 3), JBEQ-MDM NOT READY, exit 1.
+
+what changed and why, case by case (design review section A groups these under defects D1 to D5):
+  EO-02  REJECT MATCH -> LINK AS RELATED  (correct)  rule link_vs_reject, D2 fixed
+  EO-09  REJECT MATCH -> LINK AS RELATED  (correct)  rule link_vs_reject, D2 fixed
+  AD-06  KEEP SEPARATE -> ESCALATE        (correct)  evidence_reasons read moved above the evidence_strength guard, D4b fixed
+  MM-09  ESCALATE -> NO-DATA              (correct)  the weak-evidence three-way split, D5 fixed (not required by the brief but the same split closes it)
+No other case's answer moved. Confirmed by a full diff of every one of the 45 engine-covered fact sheets against round 4's own engine-answers.json: exactly these 4 cases changed, all 4 became correct, zero previously-correct case changed.
+
+what stays wrong, honestly, and why (per the design review, these four are UNREACHABLE without the schema growth the founder has not yet ruled on):
+  MM-01  AUTO-MERGE (still the false merge)     needs an object_type / distinct_operational_attributes field; the store distinction lives only in corroborating_facts prose today
+  MM-06  ESCALATE (still wrong, was already ESCALATE before this fix too, so this is not a regression: MM-06's expected KEEP SEPARATE was never reachable on this sheet, since MM-06 and the correctly-scored EO-07 are byte-identical on every field the three-way split reads: evidence_reasons=[missing_identifier], irreversible=false, history_exists=false; the kanji/banchi contradiction that distinguishes them lives only in corroborating_facts prose, matching the design review's contradicted_attributes proposal)
+  HI-02  LINK AS RELATED (still wrong)          needs requested_relation_type; the branch is implemented and inert, this sheet never sets the field
+  HI-10  LINK AS RELATED (still wrong)          same as HI-02
+  AD-03  KEEP SEPARATE (still wrong)            needs a LOCATION dimension the schema does not carry at all; every field on this sheet is at default
+
+no regression: every case correct in round 4 stayed correct. Checked explicitly against the design review's own list (EO-04, AD-04, AD-10, ID-05, MM-03, HI-05, HI-06, ID-01, ID-04, MM-02, MM-08) plus the merge-ladder pair the review did not list (EO-03, MM-04, both still AUTO-MERGE) and the other weak-evidence pair (MM-05, EO-07, both still ESCALATE): all unchanged, and a full 45-case diff against round 4's engine-answers.json confirms no other case moved either.
+
+two caveats this record repeats from the design review section G rather than let a bare percentage imply more than it proves: 25 of the 70 cases (RQ, SV, TM tracks) are the SAME direct-answers.json from round 4, a blind model's one-time answer, unchanged by this run, so 36 percent of the score is held constant and does not measure this engine at all; and the engine itself only covers 45 of 70 cases, since UNSUPPORTED_TRACKS returns NO-DATA for the three tracks the direct answers cover.
+
+the gate in FIX-DIRECTIVE section 21 (critical wrong 0/33, false merge 0) is NOT met by this run and this run does not claim to meet it: MM-01, HI-02, HI-10 and AD-03 all require the fact-sheet schema growth the design review names in section B, which is a founder decision this lane's scope explicitly excludes (see the brief for wbs/jbeq-decide-safety-a). That decision and a fresh blind extraction pass are the next JBEQ-MDM lane's work, not this one's.

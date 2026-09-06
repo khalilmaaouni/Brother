@@ -1,0 +1,64 @@
+JBEQ-MDM qualification run U3, 2026-09-06, over the third unseen set of 40 (30 critical, 6 critical merge positives) authored blind and audited blind (36 of 40 agreement, six corrections). Extractor: a fresh Claude subagent (sonnet, effort high) reading only the extractor prompt, the schema and the 40 prompts; hashes recorded before any answer was read; engine of hub main c234893e670015ec6dfcdc96e8b61c0ad9caa5e1 (after PRs 413 and 418). This is the qualification number for the engine as it stands; the frozen 70, U1 and U2 are regression sets.
+
+EXTRACTOR HASHES (recorded before Phase 2 began, before any answer was decided):
+  fact-sheets.json     sha256: 6ecc151046fcc105dc4b3d7bd4622cdc01d378e841e08849658e3e67f8788c4f
+  extractor-notes.md   sha256: 6041c68e54b6d0f6961d746868d2aaa5e725655aa42dd6a88bebbca798fee046
+
+Rerun in this run directory, matching:
+  fact-sheets.json     sha256: 6ecc151046fcc105dc4b3d7bd4622cdc01d378e841e08849658e3e67f8788c4f
+  extractor-notes.md   sha256: 6041c68e54b6d0f6961d746868d2aaa5e725655aa42dd6a88bebbca798fee046
+
+VALIDATE: validate: 40 fact sheet(s) OK (exit 0, no off-enum values, no fixes needed)
+
+SCORER EQUIVALENCE NOTE: hub PR wbs/jbeq-scorer-equivalence (REJECT MATCH and
+KEEP SEPARATE scored as one class for a refuted identity, founder ruling
+2026-09-06) is OPEN, not merged, as of this run (hub PR #428, state OPEN).
+The base merged for this run (hub/main at c234893e6) does not carry it, so
+score.txt below is scripts/jbeq_mdm.py's stock two-class scorer, and
+score-oneclass.txt is a standalone script (no engine change) that re-scores
+the same answers.json against the same seed with that one equivalence
+folded into the pass/fail comparison only.
+
+===== score.txt (scripts/jbeq_mdm.py score, stock scorer) =====
+address              2 of 5
+entity-object        4 of 5
+hierarchy            4 of 5
+identifier           4 of 5
+match-or-no-merge    5 of 5
+requirements         4 of 5
+survivorship         5 of 5
+temporal             3 of 5
+engine-decided: 22 of 30
+direct-answered (not blind, not evidence about the engine): 9 of 10
+critical WRONG W-01 [MERGE CAPABILITY GAP] expected SUGGEST MERGE, answered KEEP SEPARATE  CONSERVATIVE
+critical WRONG W-03 [WRONG STORE ASSIGNMENT] expected KEEP SEPARATE, answered REJECT MATCH  CONSERVATIVE
+critical WRONG W-04 [WRONG STORE ASSIGNMENT] expected KEEP SEPARATE, answered LINK AS RELATED
+critical WRONG W-14 [HIERARCHY REVERSAL] expected KEEP SEPARATE, answered REJECT MATCH  CONSERVATIVE
+critical WRONG W-19 [MERGE CAPABILITY GAP] expected ESCALATE, answered SUGGEST MERGE  FALSE MERGE
+critical WRONG W-37 [HISTORICAL REASSIGNMENT] expected REJECT MATCH, answered KEEP SEPARATE
+critical false merges: 1 of 30 (W-19)
+critical wrong: 6 of 30 (W-01, W-03, W-04, W-14, W-19, W-37)
+conservative wrongs: 3 (W-01, W-03, W-14)
+JBEQ-MDM NOT READY
+(exit code: 1)
+
+===== score-oneclass.txt (standalone, REJECT MATCH / KEEP SEPARATE as one class) =====
+SCORE WITH REJECT MATCH / KEEP SEPARATE AS ONE CLASS (founder ruling 2026-09-06, hub PR wbs/jbeq-scorer-equivalence, not merged into this base; computed standalone, no engine change)
+address              3 of 5
+entity-object        4 of 5
+hierarchy            5 of 5
+identifier           4 of 5
+match-or-no-merge    5 of 5
+requirements         4 of 5
+survivorship         5 of 5
+temporal             5 of 5
+engine-decided: 26 of 30
+direct-answered (not blind, not evidence about the engine): 9 of 10
+critical WRONG W-01 [MERGE CAPABILITY GAP] expected SUGGEST MERGE, answered KEEP SEPARATE  CONSERVATIVE
+critical WRONG W-04 [WRONG STORE ASSIGNMENT] expected KEEP SEPARATE, answered LINK AS RELATED
+critical WRONG W-19 [MERGE CAPABILITY GAP] expected ESCALATE, answered SUGGEST MERGE  FALSE MERGE
+critical false merges: 1 of 30 (W-19)
+critical wrong: 3 of 30 (W-01, W-04, W-19)
+conservative wrongs: 1 (W-01)
+JBEQ-MDM NOT READY
+(exit code: 1)

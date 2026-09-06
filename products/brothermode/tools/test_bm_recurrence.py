@@ -169,6 +169,34 @@ class ExitCodes(unittest.TestCase):
         os.environ.pop('BROTHERMODE_RECURRENCE_DB', None)
         self.assertIn('.brothermode', R.default_db_path())
 
+    def test_a_worktree_under_an_initialised_estate_shares_the_estate_db(self):
+        """2026-09-04: from a lane worktree (a .git FILE, not a directory) this
+        tool resolved the worktree itself and wrote .brothermode/recurrence.sqlite3
+        there, and that bare directory then read as a store marker to bm_store.py,
+        which repointed the single-writer fence at the worktree. The receipts
+        must land under the estate root that holds store.sqlite3."""
+        with tempfile.TemporaryDirectory() as d:
+            parent = os.path.realpath(d)
+            os.makedirs(os.path.join(parent, '.brothermode'))
+            with open(os.path.join(parent, '.brothermode', 'store.sqlite3'), 'wb'):
+                pass
+            child = os.path.join(parent, '.claude', 'worktrees', 'lane')
+            os.makedirs(child)
+            with open(os.path.join(child, '.git'), 'w') as fh:
+                fh.write('gitdir: elsewhere\n')
+            before = os.getcwd()
+            saved = {k: os.environ.pop(k, None)
+                     for k in ('BROTHERMODE_RECURRENCE_DB', 'BROTHERMODE_ROOT')}
+            try:
+                os.chdir(child)
+                got = os.path.realpath(R.default_db_path())
+            finally:
+                os.chdir(before)
+                for k, v in saved.items():
+                    if v is not None:
+                        os.environ[k] = v
+            self.assertEqual(got, os.path.join(parent, '.brothermode', 'recurrence.sqlite3'))
+
 
 class TheMetricIsNamedForWhatItMeasures(unittest.TestCase):
     """The label went out as "recurrence rate" and the suite stayed green, because

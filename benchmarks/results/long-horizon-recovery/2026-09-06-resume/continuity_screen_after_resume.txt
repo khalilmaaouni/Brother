@@ -1,0 +1,36 @@
+objective: two files exist, the second after the first
+canonical revision: 20682048b0f78673642a4bc288c3f9473bf994db
+environment:
+  runs root:     <SCRATCH_ROOT>/lhr-fixture-9osf69ha
+  target cwd:    <SCRATCH_ROOT>/lhr-fixture-9osf69ha/repo
+  slots:         3
+  model adapter: the product's own worker adapter
+units (2):
+  A1                       integrated  attempt=1
+  A2                       integrated  attempt=2
+
+next action: done: every unit in this run is integrated; nothing is left to resume
+
+zone 3 (15 items):
+  WHERE WE WERE: last recorded activity: lesson.drafted on A2 at 2026-09-06T00:20:39.610721+00:00
+  WHY WE WERE THERE: create file two
+  CANONICAL COMMIT: 20682048b0f78673642a4bc288c3f9473bf994db
+  CURRENT OBJECTIVE: two files exist, the second after the first
+  ACTIVE / FINISHED WORKTREES: no worktree beyond the target checkout itself; any per-unit scratch worktree already finished and was removed
+  CHANGED FILES:
+    - ?? .brothermode/
+  IMPORTANT COMMANDS:
+    - test -f one.txt
+    - test -f two.txt
+  EXPECTED SERVICES: NO-DATA: this engine runs no background service (stdlib-only, no network); nothing is expected to be up
+  VERIFICATION STATE: 2 integrated, 0 active, 0 pending, 0 abandoned, 0 unclear
+  KNOWN FAILURES: no refused or failing unit recorded in this run
+  REJECTED APPROACHES: no unit's claim has been abandoned mid-attempt in this run
+  ENVIRONMENT ASSUMPTIONS:
+    runs_root: <SCRATCH_ROOT>/lhr-fixture-9osf69ha
+    target_cwd: <SCRATCH_ROOT>/lhr-fixture-9osf69ha/repo
+    slots: 3
+    model_adapter: the product's own worker adapter
+  UNFINISHED WORK: nothing left unfinished; every unit in this run is integrated
+  RELEVANT LESSONS: NO-DATA: no vault.recall event recorded for this run yet
+  SAFE NEXT ACTION: done: every unit in this run is integrated; nothing is left to resume
