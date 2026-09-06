@@ -37,6 +37,8 @@ than passing quietly, because a control that cannot fail is not a control.
 """
 import json
 import os
+import re
+import tempfile
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -90,15 +92,62 @@ class TestNoSelfFiringCI(unittest.TestCase):
     AUTO_TRIGGERS = ("push:", "pull_request:", "pull_request_target:", "schedule:")
     FORBIDDEN_RUNNERS = ("macos", "windows")
 
-    def _workflows(self):
-        d = _p(".github", "workflows")
+    # FOUNDER RULING 2026-09-06 18:3x JST, question UI, "A: One named
+    # exception", then "I defer to you". This ONE path, on the public
+    # repository, may carry `pull_request:` and fire on a pull request into
+    # main. Every other workflow file, in this repository or any other,
+    # keeps the full refusal above with no exception. The exception is
+    # STATED here, never bypassed: it is granted only when every clause
+    # below holds in the same file, checked mechanically, not assumed from
+    # the filename alone.
+    EXEMPT_PR_FILE = "required-fast.yml"
+    EXEMPT_PR_BRANCH = "main"
+    EXEMPT_PR_MAX_TIMEOUT = 20
+
+    def _workflows(self, root=None):
+        d = os.path.join(root, ".github", "workflows") if root else _p(".github", "workflows")
         if not os.path.isdir(d):
             return []
         return [os.path.join(d, f) for f in os.listdir(d)
                 if f.endswith((".yml", ".yaml"))]
 
-    def test_no_workflow_can_fire_by_itself(self):
-        found = self._workflows()
+    @staticmethod
+    def _branches_list(text):
+        """The single `branches:` value following a trigger key, as a list
+        of names. Supports both `branches: [main]` and the block-list form.
+        Returns None if no branches: key is found."""
+        m = re.search(r"branches:\s*(\[[^\]]*\]|(?:\n\s+-\s*\S+)+)", text)
+        if not m:
+            return None
+        raw = m.group(1)
+        if raw.startswith("["):
+            return [x.strip().strip("'\"") for x in raw.strip("[]").split(",") if x.strip()]
+        return [ln.split("-", 1)[1].strip().strip("'\"") for ln in raw.strip().splitlines()]
+
+    @classmethod
+    def _named_exception_holds(cls, text):
+        """True only when the file at EXEMPT_PR_FILE meets every clause of
+        the 2026-09-06 ruling: `on:` carries pull_request and no other auto
+        trigger, branches is main only, every runs-on is ubuntu-latest,
+        timeout-minutes is present and at most 20, and no strategy/matrix
+        appears anywhere. Anything else and the trigger stays refused."""
+        if any(t in text for t in ("push:", "pull_request_target:", "schedule:")):
+            return False
+        if "pull_request:" not in text:
+            return False
+        if cls._branches_list(text) != [cls.EXEMPT_PR_BRANCH]:
+            return False
+        runs_on = re.findall(r"runs-on:\s*([^\s#]+)", text)
+        if not runs_on or any(r != "ubuntu-latest" for r in runs_on):
+            return False
+        timeouts = re.findall(r"timeout-minutes:\s*(\d+)", text)
+        if not timeouts or any(int(t) > cls.EXEMPT_PR_MAX_TIMEOUT for t in timeouts):
+            return False
+        if "strategy:" in text or "matrix:" in text:
+            return False
+        return True
+
+    def _assert_no_self_firing(self, found):
         if not found:
             self.skipTest(
                 "NO-DATA: no workflow files here yet. The rule is not that the "
@@ -107,12 +156,32 @@ class TestNoSelfFiringCI(unittest.TestCase):
         for path in found:
             with open(path) as fh:
                 text = fh.read()
+            is_exempt_path = (
+                os.path.basename(path) == self.EXEMPT_PR_FILE
+                and os.path.basename(os.path.dirname(path)) == "workflows"
+            )
             for trig in self.AUTO_TRIGGERS:
+                if trig == "pull_request:" and is_exempt_path:
+                    if trig not in text:
+                        continue  # nothing to except: no pull_request trigger here
+                    self.assertTrue(
+                        self._named_exception_holds(text),
+                        "%s carries pull_request: but does not meet every clause "
+                        "of the founder's 2026-09-06 named exception (main-only "
+                        "branch, ubuntu-latest only runners, timeout-minutes at "
+                        "most %s, no strategy/matrix): the trigger stays refused "
+                        "until all clauses hold in the same file"
+                        % (os.path.basename(path), self.EXEMPT_PR_MAX_TIMEOUT),
+                    )
+                    continue
                 self.assertNotIn(
                     trig, text,
                     "%s carries %s: a workflow that fires by itself is refused, "
                     "whatever the repository switch says" % (os.path.basename(path), trig),
                 )
+
+    def test_no_workflow_can_fire_by_itself(self):
+        self._assert_no_self_firing(self._workflows())
 
     def test_no_expensive_runner(self):
         found = self._workflows()
@@ -127,6 +196,86 @@ class TestNoSelfFiringCI(unittest.TestCase):
                     "%s names a %s runner: billed at 2x and 10x ubuntu, and "
                     "refused by standing law" % (os.path.basename(path), runner),
                 )
+
+
+class TestRequiredFastPRException(unittest.TestCase):
+    """The one named exception, FOUNDER RULING 2026-09-06 18:3x JST, question
+    UI, "A: One named exception", then "I defer to you": on the PUBLIC
+    repository, .github/workflows/required-fast.yml may fire on
+    pull_request into main, on ubuntu-latest only, timeout at most 20
+    minutes, no matrix, no other trigger. Every other workflow file, in
+    this repository or any other, keeps the full refusal.
+
+    These cases write fixture workflow files into a temporary
+    .github/workflows directory (the seam TestNoSelfFiringCI._workflows now
+    takes a root=) so the real hub tree, whose required-fast.yml is
+    dispatch-only today, is never mutated by this test file."""
+
+    ACCEPTED = """\
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - run: sh scripts/required_fast.sh
+"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.workflows_dir = os.path.join(self.tmp.name, ".github", "workflows")
+        os.makedirs(self.workflows_dir)
+        self.checker = TestNoSelfFiringCI()
+
+    def _write(self, filename, content):
+        path = os.path.join(self.workflows_dir, filename)
+        with open(path, "w") as fh:
+            fh.write(content)
+        return path
+
+    def _assert_passes(self, filename, content):
+        self._write(filename, content)
+        # Must not raise: this is the accepted shape.
+        self.checker._assert_no_self_firing(self.checker._workflows(root=self.tmp.name))
+
+    def _assert_fails(self, filename, content):
+        self._write(filename, content)
+        with self.assertRaises(AssertionError):
+            self.checker._assert_no_self_firing(self.checker._workflows(root=self.tmp.name))
+
+    def test_accepted_shape_passes(self):
+        self._assert_passes("required-fast.yml", self.ACCEPTED)
+
+    def test_same_content_under_another_filename_fails(self):
+        """The exception names ONE path. The identical body under a
+        different filename is not required-fast.yml and stays refused."""
+        self._assert_fails("required-fast-2.yml", self.ACCEPTED)
+
+    def test_exception_file_with_macos_runner_fails(self):
+        bad = self.ACCEPTED.replace("ubuntu-latest", "macos-latest")
+        self._assert_fails("required-fast.yml", bad)
+
+    def test_exception_file_with_second_trigger_fails(self):
+        bad = self.ACCEPTED.replace(
+            "on:\n  pull_request:",
+            "on:\n  push:\n    branches: [main]\n  pull_request:",
+        )
+        self._assert_fails("required-fast.yml", bad)
+
+    def test_exception_file_with_schedule_fails(self):
+        bad = self.ACCEPTED.replace(
+            "on:\n  pull_request:",
+            "on:\n  schedule:\n    - cron: '0 0 * * *'\n  pull_request:",
+        )
+        self._assert_fails("required-fast.yml", bad)
+
+    def test_exception_file_with_timeout_over_20_fails(self):
+        bad = self.ACCEPTED.replace("timeout-minutes: 20", "timeout-minutes: 60")
+        self._assert_fails("required-fast.yml", bad)
 
 
 class TestMarketplace(unittest.TestCase):
