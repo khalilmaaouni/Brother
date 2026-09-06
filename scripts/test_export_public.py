@@ -1359,6 +1359,57 @@ class ThePublishedFiguresDescribeTheExportedTree(unittest.TestCase):
                 self.assertEqual(fh.read(), body)
 
 
+def _diagnostic_run(log):
+    """A push_appended `run` seam that mirrors EP._run but also records
+    every command, and immediately after a `git add`, snapshots what row
+    E128 (2026-09-06, a CI-only regression a Mac could not reproduce
+    under any local condition tried) needs to diagnose: the runner's own
+    git version, its config and where each setting came from, and what
+    git itself thinks is staged versus ignored in that same working
+    tree. `log` collects (cmd, cwd, returncode, stdout, stderr) tuples
+    for a caller to print; this changes no return value push_appended
+    sees, it only watches."""
+    def run(cmd, cwd, env=None, timeout=120):
+        result = EP._run(cmd, cwd, env=env, timeout=timeout)
+        log.append((cmd, cwd, result.returncode,
+                     result.stdout or "", result.stderr or ""))
+        if cmd[:2] == ["git", "add"]:
+            for extra in (["git", "--version"],
+                          ["git", "config", "--list", "--show-origin"],
+                          ["git", "status", "--porcelain", "--ignored"],
+                          ["git", "ls-files", "-z"]):
+                r = EP._run(extra, cwd)
+                out = (r.stdout or "").replace("\0", " ")
+                log.append((extra, cwd, r.returncode, out, r.stderr or ""))
+        return result
+    return run
+
+
+def _print_export_diagnostics(log, clone_dir, root, label):
+    """Printed only when a TheCommitIsExactlyTheGatedTree test's
+    tracked.csv check is about to fail: everything row E128 asked for,
+    once, in the log a human reads afterward."""
+    print("---- %s: export-public diagnostics (row E128) ----" % label)
+    for cmd, cwd, rc, out, err in log:
+        print("$ %s   (cwd=%s, exit %s)" % (" ".join(cmd), cwd, rc))
+        if out.strip():
+            print(out.rstrip())
+        if err.strip():
+            print(err.rstrip())
+    fixture_dir = os.path.join(root, "products", "myproduct")
+    if os.path.isdir(fixture_dir):
+        ls = subprocess.run(["ls", "-la", fixture_dir],
+                             capture_output=True, text=True)
+        print("$ ls -la %s\n%s" % (fixture_dir,
+                                    (ls.stdout or "") + (ls.stderr or "")))
+    tree = subprocess.run(["git", "-C", clone_dir, "ls-tree", "-r", "HEAD"],
+                           capture_output=True, text=True)
+    print("$ git -C %s ls-tree -r HEAD (exit %s)\n%s"
+          % (clone_dir, tree.returncode,
+             (tree.stdout or "") + (tree.stderr or "")))
+    print("---- end %s diagnostics ----" % label)
+
+
 class TheCommitIsExactlyTheGatedTree(unittest.TestCase):
     """THE ALLOWLIST AND DENYLIST ARE THE ONLY FILTERS (module docstring).
     Measured 2026-09-02 on the public v1.0.0 tag itself: two tracked CSV
@@ -1423,13 +1474,19 @@ class TheCommitIsExactlyTheGatedTree(unittest.TestCase):
                 with open(manifest_path, encoding="utf-8") as fh:
                     self.assertIn("tracked.csv", fh.read())
 
+            diag_log = []
             with _fake_gh():
                 code, lines = EP.push_appended(self.ALLOWLIST, remote_dir,
-                                               "main", root=root)
+                                               "main", root=root,
+                                               run=_diagnostic_run(diag_log))
             self.assertEqual(code, EP.EXIT_OK, lines)
 
             subprocess.run(["git", "clone", "-q", remote_dir, clone_dir],
                             check=True, capture_output=True, text=True)
+            if not os.path.isfile(os.path.join(clone_dir, "products",
+                                                "myproduct", "tracked.csv")):
+                _print_export_diagnostics(diag_log, clone_dir, root,
+                                           self.id())
             self.assertTrue(
                 os.path.isfile(os.path.join(clone_dir, "products",
                                              "myproduct", "tracked.csv")),
@@ -1481,9 +1538,11 @@ class TheCommitIsExactlyTheGatedTree(unittest.TestCase):
                     probe, "products", "myproduct", "__pycache__")))
                 self.assertFalse(os.path.exists(os.path.join(probe, ".sbe")))
 
+            diag_log = []
             with _fake_gh():
                 code, lines = EP.push_appended(allowlist, remote_dir, "main",
-                                               root=root)
+                                               root=root,
+                                               run=_diagnostic_run(diag_log))
             self.assertEqual(code, EP.EXIT_OK, lines)
 
             subprocess.run(["git", "clone", "-q", remote_dir, clone_dir],
@@ -1493,6 +1552,10 @@ class TheCommitIsExactlyTheGatedTree(unittest.TestCase):
             self.assertFalse(os.path.exists(os.path.join(clone_dir, ".sbe")))
             # the tracked csv, unrelated to this test's untracked files,
             # still ships: this is about what stays out, not a new hole
+            if not os.path.isfile(os.path.join(
+                    clone_dir, "products", "myproduct", "tracked.csv")):
+                _print_export_diagnostics(diag_log, clone_dir, root,
+                                           self.id())
             self.assertTrue(os.path.isfile(os.path.join(
                 clone_dir, "products", "myproduct", "tracked.csv")))
 
@@ -1515,11 +1578,13 @@ class TheCommitIsExactlyTheGatedTree(unittest.TestCase):
                 fh.write("hub tracks this; the denylist withholds it\n")
             _git_track_all(root)
 
+            diag_log = []
             with _fake_gh(), mock.patch.object(
                     EP, "load_denylist",
                     return_value=["products/myproduct/withheld.md"]):
                 code, lines = EP.push_appended(self.ALLOWLIST, remote_dir,
-                                               "main", root=root)
+                                               "main", root=root,
+                                               run=_diagnostic_run(diag_log))
             self.assertEqual(code, EP.EXIT_OK, lines)
 
             subprocess.run(["git", "clone", "-q", remote_dir, clone_dir],
@@ -1527,6 +1592,10 @@ class TheCommitIsExactlyTheGatedTree(unittest.TestCase):
             self.assertFalse(os.path.isfile(os.path.join(
                 clone_dir, "products", "myproduct", "withheld.md")))
             # tracked and never denylisted: still ships alongside it
+            if not os.path.isfile(os.path.join(
+                    clone_dir, "products", "myproduct", "tracked.csv")):
+                _print_export_diagnostics(diag_log, clone_dir, root,
+                                           self.id())
             self.assertTrue(os.path.isfile(os.path.join(
                 clone_dir, "products", "myproduct", "tracked.csv")))
 
