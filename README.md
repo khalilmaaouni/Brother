@@ -67,7 +67,7 @@ A local clone path works in place of the HTTPS URL. Confirm the install:
 codex plugin list --available --json
 ```
 
-The result names `pluginId brother@brother` and nothing else of Brother's: since 1.0.9 the brother plugin carries the runtime, the skills, the commands and both products' hooks itself, so `brothermode@brother` is no longer offered to Codex. Codex reads a plugin's hooks but never trusts them, so this alone leaves Brother's safety controls silent. Run the second, required step once per Codex home, from the root of a checkout of this repository, because `scripts/codex_hooks_install.py` is a path inside this repository and an installed plugin does not carry it:
+The result names `pluginId brother@brother` and nothing else of Brother's: the brother plugin carries the runtime, the skills, the commands and both products' hooks itself, so `brothermode@brother` is no longer offered to Codex (earlier tags offered the two products separately). Codex reads a plugin's hooks but never trusts them, so this alone leaves Brother's safety controls silent. Run the second, required step once per Codex home, from the root of a checkout of this repository, because `scripts/codex_hooks_install.py` is a path inside this repository and an installed plugin does not carry it:
 
 ```bash
 python3 scripts/codex_hooks_install.py --codex-home ~/.codex --allow-default-home --trust

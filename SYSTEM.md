@@ -13,10 +13,10 @@ to run the battery.
 
 | | |
 |---|---:|
-| Parts | 163 |
-| Parts with a purpose written in the file | 163 |
-| Parts with a suite wired into the battery | 132 |
-| Checks in the battery | 218 |
+| Parts | 170 |
+| Parts with a purpose written in the file | 170 |
+| Parts with a suite wired into the battery | 137 |
+| Checks in the battery | 224 |
 
 ## Every part, what it is for, and what proves it
 
@@ -39,7 +39,7 @@ to run the battery.
 | `acceptance_trial_assign` | Acceptance Compression trial: reviewer assignment and results validation | **NO-DATA**, nothing in the battery runs it |
 | `adapter_conformance` | ONE ordered suite, unchanged across every provider. | **NO-DATA**, nothing in the battery runs it |
 | `attempt_hook` | a PostToolUse hook on Bash that writes to scripts/attempt_ledger.py | `attempt-hook-tests` |
-| `attempt_ledger` | stop the third attempt at a technique that failed twice. | `attempt-ledger-self` |
+| `attempt_ledger` | stop the third attempt at a technique that failed twice. | `attempt-ledger-self`, `real-logs-unchanged` |
 | `authority_path_coverage` | R1: does one event receive two independent enforcing decisions? | `authority-path-coverage-self` |
 | `autonomy_dial` | The A0 to A3 autonomy dial, wired: docs/plan/AUTONOMY-POLICY-V1.md made | `autonomy-dial-self` |
 | `battery_verdict` | A6, one canonical machine-readable answer to "is current | `battery-verdict-self` |
@@ -66,6 +66,7 @@ to run the battery.
 | `coverage_check` | Coverage checker for the unified WBS (docs/plan/UNIFIED-WBS.md), task 0. | `coverage`, `coverage-self` |
 | `daybook` | The Daybook: one calm decision feed swept from three repositories. | `daybook`, `daybook-self` |
 | `decide` | never hand a human a wall, hand them a screen. | `decide-self` |
+| `delivery_status` | the ONE goal for this session, as named steps with a | **NO-DATA**, nothing in the battery runs it |
 | `door` | a plain English outcome becomes a canonical Work document. | `brother-run-self`, `bundle-runtime-self`, `door-self`, `mutation-gate`, `mutation-gate-self` |
 | `e53_lesson_ab` | does a lesson SHOWN at the moment of action change the action. | **NO-DATA**, nothing in the battery runs it |
 | `e80_release_reproduction_drive` | E80's done check, run end to end against a fixture release. | **NO-DATA**, nothing in the battery runs it |
@@ -84,7 +85,7 @@ to run the battery.
 | `gauntlet_delegation_truth` | the false-green rate as a running number. | `delegation-truth-self` |
 | `gauntlet_frozen` | refuse to score a corpus whose hash moved since the | `gauntlet-frozen-self` |
 | `gauntlet_hostile_ja` | EXECUTE the frozen Hostile Japanese Identity gauntlet. | `gauntlet-hostile-ja`, `gauntlet-hostile-ja-self` |
-| `gauntlet_memory_poisoning` | The memory poisoning gauntlet: thirteen planted lessons against the real | **NO-DATA**, nothing in the battery runs it |
+| `gauntlet_memory_poisoning` | The memory poisoning gauntlet: fourteen planted lessons against the real | **NO-DATA**, nothing in the battery runs it |
 | `gauntlet_memory_recurrence` | The memory recurrence gauntlet: five seeded conditions against the real recall path. | `memory-recurrence-self` |
 | `gauntlet_memoryagentbench_conflict` | The MemoryAgentBench conflict resolution and selective forgetting self score. Row LL-6. | **NO-DATA**, nothing in the battery runs it |
 | `gen_command_center` | Render GANTT.html, the Brother command center, from the plan data files. | `gen-board-self` |
@@ -92,6 +93,7 @@ to run the battery.
 | `gen_receipt_schema` | One-shot generator for docs/plan/delivery-receipt-v1.schema.json from the | **NO-DATA**, nothing in the battery runs it |
 | `graph_loop` | The graph loop: which nodes may run RIGHT NOW, and which may run TOGETHER. | `graph-loop`, `graph-loop-self` |
 | `graph_value_experiment` | VB-15 / D15: is multi-hop graph retrieval worth anything here, measured. | **NO-DATA**, nothing in the battery runs it |
+| `guarded_strip` | never delete rows from a real file without counting them first. | `guarded-strip-self` |
 | `handover_ceremony` | Handover ceremony: collects a session's closing state and emits it as | `handover-ceremony` |
 | `handover_pack_scan` | the dry run the founder reads before any pack is rewritten. | **NO-DATA**, nothing in the battery runs it |
 | `identity_guard` | refuse NEW commits whose author or committer email domain | `export-public-self`, `identity-guard`, `identity-guard-self` |
@@ -104,6 +106,8 @@ to run the battery.
 | `journal` | one append-only causal log per run, fed by the writers that | `journal-self` |
 | `journal_projection` | the delivery report, receipts-bound and a live | `journal-projection-self` |
 | `keep_current` | update a Codex install only after every link reads PASS. | **NO-DATA**, nothing in the battery runs it |
+| `land_queue` | the hub PR lander as a product script, not five loose shell files. | `land-queue-self` |
+| `lane_resume` | turn a dead lane's worktree into a patch a fresh lane can apply. | `lane-resume-self` |
 | `laws_audit` | R28.1, the law auditor (docs/plan/READINESS-ROADMAP-2026-08-29.json). | `laws-audit`, `laws-audit-self` |
 | `leaf_pin_check` | Does the umbrella promise the release tag the leaf actually published? | `leaf-pins`, `leaf-pins-self` |
 | `lesson_repeat_trial` | was the lesson SHOWN before the failure it describes. | `lesson-repeat-trial-tests` |
@@ -138,6 +142,7 @@ to run the battery.
 | `provider_adapter` | ONE provider-neutral core, THIN adapters. | **NO-DATA**, nothing in the battery runs it |
 | `readiness_gate` | the review's enterprise readiness gate as a checkable surface. | `export-public-self`, `readiness-gate`, `readiness-gate-self` |
 | `readme_receipt_sample` | the README's per-file receipt sample, rendered by | **NO-DATA**, nothing in the battery runs it |
+| `real_logs` | .py: nothing that runs as a test or a battery may grow a real | `real-logs-unchanged` |
 | `recall_coverage` | R28.3, learnings at the point of need, measured | **NO-DATA**, nothing in the battery runs it |
 | `receipt_door` | the facts a delivery can prove, and the screens showing them. | `receipt-door-self` |
 | `record_drift` | does the record still match reality after the work landed? | `pre-push-gate`, `pre-push-gate-self`, `record-drift`, `record-drift-self` |
@@ -156,6 +161,7 @@ to run the battery.
 | `review_pass` | S32, the review pass: one existing reviewer per high-tier unit, and every | `review-depth-self` |
 | `reviewer_brief` | Generate a one-page reviewer brief from a git ref range. SR-09. | `reviewer-brief-self` |
 | `roadmap_merge` | Three way merge driver for the readiness roadmap JSON, keyed by row id. | `roadmap-merge-self` |
+| `ruling_ledger` | joins a founder ruling to whatever actually landed it. (M7) | `ruling-ledger-self` |
 | `run_evidence` | never destroy the evidence you are about to need. | `run-evidence-self` |
 | `run_heartbeat` | E46: the wait is never silent again. | **NO-DATA**, nothing in the battery runs it |
 | `safe_unwatched_time` | Safe Unwatched Time (SUT) for one run directory, read off the run's own records. | `safe-unwatched-time-self` |
@@ -169,6 +175,7 @@ to run the battery.
 | `tmp_sandbox` | One call that makes a test process delete every temporary tree it creates. | **NO-DATA**, nothing in the battery runs it |
 | `tool_bypass_test` | Measure what tool containment ACTUALLY holds, and refuse a claim that exceeds it. | `tool-bypass` |
 | `track_delivery` | Delivery tracking for the readiness roadmap, and the blocker learning behind it. | `delivery-tracker-self`, `delivery-tracking` |
+| `unseen_set_gate` | Gate a JBEQ-MDM unseen qualification set on its own blind audit. | **NO-DATA**, nothing in the battery runs it |
 | `v3_judge` | decide, mechanically, whether one work unit's diff applied a recorded lesson. | `v3-judge-self` |
 | `v3_night_receipts` | the five real work units of the night of 2026-09-03/04, with their | `v3-night-receipts-self` |
 | `v3_receipts` | records V3 pre-action-memory receipts for real work units, honestly. | `v3-receipts-self` |
@@ -242,6 +249,7 @@ to run the battery.
 - `attempt-ledger-self`: `python3 scripts/test_attempt_ledger.py -v`
 - `pattern-note-self`: `python3 scripts/test_pattern_note.py -v`
 - `board-status-self`: `python3 scripts/test_board_status.py -v`
+- `ruling-ledger-self`: `python3 scripts/test_ruling_ledger.py -v`
 - `reporting-adversarial-self`: `python3 scripts/test_reporting_adversarial.py -v`
 - `system-doc-self`: `python3 scripts/test_system_doc.py -v`
 - `release-note-self`: `python3 scripts/test_release_note_from_tree.py -v`
@@ -406,4 +414,9 @@ to run the battery.
 - `filed-runs-self`: `python3 scripts/test_filed_runs_check.py -v`
 - `filed-runs`: `python3 scripts/filed_runs_check.py`
 - `morning-pack-self`: `python3 scripts/test_morning_pack.py -v`
+- `guarded-strip-self`: `python3 scripts/test_guarded_strip.py -v`
+- `verify-tree-self`: `python3 scripts/test_verify_tree.py -v`
+- `lane-resume-self`: `python3 scripts/test_lane_resume.py -v`
+- `land-queue-self`: `python3 scripts/test_land_queue.py -v`
+- `real-logs-unchanged`: `python3 scripts/real_logs.py compare "$REAL_LOGS_SNAPSHOT"`
 

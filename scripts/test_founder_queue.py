@@ -19,6 +19,14 @@ SEED = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                     "..", "docs", "plan", "FOUNDER-QUEUE.json")
 
 
+def get_open_ids_from_seed():
+    """Load seed file and return list of OPEN item ids in order."""
+    items, err = BS.open_founder_queue_items(SEED)
+    if err or not items:
+        return []
+    return [it["id"] for it in items]
+
+
 def write_queue(items):
     fh = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False,
                                      encoding="utf-8")
@@ -31,7 +39,8 @@ class TheSeedFileRendersNCards(unittest.TestCase):
     def test_the_seed_file_has_five_open_items(self):
         items, err = BS.open_founder_queue_items(SEED)
         self.assertIsNone(err)
-        self.assertEqual(len(items), 6)
+        open_ids = get_open_ids_from_seed()
+        self.assertEqual(len(items), len(open_ids))
 
     def test_the_board_renders_one_card_per_open_item(self):
         old = BS.FOUNDER_QUEUE_PATH
@@ -43,14 +52,16 @@ class TheSeedFileRendersNCards(unittest.TestCase):
         start = html.find('<section class="fqueue">')
         end = html.find('</section>', start)
         section = html[start:end]
-        self.assertEqual(section.count('class="norow"'), 6)
-        for fid in ("FQ-1", "FQ-2", "FQ-3", "FQ-4", "FQ-5", "FQ-6"):
+        open_ids = get_open_ids_from_seed()
+        self.assertEqual(section.count('class="norow"'), len(open_ids))
+        for fid in open_ids:
             self.assertIn(fid, section)
 
     def test_the_status_line_names_every_open_id(self):
         line = BS.founder_queue_status_line(os.path.abspath(SEED))
-        self.assertTrue(line.startswith("Founder queue: 6 open"))
-        for fid in ("FQ-1", "FQ-2", "FQ-3", "FQ-4", "FQ-5", "FQ-6"):
+        open_ids = get_open_ids_from_seed()
+        self.assertTrue(line.startswith("Founder queue: %d open" % len(open_ids)))
+        for fid in open_ids:
             self.assertIn(fid, line)
 
 

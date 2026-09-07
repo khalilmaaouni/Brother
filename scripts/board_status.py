@@ -31,8 +31,10 @@ import os
 import re
 import sys
 
+import delivery_status as DS
 import journal
 import receipt_door
+import ruling_ledger
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SOURCE = os.path.join(ROOT, "docs", "plan", "READINESS-ROADMAP-2026-08-29.json")
@@ -364,6 +366,18 @@ def founder_queue_status_line(path=None, today=None):
             % (len(items), oldest.get("since"), age, ids))
 
 
+# ---------------------------------------------------------------------------
+# THE RULING LEDGER (row M7 of the 2026-09-07 reflection): a founder ruling
+# recorded and never applied read REGISTERED on this board for three days.
+# ruling_ledger.py joins every ruling to its landing; this is the one line
+# that surfaces here the same way the founder queue line does.
+# ---------------------------------------------------------------------------
+
+
+def ruling_ledger_status_line():
+    return ruling_ledger.summary_line()
+
+
 def has_evidence(item):
     return bool(str(item.get("evidence") or "").strip())
 
@@ -501,6 +515,20 @@ def main(argv=None):
         print("  done-check: %s" % str(it.get("done_check", NODATA))[:200])
         return 0
 
+    # THE DELIVERY LINE, founder ruling 2026-09-07 (question UI, "A: The
+    # delivery line"): printed FIRST, before the readiness bars below,
+    # because one goal with named steps and clocks is what reads as progress
+    # to him; row counts do not. Imported, never shelled out to, so this and
+    # `delivery_status.py`'s own CLI can never print a different number for
+    # the same step. NO-DATA (never a crash) when no delivery file exists.
+    d_doc, d_err = DS.load()
+    if d_doc is None:
+        print("%s: %s" % (DS.NODATA, d_err))
+    else:
+        for line in DS.render_lines(d_doc)[0]:
+            print(line)
+    print("")
+
     secs = sections(doc)
     if args.json:
         print(json.dumps(secs, indent=2, sort_keys=True))
@@ -525,6 +553,7 @@ def main(argv=None):
     print("")
     _print_vault_counters(vault_counters())
     print(founder_queue_status_line())
+    print(ruling_ledger_status_line())
     return rc
 
 

@@ -1,5 +1,5 @@
 {
- "_doc": "Worked example of one JBEQ-MDM fact sheet, the input scripts/jbeq_decide.py decide() reads. Full field documentation lives in the module docstring at the top of scripts/jbeq_decide.py. A real fact-sheets.json file passed to the CLI is a JSON object of {\"CASE-ID\": {fact sheet, without this _doc key}, ...}; this file shows one entry's shape plus four worked variants below it so the same file demonstrates the rules that fire on real cases. Round 5 (2026-09-06) grew the schema with the identity-kind fields (object_type_a/object_type_b, lifecycle, requested_action, requested_relation_type, authoritative_identifier, contradicted_attributes, distinct_operational_attributes, location_comparison, effective_dates); every example below carries them at a value that does not change which rule fires, so each example still demonstrates only the one rule its name and _comment say. Round 6 (2026-09-06) added one further OPTIONAL key, requested_parent (string or null, absent from every example below): the entity a request asks to become the parent, read only when requested_relation_type matches a stated hierarchy TYPE but the input asks to reverse which side is the PARENT (see scripts/jbeq_decide.py's module docstring and rule link_vs_reject). Round 7 (2026-09-06, per ~/.claude/evidence/review-u1-2026-09-06.md section F and FIX-DIRECTIVE-2026-09-06.md section 15) widened requested_action's enum to match_on_stated_basis and record_write (no rule gates on either value yet: this widening is a schema-and-prompt-only second pass, pending a fresh re-extraction of the frozen 70 before anything reads it) and added one new location_comparison value, same_area_renamed, which rule L DOES already read, exactly like notation_variant_only.",
+ "_doc": "Worked example of one JBEQ-MDM fact sheet, the input scripts/jbeq_decide.py decide() reads. Full field documentation lives in the module docstring at the top of scripts/jbeq_decide.py. A real fact-sheets.json file passed to the CLI is a JSON object of {\"CASE-ID\": {fact sheet, without this _doc key}, ...}; this file shows one entry's shape plus four worked variants below it so the same file demonstrates the rules that fire on real cases. Round 5 (2026-09-06) grew the schema with the identity-kind fields (object_type_a/object_type_b, lifecycle, requested_action, requested_relation_type, authoritative_identifier, contradicted_attributes, distinct_operational_attributes, location_comparison, effective_dates); every example below carries them at a value that does not change which rule fires, so each example still demonstrates only the one rule its name and _comment say. Round 6 (2026-09-06) added one further OPTIONAL key, requested_parent (string or null, absent from every example below): the entity a request asks to become the parent, read only when requested_relation_type matches a stated hierarchy TYPE but the input asks to reverse which side is the PARENT (see scripts/jbeq_decide.py's module docstring and rule link_vs_reject). Round 7 (2026-09-06, per ~/.claude/evidence/review-u1-2026-09-06.md section F and FIX-DIRECTIVE-2026-09-06.md section 15) widened requested_action's enum to match_on_stated_basis and record_write (no rule gates on either value yet: this widening is a schema-and-prompt-only second pass, pending a fresh re-extraction of the frozen 70 before anything reads it) and added one new location_comparison value, same_area_renamed, which rule L DOES already read, exactly like notation_variant_only. review-temporal-track-2026-09-06.md added one further key inside effective_dates, prior_valid_to (string or null, the earlier record's own valid-to date), read by the temporal record rules in scripts/jbeq_decide.py; every example below carries it at null, an invented illustration rather than any case's own text, since validate() accepts a sheet with or without the key. Round 12 (2026-09-07, per ~/.claude/evidence/review-rule6-2026-09-07.md ranking item 2) added one further location_comparison value, same_area_different_lot: two addresses in the same town and block that differ only in lot number, an absence of support under addendum rule 6, never a refutation. Rule L reads it and answers KEEP SEPARATE, never REJECT MATCH and never a merge (own disable id same_area_different_lot_keeps_separate).",
  "_enums": {
   "_doc": "One source of truth for every closed-vocabulary field decide() and validate() enforce (round 5 repair, 2026-09-06, closing the L12 gap the design review found: validate used to check key presence only, never value membership, so 20 of 45 round 5 sheets carried off-enum free text in stated_relation and stated_difference that matched no rule and silently fell to the default). Read by scripts/jbeq_decide.py's _load_enums(). identifier domain and identifier status are deliberately NOT enumerated here: the real fact sheets already carry many legitimate domain-like values (crm_guid, customer_code, site_id, store_id and more) far beyond the five illustrative values named in the module docstring, so treating that field as closed would refuse sheets for a reason unrelated to this repair. tenant_boundary is a two-value field decide() does not branch on for anything this repair touches, and is left unenforced for the same reason: this list enforces exactly the fields the design review named as load-bearing for the L12 fix, not every field that happens to have a small value set.",
   "stated_relation": ["none", "corporate_number_shared", "parent_child", "role_pair", "trade_flow", "same_site_only", "group_company_code_shared_entity"],
@@ -11,7 +11,7 @@
   "requested_action": ["none", "assignment", "match_on_stated_basis", "record_write"],
   "requested_relation_type": ["capital", "trade_flow", "reporting"],
   "authoritative_identifier": ["aligned", "conflicting", "absent"],
-  "location_comparison": ["notation_variant_only", "same_chiban_different_notation", "different_administrative_area", "different_unit_in_building", "internally_inconsistent", "same_area_renamed"],
+  "location_comparison": ["notation_variant_only", "same_chiban_different_notation", "different_administrative_area", "different_unit_in_building", "internally_inconsistent", "same_area_renamed", "same_area_different_lot"],
   "legal_person_type": ["corporation", "individual", "unknown"]
  },
  "example_rule_5_keep_separate": {
@@ -50,7 +50,8 @@
   "effective_dates": {
    "as_of": null,
    "candidate_effective_date": null,
-   "conflict": false
+   "conflict": false,
+   "prior_valid_to": null
   }
  },
  "example_rule_C_reject_match": {
@@ -96,7 +97,8 @@
   "effective_dates": {
    "as_of": null,
    "candidate_effective_date": null,
-   "conflict": false
+   "conflict": false,
+   "prior_valid_to": null
   }
  },
  "example_rule_B_weak_escalate": {
@@ -135,7 +137,8 @@
   "effective_dates": {
    "as_of": null,
    "candidate_effective_date": null,
-   "conflict": false
+   "conflict": false,
+   "prior_valid_to": null
   }
  },
  "example_rule_D_hierarchy_keep_separate": {
@@ -184,7 +187,8 @@
   "effective_dates": {
    "as_of": null,
    "candidate_effective_date": null,
-   "conflict": false
+   "conflict": false,
+   "prior_valid_to": null
   }
  },
  "example_rule_A_blank_field_escalate": {
@@ -224,7 +228,8 @@
   "effective_dates": {
    "as_of": null,
    "candidate_effective_date": null,
-   "conflict": false
+   "conflict": false,
+   "prior_valid_to": null
   }
  }
 ,
@@ -271,7 +276,8 @@
   "effective_dates": {
    "as_of": null,
    "candidate_effective_date": null,
-   "conflict": false
+   "conflict": false,
+   "prior_valid_to": null
   }
  }
 }

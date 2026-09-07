@@ -157,6 +157,122 @@ class AMissingRefReadsNoDataRatherThanCrashing(unittest.TestCase):
         self.assertTrue(text.startswith(CFC.NODATA), text)
 
 
+def _make_repo_with_orphan_tag(with_note=True):
+    """A "hub" history of three pull-request merges (#19, #20, #21) where
+    #20's merge commit is the release the note below names, plus an ORPHAN
+    commit tagged v1.0.9 that shares no history with any of it, exactly the
+    DEL-13 shape: the public tag points somewhere the hub range subtracts
+    nothing against. Returns (root, named_rev, note_path)."""
+    tmp = tempfile.mkdtemp(prefix="changelog-tag-test-")
+    _write(os.path.join(tmp, "README.md"), "fixture\n")
+    for args in (["init", "-q", "-b", "main"],
+                ["config", "user.email", "t@example.com"],
+                ["config", "user.name", "T"],
+                ["add", "-A"],
+                ["commit", "-q", "-m", "seed"]):
+        _git(args, tmp)
+
+    # #19: lands BEFORE the named revision, must be excluded once resolved.
+    _git(["checkout", "-q", "-b", "wbs/s19-old"], tmp)
+    _write(os.path.join(tmp, "a.txt"), "a\n")
+    _git(["add", "-A"], tmp)
+    _git(["commit", "-q", "-m", "add a"], tmp)
+    _git(["checkout", "-q", "main"], tmp)
+    _git(["merge", "--no-ff", "-q", "-m",
+         "Merge pull request #19 from someone/wbs/s19-old",
+         "wbs/s19-old"], tmp)
+
+    # #20: this merge commit IS the hub revision the release note names.
+    _git(["checkout", "-q", "-b", "wbs/s20-named"], tmp)
+    _write(os.path.join(tmp, "b.txt"), "b\n")
+    _git(["add", "-A"], tmp)
+    _git(["commit", "-q", "-m", "add b"], tmp)
+    _git(["checkout", "-q", "main"], tmp)
+    _git(["merge", "--no-ff", "-q", "-m",
+         "Merge pull request #20 from someone/wbs/s20-named",
+         "wbs/s20-named"], tmp)
+    named_rev = _git(["rev-parse", "HEAD"], tmp).stdout.strip()
+
+    # #21: lands AFTER the named revision, must survive resolution.
+    _git(["checkout", "-q", "-b", "wbs/s21-new"], tmp)
+    _write(os.path.join(tmp, "c.txt"), "c\n")
+    _git(["add", "-A"], tmp)
+    _git(["commit", "-q", "-m", "add c"], tmp)
+    _git(["checkout", "-q", "main"], tmp)
+    _git(["merge", "--no-ff", "-q", "-m",
+         "Merge pull request #21 from someone/wbs/s21-new",
+         "wbs/s21-new"], tmp)
+
+    note_dir = os.path.join(tmp, "docs", "releases")
+    os.makedirs(note_dir, exist_ok=True)
+    note_path = os.path.join(note_dir, "1.0.9.md")
+    if with_note:
+        _write(note_path,
+              "# Brother 1.0.9\n\n## Source revision\n\n"
+              "Cut from hub commit `%s` (hub, private).\n" % named_rev)
+        _git(["add", "-A"], tmp)
+        _git(["commit", "-q", "-m", "docs: 1.0.9 release note"], tmp)
+
+    # The public tag: an ORPHAN commit sharing no history with main, the
+    # actual shape a public export cut leaves behind.
+    _git(["checkout", "-q", "--orphan", "orphan-v1.0.9"], tmp)
+    _git(["rm", "-rf", "-q", "."], tmp)
+    _write(os.path.join(tmp, "EXPORT.txt"), "public export only\n")
+    _git(["add", "-A"], tmp)
+    _git(["commit", "-q", "-m", "public export of v1.0.9"], tmp)
+    _git(["tag", "-a", "-m", "v1.0.9", "v1.0.9"], tmp)
+    _git(["checkout", "-q", "main"], tmp)
+
+    return tmp, named_rev, note_path
+
+
+class ATagResolvesToTheHubRevisionItsNoteNames(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp, cls.named_rev, cls.note_path = _make_repo_with_orphan_tag(
+            with_note=True)
+        cls.lines = CFC.changelog_lines("v1.0.9", "HEAD", root=cls.tmp)
+
+    def test_only_merges_after_the_named_revision_are_listed(self):
+        text = "\n".join(self.lines)
+        self.assertIn("#21", text)
+        self.assertNotIn("#20", text)
+        self.assertNotIn("#19", text)
+
+    def test_the_output_says_which_hub_revision_it_resolved_to(self):
+        text = "\n".join(self.lines)
+        self.assertIn(self.named_rev[:12], text)
+        self.assertIn("docs/releases/1.0.9.md", text)
+        self.assertIn("v1.0.9", text)
+
+    def test_build_still_wraps_it_in_the_tags_own_title(self):
+        text, code = CFC.build("v1.0.9", "HEAD", root=self.tmp)
+        self.assertEqual(code, 0)
+        self.assertTrue(text.startswith("# Changelog v1.0.9..HEAD"), text)
+        self.assertIn("#21", text)
+        self.assertNotIn("#20", text)
+
+
+class WithoutANoteTheOldBehaviourHoldsUnchanged(unittest.TestCase):
+    def test_an_orphan_tag_with_no_note_still_diffs_the_whole_history(self):
+        # This is the DEL-13 bug itself, left exactly as it was for the case
+        # this fix does not touch: no note means no way to resolve, so the
+        # orphan tag subtracts nothing and every merge leaks through.
+        tmp, named_rev, _ = _make_repo_with_orphan_tag(with_note=False)
+        lines = CFC.changelog_lines("v1.0.9", "HEAD", root=tmp)
+        text = "\n".join(lines)
+        self.assertIn("#19", text)
+        self.assertIn("#20", text)
+        self.assertIn("#21", text)
+
+    def test_a_release_tag_shape_with_no_note_and_no_tag_reads_no_data(self):
+        tmp = _make_repo()
+        lines = CFC.changelog_lines("v1.0.9", "HEAD", root=tmp)
+        self.assertEqual(len(lines), 1)
+        self.assertTrue(lines[0].startswith(CFC.NODATA), lines)
+        self.assertIn("v1.0.9", lines[0])
+
+
 class GroupKeyIsAPureFunction(unittest.TestCase):
     def test_reland_prefix_is_stripped_before_grouping(self):
         self.assertEqual(CFC.group_key("reland/wbs/x8-rows-1.0.8"), "X8")

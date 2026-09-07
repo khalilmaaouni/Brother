@@ -40,6 +40,17 @@ ROOT="$(pwd)"
 # able to turn the battery red.
 python3 scripts/temp_residue.py --label start --prune --hours 1
 
+# M3 (2026-09-07 reflection): hook test suites (PR 458's new tests, main's own
+# older suite) reached the founder's actual ~/.claude/hook-outcomes.jsonl
+# through the hook's default config dir instead of an isolated one, and a
+# detector counted the fixture rows as prevented repeats. Nothing that runs
+# as a test or a battery may grow a real machine log. Snapshotted here, at
+# the very first thing this battery does, and compared as the LAST run_check
+# below (real-logs-unchanged), the same start/end shape as E100's own
+# temp-residue reading above.
+REAL_LOGS_SNAPSHOT="$(mktemp)"
+python3 scripts/real_logs.py snapshot > "$REAL_LOGS_SNAPSHOT"
+
 pass=0; fail=0; nodata=0
 failed_names=""
 nodata_names=""
@@ -329,6 +340,14 @@ run_check "pattern-note-self"      python3 scripts/test_pattern_note.py -v
 # Driven backwards 2026-08-29 by relabelling an untouched feature DONE, which
 # fails the suite and makes the tool exit 1 naming the claim.
 run_check "board-status-self"      python3 scripts/test_board_status.py -v
+
+# The ruling ledger, row M7 of the 2026-09-07 reflection: a founder ruling was
+# recorded and never applied for three days while a roadmap row read
+# REGISTERED, because nothing joined decision records to landings. Driven
+# both directions on fixture records in a temp dir: a landing (recorded,
+# roadmap-row, or commit) reads APPLIED; a ruling with no landing reads
+# RULING UNAPPLIED and exits 1 once it clears --max-age-hours.
+run_check "ruling-ledger-self"     python3 scripts/test_ruling_ledger.py -v
 
 # The adversarial suite against the reporting itself: board_status.py,
 # gen_readiness_board.py and run_evidence.py driven backwards through their
@@ -1324,6 +1343,23 @@ run_check "filed-runs-self" python3 scripts/test_filed_runs_check.py -v
 run_check "filed-runs"      python3 scripts/filed_runs_check.py
 
 run_check "morning-pack-self" python3 scripts/test_morning_pack.py -v
+
+# Rows M1, M2, M9 of the 2026-09-07 reflection: three helpers that refuse
+# rather than guess (guarded_strip.py, verify_tree.sh, lane_resume.py).
+run_check "guarded-strip-self" python3 scripts/test_guarded_strip.py -v
+run_check "verify-tree-self"   python3 scripts/test_verify_tree.py -v
+run_check "lane-resume-self"   python3 scripts/test_lane_resume.py -v
+# M6: the hub PR lander as a product script. The loose shell scripts under
+# ~/.claude/evidence had no pid lock, no gate concurrency ceiling and no
+# timeout class, which is how a lander restart on 2026-09-06 21:24 JST ran
+# seven gates at once and painted one red for load, not for a real defect.
+# Driven with fake gate/merge scripts: no network, no worktree, no real PR.
+run_check "land-queue-self" python3 scripts/test_land_queue.py -v
+
+# LAST, on purpose: compares against the snapshot taken at the very top of
+# this file, so growth from ANY check this battery ran (not only the hook
+# suites) is caught. See the snapshot comment above.
+run_check "real-logs-unchanged" python3 scripts/real_logs.py compare "$REAL_LOGS_SNAPSHOT"
 
 echo
 echo "pass $pass   fail $fail   no-data $nodata"

@@ -178,3 +178,29 @@ AS RELATED 7, KEEP SEPARATE 8, REJECT MATCH 9, ESCALATE 8, NO-DATA 2.
 
 REJECT MATCH and KEEP SEPARATE score as one class under the founder ruling
 of 2026-09-06; the engine's choice between them is recorded, not scored.
+
+## Blind audit
+
+Row M8 (~/.claude/evidence/reflection-measures-2026-09-07.md):
+`scripts/unseen_set_gate.py` reads this section before `scripts/jbeq_mdm.py`
+will `prompts` or `score` against this set. This section is new as of that
+row; neither this file nor `unseen-4-2026-09-06-RECORD.md` already carried
+one under this heading, so the heading itself is defined here and reused
+verbatim on every unseen set from this row forward.
+
+Auditor: opus reviewer, 2026-09-06. Full audit:
+`~/.claude/evidence/audit-unseen-set-3-2026-09-06.md`.
+
+Auditor scratch hash (md5; this audit predates this estate's move to
+sha256 scratch hashes, so the gate accepts 32 hex characters as well as
+64): written and locked to `blind.json` before the seed was opened,
+`255b277f95596036f632bb04561be176`.
+
+Agreement: 36 of 40 (section A, counting REJECT MATCH and KEEP SEPARATE as
+one class per the founder's 2026-09-06 ruling, which this file's own
+scoring note above already applies).
+
+Corrections (answer-level, field `expected`), applied in "Corrections
+after the 2026-09-06 blind audit" above and verified against this file's
+own `cases`:
+- W-05: expected, KEEP SEPARATE to LINK AS RELATED (APPLIED)

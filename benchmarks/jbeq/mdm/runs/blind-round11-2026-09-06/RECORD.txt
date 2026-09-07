@@ -1,0 +1,172 @@
+JBEQ-MDM blind round 11, 2026-09-06, frozen 70 under the day's final prompt
+and engine (tree: hub main plus PRs 435, 454, 457, 468 and the
+renamed-area branch). Extractor: a fresh Claude subagent (sonnet, effort
+high) reading only the extractor prompt, the schema and the 70 prompts;
+hashes recorded before any answer was read. A regression number by
+construction (the frozen 70 is a seen set); the temporal track is scored
+from the engine's own answers.
+
+SCORE (score.txt, scorer 2026-09-06.2, REJECT MATCH and KEEP SEPARATE
+score as one class for a refuted identity, founder ruling 2026-09-06):
+
+  address              10 of 10
+  entity-object        10 of 10
+  hierarchy             8 of 10
+  identifier            5 of 5
+  match-or-no-merge     8 of 10
+  requirements          3 of 5
+  survivorship         10 of 10
+  temporal              2 of 10
+  engine-decided: 46 of 60
+  direct-answered (not blind, not evidence about the engine): 10 of 10
+  critical false merges: 0 of 33
+  critical wrong: 5 of 33 (MM-06, TM-01, TM-04, TM-07, TM-10)
+  conservative wrongs: 1 (MM-06)
+  verdict line: JBEQ-MDM NOT READY
+
+SCORER ATTRIBUTION FINDING (report engine and direct halves separately, as
+briefed): the "engine-decided: 46 of 60" and "direct-answered: 10 of 10"
+lines above are the scorer's own literal output, but they misattribute the
+5 requirements (RQ) cases to the engine. cmd_score's _engine_decided_ids
+(scripts/jbeq_mdm.py) counts a case as engine-decided whenever
+decisions.jsonl's rule_fired is not literally "track-unsupported". For
+survivorship this is correct: decide()'s track-unsupported branch returns
+answer="NO-DATA", and "NO-DATA" IS one of SV's own allowed_answers, so
+rule_fired stays "track-unsupported" and the 10 SV cases are correctly
+excluded. For requirements, "NO-DATA" is NOT in RQ's own allowed_answers
+(["DECIDED", "ASSUMED", "INFERRED", "UNKNOWN"]), so finish()'s
+allowed-answers guard fires: it tries a CAUTION_RANK remap, finds none,
+and falls back to the literal answer "NO-DATA" with rule_fired rewritten
+to "safety-net" (scripts/jbeq_decide.py lines ~1012-1020). That
+overwritten rule_fired is what decisions.jsonl records for all five RQ
+cases, so _engine_decided_ids's exact-string check never recognizes them
+as track-unsupported and folds them into "engine-decided" instead.
+Reclassifying RQ correctly (its own track line already shows 3 of 5
+correct) gives the numbers the scorer should have printed:
+  true engine-decided (the 5 rule-based tracks plus temporal): 43 of 55
+  true direct-answered (requirements plus survivorship): 13 of 15
+Both halves sum to the same 56 of 70 total correct as the scorer's own
+figures (46+10 = 43+13 = 56), so no score is wrong, only which bucket
+each case's correctness is filed under. This is a gap in
+_engine_decided_ids's track-unsupported detection for any track whose own
+allowed_answers excludes "NO-DATA", not an extraction defect; the RQ fact
+sheets and RQ direct answers here are unaffected by it.
+
+CRITICAL WRONGS, with rule_fired from decisions.jsonl:
+
+  MM-06 [FALSE-MERGE RISK, not merged] expected KEEP SEPARATE, answered
+    ESCALATE (CONSERVATIVE). rule_fired=A. why: "blank field(s)
+    ['corporate_number'] but an observable fact supports without
+    confirming (corroborating_facts=[], identifiers=[],
+    contradicted_attributes=['company_name', 'lot_number'],
+    effective_dates={'as_of': None, 'candidate_effective_date': None,
+    'conflict': False}, hierarchy_parents=[])". NOTE: my fact sheet's
+    corroborating_facts is empty (correctly extracted: nothing in the
+    input corroborates the blank corporate number). Rule A still fired
+    ESCALATE off the presence of contradicted_attributes (company_name,
+    lot_number), which are REFUTING facts (a kanji-variant name and a
+    differing lot number), not corroborating ones. This reads as a gap in
+    rule A's own "supports without confirming" check treating any
+    non-empty adjacent field as support, rather than requiring an actual
+    corroborating fact; worth a design review, not an extraction fix,
+    since the fact sheet itself carried an empty corroborating_facts list
+    exactly as the input warranted.
+
+  TM-01 [HISTORICAL REASSIGNMENT] expected R1, answered NO-DATA.
+    rule_fired=rule_r. why: "rule rule_r chose 'KEEP SEPARATE', which is
+    outside this case's own allowed_answers ['R1', 'R2', 'NO-DATA'];
+    remapped along CAUTION_RANK to the nearest allowed answer instead of
+    NO-DATA: stated_relation=none and lifecycle='closed': a closed,
+    relocated or reused-identifier record is never folded into a live
+    one".
+
+  TM-04 [HISTORICAL REASSIGNMENT] expected R2, answered NO-DATA.
+    rule_fired=1. why: "rule 1 chose 'KEEP SEPARATE', which is outside
+    this case's own allowed_answers ['R1', 'R2', 'R3', 'NO-DATA'];
+    remapped along CAUTION_RANK to the nearest allowed answer instead of
+    NO-DATA: stated_relation='none': the input states no relation
+    (same_site_only reads like none here too: a shared address alone is
+    never the stated relation)".
+
+  TM-07 [HISTORICAL REASSIGNMENT] expected R1, answered NO-DATA.
+    rule_fired=rule_r. why: "rule rule_r chose 'KEEP SEPARATE', which is
+    outside this case's own allowed_answers ['R1', 'R2', 'NO-DATA'];
+    remapped along CAUTION_RANK to the nearest allowed answer instead of
+    NO-DATA: stated_relation=none and authoritative_identifier=
+    conflicting: the identifiers that should govern this decision
+    disagree outright; but requested_action='none' and
+    requested_relation_type=None record no proposal at all, so there is
+    nothing to reject: the records simply stay apart".
+
+  TM-10 [HISTORICAL REASSIGNMENT] expected R1, answered NO-DATA.
+    rule_fired=1. why: "rule 1 chose 'KEEP SEPARATE', which is outside
+    this case's own allowed_answers ['R1', 'R2', 'NO-DATA']; remapped
+    along CAUTION_RANK to the nearest allowed answer instead of NO-DATA:
+    stated_relation='none': the input states no relation (same_site_only
+    reads like none here too: a shared address alone is never the stated
+    relation)".
+
+  All four TM critical wrongs share the same root cause: the temporal
+  track has no dedicated rule table yet. It reuses the general
+  AUTO-MERGE/REJECT MATCH/... rule set (built for identity decisions
+  between two candidate records) and remaps whatever answer that rule set
+  reaches onto the case's own R1/R2/R3/NO-DATA vocabulary along
+  CAUTION_RANK; a remap that lands outside the allowed set collapses to
+  NO-DATA. This is squarely engine territory (per this brief: "the
+  temporal track is the engine's, never yours"), not an extraction
+  defect; the extraction supplied effective_dates and lifecycle facts for
+  every TM case as directed.
+
+SIX-CASE COMPARISON (answer and rule_fired, cross-checked against
+seed-2026-09-05.json's own expected field; all six correct):
+
+  AD-03: answered REJECT MATCH, rule_fired=L, expected REJECT MATCH.
+    why: "location_comparison=different_administrative_area: the two
+    addresses disagree at the administrative-area level despite any town
+    or lot number match".
+  AD-04: answered REJECT MATCH, rule_fired=rule_r, expected REJECT MATCH.
+    why: "stated_relation=none and location_comparison=
+    different_unit_in_building: the addresses match only down to the
+    wrong unit in the same building".
+  AD-05: answered SUGGEST MERGE, rule_fired=L, expected SUGGEST MERGE.
+    why: "location_comparison=same_area_renamed: the addresses name the
+    same place under an old and a new administrative name, but a rename
+    is a fact about the map, not confirmation the two registry rows are
+    one (founder ruling 2026-09-06)".
+  EO-04: answered REJECT MATCH, rule_fired=2, expected REJECT MATCH.
+    why: "stated_difference=different_legal_entity refutes the proposed
+    identity outright".
+  HI-09: answered REJECT MATCH, rule_fired=C, expected REJECT MATCH.
+    why: "tenant_boundary='none', stated_difference=
+    'different_hierarchy_dimension' states the two are not the same or
+    must never link".
+  ID-05: answered REJECT MATCH, rule_fired=rule_r, expected REJECT MATCH.
+    why: "stated_relation=none and authoritative_identifier=conflicting:
+    the identifiers that should govern this decision disagree outright".
+
+REGRESSION SCRIPT: scripts/jbeq_regression.py accepts only
+--fixture {a,b,c} plus --write-baseline/--force; it does NOT accept a
+sheets file or a new fixture flag, so a "fixture d" pin for round 11's own
+sheets is not something the harness supports today. Nothing was pinned or
+changed by this run; the default fixture (b) and its baseline are
+untouched.
+
+What the round 9 fixture c bar says restated under today's engine and
+denominators (python3 scripts/jbeq_regression.py --fixture c, the pinned
+round 6 fact sheets, NOT round 11's own sheets):
+
+  engine-decided: 37 of 45 (not the round 9 figure of 40 of 45; the
+  scorer version and the equivalence-class rules for REJECT MATCH vs
+  KEEP SEPARATE have moved since round 9, so the two numbers are not on
+  the same denominator)
+  critical wrong: 2 of 33 (MM-06, ID-02), on fixture c's own pinned
+  sheets, distinct from round 11's own MM-06 sheet above
+  jbeq-regression: no previously-correct case regressed against the
+  fixture c baseline
+
+OFF-ENUM FIXES: 0. `python3 scripts/jbeq_decide.py validate
+benchmarks/jbeq/mdm/runs/blind-round11-2026-09-06/fact-sheets.json`
+printed "validate: 70 fact sheet(s) OK" on the first run; no field was
+out of enum and none was corrected.
+
+Orchestrator note, 2026-09-07 09:2x JST: the lane that ran this round died on the account's session limit before writing its phase 1 hash values into this record, so the sentence above ("hashes recorded before any answer was read") is the lane's protocol, not a value this record can show. The sheets as committed hash to fact-sheets.json a1f41cb901cd2deb (first 16 of sha256) and extractor-notes.md 6de01f117cfe0485. Blindness for this round therefore rests on the protocol and the lane's transcript, not on a pre-answer hash line; treat it as a regression number (it is one by construction) and never as a qualification proof.

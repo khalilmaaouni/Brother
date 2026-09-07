@@ -77,5 +77,33 @@ class Refusal(unittest.TestCase):
         self.assertIn("untested", reason)
 
 
+
+
+class LifecycleRefs(unittest.TestCase):
+    def test_previous_tag_is_the_newest_older_v_tag(self):
+        import subprocess as sp
+        real = sp.run
+        def fake(argv, **kw):
+            class P: returncode = 0; stdout = "v1.0.10\nv1.0.8\nv1.0.9\nv0.9.6\njunk\n"
+            return P()
+        sp.run = fake
+        try:
+            self.assertEqual(AC._previous_tag("v1.0.9"), "v1.0.8")
+            self.assertEqual(AC._previous_tag("v1.0.11"), "v1.0.10")
+            self.assertIsNone(AC._previous_tag("v0.9.6"))
+        finally:
+            sp.run = real
+
+    def test_unknown_tags_read_no_data_never_pass(self):
+        ctx = AC.Context(ref=None, from_ref=None)
+        real = AC._umbrella_tag
+        AC._umbrella_tag = lambda root=None: None
+        try:
+            self.assertIn("could not be read", AC._lifecycle_refs(ctx))
+        finally:
+            AC._umbrella_tag = real
+        ctx2 = AC.Context(ref="v1.0.9", from_ref="v1.0.8")
+        self.assertEqual(AC._lifecycle_refs(ctx2), {"previous": "v1.0.8", "current": "v1.0.9"})
+
 if __name__ == "__main__":
     unittest.main()

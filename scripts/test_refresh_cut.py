@@ -35,9 +35,21 @@ except ImportError:
 VERSION = "9.9.9"
 
 
+def _isolated_git_env():
+    """Env for git commands against throwaway fixture repos: masks this
+    machine's global and system git config (e.g. tag.gpgsign/gpg.format set
+    for the real signed release) so a fixture commit never blocks on
+    signing that has nothing to do with the test. Pattern copied from
+    test_reproduce_export.py's own _isolated_git_env()."""
+    env = dict(os.environ)
+    env["GIT_CONFIG_GLOBAL"] = os.devnull
+    env["GIT_CONFIG_NOSYSTEM"] = "1"
+    return env
+
+
 def _git(args, cwd, check=True):
     proc = subprocess.run(["git"] + args, cwd=cwd, capture_output=True,
-                          text=True)
+                          text=True, env=_isolated_git_env())
     if check and proc.returncode != 0:
         raise AssertionError("fixture git failed: %s: %s"
                              % (args, proc.stderr))
@@ -218,6 +230,86 @@ class MainRunsDirtyCheckThenRegenerateThenStageThenCheck(unittest.TestCase):
         self.assertEqual(code, RC.EXIT_NODATA)
         self.assertEqual(regenerate_called, [])
         self.assertEqual(check_called, [])
+
+
+def _note_text(version, rev, digest, pr_lines):
+    """A release note text carrying the two self-naming fields
+    reproduce_export.compare_release_note masks (the source revision stamp
+    and the manifest digest) plus a pull request list line, shaped closely
+    enough to release_note_from_tree.py's real output for the two regexes
+    in reproduce_export.py (NOTE_STAMP_LINE_RE, NOTE_DIGEST_MASK_RE) to
+    match it."""
+    lines = [
+        "# Brother %s" % version,
+        "",
+        "## Source revision",
+        "",
+        "Cut from hub commit `%s` (hub, private)." % rev,
+        "",
+        "Export manifest digest `%s` over 3 exported file(s)." % digest,
+        "",
+        "## Changelog",
+        "",
+    ]
+    lines.extend(pr_lines)
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _write_note(tmp, version, rev, digest, pr_lines):
+    path = os.path.join(tmp, "docs", "releases", "%s.md" % version)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(_note_text(version, rev, digest, pr_lines))
+    return path
+
+
+class TheNotesContentCannotMoveSinceTheCutCommit(unittest.TestCase):
+    """Row measured 2026-09-07: the published v1.0.9 tag's note differs
+    from the note reproduce_export.py regenerates at its named source
+    revision by one pull request list line, beyond the two self-naming
+    fields reproduce_export.compare_release_note already masks. Root
+    cause: the note was regenerated on a HEAD that already carried a merge
+    the cut commit's branch did not, so the refresh changed the note's
+    content, not only its stamp. refuse_if_note_moved must catch that
+    before the note and manifest are staged."""
+
+    def setUp(self):
+        self.tmp = _make_repo()
+        # The note as it stood at the cut commit (HEAD), committed.
+        _write_note(self.tmp, VERSION, rev="a" * 40, digest="b" * 64,
+                   pr_lines=["- #460 wbs/one"])
+        _git(["add", "-A"], self.tmp)
+        _git(["commit", "-q", "-m", "cut"], self.tmp)
+
+    def test_a_note_that_gained_a_pull_request_line_refuses(self):
+        # The regenerated note: stamp and digest free to move, but the
+        # pull request list gained a line the committed note never had.
+        _write_note(self.tmp, VERSION, rev="c" * 40, digest="d" * 64,
+                   pr_lines=["- #460 wbs/one",
+                            "- #466 wbs/portability-release"])
+        code, lines = RC.refuse_if_note_moved(VERSION, root=self.tmp)
+        self.assertEqual(code, RC.EXIT_REFUSED, lines)
+        self.assertTrue(any(
+            "the note's content moved since the cut commit" in l
+            for l in lines), lines)
+        self.assertTrue(any("466" in l for l in lines), lines)
+
+    def test_only_the_stamp_and_digest_moving_clears(self):
+        # The regenerated note: same pull request list, only the two
+        # fields compare_release_note already exists to mask have moved.
+        _write_note(self.tmp, VERSION, rev="c" * 40, digest="d" * 64,
+                   pr_lines=["- #460 wbs/one"])
+        code, lines = RC.refuse_if_note_moved(VERSION, root=self.tmp)
+        self.assertIsNone(code, lines)
+
+    def test_a_first_cut_with_no_committed_note_is_not_a_refusal(self):
+        other_version = "8.8.8"
+        _write_note(self.tmp, other_version, rev="c" * 40, digest="d" * 64,
+                   pr_lines=["- #460 wbs/one"])
+        code, lines = RC.refuse_if_note_moved(other_version, root=self.tmp)
+        self.assertIsNone(code, lines)
+        self.assertEqual(lines, [])
 
 
 if __name__ == "__main__":

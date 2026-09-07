@@ -1,0 +1,95 @@
+JBEQ-MDM regression-2026-09-06-u4-renamed-area, 2026-09-06. THIS IS A
+REGRESSION RE-DECISION ON THE SEEN SET U4, NOT A NEW QUALIFICATION RUN: U4
+(benchmarks/jbeq/mdm/runs/qualification-u4-2026-09-06/) was read and
+reasoned about by the opus navigator who measured both 2026-09-06 rulings
+below, so from that moment U4 is a SEEN set, exactly as U1 through U3
+became seen after their own reviews. U4 is spent: this run exists only to
+show what the corrected seed plus the ruling's engine change do to a set
+already on record, never as a fresh qualification figure. The next real
+qualification requires a new blind unseen set, authored and audited blind
+against this engine.
+
+TWO FOUNDER RULINGS, both 2026-09-06 at about 20:4x JST in the question
+UI, are folded into this run:
+
+1. decision-p0-3-same-area-renamed-2026-09-06.json, ruling A: a renamed
+   area (location_comparison=same_area_renamed) is a fact about the map,
+   not confirmation that the two registry rows are one, so it earns a
+   merge with a person confirming, never an outright one. Engine change:
+   scripts/jbeq_decide.py rule L now answers SUGGEST MERGE for
+   same_area_renamed (mutation id renamed_area_needs_a_person), not
+   AUTO-MERGE. Seed correction: benchmarks/jbeq/mdm/unseen-4-2026-09-06.json
+   W4-21 and W4-24, expected corrected from LINK AS RELATED to SUGGEST
+   MERGE, label_corrected naming this ruling.
+2. decision-p0-3-relocation-gate-2026-09-06.json, ruling A: the engine's
+   lifecycle gate keeps its relocated arm; a relocation merge is always
+   confirmed by a person. No engine change (the gate already answered
+   SUGGEST MERGE for a relocated record). Seed correction:
+   benchmarks/jbeq/mdm/unseen-4-2026-09-06.json W4-26, expected corrected
+   from AUTO-MERGE to SUGGEST MERGE, label_corrected naming this ruling.
+
+METHOD. U4's committed fact-sheets.json (copied here unchanged from
+qualification-u4-2026-09-06/; byte-identical, diffed) was re-decided with
+`python3 scripts/jbeq_decide.py decide fact-sheets.json --out
+engine-answers.json --decisions decisions.jsonl` under the
+renamed-area-needs-a-person-fixed engine. U4's committed
+direct-answers.json (the 10 hand-answered requirements/survivorship
+cases, copied here unchanged) was merged over the engine's own answers
+for those same 10 ids, exactly as the original qualification run did,
+producing answers.json. That was scored with `python3 scripts/jbeq_mdm.py
+score answers.json --seed ../../unseen-4-2026-09-06.json` (the corrected
+seed; not modified by this run), full output in score.txt beside this
+file.
+
+POSITIVE CONTROL, before any engine edit: `git show
+origin/wbs/jbeq-qualification-u4:benchmarks/jbeq/mdm/runs/qualification-u4-2026-09-06/fact-sheets.json`
+is byte-identical to the copy re-decided here, and decide() run under the
+pre-ruling engine reproduced qualification-u4-2026-09-06/decisions.jsonl
+exactly (diff, zero lines).
+
+RESULT, key lines from score.txt (against the corrected seed):
+
+  engine-decided: 24 of 30 (up from 22 of 30 for the ORIGINAL U4 answers
+    re-scored against this same corrected seed, see the RECORD's "(a)"
+    table; up from 18 of 25 against the pre-correction seed)
+  critical false merges: 0 of 32 (unchanged; W4-21/W4-24 were never false
+    merges once the seed itself reads SUGGEST MERGE)
+  critical wrong: 5 of 32 (W4-03, W4-04, W4-22, W4-23, W4-36; down from 7
+    for the original answers under this corrected seed, and down from 8
+    under the pre-correction seed: W4-21, W4-24 and W4-26 all fixed)
+  conservative wrongs: 1 (W4-36)
+
+EVERY CASE THAT CHANGED, exhaustively diffed (old engine vs. new engine
+over the full U4 fact-sheets.json, and separately over the frozen
+regression fixtures a, b and c and U1's and U2's own fact-sheets.json; no
+other case anywhere moved):
+
+  W4-21: engine AUTO-MERGE -> SUGGEST MERGE. FIXED. rule L now answers
+    SUGGEST MERGE for location_comparison=same_area_renamed. Seed's own
+    expected also corrected (LINK AS RELATED -> SUGGEST MERGE, ruling 1),
+    so this moves from a false disagreement to a hit.
+  W4-24: same mechanism as W4-21, same fix, same seed correction.
+  W4-26: engine answer unchanged (SUGGEST MERGE via gate-lifecycle,
+    before and after; ruling 2 makes no engine change). Seed's own
+    expected corrected (AUTO-MERGE -> SUGGEST MERGE, ruling 2), so this
+    moves from a wrong label to a hit with no engine change at all.
+  AD-05 (benchmarks/jbeq/mdm/regression-sheets-2026-09-06b.json and
+    -2026-09-06c.json, NOT this U4 run; frozen, non-critical): engine
+    AUTO-MERGE -> SUGGEST MERGE, matching its unchanged expected SUGGEST
+    MERGE in seed-2026-09-05.json (gains from wrong to correct). Fixture
+    a's own AD-05 sheet carries location_comparison=same_chiban_
+    different_notation, not same_area_renamed, so it is untouched by this
+    change and was already correct.
+  Nothing else changed anywhere: `python3 scripts/jbeq_regression.py
+  --fixture a`, `b` and `c` each print "no previously-correct case
+  regressed"; an exhaustive answer-by-answer diff (old engine vs. new
+  engine) over fixtures a/b/c and over U1's and U2's own
+  fact-sheets.json returns zero lines beyond AD-05 on b and c.
+
+WHAT THIS DOES NOT PROVE. W4-03, W4-04, W4-22, W4-23 and W4-36 remain
+wrong, for the same reasons named in qualification-u4-2026-09-06/RECORD.txt
+(a stated fact that should refute or gate a proposal is read the other
+way by the current rule table). None of this run's numbers should be read
+as approaching the directive's own exit gate, and no claim of
+qualification should be made on any re-run of U4: it is a regression
+number on a seen, spent set, not a fresh qualification figure.

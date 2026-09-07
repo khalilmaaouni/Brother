@@ -16,6 +16,15 @@ import subprocess
 import sys
 import tempfile
 
+#: scripts/real_logs.py, the shared "no real machine log grew" guard (row
+#: M3, the 2026-09-07 reflection). Every subprocess call below already
+#: points HOME at a temp dir, so this is a redundant net over the whole
+#: process rather than a fix for a known leak here, matching how the other
+#: hook suites are wired.
+_REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(_REPO_ROOT / "scripts"))
+import real_logs  # noqa: E402
+
 HOOK = str(pathlib.Path(__file__).with_name("repeat_guard.py"))
 
 results = []
@@ -135,6 +144,7 @@ def last_row(home, payload):
 
 
 def main():
+    real_logs_before = real_logs.snapshot()
     with tempfile.TemporaryDirectory() as home:
         os.makedirs(os.path.join(home, ".claude", "repeat-guard"))
         cmd = "pytest tests/test_thing.py -k broken"
@@ -383,6 +393,8 @@ def main():
               (row2 or {}).get("ts"), None)
         check("17c the rest of the row is unaffected by the broken clock",
               (row2 or {}).get("ok"), True)
+
+    real_logs.assert_unchanged(real_logs_before, context=__name__)
 
     bad = results.count(False)
     print(f"\n{len(results)} cases, {bad} failures")

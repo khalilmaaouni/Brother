@@ -1,0 +1,770 @@
+{
+ "_doc": "The fifth JBEQ-MDM unseen qualification set (U5), authored blind on 2026-09-07 per jbeq_mdm.load_seed's shape: _doc, authored_at, critical_classes, cases, scoring. Every company, store, person, address and identifier in this file is invented; none resembles a real corporation and no client or team term appears in it. This set was authored with no access to seed-2026-09-05.json or any prior unseen set, per benchmarks/jbeq/mdm/unseen-5-2026-09-07-RECORD.md.",
+ "authored_at": "2026-09-07",
+ "critical_classes": [
+  "FALSE MERGE",
+  "WRONG LEGAL ENTITY",
+  "CROSS-CUSTOMER CONTAMINATION",
+  "WRONG TAX IDENTITY",
+  "WRONG PAYER",
+  "WRONG STORE ASSIGNMENT",
+  "HISTORICAL REASSIGNMENT",
+  "HIERARCHY REVERSAL",
+  "SOURCE PRECEDENCE VIOLATION",
+  "CROSS-TENANT DATA LEAK",
+  "UNREVERSIBLE MERGE WITHOUT EVIDENCE"
+ ],
+ "cases": [
+  {
+   "id": "W5-01",
+   "track": "address",
+   "input": "甲田印刷株式会社の拠点台帳では、中央区新田1丁目2番3号にあった工場が先月、賃貸契約満了に伴い同じ中央区内の新田3丁目4番5号へ移転した。代表者氏名と代表電話番号は移転前後で変わっていない。旧住所の配送先コードには過去1年分の出荷実績が計12件記録されており、この履歴は移転後も参照できる状態を保つ必要があると台帳の備考欄に記されている。",
+   "question": "新旧の配送先コードを同一の配送先として1件に統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "SUGGEST MERGE",
+   "critical": true,
+   "critical_class": "HISTORICAL REASSIGNMENT",
+   "rationale": "Relocation within the same administrative area (rule 12), medium evidence (matching representative and phone, no authoritative identifier stated) plus a separately stated confirmation reason (a year of shipment history that must stay traceable): rule 9 gives SUGGEST MERGE, never AUTO-MERGE. Wrongly kept separate, that history stays orphaned under a dead code; wrongly auto-merged, nobody checks it."
+  },
+  {
+   "id": "W5-02",
+   "track": "address",
+   "input": "倉庫管理台帳には、2019年の市町村再編で隣接する町へ編入された旧町名の表記で登録された保管区画の記録と、同じ番地・同じ建物名で新町名の表記で登録された保管区画の記録が別々に存在する。両区画にはそれぞれ継続中の保管契約が紐づいており、契約担当者は同一区画への一本化を希望していると備考にある。",
+   "question": "この2件の保管区画記録は同一の倉庫区画として統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "SUGGEST MERGE",
+   "critical": true,
+   "critical_class": "HISTORICAL REASSIGNMENT",
+   "rationale": "location_comparison=same_area_renamed reads like notation_variant_only (EXTRACTOR-PROMPT, rule 12), which is medium evidence rather than an authoritative identifier match; the ongoing storage contracts on both sides are the separately stated confirmation reason, so rule 9 gives SUGGEST MERGE. Merging silently would reattach one party's contract history without a steward looking at it."
+  },
+  {
+   "id": "W5-03",
+   "track": "address",
+   "input": "菓子卸売業を営む未崎菓子の店舗台帳には、県内6店舗の配送を一括で引き受ける共同配送センターの記録と、そのうちの1店舗である駅前店の記録がある。両者は同じ住所で登録されているが、法人番号の一致、親子関係、役割の対、商流上の経由のいずれも記載は無く、共同配送センターは6店舗分の入出庫をまとめて処理する拠点であると明記されている。",
+   "question": "共同配送センターの記録と駅前店の記録を、住所が同じであることを理由に関係づけてよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "KEEP SEPARATE",
+   "critical": true,
+   "critical_class": "WRONG STORE ASSIGNMENT",
+   "rationale": "Boundary rule 5: same address only, no stated corporate/parent-child/role/trade-flow relation, and one side is a stated one-to-many function (a hub covering six stores). KEEP SEPARATE. Linking or merging would misattribute the other five stores' movements to the 駅前店 record alone."
+  },
+  {
+   "id": "W5-04",
+   "track": "address",
+   "input": "支店開設申請の入力フォームには、支店名「みなと支店」、電話番号、開設予定日、郵便番号が記入されているが、都道府県欄は未記入のまま提出されている。担当者欄には稟議番号のみが記されている。",
+   "question": "この支店を本社と同一都道府県内の拠点として記録してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "NO-DATA",
+   "critical": false,
+   "critical_class": null,
+   "rationale": "Blank prefecture field with no corroborating fact anywhere in the input (no matching banchi, no matching postal code range, nothing tying the branch to the head office's area): boundary rule 8 reserves NO-DATA for exactly this, when nothing corroborates the blank. The form simply omits the fact; nothing in it says so."
+  },
+  {
+   "id": "W5-05",
+   "track": "address",
+   "input": "貸ビル管理会社の賃貸借台帳には、同一建物の3階を戌井硝子株式会社が、8階を全く別のテナントである亥本鋳造株式会社がそれぞれ賃借していると明記されている。物流システムからは、建物住所が同一であることを根拠に3階と8階の出荷先コードを統合してよいかという照会が届いている。",
+   "question": "3階と8階の出荷先コードを、建物住所が同一であることを根拠に統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "REJECT MATCH",
+   "critical": true,
+   "critical_class": "CROSS-TENANT DATA LEAK",
+   "rationale": "The input states an explicit, different named tenant on the other floor: a stated tenant wall, exactly what example_rule_C guards against. REJECT MATCH. Merging would leak one tenant's shipment data into a different tenant's code."
+  },
+  {
+   "id": "W5-06",
+   "track": "entity-object",
+   "input": "卸売業者甲越物産の仕入先マスタには、旧本店住所で登録された記録と新本店住所で登録された記録が並存している。両記録とも代表者氏名と屋号の表記が完全に一致しているが、法人番号欄はいずれの記録も空欄のままである。旧本店コード宛の未払い請求書が3件残っており、支払処理担当者はどちらのコードに紐づけるべきか確認を求めている。",
+   "question": "旧本店コードと新本店コードは同一の仕入先として統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "SUGGEST MERGE",
+   "critical": true,
+   "critical_class": "WRONG PAYER",
+   "rationale": "No authoritative identifier is stated on either side (corporate number blank both sides), so the matching representative name and trade name are medium evidence at best; the unpaid invoices are the separately stated confirmation reason. Rule 9: SUGGEST MERGE. Left unmerged, part of the payment continues to target a dead payer code."
+  },
+  {
+   "id": "W5-07",
+   "track": "entity-object",
+   "input": "衣料品チェーンを展開する乙部工業の店舗台帳では、南口店が閉店し、2週間後に徒歩5分の場所で北口店として営業を再開したことが、閉店報告書に「南口店の移転」であると明記されている。両店舗はPOS端末IDを引き継いで使用しており、南口店の会員ポイント残高を北口店に引き継ぐ必要があると同じ報告書に記載されている。",
+   "question": "南口店の記録と北口店の記録を同一店舗として統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "SUGGEST MERGE",
+   "critical": true,
+   "critical_class": "WRONG STORE ASSIGNMENT",
+   "rationale": "lifecycle=relocated does not itself refute identity (rule 12); the reused POS terminal id is medium evidence (not an authoritative identifier), and the stated loyalty-point carryover is a separately stated confirmation reason. Rule 9: SUGGEST MERGE. A wrong keep-separate answer strands one store's balances at a store no longer trading."
+  },
+  {
+   "id": "W5-08",
+   "track": "entity-object",
+   "input": "文具卸を営む丙谷紡績の仕入先台帳には同一の取引先について2件の支払先レコードがあり、両方とも法人番号1234567890123が有効な値として記載されている。役割区分はいずれも支払先(payer)で一致しており、店舗や拠点単位の区別を示す記述、契約上の区分、期限切れの手続きを示す記述はいずれも無い。",
+   "question": "この2件の支払先レコードは統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "AUTO-MERGE",
+   "critical": true,
+   "critical_class": "WRONG PAYER",
+   "rationale": "Both sides state the same valid corporate number, no site/store distinction, no tenant issue, no lifecycle conflict: strong, unexplained conflict-free identifier match with matching roles. Rule 9: AUTO-MERGE, no confirmation needed. Left split, this payer's remittances keep routing through two separate payer codes."
+  },
+  {
+   "id": "W5-09",
+   "track": "entity-object",
+   "input": "名寄せエンジンは、電話番号が一致していることを根拠に丁子鉄鋼の取引先アカウントAと取引先アカウントBを同一候補として提示した。しかし取引先台帳の履歴欄には、アカウントBが昨年、譲渡契約書に基づき全く別の法人である戊井鉄鋼へ譲渡済みであると明記されている。",
+   "question": "アカウントAとアカウントBを、電話番号の一致を根拠に同一の取引先として統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "REJECT MATCH",
+   "critical": true,
+   "critical_class": "WRONG LEGAL ENTITY",
+   "rationale": "A stated transfer to another legal entity is exactly the refuting fact boundary rule 6 asks for, on a proposal carried on a stated ground (matching phone number): REJECT MATCH. Merging would attribute account B's future activity to the wrong legal entity."
+  },
+  {
+   "id": "W5-10",
+   "track": "entity-object",
+   "input": "移行担当者からの依頼票には、候補レコードBの取引履歴を生存レコードAへ書き込み、Bを廃止コードとして処理してほしいとある。台帳には、AとBがそれぞれ異なる法人番号(Aは9988776655443、Bは1122334455667)を持つ別の法人であると明記されている。",
+   "question": "候補レコードBの取引履歴を生存レコードAへ書き込んで統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "REJECT MATCH",
+   "critical": true,
+   "critical_class": "CROSS-CUSTOMER CONTAMINATION",
+   "rationale": "requested_action=record_write with a stated refuting fact (different corporate numbers) present: rule 13 says the refuting fact outranks any relation and answers REJECT MATCH, not LINK AS RELATED or a silent KEEP SEPARATE. Writing B's history into A would contaminate A's record with a different legal entity's transactions."
+  },
+  {
+   "id": "W5-11",
+   "track": "hierarchy",
+   "input": "楽器販売会社の子安運輸グループでは、資本上の親会社は庚崎ホールディングス、商流上の親会社(仕入経由先)は辛島商事、レポーティング上の親会社(月次報告の提出先)は関東統括本部であると、それぞれの台帳に個別に明記されている。3つの階層はいずれも現在も有効である。",
+   "question": "この3種類の親会社情報を1件の関係として記録してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "LINK AS RELATED",
+   "critical": false,
+   "critical_class": null,
+   "rationale": "Boundary rule 11: capital, trade-flow and reporting parents are independent hierarchies; three different valid parents is evidence of a relationship, not a conflict to resolve to one. LINK AS RELATED, reserving ESCALATE for an actual conflict, which is absent here."
+  },
+  {
+   "id": "W5-12",
+   "track": "hierarchy",
+   "input": "組織変更依頼票には、壬生倉庫を癸浦建材の資本上の子会社として登録したいとある。しかし壬生倉庫の株主名簿には、発行済株式の62%を保有する筆頭株主は子安運輸であり、癸浦建材の保有比率はゼロであると明記されている。",
+   "question": "壬生倉庫を癸浦建材の資本上の子会社として登録してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "REJECT MATCH",
+   "critical": true,
+   "critical_class": "HIERARCHY REVERSAL",
+   "rationale": "requested_parent (癸浦建材) differs from the entity the shareholder register actually states as majority holder (子安運輸): a stated fact refutes the proposed hierarchy, boundary rule 2. REJECT MATCH. Writing the requested parent would reverse the true capital chain."
+  },
+  {
+   "id": "W5-13",
+   "track": "hierarchy",
+   "input": "レポーティング体系の更新依頼には、寅松水産の月次報告提出先を北陸統括部へ書き換えたいとある。しかし前年度の内部監査報告書には、北陸統括部は寅松水産と資本関係も業務関係も一切持たないと監査人が明記した指摘事項が記録されている。",
+   "question": "寅松水産のレポーティング上の親組織を北陸統括部へ書き換えてよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "REJECT MATCH",
+   "critical": true,
+   "critical_class": "HIERARCHY REVERSAL",
+   "rationale": "requested_action=record_write for a reporting-parent field, with a stated audit finding that refutes the proposed parent entirely: rule 13's refuting fact outranks the write proposal. REJECT MATCH, not a silent write."
+  },
+  {
+   "id": "W5-14",
+   "track": "hierarchy",
+   "input": "グループ会社である卯月通信と辰野包装は、それぞれ自社の会社コードで外部の資材供給元である巳杉家具について個別に与信枠と価格条件を保持している。両社の記録は、同一の外部取引先である巳杉家具を指しているという点で一致しているが、与信枠と価格条件はグループの運用方針により会社コードごとに独立管理されている。",
+   "question": "卯月通信側と辰野包装側の巳杉家具レコードを1件に統合してよいか、それとも別の扱いとすべきか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "LINK AS RELATED",
+   "critical": true,
+   "critical_class": "WRONG PAYER",
+   "rationale": "Boundary rule 7: separate company-code credit and pricing records for one external counterparty must not merge, but both naming the same external entity is itself the relation. LINK AS RELATED. AUTO-MERGE here would collapse two independently managed credit limits, misapplying one company's exposure to the other's payer code."
+  },
+  {
+   "id": "W5-15",
+   "track": "hierarchy",
+   "input": "同じビルに本社機能を置く午来電材と未崎菓子は、それぞれ別の法人として登記されており、資本関係、親子関係、役割の対、商流上の経由のいずれも台帳に記載は無い。午来電材の総務部は、両社共通の受付業務と郵便物仕分けを一括して担当していると社内規程に明記されている。",
+   "question": "午来電材と未崎菓子を、本社所在地が同一であることを理由に関係づけてよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "KEEP SEPARATE",
+   "critical": true,
+   "critical_class": "WRONG LEGAL ENTITY",
+   "rationale": "Same site only, no stated relation, and one side performs a one-to-many shared-service function (rule 5, extended by round 11 to treat same_site_only like none): KEEP SEPARATE. Linking or merging would collapse two distinct legal entities that merely share a building."
+  },
+  {
+   "id": "W5-16",
+   "track": "identifier",
+   "input": "顧客コードCUST-7710は、旧顧客である申村塗料が廃業した際に一度無効化されたが、半年後に全く関係のない新規顧客である酉川紙業へ同じコードが再割当てされたと顧客マスタの履歴に明記されている。移行ツールは、コードが一致することを根拠に旧顧客名義の過去注文を新顧客の実績として計上する候補を提示している。",
+   "question": "旧顧客名義の過去注文を、コードの一致を根拠に新顧客の実績として統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "REJECT MATCH",
+   "critical": true,
+   "critical_class": "WRONG LEGAL ENTITY",
+   "rationale": "authoritative_identifier=conflicting via reuse: the same identifier value now names a different, unrelated entity after the original holder closed. REJECT MATCH. Merging would attribute the closed company's orders to an unrelated new customer."
+  },
+  {
+   "id": "W5-17",
+   "track": "identifier",
+   "input": "法人番号3344556677889は、旧法人である戌井硝子株式会社が解散した後、国税庁の法人番号公表サイトの記録によれば別の新設法人である亥本電材株式会社に再付番されたと台帳の注記にある。経理担当者は、この法人番号が一致することを根拠に旧法人宛の過去請求書を現在の付番先である亥本電材の請求として突合してよいか照会している。",
+   "question": "旧法人宛の過去請求書を、法人番号の一致を根拠に現在の付番先の請求として突合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "REJECT MATCH",
+   "critical": true,
+   "critical_class": "WRONG TAX IDENTITY",
+   "rationale": "A reused corporate number now naming an unrelated successor is authoritative_identifier=conflicting by definition (round 8). REJECT MATCH. Matching on the reused number would attribute the wrong entity's invoices to today's number holder for tax purposes."
+  },
+  {
+   "id": "W5-18",
+   "track": "identifier",
+   "input": "サイトID SITE-041は、閉店した旧店舗が使用していたが、閉店から4か月後に別のフランチャイズオーナーが全く別の場所で新規開業した店舗に同じIDが割り振られたと店舗台帳の注記に明記されている。本部の実績集計システムは、サイトIDが一致することを根拠に新店舗の売上を旧店舗の年間目標値と紐づける候補を提示している。",
+   "question": "新店舗の売上実績を、サイトIDの一致を根拠に旧店舗の年間目標値と紐づけてよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "REJECT MATCH",
+   "critical": true,
+   "critical_class": "WRONG STORE ASSIGNMENT",
+   "rationale": "The site id was reassigned to an unrelated store under a different owner: authoritative_identifier=conflicting via reuse, this time on a store object. REJECT MATCH. Linking would attribute the new owner's performance data to the closed store's target and owner."
+  },
+  {
+   "id": "W5-19",
+   "track": "identifier",
+   "input": "経理システムには、個人事業主である卯月茶舗の適格請求書発行事業者番号T2244668800223と、法人である辰野物流の法人番号2244668800223が数字として完全に一致していると突合ログに記録されている。両者が個人と法人という異なる法人格種別であることは台帳に明記されている。",
+   "question": "この2件の識別子は数字が一致することを根拠に同一の取引先として統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "REJECT MATCH",
+   "critical": true,
+   "critical_class": "WRONG TAX IDENTITY",
+   "rationale": "Rule 10: a numeric match across a stated different identifier domain and different legal person type (individual invoice registration number versus corporate number) invalidates itself. REJECT MATCH. Consolidating would file one taxpayer's invoices under the other's tax identity."
+  },
+  {
+   "id": "W5-20",
+   "track": "identifier",
+   "input": "移行対応表(クロスウォーク)は、旧システムの取引先ID OLD-2201と新システムの取引先ID NEW-6604を対応付けているが、この対応表自体は移行担当者による検証を経ていないと移行ログに明記されている。台帳の備考欄には対応表を作成した日付のみが記されている。",
+   "question": "OLD-2201とNEW-6604を、この移行対応表を根拠に統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "ESCALATE",
+   "critical": true,
+   "critical_class": "UNREVERSIBLE MERGE WITHOUT EVIDENCE",
+   "rationale": "An unvalidated crosswalk is medium evidence at best (EXTRACTOR-PROMPT rule 1), and rule 9's 2026-09-06 repair says medium evidence with no separately stated confirmation reason anywhere in the input gives ESCALATE, not SUGGEST MERGE. Merging on the crosswalk alone would be exactly the no-evidence-floor merge section 18 warns against."
+  },
+  {
+   "id": "W5-21",
+   "track": "match-or-no-merge",
+   "input": "名寄せツールは、取引先名の類似度スコア0.79のみを根拠に、休止予定の取引先レコードAとレコードBを統合候補として提示した。両レコードとも法人番号を含む識別子欄は空欄であり、このレコードは統合完了後に元の情報は復元できない形で削除される予定であると処理手順書に記されている。",
+   "question": "類似度スコアのみを根拠に、この2件を統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "ESCALATE",
+   "critical": true,
+   "critical_class": "UNREVERSIBLE MERGE WITHOUT EVIDENCE",
+   "rationale": "Weak evidence (score_only, missing_identifier): rule 9 answers ESCALATE regardless of the planned irreversible deletion, since irreversibility never upgrades weak evidence into a merge basis."
+  },
+  {
+   "id": "W5-22",
+   "track": "match-or-no-merge",
+   "input": "未検証の移行対応表は、仕入先コードVEN-330とVEN-771を同一の仕入先候補として結び付けている。この対応表自体は検証を経ていないと明記されている一方、両コードには合計8年分にわたる継続的な取引履歴がそれぞれ個別に記録されており、この履歴を引き継ぐ必要があると経理部門からの照会にある。",
+   "question": "VEN-330とVEN-771を、この移行対応表を根拠に統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "SUGGEST MERGE",
+   "critical": true,
+   "critical_class": "WRONG PAYER",
+   "rationale": "Unvalidated crosswalk is medium evidence, and the eight years of transaction history is a confirmation reason stated separately from the crosswalk itself: rule 9 gives SUGGEST MERGE. Left split, this vendor's payments continue to route through two payer codes."
+  },
+  {
+   "id": "W5-23",
+   "track": "match-or-no-merge",
+   "input": "経理台帳には、卸売業者向け取引先コードAとコードBについて、それぞれが保有する法人番号が末尾1桁だけ異なっており、この相違は入力担当者の転記誤りによるものであると担当者本人の申告メモに説明つきで記録されている。コードAでは既に今月分の振込が実行済みであり、この処理は取り消せないと経理システムのログにある。",
+   "question": "コードAとコードBを、この識別子の相違を踏まえて統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "SUGGEST MERGE",
+   "critical": true,
+   "critical_class": "CROSS-CUSTOMER CONTAMINATION",
+   "rationale": "An explained conflicting identifier (a stated transcription-error reason, not an unexplained clash) is medium evidence, and the already-executed, irreversible payment run is a confirmation reason stated separately from that evidence: rule 9 gives SUGGEST MERGE, never AUTO-MERGE. If these are in fact two different customers, an unreviewed auto-merge would contaminate one customer's ledger with the other's."
+  },
+  {
+   "id": "W5-24",
+   "track": "match-or-no-merge",
+   "input": "名寄せエンジンは、貸ビル内の同名表記であることを根拠に、5階のテナントである甲東堂と9階のテナントである子安運輸を統合候補として提示した。しかし賃貸借契約台帳には、5階と9階はそれぞれ別のテナントとして契約されていると明記されている。",
+   "question": "5階と9階のテナント記録を、名称表記が同じであることを根拠に統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "REJECT MATCH",
+   "critical": true,
+   "critical_class": "CROSS-TENANT DATA LEAK",
+   "rationale": "A proposal carried on a stated ground (matching name notation), refuted by an explicit different-tenant fact in the lease register: example_rule_C's tenant wall. REJECT MATCH. Merging would leak one tenant's records into the other's."
+  },
+  {
+   "id": "W5-25",
+   "track": "match-or-no-merge",
+   "input": "問い合わせフォームには、取引先名の読みだけが一致するという理由で取引先レコードCとレコードDの統合を依頼する内容が記載されている。両レコードとも法人番号などの識別子欄はいずれも空欄であり、それ以外に一致や矛盾を示す記述は見当たらない。",
+   "question": "読みの一致のみを根拠に、レコードCとレコードDを統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "ESCALATE",
+   "critical": true,
+   "critical_class": "FALSE MERGE",
+   "rationale": "A shared reading alone, with identifiers missing on both sides, is weak evidence (score_only/missing_identifier territory): rule 9 gives ESCALATE. Merging on a reading match alone is exactly the shape of a false merge."
+  },
+  {
+   "id": "W5-26",
+   "track": "temporal",
+   "input": "情報源R1は基幹ERPに登録された顧客住所、R2はCRMに登録された顧客住所、R3は営業担当者が作成した手入力の一時修正シートである。社内規程は、R3による上書きは申請時に定めた有効期間内に限り基幹ERPより優先すると定めている。当該顧客のR3修正シートの有効期間は昨日満了しており、基幹ERPの住所は現在も最新の値として維持されている。",
+   "question": "現時点で顧客住所として正とすべき情報源はどれか。",
+   "allowed": [
+    "R1",
+    "R2",
+    "R3",
+    "NO-DATA"
+   ],
+   "expected": "R1",
+   "critical": true,
+   "critical_class": "SOURCE PRECEDENCE VIOLATION",
+   "rationale": "The manual override's stated validity window expired; the policy gives it precedence only within that window. With the window closed, precedence reverts to the core ERP, R1. Treating the expired override as still authoritative is exactly the source-precedence mistake this class names."
+  },
+  {
+   "id": "W5-27",
+   "track": "temporal",
+   "input": "情報源R1は旧店舗コード宛に登録された出荷履歴、R2は新店舗コード宛に登録された出荷履歴である。閉店報告書には、旧店舗が8月1日付で閉店し、同日以降の出荷は新店舗コードで処理する運用に切り替わったと明記されている。ところが8月15日付の出荷伝票が、閉店済みの旧店舗コード側であるR1に記録されている。",
+   "question": "8月15日付の出荷はどちらの情報源に帰属させるべきか。",
+   "allowed": [
+    "R1",
+    "R2",
+    "R3",
+    "NO-DATA"
+   ],
+   "expected": "R2",
+   "critical": true,
+   "critical_class": "HISTORICAL REASSIGNMENT",
+   "rationale": "A record dated after a stated closure, filed under the pre-closure code, is the self-contradiction EXTRACTOR-PROMPT rule 3 names: the August 15 shipment belongs under R2, the post-closure code, and R1's filing is the error to correct, not the source to trust."
+  },
+  {
+   "id": "W5-28",
+   "track": "temporal",
+   "input": "情報源R1は販売管理システムに記録された新価格の発効日、R2は経理システムに記録された新価格の発効日である。両システムの発効日は1週間ずれている。",
+   "question": "新価格の発効日として正とすべき情報源はどれか。",
+   "allowed": [
+    "R1",
+    "R2",
+    "R3",
+    "NO-DATA"
+   ],
+   "expected": "NO-DATA",
+   "critical": false,
+   "critical_class": null,
+   "rationale": "Two systems disagree on an effective date and nothing else in the input names which system governs pricing effective dates, states a validity window, or names an audit figure: nothing corroborates either side, so boundary rule 8's NO-DATA branch applies, without the input ever saying so in words."
+  },
+  {
+   "id": "W5-29",
+   "track": "temporal",
+   "input": "情報源R1は本社が保持する在庫台帳、R2は支店が独自に集計している手元記録、R3は今期完了した外部監査で確定した年次棚卸データである。社内規程は、R1とR2が食い違う場合は必ずR3を正とすると定めている。今期はR1とR2の数値が互いに異なっており、さらにその両方がR3の確定値とも異なっている。",
+   "question": "今期の在庫数量として正とすべき情報源はどれか。",
+   "allowed": [
+    "R1",
+    "R2",
+    "R3",
+    "NO-DATA"
+   ],
+   "expected": "R3",
+   "critical": true,
+   "critical_class": "SOURCE PRECEDENCE VIOLATION",
+   "rationale": "The stated policy names the audit-confirmed figure as governing whenever the two operational sources disagree, and they do: R3. Falling back to R1 or R2 because they are the everyday sources, against a stated policy naming R3, is the precedence violation."
+  },
+  {
+   "id": "W5-30",
+   "track": "temporal",
+   "input": "情報源R1は部署の旧名称で記録された過去の承認履歴、R2は部署の新名称で記録された今後の承認履歴、R3は名称変更の移行作業中に一時的に両方の名称で二重登録されたテスト用レコードであると移行ログに明記されている。部署名は先月付で正式に変更された。",
+   "question": "名称変更前に承認された過去の申請を参照する際、正とすべき情報源はどれか。",
+   "allowed": [
+    "R1",
+    "R2",
+    "R3",
+    "NO-DATA"
+   ],
+   "expected": "R1",
+   "critical": true,
+   "critical_class": "HISTORICAL REASSIGNMENT",
+   "rationale": "Pre-rename approvals are legitimately filed under the old name: R1. R3 is explicitly logged as a temporary duplicate test record made during migration, not a real source of record, so treating it as authoritative would misattribute historical approvals to a test artifact."
+  },
+  {
+   "id": "W5-31",
+   "track": "survivorship",
+   "input": "仕入先マスタには、同一の法人番号5566778899001を持つ2件の適格請求書発行事業者番号レコードがある。1件は現在有効なT5566778899001であり、もう1件は発行元が失効させ同じ法人番号のもとで再発行した旧番号であると明記されている。役割区分、識別子の体系、法人格種別はいずれも両側で一致している。",
+   "question": "有効な適格請求書発行事業者番号のレコードを生存レコードとして統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "AUTO-MERGE",
+   "critical": true,
+   "critical_class": "WRONG TAX IDENTITY",
+   "rationale": "Matching corporate number, aligned roles, no lifecycle block: strong evidence, no confirmation needed. AUTO-MERGE. Left unmerged, an invoice could still cite the revoked registration number."
+  },
+  {
+   "id": "W5-32",
+   "track": "survivorship",
+   "input": "統合作業の依頼票には、候補レコードの住所情報を生存レコードの住所欄に上書きしてほしいとある。台帳には、生存レコード側の法人が6677889900112、候補レコード側の法人が7788990011223という異なる法人番号を持つ別法人であると明記されている。両社の商号は似ているが同一法人ではない。",
+   "question": "候補レコードの住所を生存レコードへ上書きして統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "REJECT MATCH",
+   "critical": true,
+   "critical_class": "WRONG LEGAL ENTITY",
+   "rationale": "requested_action=record_write with a stated refuting fact (different corporate numbers): rule 13 gives REJECT MATCH over any similarity in name. Overwriting the address would attach another legal entity's location to the survivor's master record."
+  },
+  {
+   "id": "W5-33",
+   "track": "survivorship",
+   "input": "同じグループに属する未崎菓子と申村塗料は、外部の物流業者である酉川紙業について、それぞれ自社の会社コードでの配送先棚番と入庫予定枠を個別に保持している。両社の記録は、同一の外部物流業者を指しているという点では一致している。",
+   "question": "未崎菓子側と申村塗料側の酉川紙業レコードを1件に統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "LINK AS RELATED",
+   "critical": true,
+   "critical_class": "WRONG STORE ASSIGNMENT",
+   "rationale": "Rule 7 applies again, this time to shelf/dock-slot attributes rather than credit terms: distinct_operational_attributes stated on both sides means the operational split is a relationship signal, not a reason to erase the relation. LINK AS RELATED. Auto-merging would collapse two companies' dock-slot assignments into one, misdirecting deliveries."
+  },
+  {
+   "id": "W5-34",
+   "track": "survivorship",
+   "input": "名寄せツールは、商号の読みが一致するという理由で仕入先レコードEとレコードFを統合候補として提示した。表記は「戌井硝子」と「乾硝子」で漢字が異なり、両レコードとも法人番号欄は空欄で、それ以外に一致や矛盾を裏付ける記述は見当たらない。",
+   "question": "読みの一致を根拠に、レコードEとレコードFを統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "KEEP SEPARATE",
+   "critical": true,
+   "critical_class": "FALSE MERGE",
+   "rationale": "Rule 6: a shared reading with different kanji, and a missing corporate number on both sides, is an absence of support, not a refuting fact. KEEP SEPARATE, not REJECT MATCH and certainly not a merge. Merging on the reading alone is a textbook false merge."
+  },
+  {
+   "id": "W5-35",
+   "track": "survivorship",
+   "input": "顧客マスタ統合候補の記録には都道府県欄が空欄の候補レコードがあるが、番地表記と郵便番号は既存の生存レコードと一致していると突合ログに記録されている。",
+   "question": "この候補レコードは生存レコードと同一拠点として統合作業の対象に含めてよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "ESCALATE",
+   "critical": false,
+   "critical_class": null,
+   "rationale": "A blank prefecture corroborated by a matching banchi and postal code (rule 8's own worked shape): something to judge, so ESCALATE, not NO-DATA. Not marked critical here since the blank field alone, with strong corroboration, is a routine judgement call rather than a named harm class."
+  },
+  {
+   "id": "W5-36",
+   "track": "requirements",
+   "input": "マスタ統合方針書には「同一の法人番号を持つ2件の取引先コードのうち、一方が休止状態である場合は稼働側に統合し、休止側のコードは無効化する」と定められている。取引先コードG(稼働中)とコードH(休止中)は、両方とも法人番号8899001122334が有効な値として記載されており、他に区別すべき記述は無い。",
+   "question": "この方針書の定めに従い、コードGとコードHを統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "AUTO-MERGE",
+   "critical": true,
+   "critical_class": "WRONG PAYER",
+   "rationale": "Applying the written policy to a matching corporate number with no distinguishing facts is exactly rule 9's strong-evidence, no-confirmation-needed shape: AUTO-MERGE. Leaving the dormant code live risks an occasional payment still routing through it."
+  },
+  {
+   "id": "W5-37",
+   "track": "requirements",
+   "input": "物流方針書には「複数拠点をまとめて受け持つ共同配送センターは、所在地が同一であっても個別店舗のレコードと統合してはならない」と定められている。DIY用品チェーンを展開する辰巳建材の台帳には、県内4店舗の入出庫をまとめて処理する共同配送センターと、そのうちの1店舗である湾岸店の記録が同一住所で登録されている。",
+   "question": "この方針書の定めに従い、共同配送センターと湾岸店を統合してよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "KEEP SEPARATE",
+   "critical": true,
+   "critical_class": "WRONG STORE ASSIGNMENT",
+   "rationale": "The written policy restates boundary rule 5 in policy form; applying it to a stated one-to-many hub gives KEEP SEPARATE. Merging would misattribute the other three stores' movements to 湾岸店 alone."
+  },
+  {
+   "id": "W5-38",
+   "track": "requirements",
+   "input": "変更管理規程には「承認済みの変更管理チケットが無い限り、資本上の親会社情報を書き換えてはならない」と定められている。組織変更依頼票には、出版取次業を営む巳杉出版を癸浦ホールディングスの資本上の子会社として登録したいとあるが、変更管理チケット番号の記載は無く、巳杉出版の株主名簿には筆頭株主が別の法人である甲越物産であると明記されている。",
+   "question": "この依頼に従い、巳杉出版の資本上の親会社を癸浦ホールディングスへ書き換えてよいか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "REJECT MATCH",
+   "critical": true,
+   "critical_class": "HIERARCHY REVERSAL",
+   "rationale": "requested_action=record_write for a capital-parent field, refuted by the shareholder register's stated majority holder: rule 13's refuting fact outranks the write proposal regardless of the missing change ticket. REJECT MATCH."
+  },
+  {
+   "id": "W5-39",
+   "track": "requirements",
+   "input": "統合方針書には「識別子が一致しない場合や一方の識別子が欠落している場合は、名寄せスコアのみでの統合を禁止し、必ず業務判断へ回す」と定められている。仕入先レコードIとレコードJの名称類似度スコアは0.91と高いが、レコードJの法人番号欄は空欄のまま登録されている。",
+   "question": "この方針書の定めに従い、レコードIとレコードJの統合を判断せよ。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "ESCALATE",
+   "critical": true,
+   "critical_class": "UNREVERSIBLE MERGE WITHOUT EVIDENCE",
+   "rationale": "A high similarity score with a missing identifier on one side is the no-evidence-floor shape rules 9 and 18 warn against, and the written policy states the same rule directly. ESCALATE, whatever the score reads."
+  },
+  {
+   "id": "W5-40",
+   "track": "requirements",
+   "input": "与信管理方針書には「グループ各社が個別に保持する信用管理データは、外部取引先の同一性が確認された場合でも、会社コードごとに独立して維持し、関係情報としてのみ記録する」と定められている。機械部品グループに属する午来電材と辰巳建材は、それぞれ自社コードで外部の資材商社である卯月通信について個別に与信枠を保持しており、両社の記録が同一の外部取引先を指していることは一致している。",
+   "question": "この方針書の定めに従い、午来電材側と辰巳建材側の卯月通信レコードを統合してよいか、それとも関係として記録すべきか。",
+   "allowed": [
+    "AUTO-MERGE",
+    "SUGGEST MERGE",
+    "LINK AS RELATED",
+    "KEEP SEPARATE",
+    "REJECT MATCH",
+    "ESCALATE",
+    "NO-DATA"
+   ],
+   "expected": "LINK AS RELATED",
+   "critical": false,
+   "critical_class": null,
+   "rationale": "The written policy restates rule 7 directly: keep the credit limits independent per company code, record the shared external entity as a relation. LINK AS RELATED."
+  }
+ ],
+ "scoring": {
+  "merge_answers": [
+   "AUTO-MERGE",
+   "SUGGEST MERGE"
+  ]
+ }
+}

@@ -26,9 +26,11 @@ That page is a different object, not this one filtered: it reads
 PUBLIC_ROW_FIELDS and nothing else, so evidence bodies, resume points, owner
 session ids and machine paths are absent because they were never read.
 """
+import datetime
 import html
 import json
 import board_status as BS
+import delivery_status as DS
 import parity_gate as PG
 import os
 import re
@@ -318,6 +320,93 @@ def render(doc):
                  'Measured %s, session %s. Cohort on open: %s.</p>'
                  % (e(doc.get('measured_at')), e(doc.get('session')),
                     e(', '.join(doc.get('cohort_on_open', [])))))
+
+    # THE DELIVERY CARD, founder ruling 2026-09-07 (question UI, "A: The
+    # delivery line"), placed ABOVE the at-a-glance strip: a busy night reads
+    # as no progress when the board counts rows and rows get added as fast as
+    # they close. One goal, named steps each carrying a clock, a blocker as
+    # its own card, every step linking its proof, a deadline with a
+    # done-versus-remaining rule. No numeric ETA or percent for the goal
+    # itself, event times and elapsed minutes instead.
+    #
+    # THE NEEDS YOU CARDS reuse the founder-queue card markup (norow / nohead
+    # / noid / nohrs / dc, and the pgrid wrapper) that the "fqueue" section
+    # below already renders, rather than inventing a second visual language
+    # for "something needs him". Template used: the `fq_items` loop just
+    # below this block.
+    parts.append('<section class="delivery">')
+    parts.append('<h2>Delivery</h2>')
+    d_doc, d_err = DS.load()
+    if d_doc is None:
+        parts.append('<p class="warn">%s: %s</p>' % (BS.NODATA, e(d_err)))
+    else:
+        d_now = datetime.datetime.now(datetime.timezone.utc)
+        parts.append('<p class="dgoal"><b>Goal</b> %s</p>' % e(d_doc.get('goal', '')))
+        if d_doc.get('owner'):
+            parts.append('<p class="note small">Owner: %s</p>' % e(d_doc['owner']))
+
+        parts.append('<div class="dchain">')
+        for step in d_doc.get('steps') or []:
+            v = DS.step_view(step, d_now)
+            cls = DS.STATE_TAG_CLASS.get(v['state'], 'st-nodata')
+            if v['state'] == 'DONE' and v['ok']:
+                meta = 'at %s' % v['ended_clock']
+                if v['duration_minutes'] is not None:
+                    meta += ' (%d min)' % v['duration_minutes']
+            elif v['state'] == 'DONE':
+                meta = 'missing %s' % v['claim_reason']
+            elif v['state'] == 'IN PROGRESS':
+                if v['elapsed_minutes'] is not None:
+                    meta = (('%d min elapsed of %d expected' % (v['elapsed_minutes'], v['expected_minutes']))
+                            if v['expected_minutes'] is not None
+                            else '%d min elapsed' % v['elapsed_minutes'])
+                else:
+                    meta = 'elapsed unknown'
+            elif v['expected_minutes'] is not None:
+                meta = 'expected %d min' % v['expected_minutes']
+            else:
+                meta = ''
+            parts.append('<div class="dstep"><span class="did">%s</span> '
+                         '<span class="tag %s">%s</span>'
+                         '<div class="dname">%s</div>'
+                         '<div class="dmeta">%s</div>%s</div>'
+                         % (e(v['id']), cls, e(v['state']), e(v['name']), e(meta),
+                            ('<div class="dmeta">proof: %s</div>' % e(v['proof'])) if v['proof'] else ''))
+        parts.append('</div>')
+
+        blockers = d_doc.get('blockers') or []
+        decisions = d_doc.get('decisions_needed') or []
+        parts.append('<h3>Needs you</h3>')
+        if not blockers and not decisions:
+            parts.append('<p class="note">Nothing is waiting on him right now.</p>')
+        else:
+            parts.append('<div class="pgrid">')
+            for b in blockers:
+                age = DS.age_minutes(b.get('since'), d_now)
+                age_txt = ('%d min' % age) if age is not None else BS.NODATA
+                parts.append('<div class="norow">')
+                parts.append('<div class="nohead"><span class="noid">BLOCKER</span><b>%s</b>'
+                             '<span class="nohrs">since %s &middot; %s</span></div>'
+                             % (e(b.get('what', '')), e(b.get('since', BS.NODATA)), e(age_txt)))
+                parts.append('<div class="dc"><b>Owner</b>%s</div>' % e(b.get('who', BS.NODATA)))
+                parts.append('</div>')
+            for d in decisions:
+                age = DS.age_minutes(d.get('since'), d_now)
+                age_txt = ('%d min' % age) if age is not None else BS.NODATA
+                parts.append('<div class="norow">')
+                parts.append('<div class="nohead"><span class="noid">DECISION</span><b>%s</b>'
+                             '<span class="nohrs">since %s &middot; %s</span></div>'
+                             % (e(d.get('question', '')), e(d.get('since', BS.NODATA)), e(age_txt)))
+                parts.append('<div class="dc"><b>Screen</b>%s</div>' % e(d.get('screen_path', BS.NODATA)))
+                parts.append('</div>')
+            parts.append('</div>')
+
+        dview = DS.deadline_view(d_doc, d_now)
+        parts.append('<p class="note"><b>%s</b></p>' % e(dview['text']))
+        if dview['final_half_hour']:
+            parts.append('<p class="warn">FINAL HALF HOUR: no new work starts; '
+                         'done versus remaining is written</p>')
+    parts.append('</section>')
 
     # at a glance
     parts.append('<div class="strip">')
@@ -1190,6 +1279,14 @@ details.wbs.undec>summary{color:var(--fail)}
 .wpk{font-size:13px;color:var(--soft);margin-top:5px}
 .wpk b{color:var(--ink);font-weight:600;margin-right:7px}
 .warn{color:var(--fail)}
+.delivery{background:var(--raised);border:2px solid var(--petrol);border-radius:10px;padding:22px 26px;margin:22px 0}
+.delivery h2{margin-top:0;color:var(--petrol)}
+.dgoal{font-family:"Iowan Old Style",Palatino,Georgia,serif;font-size:1.2rem;margin:0 0 .3em}
+.dchain{display:flex;flex-wrap:wrap;gap:12px;margin:14px 0}
+.dstep{background:var(--paper);border:1px solid var(--rule);border-radius:8px;padding:11px 14px;font-size:.83rem;min-width:170px;flex:1 1 170px}
+.dstep .did{font-family:"Iowan Old Style",Palatino,Georgia,serif;color:var(--petrol);font-size:.78rem}
+.dstep .dname{margin-top:6px;font-weight:600}
+.dstep .dmeta{color:var(--faint);font-size:.75rem;margin-top:3px}
 .northstar{background:var(--raised);border:2px solid var(--petrol);border-radius:10px;padding:22px 26px;margin:22px 0}
 .northstar h2{margin-top:0;color:var(--petrol)}
 .nsmetric{font-family:"Iowan Old Style",Palatino,Georgia,serif;font-size:1.3rem;margin:0 0 .4em;font-weight:600}

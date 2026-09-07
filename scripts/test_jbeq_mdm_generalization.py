@@ -158,6 +158,45 @@ class AddendumDocument(unittest.TestCase):
         for cp in (0x2014, 0x2013):
             self.assertNotIn(chr(cp), self.text, "no em or en dashes in the addendum")
 
+    def test_no_unresolved_conflict_markers(self):
+        # C1 (2026-09-06, qa-review-jbeq-2026-09-06.md): a merge once left
+        # <<<<<<< / ======= / >>>>>>> in this exact file, with two rules
+        # both numbered 13 and neither side resolved, while this suite
+        # still read the file and passed. The document is the extractor's
+        # and the operator's contract; it must be plain text, not a diff.
+        for marker in ("<<<<<<<", "=======", ">>>>>>>"):
+            self.assertNotIn(
+                marker, self.text,
+                "unresolved conflict marker %r in decision-rules-"
+                "addendum.md" % marker,
+            )
+
+    def test_numbered_top_level_items_are_unique(self):
+        # C1: a conflict that leaves two rules both numbered 13 (or drops
+        # a number, or duplicates one without a conflict marker at all) is
+        # unreadable to the human operator this document is written for.
+        import re
+
+        numbers = re.findall(r"^(\d+)\. ", self.text, flags=re.MULTILINE)
+        self.assertTrue(numbers, "no numbered top-level item found; the "
+                        "addendum's shape changed under this regex")
+        seen = set()
+        duplicates = set()
+        for n in numbers:
+            if n in seen:
+                duplicates.add(n)
+            seen.add(n)
+        self.assertEqual(
+            duplicates, set(),
+            "numbered item(s) appearing more than once in decision-rules-"
+            "addendum.md: %s" % sorted(duplicates, key=int),
+        )
+        # On this base, items 13 and 14 each appear exactly once.
+        self.assertIn("13", numbers)
+        self.assertIn("14", numbers)
+        self.assertEqual(numbers.count("13"), 1)
+        self.assertEqual(numbers.count("14"), 1)
+
     # The founder's own forbidden clause (no rule may name a seed case id,
     # phrase, or answer set) is verified by
     # grep -rn over every changed file as part of this lane's pre-push

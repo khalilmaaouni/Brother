@@ -830,7 +830,18 @@ def _build_parser():
 
 def main(argv=None):
     args = _build_parser().parse_args(sys.argv[1:] if argv is None else argv)
-    return cmd_capture(args) if args.command == "capture" else cmd_admit(args)
+    # Row M4: a BM_VAULT_DISABLE_* typo refuses loudly here instead of
+    # surfacing as an uncaught traceback out of _admission_seam_refusal.
+    # Loaded fresh rather than cached from module import, the same
+    # "each write-capable entry point owns its own gate" pattern
+    # _admission_seam_refusal itself already uses.
+    seams_mod = _load_sibling("bm_vault_seams")
+    unknown_seam_error = seams_mod.UnknownSeamError if seams_mod is not None else ()
+    try:
+        return cmd_capture(args) if args.command == "capture" else cmd_admit(args)
+    except unknown_seam_error as exc:
+        print("bm_vault_intake: REFUSED, %s" % exc, file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

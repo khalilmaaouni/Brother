@@ -28,6 +28,24 @@ the hand written slot the note already reads), so a reader of the shipped
 note sees why the stamped revision does not cover the whole tree rather than
 being left to guess.
 
+THE 1.0.9 REPEAT (measured 2026-09-07, X7 FAIL on the published tag). A note
+can also drift without ever being dirty. v1.0.9's note was generated on a
+pull request branch before a second pull request's merge was in that
+branch's history; this tool then ran on main, on a HEAD that already
+carried both merges, and rewrote the WHOLE note, including its pull request
+list, not only the two fields it is allowed to restamp. The refresh commit
+that followed changed the note's content, not just its stamp, and
+reproduce_export.py can never match a note against the revision it claims
+to be cut from once the note itself has changed after that revision. So
+this tool now compares the note it just regenerated against the note
+already committed at HEAD, masked exactly the way
+reproduce_export.compare_release_note masks a reproduction (the source
+revision stamp and the manifest digest, nothing else): anything else
+differing, the pull request list included, refuses (exit 1) rather than
+writing a note that can never be reproduced from the commit that will
+claim it. A version with no note yet at HEAD (the first cut) has nothing
+to have moved away from, so it is not a refusal.
+
 THE TWO INVOCATIONS, from the hub root:
 
     python3 scripts/refresh_cut.py --version 1.0.3
@@ -59,6 +77,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import export_public as EP  # noqa: E402
 import release_note_from_tree as RN  # noqa: E402
+import reproduce_export as REX  # noqa: E402
 
 EXIT_CLEAR = 0
 EXIT_REFUSED = 1
@@ -214,6 +233,81 @@ def regenerate(version, root=EP.ROOT):
     return True, lines
 
 
+def committed_note_bytes(version, root=EP.ROOT):
+    """The release note bytes as already committed at HEAD, or None when
+    this version has no note there yet (a first cut, nothing for a
+    regenerated note to have moved away from). Read with `git show`, never
+    from disk: the file on disk at this point is the one regenerate() just
+    (re)wrote, and HEAD is still the commit before this refresh."""
+    rel = os.path.join("docs", "releases", "%s.md" % version)
+    proc = subprocess.run(["git", "show", "HEAD:%s" % rel], cwd=root,
+                          capture_output=True)
+    if proc.returncode != 0:
+        return None
+    return proc.stdout
+
+
+def _first_differing_lines(shipped_text, generated_text, max_pairs=3):
+    """The first few masked lines the committed note and the regenerated
+    note disagree on, so a REFUSED reader sees what moved without diffing
+    the whole note by hand."""
+    shipped_lines = shipped_text.splitlines()
+    generated_lines = generated_text.splitlines()
+    out = []
+    for i in range(max(len(shipped_lines), len(generated_lines))):
+        old = shipped_lines[i] if i < len(shipped_lines) else "(absent)"
+        new = generated_lines[i] if i < len(generated_lines) else "(absent)"
+        if old != new:
+            out.append("  committed: %s" % old)
+            out.append("  regenerated: %s" % new)
+            if len(out) >= max_pairs * 2:
+                break
+    return out
+
+
+def refuse_if_note_moved(version, root=EP.ROOT):
+    """(exit_code_or_None, lines), called after regenerate() has rewritten
+    the note on disk. Compares it against the note already committed at
+    HEAD with the same masking reproduce_export.compare_release_note
+    applies to a reproduction (the source revision stamp and the manifest
+    digest, the only two fields a note cannot state about the commit that
+    will carry it). Anything else differing, row measured 2026-09-07 on the
+    published v1.0.9 tag: its pull request list gained a line between the
+    cut commit and the refresh commit that followed it, so
+    reproduce_export.py could never match the note to the revision it
+    names. A version with no committed note yet (the first cut) is not a
+    refusal: there is nothing yet for the regenerated note to have moved
+    away from."""
+    shipped = committed_note_bytes(version, root)
+    if shipped is None:
+        return None, []
+    note_path = os.path.join(root, "docs", "releases", "%s.md" % version)
+    try:
+        with open(note_path, "rb") as fh:
+            generated = fh.read()
+    except OSError as exc:
+        return EXIT_NODATA, ["NO-DATA: could not read %s to compare it "
+                             "against the note committed at HEAD: %s"
+                             % (note_path, exc)]
+    ok, detail = REX.compare_release_note(generated, shipped)
+    if ok:
+        return None, []
+    try:
+        shipped_masked = REX.mask_self_naming_note(shipped.decode("utf-8"))
+        generated_masked = REX.mask_self_naming_note(
+            generated.decode("utf-8"))
+        diff_lines = _first_differing_lines(shipped_masked, generated_masked)
+    except UnicodeDecodeError:
+        diff_lines = []
+    rel = os.path.relpath(note_path, root)
+    return EXIT_REFUSED, (
+        ["REFUSED: %s %s" % (rel, detail)]
+        + diff_lines
+        + ["the note's content moved since the cut commit (for example the "
+           "pull request list): re-run the cut on this revision so the "
+           "note and the tree are committed together, then refresh"])
+
+
 def check(version, root=EP.ROOT):
     """Build the export tree with the exporter's own build_export_tree and
     ask the exporter's own tag-time check whether the manifest inside it
@@ -278,6 +372,11 @@ def main(argv=None):
             print(line)
         if not ok:
             return EXIT_NODATA
+        refusal, lines = refuse_if_note_moved(version)
+        for line in lines:
+            print(line)
+        if refusal is not None:
+            return refusal
         for line in stage_release_files(version):
             print(line)
 

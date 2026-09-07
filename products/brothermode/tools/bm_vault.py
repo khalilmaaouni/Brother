@@ -93,6 +93,12 @@ try:
 except ImportError:  # pragma: no cover, exercised only by a partial deployment
     bm_vault_seams = None
 
+# Row M4: an empty tuple as an except clause's type matches nothing, so
+# `except _UNKNOWN_SEAM_ERROR` below is a safe no-op when bm_vault_seams
+# itself is absent, instead of masking an unrelated exception behind an
+# AttributeError on a None module.
+_UNKNOWN_SEAM_ERROR = bm_vault_seams.UnknownSeamError if bm_vault_seams is not None else ()
+
 
 def _config_dir():
     """brother_paths' answer, or the pre-C3 literal when the helper is absent."""
@@ -2196,7 +2202,7 @@ def _print_hits(con, fused, why, header, roots=None, ledger_hits=None, withheld_
             # never served as applicable. EVIDENCED/UNVERIFIED are printed,
             # never withheld: UNVERIFIED is advisory only, read by
             # vault_recall_hook.py's own count of applied vs declined.
-            tier, tier_reason = None, None
+            tier, tier_reason, tier_seam = None, None, None
             if contradiction is not None:
                 tier_lesson = contradiction._lesson_from_row(row["path"], row["body"])
                 # allowed_roots=fresh_roots: the same repository root this
@@ -2208,18 +2214,23 @@ def _print_hits(con, fused, why, header, roots=None, ledger_hits=None, withheld_
                 # 2026-09-06 section 5).
                 probe = contradiction.make_evidence_probe(os.getcwd(), allowed_roots=fresh_roots)
                 try:
-                    tier, tier_reason = contradiction.evidence_tier(
+                    tier, tier_reason, tier_seam = contradiction.evidence_tier(
                         tier_lesson, probe, duplicate_probe)
                 except Exception as e:
-                    tier, tier_reason = None, "tier resolver error: %s" % e
+                    tier, tier_reason, tier_seam = None, "tier resolver error: %s" % e, None
                 # MUTATION SEAM, never set in production: BM_VAULT_DISABLE_EVIDENCE_LOCATOR_CHECK
-                # turns off this withhold entirely. Named for the class it was written to prove
-                # (a nonexistent evidence_locator), but it disables the whole tier withhold, so a
-                # duplicate-slug or a forged-future-verified-at refusal (the other two reasons
-                # contradiction.evidence_tier returns TIER_REFUSED for) is bypassed too, since all
-                # three share this one path.
-                if (tier == contradiction.TIER_REFUSED
-                        and not os.environ.get("BM_VAULT_DISABLE_EVIDENCE_LOCATOR_CHECK")):
+                # or BM_VAULT_DISABLE_APPROVAL_FORGERY_CHECK, whichever tier_seam names as the
+                # check that actually produced this TIER_REFUSED (row P0-1, 2026-09-06
+                # follow-up). Before this attribution existed both gates keyed off
+                # BM_VAULT_DISABLE_EVIDENCE_LOCATOR_CHECK alone, so disabling it also freed a
+                # forged-approval row it never named; every other TIER_REFUSED reason (a
+                # duplicate slug, a forged-future-verified-at, an unparsable date, an escaping or
+                # dead evidence_locator) still shares BM_VAULT_DISABLE_EVIDENCE_LOCATOR_CHECK
+                # exactly as before, unchanged.
+                disable_env = ("BM_VAULT_DISABLE_APPROVAL_FORGERY_CHECK"
+                               if tier_seam == contradiction.SEAM_APPROVAL_FORGERY
+                               else "BM_VAULT_DISABLE_EVIDENCE_LOCATOR_CHECK")
+                if tier == contradiction.TIER_REFUSED and not os.environ.get(disable_env):
                     withheld += 1
                     print("\n  WITHHELD (refused)  %s  [%s, %s]" % (
                         row["title"], row["kind"], row["source"]) + seam_suffix)
@@ -2796,7 +2807,14 @@ def main(argv=None):
         sys.stderr.write("bm_vault: unknown command %r; known: %s\n"
                          % (argv[0], ", ".join(sorted(fns))))
         return 2
-    return fns[argv[0]](_parse(argv[1:]))
+    # Row M4: a BM_VAULT_DISABLE_* typo refuses loudly here, at the single
+    # dispatch point every command passes through, instead of surfacing as
+    # an uncaught traceback from whichever cmd_* happened to read the seam.
+    try:
+        return fns[argv[0]](_parse(argv[1:]))
+    except _UNKNOWN_SEAM_ERROR as exc:
+        sys.stderr.write("bm_vault: REFUSED, %s\n" % exc)
+        return 2
 
 
 if __name__ == "__main__":

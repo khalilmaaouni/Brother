@@ -34,6 +34,12 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.dirname(os.path.abspath(__file__)))))
 REPEAT_GUARD = os.path.join(_REPO_ROOT, "tools", "repeat-guard", "repeat_guard.py")
 
+#: scripts/real_logs.py, the shared "no real machine log grew" guard (row
+#: M3). Imported rather than reimplemented, same rationale as REPEAT_GUARD
+#: above.
+sys.path.insert(0, os.path.join(_REPO_ROOT, "scripts"))
+import real_logs  # noqa: E402
+
 
 def REPEAT_GUARD_SIGNATURE(tool_name, tool_input):
     """tools/repeat-guard/repeat_guard.py's own signature(), imported rather
@@ -73,42 +79,23 @@ def load_hook(env=None, consented=True):
         os.environ.update(saved)
 
 
-def _real_outcomes_path():
-    """The REAL default hook-outcomes.jsonl location, read straight off
-    _config_dir() rather than through the BM_HOOK_OUTCOMES override every
-    isolated test above sets: a guard checking whether the founder's actual
-    log changed has to look at the actual log, not at whatever override the
-    test in progress happened to install. load_hook() with no env argument
-    restores the ambient environment afterward (see its own finally block
-    above), so this never leaves BM_TOOLS or anything else mutated."""
-    mod = load_hook()
-    return os.path.join(mod._config_dir(), "hook-outcomes.jsonl")
-
-
-def _outcomes_size_or_none():
-    path = _real_outcomes_path()
-    return os.path.getsize(path) if os.path.exists(path) else None
-
-
 #: PR 458 fixed a defect where several tests in this module reached
 #: _append_outcome without redirecting BM_HOOK_OUTCOMES, so every run of this
 #: suite appended real rows to the founder's actual ~/.claude/hook-outcomes.jsonl.
-#: setUpModule/tearDownModule bracket the WHOLE module (every class below,
-#: regardless of load order) so a future test that reintroduces the same gap
-#: fails here rather than shipping silently again.
+#: Then, on 2026-09-06, this module's own ad hoc guard (a size check on that
+#: one path) missed a SECOND path a sibling suite grows: row M3 of the
+#: 2026-09-07 reflection. Replaced with the shared guard
+#: (scripts/real_logs.py) that watches all three real machine logs the
+#: estate's hooks write. setUpModule/tearDownModule bracket the WHOLE module
+#: (every class below, regardless of load order) so a future test that
+#: reintroduces the same gap fails here rather than shipping silently again.
 def setUpModule():
-    global _REAL_OUTCOMES_SIZE_BEFORE
-    _REAL_OUTCOMES_SIZE_BEFORE = _outcomes_size_or_none()
+    global _REAL_LOGS_BEFORE
+    _REAL_LOGS_BEFORE = real_logs.snapshot()
 
 
 def tearDownModule():
-    after = _outcomes_size_or_none()
-    if after != _REAL_OUTCOMES_SIZE_BEFORE:
-        raise AssertionError(
-            "the real outcomes log (%s) changed during this test module: "
-            "%r before, %r after. A test above reached _append_outcome "
-            "without redirecting BM_HOOK_OUTCOMES to an isolated path."
-            % (_real_outcomes_path(), _REAL_OUTCOMES_SIZE_BEFORE, after))
+    real_logs.assert_unchanged(_REAL_LOGS_BEFORE, context=__name__)
 
 
 class TheTimeoutMustClearTheMeasuredWorstCase(unittest.TestCase):

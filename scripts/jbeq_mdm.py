@@ -63,6 +63,9 @@ import shutil
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import unseen_set_gate  # noqa: E402
+
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SEED = os.path.join(REPO, "benchmarks", "jbeq", "mdm", "seed-2026-09-05.json")
 PROMPTS_DIR = os.path.join(REPO, "benchmarks", "jbeq", "mdm", "prompts")
@@ -71,6 +74,7 @@ RUNS_DIR = os.path.join(REPO, "benchmarks", "jbeq", "mdm", "runs")
 
 EXIT_OK = 0
 EXIT_NOT_READY = 1
+EXIT_IMPOSSIBLE_RATIO = 2
 EXIT_NODATA = 3
 
 # Founder ruling 2026-09-06 (question UI, ~17:57 JST): "One class for
@@ -414,7 +418,54 @@ def named(ids):
     return " (%s)" % ", ".join(ids) if ids else ""
 
 
+def _print_ratio(label, n, m, line=None):
+    """The one gate every ratio cmd_score prints goes through (M5,
+    2026-09-06 lesson: "direct-answered 28 of 25" stood a full day because
+    nothing ever checked that a printed n could not exceed its own m).
+
+    `line` is the exact text to print when the pair is sane (n between 0
+    and m inclusive); pass None for a check that never prints on success
+    (used for a population check that has no visible line of its own).
+    On violation this prints "NO-DATA: impossible ratio <label> <n> of
+    <m>" INSTEAD of `line` and returns False, so the caller can refuse the
+    whole run rather than let a bad ratio stand. Returns True on a sane
+    pair.
+    """
+    if n < 0 or m < 0 or n > m:
+        print("NO-DATA: impossible ratio %s %d of %d" % (label, n, m))
+        return False
+    if line is not None:
+        print(line)
+    return True
+
+
+def _unseen_gate_check(seed_path, regression):
+    """Refuse cmd_prompts/cmd_score for a seed whose basename starts with
+    "unseen-" unless scripts/unseen_set_gate.py's gate() passes on it, or
+    the caller passed --regression (M8: a set could be run before its
+    blind audit's corrections were applied and recorded).
+
+    Returns an exit code to return immediately, or None to proceed.
+    """
+    if not os.path.basename(seed_path).startswith("unseen-"):
+        return None
+    if regression:
+        print("REGRESSION: re-deciding a spent unseen set (%s) with "
+              "--regression, bypassing the blind-audit gate"
+              % os.path.basename(seed_path))
+        return None
+    status, message = unseen_set_gate.gate(seed_path)
+    if status != unseen_set_gate.PASS:
+        sys.stderr.write("REFUSED: %s %s\n" % (status, message))
+        return EXIT_IMPOSSIBLE_RATIO
+    return None
+
+
 def cmd_score(args):
+    refusal = _unseen_gate_check(args.seed, args.regression)
+    if refusal is not None:
+        return refusal
+
     seed = load_seed(args.seed)
     if seed is None:
         return EXIT_NODATA
@@ -429,6 +480,18 @@ def cmd_score(args):
         sys.stderr.write("NO-DATA: the answer file must be an object of "
                          "{case id: answer}, got %s\n" % type(answers).__name__)
         return EXIT_NODATA
+
+    # M5: an answer file cannot answer more cases than the seed has (the
+    # exact shape of "direct-answered 28 of 25": more given answers than
+    # the population they are drawn from). A key outside the seed's own
+    # case ids (a phantom id from a stale or mismatched seed) is exactly
+    # how that count would inflate past the population, so this is checked
+    # here, once, before anything else is computed from `answers`. Keys
+    # starting with "_" (like "_mutation") are metadata, not case answers.
+    seed_ids = {c["id"] for c in seed["cases"]}
+    answer_ids = {k for k in answers if not str(k).startswith("_")}
+    if not _print_ratio("answered", len(answer_ids), len(seed_ids)):
+        return EXIT_IMPOSSIBLE_RATIO
 
     # Closed at the scorer (hub PR 386 security finding, 2026-09-06): a
     # mutation seam (JBEQ_DECIDE_DISABLE_RULES) marks every result it
@@ -457,7 +520,9 @@ def cmd_score(args):
 
     for name in sorted(tracks):
         row = tracks[name]
-        print("%-20s %d of %d" % (name, row["passed"], row["total"]))
+        if not _print_ratio("track %s" % name, row["passed"], row["total"],
+                            "%-20s %d of %d" % (name, row["passed"], row["total"])):
+            return EXIT_IMPOSSIBLE_RATIO
 
     for cid, expected, given in equivalence_hits:
         print("equivalence class %s: expected %s, engine said %s (scored "
@@ -501,9 +566,14 @@ def cmd_score(args):
         engine_total = sum(tracks[t]["total"] for t in ENGINE_TRACKS if t in tracks)
     direct_passed = passed - engine_passed
     direct_total = total - engine_total
-    print("engine-decided: %d of %d" % (engine_passed, engine_total))
-    print("direct-answered (not blind, not evidence about the engine): %d of %d"
-          % (direct_passed, direct_total))
+    if not _print_ratio("engine-decided", engine_passed, engine_total,
+                        "engine-decided: %d of %d" % (engine_passed, engine_total)):
+        return EXIT_IMPOSSIBLE_RATIO
+    if not _print_ratio(
+            "direct-answered", direct_passed, direct_total,
+            "direct-answered (not blind, not evidence about the engine): "
+            "%d of %d" % (direct_passed, direct_total)):
+        return EXIT_IMPOSSIBLE_RATIO
 
     if missing:
         print("NO-DATA: %d case(s) not answered, never counted as passed: %s"
@@ -531,12 +601,21 @@ def cmd_score(args):
 
     false_merges = [row[0] for row in critical_failures if row[4]]
     conservatives = [row[0] for row in critical_failures if row[5]]
-    print("critical false merges: %d of %d%s"
-          % (len(false_merges), n_critical, named(false_merges)))
-    print("critical wrong: %d of %d%s"
-          % (len(critical_failures), n_critical,
-             named([row[0] for row in critical_failures])))
-    print("conservative wrongs: %d%s" % (len(conservatives), named(conservatives)))
+    if not _print_ratio(
+            "critical false merges", len(false_merges), n_critical,
+            "critical false merges: %d of %d%s"
+            % (len(false_merges), n_critical, named(false_merges))):
+        return EXIT_IMPOSSIBLE_RATIO
+    if not _print_ratio(
+            "critical wrong", len(critical_failures), n_critical,
+            "critical wrong: %d of %d%s"
+            % (len(critical_failures), n_critical,
+               named([row[0] for row in critical_failures]))):
+        return EXIT_IMPOSSIBLE_RATIO
+    if not _print_ratio(
+            "conservative wrongs", len(conservatives), n_critical,
+            "conservative wrongs: %d%s" % (len(conservatives), named(conservatives))):
+        return EXIT_IMPOSSIBLE_RATIO
 
     if len(missing) == total:
         print("JBEQ-MDM NO-DATA: the answer file answered no case")
@@ -712,6 +791,10 @@ def cmd_extract(args):
 
 
 def cmd_prompts(args):
+    refusal = _unseen_gate_check(args.seed, args.regression)
+    if refusal is not None:
+        return refusal
+
     seed = load_seed(args.seed)
     if seed is None:
         return EXIT_NODATA
@@ -726,6 +809,12 @@ def main(argv=None):
     p = sub.add_parser("prompts", help="write one blind prompt file per case")
     p.add_argument("out_dir")
     p.add_argument("--seed", default=SEED)
+    p.add_argument(
+        "--regression", action="store_true",
+        help="write prompts for an unseen-* seed even though "
+             "scripts/unseen_set_gate.py does not pass it, because this is "
+             "a deliberate re-decision on an already-spent qualification set",
+    )
     p.set_defaults(func=cmd_prompts)
     s = sub.add_parser("score", help="score a blind answer file")
     s.add_argument("answers")
@@ -735,6 +824,12 @@ def main(argv=None):
         help="score an answers file produced under a mutation seam anyway, "
              "printing the result under a MUTATION REPORT header instead of "
              "refusing it; writes no record file either way",
+    )
+    s.add_argument(
+        "--regression", action="store_true",
+        help="score an unseen-* seed even though scripts/unseen_set_gate.py "
+             "does not pass it, because this is a deliberate re-decision on "
+             "an already-spent qualification set",
     )
     s.set_defaults(func=cmd_score)
     e = sub.add_parser("extract", help="run the extractor prompt once per "

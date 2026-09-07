@@ -278,6 +278,63 @@ def _isolated_home(evidence_dir):
     return home
 
 
+#: The public repository the lifecycle verbs install from. Codex accepts a
+#: ref only on a git marketplace source, so this is a URL, never REPO.
+MARKETPLACE_GIT = "https://github.com/khalilmaaouni/Brother"
+
+
+def _umbrella_tag(root=REPO):
+    """v<umbrella version> read from the marketplace source of truth, or
+    None when it cannot be read (never a guess)."""
+    path = os.path.join(root, ".claude-plugin", "marketplace.json")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            doc = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    version = (doc.get("metadata") or {}).get("version")
+    return ("v%s" % version) if version else None
+
+
+def _previous_tag(current, root=REPO):
+    """The newest v-tag this checkout knows that sorts below `current`, or
+    None. Read from git, so a tag nobody cut is never named."""
+    try:
+        proc = subprocess.run(["git", "tag", "--list", "v[0-9]*"],
+                              capture_output=True, text=True, timeout=30,
+                              cwd=root)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0:
+        return None
+
+    def key(tag):
+        try:
+            return tuple(int(x) for x in tag[1:].split("."))
+        except ValueError:
+            return None
+    cur = key(current)
+    older = [t for t in proc.stdout.split() if key(t) and cur and key(t) < cur]
+    return max(older, key=key) if older else None
+
+
+def _lifecycle_refs(ctx):
+    """{"previous": ..., "current": ...} for the lifecycle verbs, cached on
+    the context, or a NO-DATA reason string when either tag is unknown."""
+    if "lifecycle_refs" in ctx:
+        return ctx["lifecycle_refs"]
+    current = ctx.get("ref") or _umbrella_tag()
+    if not current:
+        return "the umbrella version could not be read from " \
+               ".claude-plugin/marketplace.json, so no install tag is known"
+    previous = ctx.get("from_ref") or _previous_tag(current)
+    if not previous:
+        return "no public tag older than %s is known to this checkout, so " \
+               "the install-then-upgrade pair has no starting tag" % current
+    ctx["lifecycle_refs"] = {"previous": previous, "current": current}
+    return ctx["lifecycle_refs"]
+
+
 def _lifecycle_verb(ctx, verb):
     """(verdict, reason) for install/upgrade/rollback/uninstall, the shared
     logic behind steps 1, 8, 9, 10 and 11. NO-DATA immediately when the
@@ -292,9 +349,25 @@ def _lifecycle_verb(ctx, verb):
     if ctx["offline"]:
         return NODATA, "offline: %s not attempted" % verb
     if os.path.isfile(BROTHER_INSTALL):
+        # brother_install.py adds its marketplace with --ref, which Codex
+        # accepts only for a GIT source (a local path is refused with
+        # "--ref is only supported for git marketplace sources", measured
+        # 2026-09-07 on the first online run of this suite). So the
+        # lifecycle verbs run against the public repository at real tags:
+        # install and install-again at the PREVIOUS public tag, upgrade
+        # from that tag to the CURRENT one (an upgrade proves the version
+        # moved, so same-to-same could never pass), rollback and uninstall
+        # take no ref. A tag this checkout cannot name reads NO-DATA.
+        refs = _lifecycle_refs(ctx)
+        if isinstance(refs, str):
+            return NODATA, refs
         argv = [sys.executable, BROTHER_INSTALL, verb,
                "--codex-home", ctx["isolated_home"],
-               "--marketplace", REPO]
+               "--marketplace", ctx.get("marketplace") or MARKETPLACE_GIT]
+        if verb == "install":
+            argv += ["--ref", refs["previous"]]
+        elif verb == "upgrade":
+            argv += ["--from-ref", refs["previous"], "--ref", refs["current"]]
         if provider == "codex" and adapter.bin:
             argv += ["--codex-bin", adapter.bin]
         try:
@@ -584,12 +657,50 @@ def step_uninstall(ctx):
     return Step("uninstall", verdict, reason)
 
 
+#: What brother_install.py prints on a second uninstall, its own documented
+#: contract (docs/codex/PACKAGE-SHAPE.md): NO-DATA at exit 0, never PASS.
+SECOND_UNINSTALL_LINE = "NO-DATA: nothing of Brother's is installed"
+
+
 def step_uninstall_again(ctx):
+    """Step 12 runs the second uninstall for real and PASSES on exactly the
+    shape the tool documents for it: exit 0 and the NO-DATA line above.
+    Before 2026-09-07 this step never ran anything and hard coded NO-DATA,
+    which made every provider's verdict NO-DATA by construction (the
+    verdict rule says any NO-DATA outranks PASS), so keep_current.py's
+    conformance link could never read PASS for any provider, ever. The
+    tool's NO-DATA is the step's expected observation, not the step's
+    verdict; a second uninstall that removes something, or fails, is the
+    defect."""
     cap = ctx["adapter"].uninstall()
     if isinstance(cap, PA.Refusal):
         return Step("uninstall-again", NODATA, cap.reason)
-    return Step("uninstall-again", NODATA,
-               "a second uninstall has nothing left to remove")
+    if ctx["offline"]:
+        return Step("uninstall-again", NODATA, "offline: uninstall not attempted")
+    if not os.path.isfile(BROTHER_INSTALL):
+        return Step("uninstall-again", NODATA,
+                    "%s is not on disk" % BROTHER_INSTALL)
+    argv = [sys.executable, BROTHER_INSTALL, "uninstall",
+            "--codex-home", ctx["isolated_home"],
+            "--marketplace", ctx.get("marketplace") or MARKETPLACE_GIT]
+    if ctx["provider"] == "codex" and ctx["adapter"].bin:
+        argv += ["--codex-bin", ctx["adapter"].bin]
+    try:
+        proc = subprocess.run(argv, capture_output=True, text=True,
+                              timeout=180, cwd=REPO)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return Step("uninstall-again", FAIL,
+                    "second uninstall failed to run: %s" % exc)
+    _write_evidence(ctx["evidence_dir"], "uninstall-again-brother_install",
+                    _proc_text(proc))
+    text = (proc.stdout or "") + (proc.stderr or "")
+    if proc.returncode == 0 and SECOND_UNINSTALL_LINE in text:
+        return Step("uninstall-again", PASS,
+                    "the second uninstall printed %r at exit 0, as the tool "
+                    "documents" % SECOND_UNINSTALL_LINE)
+    return Step("uninstall-again", FAIL,
+                "the second uninstall exited %d without the documented "
+                "line %r" % (proc.returncode, SECOND_UNINSTALL_LINE))
 
 
 STEP_FUNCS = {
@@ -603,7 +714,8 @@ STEP_FUNCS = {
 }
 
 
-def run_conformance(provider, evidence_dir, offline):
+def run_conformance(provider, evidence_dir, offline, marketplace=None,
+                    ref=None, from_ref=None):
     """The twelve Step results for one provider, in STEP_ORDER. Never
     raises: a step function that cannot even attempt its work returns a
     NO-DATA or FAIL Step rather than propagating."""
@@ -629,7 +741,8 @@ def run_conformance(provider, evidence_dir, offline):
         return [Step(name, NODATA, invocation.reason) for name in STEP_ORDER]
     ctx = Context(provider=provider, adapter=adapter,
                  evidence_dir=evidence_dir, offline=offline,
-                 isolated_home=isolated_home, runs_root=runs_root)
+                 isolated_home=isolated_home, runs_root=runs_root,
+                 marketplace=marketplace, ref=ref, from_ref=from_ref)
     results = []
     for name in STEP_ORDER:
         try:
@@ -667,6 +780,15 @@ def main(argv=None):
                    help="skip every step that would install, upgrade, "
                         "roll back or uninstall for real; those steps "
                         "read NO-DATA")
+    ap.add_argument("--marketplace", default=None,
+                   help="git marketplace source for the lifecycle verbs "
+                        "(default: the public repository)")
+    ap.add_argument("--ref", default=None,
+                   help="the tag the upgrade step moves TO (default: v<the "
+                        "umbrella version in .claude-plugin/marketplace.json>)")
+    ap.add_argument("--from-ref", default=None,
+                   help="the tag install runs at and upgrade moves FROM "
+                        "(default: the newest older v-tag this checkout knows)")
     args = ap.parse_args(list(sys.argv[1:] if argv is None else argv))
 
     providers = sorted(PA.ADAPTERS) if args.provider == "all" else \
@@ -676,13 +798,29 @@ def main(argv=None):
     for provider in providers:
         base = args.evidence_dir or os.path.join(DEFAULT_EVIDENCE_ROOT,
                                                  provider)
-        results = run_conformance(provider, base, args.offline)
+        results = run_conformance(provider, base, args.offline,
+                                  marketplace=args.marketplace, ref=args.ref,
+                                  from_ref=args.from_ref)
         print("== %s ==" % provider)
         for r in results:
             print(r.line())
         summary = _summary_line(provider, results)
         print(summary)
         print("")
+        # <evidence-dir>/summary.txt, the file the adapter contract names
+        # and scripts/keep_current.py's conformance link reads. Until
+        # 2026-09-07 nothing wrote it, so that link read NO-DATA on every
+        # machine no matter what the suite measured.
+        try:
+            os.makedirs(base, exist_ok=True)
+            with open(os.path.join(base, "summary.txt"), "w",
+                      encoding="utf-8") as fh:
+                fh.write("== %s ==\n" % provider)
+                for r in results:
+                    fh.write(r.line() + "\n")
+                fh.write(summary + "\n")
+        except OSError as exc:
+            print("NO-DATA: could not write %s/summary.txt: %s" % (base, exc))
         verdicts.append(_verdict_for(results))
 
     if FAIL in verdicts:

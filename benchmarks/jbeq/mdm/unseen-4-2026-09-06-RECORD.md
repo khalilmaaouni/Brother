@@ -139,6 +139,11 @@ structural findings, applied without reusing any specific case:
   LINK AS RELATED 6, AUTO-MERGE 7, KEEP SEPARATE 6, ESCALATE 5,
   SUGGEST MERGE 2, NO-DATA 2 (W4-32 moved from SUGGEST MERGE to AUTO-MERGE,
   see "Corrections after blind audit" below).
+- Label distribution after the 2026-09-06 founder-ruling corrections below:
+  REJECT MATCH 12, LINK AS RELATED 4, AUTO-MERGE 6, KEEP SEPARATE 6,
+  ESCALATE 5, SUGGEST MERGE 5, NO-DATA 2 (W4-21 and W4-24 moved from LINK AS
+  RELATED to SUGGEST MERGE, W4-26 moved from AUTO-MERGE to SUGGEST MERGE;
+  see "Corrections after the 2026-09-06 founder rulings" below).
 - Every `expected` value is inside that case's own `allowed` list (0
   violations); every `track` is one of `CANONICAL_TRACKS` (0 violations); 0
   duplicate ids; every critical case carries a `critical_class` and no
@@ -249,3 +254,63 @@ benchmarks/jbeq/mdm/unseen-4-prompts --seed
 benchmarks/jbeq/mdm/unseen-4-2026-09-06.json` was re-run against the
 corrected seed; see the done-check output for the regenerated prompt count
 and the leak/dash/banned-term scans.
+
+## Corrections after the 2026-09-06 founder rulings
+
+Two founder rulings, both 2026-09-06 at about 20:4x JST in the question UI,
+corrected three of this set's labels as recorded seed defects (the HI-01 and
+U-17 precedent: `label_corrected` names the ruling, the `expected` value
+changes, the rationale is rewritten in the ruling's own words, nothing else
+about the case changes). Neither ruling edits `scripts/jbeq_decide.py` in
+this file's own commit history beyond what the ruling itself required; the
+engine change for the first ruling lands beside these corrections.
+
+- `W4-21`, `W4-24`: `expected` corrected from LINK AS RELATED to SUGGEST
+  MERGE, `label_corrected` naming
+  `docs/decisions/decision-p0-3-same-area-renamed-2026-09-06.json`. Ruling A:
+  `location_comparison=same_area_renamed` (a street or town renaming with
+  both records stating one facility) is a fact about the map, not
+  confirmation the two registry rows are one, so it earns a merge with a
+  person confirming, never an outright one; LINK AS RELATED is reserved for
+  two different master data objects, which these inputs' own words deny.
+  `scripts/jbeq_decide.py` rule L now answers SUGGEST MERGE for
+  `same_area_renamed` (mutation id `renamed_area_needs_a_person`), so both
+  cases move from a false disagreement (engine AUTO-MERGE, seed LINK AS
+  RELATED) to a hit.
+- `W4-26`: `expected` corrected from AUTO-MERGE to SUGGEST MERGE,
+  `label_corrected` naming
+  `docs/decisions/decision-p0-3-relocation-gate-2026-09-06.json`. Ruling A:
+  the engine's lifecycle gate keeps its relocated arm; a relocation merge is
+  always confirmed by a person, even when the registry states only the new
+  address is valid and nothing else contradicts. `scripts/jbeq_decide.py` is
+  unchanged by this ruling (the gate already answered SUGGEST MERGE); only
+  the seed's label was wrong.
+
+These three corrections are the whole of this set's re-score under
+`benchmarks/jbeq/mdm/runs/regression-2026-09-06-u4-renamed-area/`, which
+re-decides U4's own `fact-sheets.json` against the corrected seed with the
+ruling's engine change in place; see that run directory's own RECORD for the
+before/after table.
+
+## Blind audit
+
+Row M8 (~/.claude/evidence/reflection-measures-2026-09-07.md):
+`scripts/unseen_set_gate.py` reads this section before `scripts/jbeq_mdm.py`
+will `prompts` or `score` against this set. See
+`unseen-3-2026-09-06-RECORD.md`'s own "Blind audit" section for the note on
+why this heading is new as of this row.
+
+Auditor: opus reviewer, 2026-09-06, PR 441. Full audit:
+`~/.claude/evidence/audit-unseen-set-4-2026-09-06.md`.
+
+Auditor scratch hash (sha256, written and locked before the first read of
+`unseen-4-2026-09-06.json`):
+`661d52d459becf6032719578a3ea887e97b41764806e49568aed236be958e460`.
+
+Agreement: 35 of 40 (section 1: 33 of 40 exact, 35 of 40 applying the
+founder's 2026-09-06 ruling that REJECT MATCH and KEEP SEPARATE score as
+one class, which `scripts/jbeq_mdm.py`'s scorer already applies).
+
+Corrections (answer-level, field `expected`), applied in "Corrections
+after blind audit" above and verified against this file's own `cases`:
+- W4-32: expected, SUGGEST MERGE to AUTO-MERGE (APPLIED)

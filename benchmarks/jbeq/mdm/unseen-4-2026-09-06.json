@@ -390,8 +390,9 @@
         "ESCALATE",
         "NO-DATA"
       ],
-      "expected": "LINK AS RELATED",
-      "rationale": "The input itself states both names refer to the same facility after an administrative renaming; this is the same-area-renamed shape, recorded as one place under two notations. LINK AS RELATED."
+      "expected": "SUGGEST MERGE",
+      "label_corrected": "2026-09-06 founder ruling A (docs/decisions/decision-p0-3-same-area-renamed-2026-09-06.json): a renamed area is a fact about the map, not confirmation that the two registry rows are one, so it earns a merge with a person confirming, never an outright one; LINK AS RELATED is reserved for two different master data objects, and the input states these are one facility, not two",
+      "rationale": "The input itself states both names refer to the same facility after an administrative renaming; this is the same-area-renamed shape. A rename earns a merge with a person confirming, never an outright one, and it is not two different master data objects to keep linked: SUGGEST MERGE."
     },
     {
       "id": "W4-22",
@@ -441,8 +442,9 @@
         "ESCALATE",
         "NO-DATA"
       ],
-      "expected": "LINK AS RELATED",
-      "rationale": "The input explicitly states the merger did not change which site is meant; two names for one place after a municipal renaming is the same-area-renamed shape. LINK AS RELATED."
+      "expected": "SUGGEST MERGE",
+      "label_corrected": "2026-09-06 founder ruling A (docs/decisions/decision-p0-3-same-area-renamed-2026-09-06.json): a renamed area is a fact about the map, not confirmation that the two registry rows are one, so it earns a merge with a person confirming, never an outright one; LINK AS RELATED is reserved for two different master data objects, and the input states the merger did not change which site is meant",
+      "rationale": "The input explicitly states the merger did not change which site is meant; two names for one place after a municipal renaming is the same-area-renamed shape. A rename earns a merge with a person confirming, never an outright one, and it is not two different master data objects to keep linked: SUGGEST MERGE."
     },
     {
       "id": "W4-25",
@@ -476,8 +478,9 @@
         "ESCALATE",
         "NO-DATA"
       ],
-      "expected": "AUTO-MERGE",
-      "rationale": "The registry confirms this is the same legal office across the move, with no site distinction and no contradictory identifier, and it states plainly that the old and new address records both mean the same office; strong, unexplained evidence with no confirmation reason is AUTO-MERGE, keeping one continuous timeline instead of a fragmented duplicate."
+      "expected": "SUGGEST MERGE",
+      "label_corrected": "2026-09-06 founder ruling A (docs/decisions/decision-p0-3-relocation-gate-2026-09-06.json): the lifecycle gate keeps its relocated arm; a relocation merge is always confirmed by a person, even when the registry states only the new address is valid and nothing else contradicts",
+      "rationale": "The registry confirms this is the same legal office across the move, with no site distinction and no contradictory identifier, and it states plainly that the old and new address records both mean the same office; but a relocation merge is always confirmed by a person, so strong, unexplained evidence on a relocated record is SUGGEST MERGE, not AUTO-MERGE."
     },
     {
       "id": "W4-27",
