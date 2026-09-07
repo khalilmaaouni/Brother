@@ -34,6 +34,7 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import repeat_control as R  # noqa: E402
+import real_logs  # noqa: E402
 
 # E100: one sandbox for every temp tree this process makes, removed at exit.
 import os as _e100_os, sys as _e100_sys  # noqa: E402
@@ -51,6 +52,20 @@ except ImportError:
         % _e100_os.path.basename(__file__))
 
 SCRIPT = os.path.join(HERE, "repeat_control.py")
+
+
+#: This suite already drives repeat_control.py against explicit temp
+#: guard_dir/recall_log paths, never the real ones -- but row M3 (the
+#: 2026-09-07 reflection) is exactly the class of gap that goes unnoticed
+#: until something watches the real logs directly. Shared with every other
+#: hook suite: scripts/real_logs.py.
+def setUpModule():
+    global _REAL_LOGS_BEFORE
+    _REAL_LOGS_BEFORE = real_logs.snapshot()
+
+
+def tearDownModule():
+    real_logs.assert_unchanged(_REAL_LOGS_BEFORE, context=__name__)
 
 
 def _write_session(guard_dir, session_id, rows, mtime=None):

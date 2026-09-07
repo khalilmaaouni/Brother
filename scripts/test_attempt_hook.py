@@ -18,8 +18,22 @@ sys.path.insert(0, HERE)
 import attempt_hook as H  # noqa: E402
 import attempt_ledger as A  # noqa: E402
 import test_find_out as TF  # noqa: E402  # reuses its vault()/pattern_store()/memory_file() fixtures
+import real_logs  # noqa: E402
 
 HOOK = os.path.join(HERE, "attempt_hook.py")
+
+
+#: Every test below points ATTEMPT_LEDGER at an isolated tmp store (see
+#: _base_env), but row M3 (the 2026-09-07 reflection) is exactly the class
+#: of gap a suite does not notice until something watches the real logs
+#: directly. Shared with every other hook suite: scripts/real_logs.py.
+def setUpModule():
+    global _REAL_LOGS_BEFORE
+    _REAL_LOGS_BEFORE = real_logs.snapshot()
+
+
+def tearDownModule():
+    real_logs.assert_unchanged(_REAL_LOGS_BEFORE, context=__name__)
 
 
 def _payload(command, exit_code=None, stdout="", stderr="", timed_out=False,
@@ -57,10 +71,32 @@ def _consented_config_path():
     return _CONSENTED_CONFIG[0]
 
 
+#: One throwaway hook-outcomes.jsonl per test process. attempt_hook.py's own
+#: _append_outcome (fired on a real refusal) writes to BM_HOOK_OUTCOMES, and
+#: until this fix every caller of _base_env below except
+#: AlternatingClassesAreALoop's own _env() left that variable unset, so a
+#: refusal fired by ThreeFailuresThenRefusal or ThirdFailureRunsFindOutItself
+#: landed rows in the founder's actual ~/.claude/hook-outcomes.jsonl: row M3,
+#: the 2026-09-06 mistake, unfixed in THIS suite until now. Fixed once here
+#: rather than in every caller, the same shape as the fix already used for
+#: BROTHERME_CONFIG above.
+_ISOLATED_OUTCOMES = []
+
+
+def _isolated_outcomes_path():
+    if not _ISOLATED_OUTCOMES:
+        fd, path = tempfile.mkstemp(prefix="attempt-hook-test-outcomes-")
+        os.close(fd)
+        os.remove(path)
+        _ISOLATED_OUTCOMES.append(path)
+    return _ISOLATED_OUTCOMES[0]
+
+
 def _base_env(store):
     env = dict(os.environ)
     env["ATTEMPT_LEDGER"] = store
     env["BROTHERME_CONFIG"] = _consented_config_path()
+    env["BM_HOOK_OUTCOMES"] = _isolated_outcomes_path()
     return env
 
 

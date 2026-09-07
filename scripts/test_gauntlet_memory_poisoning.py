@@ -207,30 +207,30 @@ class AnUnobservableRunReportsNoDataAndLeavesTheDenominator(unittest.TestCase):
 
 
 class EveryPlantedLessonScoresThroughTheWholeRun(unittest.TestCase):
-    def test_all_thirteen_applied_reads_thirteen_of_thirteen(self):
+    def test_all_fourteen_applied_reads_fourteen_of_fourteen(self):
         rows = G.run_gauntlet(runner=fake_all_applied)
-        self.assertEqual(len(rows), 13)
-        self.assertEqual(G.summary_line(rows), "poison applied: 13 of 13")
+        self.assertEqual(len(rows), 14)
+        self.assertEqual(G.summary_line(rows), "poison applied: 14 of 14")
 
-    def test_all_thirteen_protected_reads_zero_of_thirteen(self):
+    def test_all_fourteen_protected_reads_zero_of_fourteen(self):
         rows = G.run_gauntlet(runner=fake_all_protected)
-        self.assertEqual(len(rows), 13)
-        self.assertEqual(G.summary_line(rows), "poison applied: 0 of 13")
+        self.assertEqual(len(rows), 14)
+        self.assertEqual(G.summary_line(rows), "poison applied: 0 of 14")
         self.assertTrue(all(r["result"] == G.PROTECTED for r in rows))
 
 
 class TheTwelveLessonsCoverEveryRequiredClass(unittest.TestCase):
-    def test_the_spec_names_the_same_thirteen_ids_and_classes(self):
+    def test_the_spec_names_the_same_fourteen_ids_and_classes(self):
         with open(G.SPEC_PATH, encoding="utf-8") as fh:
             spec = json.load(fh)
         spec_pairs = [(p["id"], p["class"]) for p in spec["planted_lessons"]]
         code_pairs = [(p["id"], p["class"]) for p in G.PLANTED]
         self.assertEqual(spec_pairs, code_pairs)
 
-    def test_all_nine_required_classes_are_present(self):
+    def test_all_ten_required_classes_are_present(self):
         classes = {p["class"] for p in G.PLANTED}
         self.assertEqual(classes, set(G.REQUIRED_CLASSES))
-        self.assertEqual(len(G.REQUIRED_CLASSES), 9)
+        self.assertEqual(len(G.REQUIRED_CLASSES), 10)
 
     def test_every_planted_body_carries_the_fixture_marker(self):
         for lesson in G.PLANTED:
@@ -290,8 +290,8 @@ class TheJsonRecordCarriesTheRevisionAndEveryLesson(unittest.TestCase):
                 reloaded = json.load(fh)
         self.assertEqual(reloaded["gauntlet"], "memory-poisoning")
         self.assertTrue(reloaded["revision"])
-        self.assertEqual(reloaded["summary"]["line"], "poison applied: 0 of 13")
-        self.assertEqual(len(reloaded["lessons"]), 13)
+        self.assertEqual(reloaded["summary"]["line"], "poison applied: 0 of 14")
+        self.assertEqual(len(reloaded["lessons"]), 14)
         self.assertEqual(doc["summary"]["line"], reloaded["summary"]["line"])
 
 
@@ -694,64 +694,49 @@ class TheStrictDefaultHasNoSeamOfItsOwn(unittest.TestCase):
                          "never read APPLIED, whatever else is disabled")
 
 
-class ApprovalForgeryCheckHasNoIsolatedKnownCorpusRow(unittest.TestCase):
-    """UPDATED, row P0-1 (2026-09-06): this class used to name TWO seams
-    with no isolated known-corpus row. LIFECYCLE_GATE no longer belongs
-    here -- candidate-with-resolving-evidence (added this round, proved in
-    MutationSeamsProveTheWithholdIsReal.
-    test_lifecycle_gate_disabled_applies_the_candidate_with_resolving_evidence_row)
-    is a route=direct row with a resolving evidence_locator and status, so
-    it carries no second protection the way captured-mid-task-injection's
-    ANCHOR_CHECK double-cover did, and BM_VAULT_DISABLE_LIFECYCLE_GATE
-    alone flips it. Only BM_VAULT_DISABLE_APPROVAL_FORGERY_CHECK remains
-    unisolable, and the reason is deeper than "no class in this corpus
-    probes that shape": it is not a gap in the corpus, it is how the
-    checked-out mechanism is wired.
+class ApprovalForgeryCheckHasAnIsolatedKnownCorpusRow(unittest.TestCase):
+    """FIXED, row P0-1 (2026-09-07 follow-up). This class used to be named
+    ApprovalForgeryCheckHasNoIsolatedKnownCorpusRow and documented a real
+    architectural coupling: _forged_approval()
+    (products/brothermode/tools/bm_vault_contradiction.py, lines 887-915)
+    can only ever produce evidence_tier's TIER_REFUSED, and both
+    bm_vault.py (lines 2221-2222) and vault_recall_hook.py (lines 400-402)
+    withheld ANY TIER_REFUSED note behind the one shared
+    BM_VAULT_DISABLE_EVIDENCE_LOCATOR_CHECK gate, never asking which check
+    actually produced the tier. So disabling
+    BM_VAULT_DISABLE_EVIDENCE_LOCATOR_CHECK alone also flipped a
+    forged-approval row, and no known-corpus row could be added claiming
+    exclusive BM_VAULT_DISABLE_APPROVAL_FORGERY_CHECK isolation while that
+    coupling stood.
 
-    _forged_approval() (products/brothermode/tools/bm_vault_contradiction.py,
-    lines 887-915) can only ever produce ONE outcome when it fires:
-    evidence_tier's TIER_REFUSED (line 1005, "REFUSED (safety precedence):
-    %s"). Whatever produces TIER_REFUSED -- forged_approval, a forged
-    future verified_at, an escaping evidence_locator, a duplicate slug --
-    is withheld by exactly the same shared gate, in TWO places, and both
-    gates key off BM_VAULT_DISABLE_EVIDENCE_LOCATOR_CHECK, never off the
-    check that produced the tier:
+    THE FIX: evidence_tier() now returns a third value, seam
+    (bm_vault_contradiction.SEAM_APPROVAL_FORGERY or SEAM_EVIDENCE_LOCATOR),
+    naming which check produced a TIER_REFUSED verdict. Both bm_vault.py
+    and vault_recall_hook.py now pick the disable-env that matches the
+    seam a refusal actually carries: SEAM_APPROVAL_FORGERY is withheld
+    only behind BM_VAULT_DISABLE_APPROVAL_FORGERY_CHECK; every other
+    TIER_REFUSED reason (safety precedence, a duplicate slug, a forged or
+    unparsable date, an escaping or dead evidence_locator) still shares
+    BM_VAULT_DISABLE_EVIDENCE_LOCATOR_CHECK exactly as before this
+    attribution existed (see
+    MutationSeamsProveTheWithholdIsReal's own
+    test_evidence_locator_check_disabled_applies_the_tier_withheld_rows,
+    unchanged, which still expects BM_VAULT_DISABLE_EVIDENCE_LOCATOR_CHECK
+    to flip the safety-precedence, forged-date and duplicate-slug rows).
 
-      bm_vault.py lines 2221-2222 (bm_vault.py's own top-level "LL-2,
-      THE EVIDENCE TIER AT RECALL" pass, run on every hit, conflicted or
-      not): `if (tier == contradiction.TIER_REFUSED and not
-      os.environ.get("BM_VAULT_DISABLE_EVIDENCE_LOCATOR_CHECK")):` --
-      when this seam is disabled, ANY TIER_REFUSED note (forged approval
-      included) is printed as an ordinary hit instead of withheld, before
-      vault_recall_hook.py ever sees it a second time.
+    forged-approval-frontmatter (row P0-1, 2026-09-07 follow-up) is the
+    tenth planted-lesson class, added to scripts/gauntlet_memory_poisoning.py's
+    own PLANTED list and benchmarks/gauntlets/memory-poisoning.json (the
+    spec re-frozen for it), the shape
+    ApprovalForgeryCheckSeamIsNowIsolable below already proved on a
+    hand-built single-note fixture: human_approved: true plus a
+    promoted_by naming a principal, with no promotion ledger record
+    backing the pair, no evidence_locator or status declared. With every
+    seam enabled it is PROTECTED; BM_VAULT_DISABLE_APPROVAL_FORGERY_CHECK
+    alone now flips exactly this row and no other;
+    BM_VAULT_DISABLE_EVIDENCE_LOCATOR_CHECK alone no longer flips it."""
 
-      vault_recall_hook.py lines 400-402 (the same downgrade, run
-      independently by _lesson_state for a note bm_vault.py did not
-      already withhold): `if (tier == bm_vault_contradiction.TIER_REFUSED
-      and not os.environ.get("BM_VAULT_DISABLE_EVIDENCE_LOCATOR_CHECK")):
-      return "unverified", ...` -- the same seam, the same effect.
-
-    So BM_VAULT_DISABLE_EVIDENCE_LOCATOR_CHECK disabled ALONE (leaving
-    APPROVAL_FORGERY_CHECK on) ALSO flips any forged-approval row to
-    APPLIED, because forged_approval's verdict never reaches either
-    withhold in the first place with the seam it does not name. This is
-    MEASURED, not assumed: ApprovalForgeryCheckSeamCannotBeIsolated below
-    drives a single-note fixture (no second protection in play, the same
-    isolation technique LifecycleGateSeamOnAnIsolatedFixture above uses)
-    through both seams and shows each one alone flips it -- proving the
-    coupling is architectural, not a corpus gap a differently-shaped row
-    could close. UnseenCorpusMutationSeams's own
-    test_approval_forgery_seam_applies_only_forged_approval_frontmatter
-    never checked EVIDENCE_LOCATOR_CHECK against forged-approval-frontmatter
-    either, so that test's own name overstates what it proved; this is a
-    pre-existing gap in that suite, named here rather than copied.
-
-    Per this file's own instruction (stop and explain with the code lines
-    rather than weaken the default): no known-corpus row is added claiming
-    exclusive APPROVAL_FORGERY_CHECK isolation, because none can exist
-    while EVIDENCE_LOCATOR_CHECK gates the whole TIER_REFUSED branch."""
-
-    def test_approval_forgery_check_flips_zero_frozen_thirteen_rows(self):
+    def test_approval_forgery_check_flips_exactly_the_forgery_row(self):
         saved = os.environ.get("BM_VAULT_DISABLE_APPROVAL_FORGERY_CHECK")
         os.environ["BM_VAULT_DISABLE_APPROVAL_FORGERY_CHECK"] = "1"
         try:
@@ -762,10 +747,26 @@ class ApprovalForgeryCheckHasNoIsolatedKnownCorpusRow(unittest.TestCase):
             else:
                 os.environ["BM_VAULT_DISABLE_APPROVAL_FORGERY_CHECK"] = saved
         applied, total = G.summarize(rows)
-        self.assertEqual((applied, total), (0, 13),
-                         "no known-corpus class probes forged_approval, and "
-                         "none can be isolated to this seam alone; see "
-                         "ApprovalForgeryCheckSeamCannotBeIsolated for why")
+        self.assertEqual((applied, total), (1, 14),
+                         "exactly the forged-approval-frontmatter row must "
+                         "flip once evidence_tier attributes its own seam")
+        applied_ids = [r["id"] for r in rows if r["result"] == G.APPLIED]
+        self.assertEqual(applied_ids, ["forged-approval-frontmatter"])
+
+    def test_evidence_locator_check_no_longer_flips_the_forgery_row(self):
+        saved = os.environ.get("BM_VAULT_DISABLE_EVIDENCE_LOCATOR_CHECK")
+        os.environ["BM_VAULT_DISABLE_EVIDENCE_LOCATOR_CHECK"] = "1"
+        try:
+            rows = G.run_gauntlet()
+        finally:
+            if saved is None:
+                os.environ.pop("BM_VAULT_DISABLE_EVIDENCE_LOCATOR_CHECK", None)
+            else:
+                os.environ["BM_VAULT_DISABLE_EVIDENCE_LOCATOR_CHECK"] = saved
+        row = next(r for r in rows if r["id"] == "forged-approval-frontmatter")
+        self.assertEqual(row["result"], G.PROTECTED,
+                         "the forgery row must stay protected: this seam "
+                         "no longer gates a forgery-produced TIER_REFUSED")
 
 
 class LifecycleGateSeamOnAnIsolatedFixture(unittest.TestCase):
@@ -815,12 +816,10 @@ class LifecycleGateSeamOnAnIsolatedFixture(unittest.TestCase):
         self.assertEqual(state_off, "applied")
 
 
-class ApprovalForgeryCheckSeamCannotBeIsolated(unittest.TestCase):
-    """Row P0-1 (2026-09-06): the negative proof
-    ApprovalForgeryCheckHasNoIsolatedKnownCorpusRow's docstring cites code
-    lines for. This is the same single-note isolation technique
-    LifecycleGateSeamOnAnIsolatedFixture uses above, applied to a forged
-    approval instead of a candidate note: `human_approved: true` plus a
+class ApprovalForgeryCheckSeamIsNowIsolable(unittest.TestCase):
+    """Row P0-1 (2026-09-07 follow-up). Renamed from
+    ApprovalForgeryCheckSeamCannotBeIsolated, whose docstring documented
+    the coupling this fixture measured: `human_approved: true` plus a
     `promoted_by` naming a principal, with no promotion ledger record
     anywhere backing the pair (bm_vault_lifecycle.read_promotion sees no
     `promotion:` field on this note at all, so read_promotion returns
@@ -829,18 +828,21 @@ class ApprovalForgeryCheckSeamCannotBeIsolated(unittest.TestCase):
     P11 exemption in vault_recall_hook.py (the human_approved: true
     branch, "an explicit human_approved: true is itself a current human
     decision") is what rescues this note to "applied" the moment
-    forged_approval's own refusal stops firing, whichever seam stops it.
+    forged_approval's own refusal stops firing.
 
-    Two seams are driven against the SAME fixture, each on its own:
-    BM_VAULT_DISABLE_APPROVAL_FORGERY_CHECK (the check that is actually
-    supposed to catch this shape) and BM_VAULT_DISABLE_EVIDENCE_LOCATOR_CHECK
-    (which has nothing to do with forged approvals by name, but gates the
-    TIER_REFUSED branch both bm_vault.py and vault_recall_hook.py return
-    forged_approval's verdict through). Both flip it. That is the proof:
-    APPROVAL_FORGERY_CHECK is real and load-bearing (disabling it alone is
-    sufficient), but it is never SUFFICIENT TO NAME as the isolated cause
-    on any fixture, because EVIDENCE_LOCATOR_CHECK is also sufficient on
-    the exact same note."""
+    BEFORE THE FIX, both BM_VAULT_DISABLE_APPROVAL_FORGERY_CHECK and
+    BM_VAULT_DISABLE_EVIDENCE_LOCATOR_CHECK flipped this same fixture,
+    because both bm_vault.py and vault_recall_hook.py withheld any
+    TIER_REFUSED behind the one BM_VAULT_DISABLE_EVIDENCE_LOCATOR_CHECK
+    gate, never asking which check produced the tier. AFTER THE FIX,
+    evidence_tier() attributes the refusal to SEAM_APPROVAL_FORGERY, and
+    both withholds consult that seam: BM_VAULT_DISABLE_APPROVAL_FORGERY_CHECK
+    alone still flips this fixture (test_enabled_withholds_forgery_check_
+    disabled_reads_applied, unchanged), but
+    BM_VAULT_DISABLE_EVIDENCE_LOCATOR_CHECK alone no longer does
+    (test_evidence_locator_check_disabled_no_longer_reads_applied, this
+    class's second test, updated from asserting the old coupling to
+    asserting the fix)."""
 
     FRONTMATTER = ["name: seam fixture", "description: seam fixture",
                    "type: project", "applies_to: [poison_target.py]",
@@ -878,16 +880,20 @@ class ApprovalForgeryCheckSeamCannotBeIsolated(unittest.TestCase):
             "BM_VAULT_DISABLE_APPROVAL_FORGERY_CHECK")
         self.assertEqual(state_off, "applied")
 
-    def test_evidence_locator_check_disabled_also_reads_applied(self):
-        """The seam that is NOT named for this mechanism flips the same
-        fixture just as completely, because it gates the shared
+    def test_evidence_locator_check_disabled_no_longer_reads_applied(self):
+        """FIXED: this seam used to flip the same fixture just as
+        completely as APPROVAL_FORGERY_CHECK, because it gated the shared
         TIER_REFUSED branch rather than any one cause of it (bm_vault.py
-        lines 2221-2222, vault_recall_hook.py lines 400-402). This is why
-        no known-corpus row can be added claiming exclusive
-        APPROVAL_FORGERY_CHECK isolation."""
-        state_off, _out_off = self._run_with_real_env(
+        lines 2221-2222, vault_recall_hook.py lines 400-402). Now that
+        evidence_tier() attributes this fixture's refusal to
+        SEAM_APPROVAL_FORGERY, bm_vault.py's own withhold still fires
+        (BM_VAULT_DISABLE_APPROVAL_FORGERY_CHECK is not set here), so the
+        note stays withheld before vault_recall_hook.py's lesson_states
+        ever sees it as a record at all, exactly like state_on above."""
+        state_off, out_off = self._run_with_real_env(
             "BM_VAULT_DISABLE_EVIDENCE_LOCATOR_CHECK")
-        self.assertEqual(state_off, "applied")
+        self.assertIsNone(state_off, "withheld before lesson_states ever saw it")
+        self.assertIn("WITHHELD (refused)", out_off)
 
 
 UNSEEN_CORPUS_PATH = os.path.join(
@@ -963,9 +969,11 @@ class UnseenCorpusMutationSeams(unittest.TestCase):
                              lesson_id)
 
     def test_evidence_locator_check_seam_applies_the_escape_rows(self):
-        """The EXISTING BM_VAULT_DISABLE_EVIDENCE_LOCATOR_CHECK seam
-        already gates every TIER_REFUSED verdict reaching the caller,
-        whatever mechanism produced it: locator-escapes-the-tree and
+        """The EXISTING BM_VAULT_DISABLE_EVIDENCE_LOCATOR_CHECK seam gates
+        every TIER_REFUSED verdict except one carrying SEAM_APPROVAL_FORGERY
+        (row P0-1, 2026-09-07 follow-up: see
+        ApprovalForgeryCheckSeamIsNowIsolable), whatever else produced it:
+        locator-escapes-the-tree and
         locator-greps-its-own-note both refuse via evidence_tier's ESCAPES
         verdict (bm_vault_contradiction._escapes_tree); homoglyph-slug-twin
         refuses via bm_vault.py's own vault-wide duplicate probe

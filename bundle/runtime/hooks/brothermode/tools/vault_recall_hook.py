@@ -370,9 +370,9 @@ def _lesson_state(slug, path, tree):
         if lesson is not None:
             probe = bm_vault_contradiction.make_evidence_probe(tree)
             try:
-                tier, reason = bm_vault_contradiction.evidence_tier(lesson, probe)
+                tier, reason, tier_seam = bm_vault_contradiction.evidence_tier(lesson, probe)
             except Exception as e:  # sbe: allow-silent a broken tier resolver degrades to the old applies_to verdict, never a crash in front of every edit
-                tier, reason = None, None
+                tier, reason, tier_seam = None, None, None
             # P11 EXEMPTION, narrow: an explicit human_approved: true is
             # itself a current human decision (doc 24.4's own precedence,
             # "current evidence and current human decisions win"; the
@@ -393,14 +393,21 @@ def _lesson_state(slug, path, tree):
             if human_approved is True and tier == bm_vault_contradiction.TIER_UNVERIFIED and no_signal:
                 tier = None
             # MUTATION SEAM, never set in production: BM_VAULT_DISABLE_EVIDENCE_LOCATOR_CHECK
-            # turns off the REFUSED half of this downgrade (the same seam
-            # bm_vault.py's own tier withhold reads), so a forged-future or
-            # nonexistent-evidence-locator lesson that reaches this hook is
-            # not caught here either, matching bm_vault.py's own disabled
-            # state. TIER_UNVERIFIED is a separate, softer advisory and is
-            # never gated by this seam.
+            # or BM_VAULT_DISABLE_APPROVAL_FORGERY_CHECK, whichever tier_seam names as the
+            # check that actually produced this TIER_REFUSED (row P0-1, 2026-09-06
+            # follow-up; the same attribution bm_vault.py's own tier withhold reads). Before
+            # this attribution existed, both a forged-future or nonexistent-evidence-locator
+            # refusal AND a forged-approval refusal shared this one seam, so disabling
+            # BM_VAULT_DISABLE_EVIDENCE_LOCATOR_CHECK alone also freed a forged-approval row
+            # it never named. Every other TIER_REFUSED reason still shares
+            # BM_VAULT_DISABLE_EVIDENCE_LOCATOR_CHECK exactly as before, unchanged.
+            # TIER_UNVERIFIED is a separate, softer advisory and is never gated by either seam.
+            refused_disable_env = (
+                "BM_VAULT_DISABLE_APPROVAL_FORGERY_CHECK"
+                if tier_seam == bm_vault_contradiction.SEAM_APPROVAL_FORGERY
+                else "BM_VAULT_DISABLE_EVIDENCE_LOCATOR_CHECK")
             if (tier == bm_vault_contradiction.TIER_REFUSED
-                    and not os.environ.get("BM_VAULT_DISABLE_EVIDENCE_LOCATOR_CHECK")):
+                    and not os.environ.get(refused_disable_env)):
                 return "unverified", EVIDENCE_TIER_LINE_FMT % (tier, slug, reason), note_type
             if tier == bm_vault_contradiction.TIER_UNVERIFIED:
                 return "unverified", EVIDENCE_TIER_LINE_FMT % (tier, slug, reason), note_type
@@ -432,7 +439,26 @@ def lesson_states(out, tree):
     # "wrap every result" posture bm_vault.py's own _print_hits and
     # scripts/jbeq_decide.py's decide() already use for their own mutation
     # seams: a record read on its own must still say a seam was live.
-    active_seams = bm_vault_seams.active_seams() if bm_vault_seams is not None else ()
+    #
+    # Row M4: this hook never blocks and never fails an edit (see the
+    # module docstring), so a BM_VAULT_DISABLE_* typo cannot be allowed to
+    # raise all the way out and crash the hook process, but it also must
+    # never be allowed to silently fall back to treating every note as an
+    # ordinary, unmutated hit -- that would be the exact "proceed as if the
+    # seam were valid" failure this row exists to close. The one safe
+    # middle: withhold every note block in this output outright and name
+    # the unknown seam on its title line, never a record claiming a state
+    # this hook could not actually verify.
+    if bm_vault_seams is None:
+        active_seams = ()
+    else:
+        try:
+            active_seams = bm_vault_seams.active_seams()
+        except bm_vault_seams.UnknownSeamError as exc:
+            withheld = "WITHHELD (%s)" % exc
+            out_lines = [withheld if _NOTE_START_RE.match(line) else line
+                        for line in lines]
+            return [], "\n".join(out_lines)
     records = []
     out_lines = []
     prev = 0

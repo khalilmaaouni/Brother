@@ -803,6 +803,19 @@ TIER_EVIDENCED = "EVIDENCED"
 TIER_UNVERIFIED = "UNVERIFIED"
 TIER_REFUSED = "REFUSED"
 
+#: row P0-1 (2026-09-06 follow-up): the seam that produced a TIER_REFUSED
+#: verdict, so a caller withholding one can consult the check that
+#: actually produced it instead of one shared catch-all.
+#: SEAM_APPROVAL_FORGERY is the one exclusive case, _forged_approval()'s
+#: own verdict; every other TIER_REFUSED reason (safety precedence, a
+#: duplicate slug, an unparsable or forged-future date, an escaping or
+#: dead evidence_locator) keeps SEAM_EVIDENCE_LOCATOR, the pre-existing
+#: shared gate, unchanged from before this attribution existed.
+#: Meaningless (None) for TIER_UNVERIFIED and TIER_EVIDENCED, which no
+#: withhold ever gates on.
+SEAM_APPROVAL_FORGERY = "approval_forgery"
+SEAM_EVIDENCE_LOCATOR = "evidence_locator"
+
 #: Both date fields this estate's notes actually carry: verified_at (this
 #: resolver's own field, bm_vault_staleness.py's field) and last_verified_at
 #: (vault_recall_hook.py's E74 field, curator-declared applies_to's own
@@ -916,12 +929,23 @@ def _forged_approval(lesson):
 
 
 def evidence_tier(lesson, evidence_probe, duplicate_probe=None):
-    """(tier, reason): the ONE evidence tier a recalled lesson carries, read
-    identically by bm_vault.py's _print_hits and by vault_recall_hook.py so
-    both surfaces agree on the same lesson's verdict. Never mutates a note,
-    never writes to the vault, never touches a declared contradicts: pair
-    (resolve()/recall_verdict is the separate law for two lessons that
-    disagree; this is the law for one lesson taken alone, conflicted or not).
+    """(tier, reason, seam): the ONE evidence tier a recalled lesson
+    carries, read identically by bm_vault.py's _print_hits and by
+    vault_recall_hook.py so both surfaces agree on the same lesson's
+    verdict. Never mutates a note, never writes to the vault, never
+    touches a declared contradicts: pair (resolve()/recall_verdict is the
+    separate law for two lessons that disagree; this is the law for one
+    lesson taken alone, conflicted or not).
+
+    seam names which check produced a TIER_REFUSED verdict
+    (SEAM_APPROVAL_FORGERY or SEAM_EVIDENCE_LOCATOR), so a caller
+    withholding one can gate on the mutation seam that actually produced
+    it rather than one shared catch-all (row P0-1, 2026-09-06 follow-up:
+    disabling BM_VAULT_DISABLE_EVIDENCE_LOCATOR_CHECK used to flip a
+    forged-approval row too, since both bm_vault.py and
+    vault_recall_hook.py withheld any TIER_REFUSED behind that one seam
+    alone). seam is always None for TIER_UNVERIFIED and TIER_EVIDENCED,
+    which no withhold gates on.
 
     Checked in this order:
 
@@ -997,57 +1021,64 @@ def evidence_tier(lesson, evidence_probe, duplicate_probe=None):
                 "%s. SYSTEM SAFETY POLICY > REPOSITORY SAFETY POLICY > "
                 "CURRENT EVIDENCE > VERIFIED PROJECT DECISION > VAULT "
                 "LESSON; an exception requires a current higher-authority "
-                "policy, which no memory record can grant itself." % control)
+                "policy, which no memory record can grant itself." % control
+            ), SEAM_EVIDENCE_LOCATOR
 
     if not os.environ.get(APPROVAL_FORGERY_DISABLE_ENV):
         forged_approval = _forged_approval(lesson)
         if forged_approval:
-            return TIER_REFUSED, "REFUSED (safety precedence): %s" % forged_approval
+            return (TIER_REFUSED, "REFUSED (safety precedence): %s" % forged_approval,
+                    SEAM_APPROVAL_FORGERY)
 
     if duplicate_probe is not None:
         dup = duplicate_probe(lesson)
         if dup:
             return TIER_REFUSED, (
                 "slug %r duplicates %s in a different folder with "
-                "different content" % (lesson["lesson_id"], dup))
+                "different content" % (lesson["lesson_id"], dup)
+            ), SEAM_EVIDENCE_LOCATOR
 
     unparsable = _unparsable_date_field(lesson)
     if unparsable:
         field, value = unparsable
         return TIER_REFUSED, (
             "%s %r is not a valid calendar date: verification date "
-            "unreadable" % (field, value))
+            "unreadable" % (field, value)
+        ), SEAM_EVIDENCE_LOCATOR
 
     forged = _forged_future_field(lesson)
     if forged:
         field, value = forged
-        return TIER_REFUSED, "%s %s is in the future: forged" % (field, value)
+        return (TIER_REFUSED, "%s %s is in the future: forged" % (field, value),
+                SEAM_EVIDENCE_LOCATOR)
 
     if not _has_signal(lesson):
-        return TIER_UNVERIFIED, ("unknown trust: no evidence locator and no "
-                                  "status; unknown means WITHHOLD")
+        return (TIER_UNVERIFIED, ("unknown trust: no evidence locator and no "
+                                  "status; unknown means WITHHOLD"), None)
 
     locator = lesson.get("evidence_locator", NO_DATA)
     if not locator or locator == NO_DATA:
-        return TIER_UNVERIFIED, "no evidence_locator declared"
+        return TIER_UNVERIFIED, "no evidence_locator declared", None
 
     verdict = evidence_probe(lesson)
     if verdict == NO_DATA_EVIDENCE:
-        return TIER_UNVERIFIED, "evidence_locator %r could not be checked" % locator
+        return TIER_UNVERIFIED, "evidence_locator %r could not be checked" % locator, None
     if verdict == ESCAPES:
-        return TIER_REFUSED, "evidence_locator %r escapes the tree" % locator
+        return (TIER_REFUSED, "evidence_locator %r escapes the tree" % locator,
+                SEAM_EVIDENCE_LOCATOR)
     if verdict == CIRCULAR:
-        return TIER_UNVERIFIED, "evidence_locator %r points at the vault itself" % locator
+        return TIER_UNVERIFIED, "evidence_locator %r points at the vault itself" % locator, None
     if verdict == WEAK:
         return TIER_UNVERIFIED, (
             "test locator %r proves nothing about %s" % (
-                locator, ", ".join(lesson.get("applies_to") or []) or "the claim"))
+                locator, ", ".join(lesson.get("applies_to") or []) or "the claim")), None
     if verdict == FAILS:
-        return TIER_REFUSED, "evidence_locator %r does not currently hold" % locator
+        return (TIER_REFUSED, "evidence_locator %r does not currently hold" % locator,
+                SEAM_EVIDENCE_LOCATOR)
 
     if lesson.get("status") == "superseded":
-        return TIER_UNVERIFIED, "evidence holds but the note is marked superseded"
-    return TIER_EVIDENCED, "evidence_locator %r holds" % locator
+        return TIER_UNVERIFIED, "evidence holds but the note is marked superseded", None
+    return TIER_EVIDENCED, "evidence_locator %r holds" % locator, None
 
 
 def recall_verdict(con, row, conflicting_titles, base_dir=None, allowed_roots=None):

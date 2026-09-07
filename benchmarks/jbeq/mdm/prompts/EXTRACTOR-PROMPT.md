@@ -270,7 +270,8 @@ fact-sheet-schema.json's worked examples for the exact shape.
   never a merge signal, and it is what MM-01 was missing in round 4.
 - location_comparison: notation_variant_only | same_chiban_different_
   notation | different_administrative_area | different_unit_in_building |
-  internally_inconsistent | same_area_renamed | null. Set this ONLY on an
+  internally_inconsistent | same_area_renamed | same_area_different_lot |
+  null. Set this ONLY on an
   address-track case, from what the input's own address text states; null
   on every other track. same_area_renamed (round 7, 2026-09-06) is for
   ONE place named under both an old and a new administrative name (a
@@ -285,8 +286,26 @@ fact-sheet-schema.json's worked examples for the exact shape.
   moves from 3-chome in one town to 5-chome in a neighboring town of the
   SAME city; both towns are within one administrative area, so this reads
   null, not different_administrative_area, however far apart the two
-  chiban are within that area.
+  chiban are within that area. same_area_different_lot (round 12,
+  2026-09-07) is for two addresses that state the SAME town and block and
+  differ ONLY in the lot number, with nothing else stated: this is an
+  absence of support, never a refutation, so it is NOT
+  different_administrative_area, whatever the lot numbers are. Use it
+  only when the input states no other difference. Invented illustration,
+  never a case's own text: two records both give the same town and block,
+  one states lot 14 and the other lot 18, and the input states nothing
+  else that distinguishes the two places.
 - effective_dates: {as_of, candidate_effective_date, conflict}. conflict is
+  chiban are within that area.
+- effective_dates: {as_of, candidate_effective_date, conflict, prior_valid_to}.
+  as_of is the date the QUESTION asks about, read from the input's own
+  wording; never today's date, and never the date this extraction is being
+  done. candidate_effective_date is the date the LATER (successor) record
+  takes effect, never the earlier record's own start date: when the input
+  states one record's history was reassigned to another, this is the date
+  the successor record begins, not when the record it replaces began.
+  prior_valid_to is the earlier record's own valid-to (closing) date, read
+  from the input; null when the input does not state one. conflict is
   true only when the input states two different dates for the same fact
   that disagree about which one governs today; false or null fields
   otherwise.

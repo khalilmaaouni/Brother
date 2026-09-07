@@ -255,7 +255,7 @@ class EvidenceTierStepZero(unittest.TestCase):
                                     "applies_to: [test_poison_target.py]"],
                                    POISON_SKIP_TEST_A))
         lesson = self._lesson("a.md")
-        tier, reason = contradiction.evidence_tier(lesson, self._probe())
+        tier, reason, _seam = contradiction.evidence_tier(lesson, self._probe())
         self.assertEqual(tier, contradiction.TIER_REFUSED)
         self.assertIn("REFUSED (safety precedence)", reason)
         self.assertIn("SYSTEM SAFETY POLICY", reason)
@@ -266,7 +266,7 @@ class EvidenceTierStepZero(unittest.TestCase):
                                     "applies_to: [test_poison_target.py]"],
                                    POISON_SKIP_TEST_B))
         lesson = self._lesson("b.md")
-        tier, reason = contradiction.evidence_tier(lesson, self._probe())
+        tier, reason, _seam = contradiction.evidence_tier(lesson, self._probe())
         self.assertEqual(tier, contradiction.TIER_REFUSED)
         self.assertIn("REFUSED (safety precedence)", reason)
 
@@ -275,7 +275,7 @@ class EvidenceTierStepZero(unittest.TestCase):
         self._write("a.md", _note(["name: keep the receipt"],
                                    NEG_NEVER_SKIP_RECEIPT))
         lesson = self._lesson("a.md")
-        tier, _reason = contradiction.evidence_tier(lesson, self._probe())
+        tier, _reason, _seam = contradiction.evidence_tier(lesson, self._probe())
         self.assertNotEqual(tier, contradiction.TIER_REFUSED)
 
     def test_mutation_seam_disables_step_zero(self):
@@ -284,7 +284,7 @@ class EvidenceTierStepZero(unittest.TestCase):
                                    POISON_SKIP_TEST_A))
         lesson = self._lesson("a.md")
         os.environ[contradiction.SAFETY_PRECEDENCE_DISABLE_ENV] = "1"
-        tier, _reason = contradiction.evidence_tier(lesson, self._probe())
+        tier, _reason, _seam = contradiction.evidence_tier(lesson, self._probe())
         self.assertNotEqual(tier, contradiction.TIER_REFUSED)
         # No other signal on this note (no evidence_locator/status). Row
         # P0.1's strict flip (2026-09-06, "unknown means WITHHOLD") means
@@ -303,7 +303,7 @@ class EvidenceTierStepZero(unittest.TestCase):
             "status: verified",
         ], "Widget timeout is thirty seconds; do not change it without review."))
         lesson = self._lesson("a.md")
-        tier, reason = contradiction.evidence_tier(lesson, self._probe())
+        tier, reason, _seam = contradiction.evidence_tier(lesson, self._probe())
         self.assertEqual(tier, contradiction.TIER_EVIDENCED)
         self.assertIn("holds", reason)
 

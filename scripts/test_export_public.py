@@ -605,6 +605,38 @@ class EachGateOfRunGatesIsIndividuallyLoadBearing(unittest.TestCase):
             self.assertNotIn("fakebrothertermxyz", "\n".join(lines))
 
 
+class AGateTimeoutReadsNoDataNamingTheLoadAndTheSeconds(unittest.TestCase):
+    """run_gate used _run's fixed 120 second timeout; under a loaded
+    machine that read as a FAIL shaped exit 1 for a check that never even
+    finished. gate_timeout scales the floor by 15 minute load over core
+    count, and a gate that times out now reads NO-DATA naming the load and
+    the seconds, never FAIL."""
+
+    def test_a_gate_timeout_reads_no_data_naming_the_load_and_the_seconds(
+            self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            ok, line = EP.run_gate(["sleep", "5"], tempdir, "slow",
+                                    timeout=1, load15=80.0)
+            self.assertFalse(ok, line)
+            self.assertTrue(
+                line.startswith("slow: exit 2, NO-DATA: timed out after "
+                                 "1 seconds"), line)
+            self.assertIn("80.0", line)
+            self.assertNotIn("FAIL", line)
+
+    def test_gate_timeout_scales_by_load_over_cores_floored_and_capped(
+            self):
+        self.assertEqual(
+            EP.gate_timeout(load15=80.0, cores=8, floor=120, cap=1800),
+            1200)
+        self.assertEqual(
+            EP.gate_timeout(load15=2.0, cores=8, floor=120, cap=1800),
+            120)
+        self.assertEqual(
+            EP.gate_timeout(load15=800.0, cores=8, floor=120, cap=1800),
+            1800)
+
+
 #: A shape SECRET_SHAPES matches (scripts/pre_push_gate.py: ghp_ + 36
 #: alphanumerics). Fake in the same sense as the estate's own private-term
 #: fixtures: real enough to match the pattern under test, invented for

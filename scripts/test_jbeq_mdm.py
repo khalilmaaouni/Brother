@@ -390,6 +390,25 @@ class Scoring(unittest.TestCase):
         self.assertEqual(code, 3, out)
         self.assertIn("NO-DATA", out)
 
+    def test_a_phantom_case_id_prints_no_data_and_exits_two(self):
+        """M5 (~/.claude/evidence/reflection-measures-2026-09-07.md): the
+        scorer once printed "direct-answered 28 of 25", an impossible
+        ratio, and nobody read it for a day. A phantom case id (one absent
+        from the seed) added to an otherwise perfect answer file drives
+        the same shape: more answered cases than the seed's own
+        population. The one ratio printer this refuses through catches it
+        before any other ratio is computed, prints the NO-DATA line naming
+        the impossible pair, and exits 2 rather than EXIT_NODATA (3): this
+        is a corrupt/impossible input, never an ordinary missing record."""
+        answers = {c["id"]: c["expected"] for c in self.seed["cases"]}
+        answers["PHANTOM-DOES-NOT-EXIST"] = "AUTO-MERGE"
+        path = self._write(answers)
+        code, out = run("score", path)
+        self.assertEqual(code, jbeq_mdm.EXIT_IMPOSSIBLE_RATIO, out)
+        self.assertIn("NO-DATA: impossible ratio answered 71 of 70", out)
+        self.assertNotIn("JBEQ-MDM SEED:", out)
+        self.assertNotIn("NOT READY", out)
+
 
 class EngineDecidedDerivation(unittest.TestCase):
     """review-u1-2026-09-06.md finding 1: engine-decided is derived from a
@@ -572,6 +591,71 @@ class CanonicalTrackNames(unittest.TestCase):
             path = os.path.join(REPO, rel)
             seed = jbeq_mdm.load_seed(path)
             self.assertIsNotNone(seed, rel)
+
+
+class UnseenGateWiring(unittest.TestCase):
+    """M8: prompts and score refuse an unseen-* seed unless
+    scripts/unseen_set_gate.py passes it, or the caller passes
+    --regression. This drives the wiring, not the gate's own logic (see
+    scripts/test_unseen_set_gate.py for that)."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="jbeq-unseen-wiring-")
+        self.seed_path = os.path.join(self.dir, "unseen-9-2026-09-07.json")
+        seed = {
+            "cases": [{
+                "id": "Z-01",
+                "track": "address",
+                "input": "x",
+                "question": "x",
+                "allowed": ["NO-DATA"],
+                "expected": "NO-DATA",
+                "critical": False,
+                "critical_class": None,
+            }],
+            "scoring": {"merge_answers": ["AUTO-MERGE", "SUGGEST MERGE"]},
+        }
+        with open(self.seed_path, "w", encoding="utf-8") as fh:
+            json.dump(seed, fh)
+        # No sibling -RECORD.md is written: the gate reads this as
+        # NO-DATA (no audit at all), which refuses both subcommands
+        # without --regression.
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def test_prompts_on_an_ungated_unseen_seed_exits_two(self):
+        out_dir = os.path.join(self.dir, "prompts-out")
+        code, out = run("prompts", out_dir, "--seed", self.seed_path)
+        self.assertEqual(code, jbeq_mdm.EXIT_IMPOSSIBLE_RATIO, out)
+        self.assertIn("REFUSED", out)
+        self.assertIn("NO-DATA", out)
+        self.assertFalse(os.path.isdir(out_dir), "refused, so nothing was written")
+
+    def test_prompts_with_regression_proceeds(self):
+        out_dir = os.path.join(self.dir, "prompts-out")
+        code, out = run("prompts", out_dir, "--seed", self.seed_path, "--regression")
+        self.assertEqual(code, 0, out)
+        self.assertIn("REGRESSION", out)
+        self.assertEqual(sorted(os.listdir(out_dir)), ["Z-01.md"])
+
+    def test_score_on_an_ungated_unseen_seed_exits_two(self):
+        answers_path = os.path.join(self.dir, "answers.json")
+        with open(answers_path, "w", encoding="utf-8") as fh:
+            json.dump({"Z-01": "NO-DATA"}, fh)
+        code, out = run("score", answers_path, "--seed", self.seed_path)
+        self.assertEqual(code, jbeq_mdm.EXIT_IMPOSSIBLE_RATIO, out)
+        self.assertIn("REFUSED", out)
+        self.assertNotIn("JBEQ-MDM SEED:", out)
+
+    def test_score_with_regression_proceeds(self):
+        answers_path = os.path.join(self.dir, "answers.json")
+        with open(answers_path, "w", encoding="utf-8") as fh:
+            json.dump({"Z-01": "NO-DATA"}, fh)
+        code, out = run("score", answers_path, "--seed", self.seed_path, "--regression")
+        self.assertEqual(code, 0, out)
+        self.assertIn("REGRESSION", out)
+        self.assertIn("JBEQ-MDM SEED: 1 of 1", out)
 
 
 if __name__ == "__main__":

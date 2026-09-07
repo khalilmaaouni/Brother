@@ -20,8 +20,12 @@ to move THIS Codex install onto this tag":
   4. conformance      ~/.claude/evidence/adapter-conformance/codex/summary.txt
                       names provider=codex and verdict=PASS, and is not
                       older than the tag's own commit date.
-  5. closeout         the X1 to X7 evidence release_closeout.py writes for
-                      this version, under its own --evidence-dir default.
+  5. closeout         reads the VERDICT release_closeout.py's own run logs
+                      (RUN.log and any RUN-X<n>.log rerun) record for each
+                      of X1 to X7, never gate-directory presence alone: PASS
+                      only when all seven read PASS, FAIL when any reads
+                      FAIL, NO-DATA otherwise (a missing or NO-DATA gate is
+                      never a pass).
   6. virgin CI        a recorded GitHub Actions virgin-install run id for
                       this tag, read from the closeout evidence; this script
                       never dispatches anything (no self-fired CI).
@@ -194,31 +198,91 @@ def link_conformance(tag_commit_epoch, path=CONFORMANCE_DEFAULT):
 
 
 # ---------------------------------------------------------------------------
-# Link 5: X1 to X7 closeout evidence.
+# Link 5: X1 to X7 closeout evidence, read by VERDICT.
+#
+# release_closeout.py writes one gate-directory per gate whether that gate
+# PASSED or not, so directory presence alone (the earlier shape of this
+# link) reads PASS on a closeout whose own verdict table says otherwise: on
+# v1.0.9 all seven X1-X7 directories existed while X7 read FAIL and X1, X6
+# read NO-DATA, and the old link still printed PASS. NO-DATA is never a
+# pass, and neither is presence.
 # ---------------------------------------------------------------------------
 
 CLOSEOUT_GATES = ("X1", "X2", "X3", "X4", "X5", "X6", "X7")
 
+# release_closeout.py opens each gate's block with a line of this shape,
+# e.g. "== X7 public-artifact   FAIL" (verdict_table in release_closeout.py
+# uses the same four words: PASS, FAIL, NO-DATA, FOUNDER).
+GATE_HEADER_RE = re.compile(
+    r"^==\s+(X[0-9]+)\s+\S+\s+(PASS|FAIL|NO-DATA|FOUNDER)\s*$", re.MULTILINE)
+# Each gate's block closes with its own "PASS: ...", "FAIL: ..." or
+# "NO-DATA: ..." summary line; a block can also carry an earlier sub-check's
+# PASS/FAIL/NO-DATA line, so the LAST match in the block is the gate's own
+# verdict line, never the first.
+REASON_LINE_RE = re.compile(
+    r"^[ \t]*(?:PASS|FAIL|NO-DATA):[ \t]*(.+)$", re.MULTILINE)
 
-def classify_closeout(dir_exists, present_gates):
-    if not dir_exists:
-        return "NO-DATA", "no closeout evidence directory for this version"
-    missing = [g for g in CLOSEOUT_GATES if g not in present_gates]
-    if missing:
-        return "NO-DATA", "closeout evidence is missing gate(s): %s" % ", ".join(missing)
-    return "PASS", "closeout evidence present for gates %s" % ", ".join(CLOSEOUT_GATES)
+
+def parse_gate_verdicts(text):
+    """{gate_id: (verdict, why)} read from one release_closeout.py run log
+    (the full RUN.log, or a single-gate RUN-X<n>.log rerun)."""
+    headers = list(GATE_HEADER_RE.finditer(text))
+    verdicts = {}
+    for i, m in enumerate(headers):
+        gate_id, verdict = m.group(1), m.group(2)
+        block_end = headers[i + 1].start() if i + 1 < len(headers) else len(text)
+        block = text[m.end():block_end]
+        reasons = REASON_LINE_RE.findall(block)
+        why = reasons[-1].strip() if reasons else "no reason line found in this gate's block"
+        verdicts[gate_id] = (verdict, why)
+    return verdicts
+
+
+def classify_closeout(gate_verdicts):
+    failing = [g for g in CLOSEOUT_GATES
+               if gate_verdicts.get(g, (None, None))[0] == "FAIL"]
+    if failing:
+        return "FAIL", "gate(s) read FAIL: %s" % "; ".join(
+            "%s (%s)" % (g, gate_verdicts[g][1]) for g in failing)
+    not_pass = [g for g in CLOSEOUT_GATES
+                if gate_verdicts.get(g, (None, None))[0] != "PASS"]
+    if not_pass:
+        return "NO-DATA", "gate(s) not PASS: %s" % ", ".join(
+            "%s(%s)" % (g, gate_verdicts[g][0] if g in gate_verdicts else "missing")
+            for g in not_pass)
+    return "PASS", "closeout evidence reads PASS for gates %s" % ", ".join(CLOSEOUT_GATES)
+
+
+RUN_LOG_RE = re.compile(r"^RUN(-X[0-9]+)?\.log$")
+
+
+def read_closeout_verdicts(root):
+    """{gate_id: (verdict, why)} merged across every RUN.log and RUN-X<n>.log
+    in the closeout directory itself (never its work* throwaway homes, which
+    hold binaries and caches, not logs), oldest to newest by file mtime: a
+    later file's verdict for a gate overwrites an earlier one, so a
+    single-gate rerun (RUN-X1.log) can supersede that one gate's line in the
+    full RUN.log without disturbing the other six. "Later" is decided by
+    mtime, not by a timestamp inside the log, because neither RUN.log nor a
+    RUN-X<n>.log rerun carries one."""
+    if not os.path.isdir(root):
+        return {}
+    log_paths = [
+        os.path.join(root, fn) for fn in os.listdir(root)
+        if RUN_LOG_RE.match(fn) and os.path.isfile(os.path.join(root, fn))
+    ]
+    log_paths.sort(key=os.path.getmtime)
+    gate_verdicts = {}
+    for path in log_paths:
+        log_text, _ = read_text(path)
+        if log_text is not None:
+            gate_verdicts.update(parse_gate_verdicts(log_text))
+    return gate_verdicts
 
 
 def link_closeout(version, evidence_dir=None):
     root = evidence_dir or os.path.expanduser("~/.claude/evidence/closeout-%s" % version)
-    exists = os.path.isdir(root)
-    present = []
-    if exists:
-        for gate in CLOSEOUT_GATES:
-            gate_dir = os.path.join(root, gate)
-            if os.path.isdir(gate_dir) and os.listdir(gate_dir):
-                present.append(gate)
-    return classify_closeout(exists, present), root
+    return classify_closeout(read_closeout_verdicts(root)), root
 
 
 # ---------------------------------------------------------------------------
@@ -241,9 +305,18 @@ def link_ci(closeout_dir):
     if not os.path.isdir(closeout_dir):
         return classify_ci(None)
     combined = []
-    for base, _dirs, files in os.walk(closeout_dir):
+    for base, dirs, files in os.walk(closeout_dir):
+        # The matrix's throwaway homes (work*, isolated Codex homes with
+        # binaries, sqlite and plugin caches) hold no recorded run id and
+        # are not text; reading them crashed this link on 2026-09-07.
+        dirs[:] = [d for d in dirs if not d.startswith("work")]
         for fn in files:
-            text, _ = read_text(os.path.join(base, fn))
+            if not fn.endswith((".log", ".txt")):
+                continue
+            try:
+                text, _ = read_text(os.path.join(base, fn))
+            except (OSError, UnicodeDecodeError):
+                continue
             if text:
                 combined.append(text)
     return classify_ci("\n".join(combined) if combined else None)
@@ -287,7 +360,7 @@ def link_smoke(tag, path=SMOKE_DEFAULT):
 # Orchestration.
 # ---------------------------------------------------------------------------
 
-def run_links(tag, public_url, evidence_dir, clone_dir):
+def run_links(tag, public_url, evidence_dir, clone_dir, closeout_dir=None):
     """[(name, verdict, message)], stopping at the first non-PASS link."""
     version = tag[1:] if tag.startswith("v") else tag
     results = []
@@ -322,7 +395,12 @@ def run_links(tag, public_url, evidence_dir, clone_dir):
         return results
 
     # 5. closeout
-    (verdict, msg), closeout_dir = link_closeout(version, evidence_dir)
+    # The closeout matrix lives under release_closeout.py's own root
+    # (~/.claude/evidence/closeout-<version>), never under this tool's
+    # --evidence-dir, which holds the clone. Passing the clone root here
+    # made link 5 report every gate missing on a machine where all seven
+    # were on disk (measured 2026-09-07, v1.0.9).
+    (verdict, msg), closeout_dir = link_closeout(version, closeout_dir)
     results.append(("closeout", verdict, msg))
     if verdict != "PASS":
         return results
@@ -378,6 +456,9 @@ def main(argv=None, install_fn=default_install):
     parser.add_argument("--public-url", default="https://github.com/khalilmaaouni/Brother")
     parser.add_argument("--evidence-dir", default=os.path.expanduser("~/.claude/evidence/keep-current"))
     parser.add_argument("--install", action="store_true")
+    parser.add_argument("--closeout-dir", default=None,
+                        help="where release_closeout.py wrote X1 to X7 "
+                             "(default: ~/.claude/evidence/closeout-<version>)")
     args = parser.parse_args(argv)
 
     if not re.match(r"^v[0-9]+\.[0-9]+\.[0-9]+$", args.tag):
@@ -389,7 +470,8 @@ def main(argv=None, install_fn=default_install):
         print("stopped at: signature")
         return 0
 
-    results = run_links(args.tag, args.public_url, args.evidence_dir, clone_dir)
+    results = run_links(args.tag, args.public_url, args.evidence_dir, clone_dir,
+                        closeout_dir=args.closeout_dir)
     for name, verdict, msg in results:
         print("%-8s %-13s %s" % (verdict, name, msg))
 

@@ -138,28 +138,47 @@ contradicted_attributes existed before round 5 as OPTIONAL fields read with
                                    same_chiban_different_notation |
                                    different_administrative_area |
                                    different_unit_in_building |
-                                   internally_inconsistent | null (AD-03).
+                                   internally_inconsistent |
+                                   same_area_different_lot | null (AD-03).
                                    different_administrative_area,
                                    internally_inconsistent,
                                    notation_variant_only and
                                    same_chiban_different_notation are all
                                    read by rule L below (the last two added
-                                   round 6, 2026-09-06);
+                                   round 6, 2026-09-06); same_area_different_lot
+                                   (round 12, 2026-09-07, id
+                                   same_area_different_lot_keeps_separate)
+                                   is also read by rule L, and answers
+                                   KEEP SEPARATE, never REJECT MATCH and
+                                   never a merge: a differing lot number
+                                   alone, in the same town and block, is an
+                                   absence of support under addendum
+                                   rule 6, not a refutation.
                                    different_unit_in_building is read
                                    separately, by rule_r, only when
                                    stated_relation == "none". null falls
                                    through to the ordinary relation and
                                    evidence rules.
   effective_dates            dict  {as_of, candidate_effective_date,
-                                   conflict}. Promoted from reserved to
-                                   required round 5: conflict=true blocks an
-                                   otherwise-AUTO-MERGE case (gate
-                                   "temporal"). The "temporal" TRACK is no
-                                   longer in UNSUPPORTED_TRACKS as of round
-                                   5: it is decided by the ordinary rules
-                                   below like any other track, using this
-                                   field where a case reaches the merge
-                                   ladder.
+                                   conflict, prior_valid_to}. Promoted from
+                                   reserved to required round 5:
+                                   conflict=true blocks an otherwise-
+                                   AUTO-MERGE case (gate "temporal"). The
+                                   "temporal" TRACK is no longer in
+                                   UNSUPPORTED_TRACKS as of round 5: it is
+                                   decided by the ordinary rules below like
+                                   any other track, using this field where
+                                   a case reaches the merge ladder.
+                                   as_of is the date the QUESTION asks
+                                   about, never today; candidate_
+                                   effective_date is the date the LATER
+                                   (successor) record takes effect, never
+                                   the earlier record's own start date.
+                                   prior_valid_to, added for the temporal
+                                   record rules below (review-temporal-
+                                   track-2026-09-06.md), is the earlier
+                                   record's own valid-to date, null when
+                                   the input does not state one.
 
 THE PRECEDENCE ORDER, fixed and documented once here (decide() below is a
 straight-line implementation of this list, checked in this order, first
@@ -171,6 +190,20 @@ match wins):
      unsupported. These two tracks answer from their own vocabulary, which
      no rule handed to this module defines. The temporal (TM) track left
      this set round 5: it is decided by the ordinary rules below.
+  1.5. Temporal record rules (temporal_at_or_after_successor_is_r2,
+     temporal_before_successor_is_r1, temporal_gap_is_nodata; review-
+     temporal-track-2026-09-06.md), only when "R1" is a member of the
+     case's own allowed_answers, never gated on track (so U1 to U4's
+     TM-flavored cases, which answer from the decision vocabulary below
+     instead, reach item 2 untouched). as_of at or after
+     candidate_effective_date: R2, the successor record governs. as_of
+     before candidate_effective_date and lifecycle not closed: R1, the
+     earlier record is still in force. as_of before
+     candidate_effective_date, lifecycle closed, and no prior_valid_to
+     stated: NO-DATA, naming the dormancy gap that cannot be ruled out. A
+     month-precision date collision (same year and month, either side
+     missing a day) leaves the order unknowable, so none of the three
+     fires and the case falls through to item 2.
   2. Rule D (hierarchy types independent): 2 or more hierarchy_parents of
      DIFFERENT types, each with a parent named, is not one conflict; answer
      LINK AS RELATED. This runs before any relation or difference check
@@ -220,7 +253,11 @@ match wins):
      runs BEFORE rule L (next) so a notation-variant-only address match on
      a one-to-many, shared-address case cannot reach rule L's AUTO-MERGE
      gates and answer off gate-object-type before rule 5 is ever read; id
-     "5" is unchanged.
+     "5" is unchanged. QA round (2026-09-06, qa-review-jbeq-2026-09-06.md
+     M1): the hoisted position also checks id rule5_hoist, so disabling
+     rule5_hoist alone re-lowers rule 5 below rule L without deleting the
+     rule (a different mutation from disabling "5", which removes it
+     everywhere).
   6. Rule L (location comparison, added round 5, closes AD-03; grew round
      6, 2026-09-06, closes AD-01/AD-02/AD-05/AD-07; grew round 10,
      2026-09-06, closes W-01):
@@ -237,9 +274,24 @@ match wins):
      relation, temporal), then AUTO-MERGE if nothing blocks it.
      location_comparison == same_chiban_different_notation: SUGGEST MERGE.
      location_comparison == same_area_renamed (added round 7, 2026-09-06,
-     closes the extraction half of U-03): one place under an old and a new
-     administrative name, never two different places; treated exactly like
-     notation_variant_only, the same AUTO-MERGE-gate-checked path.
+     closes the extraction half of U-03; changed by founder ruling
+     2026-09-06, decision-p0-3-same-area-renamed-2026-09-06, id
+     renamed_area_needs_a_person): one place under an old and a new
+     administrative name, never two different places, but a rename is a
+     fact about the map, not confirmation the two rows are one, so this
+     answers SUGGEST MERGE, a person confirms. Disabling
+     renamed_area_needs_a_person reverts to the pre-ruling behaviour: the
+     same AUTO-MERGE-gate-checked path notation_variant_only uses.
+     location_comparison == same_area_different_lot (added round 12,
+     2026-09-07, per ~/.claude/evidence/review-rule6-2026-09-07.md ranking
+     item 2, closes U3 W-03): two addresses that state the same town and
+     block and differ only in lot number, with nothing else stated. Per
+     addendum rule 6, a differing lot number alone is an absence of
+     support, never a refutation, so this answers KEEP SEPARATE, never
+     REJECT MATCH and never a merge (own id
+     same_area_different_lot_keeps_separate; disabling it falls through to
+     whichever rule would apply next, exactly as if the location_comparison
+     value carried no signal at all).
      different_unit_in_building is read separately, by rule_r below.
   7. Rule 7 (group company-code records): stated_relation ==
      group_company_code_shared_entity: LINK AS RELATED. An operational
@@ -322,9 +374,17 @@ rule_r_blank_fields_guard, plus the round 7 ids rule_r_lifecycle_keep and
 allowed_answers_remap, plus the round 8 id proposal_gate, plus the round 9
 id relocated_not_a_bar, plus the round 10 ids rule_c_hierarchy_dimension,
 medium_needs_confirmation and relocated_address_not_a_refutation, plus the
+2026-09-06 founder-ruling id renamed_area_needs_a_person, plus the
 round 11 ids (2026-09-06, review-u4-2026-09-06.md)
 link_vs_reject_write_refutes, site_store_write_refutes and
-same_site_only_never_a_relation) to
+same_site_only_never_a_relation, plus the round 12 id (2026-09-07,
+review-rule6-2026-09-07.md) same_area_different_lot_keeps_separate) to
+same_site_only_never_a_relation, plus the QA round id (2026-09-06,
+qa-review-jbeq-2026-09-06.md M1) rule5_hoist, a second guard on rule 5's
+hoisted position so the ordering can be mutated without also removing the
+rule, plus the temporal record ids (2026-09-06, review-temporal-track-
+2026-09-06.md) temporal_at_or_after_successor_is_r2,
+temporal_before_successor_is_r1 and temporal_gap_is_nodata) to
 disable, one at a time or several together, so
 a test can prove ONE rule is load-bearing
 rather than only that the whole table is. A disabled rule's condition is
@@ -338,6 +398,14 @@ active. With everything disabled, decide() always returns NO-DATA with
 rule_fired="rules-disabled-for-test". This exists so a test suite can prove
 it is testing something real: with a rule disabled, any test that asserts
 that rule's specific answer must fail.
+
+EVERY ID ABOVE IS ALSO IN KNOWN_RULE_IDS (2026-09-06, qa-review-jbeq-
+2026-09-06.md C2): an unrecognized token used to be accepted here and
+silently disabled nothing, so a mistyped mutation id looked like a
+passing test for the wrong reason. _disabled_rules() now raises
+ValueError naming any token outside KNOWN_RULE_IDS, and the `decide` CLI
+turns that into a non-zero exit with the token on stderr, before
+anything runs.
 
 THE MUTATION SEAM IS FAIL LOUD AND FAIL CLOSED (hub PR 386 security
 finding, 2026-09-06): this environment variable is a fail-open test hook
@@ -774,18 +842,73 @@ def _enum_violations(sheet, enums):
     return violations
 
 
+# Every id JBEQ_DECIDE_DISABLE_RULES is ever compared against, built by
+# hand from `grep -noE '"[^"]*" (not )?in disabled' scripts/jbeq_decide.py`
+# (2026-09-06, qa-review-jbeq-2026-09-06.md C2): before this set existed, a
+# typo in the env var silently disabled nothing, so a mutation test with a
+# mistyped id could never fail for the right reason. scripts/test_jbeq_
+# decide.py greps this same file and asserts every literal it finds is a
+# member here, so this set cannot drift from the code without a failing
+# test naming the gap. "*" is the internal wildcard (see _disabled_rules
+# below); every other member is a rule id named in the module docstring
+# above.
+KNOWN_RULE_IDS = frozenset({
+    "*", "1", "2", "5", "7", "A", "B", "C", "D", "L",
+    "allowed_answers_remap",
+    "authoritative_identifier",
+    "lifecycle",
+    "link_vs_reject",
+    "link_vs_reject_write_refutes",
+    "medium_needs_confirmation",
+    "object_type",
+    "proposal_gate",
+    "relation_partition",
+    "relocated_address_not_a_refutation",
+    "relocated_not_a_bar",
+    "renamed_area_needs_a_person",
+    "rule5_hoist",
+    "rule_c_hierarchy_dimension",
+    "rule_r",
+    "rule_r_blank_fields_guard",
+    "rule_r_lifecycle_keep",
+    "same_site_only_never_a_relation",
+    "site_store",
+    "site_store_weak_guard",
+    "site_store_write_refutes",
+    "stated_relation_gate",
+    "temporal",
+    "temporal_at_or_after_successor_is_r2",
+    "temporal_before_successor_is_r1",
+    "temporal_gap_is_nodata",
+    "same_area_different_lot_keeps_separate",
+})
+
+
 def _disabled_rules():
     """Parse JBEQ_DECIDE_DISABLE_RULES into a set of rule ids to skip. See
     the module docstring for the full contract: bare "1" means "disable
     everything" (returned as the sentinel "*"), anything else is read as a
     comma list of specific rule ids.
+
+    Raises ValueError naming the token(s) if the env var names anything
+    outside KNOWN_RULE_IDS (2026-09-06, qa-review-jbeq-2026-09-06.md C2):
+    an unrecognized token used to be accepted and silently disabled
+    nothing, so a mistyped id read as a passing mutation test.
     """
     raw = os.environ.get("JBEQ_DECIDE_DISABLE_RULES", "")
     if not raw:
         return set()
     if raw == "1":
         return {"*"}
-    return {tok.strip() for tok in raw.split(",") if tok.strip()}
+    tokens = {tok.strip() for tok in raw.split(",") if tok.strip()}
+    unknown = tokens - KNOWN_RULE_IDS
+    if unknown:
+        raise ValueError(
+            "JBEQ_DECIDE_DISABLE_RULES named unknown rule id(s): %s "
+            "(known ids: %s)"
+            % (", ".join(sorted(unknown)), ", ".join(sorted(KNOWN_RULE_IDS)))
+        )
+    return tokens
 
 
 def _auto_merge_blocked(sheet, disabled):
@@ -947,6 +1070,107 @@ def _relation_is_none(stated_relation, disabled):
     )
 
 
+def _date_parts(value):
+    """Parse an ISO-ish "YYYY", "YYYY-MM" or "YYYY-MM-DD" string into
+    (year, month-or-None, day-or-None). None on anything unparseable."""
+    if not isinstance(value, str):
+        return None
+    bits = value.strip().split("-")
+    try:
+        year = int(bits[0])
+        month = int(bits[1]) if len(bits) > 1 else None
+        day = int(bits[2]) if len(bits) > 2 else None
+    except (ValueError, IndexError):
+        return None
+    return (year, month, day)
+
+
+def _date_cmp(a, b):
+    """-1/0/1 for a versus b, or None when the order is unknowable: either
+    side lacks month precision, or both fall in the same year and month but
+    at least one side lacks a day (a month-precision collision the temporal
+    rules below must not fire on)."""
+    pa, pb = _date_parts(a), _date_parts(b)
+    if not pa or not pb or pa[1] is None or pb[1] is None:
+        return None
+    if (pa[0], pa[1]) != (pb[0], pb[1]):
+        return -1 if (pa[0], pa[1]) < (pb[0], pb[1]) else 1
+    if pa[2] is None or pb[2] is None:
+        return None
+    return (pa[2] > pb[2]) - (pa[2] < pb[2])
+
+
+def _temporal_rule(fact_sheet, disabled):
+    """Three date-ordering rules for the temporal track's own R1/R2/NO-DATA
+    vocabulary (review-temporal-track-2026-09-06.md), gated on "R1" being a
+    member of the case's own allowed_answers, never on track: U1 to U4's
+    temporal cases answer from the decision vocabulary instead (KEEP
+    SEPARATE and the like) and must reach the ladder below untouched.
+    Returns (answer, rule_fired, why) for the first rule that fires, or
+    None to fall through to the ladder unchanged. Each rule has its own
+    JBEQ_DECIDE_DISABLE_RULES id so a mutation test can disable exactly
+    one.
+
+    temporal_at_or_after_successor_is_r2: as_of is at or after
+    candidate_effective_date (the date the later, successor record takes
+    effect), so the successor record is the one in force: R2.
+    temporal_before_successor_is_r1: as_of is before candidate_effective_date
+    and lifecycle is not stated closed, so the earlier record is still the
+    one in force: R1.
+    temporal_gap_is_nodata: as_of is before candidate_effective_date, the
+    earlier record is stated closed, and the sheet carries no
+    prior_valid_to (the earlier record's own valid_to): a dormancy gap
+    between the closure and the successor's start cannot be ruled out, so
+    the honest answer is NO-DATA naming that gap rather than guessing which
+    record, if any, was in force.
+
+    A pair of dates that collide at month precision (either side missing a
+    day, both in the same year and month) has an unknowable order, so no
+    rule fires and the case falls through to the ladder below.
+    """
+    allowed = fact_sheet.get("allowed_answers") or []
+    if "R1" not in allowed:
+        return None
+    effective_dates = fact_sheet.get("effective_dates") or {}
+    as_of = effective_dates.get("as_of")
+    candidate = effective_dates.get("candidate_effective_date")
+    if not as_of or not candidate:
+        return None
+    order = _date_cmp(as_of, candidate)
+    if order is None:
+        return None
+    if order >= 0:
+        if "temporal_at_or_after_successor_is_r2" in disabled:
+            return None
+        return (
+            "R2", "temporal_at_or_after_successor_is_r2",
+            "as_of %r is at or after candidate_effective_date %r: the "
+            "later (successor) record is the one in force"
+            % (as_of, candidate),
+        )
+    lifecycle = fact_sheet.get("lifecycle")
+    if lifecycle != "closed":
+        if "temporal_before_successor_is_r1" in disabled:
+            return None
+        return (
+            "R1", "temporal_before_successor_is_r1",
+            "as_of %r is before candidate_effective_date %r and "
+            "lifecycle=%r is not closed: the earlier record is still the "
+            "one in force" % (as_of, candidate, lifecycle),
+        )
+    if effective_dates.get("prior_valid_to") is None:
+        if "temporal_gap_is_nodata" in disabled:
+            return None
+        return (
+            "NO-DATA", "temporal_gap_is_nodata",
+            "as_of %r is before candidate_effective_date %r and "
+            "lifecycle=closed, but the sheet carries no prior_valid_to: a "
+            "dormancy gap between the closure and the successor's start "
+            "cannot be ruled out" % (as_of, candidate),
+        )
+    return None
+
+
 def _decide_unwrapped(fact_sheet, allow_unrecognized, disabled):
     """The rule table itself, run with `disabled` already resolved. See
     decide() below for the public entry point, which wraps every result
@@ -1052,6 +1276,10 @@ def _decide_unwrapped(fact_sheet, allow_unrecognized, disabled):
             "track %r answers from its own vocabulary; no rule handed to "
             "this module defines it" % track,
         )
+
+    temporal_hit = _temporal_rule(fact_sheet, disabled)
+    if temporal_hit is not None:
+        return finish(*temporal_hit)
 
     hierarchy_parents = fact_sheet["hierarchy_parents"] or []
     distinct_types = {p["type"] for p in hierarchy_parents if p.get("parent")}
@@ -1191,8 +1419,15 @@ def _decide_unwrapped(fact_sheet, allow_unrecognized, disabled):
     # off gate-object-type before rule 5 was ever read. Hoisted above the
     # ladder so it answers first, exactly as it already does for every
     # other location_comparison value.
+    #
+    # M1 (2026-09-06, qa-review-jbeq-2026-09-06.md): id "5" guards the rule
+    # itself (disabling it removes rule 5 everywhere), and id rule5_hoist
+    # guards only THIS hoisted position, separately: disabling rule5_hoist
+    # alone re-lowers rule 5 below the location ladder without deleting the
+    # rule, which is a different mutation from disabling "5" and needs its
+    # own id to be provable in isolation.
     if (stated_relation == "same_site_only" and fact_sheet["one_to_many_object"]
-            and "5" not in disabled):
+            and "5" not in disabled and "rule5_hoist" not in disabled):
         return finish(
             "KEEP SEPARATE", "5",
             "only a shared address is stated and one side is a one-to-many "
@@ -1234,28 +1469,55 @@ def _decide_unwrapped(fact_sheet, allow_unrecognized, disabled):
     # through to the boundary-rule-1 default (KEEP SEPARATE). Landed last
     # and in its own commit so it can be reverted alone if the mapping
     # below turns out to be the wrong shape.
-    # Round 7 repair (2026-09-06, review section F, closing the extraction
-    # half of U-03): same_area_renamed is ONE place under an old and a new
-    # administrative name (a municipal merger or a renaming), never two
-    # genuinely different places, so it is treated exactly like
-    # notation_variant_only below, sharing the same AUTO-MERGE-gate-checked
-    # path and the same "L" mutation id.
-    if (location_comparison in ("notation_variant_only", "same_area_renamed")
-            and "L" not in disabled):
-        # A notation-only (or renaming-only) address difference is close
-        # enough to an AUTO-MERGE candidate that it must still clear every
-        # AUTO-MERGE safety gate (object type, lifecycle, authoritative
-        # identifier, stated relation, temporal), exactly like the merge
-        # ladder's own strong-evidence branch.
+    if location_comparison == "notation_variant_only" and "L" not in disabled:
+        # A notation-only address difference is close enough to an
+        # AUTO-MERGE candidate that it must still clear every AUTO-MERGE
+        # safety gate (object type, lifecycle, authoritative identifier,
+        # stated relation, temporal), exactly like the merge ladder's own
+        # strong-evidence branch.
         blocked = _auto_merge_blocked(fact_sheet, disabled)
         if blocked:
             answer, rule_fired, why = blocked
             return finish(answer, rule_fired, why)
         return finish(
             "AUTO-MERGE", "L",
-            "location_comparison=%r: the addresses name the same place "
-            "under two notations (or an old and a new administrative "
-            "name), and no merge-safety gate blocked it" % location_comparison,
+            "location_comparison=notation_variant_only: the addresses name "
+            "the same place under two notations, and no merge-safety gate "
+            "blocked it",
+        )
+    # Round 7 repair (2026-09-06, review section F, closing the extraction
+    # half of U-03) had treated same_area_renamed exactly like
+    # notation_variant_only above, sharing the AUTO-MERGE-gate-checked path.
+    # Founder ruling 2026-09-06 (decision-p0-3-same-area-renamed-2026-09-06):
+    # that was wrong on all three corpus cases carrying the value (AD-05,
+    # W4-21, W4-24): a renamed area (a municipal merger or a street/town
+    # renaming) is a fact about the map, never confirmation the two
+    # registry rows are one, so it earns a person's confirmation, not an
+    # outright merge. id renamed_area_needs_a_person isolates this branch:
+    # disabling it reverts to the pre-ruling AUTO-MERGE-gate-checked path
+    # (below), so a mutation test can prove the branch is load-bearing.
+    if location_comparison == "same_area_renamed" and "L" not in disabled:
+        if "renamed_area_needs_a_person" not in disabled:
+            return finish(
+                "SUGGEST MERGE", "L",
+                "location_comparison=same_area_renamed: the addresses name "
+                "the same place under an old and a new administrative "
+                "name, but a rename is a fact about the map, not "
+                "confirmation the two registry rows are one (founder "
+                "ruling 2026-09-06, decision-p0-3-same-area-renamed-"
+                "2026-09-06: a renamed area earns a person's confirmation, "
+                "never an outright merge)",
+            )
+        blocked = _auto_merge_blocked(fact_sheet, disabled)
+        if blocked:
+            answer, rule_fired, why = blocked
+            return finish(answer, rule_fired, why)
+        return finish(
+            "AUTO-MERGE", "L",
+            "location_comparison=same_area_renamed: the addresses name "
+            "the same place under an old and a new administrative name, "
+            "and no merge-safety gate blocked it "
+            "(renamed_area_needs_a_person disabled)",
         )
     if location_comparison == "same_chiban_different_notation" and "L" not in disabled:
         return finish(
@@ -1263,6 +1525,25 @@ def _decide_unwrapped(fact_sheet, allow_unrecognized, disabled):
             "location_comparison=same_chiban_different_notation: the same "
             "lot number written two ways is close enough that a person "
             "should confirm before it merges",
+        )
+    # Round 12 repair (2026-09-07, review-rule6-2026-09-07.md ranking item
+    # 2, closes U3 W-03): the corpus had no location_comparison value for
+    # two addresses that state the same town and block and differ only in
+    # lot number, so the extractor wrote different_administrative_area and
+    # rule L's REJECT MATCH fired. Addendum rule 6 treats a differing lot
+    # number alone, with nothing else stated, as an absence of support,
+    # never a refutation: answer stays KEEP SEPARATE. Own id
+    # same_area_different_lot_keeps_separate isolates this branch: disabled,
+    # the case falls through to whichever rule would apply next, exactly as
+    # if location_comparison carried no signal at all.
+    if (location_comparison == "same_area_different_lot" and "L" not in disabled
+            and "same_area_different_lot_keeps_separate" not in disabled):
+        return finish(
+            "KEEP SEPARATE", "L",
+            "location_comparison=same_area_different_lot: the two addresses "
+            "state the same town and block and differ only in lot number, "
+            "which addendum rule 6 treats as an absence of support, never "
+            "a refutation",
         )
 
     if stated_relation == "group_company_code_shared_entity" and "7" not in disabled:
@@ -1671,7 +1952,14 @@ def cmd_validate(args):
 
 
 def cmd_decide(args):
-    disabled = _disabled_rules()
+    try:
+        disabled = _disabled_rules()
+    except ValueError as exc:
+        # C2 (2026-09-06, qa-review-jbeq-2026-09-06.md): an unknown
+        # mutation id must refuse loudly at the CLI, never disable
+        # nothing and run as if the seam were off.
+        sys.stderr.write("NO-DATA: %s\n" % exc)
+        return EXIT_NODATA
     if disabled:
         # Loud (hub PR 386): one stderr banner per run naming the disabled
         # ids, so a mutation seam can never run silently even if nobody

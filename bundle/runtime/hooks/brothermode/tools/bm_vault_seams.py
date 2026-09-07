@@ -23,6 +23,16 @@ all read the exact same set from the exact same call.
 NEVER set any of SEAM_VARS in production. Each one is documented at its own
 call site (bm_vault.py, bm_vault_intake.py, vault_recall_hook.py,
 bm_vault_contradiction.py) with the single protection it turns off.
+
+ROW M4 (2026-09-07, generalized from hub PR 481's JBEQ_DECIDE_DISABLE_RULES
+fix): a typo in one of these names used to disable nothing at all, silently
+-- BM_VAULT_DISABLE_LIFECYLE_GATE (missing the C) reads to a human as the
+real gate but matches no os.environ.get(...) call site anywhere in this
+estate, so a mutation test written against it would pass for the wrong
+reason: every protection stayed live, and nothing said so. active_seams()
+now refuses (UnknownSeamError) the moment it finds a BM_VAULT_DISABLE_*
+name outside KNOWN_SEAMS, so a typo is loud at the read point instead of
+silent at every call site that would have ignored it.
 """
 import os
 
@@ -41,12 +51,48 @@ SEAM_VARS = (
     "BM_VAULT_DISABLE_LIFECYCLE_GATE",
 )
 
+#: Same set as SEAM_VARS, as a frozenset, for membership checks below and
+#: in every consumer's own drift test. Derived, never hand-duplicated, so
+#: the two can never disagree with each other.
+KNOWN_SEAMS = frozenset(SEAM_VARS)
+
+#: The one prefix every seam name shares. A name outside KNOWN_SEAMS that
+#: does not even start with this prefix is not one of ours at all (some
+#: unrelated env var) and is none of this module's business.
+SEAM_PREFIX = "BM_VAULT_DISABLE_"
+
+
+class UnknownSeamError(RuntimeError):
+    """Raised by active_seams() when an environment variable matches
+    SEAM_PREFIX but is not a member of KNOWN_SEAMS. Almost always a typo:
+    the name reads like a real seam to a human, matches no os.environ.get
+    call site anywhere, and would otherwise disable nothing while looking
+    exactly like a live mutation to anyone reading the process's own
+    environment. `unknown` carries the sorted bad name(s)."""
+
+    def __init__(self, unknown):
+        self.unknown = tuple(sorted(unknown))
+        super().__init__(
+            "UNKNOWN SEAM %s (known seams: %s)"
+            % (", ".join(self.unknown), ", ".join(sorted(KNOWN_SEAMS))))
+
 
 def active_seams():
     """Sorted tuple of the SEAM_VARS names currently set to a truthy env
     value (any non-empty string -- the same truthiness every existing
     os.environ.get(...) call site in this estate already used). An empty
-    tuple means production shape: nothing disabled."""
+    tuple means production shape: nothing disabled.
+
+    Raises UnknownSeamError first, before returning anything, if any
+    BM_VAULT_DISABLE_* environment variable is present that is not in
+    KNOWN_SEAMS (row M4): a typo must never read as "nothing disabled"
+    when it might instead mean an operator believes a protection is off
+    that is not."""
+    unknown = tuple(sorted(
+        name for name in os.environ
+        if name.startswith(SEAM_PREFIX) and name not in KNOWN_SEAMS))
+    if unknown:
+        raise UnknownSeamError(unknown)
     return tuple(sorted(v for v in SEAM_VARS if os.environ.get(v)))
 
 
@@ -85,6 +131,16 @@ def demo():
             "BM_VAULT_DISABLE_ANCHOR_CHECK)")
     finally:
         del os.environ["BM_VAULT_DISABLE_LIFECYCLE_GATE"]
+    os.environ["BM_VAULT_DISABLE_LIFECYLE_GATE"] = "1"  # typo, missing the C
+    try:
+        try:
+            active_seams()
+        except UnknownSeamError as exc:
+            assert "BM_VAULT_DISABLE_LIFECYLE_GATE" in str(exc)
+        else:
+            raise AssertionError("a typo'd seam name must refuse, not pass silently")
+    finally:
+        del os.environ["BM_VAULT_DISABLE_LIFECYLE_GATE"]
     print("bm_vault_seams: demo OK")
 
 

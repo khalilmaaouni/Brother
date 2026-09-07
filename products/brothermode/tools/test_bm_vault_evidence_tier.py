@@ -83,7 +83,7 @@ class EvidenceTierAtRecall(unittest.TestCase):
             "status: verified",
         ]))
         lesson = self._lesson("10-Lessons/a.md")
-        tier, reason = contradiction.evidence_tier(lesson, self._probe())
+        tier, reason, _seam = contradiction.evidence_tier(lesson, self._probe())
         self.assertEqual(tier, contradiction.TIER_EVIDENCED)
         self.assertIn("holds", reason)
 
@@ -94,7 +94,7 @@ class EvidenceTierAtRecall(unittest.TestCase):
             "status: verified",
         ]))
         lesson = self._lesson("10-Lessons/a.md")
-        tier, reason = contradiction.evidence_tier(lesson, self._probe())
+        tier, reason, _seam = contradiction.evidence_tier(lesson, self._probe())
         self.assertEqual(tier, contradiction.TIER_UNVERIFIED)
         self.assertIn("no evidence_locator", reason)
 
@@ -173,7 +173,7 @@ class EvidenceTierAtRecall(unittest.TestCase):
             "status: verified",
         ]))
         lesson = self._lesson("10-Lessons/a.md")
-        tier, reason = contradiction.evidence_tier(lesson, self._probe())
+        tier, reason, _seam = contradiction.evidence_tier(lesson, self._probe())
         self.assertEqual(tier, contradiction.TIER_REFUSED)
         self.assertIn("does not currently hold", reason)
 
@@ -185,7 +185,7 @@ class EvidenceTierAtRecall(unittest.TestCase):
             "status: verified",
         ]))
         lesson = self._lesson("10-Lessons/a.md")
-        tier, reason = contradiction.evidence_tier(lesson, self._probe())
+        tier, reason, _seam = contradiction.evidence_tier(lesson, self._probe())
         self.assertEqual(tier, contradiction.TIER_REFUSED)
         self.assertIn("forged", reason)
 
@@ -201,7 +201,7 @@ class EvidenceTierAtRecall(unittest.TestCase):
             "last_verified_at: %s" % FUTURE,
         ]))
         lesson = self._lesson("10-Lessons/a.md")
-        tier, reason = contradiction.evidence_tier(lesson, self._probe())
+        tier, reason, _seam = contradiction.evidence_tier(lesson, self._probe())
         self.assertEqual(tier, contradiction.TIER_REFUSED)
         self.assertIn("forged", reason)
 
@@ -219,7 +219,7 @@ class EvidenceTierAtRecall(unittest.TestCase):
         def duplicate_probe(_lsn):
             return os.path.join(self.vault, "10-Lessons/shared.md")
 
-        tier, reason = contradiction.evidence_tier(lesson, self._probe(), duplicate_probe)
+        tier, reason, _seam = contradiction.evidence_tier(lesson, self._probe(), duplicate_probe)
         self.assertEqual(tier, contradiction.TIER_REFUSED)
         self.assertIn("duplicates", reason)
 
@@ -234,7 +234,7 @@ class EvidenceTierAtRecall(unittest.TestCase):
         def duplicate_probe(_lsn):
             return None
 
-        tier, _reason = contradiction.evidence_tier(lesson, self._probe(), duplicate_probe)
+        tier, _reason, _seam = contradiction.evidence_tier(lesson, self._probe(), duplicate_probe)
         self.assertEqual(tier, contradiction.TIER_UNVERIFIED)
 
     # STRICT EVERYWHERE: a plain legacy lesson (neither evidence_locator
@@ -246,7 +246,7 @@ class EvidenceTierAtRecall(unittest.TestCase):
     def test_unverified_when_neither_evidence_locator_nor_status_declared(self):
         self._write("10-Lessons/a.md", _note(["name: plain widget lesson"]))
         lesson = self._lesson("10-Lessons/a.md")
-        tier, reason = contradiction.evidence_tier(lesson, self._probe())
+        tier, reason, _seam = contradiction.evidence_tier(lesson, self._probe())
         self.assertEqual(tier, contradiction.TIER_UNVERIFIED)
         self.assertIn("unknown means WITHHOLD", reason)
 
@@ -263,7 +263,7 @@ class EvidenceTierAtRecall(unittest.TestCase):
         self._write("10-Lessons/a.md", _note(
             ["name: skip validation is fine here"], body=harmful_body))
         lesson = self._lesson("10-Lessons/a.md")
-        tier, reason = contradiction.evidence_tier(lesson, self._probe())
+        tier, reason, _seam = contradiction.evidence_tier(lesson, self._probe())
         self.assertEqual(tier, contradiction.TIER_UNVERIFIED)
         self.assertIn("unknown means WITHHOLD", reason)
 
@@ -290,7 +290,7 @@ class EvidenceTierAtRecall(unittest.TestCase):
             "status: superseded",
         ]))
         lesson = self._lesson("10-Lessons/a.md")
-        tier, reason = contradiction.evidence_tier(lesson, self._probe())
+        tier, reason, _seam = contradiction.evidence_tier(lesson, self._probe())
         self.assertEqual(tier, contradiction.TIER_UNVERIFIED)
         self.assertIn("superseded", reason)
 
@@ -303,7 +303,7 @@ class EvidenceTierAtRecall(unittest.TestCase):
             "status: verified",
         ]))
         lesson = self._lesson("10-Lessons/a.md")
-        tier, reason = contradiction.evidence_tier(lesson, self._probe())
+        tier, reason, _seam = contradiction.evidence_tier(lesson, self._probe())
         self.assertEqual(tier, contradiction.TIER_UNVERIFIED)
         self.assertIn("could not be checked", reason)
 

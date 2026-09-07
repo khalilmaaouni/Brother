@@ -94,7 +94,7 @@
   },
   {
    "path": "brothermode/tools/bm_vault.py",
-   "sha256": "0aafea297922550223fe47f21fbf7eebcfc51e03f6ff3a75205757f764605d7c"
+   "sha256": "e746ed87d4e313db0ea2f59e5e65006cd306ed0eb0af1b6e7e71180fc586cff7"
   },
   {
    "path": "brothermode/tools/bm_vault_analyzer.py",
@@ -118,7 +118,7 @@
   },
   {
    "path": "brothermode/tools/bm_vault_contradiction.py",
-   "sha256": "61f61cc4ba64048ef78869dc123f174d9e0cf5bd19f7d40f29f47614f6c67946"
+   "sha256": "c7df1e01b054963d8f803a474450b17ac552e424e00c5cc09ded1834227c03c4"
   },
   {
    "path": "brothermode/tools/bm_vault_decay.py",
@@ -138,7 +138,7 @@
   },
   {
    "path": "brothermode/tools/bm_vault_intake.py",
-   "sha256": "a46cfefe730cd9db17d4935b86f318673ded6876bbdc70022bb5b9f10dcaa34a"
+   "sha256": "aa3b29bb4b0817f19575b92d51953c9af891c906f33501b823e17e4afa436297"
   },
   {
    "path": "brothermode/tools/bm_vault_lifecycle.py",
@@ -162,7 +162,7 @@
   },
   {
    "path": "brothermode/tools/bm_vault_seams.py",
-   "sha256": "16fd2464f758ea28b838740dcece11891982b0a13353a6f8ac4dee8180a40717"
+   "sha256": "e7d7f79c8b5ebe8f069c9cbec7072b18a29bde9756ea54f1cd91e7705a378b65"
   },
   {
    "path": "brothermode/tools/bm_vault_serve.py",
@@ -198,7 +198,7 @@
   },
   {
    "path": "brothermode/tools/vault_recall_hook.py",
-   "sha256": "bbbef91be8c7386f293f2b4f303d5e86d24a5b28ff7c47470a2c9fc9f8aeeb60"
+   "sha256": "eae04db72449c55d65789890639785c28aad903244bb689ac749512a9fec532e"
   },
   {
    "path": "brothersbe/tools/brother_paths.py",

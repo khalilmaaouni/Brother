@@ -57,7 +57,11 @@ WHAT IT DOES, in order:
      exit from any of the three, FAIL or NO-DATA alike, refuses the export: a check that could not run has not
      certified the tree, and this exporter treats "I could not tell" and
      "it is fine" as the same non-pass, exactly as pre_push_gate.py already
-     does for the hub's own boundary.
+     does for the hub's own boundary. Each gate's own timeout scales with
+     the 15 minute load average (gate_timeout), never a fixed 120 seconds,
+     and a gate that runs out of that time reads NO-DATA, naming the load
+     and the seconds, never FAIL: a check that could not finish has not
+     failed the tree.
 
   4. Prints every gate's own verdict, and the count of paths it copied
      (what it WOULD export), whether or not the gates cleared.
@@ -282,10 +286,59 @@ def load_denylist(path=None):
     return entries
 
 
+#: GATE_TIMEOUT_FLOOR_SECONDS is what one gate gets on a quiet machine (15
+#: minute load average at or below the core count): the 120 seconds cleanse.sh
+#: and its siblings comfortably clear when nothing else is competing for CPU.
+#: GATE_TIMEOUT_CAP_SECONDS bounds a runaway: no gate ever waits past this,
+#: however loaded the machine reads.
+#:
+#: THE RULE: the timeout scales with the 15 minute load average divided by
+#: the core count, because that ratio is roughly how much of a real core
+#: each runnable process actually gets. A load of 80 on an 8 core machine
+#: means every process gets about a tenth of a core, so a job that needs 60
+#: seconds of CPU time under no contention needs about 600 seconds of wall
+#: clock time to get the same 60 seconds of CPU at one tenth speed.
+#:
+#: THE MEASUREMENT THAT MOTIVATED THIS (2026-09-06, this machine, 8 cores):
+#: cleanse.sh over 1590 files timed out at the old fixed 120 seconds when the
+#: 15 minute load average was above about 75; the same gate cleared well
+#: under 120 seconds when the load was under 35. A timeout is a check that
+#: could not run, NO-DATA, never a FAIL: run_gate below reports it that way.
+GATE_TIMEOUT_FLOOR_SECONDS = 120
+GATE_TIMEOUT_CAP_SECONDS = 1800
+
+
+def gate_timeout(load15=None, cores=None, floor=None, cap=None):
+    """The seconds one gate subprocess gets, scaled by 15 minute load over
+    core count (see the constants above), floored and capped. `load15` and
+    `cores` are read at CALL TIME when left None, never bound as default
+    argument values: a default argument is evaluated once, when this
+    function is defined, and os.getloadavg() read then would freeze the
+    load at whatever it was at import time, never at the moment a gate
+    actually runs."""
+    floor = GATE_TIMEOUT_FLOOR_SECONDS if floor is None else floor
+    cap = GATE_TIMEOUT_CAP_SECONDS if cap is None else cap
+    if cores is None:
+        cores = os.cpu_count() or 1
+    if load15 is None:
+        try:
+            load15 = os.getloadavg()[2]
+        except (AttributeError, OSError):
+            load15 = 0.0
+    scale = max(1.0, load15 / cores)
+    return min(cap, int(floor * scale))
+
+
 def _run(cmd, cwd, env=None, timeout=120):
     try:
         return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True,
                                env=env, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        class _TimedOut:
+            returncode = 2  # this estate's NO-DATA exit code
+            stdout = ""
+            stderr = "NO-DATA: timed out after %d seconds" % timeout
+        return _TimedOut()
     except Exception as exc:  # noqa: BLE001
         class _Fake:
             returncode = 1
@@ -808,13 +861,36 @@ def build_orphan_commit(export_dir, allowlist, root=ROOT):
 DEFAULT_TERMS_FILE = os.path.expanduser("~/.brothersbe-private-names")
 
 
-def run_gate(cmd, cwd, name, env=None):
+def run_gate(cmd, cwd, name, env=None, timeout=None, load15=None):
     """One gate command against `cwd`. Returns (ok, verdict_line). ANY
     nonzero exit refuses, FAIL and NO-DATA alike: a check that could not
-    run has not certified the tree, never a pass by default."""
-    proc = _run(cmd, cwd, env=env)
+    run has not certified the tree, never a pass by default.
+
+    The timeout scales with the 15 minute load average divided by the core
+    count (gate_timeout above), never a fixed 120 seconds: a gate that ran
+    out of wall clock time on a loaded machine has not failed the tree, it
+    has not certified it, and the verdict line says so as NO-DATA, naming
+    the load and the seconds, never FAIL. `timeout` and `load15` are read
+    at call time when left None (load15 falls back to os.getloadavg()
+    inside gate_timeout, guarded there for platforms without it)."""
+    if load15 is None:
+        try:
+            load15 = os.getloadavg()[2]
+        except (AttributeError, OSError):
+            load15 = None
+    if timeout is None:
+        timeout = gate_timeout(load15=load15)
+    proc = _run(cmd, cwd, env=env, timeout=timeout)
     text = ((proc.stdout or "") + (proc.stderr or "")).strip()
     verdict = text.splitlines()[-1] if text else "(no output)"
+    if proc.returncode == 2 and verdict.startswith("NO-DATA: timed out"):
+        load_str = "unknown" if load15 is None else "%.1f" % load15
+        verdict = ("NO-DATA: timed out after %d seconds at 15 minute load "
+                    "%s over %d cores (floor %d s, scaled by load over "
+                    "cores, cap %d s)" % (
+                        timeout, load_str, os.cpu_count() or 1,
+                        GATE_TIMEOUT_FLOOR_SECONDS,
+                        GATE_TIMEOUT_CAP_SECONDS))
     return proc.returncode == 0, "%s: exit %s, %s" % (
         name, proc.returncode, verdict)
 

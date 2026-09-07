@@ -19,6 +19,7 @@ No em or en dashes anywhere in this file.
 """
 import importlib.util
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -116,6 +117,105 @@ class ActiveSeamsAndBanner(_EnvSavingCase):
             seams.banner(("BM_VAULT_DISABLE_DENYLIST_GATE",)),
             "MUTATION SEAM ACTIVE (vault protections disabled: "
             "BM_VAULT_DISABLE_DENYLIST_GATE)")
+
+
+#: The four files bm_vault_seams.py's own module docstring names as the
+#: documented call site of each seam. A literal used here that is not in
+#: KNOWN_SEAMS is exactly row M4's failure mode: a name that reads like a
+#: real seam to a human but that active_seams() would never recognize.
+_DOCUMENTED_CONSUMER_FILES = (
+    "bm_vault.py",
+    "bm_vault_intake.py",
+    "vault_recall_hook.py",
+    "bm_vault_contradiction.py",
+)
+_SEAM_LITERAL_RE = re.compile(r"BM_VAULT_DISABLE_[A-Z_]+")
+
+
+class KnownSeamsCannotDriftFromTheCode(unittest.TestCase):
+    """Mirrors scripts/test_jbeq_decide.py's own KNOWN_RULE_IDS drift test
+    (hub PR 481, the sibling half of row M4): grep every documented
+    consumer file for a BM_VAULT_DISABLE_* literal and assert each one
+    found is a member of KNOWN_SEAMS, so a new seam wired into a consumer
+    without also being added to SEAM_VARS/KNOWN_SEAMS fails this test
+    instead of silently reading as "unknown" (or, worse, never reaching
+    active_seams() at all)."""
+
+    def test_every_literal_in_a_documented_consumer_is_known(self):
+        found = set()
+        for name in _DOCUMENTED_CONSUMER_FILES:
+            path = os.path.join(HERE, name)
+            with open(path, encoding="utf-8") as fh:
+                found.update(_SEAM_LITERAL_RE.findall(fh.read()))
+        self.assertTrue(found, "no BM_VAULT_DISABLE_* literal found at all; "
+                               "the grep itself is broken")
+        unknown = found - seams.KNOWN_SEAMS
+        self.assertEqual(unknown, set(),
+                         "literal(s) used in a consumer but missing from "
+                         "KNOWN_SEAMS: %s" % ", ".join(sorted(unknown)))
+
+
+class UnknownSeamRefuses(_EnvSavingCase):
+    """Row M4: a BM_VAULT_DISABLE_* name outside KNOWN_SEAMS (the typo
+    case: BM_VAULT_DISABLE_LIFECYLE_GATE, missing the C) must refuse at
+    the read point, naming itself, rather than silently disabling
+    nothing and letting a mutation test pass for the wrong reason."""
+
+    def tearDown(self):
+        os.environ.pop("BM_VAULT_DISABLE_LIFECYLE_GATE", None)
+        super().tearDown()
+
+    def test_unknown_seam_raises_naming_itself(self):
+        os.environ["BM_VAULT_DISABLE_LIFECYLE_GATE"] = "1"
+        with self.assertRaises(seams.UnknownSeamError) as ctx:
+            seams.active_seams()
+        self.assertIn("BM_VAULT_DISABLE_LIFECYLE_GATE", str(ctx.exception))
+        self.assertIn("UNKNOWN SEAM", str(ctx.exception))
+
+    def test_a_known_seam_still_disables_and_still_banners(self):
+        # The fix must never make a REAL seam name stop working: this is
+        # the same case test_one_seam_set_reads_just_that_one already
+        # covers, restated here beside the unknown-seam test so the two
+        # contrast directly.
+        self._set("BM_VAULT_DISABLE_LIFECYCLE_GATE", "1")
+        self.assertEqual(seams.active_seams(), ("BM_VAULT_DISABLE_LIFECYCLE_GATE",))
+        self.assertEqual(
+            seams.banner(),
+            "MUTATION SEAM ACTIVE (vault protections disabled: "
+            "BM_VAULT_DISABLE_LIFECYCLE_GATE)")
+
+    def test_unrelated_env_var_never_counts_as_an_unknown_seam(self):
+        os.environ["BM_VAULT_SOMETHING_ELSE_ENTIRELY"] = "1"
+        try:
+            self.assertEqual(seams.active_seams(), ())
+        finally:
+            del os.environ["BM_VAULT_SOMETHING_ELSE_ENTIRELY"]
+
+
+class VaultRecallHookWithholdsUnderAnUnknownSeam(_EnvSavingCase):
+    """The hook never blocks and never fails an edit (its own module
+    docstring), so an unknown seam must not raise out of lesson_states()
+    and crash the hook process -- but it must also never silently fall
+    back to classifying notes as if the environment were clean. Row M4's
+    answer for this one consumer: withhold every note block outright and
+    name the unknown seam on its own title line."""
+
+    def setUp(self):
+        super().setUp()
+        self.hook = load_hook()
+
+    def tearDown(self):
+        os.environ.pop("BM_VAULT_DISABLE_LIFECYLE_GATE", None)
+        super().tearDown()
+
+    def test_every_block_is_withheld_and_names_the_unknown_seam(self):
+        os.environ["BM_VAULT_DISABLE_LIFECYLE_GATE"] = "1"
+        out = "\n  widget fact  [lesson, harvest]\n    /tmp/widget-fact.md\n"
+        records, out2 = self.hook.lesson_states(out, "/tmp")
+        self.assertEqual(records, [])
+        self.assertIn("WITHHELD", out2)
+        self.assertIn("BM_VAULT_DISABLE_LIFECYLE_GATE", out2)
+        self.assertNotIn("widget fact", out2)
 
 
 class BmVaultCheckIsLoud(_EnvSavingCase):
