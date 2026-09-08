@@ -338,6 +338,69 @@ def compare_export_manifest(shipped, tag_entries):
                       len(shipped_rows - fresh_rows)))
 
 
+def _first_differing_lines(shipped_text, generated_text, max_pairs=3):
+    """The first few masked lines the shipped note and the regenerated note
+    disagree on, so a MISMATCH reader sees what moved without diffing the
+    whole note by hand. Copied from refresh_cut.py's own helper of the same
+    name and shape (that copy compares a committed note against a freshly
+    regenerated one at HEAD; this one compares a tag's shipped note against
+    one regenerated at --source-rev), kept as a plain copy rather than an
+    import because refresh_cut.py already imports this module."""
+    shipped_lines = shipped_text.splitlines()
+    generated_lines = generated_text.splitlines()
+    out = []
+    for i in range(max(len(shipped_lines), len(generated_lines))):
+        old = shipped_lines[i] if i < len(shipped_lines) else "(absent)"
+        new = generated_lines[i] if i < len(generated_lines) else "(absent)"
+        if old != new:
+            out.append("  shipped: %s" % old)
+            out.append("  regenerated: %s" % new)
+            if len(out) >= max_pairs * 2:
+                break
+    return out
+
+
+def regenerate_note(src_root, version):
+    """--regenerate-note: run the estate's own release note generator
+    (the same command refresh_cut.regenerate() runs at cut time) inside
+    `src_root`, the source-revision checkout, to produce the note DEL-13
+    found this reproducer never checks: docs/releases/<version>.md is only
+    ever present in export_dir when --source-rev is at or after the refresh
+    commit that adds it, so at the ordinary --source-rev the cut script
+    names, the note is simply absent and never reaches compare_release_note.
+
+    Returns (bytes_or_None, detail): the regenerated note's bytes on
+    success, or (None, "NO-DATA: ...") when the generator script is
+    missing, exits non-zero, or its output cannot be read back. A
+    subprocess, not an import, for the same reason refresh_cut.regenerate()
+    uses one: release_note_from_tree.py memoizes its measurements for the
+    life of a process, so importing it here could answer from whatever this
+    process already computed rather than reading src_root fresh."""
+    script = os.path.join(src_root, "scripts", "release_note_from_tree.py")
+    if not os.path.isfile(script):
+        return None, ("NO-DATA: %s has no scripts/release_note_from_tree.py "
+                      "to regenerate the note with" % src_root)
+    cmd = [sys.executable, script, "--write", "--version", version]
+    try:
+        proc = subprocess.run(cmd, cwd=src_root, capture_output=True,
+                              text=True)
+    except OSError as exc:
+        return None, "NO-DATA: could not run %s (%s)" % (" ".join(cmd), exc)
+    if proc.returncode != 0:
+        tail = (proc.stderr or "").strip().splitlines()
+        return None, ("NO-DATA: %s exited %d: %s"
+                      % (" ".join(cmd), proc.returncode,
+                         tail[-1] if tail else "(no output)"))
+    note_path = os.path.join(src_root, "docs", "releases",
+                             "%s.md" % version)
+    try:
+        with open(note_path, "rb") as fh:
+            return fh.read(), ""
+    except OSError as exc:
+        return None, ("NO-DATA: %s exited 0 but %s could not be read: %s"
+                      % (" ".join(cmd), note_path, exc))
+
+
 def apply_release_stamp(export_dir, tag, source_rev):
     """A commit cannot contain its own hash: export_public.py stamps
     docs/releases/<version>.md with the hub HEAD taken AFTER --source-rev
@@ -372,6 +435,15 @@ def main(argv=None):
     ap.add_argument("--expect", default=None,
                     help="--verify-tree: the manifest digest to require "
                          "(default: the one the tag's own release note states)")
+    ap.add_argument("--regenerate-note", action="store_true",
+                    help="DEL-13: when the tag ships docs/releases/<version>"
+                         ".md and the rebuild at --source-rev has none (the "
+                         "ordinary case), run the estate's own generator "
+                         "inside the source-revision checkout and compare "
+                         "the result to the tag's note, masked. Opt-in: the "
+                         "generator runs this estate's test suites, 10 to "
+                         "20 minutes, so a default run does not pay that "
+                         "cost twice")
     args = ap.parse_args(argv)
 
     if args.verify_tree:
@@ -462,6 +534,47 @@ def main(argv=None):
         if not ok:
             mismatched.append(rel)
 
+    # DEL-13 (the 1.0.10 pre-tag audit): docs/releases/<version>.md only
+    # lands in `deferred` above when it was actually generated at
+    # --source-rev, which by design it is NOT at the ordinary --source-rev
+    # the cut script names (the refresh commit that adds the note comes
+    # AFTER the revision the note itself claims to be cut from). So the
+    # comparison above silently never runs for the shipped note. Without
+    # --regenerate-note this is now said out loud instead of left silent;
+    # with it, the note is regenerated at --source-rev and compared here.
+    # Opt-in because the generator runs this estate's own test suites (10
+    # to 20 minutes): doubling that cost on every default reproduce-export
+    # run, including the ones X7 already runs at 1800s, is not worth paying
+    # unless a caller actually wants this half checked.
+    note_no_data = None
+    if rel_note not in deferred:
+        note_in_tag = tag_file_bytes(args.tag, rel_note, public)
+        if note_in_tag is not None:
+            if not args.regenerate_note:
+                print("NO-DATA: %s is not regenerated at %s; pass "
+                      "--regenerate-note to compare it"
+                      % (rel_note, args.source_rev))
+            else:
+                gen_note, note_detail = regenerate_note(
+                    src, args.tag.lstrip("v"))
+                if gen_note is None:
+                    note_no_data = note_detail
+                    self_naming.append((rel_note, None, note_detail))
+                else:
+                    ok, detail = compare_release_note(gen_note, note_in_tag)
+                    self_naming.append((rel_note, ok, detail))
+                    if not ok:
+                        mismatched.append(rel_note)
+                        try:
+                            for line in _first_differing_lines(
+                                    mask_self_naming_note(
+                                        note_in_tag.decode("utf-8")),
+                                    mask_self_naming_note(
+                                        gen_note.decode("utf-8"))):
+                                print(line)
+                        except UnicodeDecodeError:
+                            pass
+
     print("reproduce-export: %d allowlisted file(s) regenerated from %s"
           % (len(reproduced) + len(mismatched) + len(out_of_scope_missing)
              + len([1 for _, ok, _ in self_naming if ok]),
@@ -469,8 +582,8 @@ def main(argv=None):
     print("  reproduced byte-for-byte against %s: %d" % (args.tag,
                                                          len(reproduced)))
     for rel, ok, detail in self_naming:
-        print("  self-naming %s: %s: %s"
-              % (rel, detail, "MATCH" if ok else "DIFFERS"))
+        status = "MATCH" if ok else ("NO-DATA" if ok is None else "DIFFERS")
+        print("  self-naming %s: %s: %s" % (rel, detail, status))
     if out_of_scope_missing:
         print("  generated but absent from %s (added after the tag, out of "
               "scope): %d" % (args.tag, len(out_of_scope_missing)))
@@ -481,6 +594,8 @@ def main(argv=None):
         print("reproduce-export: the export is NOT reproducible; %d file(s) "
               "differ" % len(mismatched))
         return 1
+    if note_no_data:
+        return 2
     if not reproduced and not self_naming:
         print("NO-DATA: no allowlisted file could be compared against %s "
               "(is the tag on this checkout?)" % args.tag)

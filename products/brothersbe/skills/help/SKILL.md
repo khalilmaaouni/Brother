@@ -10,6 +10,8 @@ Plugin root: a Claude Code install exports `${CLAUDE_PLUGIN_ROOT}` and a Codex i
 Orient the person first, list the machinery last. A flat command list is never the primary
 answer, because the person asking for help is exactly the person a flat list fails.
 
+Answer in the language the user wrote in (R-7, persona dogfood 2026-09-07; the same rule products/brothermode/references/honesty.md states): this tool's own printed output stays in English regardless.
+
 ## What BrotherSBE is, said plainly
 
 Open with this, in your own words but with this content: BrotherSBE is a colleague that

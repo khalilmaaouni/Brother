@@ -682,8 +682,25 @@ class TheGateConsumesTheConsolidatedBattery(unittest.TestCase):
         self.assertEqual(status, "BLOCK")
         self.assertIn("invented-check", detail)
 
+    def _root_no_critical(self):
+        """C1 fix-round-2 (review-P4.md): battery_state() now also loads
+        the real repository's BATTERY-EXPECTATIONS.json "critical" section
+        by default (root=ROOT), and that section names 16 real capability
+        checks this class's hand-rolled CLEAN/DIRTY logs never mention, so
+        they would read ABSENT/NO-DATA and block. This class is about
+        unexpected_failures, not the critical closeout (that is
+        TheGateReadsCriticalBlockingNotOnlyUnexpectedFailures below), so
+        point it at an isolated root with no critical entries declared."""
+        d = tempfile.mkdtemp()
+        os.makedirs(os.path.join(d, "docs", "plan"))
+        with open(os.path.join(d, "docs", "plan", "BATTERY-EXPECTATIONS.json"),
+                 "w", encoding="utf-8") as fh:
+            json.dump({"checks": {}, "critical": {}}, fh)
+        return d
+
     def test_a_clean_battery_passes(self):
-        status, _detail = RG.battery_state(self._saved(self.CLEAN))
+        status, _detail = RG.battery_state(self._saved(self.CLEAN),
+                                           root=self._root_no_critical())
         self.assertEqual(status, "PASS")
 
     def test_no_saved_run_is_no_data_and_never_a_pass(self):
@@ -716,6 +733,66 @@ class TheGateConsumesTheConsolidatedBattery(unittest.TestCase):
             code = RG.main(["--battery", self._saved(self.DIRTY)])
         self.assertEqual(code, 1)
         self.assertIn("NOT READY", buf.getvalue())
+
+
+class TheGateReadsCriticalBlockingNotOnlyUnexpectedFailures(unittest.TestCase):
+    """C1 (docs/plan/runs/night-2026-09-07/review-P4.md): battery_state()
+    called BV.classify() with no critical=, and its BLOCK condition read
+    only unexpected_failures, so a critical capability whose only check was
+    a declared known_no_data NO-DATA read PASS at this gate while
+    battery_verdict.py itself read product FAIL on the identical bytes.
+    Reproduces the reviewer's repro: codex-smoke NO-DATA, declared
+    known_no_data at the general-checks level, named by two critical
+    capabilities."""
+
+    LOG = ("PASS    exit 0   surface                            OK\n"
+           "NO-DATA exit 2   codex-smoke                         boom\n")
+
+    def _root(self, critical):
+        d = tempfile.mkdtemp()
+        os.makedirs(os.path.join(d, "docs", "plan"))
+        with open(os.path.join(d, "docs", "plan", "BATTERY-EXPECTATIONS.json"),
+                 "w", encoding="utf-8") as fh:
+            json.dump({
+                "checks": {
+                    "codex-smoke": {
+                        "class": "known_no_data",
+                        "reason": "test fixture: codex unavailable here",
+                        "recorded": "2026-09-01",
+                        "review_by": "2099-01-01",
+                    }
+                },
+                "critical": critical,
+            }, fh)
+        return d
+
+    def _saved(self, body):
+        fh = tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False)
+        fh.write(body)
+        fh.close()
+        return fh.name
+
+    def test_a_critical_capability_declared_known_no_data_still_blocks(self):
+        critical = {
+            "codex_smoke": {"checks": ["codex-smoke"], "reason": "x",
+                            "recorded": "2026-09-01"},
+            "codex_hooks_install": {"checks": ["codex-smoke"], "reason": "x",
+                                    "recorded": "2026-09-01"},
+        }
+        status, detail = RG.battery_state(self._saved(self.LOG),
+                                          root=self._root(critical))
+        self.assertEqual(status, "BLOCK")
+        self.assertIn("codex_smoke", detail)
+        self.assertIn("codex_hooks_install", detail)
+
+    def test_a_clean_critical_set_still_passes(self):
+        critical = {
+            "codex_smoke": {"checks": ["surface"], "reason": "x",
+                            "recorded": "2026-09-01"},
+        }
+        status, _detail = RG.battery_state(self._saved(self.LOG),
+                                           root=self._root(critical))
+        self.assertEqual(status, "PASS")
 
 
 if __name__ == "__main__":

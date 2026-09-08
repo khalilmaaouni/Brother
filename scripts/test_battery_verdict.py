@@ -37,7 +37,7 @@ EXPECTATIONS = {
             "class": "expected_unavailable",
             "reason": "test fixture: the pre-existing acceptance-family flake",
             "recorded": "2026-08-31",
-            "review_by": "2026-09-07"
+            "review_by": "2099-01-01"
         },
         "negative-space-audit": {
             "class": "known_no_data",
@@ -101,6 +101,14 @@ run_check "product-acceptance-self" python3 scripts/acceptance_probe.py
 run_check "count-only-suite"        python3 scripts/count_probe.py
 """
 
+# P4: a fixture check_all.sh naming the one check the critical-closeout tests
+# below declare, so the schema gate (every critical check must be registered)
+# is satisfied without pulling in the real 224-line file.
+CRITICAL_CHECK_ALL_FIXTURE = """#!/bin/sh
+run_check "codex-smoke"      python3 scripts/codex_smoke.py
+run_check "codex-smoke-self" python3 scripts/test_codex_smoke.py -v
+"""
+
 
 def check_all_line(verdict, code, name, detail="ok"):
     return "%-7s exit %-3s %-34s %s" % (verdict, code, name, detail)
@@ -121,8 +129,31 @@ class BatteryVerdictTest(unittest.TestCase):
         self.check_all_clean = self.write_check_all("clean.sh", CHECK_ALL_CLEAN)
         self.check_all_strict = self.write_check_all("strict.sh",
                                                      CHECK_ALL_FIXTURE)
+        self.check_all_critical = self.write_check_all(
+            "critical.sh", CRITICAL_CHECK_ALL_FIXTURE)
+
+    def write_expectations_with_critical(self, critical, extra_checks=None,
+                                         filename="expectations-critical.json"):
+        """A fresh expectations file pairing only the entries the calling
+        test needs (never the shared, date-bearing EXPECTATIONS fixture)
+        with a P4 "critical" section, so each critical test is isolated
+        from every other check's own review_by."""
+        checks = dict(extra_checks) if extra_checks else {}
+        path = os.path.join(self.tmpdir, filename)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump({"checks": checks, "critical": critical}, fh)
+        return path
 
     def write_check_all(self, name, text):
+        path = os.path.join(self.tmpdir, name)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        return path
+
+    def write_report(self, name, text):
+        """A fixture morning-report file for --unfinished --report tests
+        (fix-round finding 1): a plain text file, never JSON, matching the
+        real morning report's own shape."""
         path = os.path.join(self.tmpdir, name)
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(text)
@@ -140,6 +171,10 @@ class BatteryVerdictTest(unittest.TestCase):
         args = [sys.executable, SCRIPT, input_path,
                 "--expectations", expectations_path or self.expectations_path,
                 "--check-all", check_all or self.check_all_clean]
+        if not extra_args or "--today" not in extra_args:
+            # a stable clock: keeps product-acceptance-self's review_by
+            # (2026-09-07) from expiring out from under an unrelated test
+            args += ["--today", "2026-09-01"]
         if extra_args:
             args += extra_args
         proc = subprocess.run(args, capture_output=True, text=True)
@@ -240,11 +275,11 @@ class BatteryVerdictTest(unittest.TestCase):
         self.assertEqual(out["product"], "PASS")
 
     def test_an_exception_past_its_review_date_turns_blocking(self):
-        # Red-team item 6: --today after review_by (2026-09-07) means the
+        # Red-team item 6: --today after review_by (2099-01-01) means the
         # sheltered flake is no longer sheltered and blocks.
         proc = self.run_verdict([
             check_all_line("FAIL", "1", "product-acceptance-self", "still flaking"),
-        ], extra_args=["--today", "2026-09-08"])
+        ], extra_args=["--today", "2099-01-02"])
         self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
         out = json.loads(proc.stdout)
         self.assertIn("product-acceptance-self", out["expired_exceptions"])
@@ -264,7 +299,7 @@ class BatteryVerdictTest(unittest.TestCase):
     def test_a_recovered_check_never_blocks_even_when_past_review(self):
         proc = self.run_verdict([
             check_all_line("PASS", "0", "product-acceptance-self", "fixed"),
-        ], extra_args=["--today", "2026-09-08"])
+        ], extra_args=["--today", "2099-01-02"])
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         out = json.loads(proc.stdout)
         self.assertIn("product-acceptance-self", out["recovered"])
@@ -393,8 +428,7 @@ class BatteryVerdictTest(unittest.TestCase):
         ca_path = self.write_check_all("check_all.sh", check_all_text)
         args = [sys.executable, SCRIPT, "--check-expectations",
                 exp_path, "--check-all", ca_path]
-        if today:
-            args += ["--today", today]
+        args += ["--today", today or "2026-09-01"]
         return subprocess.run(args, capture_output=True, text=True), ca_path
 
     def test_the_schema_check_accepts_names_and_rejects_a_count(self):
@@ -496,6 +530,398 @@ class BatteryVerdictTest(unittest.TestCase):
                                real_path], capture_output=True, text=True)
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         self.assertIn("OK:", proc.stdout)
+
+    # -- P4: critical NO-DATA closeout (steering 10.4/10.5, GATE E) --------
+    # A critical capability is judged straight off the log, bypassing the
+    # ordinary expectations shelter entirely: a NO-DATA or FAIL that the
+    # general battery would sanction as known_no_data / expected_unavailable
+    # still blocks here, because a shelter for the general battery is not a
+    # shelter for a critical capability (design DESIGN section, point 2).
+
+    def test_a_critical_check_declared_known_no_data_still_blocks(self):
+        critical = {
+            "codex_smoke": {
+                "checks": ["codex-smoke"],
+                "reason": "test fixture: a clean install codex run is the "
+                          "path Brother asks a user to trust",
+                "recorded": "2026-09-08",
+            }
+        }
+        extra_checks = {
+            "codex-smoke": {
+                "class": "known_no_data",
+                "reason": "test fixture: declared no-data shelter",
+                "recorded": "2026-09-08",
+                "review_by": "2099-01-01",
+            }
+        }
+        exp_path = self.write_expectations_with_critical(
+            critical, extra_checks, "expectations-t1.json")
+        proc = self.run_verdict(
+            [check_all_line("NO-DATA", "2", "codex-smoke", "no codex on PATH")],
+            expectations_path=exp_path, check_all=self.check_all_critical)
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        out = json.loads(proc.stdout)
+        self.assertEqual(out["product"], "FAIL")
+        self.assertEqual(out["critical"]["codex_smoke"]["verdict"], "NO-DATA")
+        self.assertTrue(
+            any(b.startswith("codex_smoke:") for b in out["critical_blocking"]),
+            out["critical_blocking"])
+        # the general (non-critical) view still shelters it, proving the
+        # critical judgment is a SEPARATE, stricter path, not a rewrite of
+        # the general one
+        self.assertIn("codex-smoke", out["known_no_data"])
+
+    def test_a_critical_check_missing_from_the_log_blocks(self):
+        critical = {
+            "codex_smoke": {
+                "checks": ["codex-smoke"],
+                "reason": "test fixture: a clean install codex run is the "
+                          "path Brother asks a user to trust",
+                "recorded": "2026-09-08",
+            }
+        }
+        exp_path = self.write_expectations_with_critical(
+            critical, filename="expectations-t2.json")
+        proc = self.run_verdict(
+            [check_all_line("PASS", "0", "surface")],
+            expectations_path=exp_path, check_all=self.check_all_critical)
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        out = json.loads(proc.stdout)
+        self.assertEqual(out["product"], "FAIL")
+        self.assertEqual(out["critical"]["codex_smoke"]["checks"]["codex-smoke"],
+                         "ABSENT")
+        self.assertTrue(any("ABSENT" in b for b in out["critical_blocking"]),
+                        out["critical_blocking"])
+
+    def test_a_critical_check_declared_expected_unavailable_still_blocks_on_FAIL(self):
+        critical = {
+            "codex_smoke": {
+                "checks": ["codex-smoke"],
+                "reason": "test fixture: a clean install codex run is the "
+                          "path Brother asks a user to trust",
+                "recorded": "2026-09-08",
+            }
+        }
+        extra_checks = {
+            "codex-smoke": {
+                "class": "expected_unavailable",
+                "reason": "test fixture: declared FAIL shelter",
+                "recorded": "2026-09-08",
+                "review_by": "2099-01-01",
+                "failing_tests": "none: prints one verdict and exits 1",
+            }
+        }
+        exp_path = self.write_expectations_with_critical(
+            critical, extra_checks, "expectations-t3.json")
+        proc = self.run_verdict(
+            [check_all_line("FAIL", "1", "codex-smoke", "boom")],
+            expectations_path=exp_path, check_all=self.check_all_critical)
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        out = json.loads(proc.stdout)
+        self.assertEqual(out["product"], "FAIL")
+        self.assertEqual(out["critical"]["codex_smoke"]["verdict"], "FAIL")
+        self.assertTrue(
+            any(b.startswith("codex_smoke:") for b in out["critical_blocking"]),
+            out["critical_blocking"])
+        self.assertIn("codex-smoke", out["expected_unavailable"])
+
+    def test_unfinished_moves_a_capability_out_of_blocking_but_keeps_it_named(self):
+        critical = {
+            "codex_smoke": {
+                "checks": ["codex-smoke"],
+                "reason": "test fixture: a clean install codex run is the "
+                          "path Brother asks a user to trust",
+                "recorded": "2026-09-08",
+            }
+        }
+        exp_path = self.write_expectations_with_critical(
+            critical, filename="expectations-t4.json")
+        report_path = self.write_report(
+            "morning-report-t4.md",
+            "codex_smoke is declared unfinished for tonight; see the P4 "
+            "run log.\n")
+        proc = self.run_verdict(
+            [check_all_line("PASS", "0", "surface")],
+            expectations_path=exp_path, check_all=self.check_all_critical,
+            extra_args=["--unfinished", "codex_smoke",
+                        "--report", report_path])
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        out = json.loads(proc.stdout)
+        self.assertEqual(out["product"], "PASS")
+        self.assertEqual(out["critical_blocking"], [])
+        self.assertIn("codex_smoke", out["critical_unfinished"])
+        self.assertEqual(out["counts"]["critical_unfinished"], 1)
+        # named, never counted as PASS (design's own warning against a
+        # version that silently drops the name)
+        self.assertEqual(out["counts"]["critical_pass"], 0)
+
+    # -- fix-round finding 1: --unfinished requires --report PATH ----------
+    # (codex-findings-P4.md #1). --unfinished was a free escape: nothing
+    # checked that a human actually wrote down why the capability is
+    # unfinished. Now the gate opens the report and refuses unless the file
+    # names the capability, verbatim, in a line that also says "unfinished".
+
+    def test_unfinished_without_report_is_refused(self):
+        critical = {
+            "codex_smoke": {
+                "checks": ["codex-smoke"],
+                "reason": "test fixture",
+                "recorded": "2026-09-08",
+            }
+        }
+        exp_path = self.write_expectations_with_critical(
+            critical, filename="expectations-t9.json")
+        proc = self.run_verdict(
+            [check_all_line("PASS", "0", "surface")],
+            expectations_path=exp_path, check_all=self.check_all_critical,
+            extra_args=["--unfinished", "codex_smoke"])
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        self.assertIn("--report", proc.stdout)
+        self.assertIn("codex_smoke", proc.stdout)
+
+    def test_unfinished_report_without_the_name_is_refused(self):
+        critical = {
+            "codex_smoke": {
+                "checks": ["codex-smoke"],
+                "reason": "test fixture",
+                "recorded": "2026-09-08",
+            }
+        }
+        exp_path = self.write_expectations_with_critical(
+            critical, filename="expectations-t10.json")
+        report_path = self.write_report(
+            "morning-report-t10.md",
+            "Everything ran clean tonight; nothing is called out.\n")
+        proc = self.run_verdict(
+            [check_all_line("PASS", "0", "surface")],
+            expectations_path=exp_path, check_all=self.check_all_critical,
+            extra_args=["--unfinished", "codex_smoke",
+                        "--report", report_path])
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        self.assertIn("codex_smoke", proc.stdout)
+        self.assertIn(report_path, proc.stdout)
+
+    def test_unfinished_report_naming_only_a_longer_word_is_refused(self):
+        """M1 (review-P4.md): the report match was a bare substring, so a
+        report naming only 'codex_smoke_harness is unfinished' satisfied
+        the precondition for 'codex_smoke' too. Fix: match on a word
+        boundary, not any substring."""
+        critical = {
+            "codex_smoke": {
+                "checks": ["codex-smoke"],
+                "reason": "test fixture",
+                "recorded": "2026-09-08",
+            }
+        }
+        exp_path = self.write_expectations_with_critical(
+            critical, filename="expectations-m1.json")
+        report_path = self.write_report(
+            "morning-report-m1.md",
+            "Notes: codex_smoke_harness is unfinished.")
+        proc = self.run_verdict(
+            [check_all_line("PASS", "0", "surface")],
+            expectations_path=exp_path, check_all=self.check_all_critical,
+            extra_args=["--unfinished", "codex_smoke",
+                        "--report", report_path])
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        self.assertIn("codex_smoke", proc.stdout)
+        self.assertIn(report_path, proc.stdout)
+
+    def test_the_schema_refuses_a_critical_entry_naming_an_unregistered_check(self):
+        critical = {
+            "ghost_capability": {
+                "checks": ["nonexistent-check"],
+                "reason": "test fixture: a check nobody registers",
+                "recorded": "2026-09-08",
+            }
+        }
+        exp_path = self.write_expectations_with_critical(
+            critical, filename="expectations-t5.json")
+        args = [sys.executable, SCRIPT, "--check-expectations", exp_path,
+                "--check-all", self.check_all_critical]
+        proc = subprocess.run(args, capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        self.assertIn("ghost_capability", proc.stdout)
+        self.assertIn("nonexistent-check", proc.stdout)
+
+    def test_the_real_critical_set_names_only_registered_checks(self):
+        """The guard that catches a P0 to P3 lane renaming a check: every
+        check any critical capability in the real BATTERY-EXPECTATIONS.json
+        names must be a check this repo's own check_all.sh actually
+        registers."""
+        real_expectations_path = os.path.join(
+            HERE, "..", "docs", "plan", "BATTERY-EXPECTATIONS.json")
+        real_check_all_path = os.path.join(HERE, "check_all.sh")
+        proc = subprocess.run(
+            [sys.executable, SCRIPT, "--check-expectations",
+             real_expectations_path, "--check-all", real_check_all_path],
+            capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("OK:", proc.stdout)
+
+    # -- fix-round finding 2: a self test is not proof the capability ran --
+    # (codex-findings-P4.md #2). An entry whose checks are ALL self tests
+    # must declare self_test_only, and is then reported separately: never
+    # blocking, never counted as critical_pass either.
+
+    def test_the_schema_refuses_an_all_self_entry_missing_self_test_only(self):
+        critical = {
+            "codex_smoke": {
+                "checks": ["codex-smoke-self"],
+                "reason": "test fixture: only the self test is registered",
+                "recorded": "2026-09-08",
+            }
+        }
+        exp_path = self.write_expectations_with_critical(
+            critical, filename="expectations-t11.json")
+        args = [sys.executable, SCRIPT, "--check-expectations", exp_path,
+                "--check-all", self.check_all_critical]
+        proc = subprocess.run(args, capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        self.assertIn("codex_smoke", proc.stdout)
+        self.assertIn("self_test_only", proc.stdout)
+
+    def test_a_self_test_only_entry_is_never_counted_as_pass(self):
+        critical = {
+            "codex_smoke": {
+                "checks": ["codex-smoke-self"],
+                "reason": "test fixture: only the self test is registered",
+                "recorded": "2026-09-08",
+                "self_test_only": True,
+            }
+        }
+        exp_path = self.write_expectations_with_critical(
+            critical, filename="expectations-t12.json")
+        proc = self.run_verdict(
+            [check_all_line("PASS", "0", "codex-smoke-self")],
+            expectations_path=exp_path, check_all=self.check_all_critical)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        out = json.loads(proc.stdout)
+        self.assertIn("codex_smoke", out["critical_self_test_only"])
+        self.assertNotIn("codex_smoke", out["critical_blocking"])
+        self.assertEqual(out["counts"]["critical_pass"], 0)
+        self.assertEqual(out["counts"]["critical_self_test_only"], 1)
+
+    def test_a_self_test_only_entry_that_fails_still_blocks(self):
+        """C2 (review-P4.md, fix-round-2): the self_test_only exemption was
+        gated only on entry.get('self_test_only'), applied above the
+        verdict test, so a self-test-only capability whose own self test
+        FAILs was exempted before its FAIL was ever read (attack B in the
+        review). The exemption must apply only when cap_verdict == PASS."""
+        critical = {
+            "codex_smoke": {
+                "checks": ["codex-smoke-self"],
+                "reason": "test fixture: only the self test is registered",
+                "recorded": "2026-09-08",
+                "self_test_only": True,
+            }
+        }
+        exp_path = self.write_expectations_with_critical(
+            critical, filename="expectations-t13.json")
+        proc = self.run_verdict(
+            [check_all_line("FAIL", "1", "codex-smoke-self", "boom")],
+            expectations_path=exp_path, check_all=self.check_all_critical)
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        out = json.loads(proc.stdout)
+        self.assertNotIn("codex_smoke", out["critical_self_test_only"])
+        self.assertTrue(
+            any(b.startswith("codex_smoke:") for b in out["critical_blocking"]))
+        self.assertEqual(out["counts"]["critical_pass"], 0)
+        self.assertEqual(out["product"], "FAIL")
+
+    def test_a_self_test_only_entry_absent_from_the_log_still_blocks(self):
+        """C2 second attack shape (review-P4.md attack A): the 11 self
+        tests simply absent from a truncated or killed battery run must
+        not read as an exempt PASS either."""
+        critical = {
+            "codex_smoke": {
+                "checks": ["codex-smoke-self"],
+                "reason": "test fixture: only the self test is registered",
+                "recorded": "2026-09-08",
+                "self_test_only": True,
+            }
+        }
+        exp_path = self.write_expectations_with_critical(
+            critical, filename="expectations-t14.json")
+        proc = self.run_verdict(
+            [check_all_line("PASS", "0", "codex-smoke", "ok")],
+            expectations_path=exp_path, check_all=self.check_all_critical)
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        out = json.loads(proc.stdout)
+        self.assertNotIn("codex_smoke", out["critical_self_test_only"])
+        self.assertTrue(
+            any(b.startswith("codex_smoke:") for b in out["critical_blocking"]))
+        self.assertEqual(out["counts"]["critical_pass"], 0)
+        self.assertEqual(out["product"], "FAIL")
+
+    def test_the_schema_judges_self_test_shape_by_command_not_suffix(self):
+        """H1 (review-P4.md): the all_self decision read the check NAME's
+        -self/-selftest suffix instead of its registered COMMAND. A check
+        that runs a unittest suite but is not named -self (measured: 41 of
+        242 registered checks) would be accepted as a real runner check
+        with no self_test_only declared. Fix: judge commands[check] with
+        TEST_SHAPED_RE, the same regex the expected_unavailable granularity
+        check already uses."""
+        h1_check_all_text = (
+            "#!/bin/sh\n"
+            'run_check "close-ceremony-tests" python3 -m unittest scripts.test_close_ceremony -v\n'
+            'run_check "codex-smoke"          python3 scripts/codex_smoke.py\n'
+        )
+        check_all = self.write_check_all("h1.sh", h1_check_all_text)
+        critical = {
+            "codex_smoke": {
+                "checks": ["close-ceremony-tests"],
+                "reason": "test fixture: unittest-shaped command, no -self suffix",
+                "recorded": "2026-09-08",
+            }
+        }
+        exp_path = self.write_expectations_with_critical(
+            critical, filename="expectations-h1.json")
+        args = [sys.executable, SCRIPT, "--check-expectations", exp_path,
+                "--check-all", check_all]
+        proc = subprocess.run(args, capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        self.assertIn("codex_smoke", proc.stdout)
+        self.assertIn("self_test_only", proc.stdout)
+
+    def test_a_duplicate_check_name_keeps_the_worst_verdict_for_critical(self):
+        """L1 (review-P4.md): the by_name lookup _judge_critical builds for
+        the critical closeout overwrote on a duplicate check name, so a
+        FAIL line followed by a later PASS line for the same check made
+        the critical map read PASS. Two concatenated evidence logs are a
+        realistic shape for this. The worst verdict must win."""
+        critical = {
+            "codex_smoke": {
+                "checks": ["codex-smoke"],
+                "reason": "test fixture: duplicate log lines",
+                "recorded": "2026-09-08",
+            }
+        }
+        exp_path = self.write_expectations_with_critical(
+            critical, filename="expectations-l1.json")
+        proc = self.run_verdict(
+            [check_all_line("FAIL", "1", "codex-smoke", "boom"),
+             check_all_line("PASS", "0", "codex-smoke", "ok")],
+            expectations_path=exp_path, check_all=self.check_all_critical)
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        out = json.loads(proc.stdout)
+        self.assertEqual(out["critical"]["codex_smoke"]["verdict"], "FAIL")
+        self.assertTrue(
+            any(b.startswith("codex_smoke:") for b in out["critical_blocking"]),
+            out["critical_blocking"])
+
+    def test_no_data_names_lists_every_no_data_including_declared_ones(self):
+        proc = self.run_verdict([
+            check_all_line("PASS", "0", "surface"),
+            check_all_line("NO-DATA", "2", "negative-space-audit", "3 cells"),
+            check_all_line("NO-DATA", "2", "some-fresh-audit", "unreviewed"),
+        ])
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        out = json.loads(proc.stdout)
+        self.assertEqual(sorted(out["no_data_names"]),
+                         ["negative-space-audit", "some-fresh-audit"])
+
 
 
 if __name__ == "__main__":

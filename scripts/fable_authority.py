@@ -60,10 +60,36 @@ import json
 import os
 import sys
 
+import autonomy_dial
+import fence_expiry
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-RECORD_DIR = os.path.join(ROOT, '.sbe', 'fable-authority')
+
+
+def _record_dir(root=None):
+    """Where this module's three logs actually live (F6). A linked
+    worktree has no .sbe of its own, exactly the worktree-blindness
+    fence_expiry._registry_root's own docstring names for two prior
+    instances (integrate._Lock, record_drift); newly load-bearing here
+    because a grant written by a human in one worktree must be found by
+    land_queue.resolve_authority running in another. Reuses
+    fence_expiry's own resolver rather than a second implementation of
+    the same "walk to the primary checkout" logic (steering 12: no second
+    source of truth), so this file and fence_expiry can never disagree
+    about which checkout holds the live registry."""
+    return os.path.join(fence_expiry._registry_root(root or ROOT), '.sbe', 'fable-authority')
+
+
+RECORD_DIR = _record_dir()
 AMBER_LOG = os.path.join(RECORD_DIR, 'amber-records.jsonl')
 RED_QUEUE = os.path.join(RECORD_DIR, 'red-queue.jsonl')
+DELEGATIONS_LOG = os.path.join(RECORD_DIR, 'delegations.jsonl')
+
+# F1: the one spelling of the merge-delegation action word. land_queue.py
+# imports this (falling back to the same literal if fable_authority.py is
+# ever absent from a worktree) instead of hardcoding its own, which is
+# exactly how the two lanes disagreed on "merge" vs "merge_or_release".
+MERGE_ACTION = 'merge'
 
 GREEN = 'GREEN'
 AMBER = 'AMBER'
@@ -233,6 +259,144 @@ def queue_red(decision, reason, session='fable', now=None, path=None):
     return entry
 
 
+def grant_merge(repository, base, action, risk_ceiling, until, merge_method,
+                 granted_by, words, now=None, path=None):
+    """Append one scoped merge delegation (design-P3.md section 3, steering
+    9.7). Returns (True, entry) or (False, reason), mirroring
+    accept_delivery.record's refusal style.
+
+    THE LINE THIS FUNCTION NEVER CROSSES: it records a human's own grant.
+    It never infers one from evidence, memory, or a prior acceptance, and it
+    is reached only through this module's own `grant-merge` CLI subcommand,
+    never from a model's own decision. A session that finds no live
+    delegation via delegation_for() reports READY-FOR-HUMAN and stops; it
+    never calls this function to manufacture the grant it is missing.
+
+    until is refused when it cannot be parsed or already lies in the past
+    (fence_expiry.parse_expiry is the one expiry reader, matching the spend
+    guard's own rule that a grant with no future `until` is no grant)."""
+    missing = [flag for flag, val in (
+        ('repository', repository), ('base', base), ('action', action),
+        ('risk_ceiling', risk_ceiling), ('until', until),
+        ('merge_method', merge_method), ('granted_by', granted_by),
+        ('words', words))
+        if not (val or '').strip()]
+    if missing:
+        return False, ('grant-merge requires %s (no field is ever '
+                        'defaulted or inferred)' % ', '.join(missing))
+    if risk_ceiling not in autonomy_dial.ORDER:
+        return False, ('risk_ceiling %r is not one of %s'
+                        % (risk_ceiling, autonomy_dial.ORDER))
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    when = fence_expiry.parse_expiry(until)
+    if when is None:
+        return False, 'until %r cannot be parsed as a date' % until
+    if when <= now:
+        return False, ('until %r is in the past (now %s); a grant needs a '
+                        'future expiry, never a lapsed one'
+                        % (until, _now_stamp(now)))
+    if path is None:
+        path = DELEGATIONS_LOG
+    entry = {
+        'repository': repository.strip(),
+        'base': base.strip(),
+        'action': action.strip(),
+        'risk_ceiling': risk_ceiling.strip(),
+        'until': until.strip(),
+        'merge_method': merge_method.strip(),
+        'granted_by': granted_by.strip(),
+        'words': words.strip(),
+        'granted_at': _now_stamp(now),
+    }
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'a', encoding='utf-8') as fh:
+        fh.write(json.dumps(entry, sort_keys=True) + '\n')
+    return True, entry
+
+
+
+def revoke_merge(repository, base, action, granted_by, words, now=None, path=None):
+    """F4: the only way to end a live grant early. `grant_merge` refuses
+    any `until` at or before now (a human cannot grant an already-lapsed
+    window), so ending one early by writing a plain grant is impossible
+    by construction; this is the second, deliberate writer. It appends a
+    line for the SAME (repository, base, action) whose `until` already
+    equals its own `granted_at`, i.e. already expired the instant it is
+    written. delegation_for's last-matching-line-wins scan then reads
+    this line, not the live grant before it, and its own expiry check
+    (F4 exercises the same path steering 9.7 already required: NO-EXPIRY
+    and EXPIRED both collapse to no grant). Returns (True, entry) or
+    (False, reason), matching grant_merge's own refusal style."""
+    missing = [flag for flag, val in (
+        ('repository', repository), ('base', base), ('action', action),
+        ('granted_by', granted_by), ('words', words))
+        if not (val or '').strip()]
+    if missing:
+        return False, ('revoke-merge requires %s' % ', '.join(missing))
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    stamp = _now_stamp(now)
+    if path is None:
+        path = DELEGATIONS_LOG
+    entry = {
+        'repository': repository.strip(),
+        'base': base.strip(),
+        'action': action.strip(),
+        'risk_ceiling': None,
+        'until': stamp,
+        'merge_method': None,
+        'granted_by': granted_by.strip(),
+        'words': words.strip(),
+        'granted_at': stamp,
+        'revoked': True,
+    }
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'a', encoding='utf-8') as fh:
+        fh.write(json.dumps(entry, sort_keys=True) + '\n')
+    return True, entry
+
+
+def delegation_for(repository, base, action, now=None, path=None):
+    """The live grant matching (repository, base, action), or None.
+
+    None covers three cases a caller must treat identically (steering 9.7:
+    authority NO-DATA is READY-FOR-HUMAN, never FAIL and never MERGED): no
+    delegations file yet, no matching line, and a matching line whose
+    `until` is expired or unparsable. fence_expiry.parse_expiry is the sole
+    expiry reader, so this file and fence_expiry never disagree about a
+    date; an unparsable or absent `until` reads NO-EXPIRY, and NO-EXPIRY is
+    no grant, exactly as fence_expiry treats an open claim with none.
+
+    Last matching line wins: delegations.jsonl is append-only, so a later
+    grant supersedes an earlier one for the same (repository, base, action)
+    without needing to edit or delete the earlier line."""
+    if path is None:
+        path = DELEGATIONS_LOG
+    if not os.path.isfile(path):
+        return None
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    found = None
+    with open(path, encoding='utf-8') as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except ValueError:
+                continue
+            if (entry.get('repository') == repository
+                    and entry.get('base') == base
+                    and entry.get('action') == action):
+                found = entry
+    if found is None:
+        return None
+    when = fence_expiry.parse_expiry(found.get('until'))
+    if when is None or when <= now:
+        return None
+    return found
+
+
+
 def decide(decision, overrule=None, cost_if_wrong=None, session='fable', now=None,
            amber_path=None, red_path=None):
     """Classify, then act. Returns (label, entry_or_None, reason).
@@ -307,7 +471,75 @@ def _selftest_in(d):
     return 0 if ok else 1
 
 
+def _grant_merge_cli(argv):
+    """`grant-merge`: the one writer of delegations.jsonl (steering 9.7: a
+    model never writes its own delegation). Human-run only; nothing in this
+    repository calls into it (mirrors accept_delivery.py's own claim, made
+    the same way: grep -rl grant_merge scripts finds no importer besides
+    this file and its test)."""
+    ap = argparse.ArgumentParser(
+        prog='fable_authority.py grant-merge',
+        description='Write one scoped merge delegation. Refuses a missing '
+                     'or past --until so a human writes it and a session '
+                     'never fabricates one.')
+    ap.add_argument('--repository', required=True)
+    ap.add_argument('--base', required=True)
+    ap.add_argument('--action', required=True)
+    ap.add_argument('--risk-ceiling', required=True, choices=autonomy_dial.ORDER)
+    ap.add_argument('--until', required=True,
+                     help='ISO date/datetime; refused unless it is in the future')
+    ap.add_argument('--merge-method', required=True)
+    ap.add_argument('--granted-by', required=True)
+    ap.add_argument('--words', required=True, help="the granter's own words, verbatim")
+    ap.add_argument('--delegations-log', default=None,
+                     help='override the delegations log path, for tests')
+    args = ap.parse_args(argv)
+
+    ok, result = grant_merge(args.repository, args.base, args.action,
+                              args.risk_ceiling, args.until, args.merge_method,
+                              args.granted_by, args.words, path=args.delegations_log)
+    if not ok:
+        print('REFUSED: %s' % result, file=sys.stderr)
+        return 1
+    print('GRANTED: %s' % json.dumps(result, sort_keys=True))
+    return 0
+
+
+def _revoke_merge_cli(argv):
+    """`revoke-merge` (F4): the only writer that can end a live grant
+    early, matching grant_merge's own rule that a session never writes
+    its own delegation nor its own revocation; nothing in this repository
+    calls into it besides this dispatch and its test."""
+    ap = argparse.ArgumentParser(
+        prog='fable_authority.py revoke-merge',
+        description='Supersede any live merge delegation for one '
+                     '(repository, base, action) with an already-expired '
+                     'line, so delegation_for stops finding a grant.')
+    ap.add_argument('--repository', required=True)
+    ap.add_argument('--base', required=True)
+    ap.add_argument('--action', required=True)
+    ap.add_argument('--granted-by', required=True, help='who is revoking, verbatim')
+    ap.add_argument('--words', required=True, help="the revoker's own words, verbatim")
+    ap.add_argument('--delegations-log', default=None,
+                     help='override the delegations log path, for tests')
+    args = ap.parse_args(argv)
+
+    ok, result = revoke_merge(args.repository, args.base, args.action,
+                               args.granted_by, args.words, path=args.delegations_log)
+    if not ok:
+        print('REFUSED: %s' % result, file=sys.stderr)
+        return 1
+    print('REVOKED: %s' % json.dumps(result, sort_keys=True))
+    return 0
+
+
 def main(argv=None):
+    if argv is None:
+        argv = sys.argv[1:]
+    if argv[:1] == ['grant-merge']:
+        return _grant_merge_cli(argv[1:])
+    if argv[:1] == ['revoke-merge']:
+        return _revoke_merge_cli(argv[1:])
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0],
                                   formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--classify', metavar='DECISION',

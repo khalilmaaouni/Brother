@@ -2,6 +2,10 @@
  "entry": "brother_run.py",
  "files": [
   {
+   "path": "autonomy_dial.py",
+   "sha256": "6ff379cb54b2c7aec5205db9c641c8bb6c9a9881072959ef2d4b2cf4d97e1d6f"
+  },
+  {
    "path": "brother-run",
    "sha256": "832d92a307e7053981da4c48e6a1f383ec439ad7257f3d10a404820a1e03ee73"
   },
@@ -11,11 +15,15 @@
   },
   {
    "path": "brother_run.py",
-   "sha256": "4a83f36b03eee66f7fecc655546fceed74fd3be2fbca63b5bc1b4bd8cf3ea361"
+   "sha256": "7bef71f72ab732f5054505e5794a08608673e902fd0ed10b2b3c631c320bee78"
   },
   {
    "path": "claim_store.py",
    "sha256": "e02d3d5970cf7c53b7f1ce0d51339aba982e4c6d4e2003d9c094a0365cd0e6ed"
+  },
+  {
+   "path": "codex_hooks_install.py",
+   "sha256": "738427194dc091c9ce17924e27860f47b5f8317b6432dfee1ce7deb417b2a095"
   },
   {
    "path": "continuity.py",
@@ -51,7 +59,11 @@
   },
   {
    "path": "loop_bridge.py",
-   "sha256": "37cd33f148c86cb860d86c8283ab3b502a43674737c3f9da11ddf10b24c1131a"
+   "sha256": "249a9ddaae9a16a9b5580b9050e1db2ed000184757a22fe33d44403ac4b06fbe"
+  },
+  {
+   "path": "managed_safety.py",
+   "sha256": "2aece07d4e82283df65bc82b81fd796b7e6202b9643217db97d2a3d874a56578"
   },
   {
    "path": "model_worker.py",
@@ -111,7 +123,7 @@
   },
   {
    "path": "receipt_door.py",
-   "sha256": "8dfb68449701fa000ec79d1c174a2f9c72e1a4f0ac9be617f0fe11b4b8b6f31f"
+   "sha256": "bc35a5943a369fa5c68c500a0a57aa0f57db749d23129f40e89e439f48170768"
   },
   {
    "path": "review_pass.py",
@@ -139,6 +151,6 @@
   }
  ],
  "generated_by": "scripts/bundle_runtime.py",
- "source_describe": "v0.9.6-4313-gfd7aaca0",
- "source_revision": "fd7aaca048bf9a572f0315d49904ab85bc75746e"
+ "source_describe": "v0.9.6-4690-g8d1c0147",
+ "source_revision": "8d1c0147f88f98af35f31448954d629dba0aff96"
 }

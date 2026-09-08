@@ -371,8 +371,20 @@ def _lesson_state(slug, path, tree):
             probe = bm_vault_contradiction.make_evidence_probe(tree)
             try:
                 tier, reason, tier_seam = bm_vault_contradiction.evidence_tier(lesson, probe)
-            except Exception as e:  # sbe: allow-silent a broken tier resolver degrades to the old applies_to verdict, never a crash in front of every edit
-                tier, reason, tier_seam = None, None, None
+            except Exception as e:
+                # Codex finding 1 (night run 2026-09-07, folded into
+                # design-P0.md): before this fix, an exception here reset
+                # tier to None and fell through to "return applied, None,
+                # note_type" at the bottom of this function, so a broken
+                # or unreadable policy resolver PERMITTED the memory
+                # instead of withholding it, collapsing NO-DATA into PASS
+                # (Law 2). A resolver that cannot even run is never
+                # evidence a lesson is safe, so this withholds
+                # immediately, naming the exception class in the reason.
+                return ("unverified", EVIDENCE_TIER_LINE_FMT % (
+                    bm_vault_contradiction.TIER_UNVERIFIED, slug,
+                    "evidence_tier raised %s: %s" % (type(e).__name__, e)),
+                    note_type)
             # P11 EXEMPTION, narrow: an explicit human_approved: true is
             # itself a current human decision (doc 24.4's own precedence,
             # "current evidence and current human decisions win"; the
@@ -408,7 +420,18 @@ def _lesson_state(slug, path, tree):
                 else "BM_VAULT_DISABLE_EVIDENCE_LOCATOR_CHECK")
             if (tier == bm_vault_contradiction.TIER_REFUSED
                     and not os.environ.get(refused_disable_env)):
-                return "unverified", EVIDENCE_TIER_LINE_FMT % (tier, slug, reason), note_type
+                # Night run 2026-09-07 (design-P0.md section 3, steering
+                # 6.5): a refusal attributed to SEAM_SAFETY_PRECEDENCE is a
+                # DIFFERENT fact from an ordinary dead-locator or
+                # forged-date refusal -- a vault lesson tried to weaken a
+                # safety control, not merely fail to prove itself -- so it
+                # reads state policy-conflict here, never collapsed into
+                # the same unverified bucket a dead evidence_locator reads.
+                # The reason line is unchanged either way.
+                state = ("policy-conflict"
+                        if tier_seam == bm_vault_contradiction.SEAM_SAFETY_PRECEDENCE
+                        else "unverified")
+                return state, EVIDENCE_TIER_LINE_FMT % (tier, slug, reason), note_type
             if tier == bm_vault_contradiction.TIER_UNVERIFIED:
                 return "unverified", EVIDENCE_TIER_LINE_FMT % (tier, slug, reason), note_type
     return "applied", None, note_type

@@ -140,6 +140,25 @@ class TestSafetyFloorNeverAdjustable(unittest.TestCase):
                                  "refuse_until_approved")
 
 
+class AMemoryCannotRaiseAuthority(unittest.TestCase):
+    """P0 acceptance gate (design-P0.md section 4, night run 2026-09-07):
+    authority_after_memory <= authority_before_memory. A FLOOR ASSERTION,
+    not a new wire: autonomy_dial.py is untouched by the P0 patch, and
+    this test proves the invariant already holds structurally, the same
+    way TestSafetyFloorNeverAdjustable above proves it for credentials
+    and destructive changes. A vault memory has no path into `observables`
+    at all (gate() takes only what the caller already knew about the
+    action's own shape), so the only way a memory COULD raise authority
+    is if merge_or_release itself stopped refusing at some dial position
+    -- it never does."""
+
+    def test_merge_or_release_is_refused_at_every_dial_position(self):
+        for dial in ORDER:
+            with self.subTest(dial=dial):
+                decision = gate({"merge_or_release": True}, dial=dial)
+                self.assertEqual(decision, "refuse_until_approved")
+
+
 class TestActionsCoverEveryClass(unittest.TestCase):
 
     def test_actions_map_names_every_order_value(self):

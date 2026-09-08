@@ -125,6 +125,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from pathlib import Path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -2111,6 +2112,21 @@ def main(argv=None):
                           "battery); a release cut passes this so the "
                           "public repository's own required check cannot "
                           "regress unnoticed. Works with or without --push.")
+    ap.add_argument("--tag-time-checks", action="store_true",
+                     help="in a dry run (no --push), build the candidate "
+                          "export tree as usual, then run tag_time_checks "
+                          "over it right here (the release note stamped, "
+                          "every product's own verify-install.sh, "
+                          "readiness_gate.py reading READY, every relative "
+                          "markdown link, every README prove command) for "
+                          "the version read from the tree's own "
+                          ".claude-plugin/marketplace.json, printing the "
+                          "same lines and refusing (EXIT_REFUSED) when "
+                          "they do not clear. DEL-15: --push --tag already "
+                          "ran these, but only after cut_v1.0.0.sh's other "
+                          "~45 minutes of steps; this flag reaches the same "
+                          "verdict in about 3 minutes, before those steps "
+                          "run. Without this flag, behaviour is unchanged.")
     ap.add_argument("--tag", default=None,
                      help="with --push only: after the export commit lands, "
                           "create an annotated tag of this name pointing at "
@@ -2202,6 +2218,34 @@ def main(argv=None):
             if not rf_ok:
                 print("REFUSED: the candidate export tree does not clear "
                       "its own required-fast check. Nothing was pushed.")
+                return EXIT_REFUSED
+
+        if args.tag_time_checks and not args.push:
+            # DEL-15: the export's own TAG-TIME checks (tag_time_checks,
+            # below) used to run only inside --push --tag, after
+            # cut_v1.0.0.sh's other ~45 minutes of steps. Tonight's 1.0.10
+            # cut read CLEAR at 21:12 and the export then refused at 21:5x
+            # with "the export tree's own readiness gate does not read
+            # READY: Restore drill (NO-DATA)", because the orphan export
+            # tree cannot use ancestry the way the hub tree can (the 1.0.2
+            # cut hit the same class on 2026-09-04). This flag reaches the
+            # same verdict here, in the ~3 minute dry run, before any long
+            # step runs. Combined with --push, --tag's own call already
+            # covers this, so this block is skipped rather than duplicated.
+            import version_source as VS
+            version, _ = VS.read_source(Path(export_dir))
+            if version is None:
+                print("NO-DATA: could not read the umbrella version from "
+                      "the candidate export tree's own %s, so "
+                      "--tag-time-checks has nothing to check against"
+                      % VS.MARKETPLACE_REL)
+                return EXIT_NODATA
+            checks_ok, check_lines = tag_time_checks(export_dir, version)
+            for line in check_lines:
+                print(line)
+            if not checks_ok:
+                print("REFUSED: the candidate export tree does not clear "
+                      "its own tag-time checks. Nothing was pushed.")
                 return EXIT_REFUSED
 
     if not args.push:

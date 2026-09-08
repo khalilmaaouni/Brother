@@ -140,9 +140,17 @@ fi
         self.assertIn("LAND-7-END", text)
 
     def test_timeout_that_stays_red_is_refused_not_merged(self):
+        # P3a (codex-findings-P3 #1) closed the legacy fail-open hole: a
+        # gate that is still red after its lone re-gate now never even
+        # reaches the --merge template, so this test no longer asserts
+        # the TEMPLATE'S OWN grep-and-refuse message (that message can
+        # never print again, because the template is never invoked); it
+        # asserts land_queue's own refusal instead, plus a marker file
+        # the template would have created if it HAD run, absent.
         d = tempfile.mkdtemp()
         queue = os.path.join(d, "queue.txt")
         log = os.path.join(d, "land.log")
+        marker = os.path.join(d, "merge-ran.marker")
         with open(queue, "w", encoding="utf-8") as fh:
             fh.write("9\n")
         gate = os.path.join(d, "gate.sh")
@@ -150,16 +158,19 @@ fi
         merge = os.path.join(d, "merge.sh")
         write_script(merge, """
 n=$1
+touch "%s"
 if grep -q '## required_fast exit 0' "%s/gate-regate$n.log"; then
   echo "merge $n: state MERGED "
 else
   echo "merge $n REFUSED: no green gate"
 fi
-""" % d)
+""" % (marker, d))
         LQ.run(queue, log, "bash %s {n}" % gate, "bash %s {n}" % merge, concurrency=1)
         with open(log, encoding="utf-8") as fh:
             text = fh.read()
-        self.assertIn("merge 9 REFUSED", text)
+        self.assertIn("land 9: gate verdict TIMEOUT-RED, merge template not invoked", text)
+        self.assertNotIn("state MERGED", text)
+        self.assertFalse(os.path.exists(marker), "the --merge template ran on a still-red gate")
 
 
 class MergeOrderFollowsQueueOrder(unittest.TestCase):

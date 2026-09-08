@@ -8,6 +8,7 @@ enforces nothing at all.
 
 Most of this file is the second property. The first is one test.
 """
+import importlib.util
 import json
 import os
 import sys
@@ -174,6 +175,59 @@ class TheExitCodesAreTheContract(unittest.TestCase):
         specifically, and a hook returning 1 would fail silently as an error."""
         self.assertEqual(L.REFUSE, 2)
         self.assertEqual(L.ALLOW, 0)
+
+
+_GUARD_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), os.pardir,
+    "products", "brothersbe", "tools", "sbe_bash_write_guard.py")
+_guard_spec = importlib.util.spec_from_file_location(
+    "sbe_bash_write_guard_for_lifecycle_test", _GUARD_PATH)
+sbe_guard = importlib.util.module_from_spec(_guard_spec)
+_guard_spec.loader.exec_module(sbe_guard)
+
+
+class TestPushGuard(unittest.TestCase):
+    """R-8: the write guards must decide on a command's EFFECT, not only on
+    path spellings matched against CONTROL_PLANE_PATTERNS. A push carrying
+    --no-verify to the default branch writes no file at all, so every
+    path-based check sees nothing (persona dogfood transcript B3-S3).
+    Mirrors GuardCase in products/brothersbe/tools/test_sbe_bash_guard.py: a
+    git-shaped fixture made of plain ref files, since
+    sbe_bash_write_guard.py reads those directly and never shells out to
+    git."""
+
+    def setUp(self):
+        self._tmp = tempfile.mkdtemp()
+        os.makedirs(os.path.join(self._tmp, ".git", "refs", "remotes", "origin"))
+        with open(os.path.join(self._tmp, ".git", "HEAD"), "w") as f:
+            f.write("ref: refs/heads/feature-x\n")
+        with open(os.path.join(self._tmp, ".git", "refs", "remotes", "origin",
+                               "HEAD"), "w") as f:
+            f.write("ref: refs/remotes/origin/main\n")
+
+    def _decide(self, command):
+        call = {"tool_name": "Bash", "tool_input": {"command": command},
+                "cwd": self._tmp, "project_dir": self._tmp}
+        return sbe_guard.decide(call)
+
+    def test_a_push_with_no_verify_to_the_default_branch_is_refused(self):
+        decision = self._decide("git push --no-verify origin main")
+        self.assertIsNotNone(
+            decision.payload,
+            "a --no-verify push to the default branch was allowed")
+        reason = decision.payload["hookSpecificOutput"]["permissionDecisionReason"]
+        self.assertIn("main", reason)
+        self.assertIn("pre-push hooks", reason)
+
+    def test_writing_a_file_that_quotes_a_refusal_message_is_allowed(self):
+        """Calibration: an ordinary file write that happens to quote this
+        guard's own refusal wording must not be caught by the push effect
+        rule, which reads only git-push segments and nothing else."""
+        quoted = "it carries the flag that switches off the pre-push hooks"
+        decision = self._decide("printf '%s\\n' " + repr(quoted) + " > notes.md")
+        self.assertIsNone(
+            decision.payload,
+            "a plain file write was refused by the push guard")
 
 
 if __name__ == "__main__":

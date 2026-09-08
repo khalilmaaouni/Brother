@@ -995,6 +995,48 @@ class E116TheExpensiveStepsAreStillWhatRefusesTheNote(unittest.TestCase):
             "a build()/main() call runs the real cited suites: %s" % offenders)
 
 
+class ThePreflightStepRunsBeforeTheLongSteps(unittest.TestCase):
+    """DEL-15: the export's own tag-time checks (readiness gate, product
+    verify-install.sh, markdown links, README prove commands, the
+    manifest) used to run only inside --push --tag, after cut_v1.0.0.sh's
+    other ~45 minutes of steps (version bump, note refresh, perturbation
+    drive, plugin validate, release invariant). Step "1c" runs
+    export_public.py --dry-run --tag-time-checks right after step 1b, so
+    the same class of refusal the 1.0.10 cut hit at 21:5x (and the 1.0.2
+    cut on 2026-09-04) is caught in the ~3 minute dry run, before any long
+    step starts. This reads the real script (R.CUT_SCRIPT, the same
+    constant Finding1 above already treats as a fixture) rather than a
+    copy, so a step that gets renamed or removed here fails this test
+    too."""
+
+    def test_step_2b2_runs_the_flag_after_the_refresh_and_before_the_drive(self):
+        with open(R.CUT_SCRIPT, encoding="utf-8") as fh:
+            text = fh.read()
+        self.assertIn("== 2b2. preflight: the export's own tag-time checks",
+                      text)
+        two_b = text.index("== 2b.")
+        pre = text.index("== 2b2.")
+        two_c = text.index("== 2c.")
+        self.assertTrue(two_b < pre < two_c,
+                        "step 2b2 must sit between the refresh (2b) and the drive (2c)")
+        step_1c_body = text[pre:two_c]
+        self.assertIn(
+            "python3 scripts/export_public.py --dry-run --tag-time-checks",
+            step_1c_body)
+
+    def test_step_4_dry_run_also_passes_the_flag(self):
+        """So the final CLEAR before the STOP line means the same thing
+        the real --push --tag will check, not only what step 1c already
+        covers earlier."""
+        with open(R.CUT_SCRIPT, encoding="utf-8") as fh:
+            text = fh.read()
+        four = text.index("== 4.")
+        stop = text.index("STOP. Review")
+        step_4_body = text[four:stop]
+        self.assertIn(
+            "python3 scripts/export_public.py --dry-run --tag-time-checks",
+            step_4_body)
+
 
 if __name__ == "__main__":
     unittest.main()

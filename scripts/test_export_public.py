@@ -8,6 +8,7 @@ looks for it, publishes exactly what the tool exists to stop.
 """
 import contextlib
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -3250,6 +3251,81 @@ class TheAllowlistCarriesEveryTrackedGitattributes(unittest.TestCase):
             "a Windows clone of the export rewrites its line endings and "
             "the product's CHECKSUMS.sha256 stops matching: "
             + ", ".join(missing))
+
+
+class ThePreflightTagTimeChecksFlagOnADryRun(unittest.TestCase):
+    """DEL-15, tonight's 1.0.10 cut: scripts/cut_v1.0.0.sh ran about 45
+    minutes of steps and printed CLEAR at 21:12, then the export itself
+    refused at 21:5x on tag_time_checks (the readiness gate did not read
+    READY in the orphan export tree, which cannot use ancestry the way the
+    hub tree can). --tag-time-checks lets a plain dry run reach that same
+    verdict in about 3 minutes, on the built candidate tree, before any of
+    cut_v1.0.0.sh's long steps run. Same fixture shape as
+    TheHelpTextTellsTheTruthAboutTheDryRun above (a seeded local bare
+    remote so identity_guard.py can pass), plus a marketplace.json so the
+    flag has a version to read and the tag-time fixtures rows E67/E70
+    already use (_seed_tag_time_needs)."""
+
+    ALLOWLIST = ["scripts", "products/myproduct", "README.md",
+                 ".claude-plugin"]
+
+    def _seed(self, root, gate):
+        _make_fake_root(root, {
+            "products/myproduct/kept.md": "kept content, shipped\n",
+            ".claude-plugin/marketplace.json": json.dumps({
+                "metadata": {"version": "9.9.9"},
+                "plugins": [{"name": "brother", "version": "9.9.9",
+                             "source": {"ref": "v9.9.9"}}],
+            }),
+        })
+        _seed_tag_time_needs(root, gate=gate)
+        _git_track_all(root)
+
+    def _dry_run(self, root, remote_dir, extra_args=()):
+        allowlist_path = _write_lines(
+            os.path.join(root, "ALLOWLIST.txt"), self.ALLOWLIST)
+        terms_path = _write_lines(
+            os.path.join(root, "terms.txt"), ["FAKETERM-NEVER-PRESENT"])
+        env = dict(os.environ)
+        env["BROTHER_PRIVATE_TERMS"] = terms_path
+        return _run_cli(["--allowlist", allowlist_path, "--root", root,
+                          "--remote", remote_dir, "--branch", "main"]
+                         + list(extra_args), env)
+
+    def test_a_the_flag_calls_tag_time_checks_and_refuses_on_a_failing_gate(
+            self):
+        with tempfile.TemporaryDirectory() as remote_dir, \
+             tempfile.TemporaryDirectory() as root:
+            _seed_bare_remote(remote_dir)
+            self._seed(root, gate=NOT_READY_GATE_STUB)
+            proc = self._dry_run(root, remote_dir, ["--tag-time-checks"])
+            self.assertEqual(proc.returncode, EP.EXIT_REFUSED,
+                              proc.stdout + proc.stderr)
+            # the ordinary gates (cleanse, identity_guard, ...) still ran
+            # and cleared; only the tag-time preflight refused
+            self.assertIn("CLEAR", proc.stdout)
+            self.assertIn(
+                "REFUSED: the export tree's own readiness gate does not "
+                "read READY", proc.stdout)
+            self.assertIn(
+                "REFUSED: the candidate export tree does not clear its "
+                "own tag-time checks", proc.stdout)
+
+    def test_b_without_the_flag_the_plain_dry_run_is_unchanged(self):
+        with tempfile.TemporaryDirectory() as remote_dir, \
+             tempfile.TemporaryDirectory() as root:
+            _seed_bare_remote(remote_dir)
+            # the same failing gate as test_a: if the plain dry run ran
+            # tag_time_checks too, this would refuse it the same way
+            self._seed(root, gate=NOT_READY_GATE_STUB)
+            proc = self._dry_run(root, remote_dir)
+            self.assertEqual(proc.returncode, EP.EXIT_OK,
+                              proc.stdout + proc.stderr)
+            self.assertIn("CLEAR", proc.stdout)
+            self.assertIn("DRY-RUN", proc.stdout)
+            self.assertNotIn("readiness gate does not read READY",
+                             proc.stdout)
+            self.assertNotIn("tag-time checks", proc.stdout)
 
 
 if __name__ == "__main__":

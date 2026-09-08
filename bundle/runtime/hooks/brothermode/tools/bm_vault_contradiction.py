@@ -603,6 +603,7 @@ _WEAKENING_VERB_ALTS = (
     r"proceed(?:s|ed|ing)?\s+without",
     r"no\s+need\s+to",
     r"ignor(?:e|es|ed|ing)",
+    r"omit(?:s|ted|ting)?",
 )
 _WEAKENING_VERB_RE = re.compile(r"\b(?:%s)\b" % "|".join(_WEAKENING_VERB_ALTS), re.I)
 
@@ -620,6 +621,8 @@ _NAMED_CONTROLS = (
     (re.compile(r"\breceipts?\b", re.I), "a receipt"),
     (re.compile(r"\bproofs?\b", re.I), "proof"),
     (re.compile(r"\bgates?\b", re.I), "a gate"),
+    (re.compile(r"\bguards?\b", re.I), "a guard"),
+    (re.compile(r"\bfence\b", re.I), "the fence"),
     (re.compile(r"\bisolation\b", re.I), "isolation"),
     (re.compile(r"\bscope\s+checks?\b", re.I), "a scope check"),
     (re.compile(r"\bsecurity\s+validation\b", re.I), "security validation"),
@@ -641,6 +644,22 @@ _NEGATION_RE = re.compile(
 #: "one clause", in characters rather than a real sentence parse, since a
 #: vault lesson is a sentence or two, never a document.
 _DIRECTIVE_WINDOW_CHARS = 80
+
+#: A REPORTING FRAME (steering 6.9's own mixed-content example, night run
+#: 2026-09-07): a phrase marking the sentence as a PAST-TENSE DESCRIPTION of
+#: what someone else did, never an instruction to do it now. "Incident: a
+#: worker attempted to skip tests" names the weakening verb "skip" but is
+#: describing an incident, not directing one; the negation guard above does
+#: not catch this shape (there is no "never"/"do not" here), so this is a
+#: second, independent guard checked in the SAME before-window, per match,
+#: alongside _NEGATION_RE -- never a whole-text check, so a second sentence
+#: in the same lesson ("Also skip the parser tests.") still refuses on its
+#: own weakening-verb match once the reporting frame has scrolled out of
+#: that match's own window.
+_REPORTING_FRAME_RE = re.compile(
+    r"\b(?:attempted\s+to|tried\s+to|used\s+to|previously|an\s+earlier|"
+    r"a\s+previous|incident:|postmortem|was\s+caught|we\s+caught)\b",
+    re.I)
 
 
 #: SECOND STRUCTURAL FAMILY (item 7a/7b): a control merely LABELED
@@ -681,12 +700,20 @@ _TRUST_OVERRIDE_RE = re.compile(
 #: substring, not \\b (Japanese carries no ASCII word boundaries), within a
 #: fixed character window, the same "about one clause" proxy the English
 #: check uses in characters rather than a real sentence parse.
-_WEAKENING_JA = ("不要", "省略", "スキップ", "飛ばす", "無視",
-                 "確認せず", "せずに進める", "任意", "参考程度")
+#: "無効" (invalidate/disable) and "なくてよい" (need not -- covers both
+#: "なくてよい" itself and "しなくてよい", since the shorter string is a
+#: substring of the longer one) join the table night run 2026-09-07,
+#: closing two of steering 6.6's own Japanese examples
+#: (チェックを無効にして, テストを実行しなくてよい) that the pre-existing
+#: vocabulary missed; "チェック" (the loanword "check") joins _CONTROL_JA
+#: for the same reason -- neither word was in either table before.
+_WEAKENING_JA = ("不要", "省略", "スキップ", "飛ばす", "無視", "無効",
+                 "確認せず", "せずに進める", "任意", "参考程度", "なくてよい")
 _CONTROL_JA = (
     ("テスト", "the tests"), ("検証", "verification"), ("レビュー", "review"),
     ("確認", "confirmation"), ("証跡", "evidence"), ("受入", "acceptance"),
     ("ゲート", "a gate"), ("承認", "approval"), ("隔離", "isolation"),
+    ("チェック", "a check"),
 )
 #: Japanese NEGATIONS: "しない"/"してはいけない" attached to the weakening
 #: word itself ("スキップしない" = "does not skip"), or "必ず" governing a
@@ -696,6 +723,43 @@ _CONTROL_JA = (
 #: _NEGATION_RE already does for the verb-plus-control family.
 _NEGATION_JA = ("しない", "してはいけない", "必ず")
 _JA_WINDOW_CHARS = 20
+
+#: The Japanese half of the reporting-frame guard above (steering 6.9): a
+#: past-tense report of what someone else did, never a live instruction.
+#: "した。" (a plain past-tense sentence ending) is deliberately narrow --
+#: only the FULL three characters, including the ideographic full stop --
+#: so it cannot fire on every "した" inside an ordinary present-tense
+#: compound verb.
+_REPORTING_FRAME_JA = ("以前", "過去に", "インシデント", "教訓", "した。")
+
+#: Verdict-laundering and authority-escalation Japanese vocabulary
+#: (steering 6.9, night run 2026-09-07): each phrase is self-contained
+#: (no separate control noun needed nearby, unlike the weakening-verb
+#: table above), matched as a plain literal substring the same way every
+#: other Japanese check in this module already is.
+_VERDICT_LAUNDER_JA = ("失敗しても無視", "合格扱い")
+_AUTHORITY_ESCALATION_JA = ("マージして", "承認済み")
+
+
+def _japanese_phrase_hit(text, phrases):
+    """True when any literal Japanese phrase in `phrases` appears in
+    `text` with no Japanese NEGATION in its own _JA_WINDOW_CHARS window --
+    the same drop rule _japanese_weakening applies, reused here for the
+    two self-contained families (verdict laundering, authority escalation)
+    that need no separate control noun."""
+    if not text:
+        return False
+    for phrase in phrases:
+        idx = text.find(phrase)
+        if idx == -1:
+            continue
+        win_start = max(0, idx - _JA_WINDOW_CHARS)
+        win_end = min(len(text), idx + len(phrase) + _JA_WINDOW_CHARS)
+        window = text[win_start:win_end]
+        if any(neg in window for neg in _NEGATION_JA):
+            continue
+        return True
+    return False
 
 
 #: A bare "not" (or "no", "isn't", "aren't") is enough to flip "the tests
@@ -735,7 +799,9 @@ def _japanese_weakening(text):
     None: the identical structural law as unsafe_directive's own English
     check (a weakening term within about one clause of a named control,
     dropped when a negation is present), read against Japanese vocabulary
-    instead of English."""
+    instead of English. Also dropped when a REPORTING FRAME (a past-tense
+    "this happened before" marker) shares the same window, the Japanese
+    half of the mixed-content guard below."""
     if not text:
         return None
     for weak in _WEAKENING_JA:
@@ -750,28 +816,180 @@ def _japanese_weakening(text):
             window = text[win_start:win_end]
             if any(neg in window for neg in _NEGATION_JA):
                 continue
+            if any(rep in window for rep in _REPORTING_FRAME_JA):
+                continue
             for control, name in _CONTROL_JA:
                 if control in window:
                     return name
     return None
 
 
+#: FOURTH STRUCTURAL FAMILY (item 3a, night run 2026-09-07, codex finding 2
+#: extended): a REQUIRED action (run/verify/check/review/test) declared
+#: unnecessary, rather than a WEAKENING VERB naming the action to skip.
+#: "don't run the tests" names no weakening verb at all ("run" is not
+#: itself weakening), and the shared _NEGATION_RE the weakening-verb check
+#: uses above would otherwise suppress this exact shape on purpose (it
+#: exists to protect the OPPOSITE instruction, "never skip the tests"), so
+#: this is its own, independent family rather than a tweak to that guard.
+#: "without" is excluded from the window outright: "do not change it
+#: without review" is the review-is-required shape the weakening-verb
+#: family's own _NEGATION_RE already protects, and this family would
+#: otherwise misread "review" as the required action being waived.
+_PROHIBITED_NEG_RE = re.compile(
+    r"\b(?:don't|do\s+not|did\s+not|didn't|no\s+need\s+to|needn't|"
+    r"wastes?\s+time|(?:is|are|was|were)\s+(?:not\s+)?(?:unnecessary|"
+    r"a\s+waste\s+of\s+time))\b", re.I)
+_PROHIBITED_ACTION_RE = re.compile(
+    r"\b(?:run|runs|running|execute[sd]?|executing|rerun\w*|re-run\w*|"
+    r"verify|verifies|verifying|verification|check\w*|review\w*|test\w*)\b",
+    re.I)
+_PROHIBITED_EXCLUDE_RE = re.compile(r"\bwithout\b", re.I)
+
+
+def _prohibited_strengthening(text):
+    """The named control (or, absent one, a generic name) a lesson's own
+    text declares UNNECESSARY -- item 3a. English only: the Japanese
+    equivalent (なくてよい/しなくてよい) is folded into _WEAKENING_JA
+    instead, since Japanese carries no _NEGATION_JA conflict the way
+    English's shared _NEGATION_RE does for this shape."""
+    if not text:
+        return None
+    for m in _PROHIBITED_NEG_RE.finditer(text):
+        before_start = max(0, m.start() - _DIRECTIVE_WINDOW_CHARS)
+        window = text[before_start:m.end() + _DIRECTIVE_WINDOW_CHARS]
+        if _PROHIBITED_EXCLUDE_RE.search(window):
+            continue
+        if not _PROHIBITED_ACTION_RE.search(window):
+            continue
+        for pattern, name in _NAMED_CONTROLS:
+            if pattern.search(window):
+                return name
+        return "the required check"
+    return None
+
+
+#: FIFTH STRUCTURAL FAMILY: a claim that a FAILING or absent result should
+#: be RECORDED, TREATED, or COUNTED as though it had passed -- the
+#: verdict itself is being laundered, never the check that produced it.
+#: "record"/"accept" and "satisfied"/"expected" widen the verb and
+#: outcome sets past steering 6.9's own three evidence-laundering
+#: examples to also cover two of codex finding 2's semantic phrases
+#: ("record the check as satisfied", "accept failures as expected").
+_VERDICT_LAUNDER_VERB_RE = re.compile(
+    r"\b(?:treat|mark|consider|count|record|accept)(?:s|ed|ing)?\b", re.I)
+_VERDICT_LAUNDER_OUTCOME_RE = re.compile(
+    r"\b(?:as\s+)?(?:passing|pass|green|harmless|satisfied|expected|"
+    r"equivalent\s+to\s+(?:pass|green))\b", re.I)
+
+
+def _verdict_laundering(text):
+    """The generic "the verdict" name when a lesson's own text launders a
+    failing or absent result into a passing one -- item 3b, English and
+    Japanese together (the Japanese phrases are self-contained, no
+    separate control noun needed, so they run through
+    _japanese_phrase_hit rather than the window-based English check).
+
+    Runs the SAME reporting-frame clause check unsafe_directive's own
+    weakening-verb loop uses (review-P0.md C3, night run 2026-09-08): a
+    past-tense report of what someone else did ("A previous session
+    marked a red suite as passing. Never do that again.") is not a live
+    instruction, so a REPORTING_FRAME phrase in the SAME clause as the
+    verb drops that match, per match, never whole-text."""
+    if not text:
+        return None
+    for m in _VERDICT_LAUNDER_VERB_RE.finditer(text):
+        before_start = max(0, m.start() - _DIRECTIVE_WINDOW_CHARS)
+        before = text[before_start:m.start()]
+        if _NEGATION_RE.search(before):
+            continue
+        clause_start = before_start
+        for boundary in (".", ";", "\n"):
+            idx = before.rfind(boundary)
+            if idx != -1:
+                clause_start = max(clause_start, before_start + idx + 1)
+        if _REPORTING_FRAME_RE.search(text[clause_start:m.start()]):
+            continue
+        window = text[before_start:m.end() + _DIRECTIVE_WINDOW_CHARS]
+        if _VERDICT_LAUNDER_OUTCOME_RE.search(window):
+            return "the verdict"
+    if _japanese_phrase_hit(text, _VERDICT_LAUNDER_JA):
+        return "the verdict"
+    return None
+
+
+#: SIXTH STRUCTURAL FAMILY: a claim of standing PERMISSION to merge, push,
+#: or delete that no memory record can actually grant itself -- the
+#: precedence law's own words (VAULT LESSON is the bottom rung), in
+#: narrative form. "replace the gate with this note" (codex finding 2) is
+#: the same evasion aimed at a check/review/test rather than at merge
+#: authority, folded in here rather than as a seventh family since it is
+#: still one memory record claiming standing it cannot grant itself.
+_AUTHORITY_ESCALATION_RE = re.compile(
+    r"\byou\s+have\s+approval\b|\balready\s+approved\b|"
+    r"\byou\s+may\s+push\b|\bmerge(?:s|d)?\s+automatically\b|"
+    r"\bdirectly\s+to\s+main\b|"
+    r"\bmerge\b(?:(?![.;]).){0,40}?\beven\s+if\b|"
+    r"\breplace\b(?:(?![.;]).){0,60}?\b(?:the\s+)?(?:gate|check\w*|"
+    r"test\w*|review\w*|verification)\b", re.I)
+
+
+def _authority_escalation(text):
+    """"authority to merge or release" when a lesson's own text claims
+    standing permission it cannot grant itself -- item 3c. Its refusal
+    reason names AUTHORITY, never a check, matching the precedence law's
+    own wording.
+
+    Runs the SAME reporting-frame clause check unsafe_directive's own
+    weakening-verb loop uses (review-P0.md C3, night run 2026-09-08),
+    truncated at the nearest clause boundary behind the match, same as
+    _verdict_laundering above."""
+    if not text:
+        return None
+    m = _AUTHORITY_ESCALATION_RE.search(text)
+    if m and not _ADVISORY_NEGATION_RE.search(text[max(0, m.start() - 40):m.end()]):
+        before_start = max(0, m.start() - _DIRECTIVE_WINDOW_CHARS)
+        before = text[before_start:m.start()]
+        clause_start = before_start
+        for boundary in (".", ";", "\n"):
+            idx = before.rfind(boundary)
+            if idx != -1:
+                clause_start = max(clause_start, before_start + idx + 1)
+        if not _REPORTING_FRAME_RE.search(text[clause_start:m.start()]):
+            return "authority to merge or release"
+    if _japanese_phrase_hit(text, _AUTHORITY_ESCALATION_JA):
+        return "authority to merge or release"
+    return None
+
+
 def unsafe_directive(text):
     """The named control a lesson's own text tries to weaken (a string
-    suitable for a refusal reason), or None. Three independent structural
+    suitable for a refusal reason), or None. Six independent structural
     families, checked in order, any one of which is enough:
 
       1. a WEAKENING VERB matched within about one clause of a NAMED
          CONTROL, dropped when a NEGATION precedes the verb in that same
-         span (the three module-level tables above unsafe_directive's own
-         original shape).
+         span, or when a REPORTING FRAME (steering 6.9's mixed-content
+         guard, night run 2026-09-07) shares that same span -- a
+         PAST-TENSE description of what someone else did is not a live
+         instruction, checked per match so a second sentence in the same
+         lesson can still refuse on its own (the three module-level
+         tables above unsafe_directive's own original shape, plus
+         _REPORTING_FRAME_RE).
       2. a control declared merely advisory/optional/informational, or an
          exemption/waiver claimed from one, or a body asking to be
          trusted OVER current evidence rather than presenting it
          (_advisory_or_exempted, _TRUST_OVERRIDE_RE): the identical
          evasion in narrative rather than imperative form, naming no
          weakening verb at all.
-      3. the identical verb-plus-control law read in Japanese
+      3. a REQUIRED action declared unnecessary (_prohibited_strengthening,
+         night run 2026-09-07): "don't run the tests" names no weakening
+         verb, and _NEGATION_RE would otherwise protect this exact shape.
+      4. a failing or absent result laundered into a passing one
+         (_verdict_laundering).
+      5. a claim of standing authority to merge, push, or delete
+         (_authority_escalation).
+      6. the identical verb-plus-control law read in Japanese
          (_japanese_weakening): an English-only vocabulary misses this by
          construction.
 
@@ -785,6 +1003,22 @@ def unsafe_directive(text):
         before = text[before_start:m.start()]
         if _NEGATION_RE.search(before):
             continue
+        # PER MATCH, NEVER WHOLE TEXT (steering 6.9's own mixed-content
+        # example): the reporting-frame guard only protects the SAME
+        # clause, so it is checked against `before` truncated at the
+        # nearest sentence boundary behind this match, never the full
+        # _DIRECTIVE_WINDOW_CHARS span. Without this truncation, a short
+        # lesson (well under 80 characters) lets an EARLIER sentence's
+        # "attempted to" bleed forward and wrongly protect a SECOND, live
+        # instruction two sentences later ("Also skip the parser tests."
+        # must still refuse even though the first sentence is a report).
+        clause_start = before_start
+        for boundary in (".", ";", "\n"):
+            idx = before.rfind(boundary)
+            if idx != -1:
+                clause_start = max(clause_start, before_start + idx + 1)
+        if _REPORTING_FRAME_RE.search(text[clause_start:m.start()]):
+            continue
         window = text[before_start:m.end() + _DIRECTIVE_WINDOW_CHARS]
         for pattern, name in _NAMED_CONTROLS:
             if pattern.search(window):
@@ -794,6 +1028,15 @@ def unsafe_directive(text):
         return control
     if _TRUST_OVERRIDE_RE.search(text):
         return "current evidence"
+    control = _prohibited_strengthening(text)
+    if control:
+        return control
+    control = _verdict_laundering(text)
+    if control:
+        return control
+    control = _authority_escalation(text)
+    if control:
+        return control
     return _japanese_weakening(text)
 
 
@@ -806,14 +1049,20 @@ TIER_REFUSED = "REFUSED"
 #: row P0-1 (2026-09-06 follow-up): the seam that produced a TIER_REFUSED
 #: verdict, so a caller withholding one can consult the check that
 #: actually produced it instead of one shared catch-all.
-#: SEAM_APPROVAL_FORGERY is the one exclusive case, _forged_approval()'s
-#: own verdict; every other TIER_REFUSED reason (safety precedence, a
-#: duplicate slug, an unparsable or forged-future date, an escaping or
+#: SEAM_APPROVAL_FORGERY is one exclusive case, _forged_approval()'s own
+#: verdict; SEAM_SAFETY_PRECEDENCE (night run 2026-09-07) is a second,
+#: unsafe_directive()'s own verdict at evidence_tier's step 0, split out
+#: of the shared SEAM_EVIDENCE_LOCATOR seam it used to report under so a
+#: caller can attribute the withhold correctly (steering 6.5: a
+#: policy-conflict withhold is a distinct state from a dead-locator
+#: withhold, never collapsed into one). Every other TIER_REFUSED reason
+#: (a duplicate slug, an unparsable or forged-future date, an escaping or
 #: dead evidence_locator) keeps SEAM_EVIDENCE_LOCATOR, the pre-existing
 #: shared gate, unchanged from before this attribution existed.
 #: Meaningless (None) for TIER_UNVERIFIED and TIER_EVIDENCED, which no
 #: withhold ever gates on.
 SEAM_APPROVAL_FORGERY = "approval_forgery"
+SEAM_SAFETY_PRECEDENCE = "safety_precedence"
 SEAM_EVIDENCE_LOCATOR = "evidence_locator"
 
 #: Both date fields this estate's notes actually carry: verified_at (this
@@ -1016,13 +1265,26 @@ def evidence_tier(lesson, evidence_probe, duplicate_probe=None):
     if not os.environ.get(SAFETY_PRECEDENCE_DISABLE_ENV):
         control = unsafe_directive(lesson.get("text", ""))
         if control:
+            # Night run 2026-09-07 (design-P0.md section 3, item 4):
+            # POLICY-CONFLICT is the reason prefix here, replacing the old
+            # "REFUSED (safety precedence)" wording, so the vocabulary
+            # matches steering 6.5 while the tier itself stays
+            # TIER_REFUSED (Law 6: no new state file, a string reason is
+            # enough). seam is SEAM_SAFETY_PRECEDENCE, not
+            # SEAM_EVIDENCE_LOCATOR: this withhold is attributable to
+            # unsafe_directive's own check, never to a dead or forged
+            # evidence_locator. The caller branch gated on this seam is
+            # unreachable by any OTHER route: step 0 above already skips
+            # this whole block when BM_VAULT_DISABLE_SAFETY_PRECEDENCE is
+            # set, so no second, separate disable gate is invented for it
+            # at any caller.
             return TIER_REFUSED, (
-                "REFUSED (safety precedence): a vault lesson cannot waive "
+                "POLICY-CONFLICT: a vault lesson cannot waive "
                 "%s. SYSTEM SAFETY POLICY > REPOSITORY SAFETY POLICY > "
                 "CURRENT EVIDENCE > VERIFIED PROJECT DECISION > VAULT "
                 "LESSON; an exception requires a current higher-authority "
                 "policy, which no memory record can grant itself." % control
-            ), SEAM_EVIDENCE_LOCATOR
+            ), SEAM_SAFETY_PRECEDENCE
 
     if not os.environ.get(APPROVAL_FORGERY_DISABLE_ENV):
         forged_approval = _forged_approval(lesson)

@@ -16,6 +16,8 @@ import unittest
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO_ROOT, 'scripts'))
 import fable_authority as fa  # noqa: E402
+import fence_expiry  # noqa: E402
+import subprocess  # noqa: E402
 
 # E100: one sandbox for every temp tree this process makes, removed at exit.
 import os as _e100_os, sys as _e100_sys  # noqa: E402
@@ -300,6 +302,214 @@ class CliExitCodes(unittest.TestCase):
 
     def test_selftest_exits_zero(self):
         self.assertEqual(fa.main(['--selftest']), 0)
+
+
+class DelegationFor(unittest.TestCase):
+    """P3b (design-P3.md section 3, steering 9.7): authority is separate
+    from readiness. delegation_for is the one reader; grant_merge (through
+    the CLI only, per 9.7) is the one writer."""
+
+    def setUp(self):
+        d = tempfile.mkdtemp()
+        self.path = os.path.join(d, 'delegations.jsonl')
+
+    def _write_raw(self, entry):
+        os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        with open(self.path, 'a', encoding='utf-8') as fh:
+            fh.write(json.dumps(entry) + '\n')
+
+    def test_no_file_means_none(self):
+        self.assertIsNone(
+            fa.delegation_for('org/repo', 'main', 'merge', now=NOW, path=self.path))
+
+    def test_a_matching_live_grant_returns_the_dict(self):
+        ok, entry = fa.grant_merge(
+            'org/repo', 'main', 'merge', 'A2', '2026-09-08T00:00:00Z', 'squash',
+            'Khalil Maaouni', 'go ahead, squash merge tonight only', now=NOW,
+            path=self.path)
+        self.assertTrue(ok, entry)
+        found = fa.delegation_for('org/repo', 'main', 'merge', now=NOW, path=self.path)
+        self.assertIsNotNone(found)
+        self.assertEqual(found['repository'], 'org/repo')
+        self.assertEqual(found['risk_ceiling'], 'A2')
+        self.assertEqual(found['granted_by'], 'Khalil Maaouni')
+
+    def test_wrong_repository_base_or_action_returns_none(self):
+        fa.grant_merge('org/repo', 'main', 'merge', 'A2', '2026-09-08T00:00:00Z',
+                        'squash', 'Khalil Maaouni', 'go ahead', now=NOW, path=self.path)
+        self.assertIsNone(fa.delegation_for('org/other', 'main', 'merge', now=NOW, path=self.path))
+        self.assertIsNone(fa.delegation_for('org/repo', 'develop', 'merge', now=NOW, path=self.path))
+        self.assertIsNone(fa.delegation_for('org/repo', 'main', 'release', now=NOW, path=self.path))
+
+    def test_expired_returns_none(self):
+        # Written directly: grant_merge itself refuses a past `until` (a
+        # human cannot grant a lapsed window), so an expired grant on disk
+        # only ever arrives by outliving the moment it was queried, exactly
+        # like fence_expiry's own claims.
+        self._write_raw({
+            'repository': 'org/repo', 'base': 'main', 'action': 'merge',
+            'risk_ceiling': 'A2', 'until': '2026-08-01T00:00:00Z',
+            'merge_method': 'squash', 'granted_by': 'Khalil Maaouni',
+            'words': 'go ahead', 'granted_at': '2026-07-30T00:00:00Z'})
+        self.assertIsNone(fa.delegation_for('org/repo', 'main', 'merge', now=NOW, path=self.path))
+
+    def test_missing_until_returns_none(self):
+        self._write_raw({
+            'repository': 'org/repo', 'base': 'main', 'action': 'merge',
+            'risk_ceiling': 'A2', 'until': None,
+            'merge_method': 'squash', 'granted_by': 'Khalil Maaouni',
+            'words': 'go ahead', 'granted_at': '2026-07-30T00:00:00Z'})
+        self.assertIsNone(fa.delegation_for('org/repo', 'main', 'merge', now=NOW, path=self.path))
+
+    def test_a_second_grant_for_a_different_base_does_not_leak(self):
+        fa.grant_merge('org/repo', 'main', 'merge', 'A2', '2026-09-08T00:00:00Z',
+                        'squash', 'Khalil Maaouni', 'main only', now=NOW, path=self.path)
+        fa.grant_merge('org/repo', 'develop', 'merge', 'A1', '2026-09-08T00:00:00Z',
+                        'merge', 'Khalil Maaouni', 'develop only', now=NOW, path=self.path)
+        found = fa.delegation_for('org/repo', 'main', 'merge', now=NOW, path=self.path)
+        self.assertEqual(found['base'], 'main')
+        self.assertEqual(found['words'], 'main only')
+
+    def test_last_matching_line_wins(self):
+        fa.grant_merge('org/repo', 'main', 'merge', 'A1', '2026-09-08T00:00:00Z',
+                        'squash', 'Khalil Maaouni', 'first grant', now=NOW, path=self.path)
+        fa.grant_merge('org/repo', 'main', 'merge', 'A2', '2026-09-09T00:00:00Z',
+                        'squash', 'Khalil Maaouni', 'second grant supersedes', now=NOW,
+                        path=self.path)
+        found = fa.delegation_for('org/repo', 'main', 'merge', now=NOW, path=self.path)
+        self.assertEqual(found['words'], 'second grant supersedes')
+        self.assertEqual(found['risk_ceiling'], 'A2')
+
+
+class GrantMergeCli(unittest.TestCase):
+    def setUp(self):
+        d = tempfile.mkdtemp()
+        self.path = os.path.join(d, 'delegations.jsonl')
+
+    def _argv(self, until):
+        return ['grant-merge', '--repository', 'org/repo', '--base', 'main',
+                '--action', 'merge', '--risk-ceiling', 'A2', '--until', until,
+                '--merge-method', 'squash', '--granted-by', 'Khalil Maaouni',
+                '--words', 'squash merge tonight only, one shot',
+                '--delegations-log', self.path]
+
+    def test_refuses_a_past_until(self):
+        code = fa.main(self._argv('2020-01-01T00:00:00Z'))
+        self.assertEqual(code, 1)
+        self.assertFalse(os.path.exists(self.path))
+
+    def test_writes_a_line_for_a_future_until(self):
+        code = fa.main(self._argv('2099-01-01T00:00:00Z'))
+        self.assertEqual(code, 0)
+        self.assertTrue(os.path.exists(self.path))
+        with open(self.path, encoding='utf-8') as fh:
+            line = json.loads(fh.readline())
+        self.assertEqual(line['repository'], 'org/repo')
+        self.assertEqual(line['merge_method'], 'squash')
+        self.assertEqual(line['granted_by'], 'Khalil Maaouni')
+
+
+class RevokeMerge(unittest.TestCase):
+    """F4: grant_merge refuses any `until` at or before now, so the only
+    writer of delegations.jsonl could never itself end a live grant
+    early. revoke_merge/`revoke-merge` is the second, deliberate writer."""
+
+    def setUp(self):
+        d = tempfile.mkdtemp()
+        self.path = os.path.join(d, 'delegations.jsonl')
+
+    def test_a_live_grant_is_revoked_and_delegation_for_reads_none(self):
+        ok, entry = fa.grant_merge('org/repo', 'main', 'merge', 'A2', '2099-01-01T00:00:00Z',
+                                    'squash', 'Khalil Maaouni', 'land it tonight', now=NOW,
+                                    path=self.path)
+        self.assertTrue(ok, entry)
+        self.assertIsNotNone(fa.delegation_for('org/repo', 'main', 'merge', now=NOW, path=self.path))
+
+        ok, revoked = fa.revoke_merge('org/repo', 'main', 'merge', 'Khalil Maaouni',
+                                       'cancel that grant', now=NOW, path=self.path)
+        self.assertTrue(ok, revoked)
+        self.assertIsNone(fa.delegation_for('org/repo', 'main', 'merge', now=NOW, path=self.path))
+
+    def test_revoke_before_any_grant_still_writes_and_finds_nothing_to_undo(self):
+        ok, revoked = fa.revoke_merge('org/repo', 'main', 'merge', 'Khalil Maaouni',
+                                       'nothing to cancel yet', now=NOW, path=self.path)
+        self.assertTrue(ok, revoked)
+        self.assertIsNone(fa.delegation_for('org/repo', 'main', 'merge', now=NOW, path=self.path))
+
+    def test_revoke_missing_a_required_field_is_refused(self):
+        ok, reason = fa.revoke_merge('', 'main', 'merge', 'Khalil Maaouni', 'cancel', path=self.path)
+        self.assertFalse(ok)
+        self.assertIn('repository', reason)
+
+
+class RevokeMergeCli(unittest.TestCase):
+    def setUp(self):
+        d = tempfile.mkdtemp()
+        self.path = os.path.join(d, 'delegations.jsonl')
+
+    def test_revoke_merge_cli_writes_and_ends_the_live_grant(self):
+        code = fa.main(['grant-merge', '--repository', 'org/repo', '--base', 'main',
+                         '--action', 'merge', '--risk-ceiling', 'A2', '--until',
+                         '2099-01-01T00:00:00Z', '--merge-method', 'squash',
+                         '--granted-by', 'Khalil Maaouni', '--words', 'land it tonight',
+                         '--delegations-log', self.path])
+        self.assertEqual(code, 0)
+        self.assertIsNotNone(fa.delegation_for('org/repo', 'main', 'merge', path=self.path))
+
+        code = fa.main(['revoke-merge', '--repository', 'org/repo', '--base', 'main',
+                         '--action', 'merge', '--granted-by', 'Khalil Maaouni',
+                         '--words', 'cancel that grant', '--delegations-log', self.path])
+        self.assertEqual(code, 0)
+        self.assertIsNone(fa.delegation_for('org/repo', 'main', 'merge', path=self.path))
+
+
+class RecordDirIsWorktreeAware(unittest.TestCase):
+    """F6: fable_authority's own logs must resolve through the SAME
+    checkout fence_expiry's registry already resolves through, or a
+    grant written by a human in one worktree is invisible to
+    land_queue.resolve_authority running in another."""
+
+    def _git(self, args, cwd=None):
+        proc = subprocess.run(['git'] + args, cwd=cwd, capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return proc
+
+    def test_record_dir_of_a_linked_worktree_resolves_to_the_primary_checkouts_sbe(self):
+        d = tempfile.mkdtemp()
+        primary = os.path.join(d, 'primary')
+        self._git(['init', '-q', primary])
+        self._git(['config', 'user.email', 't@t'], primary)
+        self._git(['config', 'user.name', 't'], primary)
+        with open(os.path.join(primary, 'f.txt'), 'w', encoding='utf-8') as fh:
+            fh.write('x\n')
+        self._git(['add', 'f.txt'], primary)
+        self._git(['commit', '-q', '-m', 'base'], primary)
+        os.makedirs(os.path.join(primary, '.sbe'), exist_ok=True)
+        with open(os.path.join(primary, '.sbe', 'tasks.json'), 'w', encoding='utf-8') as fh:
+            fh.write('{}')
+
+        linked = os.path.join(d, 'linked')
+        self._git(['worktree', 'add', '-q', linked, '-b', 'linked-branch'], primary)
+        self.assertFalse(os.path.isdir(os.path.join(linked, '.sbe')),
+                          'the linked worktree must genuinely have no .sbe of its own')
+
+        got = fa._record_dir(linked)
+        # os.path.realpath: macOS puts TMPDIR under /var, itself a symlink
+        # to /private/var; fence_expiry._registry_root resolves through it
+        # (os.path.realpath) to find the primary checkout's .git, so the
+        # expected side must be resolved the same way or this compares a
+        # symlinked path against its own resolved target.
+        self.assertEqual(got, os.path.join(os.path.realpath(primary), '.sbe', 'fable-authority'),
+                          'a linked worktree must resolve to the PRIMARY checkout, not its own '
+                          'missing .sbe, exactly the fence_expiry._registry_root contract')
+        self.assertEqual(got, os.path.join(fence_expiry._registry_root(linked), '.sbe', 'fable-authority'))
+
+    def test_a_root_with_its_own_sbe_resolves_to_itself(self):
+        d = tempfile.mkdtemp()
+        os.makedirs(os.path.join(d, '.sbe'), exist_ok=True)
+        with open(os.path.join(d, '.sbe', 'tasks.json'), 'w', encoding='utf-8') as fh:
+            fh.write('{}')
+        self.assertEqual(fa._record_dir(d), os.path.join(d, '.sbe', 'fable-authority'))
 
 
 if __name__ == '__main__':

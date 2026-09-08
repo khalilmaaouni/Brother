@@ -221,11 +221,19 @@ def main():
             _say("No memory vault is bound yet; /brothermode:start will ask "
                  "where it should live and bind it.\n")
 
-    try:
-        with io.open(_tool("DIGEST.md"), encoding="utf-8") as fh:
-            _say(fh.read())
-    except (IOError, OSError):
-        pass
+    # R-4 (persona dogfood 2026-09-07): DIGEST.md printed to every session,
+    # including a beginner's very first one, who has no use for an
+    # engineering digest and no way to know why it appeared. It is real
+    # and useful to whoever maintains this product, so it is gated to
+    # that reader rather than deleted: BROTHERMODE_MAINTAINER=1 opts in.
+    # Anyone else already got the one line above (first_run's welcome, or
+    # nothing when there is nothing new), and gets nothing more here.
+    if os.environ.get("BROTHERMODE_MAINTAINER") == "1":
+        try:
+            with io.open(_tool("DIGEST.md"), encoding="utf-8") as fh:
+                _say(fh.read())
+        except (IOError, OSError):
+            pass
 
     if not first_run:
         _run([_tool("tools", "bm_telemetry.py"), "startup-nags"])

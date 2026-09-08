@@ -407,12 +407,23 @@ def battery_state(saved_run, root=ROOT, today=None):
     if today is None:
         from datetime import date
         today = date.today().isoformat()
-    verdict = BV.classify(results, expectations, today=today)
+    try:
+        critical = BV.load_critical(
+            os.path.join(root, "docs", "plan", "BATTERY-EXPECTATIONS.json"))
+    except (OSError, ValueError):
+        critical = {}
+    verdict = BV.classify(results, expectations, today=today, critical=critical)
     unexpected = verdict.get("unexpected_failures") or []
-    if unexpected:
-        return "BLOCK", ("the consolidated battery reports %d unexpected "
-                         "failure(s): %s" % (len(unexpected),
-                                             ", ".join(sorted(unexpected))))
+    crit_blocking = verdict.get("critical_blocking") or []
+    if unexpected or crit_blocking:
+        bits = []
+        if unexpected:
+            bits.append("%d unexpected failure(s): %s" % (
+                len(unexpected), ", ".join(sorted(unexpected))))
+        if crit_blocking:
+            bits.append("%d critical capability(ies) blocking: %s" % (
+                len(crit_blocking), "; ".join(sorted(crit_blocking))))
+        return "BLOCK", ("the consolidated battery reports " + "; ".join(bits))
     return "PASS", ("the consolidated battery reports no unexpected failures "
                     "(product %s)" % verdict.get("product", "unknown"))
 

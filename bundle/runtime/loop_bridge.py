@@ -64,6 +64,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import brother_paths  # noqa: E402
 import graph_loop  # noqa: E402
+import journal  # noqa: E402
 import run_heartbeat  # noqa: E402
 
 #: WHERE THE LOOP'S THREE MOVING PARTS ARE FOUND, in order, and the order is the
@@ -528,14 +529,65 @@ class LaneWorker(object):
     The underlying worker binds cwd at construction, which is right for a
     single-tree world and wrong here: the whole point of a lane is that the
     worker's writes land in it. So this builds one spawning worker per run,
-    at the lane the dispatcher hands it."""
+    at the lane the dispatcher hands it.
+
+    P1, night-hardening-2026-09-07: THIS IS WHERE A BROTHER-MANAGED WORKER
+    BECOMES SAFE BY CONSTRUCTION rather than by an operator remembering a
+    setup ritual. Before a worker is spawned, managed_safety.materialize()
+    creates (or reuses) the lane's own store and claims the unit's declared
+    write scope under a fresh session, THEN the worker is spawned with that
+    session wired into its environment. No worker starts before its claim
+    exists (docs/plan/runs/night-2026-09-07/design-P1.md section 3). The
+    managed_safety import is local to this method, not at module scope,
+    because managed_safety.py itself imports this module (to reuse its
+    sibling-tools resolution) and a module-level import here would be a
+    cycle; importing it lazily inside the one method that needs it is the
+    standard way out of that without inventing a third module."""
 
     def __init__(self, spawn_module, argv, environ=None):
         self._spawn, self._argv, self._environ = spawn_module, list(argv), environ
 
     def run(self, unit, cwd=None):
+        if not cwd:
+            # No lane at all (isolation disabled AND no shared cwd either,
+            # theoretical but not impossible): nothing to materialize a
+            # store against, so this falls back to the pre-P1 behaviour
+            # rather than crashing on Store(None).
+            inner = self._spawn.SpawningWorker(self._argv, cwd=cwd,
+                                               environ=self._environ)
+            return inner.run(unit)
+        import managed_safety  # local: see the class docstring for why
+        session_id, why = managed_safety.materialize(cwd, unit)
+        run_dir = journal.run_dir_from_env()
+        journal.append(run_dir, "safety.claim",
+                       parent_ids=journal.previous(run_dir),
+                       unit_id=unit.get("unit_id"),
+                       payload={"cwd": cwd, "held": session_id is None,
+                                "session": session_id, "why": why})
+        if session_id is None:
+            # HELD, not started: the claim step itself is the mutation
+            # boundary, so nothing has touched the lane yet. Shaped exactly
+            # like bm_worker_spawn._result()'s contract (worker_claim,
+            # artifacts, cost, status) so every downstream reader that
+            # already handles "unavailable" handles "held" the same way.
+            return {"worker_claim": "", "artifacts": [],
+                   "cost": {"tokens": 0, "minutes": 0},
+                   "status": "held", "note": why}
+        # BM_FENCE_STRICT=1 alongside enforced mode, not enforced mode
+        # alone: the fence's DEFAULT rule only denies a write that collides
+        # with ANOTHER session's active claim, and allows a write to any
+        # path nobody has claimed at all (products/brothermode/tools/
+        # test_bm_fence_hook.py's own StrictMode.test_strict_mode_is_off_by_
+        # default proves this). A managed claim that only blocks collisions
+        # is not what "claim before worker launch" is for; strict mode is
+        # what makes the claim the OUTER BOUND of what this worker may
+        # touch, denying anything the unit did not declare, not only
+        # anything a rival session already holds.
+        environ = dict(self._environ or os.environ, BM_FENCE_MODE="enforced",
+                      BM_FENCE_STRICT="1", BROTHERMODE_ROOT=cwd,
+                      BM_FENCE_SESSION_ID=session_id)
         inner = self._spawn.SpawningWorker(self._argv, cwd=cwd,
-                                           environ=self._environ)
+                                           environ=environ)
         return inner.run(unit)
 
 

@@ -126,6 +126,25 @@ class Unusable(Exception):
     check a sentinel and accidentally allow."""
 
 
+class TasksModuleMissing(Exception):
+    """No copy of brothersbe/tasks.py could be found anywhere tasks_mod()
+    knows to look. Deliberately NOT an Unusable: Unusable means a dependency
+    was found and failed, which is a fail-closed condition about the
+    REPOSITORY being reconciled. This one means the hook cannot find its OWN
+    dependency, which is a defect in how the hook was shipped (the 1.0.10
+    bundle carries this hook without its src/brothersbe, P0), never evidence
+    about the session. Per the NO-DATA law injected at every session start,
+    "NO-DATA is never a pass ... and never a block: only FAILs decide exit
+    codes", so cmd_hook allows the turn on this exception instead of
+    blocking it."""
+
+    def __init__(self, tried):
+        self.tried = tried
+        Exception.__init__(
+            self, "no brothersbe tasks module found (looked in: %s)"
+            % ", ".join(tried))
+
+
 # ---------------------------------------------------------------------------
 # Shared helpers, loaded by path. Never a bare import: tools/ is not a package
 # and this hook runs with an arbitrary cwd. Same construction and same reason
@@ -180,9 +199,56 @@ def authority_mod():
                  os.path.join(HERE, "sbe_authority_hook.py"))
 
 
+def _version_sort_key(version):
+    """A dotted version string as a comparable tuple, digit parts as ints so
+    "3.10.0" sorts after "3.9.0". Not a full semver parser (ponytail: a
+    directory name that is not dotted digits sorts first via -1, add a real
+    parser if a pre-release suffix ever needs to compare correctly)."""
+    return tuple(int(p) if p.isdigit() else -1 for p in version.split("."))
+
+
+def _newest_plugin_cache_tasks_path():
+    """The newest ~/.claude/plugins/cache/brother/brothersbe/<version>/src/
+    brothersbe/tasks.py that exists, or "" when the cache directory holds
+    none. This is the sibling plugin install's own copy of the module this
+    hook needs: the 1.0.10 bundle ships sbe_session_reconcile.py without its
+    src/brothersbe (P0), and the brothersbe plugin, installed side by side,
+    keeps every version it was ever cached at."""
+    cache_dir = brother_paths.config_path("plugins", "cache", "brother", "brothersbe")
+    try:
+        versions = [v for v in os.listdir(cache_dir)
+                    if os.path.isfile(os.path.join(cache_dir, v, "src", "brothersbe",
+                                                    "tasks.py"))]
+    except OSError:
+        return ""
+    if not versions:
+        return ""
+    versions.sort(key=_version_sort_key)
+    return os.path.join(cache_dir, versions[-1], "src", "brothersbe", "tasks.py")
+
+
 def tasks_mod():
-    return _load("brothersbe_tasks_for_reconcile",
-                 os.path.join(ROOT_DIR, "src", "brothersbe", "tasks.py"))
+    """The brothersbe.tasks module, tried in order at: this plugin's own
+    shipped src/ (the normal layout), BROTHERSBE_SRC (an explicit override,
+    a directory holding brothersbe/tasks.py), then the newest sibling
+    brothersbe plugin install's cache copy. Raises TasksModuleMissing, not
+    Unusable, when none of them exist: a hook that cannot find its own
+    dependency has judged nothing, which is NO-DATA, never a block."""
+    tried = [os.path.join(ROOT_DIR, "src", "brothersbe", "tasks.py")]
+    env_src = os.environ.get("BROTHERSBE_SRC", "").strip()
+    if env_src:
+        tried.append(os.path.join(env_src, "brothersbe", "tasks.py"))
+    newest = _newest_plugin_cache_tasks_path()
+    if newest:
+        tried.append(newest)
+    for path in tried:
+        if not os.path.isfile(path):
+            continue
+        try:
+            return _load("brothersbe_tasks_for_reconcile", path)
+        except Unusable:
+            continue
+    raise TasksModuleMissing(tried)
 
 
 def family_of(root, rel):
@@ -781,6 +847,10 @@ def cmd_hook(argv):
 
     try:
         outcome = reconcile_worktree(cwd, session_id)
+    except TasksModuleMissing as e:
+        _warn("NO-DATA: sbe_session_reconcile cannot judge this session: %s; the turn is "
+              "allowed, never blocked, per the NO-DATA law" % e)
+        return 0
     except Unusable as e:
         _out(json.dumps(block_payload(
             "BrotherSBE scope reconciliation could not clear this session, so it is "

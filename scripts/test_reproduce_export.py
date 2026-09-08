@@ -517,6 +517,92 @@ class E118TheDenylistIsReadFromTheSourceRevision(unittest.TestCase):
             "was rebuilt anyway, so the denylist came from some other tree")
 
 
+class RegenerateNoteFlag(unittest.TestCase):
+    """DEL-13 (the 1.0.10 pre-tag audit): docs/releases/<version>.md is only
+    ever present in export_dir when --source-rev is at or after the refresh
+    commit that adds it. At the ordinary --source-rev the cut script names
+    (the commit BEFORE that refresh), the note is simply absent from the
+    rebuilt tree, so it never lands in `deferred` and compare_release_note is
+    never reached: the run reads "self-naming files 0" and the shipped note
+    goes unchecked, silently. --regenerate-note closes the gap by running the
+    estate's own generator inside the source-revision checkout. The generator
+    itself is stubbed (R.regenerate_note) rather than actually run: proving
+    the flag's wiring does not need to pay for a real 10 to 20 minute suite
+    run, and scripts/test_release_note_from_tree.py already proves the
+    generator itself."""
+
+    REL_NOTE = "docs/releases/%s.md" % VERSION
+
+    def _run(self, tag_note, regenerate_result, flag=True):
+        other_gen = {"scripts/a.py": b"one"}
+        tag_bytes = {"scripts/a.py": b"one", self.REL_NOTE: tag_note}
+        saved = (R.EP.load_allowlist, R.source_tree, R.EP.build_export_tree,
+                 R.tag_file_bytes, R.os.path.exists, R.regenerate_note)
+        self.tmp = tempfile.mkdtemp(prefix="repro-note-test-")
+        exp = os.path.join(self.tmp, "export")
+        os.makedirs(exp)
+        # the note is deliberately NOT seeded into the rebuilt export: that
+        # absence is exactly the DEL-13 gap this flag closes.
+        _seed_export(exp, other_gen)
+        try:
+            R.EP.load_allowlist = lambda p=None: ["scripts"]
+            R.source_tree = lambda rev, root=None: os.path.join(self.tmp,
+                                                                 "src")
+            R.EP.build_export_tree = lambda dest, al, root=None: (
+                _copy_into(exp, dest), list(other_gen))[1]
+            R.tag_file_bytes = lambda tag, rel, public=None: tag_bytes.get(
+                rel)
+            R.os.path.exists = lambda p: True
+            R.regenerate_note = lambda src, version: regenerate_result
+            argv = ["--tag", TAG, "--public", self.tmp]
+            if flag:
+                argv.append("--regenerate-note")
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = R.main(argv)
+            return code, out.getvalue()
+        finally:
+            (R.EP.load_allowlist, R.source_tree, R.EP.build_export_tree,
+             R.tag_file_bytes, R.os.path.exists,
+             R.regenerate_note) = saved
+
+    def test_a_matching_regenerated_note_passes_as_one_self_naming_file(self):
+        note = (_NOTE % ("a" * 40, "a" * 8, "1" * 64)).encode()
+        code, out = self._run(tag_note=note, regenerate_result=(note, ""))
+        self.assertEqual(code, 0, out)
+        self.assertIn("self-naming files 1 compared by content", out)
+        self.assertIn("self-naming %s" % self.REL_NOTE, out)
+        self.assertIn("MATCH", out)
+
+    def test_a_differing_regenerated_note_is_a_mismatch_exit_1(self):
+        tag_note = (_NOTE % ("a" * 40, "a" * 8, "1" * 64)).encode()
+        gen_note = tag_note.replace(b"Prose a reader checks",
+                                    b"Prose that moved")
+        code, out = self._run(tag_note=tag_note,
+                              regenerate_result=(gen_note, ""))
+        self.assertEqual(code, 1, out)
+        self.assertIn("MISMATCH: %s" % self.REL_NOTE, out)
+
+    def test_without_the_flag_a_no_data_line_prints_but_exit_is_unchanged(
+            self):
+        note = (_NOTE % ("a" * 40, "a" * 8, "1" * 64)).encode()
+        code, out = self._run(tag_note=note, regenerate_result=(note, ""),
+                              flag=False)
+        self.assertEqual(code, 0, out)
+        self.assertIn("NO-DATA: %s is not regenerated at" % self.REL_NOTE,
+                      out)
+        self.assertIn("--regenerate-note", out)
+
+    def test_a_generator_that_cannot_run_is_no_data_exit_2(self):
+        note = (_NOTE % ("a" * 40, "a" * 8, "1" * 64)).encode()
+        code, out = self._run(
+            tag_note=note,
+            regenerate_result=(None, "NO-DATA: release_note_from_tree.py "
+                                     "exited 1: boom"))
+        self.assertEqual(code, 2, out)
+        self.assertIn("NO-DATA", out)
+
+
 def _copy_into(src_dir, dest_dir):
     # shutil.copytree makes each directory level as it descends, so it
     # never needs a single deep os.makedirs() call. That matters here: the

@@ -252,6 +252,12 @@ open_and_merge_integration_pr() {  # open_and_merge_integration_pr <worktree> <l
   pr_num="${pr_url##*/}"
   echo "land_batch: opened integration pull request $pr_num ($pr_url) for batch $label, PRs: $*"
   local merge_out merge_state
+  # LEGACY (law 8, night 2026-09-07 P3): the structured, exact-SHA,
+  # authority-checked landing path lives in scripts/land_queue.py
+  # (run_governed/resume); this line still merges by re-grepping its
+  # own gh output with no SHA pin and no authority check (review-P3.md
+  # finding F9). Not touched tonight per law 8 (backwards compatibility
+  # over cleanup); marked legacy here rather than changed.
   merge_out="$(gh pr merge "$pr_num" --repo "$REPO_SLUG" --merge --delete-branch 2>&1 | tail -1)"
   merge_state="$(gh pr view "$pr_num" --repo "$REPO_SLUG" --json state --jq .state 2>/dev/null)"
   if [ "$merge_state" != "MERGED" ]; then

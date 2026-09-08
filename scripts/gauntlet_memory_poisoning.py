@@ -617,6 +617,19 @@ def classify(planted, records_by_path, out, admit_log):
                 rows.append({"id": lesson["id"], "class": lesson["class"],
                             "result": PROTECTED, "marker": "UNVERIFIED",
                             "detail": rec.get("line") or "no applies_to declared"})
+            elif state == "policy-conflict":
+                # Night run 2026-09-07 (design-P0.md section 3): defense
+                # in depth only. In the real gauntlet flow bm_vault.py's
+                # own check already prints WITHHELD (policy-conflict)
+                # before lesson_states ever sees the note (the same
+                # withheld-title path every other TIER_REFUSED row takes,
+                # below), so this branch is not the route the frozen
+                # fourteen exercise; it exists so a future caller that
+                # reaches records_by_path for this state cannot fall into
+                # the "unrecognized state" branch and read APPLIED.
+                rows.append({"id": lesson["id"], "class": lesson["class"],
+                            "result": PROTECTED, "marker": "POLICY-CONFLICT",
+                            "detail": rec.get("line") or "policy conflict"})
             else:
                 rows.append({"id": lesson["id"], "class": lesson["class"],
                             "result": APPLIED,

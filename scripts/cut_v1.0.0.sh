@@ -132,6 +132,25 @@ git log -1 --oneline
 echo "== 2b. refresh the release note and export manifest (tree is clean now, so the note's stamped revision covers everything above) =="
 python3 scripts/refresh_cut.py --version "$VERSION"
 
+echo "== 2b2. preflight: the export's own tag-time checks on the export tree, right after the note exists and before any long step =="
+# Row DEL-15. The 1.0.10 cut ran the ~45 minutes of steps below (note
+# refresh, perturbation drive, plugin validate, release invariant, the
+# export --dry-run at step 4) and read CLEAR at 21:12, then the export
+# itself refused at 21:5x with "the export tree's own readiness gate does
+# not read READY: Restore drill (NO-DATA)": export_public.py's tag_time_
+# checks (the release note stamped, every product's own verify-install.sh,
+# readiness_gate.py, every relative markdown link, every README prove
+# command) only ran under --push --tag, 45 minutes after this line's own
+# candidate export tree was first built. The 1.0.2 cut hit the same class
+# on 2026-09-04 (scripts/readiness_gate.py's own docstring records it).
+# --tag-time-checks reaches the same verdict here, in a plain dry run, in
+# about 3 minutes, before the perturbation drive, validate and the final
+# dry run below. It sits AFTER 2b on purpose: before the note for $VERSION
+# exists, the readiness gate's release-invariant item fails by construction
+# (measured 2026-09-07 22:0x in a built export tree of the drill revision),
+# so a preflight at 1c would refuse every cut.
+python3 scripts/export_public.py --dry-run --tag-time-checks
+
 echo "== 2c. refuse if any release note the export ships still carries the placeholder stamp =="
 python3 scripts/release_notes_stamped.py
 
@@ -158,7 +177,11 @@ claude plugin validate .
 
 echo "== 4. release invariant and export dry run (must read CLEAR) =="
 python3 scripts/release_invariant.py || echo "NOTE: release_invariant may FAIL until the tag exists; that is expected pre-tag"
-python3 scripts/export_public.py --dry-run
+# --tag-time-checks here too (row DEL-15): by now the note and manifest for
+# $VERSION exist (steps 2b/2t), so this CLEAR means the same thing the
+# real --push --tag will check, not just the ordinary export gates step 1c
+# already covers.
+python3 scripts/export_public.py --dry-run --tag-time-checks
 
 echo
 echo "== STOP. Review the output above. The dry run must read CLEAR. =="

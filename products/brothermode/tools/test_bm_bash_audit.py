@@ -914,6 +914,33 @@ class EnforcedModeRefusesStoreDestruction(BashAuditBase):
         the second, deliberately tiny rule rather than by name."""
         self._both_ways("git clean -xfd", "gitclean")
 
+    def test_a_heredoc_body_that_quotes_the_words_is_allowed_while_the_same_words_as_a_command_are_still_refused(self):
+        """R-8 step 2: a heredoc BODY is data handed to whatever reads
+        stdin, never a command, so quoting the store name and a destructive
+        verb inside one must not be read as though they were typed as a
+        command (persona dogfood transcript B4-S1: a transcript file that
+        quoted this guard's own wording was refused as if it had run the
+        words)."""
+        heredoc_command = (
+            "cat > notes.md << 'EOF'\n"
+            "rm -f ."
+            "brothermode/store.sqlite3\n"
+            "EOF"
+        )
+        r = self.run_hook("pre", self.OTHER, tool_use_id="toolu_heredoc_body",
+                          command=heredoc_command,
+                          env_extra={"BM_FENCE_MODE": "enforced"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(
+            r.stdout, "",
+            "a heredoc BODY quoting the words was refused as if it had "
+            "typed them as a command")
+        self.assertNotIn("REFUSING", r.stderr)
+
+        # Calibration: the exact same words, run as an actual command rather
+        # than written into a heredoc body, must still be refused.
+        self._both_ways("rm -f .brothermode/store.sqlite3", "heredoc-calib")
+
     def test_ordinary_commands_are_untouched_even_when_enforced(self):
         """The false-positive guard. Enforcement that stopped ordinary work
         would be removed within a day, so the refusal has to be narrow enough

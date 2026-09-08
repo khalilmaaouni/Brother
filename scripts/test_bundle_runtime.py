@@ -622,5 +622,203 @@ class ShippedVerifierReadsTheManifestWithNoScriptsBesideIt(unittest.TestCase):
         self.assertTrue(any(BR.VERIFIER_NAME in p for p in problems), problems)
 
 
+
+class HookPackageFilesFollowSiblingPathJoins(unittest.TestCase):
+    """F-002. bm_store.py own _schema() loads brotherme/core/schema.py by
+    a path computed from its own location
+    (os.path.join(candidate_root, "brotherme", "core", "schema.py")),
+    climbing one level above tools/ into a sibling PACKAGE the flat,
+    same-directory closure walk (_closure_from_entries, which only
+    matches a bare "name.py" constant against files inside tools/ itself)
+    never saw. Mirrors the F-001 shape (hub PR 520,
+    HookClosureFollowsTestPrefixedSiblings: the closure follows a path
+    expression read from the AST, never a hand list) one directory
+    further out. Both tests here fail on the untouched pre-fix generator
+    (compute_hook_package_files did not exist and the shipped bundle
+    carried no brotherme/ at all, which is the exact FileNotFoundError
+    this item closes) and pass once bundle_runtime.py derives the
+    reference from the source and generate_hooks() mirrors it."""
+
+    def test_schema_py_named_as_a_hook_package_file(self):
+        tools_dir, closure = BR.compute_hook_closure("brothermode")
+        pkgs = BR.compute_hook_package_files("brothermode", tools_dir,
+                                             closure)
+        self.assertIn("brotherme/core/schema.py", pkgs, pkgs)
+
+    def test_shipped_bundle_carries_schema_py_at_the_path_bm_store_computes(self):
+        # The exact relative path bm_store.py _schema() joins for the
+        # checkout layout: tools_dir one level up, then brotherme/core.
+        repo_root = os.path.dirname(HERE)
+        shipped = os.path.join(repo_root, "bundle", "runtime", "hooks",
+                               "brothermode", "brotherme", "core",
+                               "schema.py")
+        source = os.path.join(repo_root, "products", "brothermode",
+                              "brotherme", "core", "schema.py")
+        self.assertTrue(
+            os.path.isfile(shipped),
+            "%s missing: an installed plugin's bm_store.py._schema() "
+            "crashes with FileNotFoundError (F-002)" % shipped)
+        with open(shipped, "rb") as fh:
+            shipped_bytes = fh.read()
+        with open(source, "rb") as fh:
+            source_bytes = fh.read()
+        self.assertEqual(shipped_bytes, source_bytes)
+
+    def test_a_flat_tools_sibling_referenced_via_join_is_not_duplicated(self):
+        # vault_recall_hook.py own os.path.join(_ROOT, "tools",
+        # "bm_vault.py") names a file the bare-constant closure walk
+        # already carries as "bm_vault.py"; compute_hook_package_files
+        # must not re-list it under a second manifest path.
+        tools_dir, closure = BR.compute_hook_closure("brothermode")
+        pkgs = BR.compute_hook_package_files("brothermode", tools_dir,
+                                             closure)
+        self.assertNotIn("tools/bm_vault.py", pkgs, pkgs)
+
+    def test_brothersbe_tasks_py_is_also_found_by_the_same_general_rule(self):
+        # sbe_authority_hook.py and three siblings all load
+        # src/brothersbe/tasks.py the same way bm_store.py loads
+        # schema.py; the rule is general (read from the AST), not a
+        # brothermode-only hand list, so this second product's own real
+        # gap is found by the identical mechanism.
+        tools_dir, closure = BR.compute_hook_closure("brothersbe")
+        pkgs = BR.compute_hook_package_files("brothersbe", tools_dir,
+                                             closure)
+        self.assertIn("src/brothersbe/tasks.py", pkgs, pkgs)
+        repo_root = os.path.dirname(HERE)
+        shipped = os.path.join(repo_root, "bundle", "runtime", "hooks",
+                               "brothersbe", "src", "brothersbe",
+                               "tasks.py")
+        self.assertTrue(os.path.isfile(shipped), shipped)
+
+
+class HookCommandsSmokeRunClean(unittest.TestCase):
+    """Every Stop, SessionStart, PreCompact and SessionEnd command in the
+    real, committed bundle/hooks/hooks.json, run from a temporary HOME and
+    a temporary git repository with CLAUDE_PLUGIN_ROOT pointed at the real
+    bundle/, fed an empty JSON payload on stdin exactly like a live hook
+    invocation. A crash (a Python traceback on stderr) is a failure; a
+    non-zero exit with no traceback is fine, because every chained program
+    fails OPEN by design (bm_hookchain.py's own module docstring). This is
+    the end-to-end version of HookPackageFilesFollowSiblingPathJoins
+    above: that class checks the missing FILE, this one checks that
+    nothing which loads it by path still crashes at runtime. Fails on the
+    untouched pre-fix bundle (bm_hookchain.py stop, and every command that
+    chains through bm_view.py, printed "Traceback (most recent call
+    last)" from the missing brotherme/core/schema.py) and passes once the
+    file ships."""
+
+    EVENTS = ("Stop", "SessionStart", "PreCompact", "SessionEnd")
+
+    @classmethod
+    def setUpClass(cls):
+        repo_root = os.path.dirname(HERE)
+        cls.bundle_dir = os.path.join(repo_root, "bundle")
+        hooks_json = os.path.join(cls.bundle_dir, "hooks", "hooks.json")
+        with open(hooks_json, encoding="utf-8") as fh:
+            cls.hooks_doc = json.load(fh)
+
+    def _commands(self):
+        cmds = []
+        for event in self.EVENTS:
+            for group in self.hooks_doc.get("hooks", {}).get(event, []):
+                for h in group.get("hooks", []):
+                    cmds.append((event, h.get("command", "")))
+        return cmds
+
+    def test_every_stop_sessionstart_precompact_sessionend_command_runs_clean(self):
+        import shlex
+        cmds = self._commands()
+        self.assertTrue(cmds, "no commands found for %s" % (self.EVENTS,))
+        tmp = tempfile.mkdtemp(prefix="hook-smoke-")
+        home = os.path.join(tmp, "home")
+        repo = os.path.join(tmp, "repo")
+        os.makedirs(home)
+        os.makedirs(repo)
+        sh(["git", "init", "-q"], cwd=repo)
+        sh(["git", "-c", "user.email=a@b.c", "-c", "user.name=t", "commit",
+           "--allow-empty", "-q", "-m", "x"], cwd=repo)
+        env = dict(os.environ)
+        env["HOME"] = home
+        env["CLAUDE_PLUGIN_ROOT"] = self.bundle_dir
+        failures = []
+        for event, command in cmds:
+            args = shlex.split(command.replace(
+                "${CLAUDE_PLUGIN_ROOT}", self.bundle_dir))
+            proc = subprocess.run(args, cwd=repo, env=env, input="{}",
+                                  capture_output=True, text=True,
+                                  timeout=60)
+            if "Traceback" in proc.stderr:
+                failures.append("%s: %s\n%s"
+                                % (event, command, proc.stderr[-2000:]))
+        self.assertEqual([], failures,
+                         "hook command(s) crashed instead of failing "
+                         "open:\n\n" + "\n\n".join(failures))
+
+
+class HookClosureFollowsTestPrefixedSiblings(unittest.TestCase):
+    """F-001: a hook's own runtime dependency can be named test_*.py (the
+    shipped brother 1.0.10 bundle dropped tools/test_all.py, which
+    bm_fence_hook.py loads by path as its battery gate module, because
+    _script_files used to exclude every test_*.py name from the sibling-
+    reference candidate pool). Template: ManifestMatchesTheClosure and
+    DriftDetectedOnSourceEditWithoutRegen above, adapted from the scripts/
+    closure to the products/*/tools/ hook closure."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="bundle-runtime-hook-closure-")
+        self.products_dir = os.path.join(self.tmp, "products")
+        self.tools_dir = os.path.join(self.products_dir, "fakeprod", "tools")
+        os.makedirs(self.tools_dir)
+        hooks_dir = os.path.join(self.products_dir, "fakeprod", "hooks")
+        os.makedirs(hooks_dir)
+        with open(os.path.join(hooks_dir, BR.HOOKS_JSON_NAME), "w",
+                 encoding="utf-8") as fh:
+            json.dump({"hooks": {"PreToolUse": [{"hooks": [{
+                "type": "command",
+                "command": '$env:PY "${CLAUDE_PLUGIN_ROOT}/tools/fake_hook.py"',
+            }]}]}}, fh)
+        # fake_hook.py: same shape as bm_fence_hook.py's own
+        # os.path.join(HERE, "test_all.py") load, naming a test-prefixed
+        # sibling it needs at runtime.
+        with open(os.path.join(self.tools_dir, "fake_hook.py"), "w",
+                 encoding="utf-8") as fh:
+            fh.write(
+                "import os\n"
+                "HERE = os.path.dirname(os.path.abspath(__file__))\n"
+                "GATE = os.path.join(HERE, \"test_gate.py\")\n")
+        # test_gate.py: the real dependency. Its OWN body names a second
+        # test-prefixed file the way test_all.py names its whole suite; that
+        # name must NOT cascade into the closure just because test_gate.py
+        # got swept in.
+        with open(os.path.join(self.tools_dir, "test_gate.py"), "w",
+                 encoding="utf-8") as fh:
+            fh.write(
+                "OTHER_SUITES = (\"test_unrelated.py\",)\n")
+        with open(os.path.join(self.tools_dir, "test_unrelated.py"), "w",
+                 encoding="utf-8") as fh:
+            fh.write("# a sibling test file test_gate.py merely NAMES\n")
+
+    def test_a_hook_naming_a_test_prefixed_sibling_pulls_it_in_without_cascading(self):
+        tools_dir, closure = BR.compute_hook_closure(
+            "fakeprod", products_dir=self.products_dir)
+        self.assertEqual(tools_dir, self.tools_dir)
+        self.assertEqual(closure, ["fake_hook.py", "test_gate.py"],
+                         "the rule must discover test_gate.py because "
+                         "fake_hook.py names it by path, and must not also "
+                         "sweep in test_unrelated.py, which only test_gate.py "
+                         "itself mentions")
+
+    def test_the_real_brothermode_closure_includes_test_all_py_beside_the_fence_hook(self):
+        # Against the real repository tree (read-only: compute_hook_closure
+        # takes no write action), never a synthetic fixture: this is the
+        # exact shape of the shipped defect, bm_fence_hook.py beside
+        # test_all.py in products/brothermode/tools/.
+        tools_dir, closure = BR.compute_hook_closure("brothermode")
+        self.assertIn("bm_fence_hook.py", closure)
+        self.assertIn("test_all.py", closure,
+                      "bm_fence_hook.py loads test_all.py as its gate "
+                      "module; the closure must ship it beside the hook")
+
+
 if __name__ == "__main__":
     unittest.main()

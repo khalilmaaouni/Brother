@@ -515,7 +515,31 @@ def numbers_manifest_evidence(row, run_dir):
 #: fourth row in MARK_TABLE above: a stale memory is not a unit's check
 #: failing, it is a citation that no longer resolves, and the receipt
 #: records that as its own fact, on its own section.
-MEMORY_STATES = ("applied", "stale", "unverified")
+#:
+#: "policy-conflict" (night run 2026-09-07, design-P0.md section 3,
+#: steering 6.5) is the fourth value: a lesson that tried to weaken a
+#: safety control (vault_recall_hook.py's own SEAM_SAFETY_PRECEDENCE
+#: branch), refused before it ever reached "applied", withheld for a
+#: DIFFERENT reason than a stale citation or an unproven claim. This
+#: module owns the vocabulary; the fourth bucket needs no new code beyond
+#: this tuple, since applied_memory below already partitions by
+#: whatever states it names.
+MEMORY_STATES = ("applied", "stale", "unverified", "policy-conflict")
+
+
+class _MemorySection(dict):
+    """A dict of MEMORY_STATES -> list entries, exactly like a plain dict
+    for every existing caller (['applied']/.get('stale')/...), but the
+    mutation banner (below) lives on this attribute instead of a
+    same-shaped dict key. Row P0-1 follow-up (night run 2026-09-07): a
+    "mutation" STRING sibling of otherwise list-valued dict keys is
+    exactly the shape that crashed scripts/brother_run.py's own
+    `for values in section.values() for entry in values` (a plain string
+    iterates character by character, and the first character has no
+    .get("slug")). Moving the banner off the dict entirely means no
+    future naive .values() walk over this section can trip on it again,
+    whatever fix any one caller also carries."""
+    mutation = None
 
 
 def applied_memory(recalled):
@@ -542,17 +566,19 @@ def applied_memory(recalled):
     key (vault_recall_hook.py's lesson_states() attaches one to every
     record while a BM_VAULT_DISABLE_* seam is active) is never turned into
     a fourth MEMORY_STATES value -- its own state (applied/stale/
-    unverified) is untouched, and the entry simply gains a "mutation"
-    field carrying the same {"disabled": [...]} the hook recorded. This
-    function never reads os.environ itself; it only reports what the hook
-    already decided, the same rule the rest of this docstring already
-    states for state/type/line. Whenever any entry carries one, the
-    returned section also gains a top-level "mutation" string reading
-    "MUTATION SEAM ACTIVE (vault protections disabled: ...)", so a reader
-    of the section as a whole sees the same words the hook's own stderr
-    banner and bm_vault.py's own hit markers already use, without having
-    to scan every entry for the field."""
-    section = {state: [] for state in MEMORY_STATES}
+    unverified/policy-conflict) is untouched, and the entry simply gains a
+    "mutation" field carrying the same {"disabled": [...]} the hook
+    recorded. This function never reads os.environ itself; it only
+    reports what the hook already decided, the same rule the rest of this
+    docstring already states for state/type/line. Whenever any entry
+    carries one, the returned _MemorySection also gains a `.mutation`
+    ATTRIBUTE (never a same-shaped dict key, night run 2026-09-07: see
+    _MemorySection's own docstring above) reading "MUTATION SEAM ACTIVE
+    (vault protections disabled: ...)", so a reader of the section as a
+    whole sees the same words the hook's own stderr banner and
+    bm_vault.py's own hit markers already use, without having to scan
+    every entry for the field."""
+    section = _MemorySection((state, []) for state in MEMORY_STATES)
     disabled_seams = set()
     for rec in recalled or []:
         state = rec.get("state")
@@ -572,8 +598,8 @@ def applied_memory(recalled):
             disabled_seams.update(mutation["disabled"])
         section[state].append(entry)
     if disabled_seams:
-        section["mutation"] = ("MUTATION SEAM ACTIVE (vault protections "
-                               "disabled: %s)" % ", ".join(sorted(disabled_seams)))
+        section.mutation = ("MUTATION SEAM ACTIVE (vault protections "
+                            "disabled: %s)" % ", ".join(sorted(disabled_seams)))
     return section
 
 

@@ -320,11 +320,18 @@ class TestRefusals(unittest.TestCase):
                       "--to", "ready"] + list(ACTOR), root)
             self.assertEqual(r.returncode, 2)
 
-    def test_start_requires_actor_name(self):
+    def test_start_defaults_actor_name(self):
+        # R-10 (persona dogfood 2026-09-07 round 2): the start skill's own
+        # documented first commands omit --actor-name, and this used to
+        # exit 2 demanding it (this test's old name and assertion). It now
+        # defaults from git config user.name or the USER environment
+        # variable, and names on stderr which one it used, so start now
+        # SUCCEEDS without the flag.
         with tempfile.TemporaryDirectory() as root:
             _init(root)
             r = _run(["start", "--project-id", "proj1", "--name", "X"], root)
-            self.assertEqual(r.returncode, 2)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertIn("--actor-name not given; using", r.stderr)
 
     def test_unknown_command_is_usage_error(self):
         with tempfile.TemporaryDirectory() as root:
@@ -2209,6 +2216,64 @@ class TestReviewCriterionId(unittest.TestCase):
             raw = _raw_dump(root)
             ev = [e for e in raw["evidence"] if e["subject_id"] == task_id][0]
             self.assertEqual(ev["criterion_id"], "")
+
+
+class TestListAndReviewWithoutProjectId(unittest.TestCase):
+    """R-1 (persona dogfood 2026-09-07): a folder holding one project no
+    longer forces --project-id to be typed for `review`, and `list` is
+    the read-only discovery command a founder reaches for when a folder
+    holds more than one project (or none at all)."""
+
+    def _started(self, root, project_id="proj1", name="Acme Rescue"):
+        _init(root)
+        r = _run(["start", "--project-id", project_id, "--name", name]
+                 + list(ACTOR), root)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_list_on_an_empty_store_says_so_and_names_the_fix(self):
+        with tempfile.TemporaryDirectory() as root:
+            _init(root)
+            r = _run(["list"], root)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn("bm_project.py start", r.stdout)
+
+    def test_list_prints_the_project_id_and_goal(self):
+        with tempfile.TemporaryDirectory() as root:
+            self._started(root)
+            r = _run(["list"], root)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn("proj1", r.stdout)
+
+    def test_review_without_project_id_resolves_it_from_the_task(self):
+        with tempfile.TemporaryDirectory() as root:
+            self._started(root)
+            r = _run(["task", "add", "--project-id", "proj1",
+                      "--task-id", "task1", "--title", "Do the thing",
+                      "--status", "ready"] + list(ACTOR), root)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            r = _run(["task", "transition", "--task-id", "task1",
+                      "--to", "active", "--reason", "starting"]
+                     + list(ACTOR), root)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            r = _run(["task", "transition", "--task-id", "task1",
+                      "--to", "awaiting review", "--reason", "done"]
+                     + list(ACTOR), root)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            # No --project-id at all: task1 already names its own project.
+            r = _run(["review", "task1", "--kind", "test", "--ref", "x",
+                      "--reason", "trying"] + list(ACTOR), root)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            raw = _raw_dump(root)
+            rows = [e for e in raw["evidence"] if e["subject_id"] == "task1"]
+            self.assertEqual(1, len(rows))
+
+    def test_review_without_project_id_and_a_nonexistent_task_is_refused(self):
+        with tempfile.TemporaryDirectory() as root:
+            self._started(root)
+            r = _run(["review", "nope", "--reason", "trying"]
+                     + list(ACTOR), root)
+            self.assertEqual(r.returncode, 1)
+            self.assertIn("no task", r.stderr)
 
 
 if __name__ == "__main__":

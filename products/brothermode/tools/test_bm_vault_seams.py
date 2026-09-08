@@ -280,8 +280,12 @@ class BmVaultCheckIsLoud(_EnvSavingCase):
 class VaultRecallHookRecordsCarryTheMarker(_EnvSavingCase):
     """lesson_states() (vault_recall_hook.py): every record it returns
     carries a "mutation" field while a seam is active, the same
-    "wrap every result" posture bm_vault.py's own hit lines use, never a
-    fourth MEMORY_STATES value (receipt_door.py owns that vocabulary)."""
+    "wrap every result" posture bm_vault.py's own hit lines use. The
+    mutation field is never itself turned into a MEMORY_STATES value
+    (receipt_door.py owns that vocabulary, and its own AppliedMemory-
+    CarriesTheMutationSeamMarker test class covers the shape); adding
+    "policy-conflict" as MEMORY_STATES' fourth value, night run
+    2026-09-07, changed nothing about the mutation field itself."""
 
     def setUp(self):
         super().setUp()

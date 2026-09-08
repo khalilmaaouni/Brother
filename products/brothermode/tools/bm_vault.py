@@ -2232,8 +2232,23 @@ def _print_hits(con, fused, why, header, roots=None, ledger_hits=None, withheld_
                                else "BM_VAULT_DISABLE_EVIDENCE_LOCATOR_CHECK")
                 if tier == contradiction.TIER_REFUSED and not os.environ.get(disable_env):
                     withheld += 1
-                    print("\n  WITHHELD (refused)  %s  [%s, %s]" % (
-                        row["title"], row["kind"], row["source"]) + seam_suffix)
+                    # Night run 2026-09-07 (design-P0.md section 3,
+                    # steering 6.5): SEAM_SAFETY_PRECEDENCE prints its own
+                    # heading, POLICY-CONFLICT, never collapsed into the
+                    # generic (refused) heading a dead-locator or
+                    # forged-date withhold uses -- the note stays visible
+                    # right here as historical evidence either way, only
+                    # the heading names WHY it was never applied. No
+                    # second disable gate is invented for this seam:
+                    # `disable_env` above already falls to
+                    # BM_VAULT_DISABLE_EVIDENCE_LOCATOR_CHECK for it,
+                    # unchanged, since evidence_tier's own step 0 is the
+                    # only gate that ever produces this seam at all.
+                    withheld_label = ("policy-conflict"
+                                      if tier_seam == contradiction.SEAM_SAFETY_PRECEDENCE
+                                      else "refused")
+                    print("\n  WITHHELD (%s)  %s  [%s, %s]" % (
+                        withheld_label, row["title"], row["kind"], row["source"]) + seam_suffix)
                     print("    reason: %s" % tier_reason)
                     print("    %s" % row["path"])
                     continue
