@@ -66,6 +66,9 @@ EXPECTATIONS_DEFAULT = os.path.join(ROOT, "docs", "plan", "BATTERY-EXPECTATIONS.
 CHECK_ALL = os.path.join(ROOT, "scripts", "check_all.sh")
 
 VERDICTS = {"PASS", "FAIL", "NO-DATA"}
+# L1 (review-P4.md): a check name that appears twice in one log (two
+# concatenated evidence runs) must keep its worst verdict, not its last.
+_VERDICT_SEVERITY = {"PASS": 0, "NO-DATA": 1, "ABSENT": 1, "FAIL": 2}
 CLASSES = {"expected_unavailable", "known_no_data", "not_applicable"}
 
 # check_all.sh's own header line, added the same night as this field:
@@ -128,6 +131,17 @@ def load_expectations(path):
     with open(path, encoding="utf-8") as fh:
         data = json.load(fh)
     return data.get("checks", {})
+
+
+def load_critical(path):
+    """{capability name: {"checks": [...], "reason", "recorded"}} from the
+    top-level "critical" key beside "checks" (P4, docs/plan/runs/night-
+    2026-09-07/design-P4.md). A sibling key breaks no caller reading only
+    "checks": load_expectations above still returns data.get("checks", {})
+    unchanged."""
+    with open(path, encoding="utf-8") as fh:
+        data = json.load(fh)
+    return data.get("critical", {})
 
 
 def load_check_all(path):
@@ -207,7 +221,117 @@ def _diff_failing_tests(name, failing, entry, out):
         out["expected_unavailable"].append(name)
 
 
-def classify(results, expectations, today=None):
+def _unfinished_report_problems(names, report_path):
+    """Problems with a --unfinished NAME use, or an empty list when it is
+    honest (fix-round finding 1, codex-findings-P4.md #1): --unfinished was
+    a free escape (no proof required at all). Now the caller must also pass
+    --report PATH, and that file must name each capability VERBATIM in a
+    line that also contains the word "unfinished" (case-insensitive), so
+    the morning report becomes the mechanical precondition GATE E already
+    describes in prose, rather than a flag anyone can pass unchecked."""
+    if not report_path:
+        return ["--unfinished %s requires --report PATH naming each one as "
+                "unfinished; GATE E's escape clause is not a free pass"
+                % ", ".join(names)]
+    try:
+        with open(report_path, encoding="utf-8") as fh:
+            text = fh.read()
+    except OSError as exc:
+        return ["--report %s could not be read: %s" % (report_path, exc)]
+    lines = text.splitlines()
+    problems = []
+    for name in names:
+        # M1 (review-P4.md): a bare substring let a report naming only a
+        # longer, unrelated identifier ("codex_smoke_harness") satisfy the
+        # precondition for "codex_smoke" too. Match on a word boundary.
+        name_re = re.compile(r"\b" + re.escape(name) + r"\b")
+        if not any(name_re.search(line) and "unfinished" in line.lower()
+                   for line in lines):
+            problems.append(
+                "--report %s does not name %r verbatim in a line that also "
+                "says \"unfinished\"" % (report_path, name))
+    return problems
+
+
+def _judge_critical(results, critical, unfinished):
+    """(critical_out, blocking_lines, unfinished_names, n_pass,
+    self_test_only_names) for the P4 critical closeout (design-P4.md DESIGN
+    section, steering 10.4/10.5, GATE E). Judged straight off the raw log
+    verdicts, independent of and stricter than the expectations shelter
+    above: a critical capability's checks must appear in the log AND read
+    PASS, full stop. known_no_data and expected_unavailable are shelters for
+    the GENERAL battery; they shelter nothing here.
+
+    A check named by a capability but absent from the log (nothing
+    registers it, or the log predates registration) reads "ABSENT" and
+    rolls the capability up to NO-DATA, never silently to PASS: an unwired
+    part emits no line, so leaving it out of this map would make the
+    invisible part read clean, which is the exact P4 hole this closes.
+
+    FIX-ROUND FINDING 2 (codex-findings-P4.md #2): an entry whose checks are
+    ALL self tests (a test_x.py suite registered as x-self) proves the test
+    module's own logic, never that the production capability actually ran.
+    Such an entry must carry "self_test_only": true (refused otherwise at
+    schema time, see check_expectations) and is reported here in its own
+    self_test_only_names list: never counted in n_pass, and never added to
+    blocking either, because a runner check another lane owns is the real
+    proof; blocking the whole release on it would make the escape
+    permanent instead of honestly labelled (steering 10.3.E)."""
+    by_name = {}
+    for name, verdict, _failing in results:
+        if name not in by_name or (_VERDICT_SEVERITY.get(verdict, 0) >
+                                    _VERDICT_SEVERITY.get(by_name[name], 0)):
+            by_name[name] = verdict
+    critical = critical or {}
+    unfinished_set = set(unfinished or ())
+
+    out_critical = {}
+    blocking = []
+    unfinished_names = []
+    self_test_only_names = []
+    n_pass = 0
+
+    for cap_name in sorted(critical):
+        entry = critical.get(cap_name) or {}
+        checks = entry.get("checks") or []
+        check_verdicts = {}
+        cap_verdict = "PASS"
+        for check in checks:
+            v = by_name.get(check, "ABSENT")
+            check_verdicts[check] = v
+            if v == "FAIL":
+                cap_verdict = "FAIL"
+            elif v in ("NO-DATA", "ABSENT") and cap_verdict != "FAIL":
+                cap_verdict = "NO-DATA"
+        if not checks:
+            cap_verdict = "NO-DATA"
+        out_critical[cap_name] = {"verdict": cap_verdict, "checks": check_verdicts}
+
+        if entry.get("self_test_only") and cap_verdict == "PASS":
+            self_test_only_names.append(cap_name)
+            continue
+        if cap_verdict == "PASS":
+            n_pass += 1
+            continue
+        if cap_name in unfinished_set:
+            unfinished_names.append(cap_name)
+            continue
+        detail_bits = []
+        for check, v in check_verdicts.items():
+            if v == "PASS":
+                continue
+            if v == "ABSENT":
+                detail_bits.append("%s ABSENT (no run_check registers it)" % check)
+            else:
+                detail_bits.append("%s %s" % (check, v))
+        if not checks:
+            detail_bits.append("no checks declared")
+        blocking.append("%s: %s" % (cap_name, "; ".join(detail_bits)))
+
+    return out_critical, blocking, unfinished_names, n_pass, self_test_only_names
+
+
+def classify(results, expectations, today=None, critical=None, unfinished=()):
     out = {
         "known_no_data": [],
         "expected_unavailable": [],
@@ -217,6 +341,8 @@ def classify(results, expectations, today=None):
         "recovered": [],
         "expired_exceptions": [],
         "granularity_violations": [],
+        "no_data_names": [],
+        "blocking_no_data": [],
     }
     n_pass = n_fail = n_nodata = 0
 
@@ -227,6 +353,9 @@ def classify(results, expectations, today=None):
             n_fail += 1
         else:
             n_nodata += 1
+            # steering 10.5: every NO-DATA is named here, declared or not,
+            # so a reader never has to remember which names were exceptions
+            out["no_data_names"].append(name)
 
         entry = expectations.get(name)
         cls = entry.get("class") if entry else None
@@ -239,6 +368,8 @@ def classify(results, expectations, today=None):
                 verdict != "PASS" and _expired(entry, today):
             out["expired_exceptions"].append(name)
             out["blocking_failures"].append(name)
+            if verdict == "NO-DATA":
+                out["blocking_no_data"].append(name)
             continue
 
         if cls == "not_applicable":
@@ -252,6 +383,7 @@ def classify(results, expectations, today=None):
                 out["recovered"].append(name)
             else:  # NO-DATA where a FAIL was declared: the reality drifted
                 out["blocking_failures"].append(name)
+                out["blocking_no_data"].append(name)
             continue
 
         if cls == "known_no_data":
@@ -272,6 +404,14 @@ def classify(results, expectations, today=None):
             # an unreviewed NO-DATA is not a free pass: it blocks until
             # someone declares it known_no_data or not_applicable.
             out["blocking_failures"].append(name)
+            out["blocking_no_data"].append(name)
+
+    crit_out, crit_blocking, crit_unfinished, crit_pass, crit_self_test_only = \
+        _judge_critical(results, critical, unfinished)
+    out["critical"] = crit_out
+    out["critical_blocking"] = crit_blocking
+    out["critical_unfinished"] = crit_unfinished
+    out["critical_self_test_only"] = crit_self_test_only
 
     out["counts"] = {
         "checks_seen": len(results),
@@ -286,15 +426,32 @@ def classify(results, expectations, today=None):
         "recovered": len(out["recovered"]),
         "expired_exceptions": len(out["expired_exceptions"]),
         "granularity_violations": len(out["granularity_violations"]),
+        "no_data_names": len(out["no_data_names"]),
+        "blocking_no_data": len(out["blocking_no_data"]),
+        # P4: an empty critical set still prints its count explicitly
+        # (design MUTANTS #5: a gate whose critical set is empty and prints
+        # PASS is this estate's recorded "population of all NO-DATA
+        # composed into a PASS").
+        "critical_capabilities": len(critical or {}),
+        "critical_pass": crit_pass,
+        "critical_blocking": len(crit_blocking),
+        "critical_unfinished": len(crit_unfinished),
+        "critical_self_test_only": len(crit_self_test_only),
     }
 
-    clean = not out["blocking_failures"] and not out["unexpected_failures"]
+    # A critical capability blocking the release is exactly as fatal as an
+    # unexpected general failure: product and release_candidate read FAIL
+    # (design DESIGN section: "check_all.sh global semantics are untouched,
+    # exactly as 10.4 requires" -- this is the verdict gate widening, not a
+    # change to what check_all.sh itself reports).
+    clean = not out["blocking_failures"] and not out["unexpected_failures"] \
+        and not crit_blocking
     out["product"] = "PASS" if clean else "FAIL"
     out["release_candidate"] = "PASS" if clean else "FAIL"
     return out
 
 
-def check_expectations(checks, commands, today=None):
+def check_expectations(checks, commands, today=None, critical=None):
     """Every problem with the expectations file, one line each; empty when
     the file keeps its contract. `commands` is {check: command} read from
     check_all.sh: it decides whether a check's FAIL output names its failing
@@ -306,9 +463,67 @@ def check_expectations(checks, commands, today=None):
     that a standing exception often excuses a stale test, so a renewal that
     quietly leaves review_by in the past is refused here, at schema time,
     rather than only discovered the next time a real battery log is
-    classified."""
+    classified.
+
+    `critical` (P4) is the top-level "critical" map: every capability names
+    a non-empty list of checks, every named check must already be a name
+    `commands` registers, and every entry carries a reason and a recorded
+    date. A critical entry naming an unregistered check is refused HERE, at
+    schema time, which is what makes wiring the check the only way to
+    satisfy the declaration (design-P4.md DESIGN section, point 4)."""
     effective_today = today or _today()
     problems = []
+    for cap_name, entry in (critical or {}).items():
+        if not isinstance(entry, dict):
+            problems.append("critical.%s: entry is not an object" % cap_name)
+            continue
+        check_list = entry.get("checks")
+        if not isinstance(check_list, list) or not check_list:
+            problems.append(
+                "critical.%s: checks must be a non-empty list of registered "
+                "check names" % cap_name)
+        else:
+            for check in check_list:
+                if check not in commands:
+                    problems.append(
+                        "critical.%s: names unregistered check %r (no "
+                        "run_check in check_all.sh registers it)"
+                        % (cap_name, check))
+            # FIX-ROUND FINDING 2: a registered self test is not proof the
+            # production capability ran. An entry whose checks are ALL
+            # self tests must say so; an entry that says so despite naming
+            # a real runner check is mislabeled the other way. Either shape
+            # is refused here, at schema time, so this cannot be gamed by
+            # declaring the label without earning it or forgetting it.
+            # H1 (review-P4.md): judged off the registered COMMAND, not the
+            # check's own name, so a check that runs a unittest suite under
+            # any name is caught, and a name that merely ends -self/
+            # -selftest without a test-shaped command is not force-labelled.
+            all_self = all(
+                isinstance(check, str)
+                and TEST_SHAPED_RE.search(commands.get(check, ""))
+                for check in check_list)
+            declared_self_test_only = bool(entry.get("self_test_only"))
+            if all_self and not declared_self_test_only:
+                problems.append(
+                    "critical.%s: every named check ends in -self or "
+                    "-selftest but self_test_only is not declared true; a "
+                    "registered self test is not proof the production "
+                    "capability ran (codex findings P4 #2): add "
+                    "\"self_test_only\": true, or wire a runner check"
+                    % cap_name)
+            elif declared_self_test_only and not all_self:
+                problems.append(
+                    "critical.%s: self_test_only is declared true but a "
+                    "runner check (not ending in -self/-selftest) is also "
+                    "named; the capability can be judged for real: drop "
+                    "self_test_only" % cap_name)
+        if not str(entry.get("reason") or "").strip():
+            problems.append(
+                "critical.%s: carries an empty reason, which is an "
+                "exception nobody can review" % cap_name)
+        if not entry.get("recorded"):
+            problems.append("critical.%s: has no recorded date" % cap_name)
     for name, entry in checks.items():
         if not isinstance(entry, dict):
             problems.append("%s: entry is not an object" % name)
@@ -392,6 +607,7 @@ def check_expectations(checks, commands, today=None):
 def check_expectations_cli(path, check_all_path, today=None):
     try:
         checks = load_expectations(path)
+        critical = load_critical(path)
     except OSError as exc:
         print("NO-DATA: could not read expectations %s: %s" % (path, exc))
         return 2
@@ -403,7 +619,7 @@ def check_expectations_cli(path, check_all_path, today=None):
     except OSError as exc:
         print("NO-DATA: could not read %s: %s" % (check_all_path, exc))
         return 2
-    problems = check_expectations(checks, commands, today=today)
+    problems = check_expectations(checks, commands, today=today, critical=critical)
     for problem in problems:
         print("FAIL " + problem)
     if problems:
@@ -413,7 +629,8 @@ def check_expectations_cli(path, check_all_path, today=None):
                 if isinstance(entry, dict)
                 and isinstance(entry.get("failing_tests"), dict))
     print("OK: %d entries in %s keep their contract; %d declare failing "
-          "tests by name" % (len(checks), path, named))
+          "tests by name; %d critical capabilities all name registered "
+          "checks" % (len(checks), path, named, len(critical)))
     return 0
 
 
@@ -436,11 +653,34 @@ def main(argv=None):
     ap.add_argument("--check-all", default=CHECK_ALL, metavar="PATH",
                     help="the check_all.sh whose run_check lines say which "
                          "checks run unittest suites (default: this repo's)")
+    ap.add_argument("--unfinished", action="append", default=[], metavar="NAME",
+                    help="a critical capability (repeatable) to move out of "
+                         "critical_blocking into critical_unfinished, still "
+                         "named there and never counted as PASS: GATE E's "
+                         "own escape clause made mechanical. Requires "
+                         "--report PATH naming each one as unfinished "
+                         "(fix-round finding 1); refused otherwise")
+    ap.add_argument("--report", default=None, metavar="PATH",
+                    help="required alongside --unfinished: a report file "
+                         "that must name each --unfinished capability "
+                         "verbatim in a line that also says \"unfinished\" "
+                         "(case-insensitive); the morning report becomes "
+                         "the mechanical precondition GATE E describes, "
+                         "not a free escape (fix-round finding 1)")
     args = ap.parse_args(argv)
 
     if args.check_expectations:
         return check_expectations_cli(args.check_expectations, args.check_all,
                                        today=args.today)
+
+    if args.unfinished:
+        problems = _unfinished_report_problems(args.unfinished, args.report)
+        if problems:
+            print(json.dumps({
+                "error": "FAIL: --unfinished is not a free escape",
+                "problems": problems,
+            }, indent=2))
+            return 1
 
     if args.run:
         proc = subprocess.run(["sh", CHECK_ALL], cwd=ROOT,
@@ -460,6 +700,7 @@ def main(argv=None):
 
     try:
         expectations = load_expectations(args.expectations)
+        critical = load_critical(args.expectations)
     except OSError as exc:
         print(json.dumps({"error": "NO-DATA: could not read expectations %s: %s"
                           % (args.expectations, exc)}))
@@ -474,7 +715,14 @@ def main(argv=None):
         print(json.dumps({"error": "NO-DATA: could not read %s: %s"
                           % (args.check_all, exc)}))
         return 2
-    problems = check_expectations(expectations, commands)
+    # check_expectations() here deliberately uses the REAL calendar (no
+    # today= passed), not args.today: this is a hygiene gate on the FILE
+    # itself ("has this declaration gone stale as of right now"), separate
+    # from args.today, which only feeds classify()'s runtime judgment of
+    # THIS run's results below. --check-expectations (check_expectations_cli)
+    # is the CLI that lets a caller deliberately simulate a validation date
+    # for that hygiene gate; the ordinary verdict path here does not.
+    problems = check_expectations(expectations, commands, critical=critical)
     if problems:
         # an expectations file that fails its own schema cannot shelter
         # anything: NO-DATA, never a pass, and never a silent blanket
@@ -489,7 +737,8 @@ def main(argv=None):
         print(json.dumps({"error": "NO-DATA: no run_check lines found in input"}))
         return 2
 
-    verdict = classify(results, expectations, today=args.today or _today())
+    verdict = classify(results, expectations, today=args.today or _today(),
+                       critical=critical, unfinished=args.unfinished)
     verdict["commit"] = parse_commit(text)
     print(json.dumps(verdict, indent=2, sort_keys=True))
     return 0 if verdict["product"] == "PASS" else 1

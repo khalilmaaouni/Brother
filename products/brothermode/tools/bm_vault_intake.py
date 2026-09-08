@@ -409,6 +409,21 @@ def classify_dirt(raw, text, filename, source, by, marker_status=None):
         dirt.append("forged-vault-marker")
     elif marker_status == "unverifiable":
         dirt.append("unverifiable-vault-marker")
+    # Night run 2026-09-07 (design-P0.md section 3, steering 6.6):
+    # ADMISSION IS DEFENSE IN DEPTH, RECALL IS THE BOUNDARY. Classify,
+    # never reject: a note whose own text tries to weaken a safety
+    # control (bm_vault_contradiction.unsafe_directive, the SAME check
+    # evidence_tier's step 0 runs at recall) is still admitted, with this
+    # dirt class recorded in its frontmatter, so a real historical
+    # incident note stays admissible; vault_recall_hook.py's own
+    # SEAM_SAFETY_PRECEDENCE branch is the boundary that actually refuses
+    # applying it. Loaded by path (_load_sibling), the same guarded
+    # pattern every other optional contract module in this file already
+    # uses: an absent or broken sibling degrades to no classification at
+    # all, never a crash at intake.
+    contradiction_mod = _load_sibling("bm_vault_contradiction")
+    if contradiction_mod is not None and contradiction_mod.unsafe_directive(text):
+        dirt.append("policy-conflict-suspect")
     return dirt
 
 

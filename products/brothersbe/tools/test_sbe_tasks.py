@@ -90,9 +90,10 @@ class TaskFixture(unittest.TestCase):
         return out.returncode, out.stdout + out.stderr, out.stderr
 
     def open_task(self, task_id="w1", agent="alpha", role="writer", owns=("src/owned.py",),
-                  base=None, change=None, extra=()):
+                  base=None, change=None, extra=(), verify=None):
         argv = ["open", "--id", task_id, "--agent", agent, "--role", role,
-                "--base", base or self.base, "--verify", "python3 -m pytest"]
+                "--base", base or self.base,
+                "--verify", verify or "%s -c pass" % sys.executable]
         if change is not None:
             argv += ["--change", change]
         for p in owns:
@@ -251,6 +252,68 @@ class TestNoData(TaskFixture):
         self.commit()
         code, text, _ = self.sbe("close", "w1")
         self.assertNotEqual(code, 0, "an unresolvable base must block, never pass")
+        self.assertIn("NO-DATA", text)
+        self.assertIn("not a pass", text)
+        record = [t for t in self.registry()["tasks"] if t["id"] == "w1"][0]
+        self.assertEqual(record["status"], "open", record)
+
+
+class TestVerifyCommandIsReRunAtClose(TaskFixture):
+    """R-2, driven backwards. The defect: `close` held the task's own recorded
+    verify command and judged the close on the diff alone, so a task whose
+    named check had never been re-run printed "PASS ... Closed clean" at exit
+    0 (persona transcript A3-S5). Scope is a fact about paths; it was being
+    read as a fact about the change working."""
+
+    def test_a_task_whose_verify_command_fails_does_not_close_pass(self):
+        self.open_task(verify="false")
+        write(self.repo, "src/owned.py", "x = 2\n")
+        self.commit()
+        code, text, _ = self.sbe("close", "w1")
+        self.assertNotEqual(code, 0, "a failing verify command must block the close: %s" % text)
+        self.assertNotIn("PASS", text,
+                         "the diff staying in scope may never be printed as a PASS while "
+                         "the task's own check is red: %s" % text)
+        self.assertIn("FAIL", text)
+        self.assertIn("false", text, "the refusal must name the command it ran")
+        self.assertIn("exited 1", text, "the refusal must name the exit code it saw")
+        record = [t for t in self.registry()["tasks"] if t["id"] == "w1"][0]
+        self.assertEqual(record["status"], "open", record)
+        self.assertIsNone(record["closedAt"], record)
+
+    def test_the_same_close_passes_when_the_verify_command_is_green(self):
+        """The calibration: identical diff, identical scope, a verify command
+        that exits 0. Without this the test above would also pass against a
+        close that simply refused everything."""
+        self.open_task(verify="true")
+        write(self.repo, "src/owned.py", "x = 2\n")
+        self.commit()
+        code, text, _ = self.sbe("close", "w1")
+        self.assertEqual(code, 0, text)
+        self.assertIn("PASS", text)
+        self.assertIn("Closed clean", text)
+        record = [t for t in self.registry()["tasks"] if t["id"] == "w1"][0]
+        self.assertEqual(record["status"], "closed", record)
+
+    def test_force_waives_a_red_verify_the_way_it_waives_a_scope_violation(self):
+        self.open_task(verify="false")
+        write(self.repo, "src/owned.py", "x = 2\n")
+        self.commit()
+        code, text, _ = self.sbe("close", "w1", "--force", "--who", "the operator",
+                                 "--why", "check known red, accepted out of band")
+        self.assertEqual(code, 0, text)
+        self.assertIn("FORCED", text)
+        record = [t for t in self.registry()["tasks"] if t["id"] == "w1"][0]
+        self.assertEqual(record["status"], "closed", record)
+        self.assertEqual(record["forced"]["verdict"], "FAIL",
+                         "a forced close over a red check is never recorded as clean")
+
+    def test_a_verify_command_that_cannot_start_is_no_data_never_a_pass(self):
+        self.open_task(verify="sbe-no-such-binary-for-this-fixture")
+        write(self.repo, "src/owned.py", "x = 2\n")
+        self.commit()
+        code, text, _ = self.sbe("close", "w1")
+        self.assertNotEqual(code, 0, text)
         self.assertIn("NO-DATA", text)
         self.assertIn("not a pass", text)
         record = [t for t in self.registry()["tasks"] if t["id"] == "w1"][0]

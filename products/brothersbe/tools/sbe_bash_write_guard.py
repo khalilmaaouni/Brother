@@ -251,6 +251,10 @@ CONTROL_PLANE_PATTERNS = (
     "STATE.md",
 )
 
+#: The other half of what this guard reads, defined further down beside the
+#: write-command table because it needs that section's word readers:
+#: COMMAND_EFFECTS, the effects a path pattern cannot see at all.
+
 #: What a target of "." or the repository root itself covers. A destructive
 #: command aimed at the root ("rm -rf .") reaches every family above without
 #: naming any of them, and a comparison that only ever matched spellings
@@ -581,6 +585,248 @@ def _git_targets(words):
     if sub in ("rm", "mv", "restore", "checkout", "clean", "apply", "stash"):
         return _rest(words, 1)
     return []
+
+
+# ---------------------------------------------------------------------------
+# COMMAND EFFECTS: the second question this guard asks.
+#
+# CONTROL_PLANE_PATTERNS above answers "does this command write a protected
+# PATH". That question has a blind spot a dogfood run walked straight through
+# (root R-8, transcript B3-S3): a push carrying no-verify to the default
+# branch writes no path in the working tree at all, so every pattern in this
+# file scores zero on it, no guard said anything, and an unreviewed change
+# reached the remote at exit 0. An effect is not always a file.
+#
+# The rules below stay READABLE FROM THE ARGUMENTS, exactly like
+# WRITE_COMMANDS: an effect that cannot be read off the command line belongs
+# to the Stop reconciler, not here. And they keep this file's stated
+# invariants: no subprocess, standard library only, so the default branch is
+# read from the repository's own ref files rather than asked of the tool.
+# ---------------------------------------------------------------------------
+
+#: The version control tool's own options that take a SEPARATE value word, so
+#: a -C prefix reads the same as no prefix at all. An attached value
+#: (--git-dir=x) is one token and needs no entry here.
+GIT_VALUE_FLAGS = ("-C", "-c", "--git-dir", "--work-tree", "--namespace",
+                   "--exec-path", "--super-prefix")
+
+
+class EffectFinding(object):
+    """What one effect rule found: a refusal reason, a stderr note, or both.
+
+    An object rather than a pair, for the reason Decision states below: this
+    project's honesty meta-test reads a 2-tuple return as a possible verdict
+    source, and neither of these fields is a check verdict."""
+
+    def __init__(self, reason="", note=""):
+        self.reason = reason
+        self.note = note
+
+
+def _read_text(path):
+    """The first 4096 characters of a small text file, or "". Never raises: a
+    ref file that cannot be read is a fail-open here like everywhere else."""
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            return f.read(4096)
+    except (OSError, ValueError):
+        return ""
+
+
+def _repo_dirs(start):
+    """(gitdir, commondir) for the repository containing start, or
+    (None, None).
+
+    Read from disk rather than asked of the version control tool, because
+    this file runs in front of every Bash call and its docstring promises no
+    subprocess. A linked worktree's dotfolder is a FILE naming its gitdir,
+    and that gitdir carries a commondir marker pointing at the refs the whole
+    repository shares, which is where the remote refs live. Both forms are
+    handled, so a session working in a worktree resolves the same default
+    branch as one in the main checkout."""
+    try:
+        cur = os.path.abspath(start)
+    except (OSError, ValueError):
+        return None, None
+    gitdir = None
+    for _ in range(64):
+        dot = os.path.join(cur, ".git")
+        if os.path.isdir(dot):
+            gitdir = dot
+            break
+        if os.path.isfile(dot):
+            for line in _read_text(dot).splitlines():
+                if line.strip().startswith("gitdir:"):
+                    p = line.split(":", 1)[1].strip()
+                    gitdir = p if os.path.isabs(p) else os.path.normpath(
+                        os.path.join(cur, p))
+                    break
+            break
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            break
+        cur = parent
+    if not gitdir or not os.path.isdir(gitdir):
+        return None, None
+    marker = os.path.join(gitdir, "commondir")
+    if os.path.isfile(marker):
+        p = _read_text(marker).strip()
+        if p:
+            common = p if os.path.isabs(p) else os.path.normpath(
+                os.path.join(gitdir, p))
+            if os.path.isdir(common):
+                return gitdir, common
+    return gitdir, gitdir
+
+
+def default_branch(start, remote):
+    """The short name of remote's default branch, read from this
+    repository's own refs/remotes/<remote>/HEAD, or None when that ref was
+    never set.
+
+    NEVER a hard coded name. A repository whose default is master, trunk or
+    develop is the same repository to this guard, and a guess would refuse
+    the wrong branch while waving the right one through."""
+    _gitdir, common = _repo_dirs(start)
+    if not common:
+        return None
+    text = _read_text(os.path.join(common, "refs", "remotes", remote, "HEAD"))
+    prefix = "ref: refs/remotes/%s/" % remote
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith(prefix):
+            return line[len(prefix):].strip() or None
+    return None
+
+
+def current_branch(start):
+    """The branch HEAD is on, or None when HEAD is detached or unreadable.
+    Read from the WORKTREE's own HEAD, not the shared common dir, because
+    that is the branch a push with no refspec at all would send."""
+    gitdir, _common = _repo_dirs(start)
+    if not gitdir:
+        return None
+    for line in _read_text(os.path.join(gitdir, "HEAD")).splitlines():
+        line = line.strip()
+        if line.startswith("ref: refs/heads/"):
+            return line[len("ref: refs/heads/"):].strip() or None
+    return None
+
+
+def _push_words(segment):
+    """The non-flag words after the push subcommand in a version control push
+    command, or None when this segment is not one."""
+    words = [t.text for t in segment if not t.is_op]
+    k = 0
+    while k < len(words) and _ASSIGNMENT.match(words[k]):
+        k += 1
+    if k >= len(words) or os.path.basename(words[k].strip()) != "git":
+        return None
+    k += 1
+    while k < len(words) and _is_flag(words[k]):
+        if words[k] in GIT_VALUE_FLAGS:
+            k += 1
+        k += 1
+    if k >= len(words) or words[k] != "push":
+        return None
+    return [w for w in words[k + 1:] if not _is_flag(w)]
+
+
+def _push_targets(refspecs, start):
+    """The branch names this push would land on. A refspec's DESTINATION is
+    what matters (HEAD:main lands on main), and a push with no refspec at all
+    lands on the branch HEAD is already on."""
+    branches = []
+    for spec in refspecs[1:]:
+        dst = spec.lstrip("+")
+        if ":" in dst:
+            dst = dst.split(":")[-1]
+        if dst.startswith("refs/heads/"):
+            dst = dst[len("refs/heads/"):]
+        if dst:
+            branches.append(dst)
+    if not branches:
+        here = current_branch(start)
+        if here:
+            branches.append(here)
+    return branches
+
+
+def push_effect_reason(named, why, cmd_text):
+    """The refusal text. Same shape as refusal_reason above: what was read,
+    the command verbatim, then the numbered recovery lines, ending on the
+    same break-glass sentence and the same closing caveat."""
+    return (
+        "BrotherSBE Bash write guard: this command pushes to %s, and %s.\n"
+        "The command, verbatim:\n"
+        "  %s\n"
+        "A push writes no file in the working tree, so none of this guard's "
+        "path patterns can see it and no ownedPaths declaration could ever "
+        "cover it. The effect is judged here instead.\n"
+        "Any of these lets the work proceed, and nothing else does:\n"
+        "  1. Push to a branch of its own and open a pull request, so the "
+        "checks that guard the default branch get to run.\n"
+        "  2. Run the push without the flag that switches off the pre-push "
+        "hooks, so those hooks actually run.\n"
+        "  3. If this is a deliberate, reviewed exception, record it in "
+        ".sbe/break-glass.json with a reason, an owner, an expiry and an "
+        "approver, which the Stop reconciler reads and names in its report.\n"
+        "This guard did NOT prove anything about the rest of the command."
+        % (named, why, cmd_text[:400]))
+
+
+def push_effect(segment, root, cwd, cmd_text):
+    """An EffectFinding when this simple command is a push this guard
+    refuses, else None.
+
+    Two effects, neither of them a file: a flag that switches off the
+    pre-push hooks that are the only gate between a working tree and a
+    remote, and a push that lands on this repository's own default branch,
+    which is the branch every other lane builds on."""
+    refspecs = _push_words(segment)
+    if refspecs is None:
+        return None
+    start = root if _repo_dirs(root)[0] else cwd
+    skip_hooks_flag = "--no-verify"
+    no_verify = skip_hooks_flag in _flags(segment)
+    remote = refspecs[0] if refspecs else "origin"
+    default = default_branch(start, remote)
+    if default is None and remote != "origin":
+        default = default_branch(start, "origin")
+    targets = _push_targets(refspecs, start)
+    on_default = bool(default) and default in targets
+    if not no_verify and not on_default:
+        if default is None:
+            return EffectFinding(note=(
+                "sbe_bash_write_guard: this is a push and no "
+                "refs/remotes/%s/HEAD exists here, so the default branch "
+                "could not be named and the push was NOT checked against it. "
+                "That is not a claim the push is safe. Set that ref with the "
+                "remote set-head subcommand for %s." % (remote, remote)))
+        return None
+    if targets:
+        named = "the branch %s" % ", ".join(targets)
+    else:
+        named = ("a branch this guard could not name, because HEAD is "
+                 "detached or unreadable")
+    if no_verify and on_default:
+        why = ("it carries the flag that switches off the pre-push hooks, "
+               "AND it lands on %s, this repository's default branch"
+               % default)
+    elif no_verify:
+        why = ("it carries the flag that switches off the pre-push hooks: "
+               "the gates would not run, and nothing else in this session "
+               "would record that they did not")
+    else:
+        why = ("it lands on %s, this repository's default branch, which "
+               "every other lane builds on" % default)
+    return EffectFinding(reason=push_effect_reason(named, why, cmd_text))
+
+
+#: The effect rules, in order. Each one reads ONE simple command and returns
+#: an EffectFinding or None. Small on purpose: this is not a policy engine, it
+#: is the short list of effects a path pattern cannot see.
+COMMAND_EFFECTS = (push_effect,)
 
 
 #: name -> a function from (non-flag words, flags) to the paths it writes.
@@ -1223,6 +1469,20 @@ def decide(payload):
                 deny_payload(cross_project_reason(
                     hit.raw, hit.abs_path, hit.other_root, command)),
                 notes)
+
+        # Command effects, same priority as the cross-project check above:
+        # a categorical refusal read off the command itself, not a path
+        # question the write-family loop below could ever ask, since an
+        # effect like a push carries no path a task could declare.
+        for seg in segments:
+            for effect_rule in COMMAND_EFFECTS:
+                finding = effect_rule(seg, root, cwd, command)
+                if finding is None:
+                    continue
+                if finding.note:
+                    notes.append(finding.note)
+                if finding.reason:
+                    return Decision(deny_payload(finding.reason), notes)
 
         candidates = []
         for seg in segments:

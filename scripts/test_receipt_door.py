@@ -1923,7 +1923,10 @@ class AppliedMemoryCarriesTheMutationSeamMarker(unittest.TestCase):
     every record while a BM_VAULT_DISABLE_* seam is active) is never
     turned into a fourth MEMORY_STATES value; it stays exactly where its
     own state already put it, with a "mutation" field added, and the
-    section as a whole gains a top-level "mutation" string reading
+    section as a whole gains a `.mutation` ATTRIBUTE (never a same-shaped
+    dict key, night run 2026-09-07: a "mutation" string sibling of
+    otherwise list-valued dict keys is exactly the shape that crashed
+    scripts/brother_run.py's own blind `.values()` walk) reading
     "MUTATION SEAM ACTIVE (...)" so a reader of the section never has to
     scan every entry for the field."""
 
@@ -1933,6 +1936,7 @@ class AppliedMemoryCarriesTheMutationSeamMarker(unittest.TestCase):
              "line": None, "note_type": None},
         ])
         self.assertNotIn("mutation", section)
+        self.assertIsNone(section.mutation)
         self.assertNotIn("mutation", section["applied"][0])
 
     def test_an_entry_carrying_mutation_keeps_its_own_state_and_gains_the_field(self):
@@ -1957,7 +1961,7 @@ class AppliedMemoryCarriesTheMutationSeamMarker(unittest.TestCase):
              "mutation": {"disabled": ["BM_VAULT_DISABLE_LIFECYCLE_GATE"]}},
         ])
         self.assertEqual(
-            section["mutation"],
+            section.mutation,
             "MUTATION SEAM ACTIVE (vault protections disabled: "
             "BM_VAULT_DISABLE_ANCHOR_CHECK, BM_VAULT_DISABLE_LIFECYCLE_GATE)")
 

@@ -633,6 +633,51 @@ class EnforcedModeFailsClosed(FenceHookBase):
         self.assertFalse(fh.enforced_mode({"BM_FENCE_MODE": ""}))
         self.assertFalse(fh.enforced_mode({}))
 
+    def test_a_managed_lane_claim_refuses_a_write_outside_the_unit_s_owns(self):
+        """P1, night-hardening-2026-09-07. scripts/managed_safety.materialize()
+        is the ONLY producer of a Brother-managed lane's claim, and
+        scripts/loop_bridge.py's LaneWorker.run() is the only caller: this
+        proves the real claim it creates, read through the real fence, does
+        what the safety law promises: a write inside the unit's declared
+        write_scope is allowed, and a write outside it is refused, even
+        though both requests carry the SAME session.
+
+        BM_FENCE_STRICT=1 is required here, not enforced mode alone: the
+        default rule only denies a COLLISION with another session's active
+        claim (proved above by test_strict_mode_is_off_by_default), and
+        allows a write to any path nobody has claimed at all. LaneWorker.run
+        sets BM_FENCE_STRICT=1 on the child for exactly this reason, so this
+        test sets it too, to read the fence the way a managed worker
+        actually does."""
+        # scripts/ is already on sys.path (this file's own E100 sandbox
+        # setup at the top appends it); imported lazily, inside the one
+        # test that needs it, rather than at module scope.
+        import managed_safety
+        unit = {"unit_id": "mu1", "objective": "edit app",
+               "write_scope": ["src/app.py"], "read_scope": [],
+               "role": "builder", "risk_class": "normal", "attempt": 1,
+               "prior_failure_note": ""}
+        token, why = managed_safety.materialize(self.root, unit)
+        self.assertIsNotNone(token, why)
+        self.assertEqual(why, "")
+
+        def query(path):
+            return subprocess.run(
+                [sys.executable, HOOK_PATH, "query", path,
+                 "--session-id", token],
+                capture_output=True, text=True, cwd=self.root,
+                env=_clean_env({"BM_FENCE_MODE": "enforced",
+                               "BM_FENCE_STRICT": "1"}))
+
+        r_in = query("src/app.py")
+        self.assertEqual(r_in.returncode, 0, r_in.stderr)
+        self.assertTrue(r_in.stdout.startswith("ALLOW"), r_in.stdout)
+
+        r_out = query("src/other.py")
+        self.assertEqual(r_out.returncode, 1, r_out.stderr)
+        self.assertTrue(r_out.stdout.startswith("DENY"), r_out.stdout)
+        self.assertIn("strict mode", r_out.stdout)
+
 
 class Canonicalization(FenceHookBase):
 
@@ -2003,6 +2048,45 @@ class BatteryTokenRecords(BatteryFenceBase):
         state, holder = ta.lock_state(self.lock)
         self.assertEqual(state, "live")
         self.assertEqual(int(holder.split()[0]), os.getpid())
+
+
+
+
+class MissingGateModuleNamesTheFile(BatteryFenceBase):
+    """F-001 (brother 1.0.10): the shipped plugin bundle installed
+    bm_fence_hook.py and bm_repo_scope.py but not tools/test_all.py, which
+    _load_gate_module() loads by path as the battery gate module. On an
+    installed machine with BM_FENCE_MODE=enforced this denied EVERY
+    tracked-file write through the generic battery-unreadable copy, which
+    never named what was actually missing. Reproduced here by loading a
+    fresh copy of bm_fence_hook.py (plus the bm_store.py it also needs) from
+    a directory that holds no test_all.py, exactly like the installed
+    bundle did, rather than by disturbing the real tools/ directory this
+    suite already runs from."""
+
+    def _load_hook_missing_gate(self):
+        hook_dir = tempfile.mkdtemp(prefix="bm-fence-no-gate-")
+        self.addCleanup(shutil.rmtree, hook_dir, ignore_errors=True)
+        for name in ("bm_fence_hook.py", "bm_store.py"):
+            shutil.copy2(os.path.join(HERE, name),
+                        os.path.join(hook_dir, name))
+        spec = importlib.util.spec_from_file_location(
+            "bm_fence_hook_no_gate",
+            os.path.join(hook_dir, "bm_fence_hook.py"))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_enforced_mode_names_the_missing_gate_module_in_the_deny(self):
+        no_gate = self._load_hook_missing_gate()
+        os.environ["BM_FENCE_MODE"] = "enforced"
+        decision, _notes = no_gate.decide(
+            self.edit_payload("src/app.py", self.OTHER))
+        reason = self.assertDenied(decision)
+        self.assertIn("enforced mode", reason)
+        self.assertIn("test_all.py", reason,
+                      "the deny reason must name the missing gate module, "
+                      "not only the generic battery-unreadable copy")
 
 
 if __name__ == "__main__":

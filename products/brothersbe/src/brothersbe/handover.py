@@ -940,6 +940,11 @@ def _cmd_respond(args, outcome, exit_ok, exit_failed, exit_usage):
         sys.stderr.write("sbe handover reject: --reason is required and may not be blank; a "
                          "rejection with no reason is an off switch, not a decision.\n")
         return exit_usage
+    if getattr(args, "force", False) and not (getattr(args, "why", "") or "").strip():
+        sys.stderr.write("sbe handover acknowledge: --force requires --why. Accepting "
+                         "ownership over absent evidence with no reason on the record is an "
+                         "off switch, not a decision.\n")
+        return exit_usage
     try:
         root = tasks_mod.repo_root_of(dossier)
     except tasks_mod.RegistryUnusable as exc:
@@ -994,6 +999,7 @@ def _cmd_respond(args, outcome, exit_ok, exit_failed, exit_usage):
                 "now %s. Re-run sbe handover prepare against the current head before %sing "
                 "it.\n" % (verb, str(bound)[:12], head[:12], verb))
             return exit_failed
+        absent = []
         if outcome == "accepted":
             required = data.get("requiredAccess") or []
             if required:
@@ -1002,7 +1008,41 @@ def _cmd_respond(args, outcome, exit_ok, exit_failed, exit_usage):
                     "outstanding and acceptance is refused until it is granted: %s\n"
                     % ", ".join(str(r) for r in required))
                 return exit_failed
+            # THE DEFECT THIS CLOSES (R-2): `requiredAccess` was the ONLY thing
+            # standing between a prepared handover and moved ownership, and it
+            # is empty on a dossier nobody has recorded access needs for. So a
+            # handover whose own evidence block read absent on every entry, on
+            # a change whose `sbe review` exited 1 against the same commit,
+            # accepted at exit 0 and moved ownership (persona transcript
+            # B3-S1). The evidence block is already computed at prepare time
+            # and already bound to this head by the staleness refusal above;
+            # it was simply never read here.
+            #
+            # Read, never recomputed and never minted: `absent` means this
+            # module found nothing at all recorded of that kind. `stale` and
+            # `unavailable` entries are deliberately NOT gathered here, because
+            # each is a different fact needing a different answer, and folding
+            # three states into one refusal would make the message name the
+            # wrong repair.
+            absent = [e for e in (data.get("evidence") or [])
+                      if isinstance(e, dict) and e.get("status") == "absent"]
+            if absent and not getattr(args, "force", False):
+                sys.stderr.write(
+                    "sbe handover acknowledge: refused. Acceptance moves ownership, and "
+                    "these evidence entries are absent on this handover:\n%s\n"
+                    "Record them (or re-run sbe handover prepare once they exist) before "
+                    "accepting. Accept with --force --why to record a disposition, never to "
+                    "make this evidenced.\n"
+                    % "\n".join("  ABSENT  %s: %s" % (e.get("kind"), e.get("detail"))
+                                for e in absent))
+                return exit_failed
         ack = {"outcome": outcome, "receiver": receiver, "at": _iso(time.time()), "headSha": head}
+        if outcome == "accepted" and absent:
+            # Forced, and the record says so: the kinds waived are carried
+            # beside the reason, so a later reader is never told this
+            # acceptance was evidenced.
+            ack["forced"] = {"why": args.why.strip(),
+                             "absentEvidence": [e.get("kind") for e in absent]}
         if outcome == "rejected":
             ack["reason"] = args.reason.strip()
         data["acknowledgment"] = ack
@@ -1048,6 +1088,10 @@ def _parser():
     ak = sub.add_parser("acknowledge", help="the receiver accepts ownership")
     ak.add_argument("dossier")
     ak.add_argument("--receiver", required=True, help="the accepting identity")
+    ak.add_argument("--force", action="store_true",
+                    help="accept over absent evidence, recording the disposition on the "
+                         "handover; requires --why and never reads as evidenced")
+    ak.add_argument("--why", help="why this acceptance is taken over absent evidence")
     cwd_mod.add_cwd_argument(ak)
 
     rj = sub.add_parser("reject",

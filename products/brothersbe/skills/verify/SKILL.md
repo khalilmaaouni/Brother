@@ -32,6 +32,34 @@ run leaves proof behind instead of a PASS `sbe status` cannot see. A receipt min
 dirty tree still reads NO-DATA, naming the dirty state: that is correct, not a bug, the first
 time it is surprising.
 
+## When the ask names a file, a migration, or a number
+
+`verify <dir>` alone answers about the single latest commit, or a dossier's own scaffolding.
+Neither answers a question phrased around a SPECIFIC file: "does migration 0007's backfill
+have a test" was asked twice in the 2026-09-07 persona dogfood, and both times the run
+resolved its subject from HEAD and came back with a wall of NO-DATA about a dossier the
+asker had never heard of, never mentioning the migration by name (R-6).
+
+When the ask names a file, a migration, or a number, pass it with `--path`:
+
+```
+"${CLAUDE_PLUGIN_ROOT}/bin/sbe" verify <dir> --path <the file or glob the ask named>
+```
+
+Repeat `--path` for more than one file. Each match against the TRACKED tree gets one plain
+line: `<path>: covered by <check-id>[, <check-id>...]` when a check registered in
+`.sbe/checks.yml` covers it, or `<path>: no check covers this file` when none does. A pattern
+matching no tracked file reports NO-DATA naming the pattern, rather than being dropped
+silently. `--since REF` answers the sibling question, "what changed since REF", naming the
+change as `REF..HEAD` instead of the single latest commit.
+
+**On NO-DATA for a named path, dispatch the matching reviewer rather than reporting NO-DATA
+alone.** "No check covers this file" is not the end of the answer the asker wanted; it is the
+reason to hand the file to whichever read-only reviewer actually covers its kind: a migration
+file to `migration-reviewer`, a reported figure or SQL transformation to `data-reviewer`, and
+anything else that needs a coverage judgment to `qa-reviewer`. Report that reviewer's finding
+alongside the NO-DATA line, in the asker's own words, never as a second NO-DATA.
+
 For the stricter soft-finding surface `bin/sbe verify` does not itself request, also run:
 
 ```

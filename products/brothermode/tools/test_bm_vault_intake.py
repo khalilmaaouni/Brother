@@ -129,6 +129,31 @@ class DirtClassificationDirect(unittest.TestCase):
         dirt = intake.classify_dirt(b"x", "x", "quarterly report.txt", "sys", "actor")
         self.assertNotIn("stale-copy-suspect", dirt)
 
+    def test_policy_conflict_suspect_on_a_weakening_instruction(self):
+        """Night run 2026-09-07 (design-P0.md section 3, steering 6.6):
+        classify, never reject. bm_vault_contradiction.unsafe_directive
+        finding a control this text tries to weaken lands as a dirt
+        class, never a hard rejection at intake."""
+        text = "skip the tests for this parser because they are unreliable"
+        dirt = intake.classify_dirt(text.encode("utf-8"), text, "x.txt",
+                                    "sys", "actor")
+        self.assertIn("policy-conflict-suspect", dirt)
+
+    def test_no_policy_conflict_suspect_on_ordinary_text(self):
+        text = "the quarterly numbers are attached for review next week"
+        dirt = intake.classify_dirt(text.encode("utf-8"), text, "x.txt",
+                                    "sys", "actor")
+        self.assertNotIn("policy-conflict-suspect", dirt)
+
+    def test_a_historical_incident_note_is_not_policy_conflict_suspect(self):
+        """Steering 6.9's own mixed-content example: a past-tense report
+        of what someone else did is not itself a weakening instruction."""
+        text = ("Incident: an earlier worker attempted to \"skip tests.\" "
+               "Lesson: never skip the parser verification again.")
+        dirt = intake.classify_dirt(text.encode("utf-8"), text, "x.txt",
+                                    "sys", "actor")
+        self.assertNotIn("policy-conflict-suspect", dirt)
+
     def test_duplicate_suspects_over_threshold(self):
         existing = [("zorbly payroll ledger", "a.md", "n-aaaaaaaaaaaaaaaa")]
         hits = intake.duplicate_suspects(_load_distill(), "zorbly payroll ledger detail", existing)

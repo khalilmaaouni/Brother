@@ -321,8 +321,20 @@ if __name__ == "__main__":
 
 
 def _script_files(scripts_dir):
-    return {f for f in os.listdir(scripts_dir)
-            if f.endswith(".py") and not f.startswith("test_")}
+    """Every local .py file `_closure_from_entries` can name as a sibling,
+    test_*.py included: a hook can genuinely depend on one at runtime
+    (bm_fence_hook.py's own os.path.join(HERE, "test_all.py"), loaded as its
+    battery gate module, is exactly this), so excluding the whole test_*.py
+    class here would make that reference undiscoverable by the general rule
+    and force a hand-listed exception at the call site instead. The risk a
+    blanket inclusion would otherwise open, a test_*.py file's OWN body
+    naming a long list of sibling test files (test_all.py enumerates the
+    whole suite by name to run each one), is closed in
+    _closure_from_entries: a file whose name starts with test_ is still
+    walked for real imports, but its bare string literals are not read as
+    further sibling references, so being swept in as a dependency never
+    cascades into sweeping in everything IT happens to mention."""
+    return {f for f in os.listdir(scripts_dir) if f.endswith(".py")}
 
 
 def _closure_from_entries(entries, files_dir):
@@ -344,6 +356,17 @@ def _closure_from_entries(entries, files_dir):
         path = os.path.join(files_dir, current)
         with open(path, encoding="utf-8") as fh:
             tree = ast.parse(fh.read(), filename=path)
+        # A test_*.py file (test_all.py, swept in below because
+        # bm_fence_hook.py loads it as its gate module) is walked for real
+        # imports like any other file, but its OWN bare string literals are
+        # not read as further sibling references: test_all.py's body names
+        # every suite in the battery (test_bm_store.py, test_bm_docs.py, and
+        # around ninety more) as plain string constants, and none of those
+        # are something test_all.py needs beside it to run as a module, only
+        # names it later hands to a subprocess. Without this guard, sweeping
+        # in one legitimately-needed test_*.py sibling would cascade into
+        # sweeping in the whole suite.
+        read_bare_strings = not current.startswith("test_")
         for node in ast.walk(tree):
             candidate = None
             if isinstance(node, ast.Import):
@@ -355,7 +378,8 @@ def _closure_from_entries(entries, files_dir):
             if isinstance(node, ast.ImportFrom):
                 if node.module and node.level == 0:
                     candidate = node.module.split(".")[0] + ".py"
-            elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+            elif (read_bare_strings and isinstance(node, ast.Constant)
+                  and isinstance(node.value, str)):
                 # A bare 'name.py' string constant is how a subprocess or
                 # path target names a sibling script (brother_run.py's own
                 # os.path.join(HERE, "door.py"), loop_bridge.py's
@@ -430,6 +454,81 @@ def compute_hook_closure(product, products_dir=PRODUCTS_DIR):
                                             tools_dir)
 
 
+def _package_join_targets(path):
+    """Relative POSIX paths (e.g. "brotherme/core/schema.py") found in
+    path own source as the tail of an os.path.join(...)-shaped call
+    whose trailing arguments are all string constants ending in ".py".
+    bm_store.py own _schema() is the case this exists for:
+    os.path.join(candidate_root, "brotherme", "core", "schema.py") loads
+    a sibling PACKAGE that lives outside tools/ (F-002), the same kind of
+    load-by-path the existing closure walk already follows for a bare
+    sibling SCRIPT name inside tools/. Read from the AST, never a hand
+    list, so a future path-join gets followed automatically. Existence is
+    the caller job; this only reports what the source names."""
+    with open(path, encoding="utf-8") as fh:
+        tree = ast.parse(fh.read(), filename=path)
+    tails = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if not (isinstance(func, ast.Attribute) and func.attr == "join"):
+            continue
+        if "path" not in ast.dump(func.value):
+            continue
+        if len(node.args) < 2:
+            continue
+        tail_parts = []
+        for arg in node.args[1:]:
+            if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                tail_parts.append(arg.value)
+            else:
+                tail_parts = None
+                break
+        if tail_parts and tail_parts[-1].endswith(".py"):
+            tails.add("/".join(tail_parts))
+    return tails
+
+
+def compute_hook_package_files(product, tools_dir, closure,
+                               products_dir=PRODUCTS_DIR):
+    """Relative POSIX paths under products/<product>/ (NOT under tools/,
+    e.g. "brotherme/core/schema.py") that closure own tool files load
+    by a path computed from their own location and that climbs OUT of
+    tools/ into a sibling package. bm_store.py _schema() docstring names
+    the checkout layout it supports: this file lives in the repo tools/,
+    the package is a sibling of tools/ one level up, i.e. a sibling of
+    tools/ under the PRODUCT directory, exactly where this mirrors it,
+    so the installed copy satisfies that same layout. Walked to a fixed
+    point exactly like _closure_from_entries, in case a mirrored file
+    itself references a further sibling by the same pattern. A tail that
+    resolves to a file directly inside tools_dir itself (e.g.
+    vault_recall_hook.py own os.path.join(_ROOT, "tools",
+    "bm_vault.py")) is SKIPPED: that file is already a flat tools/
+    sibling the bare-constant closure walk already found, so a second
+    copy would double-list one manifest path rather than name a real
+    gap. Returns a sorted list; empty when nothing in the closure
+    references a genuine sibling outside tools/."""
+    product_dir = os.path.dirname(tools_dir)
+    tools_dir_norm = os.path.normpath(tools_dir)
+    found = set()
+    visited = set()
+    queue = [os.path.join(tools_dir, name) for name in closure]
+    while queue:
+        src = queue.pop(0)
+        if src in visited or not os.path.isfile(src):
+            continue
+        visited.add(src)
+        for tail in _package_join_targets(src):
+            candidate = os.path.join(product_dir, *tail.split("/"))
+            if os.path.normpath(os.path.dirname(candidate)) == tools_dir_norm:
+                continue
+            if tail not in found and os.path.isfile(candidate):
+                found.add(tail)
+                queue.append(candidate)
+    return sorted(found)
+
+
 def _rewrite_plugin_root_command(command, product):
     """`${CLAUDE_PLUGIN_ROOT}/tools/` moved to where this module mirrors
     `product`'s tools once installed, so the command that actually ships
@@ -477,6 +576,12 @@ def _hooks_manifest_bytes(products=HOOK_PRODUCTS, products_dir=PRODUCTS_DIR):
             data = _read_bytes(os.path.join(tools_dir, name))
             files.append({"path": "%s/tools/%s" % (product, name),
                          "sha256": _sha256(data)})
+        for tail in compute_hook_package_files(product, tools_dir, closure,
+                                               products_dir):
+            data = _read_bytes(os.path.join(os.path.dirname(tools_dir),
+                                            *tail.split("/")))
+            files.append({"path": "%s/%s" % (product, tail),
+                         "sha256": _sha256(data)})
     files.sort(key=lambda f: f["path"])
     return (json.dumps({"generated_by": "scripts/bundle_runtime.py",
                         "products": list(products), "files": files},
@@ -508,6 +613,14 @@ def generate_hooks(products=HOOK_PRODUCTS, products_dir=PRODUCTS_DIR,
             dst = os.path.join(runtime_dir, "hooks", product, "tools", name)
             if _write_if_changed(dst, data):
                 changed.append("runtime/hooks/%s/tools/%s" % (product, name))
+        for tail in compute_hook_package_files(product, tools_dir, closure,
+                                               products_dir):
+            data = _read_bytes(os.path.join(os.path.dirname(tools_dir),
+                                            *tail.split("/")))
+            dst = os.path.join(runtime_dir, "hooks", product,
+                               *tail.split("/"))
+            if _write_if_changed(dst, data):
+                changed.append("runtime/hooks/%s/%s" % (product, tail))
     manifest_path = os.path.join(runtime_dir, "hooks", HOOKS_MANIFEST_NAME)
     if _write_if_changed(manifest_path,
                          _hooks_manifest_bytes(products, products_dir)):
@@ -529,15 +642,28 @@ def check_hooks(products=HOOK_PRODUCTS, products_dir=PRODUCTS_DIR,
     for product in products:
         tools_dir, closure = compute_hook_closure(product, products_dir)
         for name in closure:
-            src = os.path.join(tools_dir, name)
+            hook_src = os.path.join(tools_dir, name)
             dst = os.path.join(runtime_dir, "hooks", product, "tools", name)
             if not os.path.isfile(dst):
                 problems.append("runtime/hooks/%s/tools/%s: missing from "
                                 "bundle/runtime" % (product, name))
-            elif _read_bytes(src) != _read_bytes(dst):
+            elif _read_bytes(hook_src) != _read_bytes(dst):
                 problems.append("runtime/hooks/%s/tools/%s: bundle/runtime "
                                 "copy does not match its products/ source"
                                 % (product, name))
+        for tail in compute_hook_package_files(product, tools_dir, closure,
+                                               products_dir):
+            pkg_src = os.path.join(os.path.dirname(tools_dir),
+                                   *tail.split("/"))
+            dst = os.path.join(runtime_dir, "hooks", product,
+                               *tail.split("/"))
+            if not os.path.isfile(dst):
+                problems.append("runtime/hooks/%s/%s: missing from "
+                                "bundle/runtime" % (product, tail))
+            elif _read_bytes(pkg_src) != _read_bytes(dst):
+                problems.append("runtime/hooks/%s/%s: bundle/runtime copy "
+                                "does not match its products/ source"
+                                % (product, tail))
     manifest_path = os.path.join(runtime_dir, "hooks", HOOKS_MANIFEST_NAME)
     if not os.path.isfile(manifest_path):
         problems.append("runtime/hooks/%s: missing" % HOOKS_MANIFEST_NAME)

@@ -1467,10 +1467,19 @@ def manifest_against_source(args, ev, gate, checkout):
     if not os.path.isfile(reader):
         return ("NO-DATA", "no scripts/reproduce_export.py in %s, so nothing "
                            "here can rebuild the export" % REPO)
+    # --regenerate-note (DEL-13): without it, the shipped release note is
+    # never actually compared to anything, because the note is only present
+    # in the rebuild when --source-rev is at or after the refresh commit
+    # that adds it, which the ordinary --source-rev named above is not. X7
+    # is the gate that is supposed to catch a tampered or drifted note, so
+    # it pays the extra cost: the generator this flag runs is the same one
+    # a cut already runs (this estate's test suites), 10 to 20 minutes, so
+    # the timeout below is raised from 1800s to 2700s to give it room.
     proc = step(gate, ev, "tag rebuilt from its source revision",
                 [sys.executable, reader, "--source-rev", rev, "--tag",
-                 "v%s" % args.version, "--public", checkout],
-                cwd=REPO, timeout=1800,
+                 "v%s" % args.version, "--public", checkout,
+                 "--regenerate-note"],
+                cwd=REPO, timeout=2700,
                 needles=("reproduce-export", "MISMATCH", "MISSING", "PASS",
                          "FAIL", "NO-DATA"))
     if proc.returncode == 2:

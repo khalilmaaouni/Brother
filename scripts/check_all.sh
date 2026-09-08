@@ -266,6 +266,7 @@ run_check "wbs-self"             python3 scripts/test_wbs.py -v
 # somebody to commit the list, which is the exact thing it prevents.
 run_check "private-terms-self"   python3 scripts/test_private_terms_scan.py -v
 run_check "loop-bridge-self"     python3 scripts/test_loop_bridge.py -v
+run_check "managed-safety-self" python3 scripts/test_managed_safety.py -v
 # C3: the Codex hooks adapter. Registered the day it landed, because a gate
 # the battery never runs is red for as long as nobody runs it.
 run_check "codex-hooks-self"     python3 scripts/test_codex_hooks_install.py -v
@@ -364,6 +365,10 @@ run_check "system-doc-self"        python3 scripts/test_system_doc.py -v
 run_check "release-note-self"      python3 scripts/test_release_note_from_tree.py -v
 run_check "refresh-cut-self"       python3 scripts/test_refresh_cut.py -v
 run_check "system-doc-current"     python3 scripts/system_doc.py --check
+# Class A, not on the GATE E table: codex_skills's own --check, verifying
+# bundle/codex-skills still matches bundle/skills byte for byte; a drift
+# here ships Codex a stale copy of the skills Claude Code actually has.
+run_check "codex-skills-current"      python3 scripts/codex_skills.py --check
 
 # The parity gate's own tests only. The GATE ITSELF is deliberately NOT a
 # battery check: it exits 1 while parity is unreached, and that is a true state
@@ -756,6 +761,17 @@ run_check "memory-recurrence-self" python3 scripts/test_gauntlet_memory_recurren
 # is a deliberate run, not a battery step: it writes a dated record into
 # benchmarks/results/ on every invocation.
 run_check "delegation-truth-self" python3 scripts/test_gauntlet_delegation_truth.py
+# P0 (night run 2026-09-07, design-P0.md section 4): the memory poisoning
+# gauntlet's own runner and self test, mirroring the gauntlet-hostile-ja
+# pair above (runner registered, not self-test-only, since --quiet-shaped
+# invocation still writes its dated record under benchmarks/results/, the
+# same posture that pair already accepts). Row LL-3 measured the frozen
+# fourteen applied at 0 of 14 before this row existed; it was never wired
+# into this battery (grep "poison" scripts/check_all.sh returned nothing,
+# design-P0.md section 2 item e), so it was invisible to every check this
+# project owns until now.
+run_check "memory-poisoning"      python3 scripts/gauntlet_memory_poisoning.py
+run_check "memory-poisoning-self" python3 scripts/test_gauntlet_memory_poisoning.py -v
 # J1: the JBEQ-MDM seed suite (benchmarks/jbeq/) and its scorer. It proves the
 # seed is 70 cases in the directive's mix, that every critical case names a
 # critical class, that no expected answer reaches a blind prompt file, and that
@@ -1282,6 +1298,85 @@ run_check "codex-smoke" python3 scripts/codex_smoke.py
 # the state the C7 lane actually hit, and reading it as a pass is the failure
 # this test exists to stop.
 run_check "codex-smoke-self" python3 scripts/test_codex_smoke.py -v
+# P4 (night-2026-09-07, docs/plan/runs/night-2026-09-07/design-P4.md): 17
+# class A surfaces (a passing test file, or a --check/--selftest flag, that
+# the battery had simply forgotten to register). Ten of these sit on the
+# GATE E critical table (installation truth, Codex execution safety, the
+# delivery lifecycle, memory trust); the rest were still an implementation
+# with a stable proof and no line naming it, which is the exact hole
+# steering 10.1 says to close (trust-critical first, not the raw count).
+
+# GATE E critical: brother_install. A wrong or partial Brother install is
+# the first thing every other check on this machine silently trusts; this
+# is the self test the battery had never run.
+run_check "brother-install-self"      python3 scripts/test_brother_install.py -v
+# GATE E critical: brother_paths. Every provider-neutral seam (door.py,
+# model_worker.py, the hooks) resolves its files through this module; a
+# wrong path here is wrong everywhere at once, silently.
+run_check "brother-paths-self"        python3 scripts/test_brother_paths.py -v
+# GATE E critical: adapter_conformance. The contract every provider adapter
+# (Claude Code, Codex) must keep so a caller can trust either one the same
+# way; nothing else in the battery drove this test.
+run_check "adapter-conformance-self"  python3 scripts/test_adapter_conformance.py -v
+# GATE E critical: codex_battery. Codex's own battery-shaped surface; a
+# regression here is invisible to every check that only exercises Claude
+# Code's side of the provider-neutral seam.
+run_check "codex-battery-self"        python3 scripts/test_codex_battery.py -v
+# GATE E critical: delivery_status. The founder-facing answer to "is this
+# ready to ship"; a broken status reads as calm when it should read as
+# blocked, which is the failure class this closes.
+run_check "delivery-status-self"      python3 scripts/test_delivery_status.py -v
+# GATE E critical: keep_current. The currentness contract other generated
+# surfaces (SYSTEM.md, the changelog) lean on; its own self test had never
+# run in the battery that exists to catch exactly that kind of drift.
+run_check "keep-current-self"         python3 scripts/test_keep_current.py -v
+# GATE E critical: gauntlet_memory_poisoning (self test only; P0 owns the
+# runner). Vault-served memory that can weaken verification is the defect
+# family this gauntlet exists to catch; the self test proves the harness
+# itself before P0's runner is trusted against it.
+# GATE E critical: gauntlet_memoryagentbench_conflict. Conflicting memory
+# recall is a second, distinct memory-trust failure mode from poisoning;
+# this is its own proof, previously unwired.
+run_check "memoryagentbench-self"     python3 scripts/test_gauntlet_memoryagentbench_conflict.py -v
+# GATE E critical: capability_probe (class B). The mechanism behind "ask
+# the machine, not a stale document": the runner itself depends on the
+# founder's own vault inventory file outside this repo (class D), but its
+# logic (survey/compare_inventory) is fully injectable, so this is the
+# self test that proves the logic before any runner is trusted against it.
+run_check "capability-probe-self"     python3 scripts/test_capability_probe.py -v
+# Class A, not on the GATE E table: version_source. .claude-plugin/
+# marketplace.json is this repo's single declared version source; every
+# other file that repeats the number is a carrier that must match it
+# exactly, and this is the test that catches a carrier that drifted.
+run_check "version-source-self"       python3 scripts/test_version_source.py -v
+# Class A, not on the GATE E table: provider_adapter. The ONE provider-
+# neutral core with THIN adapters design (Claude Code and Codex sharing one
+# set of facts) has its own contract test, previously unwired.
+run_check "provider-adapter-self"     python3 scripts/test_provider_adapter.py -v
+# Class A, not on the GATE E table: unseen_set_gate. Row M8's own lesson:
+# a benchmark qualification set is trustworthy only after an independent
+# blind audit clears every seed defect it found; this gates that.
+run_check "unseen-set-gate-self"      python3 scripts/test_unseen_set_gate.py -v
+# Class A, not on the GATE E table: changelog_from_commits. The changelog
+# is generated from git history, never hand written (RELEASE-POLICY.md,
+# row S29); this is the generator's own proof.
+run_check "changelog-commits-self"    python3 scripts/test_changelog_from_commits.py -v
+# Class A, not on the GATE E table: repeat_rate_page. Writes the public
+# repeat-rate page (founder ruling 2026-09-05, row LL-5); a generator that
+# nothing proves can publish a wrong number under a real founder decision.
+run_check "repeat-rate-page-self"     python3 scripts/test_repeat_rate_page.py -v
+# Class A, not on the GATE E table: night_tick's own --selftest, a
+# durable-watchdog scheduler with fifteen fire/stay-quiet cases; nothing
+# in the ordinary battery had ever driven it.
+run_check "night-tick-selftest"       python3 scripts/night_tick.py --selftest
+# Class A, not on the GATE E table: recall_coverage's own --selftest, the
+# mechanism behind "does this estate's memory actually cover what it
+# claims to," previously provable only by hand.
+run_check "recall-coverage-selftest"  python3 scripts/recall_coverage.py --selftest
+# Class A, not on the GATE E table: release_notes_stamped. Catches a
+# placeholder "Source revision" section left in a shipped release note,
+# a founder-facing defect nothing else in the battery would notice.
+run_check "release-notes-stamped"     python3 scripts/release_notes_stamped.py
 # THE GATE THE 2026-09-05 v1.0.6 DEFECT PROVED WAS MISSING: every check
 # above, codex-smoke included, ran from a tree where loop_bridge.py's own
 # DEV_CANDIDATE fallback (a developer's sibling checkout) was reachable, so
@@ -1355,6 +1450,13 @@ run_check "lane-resume-self"   python3 scripts/test_lane_resume.py -v
 # seven gates at once and painted one red for load, not for a real defect.
 # Driven with fake gate/merge scripts: no network, no worktree, no real PR.
 run_check "land-queue-self" python3 scripts/test_land_queue.py -v
+# P3a (night 2026-09-07): the structured governed landing path beside it,
+# exact-SHA freshness, authority, and a local-bare-remote merge fixture.
+run_check "land-decision-self" python3 scripts/test_land_decision.py -v
+
+# P2 (night 2026-09-07): FAST-0 eligibility and escalation contract, not
+# wired into brother_run.py yet (see scripts/fast_path.py's own docstring).
+run_check "fast-path-self" python3 scripts/test_fast_path.py -v
 
 # LAST, on purpose: compares against the snapshot taken at the very top of
 # this file, so growth from ANY check this battery ran (not only the hook

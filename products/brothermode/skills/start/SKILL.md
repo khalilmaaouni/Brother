@@ -11,6 +11,8 @@ The user wants to start a project. Their goal, in their own words: $ARGUMENTS
 
 Outcome to produce: one clear project brief (the Project Canvas) and one recommended first decision, in plain language, with a realistic time and cost range.
 
+Answer in the language the user wrote in, per references/honesty.md.
+
 Enter the guided kickoff flow of the brotherme skill. Follow the kickoff instructions at references/kickoff.md: size up the goal, ask only the questions whose answers change the scope, one decision at a time with a recommended option first.
 
 ## The first minute: three beats, then the block, and NOTHING written
@@ -50,7 +52,7 @@ FIRST RUN FOR THIS USER, a separate and rarer moment from the project setup abov
 
 Later, once memory exists to ask about, the words "vault doctor", "vault census" and "vault recall <query>" all route to that same command (`bm_vault_cli.py doctor` / `census` / `recall`), never a separate command of their own; see references/memory.md for the routing.
 
-RECORD THE OUTCOME FIRST, once the user has said in their own words what they want: run `python3 "${CLAUDE_PLUGIN_ROOT}/tools/bm_lead.py" outcome --project-id <id> --set "<their words>"` (the packaged console script is `bm-lead outcome`), then continue the guided kickoff. There is one command that records what the user is trying to achieve, and this is it, so the goal the status view reads back later is the goal they actually stated rather than a paraphrase gathered twice. Same install-path rule as below.
+RECORD THE OUTCOME FIRST, once the user has said in their own words what they want: run `python3 "${CLAUDE_PLUGIN_ROOT}/tools/bm_lead.py" outcome --project-id <id> --set "<their words>"` (the packaged console script is `bm-lead outcome`), then continue the guided kickoff. There is one command that records what the user is trying to achieve, and this is it, so the goal the status view reads back later is the goal they actually stated rather than a paraphrase gathered twice. Same install-path rule as below. It needs no --actor-name: the tool defaults it from `git config user.name`, then the `USER` environment variable, and names on stderr which one it used; pass --actor-name yourself only to record a different name (R-10, persona dogfood 2026-09-07 round 2, after a junior copying this exact command hit a usage error demanding a flag the doc never mentioned).
 
 Then, and only then, write the first page: run `python3 "${CLAUDE_PLUGIN_ROOT}/tools/brothermode_cli.py" view --project-id <id>` (the packaged console script is `brothermode view`) and offer it to them. It will be nearly empty, and that is the point: every section says what will fill it and names the one thing that fills it, and the counter at the top says how many of the eight setup steps are genuinely done, counted from real records rather than claimed. At this moment it reads 2 of 8, and saying so is honest in both directions: something real has happened, and most of it has not.
 

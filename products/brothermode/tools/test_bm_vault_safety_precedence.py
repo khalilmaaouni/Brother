@@ -255,20 +255,22 @@ class EvidenceTierStepZero(unittest.TestCase):
                                     "applies_to: [test_poison_target.py]"],
                                    POISON_SKIP_TEST_A))
         lesson = self._lesson("a.md")
-        tier, reason, _seam = contradiction.evidence_tier(lesson, self._probe())
+        tier, reason, seam = contradiction.evidence_tier(lesson, self._probe())
         self.assertEqual(tier, contradiction.TIER_REFUSED)
-        self.assertIn("REFUSED (safety precedence)", reason)
+        self.assertIn("POLICY-CONFLICT", reason)
         self.assertIn("SYSTEM SAFETY POLICY", reason)
         self.assertIn("VAULT LESSON", reason)
+        self.assertEqual(seam, contradiction.SEAM_SAFETY_PRECEDENCE)
 
     def test_refused_when_body_instructs_skip_test_b(self):
         self._write("b.md", _note(["name: comment out the failing assertion",
                                     "applies_to: [test_poison_target.py]"],
                                    POISON_SKIP_TEST_B))
         lesson = self._lesson("b.md")
-        tier, reason, _seam = contradiction.evidence_tier(lesson, self._probe())
+        tier, reason, seam = contradiction.evidence_tier(lesson, self._probe())
         self.assertEqual(tier, contradiction.TIER_REFUSED)
-        self.assertIn("REFUSED (safety precedence)", reason)
+        self.assertIn("POLICY-CONFLICT", reason)
+        self.assertEqual(seam, contradiction.SEAM_SAFETY_PRECEDENCE)
 
 
     def test_negated_instruction_is_not_refused_by_step_zero(self):
@@ -348,9 +350,76 @@ class HookDowngradesRefusedToUnverified(unittest.TestCase):
         hook = self._load_hook()
         state, line, _note_type = hook._lesson_state(
             "a", os.path.join(self.vault, "a.md"), self.tree)
-        self.assertEqual(state, "unverified")
+        # Night run 2026-09-07 (design-P0.md section 3, steering 6.5): a
+        # safety-precedence refusal now reads its own state, never
+        # collapsed into the generic "unverified" a dead evidence_locator
+        # reads (see APolicyConflictIsNotADeadLocator for both side by
+        # side). The line still names REFUSED either way.
+        self.assertEqual(state, "policy-conflict")
         self.assertIsNotNone(line)
         self.assertIn("REFUSED", line)
+
+
+class EvidenceTierExceptionNeverAppliesTheMemory(unittest.TestCase):
+    """Codex finding 1 (night run 2026-09-07, folded into design-P0.md):
+    BEFORE the fix, an exception raised by
+    bm_vault_contradiction.evidence_tier() inside _lesson_state reset tier
+    to None and fell all the way through to "return applied, None,
+    note_type" -- a broken or unreadable policy resolver PERMITTED the
+    memory instead of withholding it, collapsing NO-DATA into PASS (Law
+    2: never convert uncertainty into green). Driven by monkeypatching
+    bm_vault_contradiction.evidence_tier to raise, on a lesson that
+    otherwise carries every field needed to reach that call (an
+    applies_to anchor that resolves, so the earlier NO_APPLIES_TO branch
+    never short-circuits first)."""
+
+    def setUp(self):
+        self.vault = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.vault, ignore_errors=True)
+        self.tree = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tree, ignore_errors=True)
+        with open(os.path.join(self.tree, "widget.py"), "w",
+                 encoding="utf-8") as fh:
+            fh.write("def widget():\n    pass\n")
+        path = os.path.join(self.vault, "a.md")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(_note(["name: a plain lesson",
+                            "applies_to: [widget.py]"],
+                           "widget() does a thing."))
+        self.note_path = path
+
+    def _load_hook(self):
+        import importlib.util
+        hook_path = os.path.join(HERE, "vault_recall_hook.py")
+        spec = importlib.util.spec_from_file_location(
+            "vault_recall_hook_for_exception_test", hook_path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_a_broken_resolver_withholds_never_applies(self):
+        hook = self._load_hook()
+
+        def _raises(lesson, probe, duplicate_probe=None):
+            raise RuntimeError("boom: policy resolver is broken")
+
+        # hook.bm_vault_contradiction is the SAME cached module object
+        # every other test file in this process shares (sys.modules
+        # caches by module name, and _load_hook loads the hook by path
+        # but the hook's own `import bm_vault_contradiction` still
+        # resolves through that shared cache), so the patch is restored
+        # in addCleanup rather than left standing for every test that
+        # runs after this one in the same process.
+        original = hook.bm_vault_contradiction.evidence_tier
+        self.addCleanup(setattr, hook.bm_vault_contradiction,
+                        "evidence_tier", original)
+        hook.bm_vault_contradiction.evidence_tier = _raises
+        state, line, _note_type = hook._lesson_state(
+            "a", self.note_path, self.tree)
+        self.assertEqual(state, "unverified")
+        self.assertIsNotNone(line)
+        self.assertIn("RuntimeError", line)
+        self.assertIn("boom: policy resolver is broken", line)
 
 
 if __name__ == "__main__":

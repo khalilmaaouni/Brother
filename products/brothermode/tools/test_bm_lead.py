@@ -637,8 +637,13 @@ class TestConsentIsTheOnlyDoor(unittest.TestCase):
 
 _FIELD_RE = re.compile(r"^([A-Z][A-Za-z ]*):")
 
-EIGHT_FIELDS = ["Goal", "Direction", "Progress", "Time remaining",
-                "Decision needed", "Risk", "Evidence", "Next step"]
+# R-4 (persona dogfood 2026-09-07): collect_status now prepends a ninth
+# field, Verdict, computed from the same records the other eight already
+# read (open decisions, open risks, newest executed evidence). This constant
+# used to be named NINE_FIELDS and pin exactly eight; renamed and extended
+# rather than left to silently drift once a ninth field existed.
+NINE_FIELDS = ["Verdict", "Goal", "Direction", "Progress", "Time remaining",
+               "Decision needed", "Risk", "Evidence", "Next step"]
 
 NINE_ADVANCED = ["task ids", "runtime and model", "token input and output",
                  "worktree paths", "commands that were run",
@@ -676,22 +681,26 @@ class TestTheEightFieldsAreComputedNotNarrated(LeadCase):
         self.seed_project()
         self.add_forecast()
 
-    def test_status_prints_exactly_the_eight_fields_in_order(self):
+    def test_status_prints_exactly_the_nine_fields_in_order(self):
+        # R-4 (persona dogfood 2026-09-07): this test used to pin exactly
+        # eight fields; a ninth (Verdict) now leads them, computed from
+        # records collect_status already reads, so the pin is amended
+        # rather than the defect (a reader with no ship verdict) kept.
         code, out, err = self.run_cli("status", "--project-id", "p1")
         self.assertEqual(0, code, out + err)
         self.assertEqual(
-            EIGHT_FIELDS, _field_labels(out),
-            "status must print exactly the eight fields of "
-            "references/status-view.md lines 8 to 16, in that order, and "
-            "nothing else at column zero. Got:\n%s" % out)
+            NINE_FIELDS, _field_labels(out),
+            "status must print exactly the ship verdict plus the eight "
+            "fields of references/status-view.md lines 8 to 16, in that "
+            "order, and nothing else at column zero. Got:\n%s" % out)
 
     def test_the_label_reader_really_finds_a_ninth_field(self):
         """Calibration. An equality against a list a broken extractor also
         satisfies is not evidence, so this proves the extractor sees a
         ninth label when one is there."""
-        planted = "\n".join(["%s: x" % f for f in EIGHT_FIELDS]
+        planted = "\n".join(["%s: x" % f for f in NINE_FIELDS]
                             + ["Machinery: a ninth field"])
-        self.assertEqual(EIGHT_FIELDS + ["Machinery"],
+        self.assertEqual(NINE_FIELDS + ["Machinery"],
                          _field_labels(planted))
 
     def test_an_absent_field_says_so_rather_than_being_omitted(self):
@@ -699,7 +708,7 @@ class TestTheEightFieldsAreComputedNotNarrated(LeadCase):
             _project_dict("p2", goal="", now=self.clock.iso()), self.actor)
         code, out, err = self.run_cli("status", "--project-id", "p2")
         self.assertEqual(0, code, out + err)
-        self.assertEqual(EIGHT_FIELDS, _field_labels(out))
+        self.assertEqual(NINE_FIELDS, _field_labels(out))
         values = _field_values(out)
         self.assertIn("no outcome recorded yet", values["Goal"])
         self.assertIn("not agreed yet", values["Direction"])
@@ -732,7 +741,109 @@ class TestTheEightFieldsAreComputedNotNarrated(LeadCase):
                 "advanced is per request, never sticky "
                 "(references/status-view.md line 53): %r survived into the "
                 "next bare status:\n%s" % (item, plain))
-        self.assertEqual(EIGHT_FIELDS, _field_labels(plain))
+        self.assertEqual(NINE_FIELDS, _field_labels(plain))
+
+
+# ---------------------------------------------------------------------------
+# R-1: the project id is resolved, never a hard-required flag
+# ---------------------------------------------------------------------------
+
+class TestProjectIdResolution(LeadCase):
+    """R-1 (persona dogfood 2026-09-07): every reader here used to demand
+    --project-id against a store nothing in the repository derives an id
+    from. A folder holding exactly one project no longer needs the flag
+    named at all; _resolve_project_id in bm_lead.py reads it back off the
+    store instead."""
+
+    def test_status_with_one_project_needs_no_flag(self):
+        self.seed_project()
+        code, out, err = self.run_cli("status")
+        self.assertEqual(0, code, out + err)
+        self.assertIn("Goal:", out,
+                      "status with one project on file must resolve it "
+                      "without --project-id and still print the fields; "
+                      "got exit %d, stdout:\n%s\nstderr:\n%s"
+                      % (code, out, err))
+
+    def test_status_with_two_projects_and_no_flag_names_them_and_exits_2(self):
+        # _resolve_project_id calls sys.exit(2), the same shape _require
+        # already used for a missing flag; main() does not catch
+        # SystemExit (it never did for _require either), so this reads
+        # it directly rather than through run_cli's return-code contract.
+        self.seed_project(pid="p1")
+        self.seed_project(pid="p2")
+        out, err = io.StringIO(), io.StringIO()
+        real_out, real_err = sys.stdout, sys.stderr
+        sys.stdout, sys.stderr = out, err
+        try:
+            with self.assertRaises(SystemExit) as ctx:
+                bl.main(["status"])
+        finally:
+            sys.stdout, sys.stderr = real_out, real_err
+        self.assertEqual(2, ctx.exception.code)
+        self.assertIn("p1", err.getvalue())
+        self.assertIn("p2", err.getvalue())
+
+    def test_status_with_two_projects_and_the_flag_still_works(self):
+        self.seed_project(pid="p1")
+        self.seed_project(pid="p2")
+        code, out, err = self.run_cli("status", "--project-id", "p2")
+        self.assertEqual(0, code, out + err)
+        self.assertIn("Goal:", out)
+
+    def test_status_on_an_empty_store_points_at_the_slash_command_not_a_bare_tools_path(self):
+        # R-9 (persona dogfood round 2, 2026-09-07): the old hint told a
+        # first-time reader to type "python3 tools/bm_project.py start",
+        # which dead-ends in the user's own repository because these tools
+        # live under the plugin root, not under a tools/ folder the user
+        # has. The reader's entry point is the slash command.
+        #
+        # REWRITTEN for R-10 (persona dogfood round 2, 2026-09-07): status
+        # on an empty store is a READER, so it no longer exits 2 at all;
+        # it prints the R-10 tree read at exit 0, and that read's own
+        # next-action line is where R-9's slash-command property now
+        # lives, so this test moved with it rather than asserting a
+        # refusal that no longer happens.
+        code, out, err = self.run_cli("status")
+        self.assertEqual(0, code, out + err)
+        self.assertIn("/brothermode:start", out)
+        self.assertNotIn("(python3 tools/bm_project.py start)", out)
+
+
+# ---------------------------------------------------------------------------
+# R-4: the ship verdict leads the fields
+# ---------------------------------------------------------------------------
+
+class TestVerdictLine(LeadCase):
+    """R-4 (persona dogfood 2026-09-07): the eight fields answered every
+    question except the one every reader actually arrived with. Verdict
+    now leads them, computed from the open decisions, open risks, and
+    newest executed evidence collect_status already reads."""
+
+    def test_status_first_line_names_a_ship_verdict(self):
+        self.seed_project()
+        self.record(_decision())
+        code, out, err = self.run_cli("status", "--project-id", "p1")
+        self.assertEqual(0, code, out + err)
+        labels = _field_labels(out)
+        self.assertEqual("Verdict", labels[0],
+                         "Verdict must be the first field printed. "
+                         "Got:\n%s" % out)
+        values = _field_values(out)
+        self.assertIn("do not ship", values["Verdict"],
+                     "one open decision and no executed evidence must "
+                     "read as 'do not ship yet'. Got: %r"
+                     % values["Verdict"])
+
+    def test_nothing_blocking_reads_as_such(self):
+        self.seed_project()
+        code, out, err = self.run_cli("status", "--project-id", "p1")
+        self.assertEqual(0, code, out + err)
+        # No decisions, no risks, but also no executed evidence: still
+        # blocking, and the message must name that reason rather than
+        # claim nothing is blocking when evidence was never run.
+        values = _field_values(out)
+        self.assertIn("no executed evidence", values["Verdict"])
 
 
 # ---------------------------------------------------------------------------
@@ -1152,7 +1263,7 @@ class TestICModeAndFounderModeShareOneCollector(LeadCase):
         _c, engineer, _e = self.run_cli("status", "--project-id", "p1", "--ic")
         f_values = _field_values(founder)
         e_values = _field_values(engineer)
-        for label in EIGHT_FIELDS:
+        for label in NINE_FIELDS:
             self.assertIn(label, e_values,
                           "IC mode dropped the %s field" % label)
             self.assertEqual(
@@ -1775,6 +1886,108 @@ class TestHandoverPackTracesToRows(LeadCase):
 
 
 # ---------------------------------------------------------------------------
+# R-2: a failed check receipt travels as a decision card
+# ---------------------------------------------------------------------------
+
+class TestDecisionsReadsFailedReceipts(LeadCase):
+    """R-2 (persona dogfood 2026-09-07): "Nothing is waiting on a decision
+    from you" was computed from ONE table (open decisions) while a failing
+    check sat in the receipt store beside it. A recorded failure now
+    travels as the same card every other decision travels as."""
+
+    def _write_receipt(self, name, **fields):
+        directory = os.path.join(self.root, ".sbe", "evidence")
+        os.makedirs(directory, exist_ok=True)
+        row = {"argv": ["python3", "-m", "pytest", "test_booking.py"],
+               "exitCode": 1, "verdict": "FAIL"}
+        row.update(fields)
+        with io.open(os.path.join(directory, name), "w",
+                     encoding="utf-8") as fh:
+            json.dump(row, fh)
+
+    def test_decisions_renders_a_fail_receipt_as_a_card(self):
+        self.seed_project()
+        self._write_receipt("r1.json")
+        code, out, err = self.run_cli("decisions", "--project-id", "p1")
+        self.assertEqual(0, code, out + err)
+        self.assertNotIn("Nothing is waiting on a decision from you.", out)
+        self.assertIn("a check that failed", out,
+                      "a FAIL receipt must render as a decision card. "
+                      "Got:\n%s" % out)
+        self.assertIn("test_booking.py", out)
+
+    def test_a_passing_receipt_is_not_a_decision(self):
+        self.seed_project()
+        self._write_receipt("r1.json", exitCode=0, verdict="PASS")
+        code, out, err = self.run_cli("decisions", "--project-id", "p1")
+        self.assertEqual(0, code, out + err)
+        self.assertIn("Nothing is waiting on a decision from you.", out)
+
+    def test_an_unreadable_receipt_is_named_not_skipped(self):
+        self.seed_project()
+        directory = os.path.join(self.root, ".sbe", "evidence")
+        os.makedirs(directory, exist_ok=True)
+        with io.open(os.path.join(directory, "broken.json"), "w",
+                     encoding="utf-8") as fh:
+            fh.write("{not json")
+        code, out, err = self.run_cli("decisions", "--project-id", "p1")
+        self.assertEqual(0, code, out + err)
+        self.assertIn("broken.json", out,
+                      "an unreadable receipt file must be named, never "
+                      "silently skipped. Got:\n%s" % out)
+
+    def test_a_no_data_receipt_renders_as_an_unpriced_gap_card(self):
+        self.seed_project()
+        self._write_receipt(
+            "gate.json", exitCode=None, verdict="NO-DATA",
+            reasons=["no migration receipt found for 0007_add_payout.sql"])
+        code, out, err = self.run_cli("decisions", "--project-id", "p1")
+        self.assertEqual(0, code, out + err)
+        self.assertIn(
+            "unpriced gap", out,
+            "a NO-DATA receipt must render as an unpriced-gap card. "
+            "Got:\n%s" % out)
+        self.assertIn("0007_add_payout.sql", out)
+
+
+# ---------------------------------------------------------------------------
+# R-2: the handover pack situation page never drops real work
+# ---------------------------------------------------------------------------
+
+class TestSituationPageNamesExistingTasks(LeadCase):
+    """R-2 (persona dogfood 2026-09-07): the situation page reported "no
+    run has been opened" over a task that had been reviewed to verified
+    with its evidence id on file, because it read the run layer only."""
+
+    def test_handover_pack_names_an_existing_task_with_no_run_opened(self):
+        self.seed_project()
+        self.store.create_task(
+            {"task_id": "t1", "project_id": "p1",
+             "title": "wire the booking form", "status": "ready"},
+            self.actor)
+        self.store.transition_task("t1", "active", "starting work",
+                                   self.actor)
+        self.store.transition_task("t1", "awaiting review", "done",
+                                   self.actor)
+        self.store.review_task(
+            "t1", "p1",
+            {"evidence_id": "e1", "subject_type": "task",
+             "subject_id": "t1", "kind": "test", "ref": "test_booking.py",
+             "note": "", "created_at": self.clock.iso()},
+            "verified", "the booking test passes", self.actor)
+        code, out, err = self.run_cli("handover-pack", "--project-id", "p1")
+        self.assertEqual(0, code, out + err)
+        situation = _read_text(
+            os.path.join(self.root, bl.HANDOVER_ROOT, "00-SITUATION.md"))
+        self.assertNotIn(
+            "no run has been opened", situation,
+            "a project with a reviewed task must not be reported as if "
+            "no work had happened. Got:\n%s" % situation)
+        self.assertIn("wire the booking form", situation)
+        self.assertIn("e1", situation)
+
+
+# ---------------------------------------------------------------------------
 # 17.2 the no-SQL guard
 # ---------------------------------------------------------------------------
 
@@ -1890,7 +2103,7 @@ class TestSevenConversationShapes(LeadCase):
         _c, back, _e = self.run_cli("status", "--project-id", "p1")
         _c, engineer, _e = self.run_cli("status", "--project-id", "p1",
                                         "--ic")
-        self.assertEqual(EIGHT_FIELDS, _field_labels(plain))
+        self.assertEqual(NINE_FIELDS, _field_labels(plain))
         for item in NINE_ADVANCED:
             self.assertNotIn(item, plain)
             self.assertIn(item, advanced)
@@ -1898,7 +2111,7 @@ class TestSevenConversationShapes(LeadCase):
         for item in NINE_ADVANCED:
             self.assertNotIn(item, engineer)
         f_values, e_values = _field_values(plain), _field_values(engineer)
-        for label in EIGHT_FIELDS:
+        for label in NINE_FIELDS:
             self.assertEqual(f_values[label], e_values[label])
         _write_fixture("S2-STATUS_MID_RUN", {
             "shape": "the founder asks where things stand while work is in "
@@ -2125,6 +2338,204 @@ class TestSevenConversationShapes(LeadCase):
                                     "Recommended action",
                                     "What remains safe"],
             "report_transcript": out.splitlines()})
+
+
+# ---------------------------------------------------------------------------
+# R-7: the language rule is cited from the surfaces a user actually meets
+# ---------------------------------------------------------------------------
+
+_LANGUAGE_CITED_SKILLS = (
+    os.path.join(ROOT, "skills", "start", "SKILL.md"),
+    os.path.join(ROOT, "skills", "help", "SKILL.md"),
+    os.path.join(ROOT, "skills", "status", "SKILL.md"),
+    os.path.join(os.path.dirname(ROOT), "brothersbe",
+                "skills", "help", "SKILL.md"),
+)
+
+
+class TestTheLanguageRuleIsCited(unittest.TestCase):
+    """R-7 (persona dogfood 2026-09-07): a grep for 'user's language',
+    'their own language', 'input language', 'answer in the language' or
+    'responds in the language' over products/ and bundle/ used to hit
+    only two CHANGELOG lines. references/honesty.md now states the rule
+    once (a Language section); this is structural, not behavioural: it
+    proves the four surfaces a user actually meets before a tool's own
+    English stdout point back at it, so the rule is never silently
+    orphaned by a later edit to any one of the four."""
+
+    def test_every_named_skill_cites_the_language_rule(self):
+        missing = []
+        for path in _LANGUAGE_CITED_SKILLS:
+            self.assertTrue(os.path.isfile(path), "missing file: %s" % path)
+            text = _read_text(path)
+            if "honesty.md" not in text or "language" not in text.lower():
+                missing.append(path)
+        self.assertEqual(
+            [], missing,
+            "these SKILL.md files must cite references/honesty.md's "
+            "language rule: %s" % ", ".join(missing))
+
+    def test_honesty_md_states_the_rule(self):
+        honesty = _read_text(os.path.join(ROOT, "references", "honesty.md"))
+        self.assertIn("Language", honesty)
+        self.assertIn("language the user wrote in", honesty)
+
+
+class NoProjectCase(unittest.TestCase):
+    """A git repository that has never been touched by BrotherMode at all:
+    no store, no project. R-10 (persona dogfood 2026-09-07 round 2): every
+    reader used to exit 2 with 'this folder holds no project yet' here,
+    even though the repository's own commits, receipts, tests and
+    documents already answer most of what a first-day user wants. This
+    fixture proves the tree read those readers give instead.
+
+    BROTHERMODE_SKIP_GIT_CONTAINMENT is set because a real customer repo
+    hits the git-containment refusal first (a separate, already-known gap:
+    see ROOT-CAUSES R-8), and that gap is not this fix's fence; the
+    escape hatch it documents is used here exactly as a real user must
+    use it today."""
+
+    ENV_KEYS = ("BROTHERME_CONFIG", "BROTHERMODE_ROOT", "BROTHERMODE_VIEW",
+                "BROTHERMODE_VAULT", "BROTHERMODE_SKIP_GIT_CONTAINMENT")
+
+    def setUp(self):
+        self.assertIsNotNone(bl, "tools/bm_lead.py does not exist yet")
+        self.tmp = tempfile.mkdtemp(prefix="bm-lead-noproject-")
+        self.root = os.path.join(self.tmp, "project")
+        os.makedirs(self.root)
+        self._git("init", "-q")
+        self._git("config", "user.email", "a@example.com")
+        self._git("config", "user.name", "A Tester")
+        with io.open(os.path.join(self.root, "README.md"), "w",
+                     encoding="utf-8") as fh:
+            fh.write("hello\n")
+        self._git("add", "README.md")
+        self._git("commit", "-q", "-m", "Add the delivery window migration")
+        self.vault = os.path.join(self.tmp, "Vault")
+        self.config = os.path.join(self.tmp, "cfg", "config.json")
+        _write_consented_config(self.config, self.vault)
+        self._env_backup = dict((k, os.environ.get(k)) for k in self.ENV_KEYS)
+        os.environ["BROTHERME_CONFIG"] = self.config
+        os.environ["BROTHERMODE_ROOT"] = self.root
+        os.environ.pop("BROTHERMODE_VIEW", None)
+        os.environ["BROTHERMODE_VAULT"] = self.vault
+        os.environ["BROTHERMODE_SKIP_GIT_CONTAINMENT"] = "1"
+
+    def tearDown(self):
+        for k, v in self._env_backup.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _git(self, *args):
+        subprocess.run(["git", "-C", self.root] + list(args),
+                        check=True, capture_output=True, text=True)
+
+    def run_cli(self, *argv):
+        out, err = io.StringIO(), io.StringIO()
+        real_out, real_err = sys.stdout, sys.stderr
+        sys.stdout, sys.stderr = out, err
+        try:
+            code = bl.main(list(argv))
+        finally:
+            sys.stdout, sys.stderr = real_out, real_err
+        return code, out.getvalue(), err.getvalue()
+
+
+class TestNoProjectTreeRead(NoProjectCase):
+    """R-10 (persona dogfood 2026-09-07 round 2): status, brief,
+    decisions, an outcome listing and handover-pack all exited 2 with
+    'this folder holds no project yet' in a repository that has never
+    been set up, even though the repository itself already answers most
+    of what a first-day user wants. They now print that instead, at
+    exit 0."""
+
+    def test_status_reads_the_tree_when_no_store_exists(self):
+        code, out, err = self.run_cli("status")
+        self.assertEqual(0, code, out + err)
+        lines = out.splitlines()
+        self.assertTrue(lines, "status printed nothing")
+        self.assertTrue(
+            lines[0].startswith("Verdict:"),
+            "first line must name the Verdict. Got:\n%s" % out)
+        self.assertIn("No Brother project here yet", out)
+        self.assertIn("Add the delivery window migration", out,
+                      "the last commit's subject must be named. "
+                      "Got:\n%s" % out)
+        self.assertIn("/brothermode:start", out)
+
+    def test_brief_lists_a_change_request_document_by_name(self):
+        docs = os.path.join(self.root, "docs")
+        os.makedirs(docs)
+        with io.open(os.path.join(docs, "CR-2041-add-channel.md"), "w",
+                     encoding="utf-8") as fh:
+            fh.write("Title: Add a second channel classification\n")
+        code, out, err = self.run_cli("brief")
+        self.assertEqual(0, code, out + err)
+        self.assertIn("No Brother project here yet", out)
+        self.assertIn("CR-2041-add-channel.md", out,
+                      "a change-request document must be named by name. "
+                      "Got:\n%s" % out)
+
+    def test_decisions_and_handover_pack_and_outcome_also_read_the_tree(self):
+        for cmd in ("decisions", "handover-pack", "outcome"):
+            code, out, err = self.run_cli(cmd)
+            self.assertEqual(0, code, "%s: %s" % (cmd, out + err))
+            self.assertIn(
+                "No Brother project here yet", out,
+                "%s did not read the tree. Got:\n%s" % (cmd, out))
+
+
+class TestReaderVsWriterOnZeroProjects(LeadCase):
+    """R-10's fence, on a store that exists but holds zero projects (the
+    LeadCase fixture, before seed_project() is ever called): a writer
+    (insight, handback, an outcome --set) never invents a project id and
+    never routes through the tree read; it keeps the old exit-2 refusal.
+    Only READERS get the new behaviour."""
+
+    def test_outcome_set_without_a_project_still_exits_2(self):
+        # _resolve_project_id calls sys.exit(2) for a writer, the same
+        # shape TestConsentIsTheOnlyDoor's own two-project test already
+        # exercises; main() never catches SystemExit, so this reads it
+        # directly rather than through run_cli's return-code contract.
+        out, err = io.StringIO(), io.StringIO()
+        real_out, real_err = sys.stdout, sys.stderr
+        sys.stdout, sys.stderr = out, err
+        try:
+            with self.assertRaises(SystemExit) as ctx:
+                bl.main(["outcome", "--set", "ship it",
+                         "--actor-name", "Tester"])
+        finally:
+            sys.stdout, sys.stderr = real_out, real_err
+        self.assertEqual(2, ctx.exception.code)
+        self.assertIn("this folder holds no project yet", err.getvalue())
+
+    def test_status_reads_the_tree_instead(self):
+        code, out, err = self.run_cli("status")
+        self.assertEqual(0, code, out + err)
+        self.assertIn("No Brother project here yet", out)
+
+
+class TestActorNameDefaults(LeadCase):
+    """R-10 (persona dogfood 2026-09-07 round 2): SKILL.md's own
+    documented outcome command omits --actor-name, and the tool used to
+    exit 2 demanding it. It now defaults instead, from git config
+    user.name or the USER environment variable, and names on stderr
+    which one it used."""
+
+    def test_outcome_set_without_actor_name_succeeds_and_names_the_default(self):
+        self.seed_project()
+        code, out, err = self.run_cli(
+            "outcome", "--project-id", "p1", "--set", "finish the widget")
+        self.assertEqual(0, code, out + err)
+        self.assertIn(
+            "bm_lead: --actor-name not given; using", err,
+            "the default taken must be named. Got stderr:\n%s" % err)
+        self.assertIn("Goal: finish the widget", out)
+
+
 
 
 if __name__ == "__main__":

@@ -5,11 +5,15 @@ description: Explain what BrotherMode does and how to use it, in plain language
 
 Outcome to produce: a short, plain-language orientation that ends in ONE question, not a list of everything the product can do. No setup steps that involve editing files, and no internal machinery.
 
+Answer in the language the user wrote in, per references/honesty.md.
+
 ## What to say first, and it is three sentences
 
 1. What BrotherMode does: it turns an idea into a verified result, with a guided start, honest time and cost ranges, clear status, and a checked delivery.
 2. What it will want from them: their goal in their own words, and a decision now and then. Everything else it does itself and reports back.
 3. That normal use is plain conversation. Commands exist, and each one introduces itself at the moment it becomes useful, so nobody has to memorise a list.
+
+If the user's message carried a specific question, answer that question first from the reference that covers it, then ask the one question (R-4, persona dogfood 2026-09-07: the fixed pitch answered every question except the one the reader actually arrived with).
 
 Then ask exactly ONE question, and stop. Offer the deep tour as the recommended option for a user who wants to see where everything stands (one page laying out project progress, the decisions taken, the process drawings, and, for anyone who wants to help build, how this project is put together), then ask whether they would like that tour or would rather just say what they want to accomplish. On the deep-tour answer, enter the deep tour flow in the brotherme skill (skills/brotherme/SKILL.md). Honest limit either way: a project with no BrotherMode record yet gets a static tour of the product instead of the live view, and the page it builds says plainly which one it is showing.
 

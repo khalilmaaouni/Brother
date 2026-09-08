@@ -36,6 +36,10 @@ SUBCOMMANDS
                           unresolved alerts by severity, and, with
                           --history N, the last N attribution events (read
                           accessors only)
+  list                    every project id this folder holds, with its goal
+                          (read only; R-1 persona dogfood 2026-09-07, the
+                          id bm_lead.py points a founder at when a folder
+                          holds more than one project)
   next                   the single recommended next task, with why
   task add                thin wrapper over create_task
   task start               convenience: transition a task to 'active'
@@ -99,7 +103,9 @@ WHY create=False EVERYWHERE
   Matching bm_store.py's own CLI convention (its cmd_claim and every other
   command besides init): "only init creates a store" only means something
   if every other path refuses instead of quietly creating one. Run
-  `python3 tools/bm_store.py init` first.
+  `python3 "${CLAUDE_PLUGIN_ROOT}/tools/bm_store.py" init` first (never a
+  bare tools/ path: the plugin installs these tools under the plugin root,
+  not the user's own repository).
 
 ONE PROJECT PER FOLDER (the beginner model; C5, release-closure loop2
 refuter fixes)
@@ -365,20 +371,55 @@ def _require(kv, name, usage):
     return val
 
 
+def _default_actor_name():
+    """(name, source): git config user.name, then the USER environment
+    variable, then a fixed fallback. Never raises: a git call that fails,
+    or a config with no user.name set, falls through to the next source.
+
+    R-10 (persona dogfood 2026-09-07 round 2): a junior's first ten
+    minutes hit a usage error on the very first mechanical step because
+    --actor-name had no default. Same fix as bm_lead.py's own
+    _default_actor_name, kept as a sibling copy rather than a cross-file
+    import: this file's own docstring already states it is a thin CLI
+    over bm_store.py and nothing else."""
+    try:
+        av = _load("bm_autosave")
+        r = av._run_git(_root(), "config", "user.name")
+        name = (r.stdout or "").strip()
+        if r.returncode == 0 and name:
+            return name, "git config user.name"
+    except Exception:
+        pass
+    user = os.environ.get("USER") or os.environ.get("USERNAME")
+    if user:
+        return user, "the USER environment variable"
+    return "unknown", "no name could be found"
+
+
 def _actor(kv, usage):
     """Build the actor dict every mutating subcommand passes to the store,
     so attribution is a real record of who or what acted, not a guess.
     actor_type is restricted to human|model on this CLI's own surface
     (schema.py's AttributionEvent also allows hook|automation, but this
     tool is invoked directly by a person or by a model runtime, never as a
-    hook); actor_name has no sensible default, so it is required."""
+    hook).
+
+    R-10 (persona dogfood 2026-09-07 round 2): actor_name now DEFAULTS
+    from _default_actor_name rather than being required, because
+    skills/start/SKILL.md's own documented first commands omit it. The
+    default is named on stderr; an explicit --actor-name still always
+    wins."""
     actor_type = kv.get("actor-type", "model")
     if actor_type not in ("human", "model"):
         _err(usage)
         _err("bm_project: --actor-type must be 'human' or 'model', got %r"
              % actor_type)
         sys.exit(2)
-    actor_name = _require(kv, "actor-name", usage)
+    actor_name = kv.get("actor-name")
+    if not actor_name:
+        actor_name, source = _default_actor_name()
+        _err("bm_project: --actor-name not given; using %r, from %s."
+             % (actor_name, source))
     # A fresh, unguessable id per process when --session-id is omitted,
     # matching bm_store.py's own _default_cli_session_id() (GATE 3: two
     # independent invocations that both omitted it must never collide on
@@ -1021,6 +1062,37 @@ def cmd_status(argv):
 
 
 # ---------------------------------------------------------------------------
+# list
+# ---------------------------------------------------------------------------
+
+def cmd_list(argv):
+    """R-1 (persona dogfood 2026-09-07): every reader in this product
+    demanded --project-id against a store nothing in the repository
+    derives an id from, and there was no command to ask the store what
+    ids it holds. This prints exactly that, read only, so
+    bm_lead.py's _resolve_project_id has something to point a founder at
+    when a folder holds more than one project."""
+    _pos, kv = _parse(argv, ("json",), wants_value=())
+    store = _read_store()
+    try:
+        projects = store.list_projects(raw=True)
+    finally:
+        store.close()
+    if kv.get("json"):
+        _print_json({"projects": projects})
+        return 0
+    if not projects:
+        _out("no project in this folder yet; start one with: "
+             "/brothermode:start (or, on a clone install: "
+             'python3 "${CLAUDE_PLUGIN_ROOT}/tools/bm_project.py start")')
+        return 0
+    for p in projects:
+        _out("%s: %s" % (p.get("project_id"),
+                         (p.get("goal") or "").strip() or "(no goal set)"))
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # next
 # ---------------------------------------------------------------------------
 
@@ -1419,9 +1491,9 @@ def cmd_review(argv):
     pos, kv = _parse(argv, _REVIEW_FLAGS, wants_value=(
         "project-id", "kind", "ref", "note", "to", "reason",
         "criterion-id") + _ACTOR_FLAGS)
-    usage = ("usage: review <task_id> --project-id ID [--kind K] [--ref R] "
-             "[--note N] [--to STATE(default verified)] --reason R "
-             "[--criterion-id ID] "
+    usage = ("usage: review <task_id> [--project-id ID] [--kind K] "
+             "[--ref R] [--note N] [--to STATE(default verified)] "
+             "--reason R [--criterion-id ID] "
              "[--actor-type human|model] --actor-name NAME "
              "[--session-id SID] [--out-json]")
     if not pos:
@@ -1429,7 +1501,6 @@ def cmd_review(argv):
         _err("bm_project: review needs a task id")
         return 2
     task_id = pos[0]
-    project_id = _require(kv, "project-id", usage)
     reason = _require(kv, "reason", usage)
     actor = _actor(kv, usage)
     new_status = kv.get("to") or "verified"
@@ -1451,6 +1522,20 @@ def cmd_review(argv):
     }
     store = _store()
     try:
+        # R-1 (persona dogfood 2026-09-07): project id was a second key
+        # this command demanded on top of task id, which already names
+        # the task's own project (task id is a random hex uuid, unique
+        # store wide). The flag still wins when given, so nothing that
+        # already names one changes; a task id the store does not hold
+        # is refused here rather than passed to review_task, which would
+        # otherwise report the same fact in review_task's own words.
+        project_id = kv.get("project-id")
+        if not project_id:
+            task_row = store.get_task(task_id, raw=True)
+            if task_row is None:
+                _err("bm_project: no task %r in this folder" % task_id)
+                return 1
+            project_id = task_row.get("project_id")
         # ONE composite call (C1, release-closure loop2 refuter fixes):
         # review_task files the evidence AND runs the transition in a
         # SINGLE store transaction, so a transition schema.transition()
@@ -2001,6 +2086,7 @@ def cmd_purge(argv):
 COMMANDS = {
     "start": cmd_start,
     "status": cmd_status,
+    "list": cmd_list,
     "next": cmd_next,
     "task": cmd_task,
     "forecast": cmd_forecast,

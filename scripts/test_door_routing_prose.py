@@ -20,12 +20,16 @@ suite pins THAT SHAPE, not just that some text exists:
   3. The authoritative section never instructs telling the person a run id
      or a run directory; it only prohibits doing so.
 """
+import glob
 import os
 import re
+import sys
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
+sys.path.insert(0, HERE)
+import gen_door_table as GDT  # noqa: E402
 BUNDLE_DIR = os.path.join(REPO_ROOT, "bundle")
 SKILL_PATH = os.path.join(BUNDLE_DIR, "skills", "using-brother", "SKILL.md")
 COMMAND_PATH = os.path.join(BUNDLE_DIR, "commands", "brother.md")
@@ -168,9 +172,14 @@ class ShippedCommandStaysSmall(unittest.TestCase):
 
     The ceiling is a ratchet, not a target: it is set just above today's
     measured size so this is green on arrival and turns red the moment the
-    maintainer prose starts creeping back in."""
+    maintainer prose starts creeping back in.
 
-    CEILING = 80
+    R-5 (persona dogfood, 2026-09-07) moved the ceiling from 80 to 116: the
+    verb table used to be a six-row literal missing 22 real capabilities, and
+    the fix is a generated one row per verb either product ships. That growth
+    is the point of the fix, not drift, so the ratchet moved with it."""
+
+    CEILING = 116
 
     def test_command_file_is_under_the_line_ceiling(self):
         with open(COMMAND_PATH, encoding="utf-8") as fh:
@@ -228,6 +237,84 @@ class NeverNamesTheStorage(unittest.TestCase):
                               "internal identifier %r found in prose meant "
                               "for a person" % leaked)
 
+
+
+class TestDoorTable(unittest.TestCase):
+    """R-5 (persona dogfood, 2026-09-07): the door's verb table used to be a
+    six-row literal typed by hand, so an ask naming any of 22 real
+    capabilities (kickoff, design, work, adopt, handover, learn,
+    prove-this-change, spec-and-data-prep, brief, decisions, and more) fell
+    through to `start` silently. scripts/gen_door_table.py now generates the
+    table from the `name:` frontmatter of every installed skill, between two
+    sentinel comments in bundle/commands/brother.md. These tests pin that the
+    generated table stays complete, stable, and confined to its own region."""
+
+    def test_every_installed_skill_name_appears_in_the_door_table(self):
+        door_text = _read(COMMAND_PATH)
+        missing = []
+        for product in GDT.PRODUCTS:
+            pattern = os.path.join(GDT.ROOT, "products", product, "skills",
+                                    "*", "SKILL.md")
+            paths = sorted(glob.glob(pattern))
+            self.assertTrue(
+                paths, "no skills found under products/%s/skills" % product)
+            for path in paths:
+                name, _typeable = GDT.read_skill(path)
+                row_marker = "| %s |" % name
+                if row_marker not in door_text:
+                    missing.append("%s:%s" % (product, name))
+        self.assertEqual(
+            missing, [],
+            "%s carries no row for: %s" % (COMMAND_PATH, ", ".join(missing)))
+
+    def test_generator_is_idempotent(self):
+        cells = GDT.collect()
+        table_once = GDT.render_table(cells)
+        table_twice = GDT.render_table(GDT.collect())
+        self.assertEqual(
+            table_once, table_twice,
+            "gen_door_table produced a different table on a second read of "
+            "the same skill tree")
+        # A second rewrite of the real door with the same table changes
+        # nothing: rewrite() returns False when the bytes do not move.
+        changed = GDT.rewrite(COMMAND_PATH, table_once)
+        self.assertFalse(
+            changed,
+            "%s is not current: running gen_door_table.py would rewrite it, "
+            "so the shipped table has drifted from the skills on disk"
+            % COMMAND_PATH)
+
+    def test_sentinel_block_is_the_only_rewritten_region(self):
+        before = _read(COMMAND_PATH)
+        start = before.find(GDT.BEGIN)
+        end = before.find(GDT.END)
+        self.assertNotEqual(start, -1, "%s lost its BEGIN sentinel" %
+                             COMMAND_PATH)
+        self.assertNotEqual(end, -1, "%s lost its END sentinel" %
+                             COMMAND_PATH)
+        prose_before = before[:start], before[end:]
+
+        # Rewrite with a deliberately wrong table, then confirm only the
+        # sentinel region moved and everything outside it is byte-identical.
+        poisoned_table = "| Verb | Project (BrotherMode) | Assurance " \
+            "(BrotherSBE) |\n|---|---|---|\n| bogus | `x` | `y` |\n"
+        try:
+            changed = GDT.rewrite(COMMAND_PATH, poisoned_table)
+            self.assertTrue(changed, "rewrite() reported no change for a "
+                             "deliberately different table")
+            after = _read(COMMAND_PATH)
+            new_start = after.find(GDT.BEGIN)
+            new_end = after.find(GDT.END)
+            prose_after = after[:new_start], after[new_end:]
+            self.assertEqual(
+                prose_before, prose_after,
+                "rewriting the sentinel block changed prose outside it")
+            self.assertIn("bogus", after)
+        finally:
+            # Restore the real table so this test leaves no residue behind.
+            real_cells = GDT.collect()
+            restored = GDT.rewrite(COMMAND_PATH, GDT.render_table(real_cells))
+            self.assertTrue(restored or GDT.BEGIN in _read(COMMAND_PATH))
 
 if __name__ == "__main__":
     unittest.main()

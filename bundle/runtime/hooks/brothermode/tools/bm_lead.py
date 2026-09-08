@@ -62,6 +62,7 @@ No em or en dashes anywhere in this file, its comments, or its output.
 """
 
 import importlib.util
+import io
 import json
 import os
 import sys
@@ -236,18 +237,362 @@ def _require(kv, name, usage):
     return val
 
 
+class _NoProjectYet(Exception):
+    """Raised by _resolve_project_id(reader=True) when this folder holds
+    zero projects: the caller is a READER, so instead of exiting 2 it
+    prints R-10's no-project tree read at exit 0. Never raised for a
+    writer (reader defaults to False, which keeps the old sys.exit(2))."""
+
+
+def _resolve_project_id(kv, store, usage, reader=False):
+    """The project this command is about: the flag when one was given,
+    and otherwise the single project this folder holds.
+
+    R-1 (persona dogfood 2026-09-07): every reader here demanded
+    --project-id against a store nothing in the repository derives an id
+    from, so a first-time reader dead-ended on a key they had no way to
+    know. The flag still wins wherever it is given, so nothing that
+    already names one changes behaviour.
+
+    R-10 (persona dogfood 2026-09-07 round 2): a READER (reader=True)
+    finding zero projects raises _NoProjectYet instead of exiting 2, so
+    its caller can print the repository's own tree read instead of a bare
+    refusal. A writer (the default) is unchanged: it still exits 2 with
+    the same sentence it always has.
+
+    Ambiguity is never guessed at, and nothing is inferred from the
+    directory name: two or more projects print their ids and exit 2, the
+    same refusal shape _require above uses, for readers and writers
+    alike. The naming line goes to stderr rather than stdout so --json
+    stays machine readable."""
+    given = kv.get("project-id")
+    if given:
+        return given
+    rows = store.list_projects(raw=True)
+    if len(rows) == 1:
+        _err("bm_lead: reading project %s, the only one in this folder."
+             % rows[0]["project_id"])
+        return rows[0]["project_id"]
+    if not rows and reader:
+        raise _NoProjectYet()
+    _err(usage)
+    if not rows:
+        _err("bm_lead: this folder holds no project yet, and none is "
+             "invented. Start one with: /brothermode:start (or, on a "
+             'clone install: python3 "${CLAUDE_PLUGIN_ROOT}/tools/'
+             'bm_project.py" start)')
+    else:
+        _err("bm_lead: --project-id is required here: this folder holds "
+             "%d projects (%s). Run: /brothermode:status (or, on a "
+             'clone install: python3 "${CLAUDE_PLUGIN_ROOT}/tools/'
+             'bm_project.py" list)'
+             % (len(rows), ", ".join(r["project_id"] for r in rows)))
+    sys.exit(2)
+
+
+# ---------------------------------------------------------------------------
+# R-10 (persona dogfood 2026-09-07 round 2): the no-project tree read.
+#
+# A repository with no BrotherMode store, or a store with zero projects
+# yet, still HAS an answer to a reader's question: its own commits, check
+# receipts, test suites and change-request documents. Every reader below
+# prints that instead of a bare "no project yet" refusal. Nothing here
+# writes: no store is created, no project id is invented, and every git or
+# filesystem read fails toward NO-DATA for its own section rather than a
+# traceback.
+# ---------------------------------------------------------------------------
+
+def _skip_tree_dirs():
+    """Directory basenames a tree walk below never descends into: this
+    project's own enforcement-state directory (named from bs, never a
+    retyped literal) plus the common heavy or irrelevant ones."""
+    return frozenset((bs.STORE_DIRNAME, ".git", "node_modules", ".venv",
+                      "venv", "__pycache__", ".tox", "dist", "build"))
+
+
+def _av():
+    """bm_autosave.py, loaded by path exactly like bm_store.py is: it is
+    the one module in this project that already carries a reviewed git
+    subprocess helper (_run_git, resolve_toplevel), so reading a commit
+    log or a configured name here is reuse, not a second git integration.
+    Returns None on any load failure so every caller fails toward NO-DATA
+    instead of a traceback."""
+    try:
+        return _load("bm_autosave")
+    except Exception:
+        return None
+
+
+def _repo_identity(av, root):
+    """(name, branch), each 'NO-DATA' on any git failure."""
+    name, branch = "NO-DATA", "NO-DATA"
+    try:
+        top = av.resolve_toplevel(root)
+        if top:
+            name = os.path.basename(top.rstrip(os.sep)) or top
+    except Exception:
+        pass
+    try:
+        r = av._run_git(root, "rev-parse", "--abbrev-ref", "HEAD")
+        if r.returncode == 0 and r.stdout.strip():
+            branch = r.stdout.strip()
+    except Exception:
+        pass
+    return name, branch
+
+
+def _recent_commits(av, root, count=5):
+    """Up to `count` '<date> <subject>' lines, newest first, in the
+    commit's own language untouched. [] on any git failure or a
+    repository with no commits yet."""
+    try:
+        r = av._run_git(root, "log", "-%d" % count, "--date=short",
+                        "--pretty=%ad %s")
+        if r.returncode != 0:
+            return []
+        return [line for line in r.stdout.splitlines() if line.strip()]
+    except Exception:
+        return []
+
+
+def _receipt_summary(root):
+    """(counts, newest_name): counts is a dict of PASS, FAIL, NO-DATA
+    over every JSON file under .sbe/evidence whose own "verdict" field is
+    one of those three; newest_name is the most recently modified such
+    file, or "" when none exist. An unreadable file or directory counts
+    as zero rather than raising."""
+    directory = os.path.join(root, ".sbe", "evidence")
+    counts = dict.fromkeys(("PASS", "FAIL", "NO-DATA"), 0)
+    newest_name, newest_mtime = "", -1
+    if not os.path.isdir(directory):
+        return counts, newest_name
+    try:
+        names = os.listdir(directory)
+    except OSError:
+        return counts, newest_name
+    for name in names:
+        path = os.path.join(directory, name)
+        if not name.endswith(".json") or not os.path.isfile(path):
+            continue
+        try:
+            with io.open(path, encoding="utf-8") as fh:
+                data = json.load(fh)
+            mtime = os.path.getmtime(path)
+        except (IOError, OSError, ValueError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        verdict = str(data.get("verdict") or "").strip().upper()
+        if verdict in counts:
+            counts[verdict] += 1
+        if mtime > newest_mtime:
+            newest_mtime, newest_name = mtime, name
+    return counts, newest_name
+
+
+def _no_project_verdict(counts):
+    """references/status-view.md's Verdict field, computed from a repo
+    that holds no project yet: the same 'do not ship yet' shape
+    collect_status uses, priced from whatever receipts are already on
+    disk rather than from any project record."""
+    if counts["FAIL"]:
+        return "do not ship yet: %d failing check(s) recorded" % counts["FAIL"]
+    if counts["NO-DATA"]:
+        return ("do not ship yet: %d unpriced gap(s) recorded"
+                % counts["NO-DATA"])
+    if not counts["PASS"]:
+        return "do not ship yet: no executed evidence"
+    return ("nothing recorded is blocking: %d passing check(s) recorded"
+            % counts["PASS"])
+
+
+def _test_suites(root):
+    """[(relpath, file_count), ...] for every directory literally named
+    'tests' or 'test' anywhere under root, file_count counting every file
+    under it. Common heavy or irrelevant directories are never descended
+    into. [] on any walk failure."""
+    found = []
+    skip = _skip_tree_dirs()
+    try:
+        for dirpath, dirnames, _files in os.walk(root):
+            dirnames[:] = [d for d in dirnames
+                          if d not in skip and not d.startswith(".")]
+            if os.path.basename(dirpath) in ("tests", "test"):
+                count = sum(len(fs) for _d, _ds, fs in os.walk(dirpath))
+                found.append((os.path.relpath(dirpath, root), count))
+    except OSError:
+        pass
+    return found
+
+
+def _dossiers_and_change_requests(root):
+    """Every directory named 'design' or 'dossiers' anywhere under root,
+    plus every file directly under docs/ whose name starts with 'CR-' or
+    'CHANGE-REQUEST' (the anchor the persona corpus found: a change's own
+    rationale sitting unread in docs/CHANGE-REQUEST-TEMPLATE.md). [] on
+    any walk failure."""
+    found = []
+    skip = _skip_tree_dirs()
+    try:
+        for dirpath, dirnames, _files in os.walk(root):
+            dirnames[:] = [d for d in dirnames
+                          if d not in skip and not d.startswith(".")]
+            if os.path.basename(dirpath) in ("design", "dossiers"):
+                found.append(os.path.relpath(dirpath, root))
+    except OSError:
+        pass
+    docs_dir = os.path.join(root, "docs")
+    if os.path.isdir(docs_dir):
+        try:
+            for name in sorted(os.listdir(docs_dir)):
+                if name.startswith("CR-") or name.startswith("CHANGE-REQUEST"):
+                    found.append(os.path.join("docs", name))
+        except OSError:
+            pass
+    return found
+
+
+def _no_project_tree_read(root, want_verdict=False):
+    """The lines a READER prints, at exit 0, when this folder holds no
+    BrotherMode project yet: the repository's own commits, receipts, test
+    suites and change-request documents, in place of a bare refusal.
+    want_verdict prepends status's own leading Verdict line; every other
+    reader gets the plain header."""
+    counts, newest = _receipt_summary(root)
+    lines = []
+    if want_verdict:
+        lines.append("Verdict: %s" % _no_project_verdict(counts))
+        lines.append("")
+    lines.append("No Brother project here yet. What the repository itself "
+                 "says:")
+    lines.append("")
+    av = _av()
+    if av is None:
+        lines.append("Repository: NO-DATA")
+        lines.append("Last commits: NO-DATA")
+    else:
+        name, branch = _repo_identity(av, root)
+        lines.append("Repository: %s (branch %s)" % (name, branch))
+        commits = _recent_commits(av, root)
+        if commits:
+            lines.append("Last %d commit(s):" % len(commits))
+            for line in commits:
+                lines.append("  %s" % line)
+        else:
+            lines.append("Last commits: NO-DATA")
+    total = sum(counts.values())
+    if total:
+        lines.append(
+            "Check receipts under .sbe/evidence: %d PASS, %d FAIL, "
+            "%d NO-DATA (newest: %s)"
+            % (counts["PASS"], counts["FAIL"], counts["NO-DATA"],
+               newest or "NO-DATA"))
+    else:
+        lines.append("Check receipts under .sbe/evidence: none found")
+    suites = _test_suites(root)
+    if suites:
+        lines.append("Test suites found:")
+        for rel, count in suites:
+            lines.append("  %s (%d file(s))" % (rel, count))
+    else:
+        lines.append("Test suites found: none")
+    docs = _dossiers_and_change_requests(root)
+    if docs:
+        lines.append("Dossiers and change requests found:")
+        for rel in docs:
+            lines.append("  %s" % rel)
+    else:
+        lines.append("Dossiers and change requests found: none")
+    lines.append("")
+    lines.append("Next: /brothermode:start to make this a Brother project "
+                 "(or, on a clone install: python3 "
+                 '"${CLAUDE_PLUGIN_ROOT}/tools/bm_project.py" start)')
+    return lines
+
+
+def _print_no_project_tree_read(root, want_verdict):
+    for line in _no_project_tree_read(root, want_verdict):
+        _out(line)
+
+
+def _reader_project_id(kv, usage, want_verdict=False):
+    """The project id for a READER command (status, decisions, brief, an
+    outcome listing, handover-pack): resolved the normal way, or None
+    after already printing R-10's no-project tree read at exit 0.
+
+    Detection always goes through _store_or_refuse, the ONLY function
+    that may construct bs.Store or bs.ReadOnlyStore
+    (TestConsentIsTheOnlyDoor's structural guard): a reader must never
+    risk creating the store just to find out whether one exists, and it
+    must never open a second, unaccounted-for door to do so. A
+    repository with no store at all raises an ownership refusal here,
+    reason "no-store", before _resolve_project_id ever runs; a store
+    that exists but holds zero projects reaches _resolve_project_id and
+    raises _NoProjectYet there instead. Both print the same tree read."""
+    root = _root()
+    try:
+        probe = _store_or_refuse(kv, write=False)
+    except bs.OwnershipRefused as exc:
+        if exc.reason != "no-store":
+            raise
+        _print_no_project_tree_read(root, want_verdict)
+        return None
+    try:
+        return _resolve_project_id(kv, probe, usage, reader=True)
+    except _NoProjectYet:
+        _print_no_project_tree_read(root, want_verdict)
+        return None
+    finally:
+        _close(probe)
+
+
+
+def _default_actor_name():
+    """(name, source): git config user.name, then the USER environment
+    variable, then a fixed fallback. Never raises: a git call that fails,
+    or a config with no user.name set, falls through to the next source.
+
+    R-10 (persona dogfood 2026-09-07 round 2): SKILL.md's own documented
+    first command omitted --actor-name, so a junior copying it verbatim
+    hit a usage error on the very first mechanical step of her first ten
+    minutes."""
+    av = _av()
+    if av is not None:
+        try:
+            r = av._run_git(_root(), "config", "user.name")
+            name = (r.stdout or "").strip()
+            if r.returncode == 0 and name:
+                return name, "git config user.name"
+        except Exception:
+            pass
+    user = os.environ.get("USER") or os.environ.get("USERNAME")
+    if user:
+        return user, "the USER environment variable"
+    return "unknown", "no name could be found"
+
+
 def _actor(kv, usage):
     """The actor dict every mutating subcommand passes to the store, so the
     trail is a real record of who or what acted. Copied from
     tools/bm_project.py's own _actor, including the fresh unguessable
-    session id when --session-id is omitted."""
+    session id when --session-id is omitted.
+
+    R-10 (persona dogfood 2026-09-07 round 2): --actor-name now DEFAULTS
+    rather than exits 2, because SKILL.md's own documented first command
+    omits it. The default is named on stderr so a human sees exactly
+    whose name was recorded and where it came from; an explicit
+    --actor-name still always wins."""
     actor_type = kv.get("actor-type", "model")
     if actor_type not in ("human", "model"):
         _err(usage)
         _err("bm_lead: --actor-type must be 'human' or 'model', got %r"
              % actor_type)
         sys.exit(2)
-    actor_name = _require(kv, "actor-name", usage)
+    actor_name = kv.get("actor-name")
+    if not actor_name:
+        actor_name, source = _default_actor_name()
+        _err("bm_lead: --actor-name not given; using %r, from %s."
+             % (actor_name, source))
     session_id = kv.get("session-id") or ("cli-" + uuid.uuid4().hex)
     return {"actor_type": actor_type, "actor_name": actor_name,
             "session_id": session_id}
@@ -559,6 +904,116 @@ def _ranked_decisions(store, project_id):
                                                  len(order)),))
 
 
+def _failed_receipts(root):
+    """(failures, no_data, unreadable): every check receipt under
+    .sbe/evidence that RECORDS A FAILURE, every one that RECORDS NO-DATA
+    (an unpriced gap, never a failure and never a pass), and the names of
+    the files there that did not read as a receipt at all.
+
+    R-2 (persona dogfood 2026-09-07): the decision surface computed
+    "nothing is waiting on a decision from you" out of ONE table while a
+    failing check sat in the receipt store beside it. This reads that
+    store and never writes to it: no receipt is minted here, no verdict
+    is turned into another one, and there is no second store (the
+    receipts stay where brothersbe.tasks already keeps them).
+
+    R-10 (persona dogfood 2026-09-07 round 2): a NO-DATA verdict (a gate
+    missing a migration receipt, say) still read as "nothing is waiting
+    on a decision from you", when an unpriced gap is exactly the kind of
+    thing a decision maker needs named before they approve.
+
+    An unreadable file is NAMED rather than skipped, so a directory full
+    of broken files cannot read like an empty one; that is the rule
+    brothersbe's own _matching_receipt states, copied here.
+
+    A receipt counts as a failure when it says so ("verdict": "FAIL")
+    or, where it carries no verdict field at all, when its recorded exit
+    code is not zero. It counts as an unpriced gap when its verdict is
+    exactly "NO-DATA"."""
+    directory = os.path.join(root, ".sbe", "evidence")
+    failures, no_data, unreadable = [], [], []
+    if not os.path.isdir(directory):
+        return failures, no_data, unreadable
+    try:
+        names = sorted(os.listdir(directory))
+    except OSError as exc:
+        return failures, no_data, ["%s could not be listed: %s" % (directory, exc)]
+    for name in names:
+        path = os.path.join(directory, name)
+        if not name.endswith(".json") or not os.path.isfile(path):
+            continue
+        try:
+            with io.open(path, encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (IOError, OSError, ValueError) as exc:
+            unreadable.append("%s (%s)" % (name, exc))
+            continue
+        if not isinstance(data, dict):
+            unreadable.append("%s (not a receipt object)" % name)
+            continue
+        verdict = str(data.get("verdict") or "").strip().upper()
+        code = data.get("exitCode")
+        if verdict == "FAIL" or (not verdict and isinstance(code, int)
+                                 and code != 0):
+            failures.append(data)
+        elif verdict == "NO-DATA":
+            no_data.append(data)
+    return failures, no_data, unreadable
+
+
+def _receipt_decision(receipt):
+    """A recorded check failure, shaped as render_decision_card's own
+    input so the card format stays in ONE function. Nothing here is
+    stored and nothing is written back: these are the fields that
+    renderer reads, filled in from a receipt that already exists."""
+    command = " ".join(str(a) for a in (receipt.get("argv") or [])).strip()
+    if not command:
+        command = "a check whose command the receipt does not record"
+    return {
+        "subject": "a check that failed: %s" % command,
+        "claim": "fix it before this ships",
+        "confidence": "high",
+        "confidence_basis": "the receipt records exit code %s"
+                            % receipt.get("exitCode"),
+        "evidence_class": "EXECUTED",
+        "evidence": command,
+        "alternatives": [
+            {"option": "ship anyway and record why it may stand",
+             "why_not": "the failure stays on the record and nothing "
+                        "re-runs the check for you"}],
+        "flip_condition": "the same command exits zero",
+    }
+
+
+def _receipt_gap_decision(receipt):
+    """A recorded NO-DATA verdict, shaped as render_decision_card's own
+    input. NO-DATA means nothing was priced yet, not that anything
+    failed: the subject names it as an unpriced gap, and the reasons the
+    receipt itself gives (its own "reasons" list, when it carries one)
+    are what is missing."""
+    command = " ".join(str(a) for a in (receipt.get("argv") or [])).strip()
+    if not command:
+        command = "a check whose command the receipt does not record"
+    reasons = receipt.get("reasons")
+    if isinstance(reasons, list) and reasons:
+        gap = "; ".join(str(r) for r in reasons)
+    else:
+        gap = "the receipt does not say what is missing"
+    return dict(
+        subject="an unpriced gap: %s" % command,
+        claim="price the gap before this ships: %s" % gap,
+        confidence="high",
+        confidence_basis="the receipt records NO-DATA rather than a result",
+        evidence_class="EXECUTED",
+        evidence=command,
+        alternatives=[dict(
+            option="ship anyway and record why the gap is acceptable",
+            why_not="the gap stays unpriced and nothing re-runs the "
+                    "check for you")],
+        flip_condition="the same command records a PASS or FAIL verdict",
+    )
+
+
 def _floor_named_by(insight):
     """The safety floor id a decision names, or ''. A decision that touches
     one of the six floors is the one thing nothing else can move past."""
@@ -792,6 +1247,22 @@ def collect_status(store, project_id):
     spend = store.spend_totals(project_id)
     fields = []
 
+    # R-4 (persona dogfood 2026-09-07): the eight fields answered every
+    # question except the one every reader actually arrived with, so the
+    # ship verdict LEADS. It is computed from three things this function
+    # has already read (the open decisions, the open risks, the newest
+    # executed evidence) and reads nothing new; it is a count with a name
+    # put to it, never an opinion.
+    blocking = bool(decisions) or bool(risks) or not executed
+    fields.append((
+        "Verdict",
+        "%s: %d open decision(s), %d open risk(s), %s"
+        % ("do not ship yet" if blocking else "nothing is blocking",
+           len(decisions), len(risks),
+           "no executed evidence" if not executed
+           else "evidence recorded"),
+        []))
+
     goal = (project.get("goal") or "").strip()
     goal_extra = []
     if not goal:
@@ -969,8 +1440,13 @@ def _engineering_block(store, project_id, run, units, spend, contract,
 
 
 def render_status(view, ic=False, advanced=False, footer=""):
-    """The eight fields, in order, and nothing else at column zero unless
-    the reader explicitly asked for more."""
+    """The ship verdict, then the eight fields, in order, and nothing
+    else at column zero unless the reader explicitly asked for more.
+
+    The verdict was added by R-4 (persona dogfood 2026-09-07): the eight
+    fields never said whether the thing could ship, which is the question
+    the reader had. It is computed in collect_status beside them, from
+    the same records, so there is still ONE collector."""
     lines = []
     for label, value, extra in view["fields"]:
         lines.append("%s: %s" % (label, value))
@@ -1231,8 +1707,34 @@ def _render_situation(store, project_id, until):
         lines.append("")
         for status in sorted(by_status):
             lines.append("- %s: %d" % (status, by_status[status]))
-    else:
-        lines.append("no run has been opened")
+    # R-2 (persona dogfood 2026-09-07): this page reported "no run has
+    # been opened" over a task that had been reviewed to verified with
+    # its evidence id on file, because it read the run layer only. The
+    # tasks and their review evidence are the other half of the same
+    # project's work, and a handover that drops them is worse than a
+    # refusal: it looks complete.
+    tasks = store.list_tasks(project_id, raw=True)
+    if tasks:
+        if run:
+            lines.append("")
+        for task in tasks:
+            lines.append("- task %s: %s (%s)"
+                         % (task.get("task_id"),
+                            (task.get("title") or "").strip()
+                            or "no title recorded",
+                            task.get("status") or "no status recorded"))
+            for row in store.list_evidence("task", task.get("task_id"),
+                                           raw=True):
+                if until and (row.get("created_at") or "") > until:
+                    continue
+                lines.append("  reviewed: %s %s (evidence %s)"
+                             % (row.get("kind") or "no kind recorded",
+                                (row.get("ref") or "").strip()
+                                or "no reference recorded",
+                                row.get("evidence_id")))
+    elif not run:
+        lines.append("no run has been opened, and no task has been "
+                     "recorded either")
     lines.append("")
     lines.append("## What is still estimated")
     lines.append("")
@@ -1518,10 +2020,16 @@ def cmd_outcome(argv):
     usage = ("usage: outcome --project-id ID [--set \"<what you want>\"] "
              "[--name NAME] [--ic] [--json] [--actor-type human|model] "
              "--actor-name NAME")
-    project_id = _require(kv, "project-id", usage)
     ic, advanced, footer = _view_flags(kv)
     wants_set = isinstance(kv.get("set"), str)
-    store = _store_or_refuse(kv, write=wants_set)
+    if wants_set:
+        store = _store_or_refuse(kv, write=True)
+        project_id = _resolve_project_id(kv, store, usage)
+    else:
+        project_id = _reader_project_id(kv, usage)
+        if project_id is None:
+            return 0
+        store = _store_or_refuse(kv, write=False)
     try:
         if wants_set:
             actor = _actor(kv, usage)
@@ -1562,8 +2070,10 @@ def cmd_status(argv):
                       wants_value=("project-id",))
     usage = ("usage: status --project-id ID [--ic] [--advanced] [--json] "
              "[--raw]")
-    project_id = _require(kv, "project-id", usage)
     ic, advanced, footer = _view_flags(kv)
+    project_id = _reader_project_id(kv, usage, want_verdict=True)
+    if project_id is None:
+        return 0
     store = _store_or_refuse(kv, write=False)
     try:
         if store.get_project(project_id, raw=True) is None:
@@ -1587,8 +2097,10 @@ def cmd_decisions(argv):
     _pos, kv = _parse(argv, ("project-id", "json") + _VIEW_FLAGS,
                       wants_value=("project-id",))
     usage = "usage: decisions --project-id ID [--ic] [--json]"
-    project_id = _require(kv, "project-id", usage)
     ic, _advanced, footer = _view_flags(kv)
+    project_id = _reader_project_id(kv, usage)
+    if project_id is None:
+        return 0
     store = _store_or_refuse(kv, write=False)
     try:
         rows = _ranked_decisions(store, project_id)
@@ -1596,6 +2108,31 @@ def cmd_decisions(argv):
             _print_json({"project_id": project_id, "open": rows})
             return 0
         if not rows:
+            # R-2 (persona dogfood 2026-09-07): "nothing is waiting" was
+            # computed from ONE table while a failing check sat in the
+            # receipt store beside it. A recorded failure IS a decision
+            # waiting on a person, so it travels as the same card every
+            # other decision travels as.
+            #
+            # R-10 (persona dogfood 2026-09-07 round 2): a NO-DATA
+            # receipt (an unpriced gap) travels the same way, beside the
+            # FAIL cards, never folded into them: a gap is not a failure.
+            failed, gaps, unreadable = _failed_receipts(_root())
+            for name in unreadable:
+                _out("A file in the check receipts could not be read: %s"
+                     % name)
+            if failed or gaps:
+                for receipt in failed:
+                    for line in render_decision_card(
+                            _receipt_decision(receipt), ic=ic):
+                        _out(line)
+                    _out("")
+                for receipt in gaps:
+                    for line in render_decision_card(
+                            _receipt_gap_decision(receipt), ic=ic):
+                        _out(line)
+                    _out("")
+                return 0
             _out("Nothing is waiting on a decision from you.")
             text, why, command = next_action(store, project_id)
             _out("Next step: %s" % text)
@@ -1645,8 +2182,10 @@ def cmd_brief(argv):
                       wants_value=("project-id",) + _ACTOR_FLAGS)
     usage = ("usage: brief --project-id ID [--ic] [--json] "
              "[--actor-name NAME]")
-    project_id = _require(kv, "project-id", usage)
     ic, _advanced, footer = _view_flags(kv)
+    project_id = _reader_project_id(kv, usage)
+    if project_id is None:
+        return 0
     store = _store_or_refuse(kv, write=True)
     try:
         if store.get_project(project_id, raw=True) is None:
@@ -1708,7 +2247,6 @@ def cmd_insight(argv):
              "--control-offered is REQUIRED with --decision-class: a key "
              "decision that offers you no way to take it back cannot be "
              "recorded at all.")
-    project_id = _require(kv, "project-id", usage)
     actor = _actor(kv, usage)
     payload = {}
     for flag, field in (("kind", "kind"), ("subject", "subject"),
@@ -1735,6 +2273,7 @@ def cmd_insight(argv):
             return 2
     store = _store_or_refuse(kv, write=True)
     try:
+        project_id = _resolve_project_id(kv, store, usage)
         try:
             written = store.record_insight(project_id, payload, actor)
         except bs.OwnershipRefused as exc:
@@ -1781,12 +2320,12 @@ def cmd_handback(argv):
     usage = ("usage: handback --project-id ID --decision-id INSIGHT_ID "
              "--why \"<text>\" [--json] [--actor-type human|model] "
              "--actor-name NAME")
-    project_id = _require(kv, "project-id", usage)
     decision_id = _require(kv, "decision-id", usage)
     why = _require(kv, "why", usage)
     actor = _actor(kv, usage)
     store = _store_or_refuse(kv, write=True)
     try:
+        project_id = _resolve_project_id(kv, store, usage)
         decision = store.get_insight(decision_id, raw=True)
         if decision is None:
             _err("bm_lead: refused: not-found: no decision record %r"
@@ -1939,7 +2478,6 @@ def cmd_handover_pack(argv):
     _pos, kv = _parse(argv, ("project-id", "out", "json"),
                       wants_value=("project-id", "out"))
     usage = "usage: handover-pack --project-id ID [--out DIR] [--json]"
-    project_id = _require(kv, "project-id", usage)
     # A writable handle, and the reason is not laziness: this command
     # writes seven pages into the project, so "read only" was never true of
     # it, and one of those pages renders the developer brief, which reads
@@ -1947,6 +2485,9 @@ def cmd_handover_pack(argv):
     # not on the read-only view, so a read-only handle would silently drop
     # three sections of that page while the standalone copy of the same
     # page kept them. Both go through the same one door either way.
+    project_id = _reader_project_id(kv, usage)
+    if project_id is None:
+        return 0
     store = _store_or_refuse(kv, write=True)
     try:
         if store.get_project(project_id, raw=True) is None:

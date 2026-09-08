@@ -109,6 +109,16 @@ class HandoverScenario(unittest.TestCase):
         cwd = kwargs.pop("cwd", self.repo)
         return _run([sys.executable, SBE] + list(args), cwd=cwd)
 
+    #: Since R-2, acceptance over absent evidence is refused. The scenarios
+    #: below prepare a dossier with no receipt store, no 09-convergence.json,
+    #: no 10-approval.json and no review record, because each of them is
+    #: about something else entirely: a race, a staleness rule, an overwrite
+    #: refusal, the next-action reducer. Each takes the recorded escape
+    #: rather than pretending the evidence is there; the refusal itself is
+    #: driven, both ways, by TestAcknowledge below.
+    NO_EVIDENCE = ("--force", "--why", "fixture: this scenario carries no evidence and is "
+                                       "about something else")
+
     def handover(self, *args):
         return self.sbe("handover", *args)
 
@@ -439,7 +449,8 @@ class TestOverwriteRefusal(HandoverScenario):
 
     def test_prepare_refuses_to_overwrite_an_acknowledged_handover(self):
         doss = self._prepared()
-        code, text, _ = self.handover("acknowledge", doss, "--receiver", "bob@example.com")
+        code, text, _ = self.handover("acknowledge", doss, "--receiver", "bob@example.com",
+                                      *self.NO_EVIDENCE)
         self.assertEqual(code, 0, text)
         code, text, _ = self.handover("prepare", doss, "--outgoing", "alice@example.com",
                                       "--receiver", "carol@example.com")
@@ -591,7 +602,8 @@ class TestAcknowledgeReject(HandoverScenario):
     def test_prepared_plus_acknowledged_is_complete(self):
         doss = self._prepared()
         head = self._read_handover(doss)["headSha"]
-        code, text, _ = self.handover("acknowledge", doss, "--receiver", "bob@example.com")
+        code, text, _ = self.handover("acknowledge", doss, "--receiver", "bob@example.com",
+                                      *self.NO_EVIDENCE)
         self.assertEqual(code, 0, text)
         data = self._read_handover(doss)
         self.assertEqual(data["status"], "acknowledged")
@@ -651,7 +663,8 @@ class TestAcknowledgeReject(HandoverScenario):
                       "--receiver", "bob@example.com")
         after_prepare = io.open(reg_path).read()
         self.assertEqual(before, after_prepare, "prepare must never write the task registry")
-        self.handover("acknowledge", doss, "--receiver", "bob@example.com")
+        self.handover("acknowledge", doss, "--receiver", "bob@example.com",
+                      *self.NO_EVIDENCE)
         after_ack = io.open(reg_path).read()
         self.assertEqual(before, after_ack, "acknowledge must never write the task "
                                             "registry either: LT-301 only records the "
@@ -670,7 +683,8 @@ class TestAcknowledgeReject(HandoverScenario):
         results = {}
 
         def go(name, receiver):
-            code, text, _ = self.handover("acknowledge", doss, "--receiver", receiver)
+            code, text, _ = self.handover("acknowledge", doss, "--receiver", receiver,
+                                          *self.NO_EVIDENCE)
             results[name] = (code, text)
 
         t1 = threading.Thread(target=go, args=("x", "bob@example.com"))
@@ -701,7 +715,8 @@ class TestAcknowledgeReject(HandoverScenario):
         results = {}
 
         def go(name, receiver):
-            code, text, _ = self.handover("acknowledge", doss, "--receiver", receiver)
+            code, text, _ = self.handover("acknowledge", doss, "--receiver", receiver,
+                                          *self.NO_EVIDENCE)
             results[name] = (code, text)
 
         t1 = threading.Thread(target=go, args=("x", "bob@example.com"))
@@ -723,6 +738,101 @@ class TestAcknowledgeReject(HandoverScenario):
 # ---------------------------------------------------------------------------
 # Frozen snapshot: a prepared record is not silently re-derived on read.
 # ---------------------------------------------------------------------------
+
+class TestAcknowledge(HandoverScenario):
+    """R-2, driven backwards. The defect: `requiredAccess` was the only thing
+    acceptance ever consulted, and it is empty on a dossier nobody recorded
+    access needs for, so a handover whose own evidence block read absent on
+    every entry accepted at exit 0 and moved ownership, on a change whose
+    `sbe review` exited 1 against the same commit (persona transcript B3-S1).
+    The evidence block was already in the record; it was never read."""
+
+    def test_acknowledge_refuses_when_every_evidence_entry_is_absent(self):
+        doss = self._prepared()
+        prepared = self._read_handover(doss)
+        self.assertTrue(prepared["evidence"], prepared)
+        self.assertTrue(all(e["status"] == "absent" for e in prepared["evidence"]),
+                        "this scenario is only the defect's scenario while every entry "
+                        "really is absent: %s" % prepared["evidence"])
+        self.assertEqual(prepared["requiredAccess"], [],
+                         "the point of the case: the ONE old gate is empty here")
+
+        code, text, _ = self.handover("acknowledge", doss, "--receiver", "bob@example.com")
+        self.assertNotEqual(code, 0,
+                            "acceptance moves ownership and must not move it over evidence "
+                            "that is absent on every entry: %s" % text)
+        for kind in ("receipt-store", "convergence", "approval", "review"):
+            self.assertIn(kind, text, "the refusal must name what is absent: %s" % text)
+        data = self._read_handover(doss)
+        self.assertEqual(data["status"], "prepared",
+                         "a refused acknowledge must leave the handover pending")
+        self.assertIsNone(data["acknowledgment"], data)
+
+    def test_acknowledge_accepts_once_the_evidence_is_no_longer_absent(self):
+        """The calibration: the same dossier, the same receiver, with the
+        three dossier-side entries recorded and bound to this head, prepared
+        ONCE. Without it the test above would also pass against an
+        acknowledge that refused everything.
+
+        `_prepared()` is not used here: as `test_acknowledged_handover_
+        action_equals_the_reducers_pick` above already documents, a
+        convergence/approval/review record can only read CURRENT by binding
+        to the very commit that is HEAD, so it cannot also be part of that
+        commit -- a second `prepare` call over an already-prepared,
+        not-yet-acknowledged dossier is refused as an overwrite besides."""
+        doss = self._change("chg-a", "src/a.py")
+        head = self.commit_all("dossier")
+        for name, payload in (
+                ("09-convergence.json", {"headSha": head, "final": "PASS"}),
+                ("10-approval.json", {"headSha": head, "final": "PASS"}),
+                ("11-review.json", {"headSha": head, "reviewer": "carol@example.com",
+                                    "reviewerType": "human", "result": "PASS"})):
+            io.open(os.path.join(doss, name), "w").write(json.dumps(payload, indent=2))
+        out = os.path.join(self.repo, ".sbe", "evidence", "a.json")
+        code, text = self._receipt(out, "src/a.py")
+        self.assertEqual(code, 0, text)
+        code, text, _ = self.handover("prepare", doss, "--outgoing", "alice@example.com",
+                                      "--receiver", "bob@example.com")
+        self.assertEqual(code, 0, text)
+        prepared = self._read_handover(doss)
+        self.assertEqual([e for e in prepared["evidence"] if e["status"] == "absent"], [],
+                         "the calibration is only a calibration while nothing is absent: %s"
+                         % prepared["evidence"])
+
+        code, text, _ = self.handover("acknowledge", doss, "--receiver", "bob@example.com")
+        self.assertEqual(code, 0, text)
+        self.assertEqual(self._read_handover(doss)["status"], "acknowledged")
+
+    def test_force_records_the_disposition_and_never_reads_as_evidenced(self):
+        doss = self._prepared()
+        code, text, _ = self.handover("acknowledge", doss, "--receiver", "bob@example.com",
+                                      "--force", "--why", "receiver accepts the debt")
+        self.assertEqual(code, 0, text)
+        ack = self._read_handover(doss)["acknowledgment"]
+        self.assertEqual(ack["forced"]["why"], "receiver accepts the debt", ack)
+        self.assertEqual(sorted(ack["forced"]["absentEvidence"]),
+                         ["approval", "convergence", "receipt-store", "review"],
+                         "the record must carry exactly what the acceptance waived")
+
+    def test_force_without_why_is_refused(self):
+        doss = self._prepared()
+        code, text, _ = self.handover("acknowledge", doss, "--receiver", "bob@example.com",
+                                      "--force")
+        self.assertNotEqual(code, 0, "a forced acceptance with no reason is an off switch, "
+                                     "not a decision: %s" % text)
+        self.assertEqual(self._read_handover(doss)["status"], "prepared")
+
+    def test_absent_evidence_never_blocks_a_rejection(self):
+        """The receiver who cannot get evidence must still be able to hand the
+        change BACK. Refusing a rejection would trap ownership with someone who
+        has already declined it, exactly as `requiredAccess` does not block
+        one."""
+        doss = self._prepared()
+        code, text, _ = self.handover("reject", doss, "--receiver", "bob@example.com",
+                                      "--reason", "no evidence recorded for this change")
+        self.assertEqual(code, 0, text)
+        self.assertEqual(self._read_handover(doss)["status"], "rejected")
+
 
 class TestFrozenSnapshot(HandoverScenario):
     def test_task_changed_after_preparation_leaves_the_record_frozen(self):
@@ -988,7 +1098,8 @@ class TestCanonicalNextAction(HandoverScenario):
                          "handover's own next action must equal an INDEPENDENT reduction: "
                          "handover=%r reducer=%r" % (prepared["nextAction"], reduced["reason"]))
 
-        code, text, _ = self.handover("acknowledge", doss, "--receiver", "bob@example.com")
+        code, text, _ = self.handover("acknowledge", doss, "--receiver", "bob@example.com",
+                                      *self.NO_EVIDENCE)
         self.assertEqual(code, 0, text)
         acknowledged = self._read_handover(doss)
         self.assertEqual(acknowledged["nextAction"], prepared["nextAction"],
@@ -1162,7 +1273,8 @@ class TestRecordSurvivesItsOwnIntroducingCommit(HandoverScenario):
         clone_dir = self._clone()
         clone_doss = os.path.join(clone_dir, "design", "chg-a")
         code, text, _ = _run([sys.executable, SBE, "handover", "acknowledge", clone_doss,
-                              "--receiver", "bob@example.com"], cwd=clone_dir)
+                              "--receiver", "bob@example.com"]
+                             + list(self.NO_EVIDENCE), cwd=clone_dir)
         self.assertEqual(code, 0, "acknowledging in a clone, right after the only commit "
                                   "that could carry the record there, must succeed: %s" % text)
         data = json.loads(io.open(os.path.join(clone_doss, "12-handover.json")).read())
@@ -1199,7 +1311,8 @@ class TestRecordSurvivesItsOwnIntroducingCommit(HandoverScenario):
         # outside the exemption".
         self.git("commit", "--allow-empty", "-qm", "commit 3 (empty)")
 
-        code, text, _ = self.handover("acknowledge", doss, "--receiver", "bob@example.com")
+        code, text, _ = self.handover("acknowledge", doss, "--receiver", "bob@example.com",
+                                      *self.NO_EVIDENCE)
         self.assertEqual(code, 0, "several record-only commits in a row must not stale the "
                                   "handover: %s" % text)
 

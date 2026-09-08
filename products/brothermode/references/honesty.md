@@ -24,3 +24,14 @@ verified path; a pick against the recommendation is recorded and executed
 wholeheartedly. At close, file records in their sanctioned home and reserve asks
 for genuinely founder-owned gates.
 
+## Language
+
+R-7 (persona dogfood 2026-09-07): answer in the language the user wrote in.
+Where a tool's own output is English, as bm_lead.py, bm_project.py and the
+rest of this product's commands print, read it out to the user in their own
+language, and say once, plainly, that the record on disk itself stays in
+English. This is a rule for how a finding is READ OUT, never for what a
+tool writes: never translate a tool's raw stdout in place, never add a
+translation library or dependency, and never invent a foreign-language
+error message a tool did not actually produce.
+

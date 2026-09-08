@@ -22,7 +22,7 @@ VACUOUS_VALUES, imported by everything), and a value outside it is REFUSED by
 name rather than guessed at, exactly as sbe_decide.py reports an unrecognized
 criterion value instead of ignoring it.
 """
-import json, os, sys, time
+import io, json, os, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from sbe_checks import answered, boolean_answer, BOOLEAN_VOCABULARY
@@ -364,6 +364,162 @@ def normalize_origin(origin):
     return result
 
 
+#: The keys `--answers` accepts, flat: the five QUESTIONS keys `read_answers`
+#: already validates, plus the five ceremony fields the CLI asks for once the
+#: tier is known. Ten in all, which is the most any intake asks.
+ANSWER_FILE_KEYS = tuple(k for k, _p in QUESTIONS) + (
+    "origin", "fixes", "requested_by", "desired_outcome", "value_hypothesis")
+
+#: The most questions an intake at each tier can ask, counting the five fixed
+#: tier questions: origin is always asked, a defect origin adds `fixes`, and
+#: the intent questions scale with tier (none at T0, two at T1, three at T2 and
+#: T3). Ten at T3 is the number the kickoff skill documents.
+#:
+#: It is a CEILING, not a prediction, and it is announced as one: a feature
+#: intake never draws the `fixes` question, so a run can end one short of it.
+#: The alternative, an exact total, cannot be computed where the counter is
+#: needed, because whether `fixes` is asked is not known until the origin
+#: question it follows has been answered.
+QUESTION_BUDGET = {"T0": 7, "T1": 9, "T2": 10, "T3": 10}
+
+
+def load_answers_file(path):
+    """(supplied, problems): the answers `path` supplies, each read by the same
+    rule the prompt uses, or named one per line as unreadable.
+
+    NOTHING IS DEFAULTED HERE. A key the file omits is simply not supplied and
+    the CLI asks that question exactly as before; a key it supplies with a value
+    outside the accepted vocabulary is REFUSED BY NAME, exactly as `ask()`
+    refuses that same value typed at the prompt. The two paths therefore accept
+    the same answers and refuse the same answers, which is the only property
+    that makes a file a substitute for sitting there. A file that silently
+    filled a blank would be writing an intake nobody answered.
+    """
+    try:
+        with io.open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (ValueError, OSError) as exc:
+        return {}, ["--answers %s could not be read as JSON (%s)" % (path, exc)]
+    if not isinstance(data, dict):
+        return {}, ["--answers %s must hold a JSON object of answer keys, got %s"
+                    % (path, type(data).__name__)]
+    supplied, problems = {}, []
+    unknown = [k for k in sorted(data) if k not in ANSWER_FILE_KEYS]
+    if unknown:
+        problems.append("--answers %s names %s, which no question reads (accepted: %s)"
+                        % (path, ", ".join(unknown), ", ".join(ANSWER_FILE_KEYS)))
+    for key, _prompt in QUESTIONS:
+        if key not in data:
+            continue
+        values, said = read_answers({key: data[key]})
+        if key in values:
+            supplied[key] = values[key]
+        else:
+            problems.append(next(p for p in said if p.startswith(key + "=")))
+    if "origin" in data:
+        raw = data["origin"]
+        candidate = " ".join(str(raw).split()).casefold() if isinstance(raw, str) else raw
+        if candidate in ORIGIN_VALUES:
+            supplied["origin"] = candidate
+        else:
+            problems.append("origin=%r is not a recognized value (accepted: %s)"
+                            % (raw, ", ".join(ORIGIN_VALUES)))
+    for key in ("fixes", "requested_by", "desired_outcome", "value_hypothesis"):
+        if key not in data:
+            continue
+        value = answered(data[key])
+        if value is None:
+            problems.append("%s=%r reads as no answer at all (a placeholder like \"TBD\" "
+                            "reads the same as blank)" % (key, data[key]))
+        else:
+            supplied[key] = value
+    return supplied, problems
+
+
+#: The default dossier root every reader walks. Named here because the hint
+#: below has to spell it out for a person who has never seen it.
+DEFAULT_DESIGN_ROOT = "design"
+
+
+def _repo_root_for(path):
+    """The nearest ancestor of `path` holding `.sbe` or `.git`, or None: the
+    root the readers resolve their dossier walk against."""
+    current = os.path.abspath(path)
+    while True:
+        if (os.path.isdir(os.path.join(current, ".sbe"))
+                or os.path.exists(os.path.join(current, ".git"))):
+            return current
+        parent = os.path.dirname(current)
+        if parent == current:
+            return None
+        current = parent
+
+
+def _design_roots(root):
+    """Every directory (relative to `root`) the readers walk for dossiers: the
+    default "design" plus any `.sbe/team-profile.json` designRoots entry that
+    resolves INSIDE `root`. An entry that would escape the root is never
+    returned, the same containment refusal the readers apply.
+
+    READ HERE RATHER THAN IMPORTED, and this is the whole reason the rule is
+    copied instead of shared: the readers' copy is
+    `brothersbe.status._design_roots`, `status.py` imports `impact.py`, and
+    `impact.py` imports THIS module, so importing status back would close an
+    import cycle. These lines mirror that function and nothing else; a change
+    to the discovery rule there is a change owed here.
+    """
+    roots = [DEFAULT_DESIGN_ROOT]
+    profile = os.path.join(root, ".sbe", "team-profile.json")
+    if os.path.isfile(profile):
+        try:
+            extra = json.loads(io.open(profile, encoding="utf-8").read())
+        except (ValueError, OSError):
+            extra = None  # sbe: allow-silent  (an optional profile that does not
+            #        parse leaves the default root, exactly as it does for the
+            #        readers; this hint is not the place to report it)
+        root_abs = os.path.abspath(root)
+        for entry in ((extra.get("designRoots", []) or []) if extra else []):
+            if not isinstance(entry, str) or not entry.strip():
+                continue
+            candidate = os.path.abspath(os.path.join(root, entry))
+            if candidate == root_abs or candidate.startswith(root_abs + os.sep):
+                if entry not in roots:
+                    roots.append(entry)
+    return roots
+
+
+def undiscoverable_hint(where):
+    """One line naming `design/<name>` when `where` sits outside every design
+    root, or None when the readers will find it.
+
+    NEVER A REFUSAL. `sbe intake` accepts any directory and always did, and a
+    dossier written where the writer meant to write it is not an error to
+    correct. What it is, silently, is invisible: `sbe status` and the team
+    report walk the design roots, so an intake written anywhere else is a
+    record nobody reads and nobody says so. This line is the saying so.
+    """
+    target = os.path.abspath(where)
+    name = os.path.basename(target) or "your-change"
+    root = _repo_root_for(target)
+    roots = _design_roots(root) if root else [DEFAULT_DESIGN_ROOT]
+    if root:
+        for entry in roots:
+            entry_abs = os.path.abspath(os.path.join(root, entry))
+            if target == entry_abs or target.startswith(entry_abs + os.sep):
+                return None
+    elif DEFAULT_DESIGN_ROOT in target.split(os.sep)[:-1]:
+        # No repository root to resolve a profile's roots against (a bare
+        # directory, a fixture). The default root is still recognizable by its
+        # own name, and a dossier already sitting inside one is not the case
+        # this hint exists for; claiming otherwise would be the false alarm
+        # that teaches a reader to ignore the line.
+        return None
+    return ("sbe_intake: %s is not under a design root (%s), so `sbe status` and the team "
+            "report will not discover this dossier. The readers look in %s/%s. Writing it "
+            "where you asked anyway."
+            % (where, ", ".join(roots), DEFAULT_DESIGN_ROOT, name))
+
+
 def ask_text(prompt, required=True):
     """One free-text question, re-asked until `answered()` accepts it (when
     required) or accepted blank (when not). Mirrors ask()'s EOF handling: a
@@ -406,11 +562,23 @@ def ask(key, prompt):
         print("  %s" % next(p for p in problems if p.startswith(key + "=")))
 
 
-USAGE = """usage: sbe_intake.py [DIRECTORY]
+USAGE = """usage: sbe_intake.py [--answers FILE] [DIRECTORY]
        sbe_intake.py --budget RECORDS_ROOT
 
-Asks the five intake questions and writes 00-intake.json into DIRECTORY
-(default: the current directory).
+Asks the five tier questions, then the origin and intent questions that scale
+with the tier (ten in all at most, at T3), and writes 00-intake.json into
+DIRECTORY (default: the current directory). The count is announced before the
+first question, and every question after the tier is computed is numbered
+"question N of M", so nobody is answering an interview with no visible end.
+
+--answers FILE reads a JSON object holding any of the ten answer keys and skips
+every question it answers, so an intake can complete with stdin closed. The
+keys are the five tier questions (changes_contract, crosses_boundary,
+reversible_under_hour, touches_sensitive, consumers), then origin, fixes,
+requested_by, desired_outcome and value_hypothesis. Every value is read by the
+same rule the prompt uses, so a value outside the accepted vocabulary is
+refused by name rather than guessed at, and nothing is defaulted: a key the
+file omits is asked at the prompt exactly as before.
 
 Give it the dossier directory. This tool used to take no argument at all: it
 accepted one, ignored it, and wrote to wherever it was run from, and the README
@@ -501,6 +669,21 @@ def main():
                   % (len(rest), ", ".join(rest), BUDGET_USAGE))
             sys.exit(2)
         sys.exit(run_budget_report(rest[0]))
+    supplied = {}
+    if "--answers" in argv:
+        at = argv.index("--answers")
+        rest = argv[at + 1:]
+        if not rest:
+            print("sbe_intake: --answers takes one file path, and none was given.\n\n%s" % USAGE)
+            sys.exit(2)
+        argv = argv[:at] + rest[1:]
+        supplied, answer_problems = load_answers_file(rest[0])
+        if answer_problems:
+            # Refused where the person can still fix the file, never written
+            # into 00-intake.json for a gate to misread three commits later:
+            # the same reasoning `ask()` applies to a value typed at the prompt.
+            print("sbe_intake: %s\n\nNothing was written." % "; ".join(answer_problems))
+            sys.exit(2)
     flags = [a for a in argv if a.startswith("-")]
     if flags:
         # A mistyped flag is a usage error, exit 2 to match the CLI's
@@ -516,10 +699,38 @@ def main():
         print("sbe_intake: %r is not a directory, so nothing was written. Create the dossier "
               "directory first, then run this in it.\n\n%s" % (where, USAGE))
         sys.exit(1)
+    hint = undiscoverable_hint(where)
+    if hint:
+        print(hint)
+
+    print("%d questions now, then a few more once the tier is known (%d at most). "
+          "Answer them ahead of time with --answers FILE."
+          % (len(QUESTIONS), max(QUESTION_BUDGET.values())))
     answers = {}
     for key, prompt in QUESTIONS:
+        if key in supplied:
+            answers[key] = supplied[key]
+            continue
         answers[key] = ask(key, prompt)
     tier = compute_tier(answers)
+
+    # The count, now that the tier is known. `asked` counts the five above as
+    # paid (they are, every time) and every ceremony question from here on, so
+    # the number a person sees is the number of questions they have answered,
+    # whether they typed it or --answers supplied it.
+    total = QUESTION_BUDGET[tier]
+    asked = len(QUESTIONS)
+    print("tier %s: up to %d more questions." % (tier, total - asked))
+
+    def answer(key, prompt):
+        """One ceremony question: the answer --answers supplied, or the one the
+        person types, numbered on the way past."""
+        nonlocal asked
+        if key in supplied:
+            return supplied[key]
+        asked += 1
+        print("question %d of %d" % (asked, total))
+        return ask_text(prompt)
 
     # H4: feature-or-defect, asked beside the five tier questions rather than
     # gated by tier, because origin does not decide how much ceremony a
@@ -535,21 +746,27 @@ def main():
     # prompt text, plus, when this answer replaced a stated assumption
     # already on record, that assumption -- see build_overrides below.
     questions_asked = []
-    origin_type = None
-    while origin_type is None:
-        raw_origin = ask_text("Is this a feature or a defect? (feature/defect) ")
-        candidate = " ".join(raw_origin.split()).casefold()
-        if candidate in ORIGIN_VALUES:
-            origin_type = candidate
-        else:
-            print("  origin=%r is not a recognized value (accepted: %s)"
-                  % (raw_origin, ", ".join(ORIGIN_VALUES)))
+    origin_type = supplied.get("origin")
+    if origin_type is None:
+        asked += 1
+        print("question %d of %d" % (asked, total))
+        while origin_type is None:
+            raw_origin = ask_text("Is this a feature or a defect? (feature/defect) ")
+            candidate = " ".join(raw_origin.split()).casefold()
+            if candidate in ORIGIN_VALUES:
+                origin_type = candidate
+            else:
+                print("  origin=%r is not a recognized value (accepted: %s)"
+                      % (raw_origin, ", ".join(ORIGIN_VALUES)))
+    # Recorded whether a person typed it or --answers supplied it: this list is
+    # the question BUDGET, the ceremony the change owed, and a change owes the
+    # same ceremony either way. --answers moves who answers, never the record.
     questions_asked.append({"question": "Is this a feature or a defect? (feature/defect)",
                             "assumption_overridden": None})
     origin_answers = {"type": origin_type}
     if origin_type == "defect":
-        origin_answers["fixes"] = ask_text(
-            "What regression or behaviour row does this fix? ")
+        origin_answers["fixes"] = answer(
+            "fixes", "What regression or behaviour row does this fix? ")
         questions_asked.append({"question": "What regression or behaviour row does this fix?",
                                 "assumption_overridden": None})
     origin = normalize_origin(origin_answers)
@@ -584,15 +801,15 @@ def main():
     # supplying intent programmatically, not through this loop.
     intent_answers = {}
     if tier != "T0":
-        intent_answers["requested_by"] = ask_text("Who wants this? (a named human) ")
+        intent_answers["requested_by"] = answer("requested_by", "Who wants this? (a named human) ")
         questions_asked.append({"question": "Who wants this? (a named human)",
                                 "assumption_overridden": None})
-        intent_answers["desired_outcome"] = ask_text("What outcome is desired? ")
+        intent_answers["desired_outcome"] = answer("desired_outcome", "What outcome is desired? ")
         questions_asked.append({"question": "What outcome is desired?",
                                 "assumption_overridden": None})
         if tier in ("T2", "T3"):
-            intent_answers["value_hypothesis"] = ask_text(
-                "What is the value hypothesis (why is this worth doing)? ")
+            intent_answers["value_hypothesis"] = answer(
+                "value_hypothesis", "What is the value hypothesis (why is this worth doing)? ")
             questions_asked.append({"question": "What is the value hypothesis "
                                     "(why is this worth doing)?",
                                     "assumption_overridden": None})
@@ -652,8 +869,15 @@ def main():
            # bucket (BUDGET_TIERS) `tier` reads as for that report.
            "questions_asked": questions_asked, "overrides": overrides,
            "budget_tier": budget_tier_for(tier)}
-    with open(path, "w") as f:
-        json.dump(out, f, indent=2)
+    # ensure_ascii=False, and the encoding pinned to match: an outcome written
+    # in Japanese used to land in this file as a run of \\uXXXX escapes, so the
+    # one field that carries the user's own words became unreadable to the user
+    # in the record meant to hold them. UTF-8 is named on the handle rather than
+    # inherited from the locale, because ensure_ascii=False on an ASCII locale
+    # raises at the write instead of escaping, which would turn an unreadable
+    # record into a lost one.
+    with io.open(path, "w", encoding="utf-8") as f:
+        json.dump(out, f, indent=2, ensure_ascii=False)
     print("tier %s (artifacts required: %s) written to %s"
           % (tier, ", ".join(required_artifacts(tier)) or "none", path))
     # All THREE edits, named. This instruction used to say "set BOTH override

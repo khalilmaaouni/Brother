@@ -520,5 +520,168 @@ class TestCLIWritesQuestionBudget(unittest.TestCase):
         self.assertIn("What outcome is desired?", questions)
 
 
+class TestNonInteractive(unittest.TestCase):
+    """R-3: the intake is the only road to a claimed worktree, and it used to be
+    an interview with no visible end and no way to answer it ahead of time. A
+    T3 defect draws all ten questions, which is the worst case, so it is the
+    case this proves: an answers file covering the ten keys completes with
+    stdin closed. Mirrors TestCLIWritesIntentBlock's shape (a tmpdir dossier,
+    the real CLI through subprocess, the written record read back)."""
+
+    def setUp(self):
+        self.dossier = tempfile.mkdtemp()
+        self.answers_path = os.path.join(self.dossier, "answers.json")
+
+    def tearDown(self):
+        shutil.rmtree(self.dossier, ignore_errors=True)
+
+    def write_answers(self, answers):
+        with io.open(self.answers_path, "w", encoding="utf-8") as fh:
+            json.dump(answers, fh, ensure_ascii=False)
+
+    def run_intake(self, stdin_text=""):
+        return subprocess.run([sys.executable, SBE_INTAKE, "--answers", self.answers_path,
+                               self.dossier], input=stdin_text, capture_output=True, text=True)
+
+    def read_intake(self):
+        with io.open(os.path.join(self.dossier, "00-intake.json"), encoding="utf-8") as fh:
+            return json.load(fh)
+
+    #: The ten keys: the five tier questions, then origin, fixes and the three
+    #: intent fields. touches_sensitive=y alone reaches T3.
+    TEN = {"changes_contract": "breaking", "crosses_boundary": "y",
+           "reversible_under_hour": "n", "touches_sensitive": "y", "consumers": "many",
+           "origin": "defect", "fixes": "REG-114", "requested_by": "Daiki Saito",
+           "desired_outcome": "stop over-charging tax on rounded totals",
+           "value_hypothesis": "every wrong invoice is a refund and a support ticket"}
+
+    def test_a_t3_defect_intake_completes_from_an_answers_file_with_no_stdin(self):
+        self.write_answers(self.TEN)
+        out = self.run_intake()
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        data = self.read_intake()
+        self.assertEqual(data["tier"], "T3")
+        self.assertEqual(data["origin"], {"type": "defect", "fixes": "REG-114"})
+        self.assertEqual(data["intent"]["requested_by"], "Daiki Saito")
+        self.assertEqual(len(data["questions_asked"]), 5,
+                         "the record carries the ceremony the change owed, whoever answered it")
+
+    def test_the_count_is_announced_before_the_first_question(self):
+        """The interview's end, said out loud. A person who cannot see how many
+        questions are left answers ten and stops, which is the incident."""
+        self.write_answers(self.TEN)
+        out = self.run_intake()
+        self.assertIn("10 at most", out.stdout, out.stdout + out.stderr)
+        self.assertIn("--answers", out.stdout, out.stdout + out.stderr)
+
+    def test_a_question_the_file_leaves_out_is_still_asked(self):
+        """--answers has no default fill: an omitted key falls through to the
+        prompt, and a closed stdin there is the same named refusal as before,
+        never a blank written into the record."""
+        partial = dict(self.TEN)
+        del partial["desired_outcome"]
+        self.write_answers(partial)
+        out = self.run_intake()
+        self.assertNotEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertFalse(os.path.exists(os.path.join(self.dossier, "00-intake.json")),
+                         "an unanswered question must write nothing")
+
+    def test_a_value_outside_the_vocabulary_is_refused_by_name(self):
+        """The file accepts exactly what the prompt accepts. A value the tier
+        rule cannot read is refused where the person can still fix it, never
+        written for a gate to misread three commits later."""
+        bad = dict(self.TEN, consumers="several")
+        self.write_answers(bad)
+        out = self.run_intake()
+        self.assertNotEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertIn("consumers=", out.stdout + out.stderr)
+        self.assertIn("Nothing was written", out.stdout + out.stderr)
+
+
+class TestEncoding(unittest.TestCase):
+    """R-7: the one field carrying the user's own words used to reach the record
+    as a run of \\uXXXX escapes, unreadable to the person who wrote it."""
+
+    def setUp(self):
+        self.dossier = tempfile.mkdtemp()
+        self.answers_path = os.path.join(self.dossier, "answers.json")
+
+    def tearDown(self):
+        shutil.rmtree(self.dossier, ignore_errors=True)
+
+    def test_a_japanese_outcome_is_readable_in_the_written_file(self):
+        answers = {"changes_contract": "no", "crosses_boundary": "y",
+                   "reversible_under_hour": "y", "touches_sensitive": "n",
+                   "consumers": "none", "origin": "feature",
+                   "requested_by": "斎藤大輝", "desired_outcome": "税の丸めを直す"}
+        with io.open(self.answers_path, "w", encoding="utf-8") as fh:
+            json.dump(answers, fh, ensure_ascii=False)
+        out = subprocess.run([sys.executable, SBE_INTAKE, "--answers", self.answers_path,
+                              self.dossier], input="", capture_output=True, text=True)
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        with io.open(os.path.join(self.dossier, "00-intake.json"), "rb") as fh:
+            raw = fh.read()
+        self.assertIn("税の丸めを直す".encode("utf-8"), raw,
+                      "the outcome must be in the file as it was written")
+        self.assertNotIn(b"\\u", raw, "no escaped characters: the record is read by people")
+
+
+class TestDesignRootHint(unittest.TestCase):
+    """R-1 step 4: intake accepts any directory, and always did. A dossier
+    written outside every design root is not an error, it is INVISIBLE: the
+    readers walk the design roots, so nothing ever says the record will not be
+    found. This is the saying so, and it never refuses the write."""
+
+    def setUp(self):
+        self.repo = tempfile.mkdtemp()
+        os.makedirs(os.path.join(self.repo, ".sbe"))
+
+    def tearDown(self):
+        shutil.rmtree(self.repo, ignore_errors=True)
+
+    def run_intake(self, dossier):
+        return subprocess.run([sys.executable, SBE_INTAKE, dossier],
+                              input="no\nn\ny\nn\nnone\nfeature\n",
+                              capture_output=True, text=True)
+
+    def test_an_intake_outside_a_design_root_names_where_the_readers_look(self):
+        dossier = os.path.join(self.repo, "docs", "plan", "dossier-tax-rounding")
+        os.makedirs(dossier)
+        out = self.run_intake(dossier)
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertIn("design/dossier-tax-rounding", out.stdout, out.stdout + out.stderr)
+        self.assertTrue(os.path.exists(os.path.join(dossier, "00-intake.json")),
+                        "the hint never refuses the write")
+
+    def test_an_intake_inside_the_design_root_says_nothing(self):
+        """The calibration: a hint that fires on the ordinary case is noise, and
+        noise is what teaches a reader to skip the line that mattered."""
+        dossier = os.path.join(self.repo, "design", "tax-rounding")
+        os.makedirs(dossier)
+        out = self.run_intake(dossier)
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertNotIn("not under a design root", out.stdout, out.stdout + out.stderr)
+
+
+class TestKickoffSkillDocumentsTheCount(unittest.TestCase):
+    """The skill promised five questions and the tool asked ten. The promise is
+    what the persona followed, so the promise is what had to change."""
+
+    KICKOFF = os.path.join(ROOT, "skills", "kickoff", "SKILL.md")
+
+    def read(self):
+        with io.open(self.KICKOFF, encoding="utf-8") as fh:
+            return fh.read()
+
+    def test_the_five_question_promise_is_gone(self):
+        self.assertNotIn("five intake questions", self.read(),
+                         "the tool asks up to ten; the skill must not promise five")
+
+    def test_the_skill_names_the_real_ceiling_and_the_non_interactive_path(self):
+        text = self.read()
+        self.assertIn("up to ten in all", text)
+        self.assertIn("--answers", text)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

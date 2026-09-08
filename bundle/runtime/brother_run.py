@@ -116,6 +116,7 @@ import uuid
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
+import autonomy_dial  # noqa: E402
 import brother_paths  # noqa: E402
 import claim_store  # noqa: E402
 import decide  # noqa: E402
@@ -124,6 +125,7 @@ import integrate  # noqa: E402
 import journal  # noqa: E402
 import loom  # noqa: E402
 import loop_bridge  # noqa: E402
+import managed_safety  # noqa: E402
 import receipt_door  # noqa: E402
 import run_heartbeat  # noqa: E402
 import work_record  # noqa: E402
@@ -1969,8 +1971,17 @@ def _record_recurrence_and_draft_lessons(record, receipts, run_dir):
         if recurrence_event_id is None and bm_recurrence is not None:
             recalled = _recalled_records_for_unit(events, uid)
             section = receipt_door.applied_memory(recalled)
-            surfaced = sorted({entry.get("slug") for values in section.values()
-                               for entry in values if entry.get("slug")})
+            # P0-1 (night run 2026-09-07): iterate the named MEMORY_STATES
+            # keys, never section.values() directly -- applied_memory can
+            # also carry a "mutation" key (a plain banner string, row P0-M)
+            # sitting alongside these list-valued keys, and a blind
+            # .values() walk iterates that string character by character,
+            # crashing the very receipt meant to report on this run
+            # (AttributeError: 'str' object has no attribute 'get').
+            surfaced = sorted({entry.get("slug")
+                               for state in receipt_door.MEMORY_STATES
+                               for entry in section.get(state, [])
+                               if entry.get("slug")})
             applied = sorted({entry.get("slug")
                               for entry in section.get("applied", [])
                               if entry.get("slug")})
@@ -1992,7 +2003,12 @@ def _record_recurrence_and_draft_lessons(record, receipts, run_dir):
             declined = []
             reason_parts = []
             applied_set = set(applied)
-            for state in ("stale", "unverified"):
+            # P0-1: policy-conflict is ALSO a recorded judgement about a
+            # surfaced lesson (a vault memory that tried to weaken a
+            # required check, refused before it ever reached "applied"),
+            # so it is forwarded into declined exactly like stale and
+            # unverified already are, for the same LL-4 reason above.
+            for state in ("stale", "unverified", "policy-conflict"):
                 for entry in section.get(state, []):
                     slug = entry.get("slug")
                     if not slug or slug in applied_set or slug in declined:
@@ -3970,6 +3986,68 @@ def main(argv=None):
     harness_revision = _harness_revision()
     resumed = False
 
+    # P1, night-hardening-2026-09-07: BROTHER-MANAGED EXECUTION SAFE BY
+    # CONSTRUCTION. Measured here, before ANY of --resume, --continue or a
+    # fresh outcome is even looked at, so a resumed run cannot reach a
+    # worker on a machine that cannot enforce a fence any more than a
+    # fresh run can (Codex finding 2, 2026-09-07: the caller gates the
+    # launch, including resumed runs). What the machine can actually do
+    # right now, never what an operator hopes it can do
+    # (docs/plan/runs/night-2026-09-07/design-P1.md sections 2 and 3).
+    # Nothing is written here: run_dir is not settled on any path yet, so
+    # a refusal below leaves the repository and the runs root exactly as
+    # it found them; door.py's own contract (only WR.create makes the run
+    # directory, on success) stays true regardless of this gate. The
+    # decision is journalled once run_dir is settled and the run has
+    # actually opened, at "E59, THE RUN'S JOURNAL OPENS HERE" below, which
+    # is the earliest point common to all three paths (fresh, --resume,
+    # --continue). Per-lane claims (the OTHER half of this law) are
+    # materialized later, inside loop_bridge.LaneWorker.run, at the one
+    # place the lane path and the unit's write scope are both already
+    # known.
+    safety_caps = managed_safety.probe(cwd, runs_root)
+    safety_floor = managed_safety.capability_floor(safety_caps)
+    requested_dial = autonomy_dial.dial_level()
+    effective_safety = autonomy_dial.effective_class(requested_dial,
+                                                      safety_floor)
+    _worst_name, worst = managed_safety.worst_capability(safety_caps)
+    worst_state = (worst or {}).get("state", NODATA)
+    if requested_dial == "A0" and effective_safety != "A0":
+        # STEERING 7.1/7.7/7.8: a refusal is for an EXPLICIT high-autonomy
+        # request (the dial itself set to A0, execute_then_check) that the
+        # floor cannot back, never for the ordinary default run. Every
+        # other request (A1's default included) is advisory/manual work,
+        # and 7.8 lets that continue at a lower, unenforced safety mode;
+        # only A0 demands enforcement this strict. Nothing has been
+        # claimed, and neither the door nor the loop has been asked, so
+        # the repository is untouched.
+        print("brother_run: REFUSED higher-autonomy execution.")
+        print("  requested: %s (%s)"
+              % (requested_dial, autonomy_dial.ACTIONS[requested_dial]))
+        print("  effective safety: %s, %s"
+              % (worst_state,
+                 (worst or {}).get("detail",
+                                   "no capability reported a limiting "
+                                   "state")))
+        print("  effective: %s (%s)"
+              % (effective_safety, autonomy_dial.ACTIONS[effective_safety]))
+        remedy = (worst or {}).get("remedy") or ""
+        for i, remedy_line in enumerate(remedy.splitlines()):
+            print("  next command: %s" % remedy_line if i == 0
+                  else "                %s" % remedy_line)
+        return 1
+    # STEERING 7.7: downgrade or refuse BY NAME. This is the downgrade
+    # half: the run proceeds at what it actually requested (never at the
+    # inflated `effective_safety`, which only exists to decide the A0
+    # refusal above), and the wording never claims "enforced" when the
+    # floor could not back it.
+    log.say("brother_run: managed execution safety: %s, running at %s "
+            "(%s)%s"
+            % (worst_state, requested_dial,
+               autonomy_dial.ACTIONS[requested_dial],
+               "" if worst_state == managed_safety.PRESENT
+               else ", not enforced"))
+
     if not args.resume and args.cont is None and not args.outcome.strip():
         print("brother_run: an outcome, --resume or --continue is required",
               file=sys.stderr)
@@ -4196,6 +4274,18 @@ def main(argv=None):
     run_event = journal.append(run_dir, "run.opened", payload={
         "cwd": cwd, "resumed": resumed,
         "units": len(record.get("rows") or record.get("units") or [])})
+    # P1, night-hardening-2026-09-07: the safety decision made above, before
+    # run_dir was even settled, is journalled now that the run has actually
+    # opened on every path (fresh, --resume, --continue) -- the earliest
+    # point common to all three, so a refusal never leaves a stray journal
+    # entry behind and an allowed run's receipt can always show its own
+    # effective safety class.
+    journal.append(run_dir, "safety.enforcement", parent_ids=[run_event],
+                   payload={"requested": requested_dial,
+                            "floor": safety_floor,
+                            "effective": effective_safety,
+                            "capabilities": {k: v["state"]
+                                             for k, v in safety_caps.items()}})
     _write_capsule(run_dir)
     if resumed:
         # THE RESUMER, the second field beside the creator's, latest wins;

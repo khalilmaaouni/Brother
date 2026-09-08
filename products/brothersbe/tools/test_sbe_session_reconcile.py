@@ -654,6 +654,160 @@ class TestTheBaselineItself(ReconcileCase):
                         "no baseline was written from the stdin payload: %s" % proc.stderr)
 
 
+def _write_stub_tasks_module(path, marker):
+    """A minimal brothersbe/tasks.py stand-in: only the four names
+    sbe_session_reconcile.py actually calls on the module (load_registry,
+    RegistryUnusable, open_tasks, registry_path). MARKER lets a test prove
+    WHICH copy was loaded when more than one candidate exists."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    write(path, (
+        "MARKER = %r\n"
+        "class RegistryUnusable(Exception):\n"
+        "    pass\n"
+        "def load_registry(root):\n"
+        "    return {\"tasks\": []}\n"
+        "def open_tasks(data):\n"
+        "    return []\n"
+        "def registry_path(root):\n"
+        "    import os as _os\n"
+        "    return _os.path.join(root, \".sbe\", \"tasks.json\")\n"
+    ) % marker)
+
+
+class TestTasksModuleMissing(ReconcileCase):
+    """P0 on the 1.0.10 install: sbe_session_reconcile.py shipped without
+    its src/brothersbe, so tasks_mod() raised Unusable (FileNotFoundError)
+    and the Stop hook blocked every session on a dependency the hook itself
+    failed to ship. tasks_mod() now tries the shipped src/, BROTHERSBE_SRC,
+    then the newest sibling brothersbe plugin cache copy, and raises the
+    distinct TasksModuleMissing (not Unusable) only when none of those
+    exist, so cmd_hook can allow the turn as NO-DATA instead of blocking a
+    session for the hook's own missing dependency.
+
+    CALIBRATION: every assertion here was run RED against the unmodified
+    tasks_mod() (a bare _load of ROOT_DIR/src/brothersbe/tasks.py with no
+    fallback) before it was run GREEN against the fixed one. Against the
+    unmodified function, test_all_candidates_absent_allows_with_no_data
+    failed because reconcile_worktree raised the pre-existing Unusable and
+    cmd_hook wrote a block payload to stdout instead of returning a silent
+    allow; test_the_newest_plugin_cache_copy_is_loaded and
+    test_the_env_override_is_tried_before_the_plugin_cache both failed with
+    Unusable / FileNotFoundError since neither fallback existed yet."""
+
+    ENV_KEYS = ReconcileCase.ENV_KEYS + ("BROTHERSBE_SRC", "BROTHER_CONFIG_DIR",
+                                         "CLAUDE_CONFIG_DIR")
+
+    def setUp(self):
+        ReconcileCase.setUp(self)
+        # sr.ROOT_DIR is the one thing tasks_mod() reads besides the
+        # environment; pointed at a directory with no src/brothersbe so the
+        # first candidate never exists in these tests, exactly as the real
+        # 1.0.10 bundle leaves it.
+        self._missing_root = tempfile.TemporaryDirectory()
+        self._saved_root_dir = sr.ROOT_DIR
+        sr.ROOT_DIR = self._missing_root.name
+        # No plugin cache anywhere unless a test populates one.
+        self._empty_config = tempfile.TemporaryDirectory()
+        os.environ["BROTHER_CONFIG_DIR"] = self._empty_config.name
+        # _load() caches by alias, not by path: a module already loaded by
+        # an earlier test under "brothersbe_tasks_for_reconcile" would be
+        # returned unchanged however tasks_mod() is patched here, so the
+        # cache is cleared for the duration of this test and restored after.
+        alias = "brothersbe_tasks_for_reconcile"
+        self._saved_loaded = sr._LOADED.pop(alias, None)
+        self._saved_sys_module = sys.modules.pop(alias, None)
+
+    def tearDown(self):
+        sr.ROOT_DIR = self._saved_root_dir
+        self._missing_root.cleanup()
+        self._empty_config.cleanup()
+        alias = "brothersbe_tasks_for_reconcile"
+        sr._LOADED.pop(alias, None)
+        sys.modules.pop(alias, None)
+        if self._saved_loaded is not None:
+            sr._LOADED[alias] = self._saved_loaded
+        if self._saved_sys_module is not None:
+            sys.modules[alias] = self._saved_sys_module
+        ReconcileCase.tearDown(self)
+
+    def test_all_candidates_absent_allows_with_no_data(self):
+        """(a) No shipped src/, no BROTHERSBE_SRC, no plugin cache copy: the
+        Stop hook must exit 0, print nothing to the decision channel (an
+        allow, exactly like a clean session), and say NO-DATA on stderr."""
+        self.baseline()
+        stdin = io.StringIO(json.dumps({"session_id": MY_SESSION, "cwd": self.root}))
+        out, err = io.StringIO(), io.StringIO()
+        saved_stdin, saved_stdout, saved_stderr = sys.stdin, sys.stdout, sys.stderr
+        sys.stdin, sys.stdout, sys.stderr = stdin, out, err
+        try:
+            rc = sr.cmd_hook([])
+        finally:
+            sys.stdin, sys.stdout, sys.stderr = saved_stdin, saved_stdout, saved_stderr
+        self.assertEqual(rc, 0, "a missing dependency of the hook itself must never fail "
+                               "the hook's own exit code")
+        self.assertEqual(out.getvalue(), "",
+                         "a missing dependency produced a decision instead of an allow: %r"
+                         % out.getvalue())
+        self.assertIn("NO-DATA: sbe_session_reconcile cannot judge this session", err.getvalue())
+        self.assertIn("no brothersbe tasks module found", err.getvalue())
+        self.assertIn("the turn is allowed, never blocked, per the NO-DATA law",
+                      err.getvalue())
+
+    def test_tasks_mod_names_every_path_it_tried(self):
+        with self.assertRaises(sr.TasksModuleMissing) as caught:
+            sr.tasks_mod()
+        tried = caught.exception.tried
+        self.assertEqual(tried, [os.path.join(self._missing_root.name, "src",
+                                              "brothersbe", "tasks.py")])
+        self.assertIn("no brothersbe tasks module found (looked in:", str(caught.exception))
+
+    def test_the_newest_plugin_cache_copy_is_loaded(self):
+        """(b) A tasks.py under a temp HOME's plugins/cache/brother/
+        brothersbe/9.9.9/src/brothersbe/ is found and loaded, and a lower
+        version present alongside it is NOT the one that wins."""
+        cache_root = os.path.join(self._empty_config.name, "plugins", "cache",
+                                  "brother", "brothersbe")
+        _write_stub_tasks_module(
+            os.path.join(cache_root, "1.2.0", "src", "brothersbe", "tasks.py"), "1.2.0")
+        _write_stub_tasks_module(
+            os.path.join(cache_root, "9.9.9", "src", "brothersbe", "tasks.py"), "9.9.9")
+        mod = sr.tasks_mod()
+        self.assertEqual(mod.MARKER, "9.9.9",
+                         "the newest version directory did not win: loaded %r" % mod.MARKER)
+
+    def test_the_newest_plugin_cache_copy_clears_the_session(self):
+        """The same fixture as (a), but with a plugin cache copy present: the
+        session must reconcile normally through it, not merely avoid a
+        crash. A clean tree with the stub module must not block."""
+        cache_root = os.path.join(self._empty_config.name, "plugins", "cache",
+                                  "brother", "brothersbe")
+        _write_stub_tasks_module(
+            os.path.join(cache_root, "9.9.9", "src", "brothersbe", "tasks.py"), "9.9.9")
+        self.baseline()
+        outcome = self.reconcile()
+        self.assertFalse(outcome.blocked,
+                         "a clean tree blocked once the plugin cache copy of the tasks "
+                         "module was found: %s" % outcome.reason)
+
+    def test_the_env_override_is_tried_before_the_plugin_cache(self):
+        """BROTHERSBE_SRC names a directory holding brothersbe/tasks.py
+        directly (not versioned), and it is tried before the plugin cache
+        even when a plugin cache copy also exists."""
+        env_src = tempfile.TemporaryDirectory()
+        self.addCleanup(env_src.cleanup)
+        _write_stub_tasks_module(
+            os.path.join(env_src.name, "brothersbe", "tasks.py"), "from-env")
+        cache_root = os.path.join(self._empty_config.name, "plugins", "cache",
+                                  "brother", "brothersbe")
+        _write_stub_tasks_module(
+            os.path.join(cache_root, "9.9.9", "src", "brothersbe", "tasks.py"), "9.9.9")
+        os.environ["BROTHERSBE_SRC"] = env_src.name
+        mod = sr.tasks_mod()
+        self.assertEqual(mod.MARKER, "from-env",
+                         "BROTHERSBE_SRC was set but the plugin cache copy loaded instead: %r"
+                         % mod.MARKER)
+
+
 class TestTheCiBackstop(ReconcileCase):
     """Spec 1.5: the same reconciliation over a commit range, with no session
     baseline and no dependency on Claude Code having run locally."""

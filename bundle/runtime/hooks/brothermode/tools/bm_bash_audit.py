@@ -344,7 +344,50 @@ def protected_names(bs):
     return (store_dirname, store_filename)
 
 
-def refusal_for(command_text, bs):
+def _strip_heredoc_bodies(command_text, fh):
+    """command_text with every heredoc BODY removed, the operator line
+    itself kept. A heredoc body is DATA handed to whatever program reads
+    stdin, not a command this guard's shell-form patterns should ever match
+    against; a dogfood run hit exactly that miscall (root R-8, transcript
+    B4-S1): a file that quoted this guard's own refusal wording, written
+    through a heredoc, was refused as though it had typed the words as a
+    command.
+
+    Reuses bm_fence_hook.py's own heredoc-operator scanner
+    (_find_heredoc_ops), the same parser apply_patch_bodies is built on,
+    rather than a second hand-rolled one that could drift out of sync with
+    its already-fixed edge cases (H2's hyphenated-delimiter bypass). fh
+    absent or broken is a fail-open for the STRIPPING only: the original
+    text comes back unchanged and the destructive-form check below still
+    runs against it, erring toward refusal exactly as this file already
+    does everywhere else."""
+    if fh is None or not isinstance(command_text, str):
+        return command_text
+    finder = getattr(fh, "_find_heredoc_ops", None)
+    if finder is None:
+        return command_text
+    lines = command_text.split("\n")
+    n = len(lines)
+    out = []
+    i = 0
+    while i < n:
+        out.append(lines[i])
+        try:
+            ops = finder(lines[i])
+        except Exception:
+            ops = []
+        i += 1
+        for _cmdword, strips_tabs, delim in ops:
+            while i < n:
+                raw = lines[i]
+                probe = raw.lstrip("\t") if strips_tabs else raw
+                i += 1
+                if probe == delim:
+                    break
+    return "\n".join(out)
+
+
+def refusal_for(command_text, bs, fh=None):
     """(code, labels, names) when this command text matches a destructive
     form aimed at BrotherMode's own enforcement state, else (None, [], []).
 
@@ -375,17 +418,29 @@ def refusal_for(command_text, bs):
     refused too, and so is 'git clean -x' anywhere in the tree. Erring toward
     refusal is the deliberate choice, because the alternative inside a
     fail-closed mode is a false ALLOW on exactly the class of command this
-    exists for."""
+    exists for.
+
+    A heredoc BODY is the one exception to over-refusing: it is DATA the
+    shell hands to whatever reads stdin, never a command, so a file that
+    quotes this guard's own wording or a destructive verb inside one must
+    not be read as though it typed them (root R-8, transcript B4-S1). fh
+    is bm_fence_hook.py, already loaded by the caller; its own
+    heredoc-operator scanner strips heredoc bodies before either pattern
+    list is matched. Passing fh=None (every existing caller before this
+    change) keeps the prior behaviour exactly, so nothing already
+    depending on this function moves without asking for the new
+    argument."""
     if not isinstance(command_text, str) or not command_text.strip():
         return None, [], []
-    names = [n for n in protected_names(bs) if n in command_text]
+    scanned_text = _strip_heredoc_bodies(command_text, fh)
+    names = [n for n in protected_names(bs) if n in scanned_text]
     if names:
         labels = [lab for pat, lab in _DESTRUCTIVE_FORMS
-                  if re.search(pat, command_text)]
+                  if re.search(pat, scanned_text)]
         if labels:
             return "store-destruction", labels, names
     labels = [lab for pat, lab in _TREE_WIDE_FORMS
-              if re.search(pat, command_text)]
+              if re.search(pat, scanned_text)]
     if labels:
         return "tree-wide-destruction", labels, []
     return None, [], []
@@ -972,7 +1027,9 @@ def cmd_pre(argv):
                 tool_input = payload.get("tool_input")
                 command_text = (tool_input or {}).get("command") \
                     if isinstance(tool_input, dict) else None
-                code, labels, names = refusal_for(command_text, bs)
+                fh_for_refusal = _load_fence_hook_module()
+                code, labels, names = refusal_for(
+                    command_text, bs, fh_for_refusal)
                 if code is not None:
                     _refuse(code, labels, names)
                     return 0

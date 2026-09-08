@@ -43,5 +43,146 @@
       "removal_condition": "gpg or gpg2 is installed on the machine that runs the battery, so TheTagSignatureLegReadsARealSignature's two cases run instead of skipping; then delete this entry",
       "last_reverified": "2026-09-05: `which gpg gpg2` found neither on PATH; re-ran python3 scripts/test_release_closeout_sign.py -v, exit 0, 'OK (skipped=2)', same two tests skipped for the same reason."
     }
+  },
+  "critical": {
+    "brother_install": {
+      "checks": [
+        "brother-install-self"
+      ],
+      "reason": "a wrong or partial Brother install is the first thing every other check on this machine silently trusts",
+      "recorded": "2026-09-08",
+      "self_test_only": true
+    },
+    "brother_paths": {
+      "checks": [
+        "brother-paths-self"
+      ],
+      "reason": "every provider-neutral seam (door.py, model_worker.py, the hooks) resolves its files through this module; a wrong path here is wrong everywhere at once, silently",
+      "recorded": "2026-09-08",
+      "self_test_only": true
+    },
+    "capability_probe": {
+      "checks": [
+        "capability-probe-self"
+      ],
+      "reason": "the mechanism behind never reporting a live capability as retired after checking one path (the founder had to correct that miss by hand once already); the runner itself depends on a file outside this repo, so only the self test is registered",
+      "recorded": "2026-09-08",
+      "self_test_only": true
+    },
+    "adapter_conformance": {
+      "checks": [
+        "adapter-conformance-self"
+      ],
+      "reason": "the contract every provider adapter (Claude Code, Codex) must keep so a caller can trust either one the same way",
+      "recorded": "2026-09-08",
+      "self_test_only": true
+    },
+    "codex_battery": {
+      "checks": [
+        "codex-battery-self"
+      ],
+      "reason": "Codex's own battery-shaped surface; a regression here is invisible to every check that only exercises Claude Code's side of the provider-neutral seam",
+      "recorded": "2026-09-08",
+      "self_test_only": true
+    },
+    "codex_skills": {
+      "checks": [
+        "codex-skills-current"
+      ],
+      "reason": "bundle/codex-skills drifting from bundle/skills ships Codex a stale copy of the skills Claude Code actually has",
+      "recorded": "2026-09-08"
+    },
+    "codex_hooks_install": {
+      "checks": [
+        "codex-hooks-self",
+        "codex-smoke",
+        "codex-smoke-self",
+        "release-closeout-self"
+      ],
+      "reason": "already wired and proven by four checks; declared critical so a future lane cannot quietly drop one without the schema gate refusing",
+      "recorded": "2026-09-08"
+    },
+    "codex_smoke": {
+      "checks": [
+        "codex-smoke",
+        "codex-smoke-self"
+      ],
+      "reason": "a clean install Codex run is the path Brother asks a user to trust",
+      "recorded": "2026-09-08"
+    },
+    "delivery_status": {
+      "checks": [
+        "delivery-status-self"
+      ],
+      "reason": "the founder-facing answer to is this ready to ship; a broken status reads as calm when it should read as blocked",
+      "recorded": "2026-09-08",
+      "self_test_only": true
+    },
+    "land_queue": {
+      "checks": [
+        "land-queue-self",
+        "land-decision-self"
+      ],
+      "reason": "the autonomous merge path (M6, row S5): a lander restart with no pid lock or concurrency ceiling already ran seven gates at once and painted one red for load, not a real defect",
+      "recorded": "2026-09-08",
+      "self_test_only": true
+    },
+    "merge_queue": {
+      "checks": [
+        "merge-queue",
+        "merge-queue-self"
+      ],
+      "reason": "the queue that decides what actually lands on main; already wired and proven, declared critical so it stays that way",
+      "recorded": "2026-09-08"
+    },
+    "keep_current": {
+      "checks": [
+        "keep-current-self"
+      ],
+      "reason": "the currentness contract other generated surfaces (SYSTEM.md, the changelog) lean on",
+      "recorded": "2026-09-08",
+      "self_test_only": true
+    },
+    "release_invariants": {
+      "checks": [
+        "release-invariant",
+        "release-invariant-self"
+      ],
+      "reason": "the release identity gate; already wired and proven, declared critical so a future lane cannot quietly weaken it",
+      "recorded": "2026-09-08"
+    },
+    "gauntlet_memory_poisoning": {
+      "checks": [
+        "memory-poisoning-self",
+        "memory-poisoning"
+      ],
+      "reason": "vault-served memory that can weaken verification is the defect family this gauntlet exists to catch; P0 owns the runner, this lane owns the self test that proves the harness itself",
+      "recorded": "2026-09-08",
+      "self_test_only": false
+    },
+    "gauntlet_memoryagentbench_conflict": {
+      "checks": [
+        "memoryagentbench-self"
+      ],
+      "reason": "conflicting memory recall is a second, distinct memory-trust failure mode from poisoning",
+      "recorded": "2026-09-08",
+      "self_test_only": true
+    },
+    "memory_recurrence": {
+      "checks": [
+        "memory-recurrence-self"
+      ],
+      "reason": "gauntlet_memory_recurrence is proven only by its self check (unlike gauntlet-hostile-ja, which registers both halves); P0 owns the runner, this lane declares only what is actually registered on this branch",
+      "recorded": "2026-09-08",
+      "self_test_only": true
+    },
+    "managed_safety": {
+      "checks": [
+        "managed-safety-self"
+      ],
+      "reason": "a Brother-managed worker must hold its claim and an effective fence before it mutates anything; the capability floor refuses higher autonomy on a machine that cannot enforce it",
+      "recorded": "2026-09-08",
+      "self_test_only": true
+    }
   }
 }

@@ -39,13 +39,17 @@ the routing table that says which reference file to load when. Do not work from 
 "${CLAUDE_PLUGIN_ROOT}/bin/sbe" intake <dossier directory>
 ```
 
-That command delegates to `tools/sbe_intake.py`, which asks the five intake questions and
-writes `00-intake.json` into the dossier directory you gave it. The tier it computes decides
+That command delegates to `tools/sbe_intake.py`, which asks the five tier questions, then the
+origin and intent questions that scale with the tier, up to ten in all, and writes
+`00-intake.json` into the dossier directory you gave it. It announces the count before the
+first question and numbers every question after the tier is known, and `--answers FILE` (a JSON
+object holding any of the ten answer keys) answers them ahead of time and skips what it
+covers, so an intake can complete with nobody at a prompt. The tier it computes decides
 which artifacts `/brothersbe:design` will require and which gates `/brothersbe:verify` will
 run. Trivial one-line work stays at zero extra questions: ceremony scales with risk,
 inferred from what the change touches and confirmed in one line, never a questionnaire.
 
-### The five questions, in the outcome speaker's language
+### The five tier questions, in the outcome speaker's language
 
 On the outcome-speaker path, never read the five questions out in their engineering form:
 "downstream consumers", "service boundary" and "data model" are exactly the unexplained

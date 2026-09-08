@@ -1236,7 +1236,7 @@ def _verify_converge_delegate(target):
     return {"code": code, "lines": lines}
 
 
-def _name_the_change(target):
+def _name_the_change(target, since=None):
     """Print, before any gate runs, what this run is actually about: the
     change sitting in `target`, in the user's own words, never a verdict.
 
@@ -1260,6 +1260,17 @@ def _name_the_change(target):
     git missing -- prints NO-DATA rather than guessing, exactly like every
     other control in this project: absence of evidence is reported as
     absence, never smoothed into a verdict.
+
+    `since`, from `--since REF`, replaces that single-latest-commit default
+    with the range `REF..HEAD`. One committed change is the shape a
+    stranger's own demo commit has, and it is the WRONG shape for an ask
+    about work several commits back: measured 2026-09-07, a persona asked
+    about a migration two commits down, a newer commit had landed on top,
+    and this line named the newer commit's two files instead, so every
+    verdict under it was about a change nobody had asked about. A ref this
+    repository cannot resolve prints NO-DATA naming it and stops, rather
+    than falling back to HEAD, because a silent fall back would answer a
+    question nobody asked while looking like an answer to the one that was.
     """
     try:
         head = subprocess.run(["git", "-C", target, "rev-parse", "HEAD"],
@@ -1275,18 +1286,117 @@ def _name_the_change(target):
             "commits yet); nothing below is a verdict about your code.\n" % target)
         return
     sha = head.stdout.strip()
-    shown = subprocess.run(
-        ["git", "-C", target, "show", "--name-only", "--pretty=format:", sha],
-        capture_output=True, text=True, timeout=10)
+    if since:
+        resolved = subprocess.run(
+            ["git", "-C", target, "rev-parse", "--verify", "%s^{commit}" % since],
+            capture_output=True, text=True, timeout=10)
+        if resolved.returncode != 0:
+            sys.stdout.write(
+                "sbe verify: NO-DATA  --since %s names no commit in %s; nothing below is a "
+                "verdict about your code, and this run did not fall back to the latest "
+                "commit.\n" % (since, target))
+            return
+        scope = "%s..HEAD" % since
+        argv = ["git", "-C", target, "diff", "--name-only", scope]
+    else:
+        scope = "commit %s" % sha[:12]
+        argv = ["git", "-C", target, "show", "--name-only", "--pretty=format:", sha]
+    shown = subprocess.run(argv, capture_output=True, text=True, timeout=10)
     files = [f for f in shown.stdout.splitlines() if f.strip()]
     if shown.returncode != 0 or not files:
         sys.stdout.write(
-            "sbe verify: NO-DATA  commit %s in %s names no changed file; nothing below "
-            "is a verdict about your code.\n" % (sha[:12], target))
+            "sbe verify: NO-DATA  %s in %s names no changed file; nothing below "
+            "is a verdict about your code.\n" % (scope, target))
         return
     sys.stdout.write(
-        "sbe verify: your change is commit %s, touching %d file(s): %s\n"
-        % (sha[:12], len(files), ", ".join(files)))
+        "sbe verify: your change is %s, touching %d file(s): %s\n"
+        % (scope, len(files), ", ".join(files)))
+
+
+def _registered_checks(target):
+    """(the registered checks in `target`, the reason there are none to read).
+
+    Exactly one of the two carries information: a registry that loaded gives
+    the checks and `None`, and one that did not gives an empty mapping and a
+    reason in words. Both are returned rather than raised, because "this
+    repository registered no check that covers your file" and "the registry
+    could not be read" are opposite facts and the caller has to print which
+    one it is; collapsing them would be the same NO-DATA-read-as-clean this
+    project refuses everywhere else.
+    """
+    from . import checks as checks_mod
+    registry_path = checks_mod.default_registry_path(target)
+    if not os.path.exists(registry_path):
+        return {}, ("this repository has no %s, so no check is registered here"
+                    % checks_mod.REGISTRY_REL.replace(os.sep, "/"))
+    try:
+        return checks_mod.load_registry(registry_path)["checks"], None
+    except checks_mod.RegistryUnreadable as exc:
+        return {}, str(exc)
+
+
+def _answer_about_named_paths(target, patterns):
+    """Answer the question the ask itself named: for each file `--path`
+    matches, is there a registered check that covers it.
+
+    Finding R-6 (2026-09-07, the persona dogfood): `verify` resolved its
+    subject from HEAD or from dossier scaffolding and never from the words
+    in the ask, so "does migration 0007's backfill have a test" came back as
+    a wall of NO-DATA about a dossier the asker had never heard of. This
+    runs beside `_name_the_change`, before any gate, and answers the file
+    that was actually named.
+
+    A COVERING CHECK IS A REGISTERED ONE, and nothing else: a check declared
+    in `.sbe/checks.yml` whose own `covers` globs match the file, decided by
+    `checks.covers_match`, which is this repository's only definition of
+    coverage. Nothing here reads a test file's name, greps for the path, or
+    infers coverage from a directory layout; guessing would be exactly the
+    opinion this fix is fenced against, an opinion about a file that carries
+    no check.
+
+    Patterns are matched against the TRACKED tree through
+    `policy.path_matches`, the one glob implementation a `covers` entry and
+    a policy `paths` entry already share, so `--path` cannot disagree with
+    the registry about what a pattern means. A pattern matching nothing is
+    said out loud rather than dropped: a typed path that quietly matched no
+    file would read as a file with no findings.
+
+    Prints only. It runs before `worst` is computed in `_cmd_verify`, is
+    handed no way to reach it, and returns nothing: the answer here is
+    information about coverage, never a verdict about the code, and it can
+    move neither a gate line nor the exit code.
+    """
+    from . import checks as checks_mod
+    from .policy import path_matches
+    try:
+        tracked = checks_mod.tracked_files(target)
+    except checks_mod.RegistryUnreadable as exc:
+        sys.stdout.write("sbe verify: NO-DATA  --path could not be resolved: %s\n" % exc)
+        return
+    named = []
+    for pattern in patterns:
+        hits = [p for p in tracked if path_matches(pattern, p)]
+        if not hits:
+            sys.stdout.write(
+                "sbe verify: NO-DATA  --path %s matches no file git tracks in %s; it is "
+                "matched as a glob against tracked paths, so a directory or a bare number "
+                "matches nothing.\n" % (pattern, target))
+            continue
+        named.extend(hits)
+    if not named:
+        return
+    registered, problem = _registered_checks(target)
+    if problem:
+        sys.stdout.write(
+            "sbe verify: NO-DATA  no covering check can be named for the file(s) below: "
+            "%s.\n" % problem)
+    for rel in sorted(set(named)):
+        covering = sorted(check_id for check_id, spec in registered.items()
+                          if checks_mod.covers_match(spec, rel))
+        if covering:
+            sys.stdout.write("%s: covered by %s\n" % (rel, ", ".join(covering)))
+        else:
+            sys.stdout.write("%s: no check covers this file\n" % rel)
 
 
 def _cmd_verify(args):
@@ -1306,13 +1416,32 @@ def _cmd_verify(args):
     for why it runs BEFORE `_record_decisions` even though both write into
     the same target directory. The converge delegate is not part of that
     minted set (see `_verify_converge_delegate`'s own docstring for why).
+
+    `--since REF` and `--path PATTERN` are the two ways the ASK, rather than
+    HEAD, decides what this run is about (R-6). `--since` is threaded into
+    `_name_the_change`, replacing its single-latest-commit default.
+    `--path` is answered by `_answer_about_named_paths` in its own call
+    beside it, deliberately not from inside `_name_the_change`: that
+    function returns early on every git failure it can hit, and a repository
+    with no commits, or an unreadable HEAD, is exactly the repository whose
+    owner most needs to be told that the file they named carries no check.
+    Both run before the delegates, print only, and cannot move `worst`.
+
+    `--since` is NOT threaded into `_verify_converge_delegate`, whose four
+    other dimensions do want a base: that delegate passes HEAD for both ends
+    on purpose and documents why, and handing it a real range would change
+    gate verdicts and this command's exit code, which is a different change
+    from naming the right subject.
     """
     target = cwd_mod.resolve(args.path, args.cwd)
     if not os.path.isdir(target):
         sys.stderr.write("sbe verify: '%s' is not a directory. A mistyped path must not "
                          "read as a clean scan.\n" % target)
         return EXIT_USAGE
-    _name_the_change(target)
+    _name_the_change(target, getattr(args, "since", None))
+    named_paths = getattr(args, "named_paths", None)
+    if named_paths:
+        _answer_about_named_paths(target, named_paths)
     worst = EXIT_OK
     lines = []
     # (tool script, its flags before the target path, the evidence kind its
@@ -2924,6 +3053,24 @@ def build_parser():
                                         "directory being checked; the default skips them "
                                         "so a first run never prints this installation's "
                                         "own paths (E2.2/E2.3, 2026-08-31)")
+                # `dest` is named_paths, NEVER path: the positional above
+                # already owns `path` (the directory to check), and two
+                # actions sharing one dest would leave whichever parsed last
+                # holding the namespace, so a user naming a file would have
+                # silently redirected the whole run at it.
+                child.add_argument("--path", dest="named_paths", metavar="PATTERN",
+                                   action="append", default=[],
+                                   help="a file or glob the ask itself names; for every "
+                                        "tracked file it matches, say whether a check "
+                                        "registered in .sbe/checks.yml covers it, and name "
+                                        "the ones no check covers. Repeatable. Resolved "
+                                        "against the tracked tree, independently of which "
+                                        "commit this run is about, so a question about work "
+                                        "several commits back is answered about that work")
+                child.add_argument("--since", default=None, metavar="REF",
+                                   help="name the change as REF..HEAD instead of the single "
+                                        "latest commit; a ref this repository cannot resolve "
+                                        "reports NO-DATA rather than falling back to HEAD")
             else:
                 child.add_argument("--write", action="store_true",
                                    help="persist a durable review record, "

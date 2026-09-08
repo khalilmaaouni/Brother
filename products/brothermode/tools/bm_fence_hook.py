@@ -814,8 +814,8 @@ def _battery_decision(root, raw_targets, cwd, notes):
                 % detail)
             return deny_payload(
                 "BrotherMode is in enforced mode and refused this write "
-                "because %s. To fix it, %s. To go back to warning only, set "
-                "BM_FENCE_MODE=advisory." % (summary, remedy))
+                "because %s (%s). To fix it, %s. To go back to warning only, "
+                "set BM_FENCE_MODE=advisory." % (summary, detail, remedy))
         notes.append(
             "bm_fence_hook: the battery fence was NOT checked (%s); the "
             "write is allowed. A running gate, if any, may be invalidated "
