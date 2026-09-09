@@ -524,7 +524,18 @@ def numbers_manifest_evidence(row, run_dir):
 #: module owns the vocabulary; the fourth bucket needs no new code beyond
 #: this tuple, since applied_memory below already partitions by
 #: whatever states it names.
-MEMORY_STATES = ("applied", "stale", "unverified", "policy-conflict")
+#:
+#: "no-data" (2026-09-08 VN1 fix) is the fifth value: a lesson
+#: vault_recall_hook.py's own _tombstone_note_blocks tombstoned outright
+#: because the code that would have revalidated it (lesson_states, the
+#: contradiction resolver, the evidence tier) crashed or was unavailable --
+#: never withheld for anything the LESSON itself did wrong, so it earns its
+#: own bucket rather than being folded into "unverified" (which means "this
+#: specific claim lacks proof") or dropped as an unrecognized state. Its own
+#: bucket, never applied: provenance for a withhold this receipt could not
+#: itself verify is still provenance, and dropping it silently is exactly
+#: the failure this module's docstring warns against two paragraphs down.
+MEMORY_STATES = ("applied", "stale", "unverified", "policy-conflict", "no-data")
 
 
 class _MemorySection(dict):
@@ -545,11 +556,14 @@ class _MemorySection(dict):
 def applied_memory(recalled):
     """The receipt's applied-memory section: every lesson
     vault_recall_hook.py recalled during this run, partitioned by state.
-    `recalled` is that hook's own lesson_states() output, a list of
-    {"slug", "path", "state", "line", "note_type"} dicts, read here and never
-    recomputed: this function only reports what the hook already decided,
-    so the receipt and the hook can never disagree about which lessons were
-    stale.
+    `recalled` is that hook's own lesson_states() output (or, since VN3, the
+    same-shaped records journal.py's own vault.recall events carry -- see
+    scripts/brother_run.py's own _recalled_records_for_unit), a list of
+    {"slug", "path", "state", "line", "note_type"} dicts, plus VN3's own
+    optional {"title", "verdict", "reason", "evidence"} fields when the
+    source carried them, read here and never recomputed: this function only
+    reports what the hook already decided, so the receipt and the hook can
+    never disagree about which lessons were stale.
 
     Returns {"applied": [...], "stale": [...], "unverified": [...]}, each
     entry naming the lesson's slug plus its type (P11: data_semantic,
@@ -592,6 +606,22 @@ def applied_memory(recalled):
             entry["type"] = rec.get("note_type")
         if rec.get("line"):
             entry["line"] = rec.get("line")
+        # VN3: title/path/verdict/reason ride along ONLY when the record is
+        # VN3-shaped -- a journal event's own records always set "verdict"
+        # ("APPLY" or "WITHHELD"), which the older five-field shape
+        # (slug/path/state/line/note_type, vault_recall_hook.py's own
+        # lesson_states() output, and every pre-VN3 test fixture) never
+        # does, so gating on its presence is what keeps an old caller's
+        # entry byte-for-byte unchanged rather than gaining a "path" key it
+        # never asked for and no test expects.
+        if rec.get("verdict"):
+            if rec.get("title"):
+                entry["title"] = rec.get("title")
+            if rec.get("path"):
+                entry["path"] = rec.get("path")
+            entry["verdict"] = rec.get("verdict")
+            if rec.get("reason"):
+                entry["reason"] = rec.get("reason")
         mutation = rec.get("mutation")
         if mutation and mutation.get("disabled"):
             entry["mutation"] = mutation
@@ -601,6 +631,44 @@ def applied_memory(recalled):
         section.mutation = ("MUTATION SEAM ACTIVE (vault protections "
                             "disabled: %s)" % ", ".join(sorted(disabled_seams)))
     return section
+
+
+#: VN3 goal 4: the label the receipt prints for each MEMORY_STATES bucket,
+#: "withheld (no-data)" the one goal 4 names explicitly. "applied" is the
+#: only state that is not a withhold.
+_MEMORY_STATE_LABELS = {
+    "applied": "applied",
+    "stale": "withheld (stale)",
+    "unverified": "withheld (unverified)",
+    "policy-conflict": "withheld (policy-conflict)",
+    "no-data": "withheld (no-data)",
+}
+
+
+def memory_receipt_lines(section):
+    """VN3 goal 4: one line per lesson applied_memory() partitioned, in
+    MEMORY_STATES order: '<label> <title or slug>  (<reason>)  <path>'.
+    title/path/reason are read straight off whatever the caller attached to
+    the entry (VN3's own optional fields; an older, five-field entry that
+    never carried them just omits the piece, falling back to slug for the
+    name and to the entry's own "line" for a reason when "reason" itself is
+    absent) -- never a note's body, and never a second opinion about the
+    state: this only restates what applied_memory already decided, the same
+    read-never-recompute rule the rest of this module already follows for
+    memory."""
+    lines = []
+    for state in MEMORY_STATES:
+        label = _MEMORY_STATE_LABELS.get(state, state)
+        for entry in section.get(state, []):
+            name = entry.get("title") or entry.get("slug") or NODATA
+            reason = entry.get("reason") or entry.get("line") or ""
+            piece = "%s %s" % (label, name)
+            if reason:
+                piece += "  (%s)" % reason
+            if entry.get("path"):
+                piece += "  %s" % entry["path"]
+            lines.append(piece)
+    return lines
 
 
 def receipts_for(record, claims, refused, log_path=None,

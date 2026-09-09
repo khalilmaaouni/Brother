@@ -200,6 +200,19 @@ class TheRunDirectoryComesFromTheEnvironmentWhenACallerHasNone(
             journal.run_dir_from_env({journal.RUN_DIR_ENV_VAR: " /a/run "}),
             "/a/run")
 
+    def test_an_absent_unit_id_is_none_and_never_an_empty_string(self):
+        """VN3b: append()'s eighth field reads None as "this event is about
+        the run rather than one unit", which is exactly what an unexported
+        variable means. "" would be a NAMED unit called nothing, and
+        brother_run._recalled_records_for_unit would then match it against
+        no unit at all, silently."""
+        self.assertIsNone(journal.unit_id_from_env({}))
+        self.assertIsNone(journal.unit_id_from_env(
+            {journal.UNIT_ID_ENV_VAR: "   "}))
+        self.assertEqual(
+            journal.unit_id_from_env({journal.UNIT_ID_ENV_VAR: " VN3b-1 "}),
+            "VN3b-1")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

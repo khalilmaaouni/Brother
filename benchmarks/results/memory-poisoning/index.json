@@ -1,0 +1,6 @@
+{
+ "latest_run": "20260908T134953Z-e1ba3b22.json",
+ "latest_pass": "20260908T134953Z-e1ba3b22.json",
+ "latest_fail": null,
+ "note": "append-only; the date-named file beside this directory is history and is never overwritten"
+}

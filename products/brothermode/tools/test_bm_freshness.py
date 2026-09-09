@@ -73,6 +73,10 @@ class TempRootCase(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.root = self._tmp.name
         self.state_db = os.path.join(self.root, "state.sqlite3")
+        # LAT1: the symbol-scan budget is now per PROCESS, and one interpreter runs every test in
+        # this file, so each test starts from a fresh run deadline rather than inheriting whatever
+        # an earlier test spent.
+        bf.reset_run_budget()
 
     def tearDown(self):
         self._tmp.cleanup()
@@ -200,6 +204,41 @@ class TestSymbolScanBudget(TempRootCase):
         self.assertIn("NO-DATA", err)
         self.assertIn(self.root, err)
         self.assertIn("Some.symbol", err)
+
+    def test_the_symbol_scan_budget_is_spent_once_per_process_not_once_per_call(self):
+        """LAT1 (2026-09-08): bm_vault asks for freshness once per SERVED HIT, so a per-call budget
+        multiplied by --limit -- two non-resolving hits measured 16.27s against the recall hook's
+        12s timeout, four measured 32.28s, and the user silently got no recall. One process now
+        spends ONE budget: the second scan finds the run deadline gone and takes the existing
+        exhausted-budget path immediately, launching nothing. Asserted as a subprocess COUNT, which
+        does not depend on how fast this machine's disk is today."""
+        calls = []
+
+        def fake_popen(cmd, **kw):
+            calls.append(cmd)
+            return _FakeProc(None)  # never finishes: the scan can only end by running out of budget
+
+        with mock.patch.object(bf.subprocess, "Popen", side_effect=fake_popen):
+            found, skipped = bf._symbol_resolves_any({"A.b"}, [self.root], budget=0.2)
+            self.assertFalse(found)
+            self.assertEqual(skipped, [self.root])
+            self.assertEqual(len(calls), 1, "the first scan launches one grep per root")
+
+            # A DIFFERENT anchor set, so nothing here can be answered from a per-anchor memo: the
+            # only reason to skip is that this process has no scan budget left.
+            found2, skipped2 = bf._symbol_resolves_any({"C.d"}, [self.root], budget=0.2)
+            self.assertFalse(found2)
+            self.assertEqual(skipped2, [self.root])
+            self.assertEqual(len(calls), 1,
+                             "the second scan in the same process must launch NOTHING and report "
+                             "its roots skipped; got %d launches, so the budget is still being "
+                             "paid per call and --limit N still costs N budgets" % len(calls))
+
+            bf.reset_run_budget()
+            found3, skipped3 = bf._symbol_resolves_any({"E.f"}, [self.root], budget=0.2)
+            self.assertFalse(found3)
+            self.assertEqual(skipped3, [self.root])
+            self.assertEqual(len(calls), 2, "reset_run_budget re-arms the run and scanning resumes")
 
     def test_ample_budget_does_not_print_anything(self):
         with open(os.path.join(self.root, "Widget.swift"), "w") as f:

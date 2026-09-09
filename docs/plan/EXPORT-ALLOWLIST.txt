@@ -505,3 +505,7 @@ products/brothersbe/docs/guides/05-a-worked-engagement.md
 # first tag attempt was refused because the export tree did not carry it.
 docs/plan/DELIVERY-RECEIPT-V1.md
 docs/plan/delivery-receipt-v1.schema.json
+# docs/schema is the single source of the outcome contract schema; the bundle runtime carries a copy
+# (bundle_runtime.py DATA_FILES) and regenerates its manifest from this source, so an export without it
+# reads the manifest as stale (found at the 1.0.12 cut, 2026-09-09).
+docs/schema/outcome-contract-v1.json

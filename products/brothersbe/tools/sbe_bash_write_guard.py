@@ -610,6 +610,11 @@ def _git_targets(words):
 GIT_VALUE_FLAGS = ("-C", "-c", "--git-dir", "--work-tree", "--namespace",
                    "--exec-path", "--super-prefix")
 
+#: The two names a repository's default branch is, in practice, ever called.
+#: Used only when refs/remotes/<remote>/HEAD does not exist here at all, so
+#: the default cannot be named any other way: see push_effect below.
+LITERAL_DEFAULT_NAMES = frozenset(("main", "master"))
+
 
 class EffectFinding(object):
     """What one effect rule found: a refusal reason, a stderr note, or both.
@@ -795,7 +800,21 @@ def push_effect(segment, root, cwd, cmd_text):
         default = default_branch(start, "origin")
     targets = _push_targets(refspecs, start)
     on_default = bool(default) and default in targets
-    if not no_verify and not on_default:
+    # R-8 refused a push carrying --no-verify or landing on the default
+    # branch. Neither test fixture behind the 2026-09-08 pre-flight (B4-S2)
+    # has refs/remotes/origin/HEAD, so default_branch() returns None and a
+    # plain `git push origin main` slipped through as advisory-only. main
+    # and master are the two names a repository's default is overwhelmingly
+    # ever called, so when the default cannot be resolved AT ALL, a push
+    # naming one of them literally is treated as a push to the default
+    # rather than waved through on the strength of an absent ref.
+    literal_target = None
+    if default is None:
+        for t in targets:
+            if t in LITERAL_DEFAULT_NAMES:
+                literal_target = t
+                break
+    if not no_verify and not on_default and literal_target is None:
         if default is None:
             return EffectFinding(note=(
                 "sbe_bash_write_guard: this is a push and no "
@@ -813,10 +832,21 @@ def push_effect(segment, root, cwd, cmd_text):
         why = ("it carries the flag that switches off the pre-push hooks, "
                "AND it lands on %s, this repository's default branch"
                % default)
+    elif no_verify and literal_target:
+        why = ("it carries the flag that switches off the pre-push hooks, "
+               "AND it lands on %s, and this repository's default branch "
+               "could not be resolved (no refs/remotes/%s/HEAD here), so "
+               "the literal name was treated as the default"
+               % (literal_target, remote))
     elif no_verify:
         why = ("it carries the flag that switches off the pre-push hooks: "
                "the gates would not run, and nothing else in this session "
                "would record that they did not")
+    elif literal_target:
+        why = ("it lands on %s, and this repository's default branch could "
+               "not be resolved (no refs/remotes/%s/HEAD here), so the "
+               "literal name was treated as the default"
+               % (literal_target, remote))
     else:
         why = ("it lands on %s, this repository's default branch, which "
                "every other lane builds on" % default)

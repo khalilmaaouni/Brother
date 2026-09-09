@@ -1,0 +1,122 @@
+[
+ {
+  "estate": "A",
+  "name": "Haru Nakamura",
+  "role": "Founder / CEO",
+  "team": "Japan B2B drinks marketplace, 6 people",
+  "stack": "AWS, Bitbucket Cloud, app-first",
+  "languages": "Japanese + English",
+  "a_typical_day": "Morning Slack triage across Japanese and English, Bitbucket PR nudges, investor go/no-go prep, afternoon izakaya visits for feedback, evening AWS cost review. Constantly asks if team shipped real progress or just motion.",
+  "asks": [
+   "Break 'izakaya can pay on delivery' into verified units and show real PASS/FAIL receipts, not claims.",
+   "Use Brother readiness board to tell me if we can ship tomorrow or must delay, with numbers.",
+   "Gate release until finance owner sees evidence-bound delivery, no opinion slides."
+  ],
+  "edge_cases": [
+   "Writes outcome in Japanese, expects English receipts for investors.",
+   "Tries to ship without receipts; hook should block unsafe release.",
+   "Asks vague outcome; expects Brother to refuse and demand plain-language scope."
+  ],
+  "id": "A1"
+ },
+ {
+  "estate": "A",
+  "name": "Miyuki Kato",
+  "role": "Finance Owner",
+  "team": "Marketplace ops + finance",
+  "stack": "AWS costs, Bitbucket, spreadsheets",
+  "languages": "Japanese + English",
+  "a_typical_day": "Reviews marketplace GMV, delivery fees, AWS bills, reconciles wholesaler payouts, chases founder for budget discipline. Needs hard numbers before any release, hates vague done claims and hidden costs.",
+  "asks": [
+   "Prove last sprint's wholesaler payout fix actually passed checks in isolated worktree, show NO-DATA gaps.",
+   "Show project memory vault diff: what changed in costs and scope this week?",
+   "Block release if receipts are FAIL; give me cost-to-fix estimate before approval."
+  ],
+  "edge_cases": [
+   "Demands numbers in JPY, Brother shows USD mixed output.",
+   "Approves via Slack English, Jira comment in Japanese mismatch.",
+   "Asks for audit pack mid-sprint, not just at deliver."
+  ],
+  "id": "A2"
+ },
+ {
+  "estate": "A",
+  "name": "Daiki Saito",
+  "role": "Lead Engineer",
+  "team": "Small fullstack team of 6",
+  "stack": "AWS, Bitbucket Cloud, iOS/Android app",
+  "languages": "Japanese + English",
+  "a_typical_day": "Codes app features, reviews PRs on Bitbucket, fixes AWS deploys, translates specs between languages. Overloaded, needs isolated worktrees so parallel claims don't trash main and checks run automatically.",
+  "asks": [
+   "Run /brother door on plain outcome, split into claimed units, execute in git worktrees with named checks.",
+   "Show status and next: which units are PASS, which need rework, what to do now.",
+   "Stop hook must catch when I claim done but checks are NO-DATA, force evidence."
+  ],
+  "edge_cases": [
+   "Pushes worktree commit directly to main, hook refuses unsafe write.",
+   "Writes spec in mixed Japanese-English, Brother must keep evidence linked.",
+   "Runs brother auto overnight, expects readiness board update by morning."
+  ],
+  "id": "A3"
+ },
+ {
+  "estate": "B",
+  "name": "Hiroshi Tanaka",
+  "role": "SAP Customer Master PM",
+  "team": "National bottler, enterprise transformation",
+  "stack": "SAP, GitHub Enterprise, Jira, Java services",
+  "languages": "Japanese first",
+  "a_typical_day": "Jira grooming for customer master revamp, GitHub Enterprise PR reviews, alignment with SAP master data team, steering committee prep. Formal approvals required, cannot move without reviewer sign-offs and audit trail.",
+  "asks": [
+   "Use BrotherSBE spec-and-data-prep to prove customer master change aligns with SAP revamp, with approver receipts.",
+   "Generate handover-pack with evidence-bound PASS/FAIL for audit reviewers, Japanese first.",
+   "Gate formal release until all named checks pass and decisions log is complete."
+  ],
+  "edge_cases": [
+   "Change request written in Japanese, Jira approver comments in English.",
+   "Tries to merge without SBE verify PASS, release gate blocks.",
+   "SAP field rename breaks SQL models, receipt must show FAIL not NO-DATA."
+  ],
+  "id": "B1"
+ },
+ {
+  "estate": "B",
+  "name": "Yumi Ito",
+  "role": "Data Warehouse Lead",
+  "team": "DWH with SQL models",
+  "stack": "SQL models, Java services, GitHub Enterprise",
+  "languages": "Japanese first",
+  "a_typical_day": "Maintains DWH SQL models, reviews Java service ETL jobs, checks data lineage for thousands of outlets, answers audit queries. Needs proof that model change does not break downstream reports or outlet feeds.",
+  "asks": [
+   "Prove this SQL model change didn't break outlet reports; run SBE verify with data checks and show receipts.",
+   "Adopt existing Jira CR into BrotherSBE and keep GitHub Enterprise trace in worktree.",
+   "Show brief and decisions: why model changed, data assumed, what evidence exists."
+  ],
+  "edge_cases": [
+   "Data prep step has NO-DATA, Brother must not fake PASS.",
+   "SQL model passes in worktree but fails on prod data volume.",
+   "Asks prove-this-change for single hotfix without full design phase."
+  ],
+  "id": "B2"
+ },
+ {
+  "estate": "B",
+  "name": "Kenji Mori",
+  "role": "Security & Audit Reviewer",
+  "team": "Enterprise governance",
+  "stack": "GitHub Enterprise, Jira, release governance",
+  "languages": "Japanese first",
+  "a_typical_day": "Reviews change requests, checks security controls, validates audit evidence, attends release governance gate. Demands receipts over claims, refuses releases with NO-DATA and insists on isolated verification and memory vault history.",
+  "asks": [
+   "Refuse any handover without evidence-bound receipts; show Brother review findings with PASS/FAIL per check.",
+   "Verify hooks actually refused unsafe writes in worktrees, provide log proof.",
+   "Need learn step to capture why check failed for future governance rules."
+  ],
+  "edge_cases": [
+   "Reviewer comments in Japanese, evidence in English, vault must preserve both.",
+   "Tries to bypass hook with --no-verify, hook still blocks.",
+   "Stop hook flags claimed fix without linked check, demands rework."
+  ],
+  "id": "B3"
+ }
+]

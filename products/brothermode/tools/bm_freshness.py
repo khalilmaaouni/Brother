@@ -199,6 +199,22 @@ def _symbol_resolves(anchor, root):
 # protect -- every root is still searched, just concurrently and with fewer processes.
 SYMBOL_SCAN_BUDGET_S = float(os.environ.get("BM_FRESHNESS_SYMBOL_BUDGET", "8"))
 
+# LAT1 (2026-09-08): that budget is PER CALL, and bm_vault._print_hits asks for freshness once per
+# SERVED HIT, so `--limit N` multiplied it: two notes whose anchors resolve nowhere cost 16s
+# (measured) against the recall hook's 12s timeout, and the user silently got no recall at all.
+# One PROCESS, one budget: the first symbol scan arms a run deadline, every later scan is clamped
+# to what is left of it, and a scan with nothing left takes the exhausted-budget path that already
+# exists below (False plus every root named skipped), so the loud stderr NO-DATA and the
+# never-guess contract are untouched -- only the moment they fire moves. Worst case for a whole
+# process is one budget, at any --limit.
+_RUN_DEADLINE = [None]
+
+
+def reset_run_budget():
+    """Re-arm the per-process symbol-scan budget. For tests, which run many scans in one
+    interpreter; the product never needs it, because one run is one process."""
+    _RUN_DEADLINE[0] = None
+
 
 def _symbol_grep_cmd(anchors, root):
     cmd = ["grep", "-rlF", "-m", "1"]
@@ -216,11 +232,19 @@ def _symbol_resolves_any(anchors, roots, budget):
     Returns (resolved, skipped_roots): skipped_roots is non-empty only when `budget` seconds
     passed with outstanding roots still unresolved -- those are killed and reported, never left
     to answer "stale" on a guess. budget<=0 skips scanning entirely and reports every root
-    skipped, for a deterministic, instant test of the degrade path."""
+    skipped, for a deterministic, instant test of the degrade path. `budget` is also clamped to
+    what is left of the per-process run deadline (_RUN_DEADLINE), so N calls in one process share
+    ONE budget rather than paying N of them."""
     if not anchors:
         return False, []
     if budget is not None and budget <= 0:
         return False, list(roots)
+    if budget is not None:
+        if _RUN_DEADLINE[0] is None:
+            _RUN_DEADLINE[0] = time.time() + budget
+        budget = min(budget, _RUN_DEADLINE[0] - time.time())
+        if budget <= 0:
+            return False, list(roots)
     deadline = time.time() + budget if budget is not None else None
     pending = []
     launch_failed = []

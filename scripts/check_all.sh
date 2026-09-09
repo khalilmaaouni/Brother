@@ -197,6 +197,11 @@ run_check "limit-watch-self" python3 scripts/test_limit_watch.py -v
 # is named intake-record-diagrams, not intake-diagram-gate, because it gates
 # RECORDS IN THIS REPOSITORY and proves nothing about a live intake turn.
 run_check "intake-score-self" python3 scripts/test_intake_score.py -v
+# UNIT N3: intake_measure.py, Intake V2 closing measure (BYTES/TURNS/TOKENS
+# against the plan targets), replacing the cut intake_cost.py. Registered in
+# the same change that lands it, per this estate own recorded lesson that an
+# unregistered tool is invisible to every check the project owns.
+run_check "intake-measure-self" python3 scripts/test_intake_measure.py -v
 # --require-weighted-options became NON-OPTIONAL 2026-08-29, the same change
 # that fixed the six records. R16 required exactly that, "or it reverts":
 # a debt paid without the gate that stops it recurring is a debt that
@@ -510,6 +515,7 @@ run_check "resource-gate-self"    python3 scripts/test_resource_gate.py -v
 # real generator, which reports NO-DATA (exit 2) rather than FAIL when a
 # sibling repository's decision store is absent, never a silent skip.
 run_check "daybook-self"   python3 scripts/test_daybook.py -v
+run_check "persona-tools-self" python3 scripts/persona/test_persona_tools.py -v
 run_check "daybook"        python3 scripts/daybook.py
 
 # G1-M3.1/M3.2: the eleven capability-area acceptance harness. Registered the
@@ -528,6 +534,36 @@ run_check "acceptance"      python3 scripts/acceptance.py
 # lands it, per this estate's own recorded lesson that an unregistered tool
 # is invisible to every check the project owns.
 run_check "brother-run-self" python3 scripts/test_brother_run.py -v
+
+# D-001 (persona dogfood 2026-09-07, personas A1 and A3): the door used to
+# spawn a headless model command to decompose an outcome, which inside a
+# coding session hangs or fails with an empty error, three attempts running,
+# leaving no worktree and no test run. The plan now comes from the session
+# itself through --plan, validated by the same contract the decomposed path
+# uses. Registered in the change that lands it, per this estate's own lesson
+# that an unregistered tool is invisible to every check the project owns.
+run_check "brother-run-plan-self" python3 scripts/test_brother_run_plan.py -v
+
+# FX-A (2026-09-08): the WORKER half of the same rule. D-001 stopped the
+# engine spawning a headless decomposer inside a coding session; the
+# per-unit worker had no such guard, so every BUILD IT run still died at
+# scripts/model_worker.py with three attempts and empty stderr. Inside a
+# session the units are now claimed, given a worktree each and handed to
+# the session at exit 3; the continue commits, verifies and integrates
+# them. The calibration test asserts on the same spawn log D-001's suite
+# uses, so "nothing was nested" stays measured rather than assumed.
+run_check "brother-run-session-worker" python3 scripts/test_brother_run_session_worker.py -v
+
+# U6, A-prime amendment 2 (docs/plan/PLAN-THREE-ENGINES-2026-09-08.md step
+# 5): the outcome contract precedes the plan. The record naming the
+# language the answer owes, the question actually asked and the checks
+# that would prove the outcome reached is checked before any plan is read;
+# inside a coding session a run about to plan without one refuses at
+# NO-DATA; and a plan that skips a check the contract promised is refused
+# by that check id. Registered in the change that lands it, per this
+# estate's own lesson that an unregistered tool is invisible to every
+# check the project owns.
+run_check "brother-run-contract-self" python3 scripts/test_brother_run_contract.py -v
 
 # E59, the canonical state lane under the founder's ruling A of 2026-09-03
 # (docs/decisions/canonical-state-journal-first-2026-09-03.json): one
@@ -549,6 +585,21 @@ run_check "journal-self" python3 scripts/test_journal.py -v
 # must be ABSENT from the surface and PRESENT in the log, so "we removed the
 # noise" cannot be satisfied by deleting the record.
 run_check "receipt-door-self" python3 scripts/test_receipt_door.py -v
+
+# U4, the outcome contract schema: one project record for the door,
+# Intake V2 (U5) and Daybook (U9), decided in the 2026-09-08 debate
+# judgment. The checker reads the schema keywords generically and
+# enforces four hand rules the keywords cannot express; both directions
+# (a clean record, six broken ones) are driven here.
+run_check "contract-check-self" python3 scripts/test_contract_check.py -v
+
+# U8, hub PR 485 disposition (docs/plan/PR-485-DISPOSITION-2026-09-08.md): the
+# three intake engine tools kept from the cherry-pick, each stdlib-only and
+# self-contained.
+run_check "receipt-check-self" python3 scripts/test_receipt_check.py -v
+run_check "annotations-self" python3 scripts/test_annotations_store.py -v
+run_check "annotations-intake" python3 scripts/test_annotations_intake.py -v
+run_check "intake-inflight-self" python3 scripts/test_intake_inflight.py -v
 
 # E75, acceptance compression: the receipt orders a reviewer's attention into
 # four sections computed from the diff, and counts the cognitive debt the

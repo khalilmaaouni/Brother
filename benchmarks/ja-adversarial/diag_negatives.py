@@ -59,7 +59,7 @@ for case in fixture["cases"]:
         continue
     forbidden_stem = case.get("forbidden_note")
     forbidden_id = stem_to_id.get(forbidden_stem)
-    fused, _ = bm._search(con, text=case["query"], limit=LIMIT, fast=True)
+    fused, _, _total = bm._search(con, text=case["query"], limit=LIMIT, fast=True)
     ranked = [nid for nid, _s in fused]
     rank = ranked.index(forbidden_id) + 1 if forbidden_id in ranked else None
     top3 = [id_to_stem.get(nid, "?") for nid in ranked[:3]]

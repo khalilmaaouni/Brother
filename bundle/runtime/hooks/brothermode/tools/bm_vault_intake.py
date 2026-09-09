@@ -261,6 +261,33 @@ def _parse_date_arg(raw):
         return None
 
 
+def _inside_git_repo(path):
+    """True if `path` sits inside a git working tree: walk upward from it
+    looking for a .git entry (a directory for an ordinary checkout, a file
+    for a worktree). No subprocess call: VN2 only needs this cheap fact
+    before printing one line, not git's own ref resolution."""
+    cur = os.path.abspath(path)
+    while True:
+        if os.path.exists(os.path.join(cur, ".git")):
+            return True
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            return False
+        cur = parent
+
+
+def _print_vault_saved(title, note_path, rel_note, vault):
+    """VN2, the write notice: one 'Vault saved: <title> -> <path>' line,
+    printed ONLY after the file is confirmed on disk (exists, non-empty).
+    This module never commits what it writes, so a vault living inside a
+    git working tree always gets the "(unstaged)" suffix; outside one, the
+    write stands on its own."""
+    if not (os.path.exists(note_path) and os.path.getsize(note_path) > 0):
+        return
+    suffix = " (unstaged)" if _inside_git_repo(vault) else ""
+    print("Vault saved: %s -> %s%s" % (title, rel_note, suffix))
+
+
 # --------------------------------------------------------------- hard gate
 
 def credential_hit(text):
@@ -649,6 +676,7 @@ def _admit_one(src, args, ids_mod, distill_mod, taken_ids, existing_titles):
 
     rel_note = os.path.relpath(note_path, vault).replace(os.sep, "/")
     existing_titles.append((candidate_title, rel_note, note_id))
+    _print_vault_saved(candidate_title, note_path, rel_note, vault)
     return True, ("ADMITTED %s -> %s  id=%s  dirt=%s"
                   % (src, rel_note, note_id, ",".join(dirt) if dirt else "none"))
 
@@ -774,6 +802,7 @@ def cmd_capture(args):
     if dup_links:
         msg += "  duplicate_of=%s" % ",".join(str(x[0]) for x in dup_links)
     print(msg)
+    _print_vault_saved(title, note_path, rel_note, vault)
     return 0
 
 

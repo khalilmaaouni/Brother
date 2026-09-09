@@ -113,7 +113,7 @@ class EvidenceTierAtRecall(unittest.TestCase):
             "status: verified",
         ]))
         hook = load_hook()
-        state, line, _note_type = hook._lesson_state(
+        state, line, _note_type, _evidence = hook._lesson_state(
             "a", os.path.join(self.vault, "a.md"), tree)
         self.assertEqual(state, "unverified")
         self.assertIsNotNone(line)
@@ -134,7 +134,7 @@ class EvidenceTierAtRecall(unittest.TestCase):
             "status: verified",
         ]))
         hook = load_hook()
-        state, line, _note_type = hook._lesson_state(
+        state, line, _note_type, _evidence = hook._lesson_state(
             "a", os.path.join(self.vault, "a.md"), tree)
         self.assertEqual(state, "applied")
         self.assertIsNone(line)
@@ -158,7 +158,7 @@ class EvidenceTierAtRecall(unittest.TestCase):
             "applies_to: [widget.py]",
         ]))
         hook = load_hook()
-        state, line, _note_type = hook._lesson_state(
+        state, line, _note_type, _evidence = hook._lesson_state(
             "a", os.path.join(self.vault, "a.md"), tree)
         self.assertEqual(state, "unverified")
         self.assertIsNotNone(line)
@@ -275,7 +275,7 @@ class EvidenceTierAtRecall(unittest.TestCase):
             ["name: skip validation is fine here too", "applies_to: [widget.py]"],
             body=harmful_body))
         hook = load_hook()
-        state, line, _note_type = hook._lesson_state(
+        state, line, _note_type, _evidence = hook._lesson_state(
             "b", os.path.join(self.vault, "10-Lessons/b.md"), tree)
         self.assertEqual(state, "unverified")
         self.assertIsNotNone(line)

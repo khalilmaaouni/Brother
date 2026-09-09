@@ -1,0 +1,12 @@
+{
+  "cwd": "fixture",
+  "intake_stacks": [
+    {
+      "key": "entry:brother/using-brother",
+      "item": "brother/using-brother",
+      "bytes": 1000,
+      "tokens": 250,
+      "source": "fixture baseline PASS: 100 measured is 10pct of this"
+    }
+  ]
+}

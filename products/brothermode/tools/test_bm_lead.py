@@ -46,6 +46,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 # E100: one sandbox for every temp tree this process makes, removed at exit.
@@ -745,6 +746,75 @@ class TestTheEightFieldsAreComputedNotNarrated(LeadCase):
 
 
 # ---------------------------------------------------------------------------
+# FX-B: the Progress field names every task, not just a bare count
+# ---------------------------------------------------------------------------
+
+class TestProgressListsEveryTask(LeadCase):
+    """FX-B (Brother night run, persona dogfood 2026-09-08, scenarios
+    A3-S2, A1-S3, B4-S1, B4-S4): status used to print "Progress: 0 of 4
+    tasks accepted" and nothing else, so a lead who had just recorded a
+    passing review on one task read the tree as holding no evidence at
+    all. The per-task lines below come from the same task and evidence
+    rows the handover pack's situation page already renders."""
+
+    def setUp(self):
+        LeadCase.setUp(self)
+        self.seed_project()
+
+    def test_status_prints_a_line_per_task_with_evidence_on_the_reviewed_one(
+            self):
+        self.store.create_task(
+            {"task_id": "t1", "project_id": "p1",
+             "title": "wire the booking form", "status": "ready"},
+            self.actor)
+        self.store.transition_task("t1", "active", "starting work",
+                                   self.actor)
+        self.store.transition_task("t1", "awaiting review", "done",
+                                   self.actor)
+        self.store.review_task(
+            "t1", "p1",
+            {"evidence_id": "e1", "subject_type": "task",
+             "subject_id": "t1", "kind": "test", "ref": "test_booking.py",
+             "note": "", "created_at": self.clock.iso()},
+            "verified", "the booking test passes", self.actor)
+        self.store.create_task(
+            {"task_id": "t2", "project_id": "p1",
+             "title": "wire the payout form", "status": "ready"},
+            self.actor)
+        code, out, err = self.run_cli("status", "--project-id", "p1")
+        self.assertEqual(0, code, out + err)
+        self.assertEqual(NINE_FIELDS, _field_labels(out),
+                         "the nine field labels must still pin unchanged "
+                         "with the per-task lines added as continuation "
+                         "lines. Got:\n%s" % out)
+        self.assertIn(
+            "t1 wire the booking form (verified) evidence: "
+            "test_booking.py", out,
+            "the reviewed task must show its state and its evidence "
+            "reference on the Progress field. Got:\n%s" % out)
+        self.assertIn(
+            "t2 wire the payout form (ready) evidence: none", out,
+            "an unreviewed task must still get its own line, naming no "
+            "evidence rather than being dropped. Got:\n%s" % out)
+
+    def test_a_thirteenth_task_is_summarised_not_printed(self):
+        for i in range(13):
+            self.store.create_task(
+                {"task_id": "t%d" % i, "project_id": "p1",
+                 "title": "task number %d" % i, "status": "ready"},
+                self.actor)
+        code, out, err = self.run_cli("status", "--project-id", "p1")
+        self.assertEqual(0, code, out + err)
+        self.assertIn("t11 task number 11", out)
+        self.assertNotIn("t12 task number 12", out,
+                         "the thirteenth task must not get its own line "
+                         "past the cap. Got:\n%s" % out)
+        self.assertIn("and 1 more", out,
+                      "tasks past the cap must be summarised by count. "
+                      "Got:\n%s" % out)
+
+
+# ---------------------------------------------------------------------------
 # R-1: the project id is resolved, never a hard-required flag
 # ---------------------------------------------------------------------------
 
@@ -844,6 +914,145 @@ class TestVerdictLine(LeadCase):
         # claim nothing is blocking when evidence was never run.
         values = _field_values(out)
         self.assertIn("no executed evidence", values["Verdict"])
+
+
+# ---------------------------------------------------------------------------
+# R-12: status answers the question it was asked before the fields
+# ---------------------------------------------------------------------------
+
+class TestAskAnswersFirst(LeadCase):
+    """R-12 (P1, persona dogfood 2026-09-07, personas B4, A2, A4): the
+    status output used to be byte for byte identical for a routine check
+    and for a 2am outage or an audit ask, because the free text of the
+    ask was never read anywhere on the mechanical side. --ask makes the
+    command print what it was asked, and a Route hint when the text
+    names an incident or an audit, before the Verdict line the fields
+    still lead with."""
+
+    def setUp(self):
+        LeadCase.setUp(self)
+        self.seed_project()
+
+    def test_without_ask_prints_no_asked_line(self):
+        code, out, err = self.run_cli("status", "--project-id", "p1")
+        self.assertEqual(0, code, out + err)
+        self.assertNotIn("Asked:", out)
+        self.assertNotIn("Route:", out)
+
+    def test_incident_ask_prints_asked_then_route_then_verdict(self):
+        code, out, err = self.run_cli(
+            "status", "--project-id", "p1",
+            "--ask", "2am outage, one line for execs")
+        self.assertEqual(0, code, out + err)
+        lines = [ln for ln in out.splitlines() if ln.strip()]
+        self.assertEqual(
+            "Asked: 2am outage, one line for execs", lines[0],
+            "the Asked line must come first. Got:\n%s" % out)
+        self.assertEqual(
+            "Route: incident, see brothersbe:start", lines[1],
+            "an incident ask must route to brothersbe:start. Got:\n%s"
+            % out)
+        self.assertTrue(
+            lines[2].startswith("Verdict:"),
+            "the Verdict line still follows. Got:\n%s" % out)
+
+    def test_audit_ask_prints_route_audit(self):
+        code, out, err = self.run_cli(
+            "status", "--project-id", "p1",
+            "--ask", "audit this currency")
+        self.assertEqual(0, code, out + err)
+        lines = [ln for ln in out.splitlines() if ln.strip()]
+        self.assertEqual("Asked: audit this currency", lines[0])
+        self.assertEqual("Route: audit", lines[1])
+        self.assertTrue(lines[2].startswith("Verdict:"))
+
+    def test_routine_ask_prints_asked_with_no_route(self):
+        code, out, err = self.run_cli(
+            "status", "--project-id", "p1",
+            "--ask", "how is this going")
+        self.assertEqual(0, code, out + err)
+        lines = [ln for ln in out.splitlines() if ln.strip()]
+        self.assertEqual("Asked: how is this going", lines[0])
+        self.assertTrue(
+            lines[1].startswith("Verdict:"),
+            "a routine ask gets no Route line. Got:\n%s" % out)
+
+    def test_ask_is_truncated_to_200_chars_on_one_line(self):
+        long_ask = "why " * 100  # far over 200 chars, no newline in it
+        code, out, err = self.run_cli(
+            "status", "--project-id", "p1", "--ask", long_ask)
+        self.assertEqual(0, code, out + err)
+        asked_line = out.splitlines()[0]
+        self.assertTrue(asked_line.startswith("Asked: "))
+        self.assertLessEqual(len(asked_line) - len("Asked: "), 200)
+
+    def test_json_mode_is_unaffected_by_ask(self):
+        code, out, err = self.run_cli(
+            "status", "--project-id", "p1", "--ask", "audit this",
+            "--json")
+        self.assertEqual(0, code, out + err)
+        self.assertNotIn("Asked:", out)
+        data = json.loads(out)
+        self.assertIn("fields", data)
+
+    def test_the_nine_fields_still_pin_without_ask(self):
+        # Structural guard: the flag this class adds must never touch the
+        # default render path. Proven again beside the new flag rather
+        # than trusted from the older class alone.
+        self.add_forecast()
+        code, out, err = self.run_cli("status", "--project-id", "p1")
+        self.assertEqual(0, code, out + err)
+        self.assertEqual(NINE_FIELDS, _field_labels(out))
+
+
+class TestAskRoutesInJapanese(LeadCase):
+    """FX-B (Brother night run, persona dogfood 2026-09-08, scenarios
+    A2-S5 and B4-S4): the incident keyword list carried one Japanese
+    word and the audit list carried none, so an ask typed entirely in
+    Japanese (\u76e3\u67fb\u3057\u3066, "2\u6642\u969c\u5bb3")
+    fell through both routes. Still a plain, case-insensitive substring
+    match: no tokenizer added."""
+
+    def setUp(self):
+        LeadCase.setUp(self)
+        self.seed_project()
+
+    def test_audit_shite_routes_to_audit(self):
+        code, out, err = self.run_cli(
+            "status", "--project-id", "p1", "--ask", "\u76e3\u67fb\u3057\u3066")
+        self.assertEqual(0, code, out + err)
+        lines = [ln for ln in out.splitlines() if ln.strip()]
+        self.assertEqual("Route: audit", lines[1],
+                         "an ask of just \u76e3\u67fb\u3057\u3066 must "
+                         "route to audit. Got:\n%s" % out)
+
+    def test_2ji_shogai_routes_to_incident(self):
+        code, out, err = self.run_cli(
+            "status", "--project-id", "p1", "--ask", "2\u6642\u969c\u5bb3")
+        self.assertEqual(0, code, out + err)
+        lines = [ln for ln in out.splitlines() if ln.strip()]
+        self.assertEqual(
+            "Route: incident, see brothersbe:start", lines[1],
+            "an ask of 2\u6642\u969c\u5bb3 must route to incident. "
+            "Got:\n%s" % out)
+
+
+class TestSkillTextNamesTheThreeAskRoutes(unittest.TestCase):
+    """R-12: structural check that the status skill actually tells the
+    reader to answer a carried question first, route an incident to
+    brothersbe:start, and name sbe verify for an audit ask. A mechanical
+    --ask flag nobody is told to use would leave the defect exactly as
+    it was for every real conversation."""
+
+    def test_brothermode_status_skill_names_the_three_routes(self):
+        text = _read_text(os.path.join(ROOT, "skills", "status",
+                                       "SKILL.md"))
+        for needle in ("answer that question first", "brothersbe:start",
+                      "sbe verify", "honesty.md"):
+            self.assertIn(
+                needle, text,
+                "skills/status/SKILL.md must name %r for R-12's three "
+                "ask routes" % needle)
 
 
 # ---------------------------------------------------------------------------
@@ -2486,6 +2695,133 @@ class TestNoProjectTreeRead(NoProjectCase):
             self.assertIn(
                 "No Brother project here yet", out,
                 "%s did not read the tree. Got:\n%s" % (cmd, out))
+
+
+class TestR11ReaderIgnoresMissingStoreGitCheck(NoProjectCase):
+    """R-11 (persona dogfood 2026-09-07, release manager persona B4
+    scenario B4-S1): a repository whose .gitignore lacks the store line
+    hit the git containment refusal ('git-exposed-store', raised by
+    _refuse_if_git_can_commit_store) before any reader ever ran, because
+    ReadOnlyStore.__init__ checks git containment BEFORE it checks
+    whether the store file exists at all (bm_store.py lines 17939 to
+    17965). NoProjectCase's own fixture works around exactly this gap
+    with BROTHERMODE_SKIP_GIT_CONTAINMENT=1; this test removes that
+    workaround, since the fence is now supposed to hold on its own when
+    there is no store on disk yet: a missing store reads as no store,
+    the same as R-10 already promises, and the git check never runs for
+    a store that is not there to expose."""
+
+    def setUp(self):
+        super().setUp()
+        os.environ.pop("BROTHERMODE_SKIP_GIT_CONTAINMENT", None)
+
+    def test_status_reads_the_tree_without_the_skip_env(self):
+        code, out, err = self.run_cli("status")
+        self.assertEqual(0, code, out + err)
+        self.assertIn("No Brother project here yet", out)
+        self.assertNotIn("git does NOT ignore", out + err,
+                          "the git containment refusal must never fire "
+                          "for a store that does not exist yet. "
+                          "Got:\n%s" % (out + err))
+        self.assertNotIn("git-exposed-store", out + err)
+
+
+class TestNoProjectTreeReadCountsEveryEvidenceFile(NoProjectCase):
+    """F-003 (persona dogfood 2026-09-07 round 2, release manager B4-S1):
+    _receipt_summary only counted a JSON file under .sbe/evidence whose
+    own "verdict" field was PASS, FAIL or NO-DATA. BrotherSBE evidence of
+    another shape (design.json, gate.json, score.json) sits in that same
+    folder and carries no verdict field at all, so the tree read printed
+    "Check receipts under .sbe/evidence: none found" with three such
+    files already on disk. Every JSON file is now counted, the newest one
+    is named regardless of its shape, and the PASS/FAIL/NO-DATA counts
+    still come from whichever files do carry a verdict."""
+
+    def _write_json(self, name, data, mtime):
+        directory = os.path.join(self.root, ".sbe", "evidence")
+        os.makedirs(directory, exist_ok=True)
+        path = os.path.join(directory, name)
+        with io.open(path, "w", encoding="utf-8") as fh:
+            json.dump(data, fh)
+        os.utime(path, (mtime, mtime))
+
+    def test_shapeless_evidence_files_are_counted_not_dropped(self):
+        base = time.time() - 100
+        self._write_json("design.json", {"decision": "use sqlite"}, base)
+        self._write_json("gate.json", {"stage": "review"}, base + 1)
+        self._write_json("score.json", {"score": 8}, base + 2)
+        code, out, err = self.run_cli("status")
+        self.assertEqual(0, code, out + err)
+        self.assertNotIn(
+            "none found", out,
+            "a folder holding JSON evidence files of any shape must "
+            "never read as empty, even when none of them carry a "
+            "verdict field. Got:\n%s" % out)
+        self.assertIn(
+            "score.json", out,
+            "the newest evidence file must be named regardless of its "
+            "own shape. Got:\n%s" % out)
+
+        # A verdict-bearing receipt lands beside the shapeless ones: the
+        # existing PASS/FAIL/NO-DATA counts must still be reported.
+        self._write_json("r1.json", {"verdict": "PASS", "exitCode": 0},
+                         base + 3)
+        code, out, err = self.run_cli("status")
+        self.assertEqual(0, code, out + err)
+        self.assertIn(
+            "1 PASS", out,
+            "the PASS count from the one file that does carry a verdict "
+            "must still be reported. Got:\n%s" % out)
+
+
+class TestNoProjectTreeReadCountsExitCodeReceipts(NoProjectCase):
+    """FX-B (Brother night run, persona dogfood 2026-09-08): the three
+    receipts `sbe verify` mints (design.json, gate.json, score.json)
+    carry an "exitCode" field and no "verdict" field, so the tree read
+    counted zero of them even though file_count already named all
+    three; the line printed "3 file(s), no verdict field read" over a
+    folder holding two clean passes and one failing check. exitCode 0
+    now reads as PASS and any other integer as FAIL when no verdict
+    field is present."""
+
+    def _write_json(self, name, data, mtime):
+        directory = os.path.join(self.root, ".sbe", "evidence")
+        os.makedirs(directory, exist_ok=True)
+        path = os.path.join(directory, name)
+        with io.open(path, "w", encoding="utf-8") as fh:
+            json.dump(data, fh)
+        os.utime(path, (mtime, mtime))
+
+    def test_exitcode_only_receipts_are_counted_pass_and_fail(self):
+        base = time.time() - 100
+        self._write_json("design.json", {"exitCode": 0}, base)
+        self._write_json("gate.json", {"exitCode": 0}, base + 1)
+        self._write_json("score.json", {"exitCode": 1}, base + 2)
+        code, out, err = self.run_cli("status")
+        self.assertEqual(0, code, out + err)
+        self.assertNotIn(
+            "no verdict field read", out,
+            "exitCode-bearing receipts must never read as having no "
+            "verdict field once the fallback counts them. Got:\n%s"
+            % out)
+        self.assertIn(
+            "2 PASS, 1 FAIL", out,
+            "two exitCode 0 receipts and one exitCode 1 receipt must "
+            "count as 2 PASS, 1 FAIL. Got:\n%s" % out)
+        self.assertIn(
+            "score.json", out,
+            "the newest receipt must still be named. Got:\n%s" % out)
+
+    def test_a_verdict_field_still_wins_over_exitcode(self):
+        base = time.time() - 100
+        self._write_json(
+            "r1.json", {"exitCode": 1, "verdict": "PASS"}, base)
+        code, out, err = self.run_cli("status")
+        self.assertEqual(0, code, out + err)
+        self.assertIn(
+            "1 PASS, 0 FAIL", out,
+            "an explicit verdict field must win over exitCode even when "
+            "they disagree. Got:\n%s" % out)
 
 
 class TestReaderVsWriterOnZeroProjects(LeadCase):

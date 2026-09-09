@@ -64,6 +64,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # ~/.claude it always was.
 sys.path.insert(0, HERE)
 import brother_paths  # noqa: E402
+import annotations_store  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -112,14 +113,16 @@ def score(option, criteria):
         key = c.get("key")
         if key not in marks:
             unmarked.append(c.get("label", key))
-            rows.append({"label": c.get("label", key), "weight": c["weight"],
+            rows.append({"label": c.get("label", key), "key": key,
+                         "weight": c["weight"],
                          "mark": None, "product": 0.0,
                          "why": basis.get(key, "")})
             continue
         mark = float(marks[key])
         product = mark * c["weight"]
         total += product
-        rows.append({"label": c.get("label", key), "weight": c["weight"],
+        rows.append({"label": c.get("label", key), "key": key,
+                     "weight": c["weight"],
                      "mark": mark, "product": product,
                      "why": basis.get(key, "")})
     return total, rows, unmarked
@@ -181,6 +184,12 @@ def _pill(text, kind=""):
 
 def render(spec):
     criteria, weight_note, scored, close = rank(spec)
+    # ANNOTATE TO REMEMBER, live at intake (docs/plan/PR-485-DISPOSITION-
+    # 2026-09-08.md): a correction stored once by annotations_store.py is
+    # shown beside the mark it corrects, so the same fix is never re-typed.
+    # An absent or empty store loads as [] (annotations_store's own
+    # contract) and renders nothing extra.
+    annotations = annotations_store.load_annotations(ROOT)
     auto = bool(spec.get("auto_choose"))
     title = spec.get("title", "A decision")
     parts = []
@@ -298,7 +307,7 @@ def render(spec):
     chosen_id = decided.get("choice")
     for i, s in enumerate(scored):
         s["option"]["_chosen"] = (s["option"].get("id") == chosen_id)
-        A(render_option(s, i == 0))
+        A(render_option(s, i == 0, annotations))
 
     if spec.get("would_change"):
         A('<section class="flip"><h2>What would change this answer</h2><ul>')
@@ -311,7 +320,7 @@ def render(spec):
     return "\n".join(parts)
 
 
-def render_option(s, is_lead):
+def render_option(s, is_lead, annotations=()):
     o = s["option"]
     parts = []
     A = parts.append
@@ -349,10 +358,15 @@ def render_option(s, is_lead):
       '<th class="num">Contributes</th><th>Why that mark</th></tr></thead><tbody>')
     for r in s["rows"]:
         mark = ("%.0f" % r["mark"]) if r["mark"] is not None else NODATA
+        why_cell = E(r["why"])
+        prior = annotations_store.annotation_for(annotations, o.get("id"), r.get("key"))
+        if prior:
+            why_cell += ('<br><span class="note">corrected before: %s</span>'
+                         % E(prior.get("note", "")))
         A('<tr><th scope="row">%s</th><td class="num">%.0f%%</td>'
           '<td class="num">%s</td><td class="num">%.2f</td><td>%s</td></tr>'
           % (E(r["label"]), r["weight"] * 100, E(mark), r["product"],
-             E(r["why"])))
+             why_cell))
     A('</tbody><tfoot><tr><th scope="row">Total</th><td></td><td></td>'
       '<td class="num big">%.2f</td><td></td></tr></tfoot></table></div>'
       % s["total"])

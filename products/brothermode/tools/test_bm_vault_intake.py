@@ -10,13 +10,17 @@ its named test fail.
 
 No em or en dashes anywhere in this file.
 """
+import contextlib
+import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 INTAKE = os.path.join(HERE, "bm_vault_intake.py")
@@ -1143,6 +1147,110 @@ class ProvenanceSourceSanitization(unittest.TestCase):
         self.assertIn("provenance_actor: real-actor", body)
         self.assertIn("provenance_source: exchange:xchg-deadbeefcafebabe "
                        "provenance_actor: injected-actor", body)
+
+
+VAULT_SAVED_RE = re.compile(r"^Vault saved: (.+) -> (.+?)( \(unstaged\))?$")
+
+
+class VaultSavedWriteNotice(unittest.TestCase):
+    """VN2 (the write notice): admit and capture both print one
+    'Vault saved: <title> -> <path>' line, and ONLY once the note file is
+    actually confirmed on disk. (a) a clean admit prints exactly one such
+    line naming a file that exists; (b) a write blocked by a read-only
+    destination prints none and errors honestly; (c) a hard-gate-rejected
+    capture prints none either. Every fixture body below is a plain test
+    fixture, never a real person, client, or secret."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="bm-intake-vault-saved-")
+        self.vault = os.path.join(self.tmp, "vault")
+        os.makedirs(self.vault)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_a_clean_admit_prints_exactly_one_vault_saved_line(self):
+        src = os.path.join(self.tmp, "vn2-fixture-lesson.txt")
+        with open(src, "w", encoding="utf-8") as f:
+            f.write("VN2 test fixture: an ordinary lesson body, nothing "
+                    "real, safe to admit into a throwaway vault.\n")
+        code, out, err = run_admit(["--vault", self.vault, "--source", "vn2-test",
+                                    "--by", "vn2-tester", src])
+        self.assertEqual(code, 0, out + err)
+        saved_lines = [ln for ln in out.splitlines()
+                      if ln.startswith("Vault saved: ")]
+        self.assertEqual(len(saved_lines), 1, out)
+        m = VAULT_SAVED_RE.match(saved_lines[0])
+        self.assertIsNotNone(m, saved_lines[0])
+        self.assertEqual(m.group(1), "vn2 fixture lesson")
+        landed = os.path.join(self.vault, m.group(2))
+        self.assertTrue(os.path.isfile(landed), landed)
+        self.assertGreater(os.path.getsize(landed), 0)
+
+    def test_a_write_blocked_by_a_read_only_destination_prints_no_line(self):
+        inbox_dir = os.path.join(self.vault, "00-Inbox")
+        os.makedirs(inbox_dir)
+        src = os.path.join(self.tmp, "vn2-fixture-blocked.txt")
+        with open(src, "w", encoding="utf-8") as f:
+            f.write("VN2 test fixture: this one must never actually land.\n")
+        # Read+execute only: os.makedirs(target_dir, exist_ok=True) is a
+        # no-op since 00-Inbox already exists, so the failure comes from
+        # the note file's own open(..., "w") right after.
+        os.chmod(inbox_dir, 0o500)
+        try:
+            code, out, err = run_admit(["--vault", self.vault, "--source", "vn2-test",
+                                        "--by", "vn2-tester", src])
+        finally:
+            os.chmod(inbox_dir, 0o700)
+        self.assertNotEqual(code, 0, out + err)
+        self.assertNotIn("Vault saved", out, out)
+        self.assertEqual(os.listdir(inbox_dir), [])
+
+    def test_a_deny_list_rejected_capture_prints_no_line(self):
+        deny_list = os.path.join(self.tmp, "deny.txt")
+        with open(deny_list, "w", encoding="utf-8") as f:
+            f.write("VN2FIXTUREDENYTERM\n")
+        p = subprocess.run(
+            [sys.executable, INTAKE, "capture", "--vault", self.vault,
+             "--by", "vn2-tester", "--deny-list", deny_list,
+             "a captured thought naming VN2FIXTUREDENYTERM by mistake"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        out = p.stdout.decode("utf-8", "replace")
+        err = p.stderr.decode("utf-8", "replace")
+        self.assertEqual(p.returncode, 1, out + err)
+        self.assertIn("class=deny-list-term", err)
+        self.assertNotIn("Vault saved", out, out)
+        self.assertFalse(os.path.isdir(os.path.join(self.vault, "00-Inbox")))
+
+    def test_a_zero_size_note_file_prints_no_line(self):
+        # VN9a: the guard checks os.path.getsize(note_path) > 0, not merely
+        # that the file exists. A real, non-empty note file backs the call
+        # so only the patched getsize (0) can be why nothing prints.
+        note_path = os.path.join(self.tmp, "vn9a-fixture-note.md")
+        with open(note_path, "w", encoding="utf-8") as f:
+            f.write("VN9a test fixture: this note is really on disk.\n")
+        buf = io.StringIO()
+        with mock.patch("bm_vault_intake.os.path.getsize", return_value=0):
+            with contextlib.redirect_stdout(buf):
+                intake._print_vault_saved("vn9a title", note_path,
+                                           "00-Inbox/vn9a-fixture-note.md",
+                                           self.vault)
+        self.assertNotIn("Vault saved", buf.getvalue(), buf.getvalue())
+
+    def test_a_missing_note_file_prints_no_line(self):
+        # VN9a: the guard's other half, os.path.exists(note_path). A real
+        # file still backs the path so only the patched exists (False) can
+        # be why nothing prints.
+        note_path = os.path.join(self.tmp, "vn9a-fixture-note-2.md")
+        with open(note_path, "w", encoding="utf-8") as f:
+            f.write("VN9a test fixture: this note is really on disk too.\n")
+        buf = io.StringIO()
+        with mock.patch("bm_vault_intake.os.path.exists", return_value=False):
+            with contextlib.redirect_stdout(buf):
+                intake._print_vault_saved("vn9a title", note_path,
+                                           "00-Inbox/vn9a-fixture-note-2.md",
+                                           self.vault)
+        self.assertNotIn("Vault saved", buf.getvalue(), buf.getvalue())
 
 
 if __name__ == "__main__":

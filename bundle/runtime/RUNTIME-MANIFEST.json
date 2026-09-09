@@ -2,6 +2,10 @@
  "entry": "brother_run.py",
  "files": [
   {
+   "path": "annotations_store.py",
+   "sha256": "01f2a3ca803991aab59a478a14e133f5834f8ece428c4a53830bc799b28812be"
+  },
+  {
    "path": "autonomy_dial.py",
    "sha256": "6ff379cb54b2c7aec5205db9c641c8bb6c9a9881072959ef2d4b2cf4d97e1d6f"
   },
@@ -15,7 +19,7 @@
   },
   {
    "path": "brother_run.py",
-   "sha256": "7bef71f72ab732f5054505e5794a08608673e902fd0ed10b2b3c631c320bee78"
+   "sha256": "2a060a1f2be839cc8dceff5d28be44cb4bc76da0e78b5bf680ec53b9ab3cc16e"
   },
   {
    "path": "claim_store.py",
@@ -30,8 +34,12 @@
    "sha256": "c2df790d9c6c76217cc00524723e26eb4380ad0f9c3b0e0d86c0de76b7f23bad"
   },
   {
+   "path": "contract_check.py",
+   "sha256": "bd4e9f6fdb4ee805e8d4e521a245624d5cc5c529e2f11220d28c02778ac62386"
+  },
+  {
    "path": "decide.py",
-   "sha256": "78f571bbdbc239a69394550af11468875541b8d703949409ed676052d5895e2c"
+   "sha256": "5ef2b6fb920c04d330c65a83c01b7e74d2e6ab77090d1597490cc1dfab531624"
   },
   {
    "path": "door.py",
@@ -47,7 +55,7 @@
   },
   {
    "path": "journal.py",
-   "sha256": "186277ae59dd1f5d9a7bc07c048b6176b73ecf839a649fa67caa291b6595426a"
+   "sha256": "dc673c8950038e17d5edc1d1580b5185b1b39d095cd998b7ab6a7d13eb7bbf49"
   },
   {
    "path": "journal_projection.py",
@@ -59,7 +67,7 @@
   },
   {
    "path": "loop_bridge.py",
-   "sha256": "249a9ddaae9a16a9b5580b9050e1db2ed000184757a22fe33d44403ac4b06fbe"
+   "sha256": "8f6bdae756b69dbf6014baa048140551c455c30d75e856c0659be1af6e1ccdf2"
   },
   {
    "path": "managed_safety.py",
@@ -68,6 +76,10 @@
   {
    "path": "model_worker.py",
    "sha256": "8824e46a97ee0106739898a257eea7a2404c292c2f80e7d0ac8b7f5090597850"
+  },
+  {
+   "path": "outcome-contract-v1.json",
+   "sha256": "43fd889c338a647496b110fa3532da87b6462bf412a12e6a25f2a57cbf0a9dc7"
   },
   {
    "path": "packs/architect.json",
@@ -123,7 +135,7 @@
   },
   {
    "path": "receipt_door.py",
-   "sha256": "bc35a5943a369fa5c68c500a0a57aa0f57db749d23129f40e89e439f48170768"
+   "sha256": "d8f156390e9beb0758209fe2dd89d89b7ff771a216d77c557ac6ba9339678eca"
   },
   {
    "path": "review_pass.py",
@@ -151,6 +163,6 @@
   }
  ],
  "generated_by": "scripts/bundle_runtime.py",
- "source_describe": "v0.9.6-4690-g8d1c0147",
- "source_revision": "8d1c0147f88f98af35f31448954d629dba0aff96"
+ "source_describe": "v0.9.6-4961-gc09b4a98",
+ "source_revision": "c09b4a98e01e24cb5278b8d9789178fc87966e9e"
 }

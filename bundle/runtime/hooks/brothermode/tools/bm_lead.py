@@ -356,38 +356,67 @@ def _recent_commits(av, root, count=5):
 
 
 def _receipt_summary(root):
-    """(counts, newest_name): counts is a dict of PASS, FAIL, NO-DATA
-    over every JSON file under .sbe/evidence whose own "verdict" field is
-    one of those three; newest_name is the most recently modified such
-    file, or "" when none exist. An unreadable file or directory counts
-    as zero rather than raising."""
+    """(counts, newest_name, file_count): counts is a dict of PASS, FAIL
+    and NO-DATA over every JSON file under .sbe/evidence that carries a
+    recognized "verdict" field, OR an integer "exitCode" field read the
+    same way once no verdict is present (0 is PASS, anything else is
+    FAIL; FX-B, Brother night run 2026-09-08); file_count is EVERY JSON
+    file found there, whatever its shape. BrotherSBE evidence of another
+    shape (design.json, gate.json, score.json) sits in the same folder
+    and used to carry no verdict field at all, so counting only
+    verdict-bearing files used to read as zero receipts with three files
+    still on disk (F-003, persona dogfood 2026-09-07 round 2, release
+    manager B4-S1); those same three files carry exitCode, so the
+    exitCode fallback is what actually closes that gap. newest_name is
+    the most recently modified JSON file of any shape, or "" when none
+    exist. An unreadable file or directory counts as zero rather than
+    raising, but a file that merely fails to read still counts toward
+    file_count and can still be the newest one: it is a real JSON
+    receipt on disk, just not one this function can open. A file with
+    neither a verdict nor an integer exitCode stays uncounted."""
     directory = os.path.join(root, ".sbe", "evidence")
     counts = dict.fromkeys(("PASS", "FAIL", "NO-DATA"), 0)
     newest_name, newest_mtime = "", -1
+    file_count = 0
     if not os.path.isdir(directory):
-        return counts, newest_name
+        return counts, newest_name, file_count
     try:
         names = os.listdir(directory)
     except OSError:
-        return counts, newest_name
+        return counts, newest_name, file_count
     for name in names:
         path = os.path.join(directory, name)
         if not name.endswith(".json") or not os.path.isfile(path):
             continue
         try:
+            mtime = os.path.getmtime(path)
+        except OSError:
+            continue
+        file_count += 1
+        if mtime > newest_mtime:
+            newest_mtime, newest_name = mtime, name
+        try:
             with io.open(path, encoding="utf-8") as fh:
                 data = json.load(fh)
-            mtime = os.path.getmtime(path)
         except (IOError, OSError, ValueError):
             continue
         if not isinstance(data, dict):
             continue
         verdict = str(data.get("verdict") or "").strip().upper()
+        if not verdict and isinstance(data.get("exitCode"), int):
+            # FX-B (Brother night run, 2026-09-08): the three receipts
+            # BrotherSBE's own `sbe verify` mints (design.json, gate.json,
+            # score.json) carry exitCode and no verdict field at all, so
+            # this tree read used to say "no verdict field read" over a
+            # folder that in fact holds a clean pass. exitCode 0 is PASS,
+            # any other integer is FAIL; a verdict field, when present,
+            # still wins outright. A file with neither stays uncounted
+            # here (it is still counted in file_count above and can still
+            # be the newest file named).
+            verdict = "PASS" if data["exitCode"] == 0 else "FAIL"
         if verdict in counts:
             counts[verdict] += 1
-        if mtime > newest_mtime:
-            newest_mtime, newest_name = mtime, name
-    return counts, newest_name
+    return counts, newest_name, file_count
 
 
 def _no_project_verdict(counts):
@@ -458,7 +487,7 @@ def _no_project_tree_read(root, want_verdict=False):
     suites and change-request documents, in place of a bare refusal.
     want_verdict prepends status's own leading Verdict line; every other
     reader gets the plain header."""
-    counts, newest = _receipt_summary(root)
+    counts, newest, file_count = _receipt_summary(root)
     lines = []
     if want_verdict:
         lines.append("Verdict: %s" % _no_project_verdict(counts))
@@ -480,15 +509,22 @@ def _no_project_tree_read(root, want_verdict=False):
                 lines.append("  %s" % line)
         else:
             lines.append("Last commits: NO-DATA")
-    total = sum(counts.values())
-    if total:
+    verdict_total = sum(counts.values())
+    if not file_count:
+        lines.append("Check receipts under .sbe/evidence: none found")
+    elif not verdict_total:
+        # F-003: files exist (design.json, gate.json, score.json shapes)
+        # but none of them carry a recognized verdict field. Never say
+        # "none found" here: name the count and the newest file instead.
+        lines.append(
+            "Check receipts under .sbe/evidence: %d file(s), no verdict "
+            "field read (newest: %s)" % (file_count, newest or "NO-DATA"))
+    else:
         lines.append(
             "Check receipts under .sbe/evidence: %d PASS, %d FAIL, "
             "%d NO-DATA (newest: %s)"
             % (counts["PASS"], counts["FAIL"], counts["NO-DATA"],
                newest or "NO-DATA"))
-    else:
-        lines.append("Check receipts under .sbe/evidence: none found")
     suites = _test_suites(root)
     if suites:
         lines.append("Test suites found:")
@@ -528,11 +564,40 @@ def _reader_project_id(kv, usage, want_verdict=False):
     repository with no store at all raises an ownership refusal here,
     reason "no-store", before _resolve_project_id ever runs; a store
     that exists but holds zero projects reaches _resolve_project_id and
-    raises _NoProjectYet there instead. Both print the same tree read."""
+    raises _NoProjectYet there instead. Both print the same tree read.
+
+    R-11 (persona dogfood 2026-09-07, release manager persona B4
+    scenario B4-S1): ReadOnlyStore.__init__ checks git containment
+    (_refuse_if_git_can_commit_store) BEFORE it checks whether the store
+    file even exists, so a repository whose .gitignore lacks the store
+    line refused with 'git-exposed-store' before this function ever saw
+    'no-store', and the day-one tree read above never ran. When the
+    store file is not on disk, that IS the no-store case, so this checks
+    bs.store_path directly and skips constructing ReadOnlyStore
+    entirely: no git containment check runs for a store that is not
+    there to expose. The except clause below is belt-and-braces for the
+    same fact learned a moment later (the file could vanish between the
+    check and the construction): it never fires when the store file
+    exists, so a real containment problem on an existing store still
+    refuses exactly as it did before this fix."""
     root = _root()
+    if not os.path.isfile(bs.store_path(root)):
+        _print_no_project_tree_read(root, want_verdict)
+        return None
     try:
         probe = _store_or_refuse(kv, write=False)
     except bs.OwnershipRefused as exc:
+        if exc.reason in ("git-exposed-store", "git-tracked-store") and \
+                not os.path.isfile(bs.store_path(root)):
+            _err("bm_lead: warning: R-11: git containment (%s) refused a "
+                 "store that does not exist on disk; reading the "
+                 "repository tree instead. Run /brothermode:start (or, "
+                 "on a clone install: python3 \"${CLAUDE_PLUGIN_ROOT}/"
+                 "tools/bm_project.py\" start) to create the store, "
+                 "which also adds the missing ignore line."
+                 % exc.reason)
+            _print_no_project_tree_read(root, want_verdict)
+            return None
         if exc.reason != "no-store":
             raise
         _print_no_project_tree_read(root, want_verdict)
@@ -1224,6 +1289,35 @@ def key_decision_class(store, project_id, context):
 # The eight fields: one collector, two renderers.
 # ---------------------------------------------------------------------------
 
+_PROGRESS_TASK_LIMIT = 12
+
+
+def _progress_task_lines(store, project_id):
+    """FX-B (Brother night run, 2026-09-08): one indented continuation
+    line per task under the Progress field, capped at
+    _PROGRESS_TASK_LIMIT with an "and N more" line after. This is the
+    same data the handover pack's situation page (_render_situation)
+    already renders (task id, title, status, newest evidence reference),
+    reused here rather than read a second way, so status stops printing
+    a bare count while the evidence a lead just recorded sits unread one
+    call away."""
+    tasks = store.list_tasks(project_id, raw=True)
+    lines = []
+    for task in tasks[:_PROGRESS_TASK_LIMIT]:
+        evidence = _newest(store.list_evidence(
+            "task", task.get("task_id"), raw=True))
+        ref = (evidence.get("ref") or "").strip() if evidence else ""
+        lines.append(
+            "  %s %s (%s) evidence: %s"
+            % (task.get("task_id"),
+               (task.get("title") or "").strip() or "no title recorded",
+               task.get("status") or "no status recorded",
+               ref or "none"))
+    if len(tasks) > _PROGRESS_TASK_LIMIT:
+        lines.append("  and %d more" % (len(tasks) - _PROGRESS_TASK_LIMIT))
+    return lines
+
+
 def collect_status(store, project_id):
     """Every field computed from records, or a sentence saying it cannot be
     computed. Where a field is absent it SAYS so rather than being dropped,
@@ -1298,7 +1392,8 @@ def collect_status(store, project_id):
             progress = "%d of %d tasks accepted" % (done, len(tasks))
         else:
             progress = "nothing planned yet"
-    fields.append(("Progress", progress, []))
+    fields.append(("Progress", progress, _progress_task_lines(
+        store, project_id)))
 
     if forecast:
         fields.append(("Time remaining", render_forecast_range(forecast),
@@ -2011,6 +2106,53 @@ def render_error_card(what_happened, impact, recommended, safe):
 
 _VIEW_FLAGS = ("ic", "advanced")
 
+# R-12 (P1, persona dogfood 2026-09-07, personas B4, A2, A4): status's
+# optional --ask flag below prints one line naming what the caller asked,
+# then a Route hint from these two small keyword lists. Not natural
+# language parsing: a plain substring match, case insensitive, against the
+# caller's own text. Incident wins when a text matches both, since a "2am
+# outage, audit the number" ask is still the pager going off.
+# FX-B (Brother night run, persona dogfood 2026-09-08): the incident list
+# carried one Japanese word and the audit list carried none, so an ask
+# typed entirely in Japanese fell through both lists on a plain substring
+# test. No tokenizer added: still a plain, case-insensitive substring
+# match against the caller's own text.
+_ASK_INCIDENT_WORDS = ("down", "outage", "hotfix", "2am", "urgent",
+                       "\u843d\u3061\u305f", "\u969c\u5bb3",
+                       "\u505c\u6b62", "\u7dca\u6025",
+                       "\u843d\u3061\u3066\u308b")
+_ASK_AUDIT_WORDS = ("audit", "compliance", "evidence for",
+                    "\u76e3\u67fb", "\u8a3c\u62e0",
+                    "\u30b3\u30f3\u30d7\u30e9\u30a4\u30a2\u30f3\u30b9",
+                    "\u76e3\u67fb\u3057\u3066")
+
+
+def _ask_route(ask_text):
+    """'incident', 'audit', or '' for the given --ask text, from the
+    keyword lists above."""
+    lowered = ask_text.lower()
+    if any(w in lowered for w in _ASK_INCIDENT_WORDS):
+        return "incident"
+    if any(w in lowered for w in _ASK_AUDIT_WORDS):
+        return "audit"
+    return ""
+
+
+def _print_ask_lines(ask_text):
+    """R-12: the Asked line and, where it matches, the Route hint, printed
+    before the Verdict line. The text is echoed as given (200 chars max,
+    one line); it is never translated or interpreted beyond the keyword
+    match above."""
+    text = ask_text.strip().replace("\n", " ")
+    if len(text) > 200:
+        text = text[:200]
+    _out("Asked: %s" % text)
+    route = _ask_route(text)
+    if route == "incident":
+        _out("Route: incident, see brothersbe:start")
+    elif route == "audit":
+        _out("Route: audit")
+
 
 def cmd_outcome(argv):
     _pos, kv = _parse(argv, ("project-id", "set", "name", "json", "ic",
@@ -2066,10 +2208,17 @@ def cmd_outcome(argv):
 
 
 def cmd_status(argv):
-    _pos, kv = _parse(argv, ("project-id", "json", "raw") + _VIEW_FLAGS,
-                      wants_value=("project-id",))
+    _pos, kv = _parse(argv, ("project-id", "json", "raw", "ask") + _VIEW_FLAGS,
+                      wants_value=("project-id", "ask"))
     usage = ("usage: status --project-id ID [--ic] [--advanced] [--json] "
-             "[--raw]")
+             "[--raw] [--ask TEXT]")
+    ask = (kv.get("ask") or "").strip()
+    # R-12: printed before everything else, including the no-project tree
+    # read, so the caller sees their own question echoed back whatever
+    # this folder turns out to hold. --json stays a plain data contract
+    # and does not gain these lines.
+    if ask and not kv.get("json"):
+        _print_ask_lines(ask)
     ic, advanced, footer = _view_flags(kv)
     project_id = _reader_project_id(kv, usage, want_verdict=True)
     if project_id is None:

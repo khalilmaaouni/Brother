@@ -87,7 +87,7 @@ class DisambigBase(unittest.TestCase):
         self.con.close()
 
     def served(self, query, limit=10):
-        fused, _why = self.bm._search(self.con, text=query, limit=limit, fast=True)
+        fused, _why, _total = self.bm._search(self.con, text=query, limit=limit, fast=True)
         return {nid for nid, _s in fused}
 
 

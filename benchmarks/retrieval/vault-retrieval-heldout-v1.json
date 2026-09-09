@@ -1,0 +1,693 @@
+{
+  "schema": 1,
+  "corpus": "held-out",
+  "built_by": "benchmarks/retrieval/build_vault_retrieval_fixture.py",
+  "vault": "benchmarks/fixtures/vault-retrieval/vault",
+  "resolution_key": "primary_path",
+  "resolution_note": "paths are relative to the fixture vault root. Note ids are assigned at index time and are not stable, so this corpus never keys on one.",
+  "vault_fingerprint": {
+    "notes": 86,
+    "anchors": 150
+  },
+  "queries": [
+    {
+      "qid": "VRH01",
+      "query_sent": "cedar_anvil.sh",
+      "hook_tool_input": {
+        "file_path": "/repo/alpha-app/cedar-anvil/cedar_anvil.sh"
+      },
+      "folder": "10-Projects",
+      "project": "alpha-app",
+      "lang": "ja",
+      "kind": "lesson",
+      "band": "crowded",
+      "anchor_note_count": 11,
+      "primary_path": "10-Projects/alpha-app/vrb-p030-note.md",
+      "primary_title": "キャッシュを消す担当が決まっていない",
+      "expected_paths": [
+        "10-Projects/alpha-app/vrb-p026-the-request-router-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/alpha-app/vrb-p030-note.md",
+        "10-Projects/beta-cli/vrb-p037-the-build-anvil-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/gamma-site/vrb-p044-the-seat-allocator-reported-a-partial-run-as-a-complete-one.md",
+        "40-Failures/vrb-p005-note.md",
+        "40-Failures/vrb-p012-note.md",
+        "40-Failures/vrb-p019-the-tundra-sweeper-counted-a-skipped-row-as-a-written-one.md",
+        "50-Reference/vrb-d000-the-release-checklist-every-team-is-expected-to-follow.md",
+        "50-Reference/vrb-d002-the-retention-ruling-for-logs-and-generated-files.md",
+        "50-Reference/vrb-p051-the-page-cache-read-a-stale-copy-for-a-whole-afternoon.md",
+        "50-Reference/vrb-p058-the-tally-job-read-a-stale-copy-for-a-whole-afternoon.md"
+      ],
+      "note": "11 notes carry this anchor and only vrb-p030-note.md is the lesson for it; carriers span 40-Failures, 50-Reference, alpha-app, beta-cli, gamma-site, so nothing prefers alpha-app's own tree"
+    },
+    {
+      "qid": "VRH02",
+      "query_sent": "OnyxSync.swift",
+      "hook_tool_input": {
+        "file_path": "/repo/beta-cli/onyxsync/OnyxSync.swift"
+      },
+      "folder": "10-Projects",
+      "project": "beta-cli",
+      "lang": "en",
+      "kind": "lesson",
+      "band": "crowded",
+      "anchor_note_count": 12,
+      "primary_path": "10-Projects/beta-cli/vrb-p040-the-log-plume-reported-a-partial-run-as-a-complete-one.md",
+      "primary_title": "the log plume reported a partial run as a complete one",
+      "expected_paths": [
+        "10-Projects/alpha-app/vrb-p029-the-ledger-writer-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/beta-cli/vrb-p036-the-retry-ripple-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/beta-cli/vrb-p040-the-log-plume-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/gamma-site/vrb-p043-the-tundra-sweeper-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/gamma-site/vrb-p047-note.md",
+        "40-Failures/vrb-p001-the-batch-loader-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p008-the-parcel-tracker-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p015-the-orbit-scheduler-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p022-the-token-minter-counted-a-skipped-row-as-a-written-one.md",
+        "50-Reference/vrb-d000-the-release-checklist-every-team-is-expected-to-follow.md",
+        "50-Reference/vrb-d002-the-retention-ruling-for-logs-and-generated-files.md",
+        "50-Reference/vrb-p054-the-roster-importer-read-a-stale-copy-for-a-whole-afternoon.md"
+      ],
+      "note": "12 notes carry this anchor and only vrb-p040-the-log-plume-reported-a-partial-run-as-a-complete-one.md is the lesson for it; carriers span 40-Failures, 50-Reference, alpha-app, beta-cli, gamma-site, so nothing prefers beta-cli's own tree"
+    },
+    {
+      "qid": "VRH03",
+      "query_sent": "Gamma-roster-NOTES.md",
+      "hook_tool_input": {
+        "file_path": "/repo/beta-cli/gamma-roster-notes/Gamma-roster-NOTES.md"
+      },
+      "folder": "10-Projects",
+      "project": "beta-cli",
+      "lang": "en",
+      "kind": "lesson",
+      "band": "mid",
+      "anchor_note_count": 3,
+      "primary_path": "10-Projects/beta-cli/vrb-p041-the-index-quartz-reported-a-partial-run-as-a-complete-one.md",
+      "primary_title": "the index quartz reported a partial run as a complete one",
+      "expected_paths": [
+        "10-Projects/beta-cli/vrb-p041-the-index-quartz-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/gamma-site/vrb-p048-the-sync-worker-read-a-stale-copy-for-a-whole-afternoon.md",
+        "50-Reference/vrb-d001-the-naming-rules-for-jobs-queues-and-their-owners.md"
+      ],
+      "note": "3 notes carry this anchor and only vrb-p041-the-index-quartz-reported-a-partial-run-as-a-complete-one.md is the lesson for it; carriers span 50-Reference, beta-cli, gamma-site, so nothing prefers beta-cli's own tree"
+    },
+    {
+      "qid": "VRH04",
+      "query_sent": "kappa_orbit.py",
+      "hook_tool_input": {
+        "file_path": "/repo/gamma-site/kappa-orbit/kappa_orbit.py"
+      },
+      "folder": "10-Projects",
+      "project": "gamma-site",
+      "lang": "en",
+      "kind": "lesson",
+      "band": "mid",
+      "anchor_note_count": 4,
+      "primary_path": "10-Projects/gamma-site/vrb-p042-the-colour-picker-reported-a-partial-run-as-a-complete-one.md",
+      "primary_title": "the colour picker reported a partial run as a complete one",
+      "expected_paths": [
+        "10-Projects/gamma-site/vrb-p042-the-colour-picker-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/gamma-site/vrb-p049-the-batch-loader-read-a-stale-copy-for-a-whole-afternoon.md",
+        "50-Reference/vrb-d002-the-retention-ruling-for-logs-and-generated-files.md",
+        "50-Reference/vrb-p056-the-parcel-tracker-read-a-stale-copy-for-a-whole-afternoon.md"
+      ],
+      "note": "4 notes carry this anchor and only vrb-p042-the-colour-picker-reported-a-partial-run-as-a-complete-one.md is the lesson for it; carriers span 50-Reference, gamma-site, so nothing prefers gamma-site's own tree"
+    },
+    {
+      "qid": "VRH05",
+      "query_sent": "cedar-tally.ts",
+      "hook_tool_input": {
+        "file_path": "/repo/gamma-site/cedar-tally/cedar-tally.ts"
+      },
+      "folder": "10-Projects",
+      "project": "gamma-site",
+      "lang": "en",
+      "kind": "lesson",
+      "band": "mid",
+      "anchor_note_count": 5,
+      "primary_path": "10-Projects/gamma-site/vrb-p043-the-tundra-sweeper-reported-a-partial-run-as-a-complete-one.md",
+      "primary_title": "the tundra sweeper reported a partial run as a complete one",
+      "expected_paths": [
+        "10-Projects/gamma-site/vrb-p043-the-tundra-sweeper-reported-a-partial-run-as-a-complete-one.md",
+        "40-Failures/vrb-p004-the-nightly-digest-counted-a-skipped-row-as-a-written-one.md",
+        "50-Reference/vrb-d003-the-approved-list-of-runtimes-and-their-support-windows.md",
+        "50-Reference/vrb-p050-the-request-router-read-a-stale-copy-for-a-whole-afternoon.md",
+        "50-Reference/vrb-p057-the-quota-meter-read-a-stale-copy-for-a-whole-afternoon.md"
+      ],
+      "note": "5 notes carry this anchor and only vrb-p043-the-tundra-sweeper-reported-a-partial-run-as-a-complete-one.md is the lesson for it; carriers span 40-Failures, 50-Reference, gamma-site, so nothing prefers gamma-site's own tree"
+    },
+    {
+      "qid": "VRH06",
+      "query_sent": "gamma_orbit.yml",
+      "hook_tool_input": {
+        "file_path": "/repo/gamma-site/gamma-orbit/gamma_orbit.yml"
+      },
+      "folder": "10-Projects",
+      "project": "gamma-site",
+      "lang": "en",
+      "kind": "lesson",
+      "band": "mid",
+      "anchor_note_count": 6,
+      "primary_path": "10-Projects/gamma-site/vrb-p045-the-invoice-folder-reported-a-partial-run-as-a-complete-one.md",
+      "primary_title": "the invoice folder reported a partial run as a complete one",
+      "expected_paths": [
+        "10-Projects/gamma-site/vrb-p045-the-invoice-folder-reported-a-partial-run-as-a-complete-one.md",
+        "40-Failures/vrb-p006-the-roster-importer-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p013-the-build-anvil-counted-a-skipped-row-as-a-written-one.md",
+        "50-Reference/vrb-d000-the-release-checklist-every-team-is-expected-to-follow.md",
+        "50-Reference/vrb-p052-the-nightly-digest-read-a-stale-copy-for-a-whole-afternoon.md",
+        "50-Reference/vrb-p059-the-queue-warden-read-a-stale-copy-for-a-whole-afternoon.md"
+      ],
+      "note": "6 notes carry this anchor and only vrb-p045-the-invoice-folder-reported-a-partial-run-as-a-complete-one.md is the lesson for it; carriers span 40-Failures, 50-Reference, gamma-site, so nothing prefers gamma-site's own tree"
+    },
+    {
+      "qid": "VRH07",
+      "query_sent": "onyx_parcel.json",
+      "hook_tool_input": {
+        "file_path": "/repo/gamma-site/onyx-parcel/onyx_parcel.json"
+      },
+      "folder": "10-Projects",
+      "project": "gamma-site",
+      "lang": "en",
+      "kind": "lesson",
+      "band": "rare",
+      "anchor_note_count": 1,
+      "primary_path": "10-Projects/gamma-site/vrb-p046-the-token-minter-reported-a-partial-run-as-a-complete-one.md",
+      "primary_title": "the token minter reported a partial run as a complete one",
+      "expected_paths": [
+        "10-Projects/gamma-site/vrb-p046-the-token-minter-reported-a-partial-run-as-a-complete-one.md"
+      ],
+      "note": "one note carries this anchor; exact anchor match alone should answer it"
+    },
+    {
+      "qid": "VRH08",
+      "query_sent": "SigmaQuota.swift",
+      "hook_tool_input": {
+        "file_path": "/repo/gamma-site/sigmaquota/SigmaQuota.swift"
+      },
+      "folder": "10-Projects",
+      "project": "gamma-site",
+      "lang": "ja",
+      "kind": "lesson",
+      "band": "mid",
+      "anchor_note_count": 7,
+      "primary_path": "10-Projects/gamma-site/vrb-p047-note.md",
+      "primary_title": "設定の既定値が本番と検証で違う",
+      "expected_paths": [
+        "10-Projects/gamma-site/vrb-p047-note.md",
+        "40-Failures/vrb-p001-the-batch-loader-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p008-the-parcel-tracker-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p015-the-orbit-scheduler-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p022-the-token-minter-counted-a-skipped-row-as-a-written-one.md",
+        "50-Reference/vrb-d002-the-retention-ruling-for-logs-and-generated-files.md",
+        "50-Reference/vrb-p054-the-roster-importer-read-a-stale-copy-for-a-whole-afternoon.md"
+      ],
+      "note": "7 notes carry this anchor and only vrb-p047-note.md is the lesson for it; carriers span 40-Failures, 50-Reference, gamma-site, so nothing prefers gamma-site's own tree"
+    },
+    {
+      "qid": "VRH09",
+      "query_sent": "Alpha-beacon-NOTES.md",
+      "hook_tool_input": {
+        "file_path": "/repo/gamma-site/alpha-beacon-notes/Alpha-beacon-NOTES.md"
+      },
+      "folder": "10-Projects",
+      "project": "gamma-site",
+      "lang": "en",
+      "kind": "lesson",
+      "band": "rare",
+      "anchor_note_count": 1,
+      "primary_path": "10-Projects/gamma-site/vrb-p048-the-sync-worker-read-a-stale-copy-for-a-whole-afternoon.md",
+      "primary_title": "the sync worker read a stale copy for a whole afternoon",
+      "expected_paths": [
+        "10-Projects/gamma-site/vrb-p048-the-sync-worker-read-a-stale-copy-for-a-whole-afternoon.md"
+      ],
+      "note": "one note carries this anchor; exact anchor match alone should answer it"
+    },
+    {
+      "qid": "VRH10",
+      "query_sent": "harbor_parcel.py",
+      "hook_tool_input": {
+        "file_path": "/repo/gamma-site/harbor-parcel/harbor_parcel.py"
+      },
+      "folder": "10-Projects",
+      "project": "gamma-site",
+      "lang": "en",
+      "kind": "lesson",
+      "band": "rare",
+      "anchor_note_count": 1,
+      "primary_path": "10-Projects/gamma-site/vrb-p049-the-batch-loader-read-a-stale-copy-for-a-whole-afternoon.md",
+      "primary_title": "the batch loader read a stale copy for a whole afternoon",
+      "expected_paths": [
+        "10-Projects/gamma-site/vrb-p049-the-batch-loader-read-a-stale-copy-for-a-whole-afternoon.md"
+      ],
+      "note": "one note carries this anchor; exact anchor match alone should answer it"
+    },
+    {
+      "qid": "VRH11",
+      "query_sent": "delta-mosaic.ts",
+      "hook_tool_input": {
+        "file_path": "/repo/gamma-site/delta-mosaic/delta-mosaic.ts"
+      },
+      "folder": "50-Reference",
+      "project": "gamma-site",
+      "lang": "en",
+      "kind": "reference",
+      "band": "rare",
+      "anchor_note_count": 1,
+      "primary_path": "50-Reference/vrb-p050-the-request-router-read-a-stale-copy-for-a-whole-afternoon.md",
+      "primary_title": "the request router read a stale copy for a whole afternoon",
+      "expected_paths": [
+        "50-Reference/vrb-p050-the-request-router-read-a-stale-copy-for-a-whole-afternoon.md"
+      ],
+      "note": "one note carries this anchor; exact anchor match alone should answer it"
+    },
+    {
+      "qid": "VRH12",
+      "query_sent": "larch_invoice.sh",
+      "hook_tool_input": {
+        "file_path": "/repo/alpha-app/larch-invoice/larch_invoice.sh"
+      },
+      "folder": "50-Reference",
+      "project": "alpha-app",
+      "lang": "en",
+      "kind": "reference",
+      "band": "crowded",
+      "anchor_note_count": 9,
+      "primary_path": "50-Reference/vrb-p051-the-page-cache-read-a-stale-copy-for-a-whole-afternoon.md",
+      "primary_title": "the page cache read a stale copy for a whole afternoon",
+      "expected_paths": [
+        "10-Projects/alpha-app/vrb-p026-the-request-router-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/alpha-app/vrb-p033-the-quota-meter-reported-a-partial-run-as-a-complete-one.md",
+        "40-Failures/vrb-p005-note.md",
+        "40-Failures/vrb-p012-note.md",
+        "40-Failures/vrb-p019-the-tundra-sweeper-counted-a-skipped-row-as-a-written-one.md",
+        "50-Reference/vrb-d001-the-naming-rules-for-jobs-queues-and-their-owners.md",
+        "50-Reference/vrb-d003-the-approved-list-of-runtimes-and-their-support-windows.md",
+        "50-Reference/vrb-p051-the-page-cache-read-a-stale-copy-for-a-whole-afternoon.md",
+        "50-Reference/vrb-p058-the-tally-job-read-a-stale-copy-for-a-whole-afternoon.md"
+      ],
+      "note": "9 notes carry this anchor and only vrb-p051-the-page-cache-read-a-stale-copy-for-a-whole-afternoon.md is the lesson for it; carriers span 40-Failures, 50-Reference, alpha-app, so nothing prefers alpha-app's own tree"
+    },
+    {
+      "qid": "VRH13",
+      "query_sent": "pumice_picker.yml",
+      "hook_tool_input": {
+        "file_path": "/repo/beta-cli/pumice-picker/pumice_picker.yml"
+      },
+      "folder": "50-Reference",
+      "project": "beta-cli",
+      "lang": "en",
+      "kind": "reference",
+      "band": "mid",
+      "anchor_note_count": 3,
+      "primary_path": "50-Reference/vrb-p052-the-nightly-digest-read-a-stale-copy-for-a-whole-afternoon.md",
+      "primary_title": "the nightly digest read a stale copy for a whole afternoon",
+      "expected_paths": [
+        "50-Reference/vrb-d002-the-retention-ruling-for-logs-and-generated-files.md",
+        "50-Reference/vrb-p052-the-nightly-digest-read-a-stale-copy-for-a-whole-afternoon.md",
+        "50-Reference/vrb-p059-the-queue-warden-read-a-stale-copy-for-a-whole-afternoon.md"
+      ],
+      "note": "3 notes carry this anchor and only vrb-p052-the-nightly-digest-read-a-stale-copy-for-a-whole-afternoon.md is the lesson for it"
+    },
+    {
+      "qid": "VRH14",
+      "query_sent": "marble_invoice.json",
+      "hook_tool_input": {
+        "file_path": "/repo/gamma-site/marble-invoice/marble_invoice.json"
+      },
+      "folder": "50-Reference",
+      "project": "gamma-site",
+      "lang": "en",
+      "kind": "reference",
+      "band": "mid",
+      "anchor_note_count": 4,
+      "primary_path": "50-Reference/vrb-p053-the-ledger-writer-read-a-stale-copy-for-a-whole-afternoon.md",
+      "primary_title": "the ledger writer read a stale copy for a whole afternoon",
+      "expected_paths": [
+        "40-Failures/vrb-p000-the-sync-worker-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p007-the-health-beacon-counted-a-skipped-row-as-a-written-one.md",
+        "50-Reference/vrb-d003-the-approved-list-of-runtimes-and-their-support-windows.md",
+        "50-Reference/vrb-p053-the-ledger-writer-read-a-stale-copy-for-a-whole-afternoon.md"
+      ],
+      "note": "4 notes carry this anchor and only vrb-p053-the-ledger-writer-read-a-stale-copy-for-a-whole-afternoon.md is the lesson for it; carriers span 40-Failures, 50-Reference, so nothing prefers gamma-site's own tree"
+    },
+    {
+      "qid": "VRH15",
+      "query_sent": "KelpQuota.swift",
+      "hook_tool_input": {
+        "file_path": "/repo/alpha-app/kelpquota/KelpQuota.swift"
+      },
+      "folder": "50-Reference",
+      "project": "alpha-app",
+      "lang": "en",
+      "kind": "reference",
+      "band": "crowded",
+      "anchor_note_count": 10,
+      "primary_path": "50-Reference/vrb-p054-the-roster-importer-read-a-stale-copy-for-a-whole-afternoon.md",
+      "primary_title": "the roster importer read a stale copy for a whole afternoon",
+      "expected_paths": [
+        "10-Projects/alpha-app/vrb-p029-the-ledger-writer-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/beta-cli/vrb-p036-the-retry-ripple-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/gamma-site/vrb-p043-the-tundra-sweeper-reported-a-partial-run-as-a-complete-one.md",
+        "40-Failures/vrb-p001-the-batch-loader-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p008-the-parcel-tracker-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p015-the-orbit-scheduler-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p022-the-token-minter-counted-a-skipped-row-as-a-written-one.md",
+        "50-Reference/vrb-d001-the-naming-rules-for-jobs-queues-and-their-owners.md",
+        "50-Reference/vrb-d004-the-definition-of-a-completed-change-and-who-signs-it.md",
+        "50-Reference/vrb-p054-the-roster-importer-read-a-stale-copy-for-a-whole-afternoon.md"
+      ],
+      "note": "10 notes carry this anchor and only vrb-p054-the-roster-importer-read-a-stale-copy-for-a-whole-afternoon.md is the lesson for it; carriers span 40-Failures, 50-Reference, alpha-app, beta-cli, gamma-site, so nothing prefers alpha-app's own tree"
+    },
+    {
+      "qid": "VRH16",
+      "query_sent": "Fjord-ripple-NOTES.md",
+      "hook_tool_input": {
+        "file_path": "/repo/beta-cli/fjord-ripple-notes/Fjord-ripple-NOTES.md"
+      },
+      "folder": "50-Reference",
+      "project": "beta-cli",
+      "lang": "en",
+      "kind": "reference",
+      "band": "rare",
+      "anchor_note_count": 1,
+      "primary_path": "50-Reference/vrb-p055-the-health-beacon-read-a-stale-copy-for-a-whole-afternoon.md",
+      "primary_title": "the health beacon read a stale copy for a whole afternoon",
+      "expected_paths": [
+        "50-Reference/vrb-p055-the-health-beacon-read-a-stale-copy-for-a-whole-afternoon.md"
+      ],
+      "note": "one note carries this anchor; exact anchor match alone should answer it"
+    },
+    {
+      "qid": "VRH17",
+      "query_sent": "tau_picker.py",
+      "hook_tool_input": {
+        "file_path": "/repo/gamma-site/tau-picker/tau_picker.py"
+      },
+      "folder": "50-Reference",
+      "project": "gamma-site",
+      "lang": "en",
+      "kind": "reference",
+      "band": "rare",
+      "anchor_note_count": 1,
+      "primary_path": "50-Reference/vrb-p056-the-parcel-tracker-read-a-stale-copy-for-a-whole-afternoon.md",
+      "primary_title": "the parcel tracker read a stale copy for a whole afternoon",
+      "expected_paths": [
+        "50-Reference/vrb-p056-the-parcel-tracker-read-a-stale-copy-for-a-whole-afternoon.md"
+      ],
+      "note": "one note carries this anchor; exact anchor match alone should answer it"
+    },
+    {
+      "qid": "VRH18",
+      "query_sent": "basalt-quota.ts",
+      "hook_tool_input": {
+        "file_path": "/repo/alpha-app/basalt-quota/basalt-quota.ts"
+      },
+      "folder": "50-Reference",
+      "project": "alpha-app",
+      "lang": "en",
+      "kind": "reference",
+      "band": "rare",
+      "anchor_note_count": 1,
+      "primary_path": "50-Reference/vrb-p057-the-quota-meter-read-a-stale-copy-for-a-whole-afternoon.md",
+      "primary_title": "the quota meter read a stale copy for a whole afternoon",
+      "expected_paths": [
+        "50-Reference/vrb-p057-the-quota-meter-read-a-stale-copy-for-a-whole-afternoon.md"
+      ],
+      "note": "one note carries this anchor; exact anchor match alone should answer it"
+    },
+    {
+      "qid": "VRH19",
+      "query_sent": "granite_tundra.sh",
+      "hook_tool_input": {
+        "file_path": "/repo/beta-cli/granite-tundra/granite_tundra.sh"
+      },
+      "folder": "50-Reference",
+      "project": "beta-cli",
+      "lang": "en",
+      "kind": "reference",
+      "band": "crowded",
+      "anchor_note_count": 11,
+      "primary_path": "50-Reference/vrb-p058-the-tally-job-read-a-stale-copy-for-a-whole-afternoon.md",
+      "primary_title": "the tally job read a stale copy for a whole afternoon",
+      "expected_paths": [
+        "10-Projects/alpha-app/vrb-p026-the-request-router-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/alpha-app/vrb-p033-the-quota-meter-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/beta-cli/vrb-p040-the-log-plume-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/gamma-site/vrb-p047-note.md",
+        "40-Failures/vrb-p005-note.md",
+        "40-Failures/vrb-p012-note.md",
+        "40-Failures/vrb-p019-the-tundra-sweeper-counted-a-skipped-row-as-a-written-one.md",
+        "50-Reference/vrb-d000-the-release-checklist-every-team-is-expected-to-follow.md",
+        "50-Reference/vrb-d003-the-approved-list-of-runtimes-and-their-support-windows.md",
+        "50-Reference/vrb-p054-the-roster-importer-read-a-stale-copy-for-a-whole-afternoon.md",
+        "50-Reference/vrb-p058-the-tally-job-read-a-stale-copy-for-a-whole-afternoon.md"
+      ],
+      "note": "11 notes carry this anchor and only vrb-p058-the-tally-job-read-a-stale-copy-for-a-whole-afternoon.md is the lesson for it; carriers span 40-Failures, 50-Reference, alpha-app, beta-cli, gamma-site, so nothing prefers beta-cli's own tree"
+    },
+    {
+      "qid": "VRH20",
+      "query_sent": "dune_shard.yml",
+      "hook_tool_input": {
+        "file_path": "/repo/gamma-site/dune-shard/dune_shard.yml"
+      },
+      "folder": "50-Reference",
+      "project": "gamma-site",
+      "lang": "en",
+      "kind": "reference",
+      "band": "rare",
+      "anchor_note_count": 1,
+      "primary_path": "50-Reference/vrb-p059-the-queue-warden-read-a-stale-copy-for-a-whole-afternoon.md",
+      "primary_title": "the queue warden read a stale copy for a whole afternoon",
+      "expected_paths": [
+        "50-Reference/vrb-p059-the-queue-warden-read-a-stale-copy-for-a-whole-afternoon.md"
+      ],
+      "note": "one note carries this anchor; exact anchor match alone should answer it"
+    },
+    {
+      "qid": "VRH21",
+      "query_sent": "nimbus_ledger.json",
+      "hook_tool_input": {
+        "file_path": "/repo/alpha-app/nimbus-ledger/nimbus_ledger.json"
+      },
+      "folder": "40-Failures",
+      "project": "alpha-app",
+      "lang": "en",
+      "kind": "failure",
+      "band": "rare",
+      "anchor_note_count": 1,
+      "primary_path": "40-Failures/vrb-p060-the-retry-ripple-read-a-stale-copy-for-a-whole-afternoon.md",
+      "primary_title": "the retry ripple read a stale copy for a whole afternoon",
+      "expected_paths": [
+        "40-Failures/vrb-p060-the-retry-ripple-read-a-stale-copy-for-a-whole-afternoon.md"
+      ],
+      "note": "one note carries this anchor; exact anchor match alone should answer it"
+    },
+    {
+      "qid": "VRH22",
+      "query_sent": "AlphaQuartz.swift",
+      "hook_tool_input": {
+        "file_path": "/repo/beta-cli/alphaquartz/AlphaQuartz.swift"
+      },
+      "folder": "40-Failures",
+      "project": "beta-cli",
+      "lang": "en",
+      "kind": "failure",
+      "band": "mid",
+      "anchor_note_count": 3,
+      "primary_path": "40-Failures/vrb-p061-the-build-anvil-read-a-stale-copy-for-a-whole-afternoon.md",
+      "primary_title": "the build anvil read a stale copy for a whole afternoon",
+      "expected_paths": [
+        "10-Projects/gamma-site/vrb-p068-the-seat-allocator-read-a-stale-copy-for-a-whole-afternoon.md",
+        "40-Failures/vrb-p061-the-build-anvil-read-a-stale-copy-for-a-whole-afternoon.md",
+        "50-Reference/vrb-x001-the-rules-for-what-a-scheduled-job-may-write-and-where.md"
+      ],
+      "note": "3 notes carry this anchor and only vrb-p061-the-build-anvil-read-a-stale-copy-for-a-whole-afternoon.md is the lesson for it; carriers span 40-Failures, 50-Reference, gamma-site, so nothing prefers beta-cli's own tree"
+    },
+    {
+      "qid": "VRH23",
+      "query_sent": "Alpha-seat-NOTES.md",
+      "hook_tool_input": {
+        "file_path": "/repo/gamma-site/alpha-seat-notes/Alpha-seat-NOTES.md"
+      },
+      "folder": "40-Failures",
+      "project": "gamma-site",
+      "lang": "en",
+      "kind": "failure",
+      "band": "crowded",
+      "anchor_note_count": 9,
+      "primary_path": "40-Failures/vrb-p062-the-tile-mosaic-read-a-stale-copy-for-a-whole-afternoon.md",
+      "primary_title": "the tile mosaic read a stale copy for a whole afternoon",
+      "expected_paths": [
+        "10-Projects/alpha-app/vrb-p064-the-log-plume-read-a-stale-copy-for-a-whole-afternoon.md",
+        "10-Projects/beta-cli/vrb-p066-the-colour-picker-read-a-stale-copy-for-a-whole-afternoon.md",
+        "10-Projects/beta-cli/vrb-p067-the-tundra-sweeper-read-a-stale-copy-for-a-whole-afternoon.md",
+        "40-Failures/vrb-p060-the-retry-ripple-read-a-stale-copy-for-a-whole-afternoon.md",
+        "40-Failures/vrb-p062-the-tile-mosaic-read-a-stale-copy-for-a-whole-afternoon.md",
+        "40-Failures/vrb-p063-the-orbit-scheduler-read-a-stale-copy-for-a-whole-afternoon.md",
+        "50-Reference/vrb-p069-the-invoice-folder-read-a-stale-copy-for-a-whole-afternoon.md",
+        "50-Reference/vrb-x002-the-review-record-every-change-carries-before-it-is-merged.md",
+        "50-Reference/vrb-x004-the-wording-every-status-page-uses-for-a-partial-outage.md"
+      ],
+      "note": "9 notes carry this anchor and only vrb-p062-the-tile-mosaic-read-a-stale-copy-for-a-whole-afternoon.md is the lesson for it; carriers span 40-Failures, 50-Reference, alpha-app, beta-cli, so nothing prefers gamma-site's own tree"
+    },
+    {
+      "qid": "VRH24",
+      "query_sent": "lambda_tally.py",
+      "hook_tool_input": {
+        "file_path": "/repo/alpha-app/lambda-tally/lambda_tally.py"
+      },
+      "folder": "40-Failures",
+      "project": "alpha-app",
+      "lang": "en",
+      "kind": "failure",
+      "band": "rare",
+      "anchor_note_count": 1,
+      "primary_path": "40-Failures/vrb-p063-the-orbit-scheduler-read-a-stale-copy-for-a-whole-afternoon.md",
+      "primary_title": "the orbit scheduler read a stale copy for a whole afternoon",
+      "expected_paths": [
+        "40-Failures/vrb-p063-the-orbit-scheduler-read-a-stale-copy-for-a-whole-afternoon.md"
+      ],
+      "note": "one note carries this anchor; exact anchor match alone should answer it"
+    },
+    {
+      "qid": "VRH25",
+      "query_sent": "indigo-beacon.ts",
+      "hook_tool_input": {
+        "file_path": "/repo/alpha-app/indigo-beacon/indigo-beacon.ts"
+      },
+      "folder": "10-Projects",
+      "project": "alpha-app",
+      "lang": "en",
+      "kind": "lesson",
+      "band": "mid",
+      "anchor_note_count": 4,
+      "primary_path": "10-Projects/alpha-app/vrb-p064-the-log-plume-read-a-stale-copy-for-a-whole-afternoon.md",
+      "primary_title": "the log plume read a stale copy for a whole afternoon",
+      "expected_paths": [
+        "10-Projects/alpha-app/vrb-p064-the-log-plume-read-a-stale-copy-for-a-whole-afternoon.md",
+        "10-Projects/gamma-site/vrb-p068-the-seat-allocator-read-a-stale-copy-for-a-whole-afternoon.md",
+        "40-Failures/vrb-p061-the-build-anvil-read-a-stale-copy-for-a-whole-afternoon.md",
+        "50-Reference/vrb-x004-the-wording-every-status-page-uses-for-a-partial-outage.md"
+      ],
+      "note": "4 notes carry this anchor and only vrb-p064-the-log-plume-read-a-stale-copy-for-a-whole-afternoon.md is the lesson for it; carriers span 40-Failures, 50-Reference, alpha-app, gamma-site, so nothing prefers alpha-app's own tree"
+    },
+    {
+      "qid": "VRH26",
+      "query_sent": "larch_ripple.sh",
+      "hook_tool_input": {
+        "file_path": "/repo/alpha-app/larch-ripple/larch_ripple.sh"
+      },
+      "folder": "10-Projects",
+      "project": "alpha-app",
+      "lang": "ja",
+      "kind": "lesson",
+      "band": "crowded",
+      "anchor_note_count": 10,
+      "primary_path": "10-Projects/alpha-app/vrb-p065-note.md",
+      "primary_title": "検証用の設定が本番の設定を上書きしていた",
+      "expected_paths": [
+        "10-Projects/alpha-app/vrb-p064-the-log-plume-read-a-stale-copy-for-a-whole-afternoon.md",
+        "10-Projects/alpha-app/vrb-p065-note.md",
+        "10-Projects/beta-cli/vrb-p066-the-colour-picker-read-a-stale-copy-for-a-whole-afternoon.md",
+        "10-Projects/beta-cli/vrb-p067-the-tundra-sweeper-read-a-stale-copy-for-a-whole-afternoon.md",
+        "40-Failures/vrb-p060-the-retry-ripple-read-a-stale-copy-for-a-whole-afternoon.md",
+        "40-Failures/vrb-p062-the-tile-mosaic-read-a-stale-copy-for-a-whole-afternoon.md",
+        "40-Failures/vrb-p063-the-orbit-scheduler-read-a-stale-copy-for-a-whole-afternoon.md",
+        "50-Reference/vrb-p069-the-invoice-folder-read-a-stale-copy-for-a-whole-afternoon.md",
+        "50-Reference/vrb-x000-the-escalation-path-for-an-incident-found-outside-working-ho.md",
+        "50-Reference/vrb-x002-the-review-record-every-change-carries-before-it-is-merged.md"
+      ],
+      "note": "10 notes carry this anchor and only vrb-p065-note.md is the lesson for it; carriers span 40-Failures, 50-Reference, alpha-app, beta-cli, so nothing prefers alpha-app's own tree"
+    },
+    {
+      "qid": "VRH27",
+      "query_sent": "larch_beacon.yml",
+      "hook_tool_input": {
+        "file_path": "/repo/beta-cli/larch-beacon/larch_beacon.yml"
+      },
+      "folder": "10-Projects",
+      "project": "beta-cli",
+      "lang": "en",
+      "kind": "lesson",
+      "band": "rare",
+      "anchor_note_count": 1,
+      "primary_path": "10-Projects/beta-cli/vrb-p066-the-colour-picker-read-a-stale-copy-for-a-whole-afternoon.md",
+      "primary_title": "the colour picker read a stale copy for a whole afternoon",
+      "expected_paths": [
+        "10-Projects/beta-cli/vrb-p066-the-colour-picker-read-a-stale-copy-for-a-whole-afternoon.md"
+      ],
+      "note": "one note carries this anchor; exact anchor match alone should answer it"
+    },
+    {
+      "qid": "VRH28",
+      "query_sent": "onyx_tundra.json",
+      "hook_tool_input": {
+        "file_path": "/repo/beta-cli/onyx-tundra/onyx_tundra.json"
+      },
+      "folder": "10-Projects",
+      "project": "beta-cli",
+      "lang": "en",
+      "kind": "lesson",
+      "band": "mid",
+      "anchor_note_count": 5,
+      "primary_path": "10-Projects/beta-cli/vrb-p067-the-tundra-sweeper-read-a-stale-copy-for-a-whole-afternoon.md",
+      "primary_title": "the tundra sweeper read a stale copy for a whole afternoon",
+      "expected_paths": [
+        "10-Projects/alpha-app/vrb-p064-the-log-plume-read-a-stale-copy-for-a-whole-afternoon.md",
+        "10-Projects/beta-cli/vrb-p067-the-tundra-sweeper-read-a-stale-copy-for-a-whole-afternoon.md",
+        "10-Projects/gamma-site/vrb-p068-the-seat-allocator-read-a-stale-copy-for-a-whole-afternoon.md",
+        "40-Failures/vrb-p061-the-build-anvil-read-a-stale-copy-for-a-whole-afternoon.md",
+        "50-Reference/vrb-x002-the-review-record-every-change-carries-before-it-is-merged.md"
+      ],
+      "note": "5 notes carry this anchor and only vrb-p067-the-tundra-sweeper-read-a-stale-copy-for-a-whole-afternoon.md is the lesson for it; carriers span 40-Failures, 50-Reference, alpha-app, beta-cli, gamma-site, so nothing prefers beta-cli's own tree"
+    },
+    {
+      "qid": "VRH29",
+      "query_sent": "GraniteRoster.swift",
+      "hook_tool_input": {
+        "file_path": "/repo/gamma-site/graniteroster/GraniteRoster.swift"
+      },
+      "folder": "10-Projects",
+      "project": "gamma-site",
+      "lang": "en",
+      "kind": "lesson",
+      "band": "crowded",
+      "anchor_note_count": 11,
+      "primary_path": "10-Projects/gamma-site/vrb-p068-the-seat-allocator-read-a-stale-copy-for-a-whole-afternoon.md",
+      "primary_title": "the seat allocator read a stale copy for a whole afternoon",
+      "expected_paths": [
+        "10-Projects/alpha-app/vrb-p064-the-log-plume-read-a-stale-copy-for-a-whole-afternoon.md",
+        "10-Projects/alpha-app/vrb-p065-note.md",
+        "10-Projects/beta-cli/vrb-p066-the-colour-picker-read-a-stale-copy-for-a-whole-afternoon.md",
+        "10-Projects/beta-cli/vrb-p067-the-tundra-sweeper-read-a-stale-copy-for-a-whole-afternoon.md",
+        "10-Projects/gamma-site/vrb-p068-the-seat-allocator-read-a-stale-copy-for-a-whole-afternoon.md",
+        "40-Failures/vrb-p060-the-retry-ripple-read-a-stale-copy-for-a-whole-afternoon.md",
+        "40-Failures/vrb-p062-the-tile-mosaic-read-a-stale-copy-for-a-whole-afternoon.md",
+        "40-Failures/vrb-p063-the-orbit-scheduler-read-a-stale-copy-for-a-whole-afternoon.md",
+        "50-Reference/vrb-p069-the-invoice-folder-read-a-stale-copy-for-a-whole-afternoon.md",
+        "50-Reference/vrb-x000-the-escalation-path-for-an-incident-found-outside-working-ho.md",
+        "50-Reference/vrb-x003-the-supported-storage-tiers-and-what-each-one-guarantees.md"
+      ],
+      "note": "11 notes carry this anchor and only vrb-p068-the-seat-allocator-read-a-stale-copy-for-a-whole-afternoon.md is the lesson for it; carriers span 40-Failures, 50-Reference, alpha-app, beta-cli, gamma-site, so nothing prefers gamma-site's own tree"
+    },
+    {
+      "qid": "VRH30",
+      "query_sent": "Indigo-parcel-NOTES.md",
+      "hook_tool_input": {
+        "file_path": "/repo/beta-cli/indigo-parcel-notes/Indigo-parcel-NOTES.md"
+      },
+      "folder": "50-Reference",
+      "project": "beta-cli",
+      "lang": "en",
+      "kind": "reference",
+      "band": "rare",
+      "anchor_note_count": 1,
+      "primary_path": "50-Reference/vrb-p069-the-invoice-folder-read-a-stale-copy-for-a-whole-afternoon.md",
+      "primary_title": "the invoice folder read a stale copy for a whole afternoon",
+      "expected_paths": [
+        "50-Reference/vrb-p069-the-invoice-folder-read-a-stale-copy-for-a-whole-afternoon.md"
+      ],
+      "note": "one note carries this anchor; exact anchor match alone should answer it"
+    }
+  ]
+}

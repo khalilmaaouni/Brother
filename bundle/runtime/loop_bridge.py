@@ -414,7 +414,15 @@ def run_node(node, parts, worker, cwd=None, max_attempts=3):
     #
     # The reference is taken BEFORE the worker runs, because an audit needs a
     # baseline and taking it afterwards would compare the tree to itself.
-    before = _head(cwd)
+    #
+    # FX-A: a node can carry its OWN baseline, and one route needs it. On the
+    # session route the lane was opened in an earlier process and the session
+    # wrote in it before this one started, so reading HEAD here would take the
+    # baseline AFTER the work and compare the tree to itself, which is exactly
+    # the mistake the line above refuses to make on the spawned route. The
+    # handoff records the revision each lane was opened at and stamps it here,
+    # so the scope audit measures what the session actually changed.
+    before = node.get("base_revision") or _head(cwd)
 
     # E46, THE ONLY PLACE THAT KNOWS WHAT A UNIT IS DOING. Every phase below
     # is a real blocking call (a spawned worker, a git range, a done_check
@@ -548,13 +556,33 @@ class LaneWorker(object):
         self._spawn, self._argv, self._environ = spawn_module, list(argv), environ
 
     def run(self, unit, cwd=None):
+        # VN3b, THE UNIT ATTRIBUTION: this method is the ONLY place in this
+        # estate that starts a process for exactly one unit, so it is the
+        # only place a unit id is honestly known to a child. Everything
+        # brother_run exports is run-scoped (journal.RUN_DIR_ENV_VAR, set
+        # once for the whole run), which is why every event a hook inside a
+        # worker journalled until now carried unit_id None and could never
+        # be picked up by _recalled_records_for_unit's own unit match.
+        # Exported on BOTH branches below, and by name rather than by
+        # keyword, because the variable's name lives in journal.py beside
+        # the run directory's own. A unit with no id exports nothing: an
+        # absent variable reads as None, which is what it means.
+        #
+        # dict(self._environ or os.environ) on the no-lane branch below is
+        # behaviour-neutral, not a widening: bm_controller._sanitised_env
+        # already reads os.environ when it is handed None, so a copy of
+        # os.environ is the same environment that branch always passed.
+        environ = dict(self._environ or os.environ)
+        unit_id = str(unit.get("unit_id") or "").strip()
+        if unit_id:
+            environ[journal.UNIT_ID_ENV_VAR] = unit_id
         if not cwd:
             # No lane at all (isolation disabled AND no shared cwd either,
             # theoretical but not impossible): nothing to materialize a
             # store against, so this falls back to the pre-P1 behaviour
             # rather than crashing on Store(None).
             inner = self._spawn.SpawningWorker(self._argv, cwd=cwd,
-                                               environ=self._environ)
+                                               environ=environ)
             return inner.run(unit)
         import managed_safety  # local: see the class docstring for why
         session_id, why = managed_safety.materialize(cwd, unit)
@@ -583,7 +611,7 @@ class LaneWorker(object):
         # what makes the claim the OUTER BOUND of what this worker may
         # touch, denying anything the unit did not declare, not only
         # anything a rival session already holds.
-        environ = dict(self._environ or os.environ, BM_FENCE_MODE="enforced",
+        environ = dict(environ, BM_FENCE_MODE="enforced",
                       BM_FENCE_STRICT="1", BROTHERMODE_ROOT=cwd,
                       BM_FENCE_SESSION_ID=session_id)
         inner = self._spawn.SpawningWorker(self._argv, cwd=cwd,
@@ -591,8 +619,202 @@ class LaneWorker(object):
         return inner.run(unit)
 
 
+
+#: FX-A: the file the session route hands across two processes, written under
+#: the run directory in a SUBDIRECTORY rather than beside claims.json,
+#: because brother_run picks a run's Work document as "the one *.json that is
+#: neither claims nor target" and a third json at that level would break
+#: --resume and --continue (the same reason the receipt lives in a directory).
+HANDOFF_VERSION = 1
+
+#: The one refusal word this file already prints inline everywhere below; named
+#: once here so the two classes that follow spell it the same way.
+NODATA = "NO-DATA"
+
+
+class PreparedLanes(object):
+    """Lanes somebody else already opened, in the shape run() expects.
+
+    Deliberately NOT a worktree_lane.Lanes: that class ACQUIRES in its own
+    constructor, and acquiring over an existing lane/<unit> branch destroys
+    it. This holds what a previous process recorded and nothing else, so a
+    lane holding a session's work is read, never recreated.
+
+    A lane whose directory is gone since the handoff was written is a
+    problem, not a silent omission: isolated goes False, why() names it, and
+    run() drops writer concurrency to 1 exactly as it does for a lane that
+    could not be created in the first place.
+    """
+
+    def __init__(self, lanes, missing=None):
+        self.lanes = dict(lanes)
+        self.problems = dict(missing or {})
+
+    @property
+    def isolated(self):
+        return not self.problems and bool(self.lanes)
+
+    def safe_concurrency(self, requested):
+        if self.isolated:
+            return max(1, min(int(requested), len(self.lanes)))
+        return 1
+
+    def why(self):
+        if self.isolated:
+            return "lanes prepared by an earlier process, reused as they are"
+        if not self.lanes and not self.problems:
+            return "%s: the handoff named no lanes" % NODATA
+        return ("%d prepared lane(s) could not be used, so writer concurrency "
+                "drops to 1: %s"
+                % (len(self.problems),
+                   "; ".join("%s (%s)" % (k, v)
+                             for k, v in sorted(self.problems.items()))))
+
+    def path_for(self, uid):
+        lane = self.lanes.get(uid)
+        return lane["path"] if lane else None
+
+
+
+#: FX-A: the exit code that means "the units are claimed and the work is
+#: yours". Distinct from 0 (this round finished) and from 1 (something in it
+#: failed) because it is neither: the lanes are open, nothing has been
+#: verified, and the caller is expected to do the work and come back.
+EXIT_UNITS_ARE_YOURS = 3
+
+
+def write_handoff(path, batch, cwd):
+    """Open one lane per claimed unit and record them. Returns an exit code.
+
+    The lane root is a directory beside `path`, so a run owns its lanes and
+    they are findable from the run directory rather than from a temporary
+    directory only the process that made them knew about. That is the whole
+    difference from the spawned route, where a lane lives exactly as long as
+    the process that opened it.
+
+    NO PARTIAL HANDOFF. A batch where any lane failed to open is refused
+    outright rather than handed over half-formed: a person told to work in
+    two worktrees, one of which does not exist, is worse off than one told
+    nothing opened. The lanes that DID open are named in the refusal so they
+    can be looked at, never silently removed.
+    """
+    if worktree_lane is None:
+        print("NO-DATA: the worktree lane module could not be loaded, so no "
+              "lane was opened and nothing was handed over", file=sys.stderr)
+        return 2
+    root = os.path.join(os.path.dirname(os.path.abspath(path)), "lanes")
+    try:
+        os.makedirs(root, exist_ok=True)
+    except OSError as exc:
+        print("NO-DATA: the lane root %s could not be created: %s"
+              % (root, exc), file=sys.stderr)
+        return 2
+    lanes = worktree_lane.Lanes(cwd, [n["id"] for n in batch], root=root)
+    if not lanes.isolated:
+        print("NO-DATA: %s. Nothing was handed over" % lanes.why(),
+              file=sys.stderr)
+        return 2
+    base = _head(cwd)
+    record = {"version": HANDOFF_VERSION, "cwd": os.path.abspath(cwd or ""),
+              "base_revision": base, "units": {}}
+    for node in batch:
+        uid = node["id"]
+        lane = lanes.lanes[uid]
+        record["units"][uid] = {
+            "worktree": lane["path"], "branch": lane["branch"],
+            "objective": node.get("name") or node.get("title") or uid,
+            "done_check": node.get("done_check") or "",
+            "writes": list(node.get("owns") or []),
+            # The revision the lane was opened at, so a later process can
+            # audit what the session changed against it rather than against
+            # the lane's own tip after the fact (see run_node).
+            "base_revision": base}
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(record, fh, indent=1, sort_keys=True)
+    for uid in sorted(record["units"]):
+        print("HANDED OVER %-10s %s" % (uid, record["units"][uid]["worktree"]))
+    return EXIT_UNITS_ARE_YOURS
+
+
+def read_handoff(path, batch):
+    """(PreparedLanes, problem) for the units in `batch`, or (None, problem).
+
+    Every unit in the batch must have a lane that still exists on disk. A
+    missing one is refused rather than quietly re-acquired, because
+    re-acquiring is what would destroy the branch holding the session's own
+    work; the caller is told which lane is gone and can look before anything
+    is written."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            record = json.load(fh)
+    except (OSError, ValueError) as exc:
+        return None, "the handoff at %s could not be read: %s" % (path, exc)
+    units = record.get("units")
+    if not isinstance(units, dict):
+        return None, "the handoff at %s names no units" % path
+    lanes, missing = {}, {}
+    for node in batch:
+        uid = node["id"]
+        lane = units.get(uid)
+        if not isinstance(lane, dict) or not lane.get("worktree"):
+            missing[uid] = "the handoff names no lane for it"
+            continue
+        if not os.path.isdir(lane["worktree"]):
+            missing[uid] = "its lane %s is gone" % lane["worktree"]
+            continue
+        lanes[uid] = {"path": lane["worktree"], "branch": lane.get("branch")}
+        # The baseline the scope audit measures against, carried on the node
+        # itself because run_node takes no place else to put it.
+        node["base_revision"] = lane.get("base_revision")
+    prepared = PreparedLanes(lanes, missing)
+    if not prepared.isolated:
+        return None, prepared.why()
+    return prepared, ""
+
+
+class SessionWorker(object):
+    """The worker for a unit the SESSION did, which spawns nothing.
+
+    FX-A. model_worker.py resolves its command from MODEL_WORKER_CMD or falls
+    back to the host's own headless client, and inside a coding session that
+    client cannot be reached: it hangs or exits with an empty error. D-001
+    closed that for the decomposer; this closes it for the worker. Inside a
+    session the units are handed to the session's own model in their own
+    worktrees, and this stands where the spawned worker stood so that
+    everything after it (the scope audit, the check, the integration, the
+    receipt) is the SAME code on both routes rather than a second path that
+    could drift.
+
+    Its one real job is the commit. Nothing else in the spine commits a
+    unit's work and integrate.py merges the lane BRANCH rather than its
+    working tree, so a session that only edited files would integrate as
+    nothing at all. model_worker.commit_changes is that step, reused
+    outright: same staging rules, same exclusion of bytecode, same message
+    shape. A session that already committed reaches it as a no-op.
+    """
+
+    def __init__(self, commit=None):
+        if commit is None:
+            import model_worker
+            commit = model_worker.commit_changes
+        self._commit = commit
+
+    def run(self, unit, cwd=None):
+        unit_id = str(unit.get("unit_id") or unit.get("id") or "?")
+        if not cwd:
+            return {"worker_claim": "", "artifacts": [],
+                    "cost": {"tokens": 0, "minutes": 0}, "status": "unavailable",
+                    "note": "%s: this unit has no lane, so there is no tree the "
+                            "session could have written in" % NODATA}
+        committed, detail = self._commit(cwd, unit_id)
+        return {"worker_claim": "the session did this unit in its own lane: %s"
+                                % detail,
+                "artifacts": [], "cost": {"tokens": 0, "minutes": 0},
+                "status": "ok" if committed else "unavailable", "note": detail}
+
+
 def run(plan, parts, worker, cwd=None, max_attempts=3, max_in_flight=None,
-        isolate=True):
+        isolate=True, lanes=None):
     """Every dispatchable node, and an explicit account of every refused one.
 
     CONCURRENT, and safe BECAUSE of the scheduler rather than despite it. Until
@@ -624,8 +846,17 @@ def run(plan, parts, worker, cwd=None, max_attempts=3, max_in_flight=None,
     # concurrency drops to ONE. It never degrades into shared-tree concurrent
     # writing, because a system that silently falls back to the unsafe thing
     # under load fails exactly when nobody is watching.
-    lanes, lane_note = None, ""
-    if isolate and batch and cwd:
+    # FX-A: LANES THE CALLER ALREADY HOLDS are used as they are, never
+    # re-acquired. worktree_lane.acquire() deliberately DESTROYS a leftover
+    # lane/<unit> branch before creating a new one (its own STALE LANE
+    # REFUSAL clause), which is right for a crashed run and catastrophic for
+    # the session route, where that branch holds the work the session was
+    # just asked to do. So a prepared Lanes-shaped object skips acquisition
+    # entirely; nothing else about this function changes.
+    lane_note = "" if lanes is None else lanes.why()
+    if lanes is not None:
+        cap = lanes.safe_concurrency(cap)
+    elif isolate and batch and cwd:
         try:
             import worktree_lane
             lanes = worktree_lane.Lanes(cwd, [n.get("id") for n in batch])
@@ -825,6 +1056,18 @@ def main(argv=None):
     ap.add_argument("--null-worker", action="store_true",
                     help="claim and release without doing work, for proving the "
                          "claim path itself")
+    # FX-A, the two halves of the session route. --handoff claims the batch,
+    # opens its lanes and STOPS, writing the file that names them; --lanes
+    # reads that file back in a later process and runs the round over the
+    # lanes the session has since worked in, with no worker spawned at all.
+    ap.add_argument("--handoff", metavar="FILE",
+                    help="claim the ready batch, open one lane per unit, write "
+                         "FILE naming them, and stop at exit 3 without running "
+                         "any worker")
+    ap.add_argument("--lanes", metavar="FILE",
+                    help="run the round over the lanes a --handoff FILE "
+                         "already opened, committing and verifying what the "
+                         "session left in each, spawning no worker")
     args = ap.parse_args(list(sys.argv[1:] if argv is None else argv))
 
     if args.prove_slice:
@@ -944,14 +1187,38 @@ def main(argv=None):
     # without doing anything, so a run looked complete while nothing was
     # written. --worker-cmd still overrides for anyone who wants a different
     # or stubbed worker, exactly as before.
+    # FX-A, THE HANDOFF, and it stops here on purpose. Everything above is
+    # the round's own opening (reconcile, orphan report, the exclusive
+    # claim); everything below runs a worker. Inside a coding session no
+    # worker can be run, so this is where the two routes part: the lanes are
+    # opened, the file naming them is written, and the caller is told the
+    # work is its own. Exit 3, never 0 and never 1: nothing failed and
+    # nothing finished.
+    if args.handoff:
+        return write_handoff(args.handoff, [n for n, _c in claimed], args.cwd)
+
+    prepared = None
+    if args.lanes:
+        prepared, problem = read_handoff(args.lanes, [n for n, _c in claimed])
+        if prepared is None:
+            print("NO-DATA: %s. Nothing was run, because a lane that cannot be "
+                  "found might be holding the work" % problem, file=sys.stderr)
+            return 2
+
     default_worker_cmd = [sys.executable, os.path.join(HERE, "model_worker.py")]
-    worker = (LaneWorker(parts["spawn"], [sys.executable, "-c", "pass"])
-              if args.null_worker
-              else LaneWorker(parts["spawn"], args.worker_cmd or default_worker_cmd))
+    if args.lanes:
+        # The session already did the work; this commits it and nothing else.
+        worker = SessionWorker()
+    elif args.null_worker:
+        worker = LaneWorker(parts["spawn"], [sys.executable, "-c", "pass"])
+    else:
+        worker = LaneWorker(parts["spawn"],
+                            args.worker_cmd or default_worker_cmd)
 
     outcome = run({"batch": [n for n, _c in claimed],
                    "refused": plan.get("refused", [])},
-                  parts, worker, cwd=args.cwd, max_attempts=args.max_attempts)
+                  parts, worker, cwd=args.cwd, max_attempts=args.max_attempts,
+                  lanes=prepared)
 
     # RELEASE WITH THE STATE IT ENDED IN, so the record says what happened
     # rather than merely that somebody once held it.

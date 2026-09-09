@@ -1966,6 +1966,45 @@ class AppliedMemoryCarriesTheMutationSeamMarker(unittest.TestCase):
             "BM_VAULT_DISABLE_ANCHOR_CHECK, BM_VAULT_DISABLE_LIFECYCLE_GATE)")
 
 
+class AppliedMemoryPartitionsNoDataSeparatelyFromApplied(unittest.TestCase):
+    """S4 (2026-09-08 VN1 fix): "no-data" is MEMORY_STATES' fifth value, the
+    same way "policy-conflict" was added as the fourth -- a lesson
+    vault_recall_hook.py tombstoned outright (its own revalidator crashed
+    or a contract module was unavailable) lands in its OWN bucket, never
+    silently counted as applied and never dropped as an unrecognized
+    state."""
+
+    def test_a_no_data_entry_lands_in_its_own_bucket_never_applied(self):
+        section = RD.applied_memory([
+            {"slug": "seam-unavailable", "path": "z.md", "state": "no-data",
+             "line": "recall: NO-DATA seam-unavailable: seam module "
+                     "unavailable, mutation state unknown", "note_type": None},
+        ])
+        self.assertEqual(
+            section["no-data"],
+            [{"slug": "seam-unavailable",
+              "line": "recall: NO-DATA seam-unavailable: seam module "
+                      "unavailable, mutation state unknown"}])
+        self.assertEqual(section["applied"], [])
+
+    def test_no_data_is_a_named_memory_state(self):
+        self.assertIn("no-data", RD.MEMORY_STATES)
+
+    def test_a_no_data_entry_alongside_an_applied_one_keeps_both_separate(self):
+        section = RD.applied_memory([
+            {"slug": "plain-lesson", "path": "a.md", "state": "applied",
+             "line": None, "note_type": None},
+            {"slug": "tombstoned", "path": "b.md", "state": "no-data",
+             "line": "recall: NO-DATA tombstoned: revalidation unavailable",
+             "note_type": None},
+        ])
+        self.assertEqual(section["applied"], [{"slug": "plain-lesson"}])
+        self.assertEqual(
+            section["no-data"],
+            [{"slug": "tombstoned",
+              "line": "recall: NO-DATA tombstoned: revalidation unavailable"}])
+
+
 def _seed_two_unit_run(case, run_dir):
     """One unit repaired once then delivered (A), one zero-change unit
     (B, files_changed_by_unit stays empty): claim_store.acquire/release
