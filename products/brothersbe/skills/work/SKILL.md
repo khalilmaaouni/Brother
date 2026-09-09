@@ -160,9 +160,8 @@ reverted. State plainly that only the human writes the claimed scope now.
 The registry's own shape has no command that relabels the `agent` field on an OPEN record
 without closing the task, and closing it would end the fence rather than transfer it, which is
 not what a takeover means. So this skill makes no engine change for takeover: the registry
-record's `agent` field keeps naming whoever `sbe work start` opened it as, exactly the pattern
-`docs/book/16-working-as-one-team.md` already documents for a human handoff (the outgoing owner
-stays the recorded owner in the tool's own state until the incoming owner explicitly resumes).
+record's `agent` field keeps naming whoever `sbe work start` opened it as: the outgoing owner
+stays the recorded owner in the tool's own state until the incoming owner explicitly resumes.
 What this skill adds is the fence note it states to the operator out loud: which task, which
 worktree, which branch, and that the human now holds it. Preserve the evidence and the task
 state exactly as found. Resuming an agent on a task a human took over requires an explicit

@@ -27,7 +27,7 @@ one produces. These four gates plus the silent-failure lints are refused rather 
 an operator instruction in session can override a default, never a hard gate.
 
 It then mints one evidence receipt per delegate (design, gate, score) into `.sbe/evidence`,
-the same store `sbe status` reads (CR-08, `design/lifecycle-blockers/03-adr.md`), so a clean
+the same store `sbe status` reads, so a clean
 run leaves proof behind instead of a PASS `sbe status` cannot see. A receipt minted against a
 dirty tree still reads NO-DATA, naming the dirty state: that is correct, not a bug, the first
 time it is surprising.
