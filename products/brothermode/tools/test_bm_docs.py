@@ -6359,5 +6359,113 @@ class TestTheInstallTargetTagCandidateIsNoDataNotFail(unittest.TestCase):
                       "must still fail, naming the tag it could not find")
 
 
+
+# ---------------------------------------------------------------------------
+# FX-D, 2026-09-08: commands/brotherme-<verb>.md must say what
+# skills/<verb>/SKILL.md says
+# ---------------------------------------------------------------------------
+
+class TestCommandFilesMirrorTheirSkillMarkers(unittest.TestCase):
+    """An Opus pre-flight (2026-09-08) found every persona dogfood fix
+    (R-4 the leading Verdict line and answering a carried question first,
+    R-7 the honesty.md language rule, R-12 the ask routes) landed only in
+    skills/<verb>/SKILL.md, and a grep for R-12, R-4, honesty.md, Verdict
+    and adopt over commands/ returned zero files. The corpus transcripts
+    name commands/brotherme-status.md nine times against one mention of
+    skills/status, so the command file is the one a user's session
+    actually opens; a fix that never reaches it never reaches the user.
+
+    This pin checks the OPERATIVE body of each command file: everything
+    before the "## Maintainer note" divider every one of the fifteen
+    files carries. That divider matters: the legacy note below it already
+    names "skills/<verb>/SKILL.md" in its own boilerplate ("Replacement:
+    ... at `skills/<verb>/SKILL.md`"), on every file, on the untouched
+    pre-FX-D tree too, so a check that scanned the whole file would read
+    that maintainer-only sentence as compliance and never catch the
+    defect it exists to catch.
+
+    Two things for every one of the fifteen shipped command files: (1)
+    the operative body must name its own skill's path, so a reader
+    (human or model) is pointed at the single source instead of a stale
+    copy; (2) whichever of a small set of key markers ("Verdict",
+    "answer that question first", "honesty.md", "adopt") the skill
+    counterpart actually carries, the operative body must carry too. A
+    marker absent from the skill is never required of the command file
+    either: this is a drift pin, not a demand that every command grow
+    content its own skill never had.
+
+    Calibration: on the pre-FX-D tree this fails on every one of the
+    fifteen files for the naming half (no command file's operative body,
+    read separately from its maintainer footer, names its
+    skills/*/SKILL.md path), and fails on brotherme-status.md,
+    brotherme-help.md, brotherme-start.md and brotherme-deliver.md for
+    the marker half (their skills carry Verdict/the carried-question
+    rule/honesty.md/adopt and the command files carried none of it)."""
+
+    VERBS = ("auto-status", "auto", "brief", "decisions", "deliver",
+             "handback", "handover-pack", "help", "next", "review",
+             "start", "status", "stop", "update", "view")
+
+    MARKERS = ("Verdict", "answer that question first", "honesty.md",
+               "adopt")
+
+    DIVIDER = "## Maintainer note"
+
+    @staticmethod
+    def _skill_rel(verb):
+        return os.path.join("skills", verb, "SKILL.md")
+
+    @staticmethod
+    def _command_rel(verb):
+        return os.path.join("commands", "brotherme-%s.md" % verb)
+
+    def _operative_body(self, verb):
+        """The part of the command file a reader meets before the
+        maintainer-only footer, where every file's own legacy divider
+        lives. Every one of the fifteen shipped files carries this
+        divider (test_bm_done_no_data.py's read of these same files
+        relies on the same file set existing), so a missing divider is a
+        fixture bug, not a real state, and fails loudly rather than
+        silently reading the whole file."""
+        text = read(self._command_rel(verb))
+        idx = text.find(self.DIVIDER)
+        self.assertGreater(
+            idx, -1,
+            "%s has no %r divider; this test's split point assumption no "
+            "longer holds" % (self._command_rel(verb), self.DIVIDER))
+        return text[:idx]
+
+    def test_every_command_file_names_its_own_skill_path(self):
+        missing = []
+        for verb in self.VERBS:
+            body = self._operative_body(verb)
+            needle = "skills/%s/SKILL.md" % verb
+            if needle not in body:
+                missing.append(self._command_rel(verb))
+        self.assertEqual(
+            [], missing,
+            "these command files never name their own skill's path in "
+            "their operative body (before the maintainer footer), so a "
+            "reader has no way to find the single source and a future "
+            "skill fix can drift away from the command surface again with "
+            "nothing catching it: %r" % missing)
+
+    def test_every_command_file_carries_the_markers_its_skill_carries(self):
+        offenders = []
+        for verb in self.VERBS:
+            skill_text = read(self._skill_rel(verb))
+            body = self._operative_body(verb)
+            for marker in self.MARKERS:
+                if marker in skill_text and marker not in body:
+                    offenders.append(
+                        "%s is missing %r (present in %s)"
+                        % (self._command_rel(verb), marker,
+                           self._skill_rel(verb)))
+        self.assertEqual(
+            [], offenders,
+            "a command file lost a marker its own skill counterpart "
+            "carries, which is exactly the FX-D defect this pin exists to "
+            "catch: %s" % "; ".join(offenders))
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

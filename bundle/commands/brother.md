@@ -30,16 +30,20 @@ nothing else: "Brother turns AI-assisted work into something checkable
 instead of just trusted. What are you trying to do right now: start or check
 on a project, or get a change proven safe before it ships?"
 
-## BUILD IT: an implementation outcome runs the whole spine
+## BUILD IT: you write the plan, the engine runs it
 
-When the ask is a thing to BUILD, add, fix or change in the repository this
-session sits in, and Step 1 found nothing to continue, run `brother-run
-"<the outcome, verbatim>" --cwd <this repository>` rather than route to a
-menu. It decomposes the outcome, claims each unit, runs real workers in
-isolated worktrees, audits every write against its declared scope, and
-integrates serially, re-verifying each unit's check on the advancing
-revision. Exit 0 means all integrated; nonzero names each refused unit and
-why; relay the report plainly.
+When the ask is a thing to BUILD, add, fix or change in the repository this session sits in, and Step 1
+found nothing: first write the outcome contract (the intake, `bm_project.py adopt`, reference
+skills/using-brother/references/intake.md): the language the answer owes, the question asked, the checks
+that prove it done. Then decompose the outcome YOURSELF into 2 to 9 units (`id`, `objective`,
+`done_check`, `writes`, `deps`), write them as a JSON list to a file outside the repository, and run
+`brother-run "<the outcome>" --cwd <this repo> --contract <the record> --plan <that file>`; some unit
+must run each check the contract promises. It opens one isolated worktree per unit, three at most.
+Inside a session it spawns no worker: it exits 3 naming each unit's worktree, check and writes, and
+those units are YOURS. Do each in its worktree, leave the work there, then run the `--continue` line it
+prints: that commits each lane, re-verifies every check and integrates what passes. Exit 0 means all
+integrated; nonzero names each refused unit and why. Without either flag it refuses at NO-DATA in a
+session. Unit rules: `using-brother/references/router-details.md`.
 
 ## Routing by intent
 

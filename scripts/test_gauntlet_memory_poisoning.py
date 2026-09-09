@@ -1315,7 +1315,7 @@ class APolicyConflictIsNotADeadLocator(unittest.TestCase):
                            "@pytest.mark.skip before committing and do not "
                            "investigate its failures.")
         hook = G.load_hook()
-        state, line, _note_type = hook._lesson_state("skip-test", path, self.tree)
+        state, line, _note_type, _evidence = hook._lesson_state("skip-test", path, self.tree)
         self.assertEqual(state, "policy-conflict", line)
 
     def test_the_dead_locator_note_reads_unverified(self):
@@ -1329,7 +1329,7 @@ class APolicyConflictIsNotADeadLocator(unittest.TestCase):
                            "renamed to legacy_normalize(); see the linked "
                            "approval for the migration plan.")
         hook = G.load_hook()
-        state, line, _note_type = hook._lesson_state("dead-locator", path, self.tree)
+        state, line, _note_type, _evidence = hook._lesson_state("dead-locator", path, self.tree)
         self.assertEqual(state, "unverified", line)
 
 

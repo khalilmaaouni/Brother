@@ -290,7 +290,7 @@ class TestRetrievalOnAFixtureVault(unittest.TestCase):
         query = "夜間配送センター"  # "night delivery center"
         # zero ascii overlap: the raw query has no ASCII characters at all
         self.assertFalse(any(c.isascii() and c.isalnum() for c in query))
-        fused, why = self.bm._search(self.con, text=query, limit=6, fast=True)
+        fused, why, _total = self.bm._search(self.con, text=query, limit=6, fast=True)
         self.assertTrue(fused, "expected at least one hit")
         top_id = fused[0][0]
         row = self.con.execute("SELECT path FROM notes WHERE id=?", (top_id,)).fetchone()
@@ -301,7 +301,7 @@ class TestRetrievalOnAFixtureVault(unittest.TestCase):
                   "Toyota is トヨタ自動車株式会社 the largest maker")
         _add_note(self.bm, self.con, "other.md", "other note",
                   "an unrelated note about scheduling and nothing else")
-        fused, _why = self.bm._search(self.con, text="Toyota 自動車", limit=6, fast=True)
+        fused, _why, _total = self.bm._search(self.con, text="Toyota 自動車", limit=6, fast=True)
         self.assertTrue(fused)
         top_id = fused[0][0]
         row = self.con.execute("SELECT path FROM notes WHERE id=?", (top_id,)).fetchone()
@@ -311,7 +311,7 @@ class TestRetrievalOnAFixtureVault(unittest.TestCase):
         # note spelled in katakana, query in hiragana
         _add_note(self.bm, self.con, "kata.md", "kata",
                   "このセンターは埼玉にある")
-        fused, _why = self.bm._search(self.con, text="せんたー", limit=6, fast=True)
+        fused, _why, _total = self.bm._search(self.con, text="せんたー", limit=6, fast=True)
         self.assertTrue(fused, "hiragana query should recall a katakana note")
         top_id = fused[0][0]
         row = self.con.execute("SELECT path FROM notes WHERE id=?", (top_id,)).fetchone()
@@ -322,7 +322,7 @@ class TestRetrievalOnAFixtureVault(unittest.TestCase):
         try:
             _add_note(self.bm, con2, "hira.md", "hira",
                       "このせんたーは東京にある")
-            fused2, _why2 = self.bm._search(con2, text="センター", limit=6, fast=True)
+            fused2, _why2, _total = self.bm._search(con2, text="センター", limit=6, fast=True)
             self.assertTrue(fused2, "katakana query should recall a hiragana note")
             top_id2 = fused2[0][0]
             row2 = con2.execute("SELECT path FROM notes WHERE id=?", (top_id2,)).fetchone()
@@ -344,7 +344,7 @@ class TestRetrievalOnAFixtureVault(unittest.TestCase):
         orig = self.bm._load_bm_vault_analyzer
         self.bm._load_bm_vault_analyzer = _boom
         try:
-            fused, _why = self.bm._search(self.con, text="budget review audit", limit=6, fast=True)
+            fused, _why, _total = self.bm._search(self.con, text="budget review audit", limit=6, fast=True)
         finally:
             self.bm._load_bm_vault_analyzer = orig
         self.assertTrue(fused)
@@ -370,7 +370,7 @@ class TestRetrievalOnAFixtureVault(unittest.TestCase):
         orig_default_vault = self.bm._default_vault
         self.bm._default_vault = lambda: vault_dir
         try:
-            fused_before, _ = self.bm._search(self.con, text=query, limit=6, fast=True)
+            fused_before, _, _total = self.bm._search(self.con, text=query, limit=6, fast=True)
             self.assertTrue(fused_before)
             top_before = self.con.execute(
                 "SELECT path FROM notes WHERE id=?", (fused_before[0][0],)).fetchone()["path"]
@@ -381,7 +381,7 @@ class TestRetrievalOnAFixtureVault(unittest.TestCase):
             with open(dict_path, "w", encoding="utf-8") as fh:
                 json.dump({"terms": [query]}, fh, ensure_ascii=False)
 
-            fused_after, _ = self.bm._search(self.con, text=query, limit=6, fast=True)
+            fused_after, _, _total = self.bm._search(self.con, text=query, limit=6, fast=True)
             self.assertTrue(fused_after)
             top_after = self.con.execute(
                 "SELECT path FROM notes WHERE id=?", (fused_after[0][0],)).fetchone()["path"]
@@ -389,7 +389,7 @@ class TestRetrievalOnAFixtureVault(unittest.TestCase):
                               "the dictionary entry must move this case to PASSING")
 
             os.remove(dict_path)
-            fused_removed, _ = self.bm._search(self.con, text=query, limit=6, fast=True)
+            fused_removed, _, _total = self.bm._search(self.con, text=query, limit=6, fast=True)
             top_removed = self.con.execute(
                 "SELECT path FROM notes WHERE id=?", (fused_removed[0][0],)).fetchone()["path"]
             self.assertEqual(top_removed, "decoy.md",
@@ -437,7 +437,7 @@ class TestAliasRetrievalOnAFixtureVault(unittest.TestCase):
         shutil.rmtree(self.vault_dir, ignore_errors=True)
 
     def _top_path(self):
-        fused, _why = self.bm._search(self.con, text=self.query, limit=6, fast=True)
+        fused, _why, _total = self.bm._search(self.con, text=self.query, limit=6, fast=True)
         self.assertTrue(fused, "expected at least one hit")
         return self.con.execute(
             "SELECT path FROM notes WHERE id=?", (fused[0][0],)).fetchone()["path"]

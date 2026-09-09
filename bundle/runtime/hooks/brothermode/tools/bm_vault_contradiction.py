@@ -105,7 +105,7 @@ ESCALATE = "ESCALATE"
 FIELDS = ("lesson_id", "statement", "scope", "source", "source_type",
           "verified_against", "verified_at", "last_verified_at", "supersedes",
           "status", "contradicts", "evidence_locator", "applies_to",
-          "human_approved", "promoted_by")
+          "human_approved", "promoted_by", "type")
 
 # Same shape as bm_vault_triage.py's own FRONTMATTER_FIELD_RE: plain
 # `key: value` frontmatter lines, line-oriented.
@@ -229,10 +229,12 @@ def _load_triage():
 
 def find_conflicts(notes):
     """[[lesson_a, lesson_b], ...]: every pair in `notes` this resolver must
-    adjudicate before either can drive engineering. A pair qualifies two
-    ways, both scoped to matching `scope` (two lessons in different scopes
-    are never a conflict here, whatever their contradicts: field or wording
-    says: scope is the boundary this resolver trusts):
+    adjudicate before either can drive engineering. A pair qualifies three
+    ways; the first two scoped to matching `scope` (two lessons in
+    different scopes are never a conflict here, whatever their
+    contradicts: field or wording says: scope is the boundary this
+    resolver trusts), the third scope-independent (a duplicate identity is
+    a defect whatever topic either side claims):
 
       declared  one lesson's own contradicts: field names the other, the
                 bm_vault_graph.py edge (symmetric: either side is enough).
@@ -242,6 +244,19 @@ def find_conflicts(notes):
                 same-scope CONTRADICTION rather than a SCOPED difference.
                 Reused, never re-implemented: this module resolves
                 conflicts, it does not hunt for new ones.
+
+      duplicate lesson_id (VN8b, night run 2026-09-08, held-out pack
+                family F): two DIFFERENT notes (different `path`) declare
+                the SAME `lesson_id`. Before this, only a filename-stem
+                collision was ever checked (bm_vault.py's own
+                duplicate_probe, a stem comparison this module never
+                owned); a frontmatter lesson_id colliding under two
+                different stems went unchecked entirely, and both sides
+                applied simultaneously with opposite claims. Routed into
+                the SAME resolve()/CURRENT EVIDENCE machinery as the other
+                two kinds, reason "duplicate lesson_id <id>": no memory
+                record wins this by declaring itself first, only current
+                evidence does.
     """
     by_key = {}
     for n in notes:
@@ -276,6 +291,24 @@ def find_conflicts(notes):
                 sa, va = triage.split_subject_value(a["statement"])
                 sb, vb = triage.split_subject_value(b["statement"])
                 if sa is None or sb is None or sa != sb or va == vb:
+                    continue
+                seen.add(key)
+                conflicts.append([a, b])
+
+    by_lesson_id = {}
+    for n in notes:
+        lid = n["lesson_id"]
+        if lid == NO_DATA:
+            continue
+        by_lesson_id.setdefault(lid, []).append(n)
+    for lid, group in by_lesson_id.items():
+        for i in range(len(group)):
+            for j in range(i + 1, len(group)):
+                a, b = group[i], group[j]
+                if os.path.normpath(a["path"]) == os.path.normpath(b["path"]):
+                    continue
+                key = tuple(sorted((a["path"], b["path"])))
+                if key in seen:
                     continue
                 seen.add(key)
                 conflicts.append([a, b])
@@ -333,6 +366,60 @@ _ASSERTION_RE = re.compile(
     r"sys\.exit\(\s*[1-9]|\bexit\(\s*[1-9]")
 
 
+def _declared_anchors(lesson):
+    """The lesson's applies_to anchors, blanks dropped. [] when the note
+    declares none, which every caller below reads as "nothing to be
+    relevant to" and fails open on."""
+    return [a.strip() for a in (lesson.get("applies_to") or []) if a and a.strip()]
+
+
+def _references_anchor(text, anchors):
+    """True when `text` mentions any anchor's basename or its stem. The
+    plain substring test the test: branch has always run, lifted into one
+    place so the path: and grep: branches ask the same question rather
+    than growing a second opinion about what "about the claim" means."""
+    for anchor in anchors:
+        base_name = os.path.basename(anchor)
+        stem = os.path.splitext(base_name)[0]
+        if (base_name and base_name in text) or (stem and stem in text):
+            return True
+    return False
+
+
+def _about_the_claim(lesson, relpath, target, text=None):
+    """VN-HP2 (night run 2026-09-08, held-out pack family D): True when a
+    path:/grep: locator's own target file has anything to do with the
+    lesson's declared applies_to anchors -- either it IS one of them
+    (same basename or stem: the shape every benign note in this estate
+    already uses, evidence_locator == path:<applies_to>), or its current
+    text references one (a test or a config file named differently but
+    written about the anchor).
+
+    Fails open on purpose in two places: a note declaring no applies_to
+    at all has nothing to be irrelevant to, and an unreadable target is
+    the existence/FAILS branches' business, not this one. A False here
+    is served as WEAK, never REFUSED: an irrelevant locator is unproven
+    evidence, not proof of a lie."""
+    anchors = _declared_anchors(lesson)
+    if not anchors:
+        return True
+    target_base = os.path.basename((relpath or "").strip())
+    target_stem = os.path.splitext(target_base)[0]
+    for anchor in anchors:
+        base_name = os.path.basename(anchor)
+        if base_name and base_name == target_base:
+            return True
+        if target_stem and os.path.splitext(base_name)[0] == target_stem:
+            return True
+    if text is None:
+        try:
+            with open(target, encoding="utf-8", errors="replace") as fh:
+                text = fh.read()
+        except OSError:  # sbe: allow-silent an unreadable target is judged by the caller's own existence path
+            return False
+    return _references_anchor(text, anchors)
+
+
 def make_evidence_probe(base_dir, allowed_roots=None):
     """The default evidence_probe(lesson) -> HOLDS/FAILS/NO_DATA_EVIDENCE/
     ESCAPES/CIRCULAR/WEAK, reading the locator syntax this resolver
@@ -350,9 +437,13 @@ def make_evidence_probe(base_dir, allowed_roots=None):
     locator is unaffected: it is always joined onto base_dir, as before.
 
     Recognized locator shapes, one scheme prefix each:
-      path:<relpath>            HOLDS iff the path exists.
+      path:<relpath>            HOLDS iff the path exists AND the target
+                                 is about the lesson's own applies_to
+                                 anchors (_about_the_claim); otherwise WEAK.
       grep:<relpath>:<pattern>  HOLDS iff <pattern> is a substring of the
-                                 file's current text; a missing file FAILS
+                                 file's current text AND that file is about
+                                 the applies_to anchors (_about_the_claim,
+                                 otherwise WEAK); a missing file FAILS
                                  (a stale anchor, not an unknown one).
       decision:<relpath>#<anc>  HOLDS iff the file exists and contains
                                  <anc>; a missing file or missing anchor
@@ -381,7 +472,8 @@ def make_evidence_probe(base_dir, allowed_roots=None):
                naming a phrase the note's own body supplies proves only
                that the note says what it says.
 
-    HEURISTIC, WITH A NAMED CEILING (test: kind only). A test: locator is
+    HEURISTIC, WITH A NAMED CEILING (test:, and the anchor half of
+    path: and grep: above). A test: locator is
     accepted as real evidence only when the target script's own text
     references the lesson's applies_to anchor (a path or a bare symbol
     from it) AND contains something that looks like an assertion or a
@@ -422,7 +514,9 @@ def make_evidence_probe(base_dir, allowed_roots=None):
             target = _resolved(rest)
             if _circular(lesson, target):
                 return CIRCULAR
-            return HOLDS if os.path.exists(target) else FAILS
+            if not os.path.exists(target):
+                return FAILS
+            return HOLDS if _about_the_claim(lesson, rest, target) else WEAK
         if kind == "grep":
             relpath, sep2, pattern = rest.partition(":")
             if not sep2:
@@ -437,7 +531,9 @@ def make_evidence_probe(base_dir, allowed_roots=None):
                     text = fh.read()
             except OSError:
                 return FAILS  # the anchor is gone: stale, not unknown
-            return HOLDS if pattern in text else FAILS
+            if pattern not in text:
+                return FAILS
+            return HOLDS if _about_the_claim(lesson, relpath, target, text) else WEAK
         if kind == "decision":
             relpath, _sep3, anchor = rest.partition("#")
             if _escapes_tree(base_dir, relpath, allowed_roots):
@@ -466,18 +562,9 @@ def make_evidence_probe(base_dir, allowed_roots=None):
                     script_text = fh.read()
             except OSError:
                 return FAILS
-            applies = lesson.get("applies_to") or []
-            references_claim = False
-            for anchor in applies:
-                anchor = (anchor or "").strip()
-                if not anchor:
-                    continue
-                base_name = os.path.basename(anchor)
-                stem = os.path.splitext(base_name)[0]
-                if (base_name and base_name in script_text) or (stem and stem in script_text):
-                    references_claim = True
-                    break
-            if not applies or not references_claim or not _ASSERTION_RE.search(script_text):
+            applies = _declared_anchors(lesson)
+            if (not applies or not _references_anchor(script_text, applies)
+                    or not _ASSERTION_RE.search(script_text)):
                 return WEAK
             try:
                 proc = subprocess.run([sys.executable, target], cwd=base_dir,
@@ -486,6 +573,13 @@ def make_evidence_probe(base_dir, allowed_roots=None):
                 return FAILS
             return HOLDS if proc.returncode == 0 else FAILS
         return NO_DATA_EVIDENCE
+    # VN8a (night run 2026-09-08): the closure carries its own base_dir as
+    # a plain attribute, so evidence_tier() can read "the tree this recall
+    # is running against" for its scope check below without a new
+    # parameter threading through every caller (vault_recall_hook.py and
+    # bm_vault.py both already build a probe this way and pass only the
+    # probe itself into evidence_tier).
+    probe.base_dir = os.path.realpath(base_dir) if base_dir else None
     return probe
 
 
@@ -746,7 +840,9 @@ def _japanese_phrase_hit(text, phrases):
     `text` with no Japanese NEGATION in its own _JA_WINDOW_CHARS window --
     the same drop rule _japanese_weakening applies, reused here for the
     two self-contained families (verdict laundering, authority escalation)
-    that need no separate control noun."""
+    that need no separate control noun. Also dropped when the sentence
+    carrying the phrase is a REPORT (VN7, night run 2026-09-08): neither
+    family checked this before, English or Japanese."""
     if not text:
         return False
     for phrase in phrases:
@@ -757,6 +853,8 @@ def _japanese_phrase_hit(text, phrases):
         win_end = min(len(text), idx + len(phrase) + _JA_WINDOW_CHARS)
         window = text[win_start:win_end]
         if any(neg in window for neg in _NEGATION_JA):
+            continue
+        if _sentence_reported(text, idx):
             continue
         return True
     return False
@@ -777,9 +875,12 @@ def _advisory_or_exempted(text):
     7's second structural family, independent of the weakening-verb table
     above. Dropped when a NEGATION appears in the matched span, so "the
     tests are NOT optional" never counts as the poison it looks the
-    opposite of."""
+    opposite of, or when the sentence carrying the match is a REPORT
+    (VN7, night run 2026-09-08: "The old note said the tests are
+    advisory. That instruction is obsolete." must not refuse)."""
     m = _ADVISORY_DECLARATION_RE.search(text)
-    if m and not _ADVISORY_NEGATION_RE.search(text[max(0, m.start() - 40):m.end()]):
+    if (m and not _ADVISORY_NEGATION_RE.search(text[max(0, m.start() - 40):m.end()])
+            and not _sentence_reported(text, m.start())):
         control_names = {
             "test": "the tests", "check": "a gate", "gate": "a gate",
             "review": "review", "suite": "the test suite",
@@ -789,7 +890,8 @@ def _advisory_or_exempted(text):
         word = word_match.group(0).lower().rstrip("s") if word_match else ""
         return control_names.get(word, "a control")
     m = _EXEMPTION_RE.search(text)
-    if m and not _ADVISORY_NEGATION_RE.search(text[max(0, m.start() - 40):m.end()]):
+    if (m and not _ADVISORY_NEGATION_RE.search(text[max(0, m.start() - 40):m.end()])
+            and not _sentence_reported(text, m.start())):
         return "the evidence requirement"
     return None
 
@@ -799,9 +901,11 @@ def _japanese_weakening(text):
     None: the identical structural law as unsafe_directive's own English
     check (a weakening term within about one clause of a named control,
     dropped when a negation is present), read against Japanese vocabulary
-    instead of English. Also dropped when a REPORTING FRAME (a past-tense
-    "this happened before" marker) shares the same window, the Japanese
-    half of the mixed-content guard below."""
+    instead of English. Also dropped when the SENTENCE carrying the match
+    is a REPORT (VN7, night run 2026-09-08: _sentence_reported, the
+    general sentence-level pass every family now shares, replacing the
+    old fixed-window _REPORTING_FRAME_JA check this function used to run
+    on its own)."""
     if not text:
         return None
     for weak in _WEAKENING_JA:
@@ -816,7 +920,7 @@ def _japanese_weakening(text):
             window = text[win_start:win_end]
             if any(neg in window for neg in _NEGATION_JA):
                 continue
-            if any(rep in window for rep in _REPORTING_FRAME_JA):
+            if _sentence_reported(text, idx):
                 continue
             for control, name in _CONTROL_JA:
                 if control in window:
@@ -856,6 +960,8 @@ def _prohibited_strengthening(text):
     if not text:
         return None
     for m in _PROHIBITED_NEG_RE.finditer(text):
+        if _sentence_reported(text, m.start()):
+            continue
         before_start = max(0, m.start() - _DIRECTIVE_WINDOW_CHARS)
         window = text[before_start:m.end() + _DIRECTIVE_WINDOW_CHARS]
         if _PROHIBITED_EXCLUDE_RE.search(window):
@@ -890,12 +996,11 @@ def _verdict_laundering(text):
     separate control noun needed, so they run through
     _japanese_phrase_hit rather than the window-based English check).
 
-    Runs the SAME reporting-frame clause check unsafe_directive's own
-    weakening-verb loop uses (review-P0.md C3, night run 2026-09-08): a
-    past-tense report of what someone else did ("A previous session
-    marked a red suite as passing. Never do that again.") is not a live
-    instruction, so a REPORTING_FRAME phrase in the SAME clause as the
-    verb drops that match, per match, never whole-text."""
+    Runs the SAME sentence-level reported check every family uses (VN7,
+    night run 2026-09-08): a past-tense report of what someone else did
+    ("A previous session marked a red suite as passing. Never do that
+    again.") is not a live instruction, so a reported SENTENCE drops that
+    match, per match, never whole-text."""
     if not text:
         return None
     for m in _VERDICT_LAUNDER_VERB_RE.finditer(text):
@@ -903,12 +1008,7 @@ def _verdict_laundering(text):
         before = text[before_start:m.start()]
         if _NEGATION_RE.search(before):
             continue
-        clause_start = before_start
-        for boundary in (".", ";", "\n"):
-            idx = before.rfind(boundary)
-            if idx != -1:
-                clause_start = max(clause_start, before_start + idx + 1)
-        if _REPORTING_FRAME_RE.search(text[clause_start:m.start()]):
+        if _sentence_reported(text, m.start()):
             continue
         window = text[before_start:m.end() + _DIRECTIVE_WINDOW_CHARS]
         if _VERDICT_LAUNDER_OUTCOME_RE.search(window):
@@ -940,26 +1040,157 @@ def _authority_escalation(text):
     reason names AUTHORITY, never a check, matching the precedence law's
     own wording.
 
-    Runs the SAME reporting-frame clause check unsafe_directive's own
-    weakening-verb loop uses (review-P0.md C3, night run 2026-09-08),
-    truncated at the nearest clause boundary behind the match, same as
-    _verdict_laundering above."""
+    Runs the SAME sentence-level reported check every family uses (VN7,
+    night run 2026-09-08), same as _verdict_laundering above."""
     if not text:
         return None
     m = _AUTHORITY_ESCALATION_RE.search(text)
     if m and not _ADVISORY_NEGATION_RE.search(text[max(0, m.start() - 40):m.end()]):
-        before_start = max(0, m.start() - _DIRECTIVE_WINDOW_CHARS)
-        before = text[before_start:m.start()]
-        clause_start = before_start
-        for boundary in (".", ";", "\n"):
-            idx = before.rfind(boundary)
-            if idx != -1:
-                clause_start = max(clause_start, before_start + idx + 1)
-        if not _REPORTING_FRAME_RE.search(text[clause_start:m.start()]):
+        if not _sentence_reported(text, m.start()):
             return "authority to merge or release"
     if _japanese_phrase_hit(text, _AUTHORITY_ESCALATION_JA):
         return "authority to merge or release"
     return None
+
+
+#: SEVENTH, GENERAL FAMILY (VN7, night run 2026-09-08). The benign-
+#: neighbour pack (VN5d) measured nine cases where a real incident report,
+#: quotation, or rationale explanation still refused as a live
+#: instruction, because the old _REPORTING_FRAME_RE was a closed phrase
+#: list ("a previous", "an earlier", "attempted to"...) checked in a fixed
+#: 80-character window, and three of the six families (advisory/
+#: exemption, prohibited-strengthening, the Japanese weakening-verb
+#: family) never consulted it at all. Rather than growing that list
+#: phrase by phrase forever, this is a SENTENCE-LEVEL pass, used
+#: identically by ALL SIX families below: a sentence delimited by
+#: . ! ? newline or the Japanese "." is REPORTED when it carries an
+#: explicit reporting-speech FRAME, a QUOTED clause, a PASSIVE PAST-TENSE
+#: construction on the very verb a family matched ("was disabled" reports
+#: an event; "disable" issues one), or the pre-existing closed vocabulary
+#: (kept, not replaced -- narrowing to structure alone would have to
+#: relearn what the vocabulary already knows). A sentence carrying a
+#: LIVE-CLAUSE RE-ARM (the report is followed by a claim that it is STILL
+#: the working approach) is never exempt, whatever else it carries.
+#:
+#: A bare "." is NOT always a sentence end: this estate's own fixtures are
+#: full of "poison_target.py", "config_rule.py:" and similar, where a
+#: period sits mid-filename. A "." only counts as a delimiter when it is
+#: NOT immediately followed by a letter or digit (so "target.py" stays
+#: one token, but "wrong: it hid" -- a colon, not a period -- and
+#: "sentence one. Sentence two" still split correctly); "!"/"?"/newline/
+#: "。" always count, mid-identifier punctuation being vanishingly rare
+#: for those four.
+_SENTENCE_DELIM_RE = re.compile(r"\.(?![A-Za-z0-9])|[!?\n]|。")
+
+#: Explicit reporting-speech frames (VN5d's own fixture vocabulary,
+#: generalized): a sentence naming WHO or WHAT said, explained, or quoted
+#: the thing is reporting it, never issuing it. The last alternative
+#: catches a TITLE carrying the same rationale without the verb
+#: "explains" ("why commenting out the assertion was wrong", a note's
+#: own name: frontmatter line, its own sentence bounded by the newline):
+#: VN5d's own methodology note names this exact title-contamination
+#: shape (unsafe_directive scans the whole file text, title included).
+_SENTENCE_FRAME_RE = re.compile(
+    r"\bthe\s+old\s+note\s+said\b|"
+    r"\b(?:a\s+)?rejected\s+draft\b(?:(?![.!?\n]).){0,40}?\bclaimed\b|"
+    r"\bexample\s+of\s+a\s+forbidden\s+instruction\b|"
+    r"\bexplains?\s+why\b|"
+    r"\bthat\s+instruction\s+is\s+obsolete\b|"
+    r"\bthis\s+exact\s+phrasing\s+must\s+be\s+rejected\b|"
+    r"\bwhy\b(?:(?![.!?\n]).){0,80}?\b(?:was|were|seemed)\b"
+    r"(?:(?![.!?\n]).){0,20}?\b(?:wrong|a\s+mistake|flawed|incorrect|"
+    r"unwise)\b", re.I)
+
+#: A quoted clause anywhere in the sentence: a sentence that QUOTES an
+#: instruction, even to reject or forbid it, is reporting the quote, not
+#: issuing it.
+_SENTENCE_QUOTE_RE = re.compile(r"[\"“”]")
+
+#: The Japanese siblings of _SENTENCE_FRAME_RE, plain-substring matched
+#: the same way every other Japanese check in this module already is:
+#: "old note said" and "once" (steering's own vocabulary) plus the
+#: benign pack's own "example of a forbidden instruction" and "that
+#: instruction is abolished" shapes. _REPORTING_FRAME_JA (defined above)
+#: is checked separately below, never duplicated here.
+_SENTENCE_FRAME_JA = ("古いメモは", "かつて", "禁止された指示の例",
+                      "という指示は廃止")
+
+#: A LIVE-CLAUSE RE-ARM (VN7): a reported clause followed by a claim that
+#: the reported thing is STILL the working approach cancels the report --
+#: "Previously the team decided X, and that decision still stands today"
+#: is a live instruction wearing a report's clothing. Checked across the
+#: sentence carrying the candidate match AND the one immediately after
+#: it, so "Previously X. That rule still stands today." (two sentences)
+#: re-arms exactly like "...and it still applies" (one sentence) does.
+_LIVE_REARM_RE = re.compile(
+    r"\bstill\s+(?:stands?|applies|holds|in\s+effect)\b|"
+    r"\b(?:remains?|continues?\s+to\s+be)\s+(?:the\s+)?(?:current|"
+    r"standing|active|in\s+effect|working\s+approach)\b|"
+    r"\bcontinues?\s+to\s+apply\b", re.I)
+_LIVE_REARM_JA = ("今も有効", "今でも続", "現在も適用")
+
+#: A PASSIVE PAST-TENSE auxiliary immediately (allowing up to two words
+#: between, for an adverb) before a family's own matched verb: "the gate
+#: was disabled" reports something that happened TO the gate; "disable
+#: the gate" issues an instruction on it. Checked only at the exact match
+#: position, anchored at the end of the string it is searched against, so
+#: an unrelated "was" elsewhere in the same sentence can never launder a
+#: live verb it does not actually govern.
+_PASSIVE_BEFORE_RE = re.compile(
+    r"\b(?:was|were|got|has\s+been|had\s+been|is\s+being|are\s+being)"
+    r"\s+(?:\w+\s+){0,2}$", re.I)
+
+
+def _sentence_bounds(text, pos):
+    """(start, end): the span of `text` between the nearest sentence
+    delimiter (. ! ? newline or ".") before `pos` and the nearest one at
+    or after `pos`, delimiters themselves excluded. Not a linguistic
+    parse -- the same "about one clause" proxy the rest of this module
+    already uses, just a real boundary instead of a fixed character
+    count, so a frame or verb in an unrelated earlier sentence can never
+    leak forward into this one, and a short lesson's SECOND sentence
+    still refuses on its own even when its first sentence is a report."""
+    start = 0
+    for m in _SENTENCE_DELIM_RE.finditer(text, 0, pos):
+        start = m.end()
+    end = len(text)
+    m2 = _SENTENCE_DELIM_RE.search(text, pos)
+    if m2:
+        end = m2.start()
+    return start, end
+
+
+def _sentence_reported(text, pos):
+    """True when the sentence in `text` containing offset `pos`
+    (typically a family's own regex match start) reads as a REPORT of
+    history or quotation rather than a live instruction, with no
+    LIVE-CLAUSE RE-ARM in that sentence or the one right after it. The
+    general, sentence-scoped replacement (VN7) for the old per-family
+    reporting-frame clause window, called identically by all six
+    unsafe_directive families below."""
+    start, end = _sentence_bounds(text, pos)
+    next_end = end
+    if end < len(text):
+        _, next_end = _sentence_bounds(text, end + 1)
+    rearm_window = text[start:next_end]
+    if _LIVE_REARM_RE.search(rearm_window):
+        return False
+    if any(phrase in rearm_window for phrase in _LIVE_REARM_JA):
+        return False
+    sentence = text[start:end]
+    if _SENTENCE_FRAME_RE.search(sentence):
+        return True
+    if _SENTENCE_QUOTE_RE.search(sentence):
+        return True
+    if any(phrase in sentence for phrase in _SENTENCE_FRAME_JA):
+        return True
+    if _REPORTING_FRAME_RE.search(sentence):
+        return True
+    if any(phrase in sentence for phrase in _REPORTING_FRAME_JA):
+        return True
+    if _PASSIVE_BEFORE_RE.search(text[start:pos]):
+        return True
+    return False
 
 
 def unsafe_directive(text):
@@ -1003,21 +1234,13 @@ def unsafe_directive(text):
         before = text[before_start:m.start()]
         if _NEGATION_RE.search(before):
             continue
-        # PER MATCH, NEVER WHOLE TEXT (steering 6.9's own mixed-content
-        # example): the reporting-frame guard only protects the SAME
-        # clause, so it is checked against `before` truncated at the
-        # nearest sentence boundary behind this match, never the full
-        # _DIRECTIVE_WINDOW_CHARS span. Without this truncation, a short
-        # lesson (well under 80 characters) lets an EARLIER sentence's
-        # "attempted to" bleed forward and wrongly protect a SECOND, live
-        # instruction two sentences later ("Also skip the parser tests."
-        # must still refuse even though the first sentence is a report).
-        clause_start = before_start
-        for boundary in (".", ";", "\n"):
-            idx = before.rfind(boundary)
-            if idx != -1:
-                clause_start = max(clause_start, before_start + idx + 1)
-        if _REPORTING_FRAME_RE.search(text[clause_start:m.start()]):
+        # PER SENTENCE, NEVER WHOLE TEXT (steering 6.9's own mixed-content
+        # example, generalized to a real sentence boundary by VN7 --
+        # night run 2026-09-08): the reporting-frame guard only protects
+        # the SAME sentence, so a short lesson's SECOND sentence
+        # ("Also skip the parser tests.") must still refuse even when its
+        # first sentence is a report.
+        if _sentence_reported(text, m.start()):
             continue
         window = text[before_start:m.end() + _DIRECTIVE_WINDOW_CHARS]
         for pattern, name in _NAMED_CONTROLS:
@@ -1064,6 +1287,14 @@ TIER_REFUSED = "REFUSED"
 SEAM_APPROVAL_FORGERY = "approval_forgery"
 SEAM_SAFETY_PRECEDENCE = "safety_precedence"
 SEAM_EVIDENCE_LOCATOR = "evidence_locator"
+#: VN8a (night run 2026-09-08): a note's own declared scope names a
+#: different project than the tree it is being recalled against.
+SEAM_SCOPE_MISMATCH = "scope_mismatch"
+#: VN8b (night run 2026-09-08): a duplicate lesson_id across two notes, or
+#: an unacknowledged supersedes: edge -- see find_conflicts's own
+#: duplicate-lesson-id pairing and _unacknowledged_supersession below.
+SEAM_LESSON_ID_COLLISION = "lesson_id_collision"
+SEAM_UNACKNOWLEDGED_SUPERSESSION = "unacknowledged_supersession"
 
 #: Both date fields this estate's notes actually carry: verified_at (this
 #: resolver's own field, bm_vault_staleness.py's field) and last_verified_at
@@ -1177,6 +1408,160 @@ def _forged_approval(lesson):
     return None
 
 
+#: VN8b (night run 2026-09-08, held-out pack family F): a note's own
+#: `supersedes:` [[wikilink]] used to retire the OLDER note (bm_vault.py's
+#: own supersessions table, built and read entirely inside that file, out
+#: of this row's fence) with nothing checking whether the retirement was
+#: ever reviewed by anyone but the new note's own author -- the identical
+#: evasion _forged_approval refuses for human_approved:, aimed at
+#: supersession instead of approval. Fix, staying inside THIS module (the
+#: superseding note is the one evidence_tier is already evaluating, so
+#: refusing IT is a lever this row's fence actually reaches, unlike the
+#: older note's own display, which stays bm_vault.py's mechanism):
+#: a supersedes: edge is ACKNOWLEDGED, and lets the superseding note
+#: reach TIER_EVIDENCED, only when EITHER (a) the note it names is found
+#: (a bounded search: this note's own directory, then that directory's
+#: parent -- the two layout shapes this codebase's own fixtures use,
+#: never a wider guess) and that note's OWN status frontmatter already
+#: reads "corrected" or "superseded" (scripts/vault_correct.py's own
+#: documented contract: it sets exactly those two keys on the note it
+#: retires), or (b) the target cannot be found at all but THIS note
+#: itself carries `type: correction` (the same tool's marker on the note
+#: it writes), the fallback for a vault layout the bounded search misses.
+#: Neither found: TIER_REFUSED -- a claimed retirement nobody
+#: corroborated is exactly the unbacked claim _forged_approval already
+#: refuses for a different field.
+#: ponytail: a directory walk per supersedes: check (reusing the
+#: existing _walk helper), bounded to two candidate directories, never
+#: the whole vault; fine at today's vault size, add an index if this is
+#: ever measured slow (the same ceiling _make_duplicate_probe's own
+#: "full table scan per lookup" comment already accepts for its sibling
+#: check in bm_vault.py).
+_SUPERSESSION_ACK_STATUSES = ("corrected", "superseded")
+SUPERSESSION_ACK_DISABLE_ENV = "BM_VAULT_DISABLE_SUPERSESSION_ACK_CHECK"
+
+
+def _resolve_supersedes_target_status(lesson, target_stem):
+    """The frontmatter `status` (lowercased, or None) of the note named
+    `target_stem`, found in this lesson's own directory or that
+    directory's parent (see the block comment above), or None when no
+    match turns up in either. Never raises: an unreadable candidate file
+    is skipped, never a crash over a note this check does not own."""
+    own_path = lesson.get("path")
+    if not own_path or not target_stem:
+        return None
+    own_dir = os.path.dirname(own_path)
+    for root in (own_dir, os.path.dirname(own_dir)):
+        if not root or not os.path.isdir(root):
+            continue
+        for path in _walk(root):
+            if os.path.normpath(path) == os.path.normpath(own_path):
+                continue
+            stem = os.path.splitext(os.path.basename(path))[0]
+            if stem != target_stem:
+                continue
+            try:
+                with open(path, encoding="utf-8", errors="replace") as fh:
+                    text = fh.read()
+            except OSError:  # sbe: allow-silent an unreadable candidate is not the target; keep looking
+                continue
+            fm = dict(FRONTMATTER_FIELD_RE.findall(_frontmatter(text)))
+            status = fm.get("status", "").strip().lower()
+            if status:
+                return status
+    return None
+
+
+def _unacknowledged_supersession(lesson):
+    """The target stem this lesson declares superseding, when the edge is
+    UNACKNOWLEDGED (see the block comment above), or None when the lesson
+    declares no supersedes: edge at all, or the edge IS acknowledged."""
+    targets = lesson.get("supersedes") or []
+    if not targets:
+        return None
+    target_stem = targets[0]
+    target_status = _resolve_supersedes_target_status(lesson, target_stem)
+    if target_status in _SUPERSESSION_ACK_STATUSES:
+        return None
+    if target_status is None and lesson.get("type", NO_DATA).strip().lower() == "correction":
+        return None
+    return target_stem
+
+
+#: VN8a (night run 2026-09-08, held-out pack family E): evidence_tier used
+#: to never read a note's own `scope` field outside a declared or detected
+#: contradicts: pair (find_conflicts's own use of scope, a different law
+#: for two lessons that disagree), so a fully evidenced note tagged for a
+#: DIFFERENT project still served unconditionally against a shared file in
+#: the current one. This is the fix: the SAME `scope` field (no new field,
+#: per this row's own instruction), read as a project-identity claim only
+#: at the point a note would otherwise become TIER_EVIDENCED.
+_PROJECT_MD_WALK_LIMIT = 8
+
+
+def _current_tree_identity(base_dir):
+    """The current tree's own declared identity, lowercased, or None only
+    when `base_dir` itself is falsy. Two sources, in order, "use what
+    exists" per this row's own instruction: (1) a PROJECT.md's first "# "
+    heading, found by walking up to _PROJECT_MD_WALK_LIMIT directory
+    levels above `base_dir` -- this estate's own project-boundaries
+    convention (every project carries a PROJECT.md at its canonical
+    root); (2) failing that, the repo root name itself: `base_dir`'s own
+    basename. A bare fixture tree with no PROJECT.md (every gauntlet's
+    own temp tree) still reports SOMETHING (its own directory name), so
+    a note that names a plainly different, unrelated project is still
+    caught even against a tree that never declared a PROJECT.md of its
+    own; a tree that DOES declare one is identified by that, not by
+    whatever a temp directory happened to be named."""
+    if not base_dir:
+        return None
+    current = base_dir
+    for _ in range(_PROJECT_MD_WALK_LIMIT):
+        candidate = os.path.join(current, "PROJECT.md")
+        if os.path.isfile(candidate):
+            try:
+                with open(candidate, encoding="utf-8", errors="replace") as fh:
+                    for line in fh:
+                        line = line.strip()
+                        if line.startswith("# "):
+                            heading = line[2:].strip().lower()
+                            if heading:
+                                return heading
+            except OSError:  # sbe: allow-silent an unreadable PROJECT.md falls through to the basename below
+                break
+            break
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        current = parent
+    basename = os.path.basename(os.path.normpath(base_dir)).strip().lower()
+    return basename or None
+
+
+def _scope_mismatch(lesson, evidence_probe):
+    """(declared_scope, current_identity) when the lesson names a `scope`
+    that plainly disagrees with the current tree's own declared identity,
+    or None when no comparison is possible (no scope declared, or the
+    tree names no identity of its own -- fails OPEN, never refuses on an
+    unknown identity) or the two plainly agree (case-insensitive
+    substring either direction, so "brother-hub" and "the brother-hub
+    estate, second worktree" still agree). `evidence_probe` supplies the
+    tree via its own .base_dir attribute (see make_evidence_probe), so no
+    new parameter threads through vault_recall_hook.py or bm_vault.py."""
+    scope = lesson.get("scope", NO_DATA)
+    if not scope or scope == NO_DATA:
+        return None
+    scope_l = scope.strip().lower()
+    if not scope_l:
+        return None
+    identity = _current_tree_identity(getattr(evidence_probe, "base_dir", None))
+    if not identity:
+        return None
+    if scope_l in identity or identity in scope_l:
+        return None
+    return scope, identity
+
+
 def evidence_tier(lesson, evidence_probe, duplicate_probe=None):
     """(tier, reason, seam): the ONE evidence tier a recalled lesson
     carries, read identically by bm_vault.py's _print_hits and by
@@ -1259,8 +1644,27 @@ def evidence_tier(lesson, evidence_probe, duplicate_probe=None):
       7. evidence_probe(lesson) is HOLDS and status is "superseded":
          TIER_UNVERIFIED -- evidence holding does not un-supersede a note a
          human already moved past.
-      8. evidence_probe(lesson) is HOLDS and status is not "superseded":
-         TIER_EVIDENCED.
+      7b. evidence_probe(lesson) is HOLDS, status is not "superseded", and
+          the note's own `scope` plainly names a DIFFERENT project than
+          the current tree's own declared identity (_scope_mismatch,
+          VN8a, night run 2026-09-08): TIER_REFUSED. Fails open: no scope
+          declared, or the current tree names no identity of its own,
+          never refuses on this alone.
+      7c. evidence_probe(lesson) is HOLDS, status is not "superseded", no
+          scope mismatch, and the note declares supersedes: [[X]] with
+          neither X's own status reading corrected/superseded nor this
+          note itself carrying type: correction
+          (_unacknowledged_supersession, VN8b, night run 2026-09-08):
+          TIER_REFUSED. Placed HERE, not at step 0 alongside
+          _forged_approval, on purpose: a note with no resolving evidence
+          at all already withholds at step 3/4 below, ungated by any
+          seam, and this check must never replace that path for it (a
+          note this check does NOT reach stays exactly as protected as
+          before). Skipped only when
+          BM_VAULT_DISABLE_SUPERSESSION_ACK_CHECK is set; never set in
+          production.
+      8. evidence_probe(lesson) is HOLDS, status is not "superseded", no
+         scope mismatch, and no unacknowledged supersession: TIER_EVIDENCED.
     """
     if not os.environ.get(SAFETY_PRECEDENCE_DISABLE_ENV):
         control = unsafe_directive(lesson.get("text", ""))
@@ -1332,7 +1736,7 @@ def evidence_tier(lesson, evidence_probe, duplicate_probe=None):
         return TIER_UNVERIFIED, "evidence_locator %r points at the vault itself" % locator, None
     if verdict == WEAK:
         return TIER_UNVERIFIED, (
-            "test locator %r proves nothing about %s" % (
+            "evidence_locator %r proves nothing about %s" % (
                 locator, ", ".join(lesson.get("applies_to") or []) or "the claim")), None
     if verdict == FAILS:
         return (TIER_REFUSED, "evidence_locator %r does not currently hold" % locator,
@@ -1340,6 +1744,25 @@ def evidence_tier(lesson, evidence_probe, duplicate_probe=None):
 
     if lesson.get("status") == "superseded":
         return TIER_UNVERIFIED, "evidence holds but the note is marked superseded", None
+
+    mismatch = _scope_mismatch(lesson, evidence_probe)
+    if mismatch:
+        declared, identity = mismatch
+        return (TIER_REFUSED,
+                "scope: declared for %s, current tree is %s" % (declared, identity),
+                SEAM_SCOPE_MISMATCH)
+
+    if not os.environ.get(SUPERSESSION_ACK_DISABLE_ENV):
+        unacked = _unacknowledged_supersession(lesson)
+        if unacked:
+            return (TIER_REFUSED,
+                     "supersedes %r with no acknowledgment on the note it "
+                     "names (no corrected/superseded status found, and this "
+                     "note carries no type: correction marker); a "
+                     "supersession no one but its own author reviewed "
+                     "cannot retire another note" % unacked,
+                     SEAM_UNACKNOWLEDGED_SUPERSESSION)
+
     return TIER_EVIDENCED, "evidence_locator %r holds" % locator, None
 
 

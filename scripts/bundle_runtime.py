@@ -141,6 +141,24 @@ _HOOK_TOOL_RE = re.compile(
 #: directory by a bare string constant, the same rule the closure already
 #: uses for sibling .py names.
 DATA_DIRS = ("packs",)
+#: Single files OUTSIDE scripts/ that a closure module reads at run time,
+#: as {the closure module that reads it: (repository-relative source, the
+#: name it takes inside bundle/runtime)}. Mirrored FLAT, beside the reader,
+#: and only when that reader is actually in the closure.
+#:
+#: WHY THIS EXISTS BESIDE DATA_DIRS. DATA_DIRS walks a directory UNDER
+#: scripts/, which is where door.py's packs live. The outcome contract
+#: schema does not: docs/schema/ is the single source the whole estate
+#: reads, and bundle/runtime has no docs/ tree above it, so
+#: contract_check.py's own docs/schema path resolves to nothing in an
+#: installed plugin and every `--contract` run would read NO-DATA. The
+#: reader finds the flat copy through contract_check.default_schema().
+#: A declared source that is not there contributes nothing, exactly as an
+#: absent DATA_DIRS directory does.
+DATA_FILES = {
+    "contract_check.py": ("docs/schema/outcome-contract-v1.json",
+                          "outcome-contract-v1.json"),
+}
 
 NODATA = "NO-DATA"
 #: The two manifest fields that name where the bytes came from rather than
@@ -719,6 +737,23 @@ def compute_data_files(closure, scripts_dir=SCRIPTS_DIR):
     return sorted(files)
 
 
+def compute_extra_files(closure, scripts_dir=SCRIPTS_DIR):
+    """[(name inside bundle/runtime, absolute source path)] for every
+    DATA_FILES entry whose reader is in `closure` and whose source exists,
+    sorted by name. The repository root is taken as the parent of
+    `scripts_dir`, so a temp-tree generation resolves against that tree
+    rather than against this checkout."""
+    repo_root = os.path.dirname(os.path.abspath(scripts_dir))
+    out = []
+    for reader, (source, dest) in sorted(DATA_FILES.items()):
+        if reader not in closure:
+            continue
+        src = os.path.join(repo_root, *source.split("/"))
+        if os.path.isfile(src):
+            out.append((dest, src))
+    return sorted(out)
+
+
 def _read_bytes(path):
     with open(path, "rb") as fh:
         return fh.read()
@@ -753,6 +788,8 @@ def build_manifest(closure, scripts_dir=SCRIPTS_DIR):
     for rel in compute_data_files(closure, scripts_dir):
         src = os.path.join(scripts_dir, *rel.split("/"))
         files.append({"path": rel, "sha256": _sha256(_read_bytes(src))})
+    for dest, src in compute_extra_files(closure, scripts_dir):
+        files.append({"path": dest, "sha256": _sha256(_read_bytes(src))})
     files.sort(key=lambda f: f["path"])
     return {"generated_by": "scripts/bundle_runtime.py", "entry": ENTRY,
             "files": files,
@@ -824,6 +861,10 @@ def generate(scripts_dir=SCRIPTS_DIR, runtime_dir=RUNTIME_DIR):
         data = _read_bytes(os.path.join(scripts_dir, *rel.split("/")))
         if _write_if_changed(os.path.join(runtime_dir, *rel.split("/")), data):
             changed.append(rel)
+    for dest, src in compute_extra_files(closure, scripts_dir):
+        if _write_if_changed(os.path.join(runtime_dir, dest),
+                             _read_bytes(src)):
+            changed.append(dest)
     launcher_path = os.path.join(runtime_dir, LAUNCHER_NAME)
     if _write_if_changed(launcher_path, LAUNCHER_SOURCE.encode("utf-8")):
         changed.append(LAUNCHER_NAME)
@@ -861,6 +902,15 @@ def check(scripts_dir=SCRIPTS_DIR, runtime_dir=RUNTIME_DIR):
               != _read_bytes(dst)):
             problems.append("%s: bundle/runtime copy does not match its "
                             "scripts/ source" % rel)
+    for dest, src in compute_extra_files(closure, scripts_dir):
+        dst = os.path.join(runtime_dir, dest)
+        if not os.path.isfile(dst):
+            problems.append("%s: missing from bundle/runtime, so an "
+                            "installed copy has no schema to check a record "
+                            "against" % dest)
+        elif _read_bytes(src) != _read_bytes(dst):
+            problems.append("%s: bundle/runtime copy does not match its "
+                            "source outside scripts/" % dest)
     launcher_path = os.path.join(runtime_dir, LAUNCHER_NAME)
     if not os.path.isfile(launcher_path):
         problems.append("%s: missing from bundle/runtime" % LAUNCHER_NAME)

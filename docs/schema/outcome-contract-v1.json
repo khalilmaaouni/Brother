@@ -1,0 +1,264 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "outcome-contract-v1",
+  "title": "Outcome contract v1",
+  "description": "The one project record for the estate (2026-09-08 debate judgment): Intake V2 writes it, the door checks it before planning, Daybook reads it. Amended after the 2026-09-08 Opus adversarial review (F1 to F12). Only the keyword subset scripts/contract_check.py actually enforces is used here: type, required, properties, enum, const, items, minItems, additionalProperties. The custom top level key x-question-pivot names the state literal the questions cap treats as its lower bound, so that literal is read from the schema rather than hard coded a second time in the checker (F5). Rules the keyword subset cannot express, named here and enforced by hand in contract_check.py so a reader of either file finds the same account: (1) question and language must be non-empty after stripping whitespace; (2) ticket is required (non-null) when audit.required is true; (3) questions holds at most one entry once state is at or past x-question-pivot (contracted), and none once state is delivered or later (the A-prime rule, refined by F12); (4) every field of the project object (not persona, language, question or the rest, which come from the ask itself and carry no provenance, F6) must have a provenance entry, and every provenance entry must name a real project field (F7); (5) once state is delivered or later, every must_answer entry needs a non-empty answer and a receipt_id that names a real entry in receipts (F1); (6) every receipts[].ref must start with file:, evidence: or url:, the grammar scripts/receipt_check.py resolves (F4); (7) every success_checks entry whose expect is contains or file-exists needs a non-empty value (F9); (8) success_checks may be empty only while state is draft, and at least one entry is required once state is at or past x-question-pivot (contracted), reading the same pivot the questions cap reads rather than a second hard coded literal. The decision field (object or null) points at the intake decision JSON that decide.py scores; it never copies that record's options, criteria or weights in here, so the decision JSON stays the single ranking (F2).",
+  "type": "object",
+  "x-question-pivot": "contracted",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "project", "language", "question", "success_checks",
+    "must_answer", "affected_products", "ticket", "audit", "persona",
+    "state", "receipts", "questions", "history", "decision"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "outcome-contract-v1",
+      "description": "Which shape this record follows, so a reader never has to guess."
+    },
+    "project": {
+      "type": "object",
+      "description": "The project this record is about, and where each fact about it came from. Provenance binds this object's fields only (F6): persona, language, question and the rest of the top level record come from the ask itself and carry no provenance entry.",
+      "required": ["project_id", "name", "provenance"],
+      "additionalProperties": false,
+      "properties": {
+        "project_id": {
+          "type": "string",
+          "description": "A stable identifier for the project."
+        },
+        "name": {
+          "type": "string",
+          "description": "The project's display name."
+        },
+        "repository": {
+          "type": "object",
+          "description": "Where the project's code lives, each field a string or the literal NO-DATA when it could not be determined.",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "The repository's name, or NO-DATA."
+            },
+            "branch": {
+              "type": "string",
+              "description": "The branch this record was raised against, or NO-DATA."
+            },
+            "remote": {
+              "type": "string",
+              "description": "The git remote URL, or NO-DATA."
+            }
+          }
+        },
+        "provenance": {
+          "type": "object",
+          "description": "Maps every project field name present above (project_id, name, repository) to where it came from, and names no field that is not one of them (checked by hand in both directions, F7).",
+          "additionalProperties": {
+            "enum": ["git", "manifest", "readme", "ask", "answer", "NO-DATA"]
+          }
+        }
+      }
+    },
+    "language": {
+      "type": "string",
+      "description": "The language the user wrote in, BCP 47 style (en, ja, fr). Carries no provenance entry: it comes from the ask itself (F6)."
+    },
+    "question": {
+      "type": "string",
+      "description": "The exact ask, verbatim. Must not be empty after stripping whitespace (enforced by hand, since the enforced keyword subset carries no minLength). Carries no provenance entry: it comes from the ask itself (F6)."
+    },
+    "success_checks": {
+      "type": "array",
+      "description": "Runnable checks that prove the outcome landed. May be empty only while state is draft; once state is at or past the schema's own x-question-pivot (contracted), at least one entry is required (enforced by hand, since the enforced keyword subset has no conditional-by-sibling-value minItems).",
+      "items": {
+        "type": "object",
+        "required": ["id", "command", "expect"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "A short identifier for this check."
+          },
+          "command": {
+            "type": "string",
+            "description": "The command that proves it."
+          },
+          "expect": {
+            "enum": ["exit-0", "contains", "file-exists"],
+            "description": "How the command's result is read."
+          },
+          "value": {
+            "type": "string",
+            "description": "The expected text or path. Required and non-empty when expect is contains or file-exists (enforced by hand, since the enforced keyword subset has no conditional-by-sibling-value requirement, F9)."
+          }
+        }
+      }
+    },
+    "must_answer": {
+      "type": "array",
+      "description": "Open fields that must be answered before this contract is complete. May be empty, but the key is always present. Once state is delivered or later, every entry needs a non-empty answer and a receipt_id naming a real entry in receipts (enforced by hand, F1).",
+      "items": {
+        "type": "object",
+        "required": ["field", "why"],
+        "additionalProperties": false,
+        "properties": {
+          "field": {
+            "type": "string",
+            "description": "The field name still open."
+          },
+          "why": {
+            "type": "string",
+            "description": "Why it must be answered."
+          },
+          "answer": {
+            "type": ["string", "null"],
+            "description": "The answer given for this field, or null when not yet answered."
+          },
+          "receipt_id": {
+            "type": ["string", "null"],
+            "description": "The id of the receipts[] entry that backs the answer, or null when not yet cited."
+          }
+        }
+      }
+    },
+    "affected_products": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Which of this estate's products the outcome touches.",
+      "items": {
+        "enum": ["brother", "brothermode", "brothersbe"]
+      }
+    },
+    "ticket": {
+      "type": ["object", "null"],
+      "description": "The tracking ticket, or null when none is filed yet. Required (non-null) when audit.required is true: a conditional the enforced keyword subset cannot express, so contract_check.py enforces it by hand rather than inventing a new keyword here.",
+      "required": ["system", "id"],
+      "additionalProperties": false,
+      "properties": {
+        "system": {
+          "type": "string",
+          "description": "The ticketing system (e.g. jira, github)."
+        },
+        "id": {
+          "type": "string",
+          "description": "The ticket's id in that system."
+        }
+      }
+    },
+    "audit": {
+      "type": "object",
+      "description": "Whether this outcome needs an audit trail, and where its manifest lives.",
+      "required": ["required", "manifest"],
+      "additionalProperties": false,
+      "properties": {
+        "required": {
+          "type": "boolean",
+          "description": "Whether an audit manifest is mandatory for this record."
+        },
+        "manifest": {
+          "type": ["string", "null"],
+          "description": "Path to the audit manifest, or null when audit.required is false."
+        }
+      }
+    },
+    "persona": {
+      "enum": ["analyst", "lead", "developer", "NO-DATA"],
+      "description": "The persona this outcome is written for: one of Intake V2's three personas, or the literal NO-DATA when unknown. Carries no provenance entry: it comes from the ask itself (F6)."
+    },
+    "state": {
+      "enum": ["draft", "contracted", "planned", "in-flight", "delivered", "superseded"],
+      "description": "Where this record sits in its own lifecycle. Daybook v2 derives four DISPLAY columns from this and from decision, never storing them: open (draft/contracted/planned/in-flight with decision null or decision.close_call false), close-call (decision.close_call true, not delivered, not superseded), decided (delivered), superseded (superseded). See docs/schema/README.md, 'State and the Daybook columns' (F3)."
+    },
+    "receipts": {
+      "type": "array",
+      "description": "Evidence gathered so far. May be empty, but the key is always present.",
+      "items": {
+        "type": "object",
+        "required": ["id", "path", "verdict", "ref"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "A short identifier for this receipt."
+          },
+          "path": {
+            "type": "string",
+            "description": "Where the full evidence lives, a human readable copy of the location ref resolves."
+          },
+          "verdict": {
+            "enum": ["PASS", "FAIL", "NO-DATA"],
+            "description": "The receipt's own verdict."
+          },
+          "ref": {
+            "type": "string",
+            "description": "The resolver grammar scripts/receipt_check.py understands: file:<path>:<start>-<end>, evidence:<name>, or url:<u>. Must start with one of those three prefixes (enforced by hand, since the enforced keyword subset has no pattern keyword, F4)."
+          }
+        }
+      }
+    },
+    "questions": {
+      "type": "array",
+      "description": "Blocking questions still open for a person to answer. May be empty, but the key is always present. At most one entry is allowed once state is at or past x-question-pivot (contracted), and none once state is delivered or later (the A-prime rule, refined by F12): a cross-field count the enforced keyword subset cannot express, so contract_check.py enforces it by hand.",
+      "items": {
+        "type": "object",
+        "required": ["field", "question"],
+        "additionalProperties": false,
+        "properties": {
+          "field": {
+            "type": "string",
+            "description": "The field the question is about."
+          },
+          "question": {
+            "type": "string",
+            "description": "The question itself."
+          }
+        }
+      }
+    },
+    "history": {
+      "type": "array",
+      "description": "Stamps of what happened to this record over time. May be empty, but the key is always present.",
+      "items": {
+        "type": "object",
+        "required": ["at", "by", "note"],
+        "additionalProperties": false,
+        "properties": {
+          "at": {
+            "type": "string",
+            "description": "When this happened."
+          },
+          "by": {
+            "type": "string",
+            "description": "Who or what made it happen (git, manifest, readme, ask, answer)."
+          },
+          "note": {
+            "type": "string",
+            "description": "What happened."
+          }
+        }
+      }
+    },
+    "decision": {
+      "type": ["object", "null"],
+      "description": "The weighed decision behind this record, or null when no weighed decision has happened yet. Points at the intake decision JSON that decide.py scores; never copies that record's options, criteria or weights into this contract, so the decision JSON stays the single ranking (F2).",
+      "required": ["record", "close_call"],
+      "additionalProperties": false,
+      "properties": {
+        "record": {
+          "type": "string",
+          "description": "Path to the intake decision JSON that decide.py scores."
+        },
+        "close_call": {
+          "type": "boolean",
+          "description": "Whether decide.py judged this a close call."
+        },
+        "margin": {
+          "type": ["number", "null"],
+          "description": "The margin decide.py computed between the top two options, or null when not scored."
+        },
+        "chosen": {
+          "type": ["string", "null"],
+          "description": "The id of the option decide.py chose, or null when not scored."
+        }
+      }
+    }
+  }
+}

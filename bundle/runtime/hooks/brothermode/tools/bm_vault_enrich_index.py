@@ -5,9 +5,14 @@ THE ROW. Model-drafted aliases and question-forms for a note land as
 machine-drafted candidates through the EXISTING enrichment lane
 (tools/bm_vault_enrich.py, VB10-04), never a second approval surface.
 Promoted (canonical, clean-record) alias/question-form metadata joins the
-retrieval index AT BAKE (tools/bm_vault_catalog.py); an unpromoted draft
-changes nothing. Lexical-first hit-rate on a fixture query set is measured
-before and after a promotion, so the claim is checked, not asserted.
+retrieval index AT BAKE (tools/bm_vault_catalog.py) and, since VR5
+(2026-09-08), AT INDEX TIME as well: tools/bm_vault.py reads
+promoted_suffix_map below once per index pass and joins each note's
+promoted text onto its indexed description, so live recall can match a
+question phrased the way the note itself is not. An unpromoted draft
+changes nothing on either path. Lexical-first hit-rate on a fixture query
+set is measured before and after a promotion, so the claim is checked,
+not asserted.
 
 WHY A NEW FILE rather than growing bm_vault_enrich.py further: that module
 already carries the full drafting/listing surface for three field kinds
@@ -192,14 +197,10 @@ def promoted_terms_for_note(vault, note_relpath):
     return out
 
 
-def catalog_line_suffix(vault, note_relpath):
-    """A trailing string to append to one note's catalog line, or "" when
-    the note has no promoted alias or question-form. Kept to plain words
-    (no wikilink, no markdown table) so bm_vault_catalog.py's own
-    byte-identical-on-repeat-bake contract (see that module's docstring)
-    holds: this returns the SAME string for the SAME promoted state every
-    time, nothing here depends on wall-clock time."""
-    terms = promoted_terms_for_note(vault, note_relpath)
+def _suffix_from_terms(terms):
+    """The one formatting of a note's promoted terms, shared by the catalog
+    line and by the retrieval index below so the two can never drift into
+    two spellings of the same fact. "" for no terms."""
     if not terms:
         return ""
     aliases = [v for f, v, _m in terms if f == "alias"]
@@ -210,6 +211,59 @@ def catalog_line_suffix(vault, note_relpath):
     if questions:
         parts.append("asks: %s" % "; ".join(questions))
     return "  (%s)" % "; ".join(parts)
+
+
+def catalog_line_suffix(vault, note_relpath):
+    """A trailing string to append to one note's catalog line, or "" when
+    the note has no promoted alias or question-form. Kept to plain words
+    (no wikilink, no markdown table) so bm_vault_catalog.py's own
+    byte-identical-on-repeat-bake contract (see that module's docstring)
+    holds: this returns the SAME string for the SAME promoted state every
+    time, nothing here depends on wall-clock time."""
+    return _suffix_from_terms(promoted_terms_for_note(vault, note_relpath))
+
+
+def promoted_suffix_map(vault):
+    """{note_relpath: suffix} for every note carrying at least one promoted
+    alias or question form, built in ONE walk of the vault.
+
+    WHY NOT promoted_terms_for_note IN A LOOP: that function calls
+    bm_vault_enrich.list_drafts, which walks and reads the whole vault per
+    call, so asking it for each of a corpus's notes is quadratic (measured
+    corpus 2026-09-08: 1369 notes, so about 1.9 million file reads). The
+    index refresh runs at SessionStart under a wall-clock budget, so it
+    reads every enrichment note once and buckets by target instead:
+    measured 0.029s over a synthetic 1400 note tree, against a 5s budget.
+    Same readers, same promoted definition (through
+    bm_vault_lifecycle.counts_as_canonical), same formatting helper and
+    same walk order, so a note's suffix here is byte-identical to the one
+    catalog_line_suffix returns for it.
+
+    Read-only, and "" is never stored: a note absent from this map has no
+    promoted metadata, which is the state the caller compares against."""
+    if not vault or not os.path.isdir(vault):
+        return {}
+    by_target = {}
+    for path in ids.walk(vault):
+        try:
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                text = fh.read()
+        except OSError:  # sbe: allow-silent one unreadable vault file, the rest still bucket, same as list_drafts
+            continue
+        meta = enrich._read_enrich_meta(text)
+        if meta is None or meta.get("type") != enrich.NOTE_TYPE:
+            continue
+        field = meta.get("enrich_field")
+        target = meta.get("target_note")
+        if field not in INDEXABLE_FIELDS or not target:
+            continue
+        state, _record, problems = lc.read_promotion(text)
+        if not lc.counts_as_canonical(state, problems):
+            continue
+        value = _draft_value_text(path)
+        if value:
+            by_target.setdefault(target, []).append((field, value, meta.get("drafting_model")))
+    return {t: _suffix_from_terms(terms) for t, terms in by_target.items()}
 
 
 # ------------------------------------------------------------------- measure

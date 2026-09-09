@@ -214,7 +214,7 @@ def run_benchmark(bm, fixture, limit=DEFAULT_LIMIT):
         for item in fixture["items"]:
             item_id = item["id"]
             target = ids[item_id]
-            fused, _why = bm._search(con, text=item["question"], limit=limit, fast=True)
+            fused, _why, _total = bm._search(con, text=item["question"], limit=limit, fast=True)
             fused_ids = [nid for nid, _score in fused]
             served = served_note(bm, con, fused)
             old_in_fused = target["old"] in fused_ids

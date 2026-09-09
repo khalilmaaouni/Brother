@@ -13,10 +13,10 @@ to run the battery.
 
 | | |
 |---|---:|
-| Parts | 173 |
-| Parts with a purpose written in the file | 173 |
-| Parts with a suite wired into the battery | 157 |
-| Checks in the battery | 246 |
+| Parts | 180 |
+| Parts with a purpose written in the file | 180 |
+| Parts with a suite wired into the battery | 162 |
+| Checks in the battery | 256 |
 
 ## Every part, what it is for, and what proves it
 
@@ -38,6 +38,7 @@ to run the battery.
 | `acceptance_time` | The Acceptance Time benchmark harness (S11, roadmap row S11; protocol | `acceptance`, `acceptance-self`, `acceptance-time`, `system-doc-current`, `system-doc-self` |
 | `acceptance_trial_assign` | Acceptance Compression trial: reviewer assignment and results validation | **NO-DATA**, nothing in the battery runs it |
 | `adapter_conformance` | ONE ordered suite, unchanged across every provider. | `adapter-conformance-self` |
+| `annotations_store` | a correction made once is a fact from then on. | `annotations-self` |
 | `attempt_hook` | a PostToolUse hook on Bash that writes to scripts/attempt_ledger.py | `attempt-hook-tests` |
 | `attempt_ledger` | stop the third attempt at a technique that failed twice. | `attempt-ledger-self`, `real-logs-unchanged` |
 | `authority_path_coverage` | R1: does one event receive two independent enforcing decisions? | `authority-path-coverage-self` |
@@ -63,8 +64,9 @@ to run the battery.
 | `codex_skills` | generate bundle/codex-skills/ from bundle/skills/, with the | `codex-skills-current` |
 | `codex_smoke` | the clean-install Codex smoke test, run in an isolated home. | `codex-smoke`, `codex-smoke-self` |
 | `continuity` | the resume screen. E73.1 of the productization directive. | `continuity-self` |
+| `contract_check` | does a record follow the outcome contract, the one project | `bundle-runtime-self`, `contract-check-self` |
 | `coverage_check` | Coverage checker for the unified WBS (docs/plan/UNIFIED-WBS.md), task 0. | `coverage`, `coverage-self` |
-| `daybook` | The Daybook: one calm decision feed swept from three repositories. | `daybook`, `daybook-self` |
+| `daybook` | The Daybook: the minimal board over the outcome contract (v2). | `daybook`, `daybook-self` |
 | `decide` | never hand a human a wall, hand them a screen. | `decide-self` |
 | `delivery_status` | the ONE goal for this session, as named steps with a | `delivery-status-self` |
 | `door` | a plain English outcome becomes a canonical Work document. | `brother-run-self`, `bundle-runtime-self`, `door-self`, `mutation-gate`, `mutation-gate-self` |
@@ -99,6 +101,8 @@ to run the battery.
 | `handover_ceremony` | Handover ceremony: collects a session's closing state and emits it as | `handover-ceremony` |
 | `handover_pack_scan` | the dry run the founder reads before any pack is rewritten. | **NO-DATA**, nothing in the battery runs it |
 | `identity_guard` | refuse NEW commits whose author or committer email domain | `export-public-self`, `identity-guard`, `identity-guard-self` |
+| `intake_inflight` | the decision-in-progress file a turn re-reads instead of | `intake-inflight-self` |
+| `intake_measure` | Intake V2's closing measure against the plan's own targets. | `intake-measure-self` |
 | `intake_score` | Scoring harness for the Intake 9.5 rubric (docs/plan/INTAKE-9.5-DESIGN.md | `intake-record-diagrams`, `intake-score-self` |
 | `integrate` | workers parallel, truth serial. | `integrate-self` |
 | `jbeq_decide` | JBEQ-MDM decision module: a deterministic engine that decides once a | `jbeq-decide-self` |
@@ -147,6 +151,7 @@ to run the battery.
 | `readme_receipt_sample` | the README's per-file receipt sample, rendered by | **NO-DATA**, nothing in the battery runs it |
 | `real_logs` | .py: nothing that runs as a test or a battery may grow a real | `real-logs-unchanged` |
 | `recall_coverage` | R28.3, learnings at the point of need, measured | `recall-coverage-selftest` |
+| `receipt_check` | a source with no receipt is UNVERIFIED, and a source that | `receipt-check-self` |
 | `receipt_door` | the facts a delivery can prove, and the screens showing them. | `receipt-door-self` |
 | `record_drift` | does the record still match reality after the work landed? | `pre-push-gate`, `pre-push-gate-self`, `record-drift`, `record-drift-self` |
 | `refresh_cut` | Refresh a cut: rewrite the export manifest and the release note that | `refresh-cut-self` |
@@ -169,6 +174,8 @@ to run the battery.
 | `run_heartbeat` | E46: the wait is never silent again. | **NO-DATA**, nothing in the battery runs it |
 | `safe_unwatched_time` | Safe Unwatched Time (SUT) for one run directory, read off the run's own records. | `safe-unwatched-time-self` |
 | `scope_audit` | what a run actually changed, against what it said it would. | `scope-audit-self` |
+| `score_benign_neighbours` | VN5d: the benign near-neighbour pack. Row LL-3's sibling measurement -- | **NO-DATA**, nothing in the battery runs it |
+| `score_vault_retrieval` | retrieval quality for the Brother Vault, measured through | **NO-DATA**, nothing in the battery runs it |
 | `split_check` | Does a train/test split leak: the same entity in both sides, or a row | `evad-score`, `evad-score-personas`, `evad-score-self`, `fault-lab-self`, `split-check-self` |
 | `surface_budget` | ROW R10: a ceiling on the estate's whole user-invocable surface. | `surface-budget`, `surface-budget-self` |
 | `system_doc` | a description of this system that cannot drift, because it is generated. | `system-doc-current`, `system-doc-self` |
@@ -218,6 +225,7 @@ to run the battery.
 - `vault-correct`: `/usr/bin/python3 scripts/test_vault_correct.py -v`
 - `limit-watch-self`: `python3 scripts/test_limit_watch.py -v`
 - `intake-score-self`: `python3 scripts/test_intake_score.py -v`
+- `intake-measure-self`: `python3 scripts/test_intake_measure.py -v`
 - `intake-record-diagrams`: `python3 scripts/intake_score.py --gate --require-weighted-options`
 - `readiness-board-self`: `python3 scripts/test_gen_readiness_board.py -v`
 - `roadmap-public-clean`: `python3 scripts/gen_readiness_board.py --public --check`
@@ -286,12 +294,21 @@ to run the battery.
 - `identity-guard`: `python3 scripts/identity_guard.py`
 - `resource-gate-self`: `python3 scripts/test_resource_gate.py -v`
 - `daybook-self`: `python3 scripts/test_daybook.py -v`
+- `persona-tools-self`: `python3 scripts/persona/test_persona_tools.py -v`
 - `daybook`: `python3 scripts/daybook.py`
 - `acceptance-self`: `python3 scripts/test_acceptance.py -v`
 - `acceptance`: `python3 scripts/acceptance.py`
 - `brother-run-self`: `python3 scripts/test_brother_run.py -v`
+- `brother-run-plan-self`: `python3 scripts/test_brother_run_plan.py -v`
+- `brother-run-session-worker`: `python3 scripts/test_brother_run_session_worker.py -v`
+- `brother-run-contract-self`: `python3 scripts/test_brother_run_contract.py -v`
 - `journal-self`: `python3 scripts/test_journal.py -v`
 - `receipt-door-self`: `python3 scripts/test_receipt_door.py -v`
+- `contract-check-self`: `python3 scripts/test_contract_check.py -v`
+- `receipt-check-self`: `python3 scripts/test_receipt_check.py -v`
+- `annotations-self`: `python3 scripts/test_annotations_store.py -v`
+- `annotations-intake`: `python3 scripts/test_annotations_intake.py -v`
+- `intake-inflight-self`: `python3 scripts/test_intake_inflight.py -v`
 - `acceptance-compression`: `python3 scripts/test_acceptance_compression.py -v`
 - `acceptance-time`: `python3 scripts/test_acceptance_time.py -v`
 - `bundle-runtime-self`: `python3 scripts/test_bundle_runtime.py -v`

@@ -1,0 +1,14 @@
+{"type":"user","origin":{"kind":"human"},"message":{"role":"user","content":"turn 1"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"ok 1"}],"usage":{"input_tokens":2000,"output_tokens":30}}}
+{"type":"user","origin":{"kind":"human"},"message":{"role":"user","content":"turn 2"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"ok 2"}],"usage":{"input_tokens":2100,"output_tokens":30}}}
+{"type":"user","origin":{"kind":"human"},"message":{"role":"user","content":"turn 3"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"ok 3"}],"usage":{"input_tokens":2200,"output_tokens":30}}}
+{"type":"user","origin":{"kind":"human"},"message":{"role":"user","content":"turn 4"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"ok 4"}],"usage":{"input_tokens":2300,"output_tokens":30}}}
+{"type":"user","origin":{"kind":"human"},"message":{"role":"user","content":"turn 5"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"ok 5"}],"usage":{"input_tokens":2400,"output_tokens":30}}}
+{"type":"user","origin":{"kind":"human"},"message":{"role":"user","content":"turn 6"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"ok 6"}],"usage":{"input_tokens":2500,"output_tokens":30}}}
+{"type":"user","origin":{"kind":"human"},"message":{"role":"user","content":"turn 7"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"[INTAKE-ACCEPTED] plan locked"}],"usage":{"input_tokens":2600,"output_tokens":30}}}

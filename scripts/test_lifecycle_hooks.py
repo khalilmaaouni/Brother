@@ -230,5 +230,60 @@ class TestPushGuard(unittest.TestCase):
             "a plain file write was refused by the push guard")
 
 
+
+class TestPushGuardWhenDefaultCannotBeResolved(unittest.TestCase):
+    """FX-E: the persona fixtures that found this gap have no
+    refs/remotes/origin/HEAD ref at all (git symbolic-ref exits 128 there),
+    so default_branch() returns None and push_effect used to fall back to an
+    advisory note, no matter what branch the push named. A plain
+    `git push origin main` in that shape must still be refused: main is the
+    overwhelmingly common default name, and letting an unresolved default
+    wave through a literal main or master push is the exact gap R-8 was
+    written to close for --no-verify."""
+
+    def setUp(self):
+        self._tmp = tempfile.mkdtemp()
+        os.makedirs(os.path.join(self._tmp, ".git", "refs", "remotes", "origin"))
+        with open(os.path.join(self._tmp, ".git", "HEAD"), "w") as f:
+            f.write("ref: refs/heads/feature-x\n")
+        # No refs/remotes/origin/HEAD file: default_branch() returns None,
+        # matching the persona fixtures named in the defect report.
+
+    def _decide(self, command):
+        call = {"tool_name": "Bash", "tool_input": {"command": command},
+                "cwd": self._tmp, "project_dir": self._tmp}
+        return sbe_guard.decide(call)
+
+    def test_a_push_to_literal_main_is_refused_when_default_unresolved(self):
+        decision = self._decide("git push origin main")
+        self.assertIsNotNone(
+            decision.payload,
+            "a push to literal main was allowed when the default branch "
+            "could not be resolved")
+        reason = decision.payload["hookSpecificOutput"]["permissionDecisionReason"]
+        self.assertIn("main", reason)
+        self.assertIn("could not be resolved", reason)
+
+    def test_a_push_to_a_non_default_name_stays_advisory_only(self):
+        """Regression guard: an unresolved default must not turn into a
+        refusal of every push, only of the literal main/master names."""
+        decision = self._decide("git push origin feature/x")
+        self.assertIsNone(
+            decision.payload,
+            "a push to a plainly non-default branch was refused")
+
+    def test_a_named_default_of_trunk_still_wins_over_the_literal_guess(self):
+        """When the default CAN be resolved and it is not main, a push to
+        literal main is an ordinary feature-branch push, not the default."""
+        with open(os.path.join(self._tmp, ".git", "refs", "remotes", "origin",
+                               "HEAD"), "w") as f:
+            f.write("ref: refs/remotes/origin/trunk\n")
+        decision = self._decide("git push origin main")
+        self.assertIsNone(
+            decision.payload,
+            "a push to main was refused even though this repository's "
+            "resolved default branch is trunk, not main")
+
+
 if __name__ == "__main__":
     unittest.main()

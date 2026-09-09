@@ -81,6 +81,18 @@ JOURNAL_FILENAME = "journal.jsonl"
 #: cached, so a second run in the same process reads its own value.
 RUN_DIR_ENV_VAR = "BROTHER_RUN_DIR"
 
+#: VN3b: the same thread, one level finer. RUN_DIR_ENV_VAR names the whole
+#: run; this names the ONE unit whose worker is running right now. It is
+#: exported by loop_bridge.LaneWorker.run, the only place in this estate
+#: that spawns a process for exactly one unit and therefore the only place
+#: a unit id is honestly known to a child process. A hook or tool that
+#: journals from inside that worker reads it and stamps its event with the
+#: unit the work belongs to, which is what
+#: brother_run._recalled_records_for_unit matches on. Unset everywhere else
+#: (an ordinary interactive session, a run-level writer), and unset reads as
+#: None: honestly unknown, never invented.
+UNIT_ID_ENV_VAR = "BROTHER_UNIT_ID"
+
 #: The atomicity bound. POSIX guarantees an O_APPEND write of at most
 #: PIPE_BUF bytes is not interleaved with another appender's; the getattr
 #: fallback is the POSIX minimum, used only if a platform's select module
@@ -127,6 +139,20 @@ def run_dir_from_env(env=None):
     journal", never as an error."""
     env = os.environ if env is None else env
     return (env.get(RUN_DIR_ENV_VAR) or "").strip()
+
+
+def unit_id_from_env(env=None):
+    """The unit whose worker this process is running inside, or None when
+    nothing exported one.
+
+    NONE, NEVER "", and never a guess: append()'s own eighth field reads
+    None as "this event is about the run rather than one unit", which is
+    exactly what an unset variable means here. A caller that turned an
+    absent id into a string would attribute one unit's record to a unit
+    named "" and brother_run._recalled_records_for_unit would then match it
+    against nothing at all, silently."""
+    env = os.environ if env is None else env
+    return (env.get(UNIT_ID_ENV_VAR) or "").strip() or None
 
 
 def _line(event):

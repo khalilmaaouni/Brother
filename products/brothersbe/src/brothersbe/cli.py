@@ -17,9 +17,14 @@ Exit codes, stable from here:
   0  the command ran and NO control FAILED. Read that precisely: it is not the
      same as "a control passed". A run where every check reported NO-DATA also
      exits 0, because nothing failed, and nothing was examined either. The
-     verdict lines say which happened; the exit code cannot.
+     verdict lines say which happened; the exit code cannot. ONE NAMED
+     EXCEPTION: `verify`'s hard gates, see the next line.
   1  a control FAILED, or the underlying tool exited nonzero
-  2  usage error: an unknown command, a missing argument, a bad path
+  2  usage error: an unknown command, a missing argument, a bad path; OR
+     (`verify` only) every hard gate read NO-DATA and none read PASS or FAIL,
+     which tells a caller nothing about the code either, so it is refused the
+     same way a bad invocation is rather than left reading as exit 0 -- see
+     `_cmd_verify` and `_hard_gate_verdicts`.
   3  the command exists but is not built yet
 """
 import argparse
@@ -40,6 +45,7 @@ from . import cwd as cwd_mod
 from ._toolspath import mount
 mount()
 import sbe_hooks_wiring  # noqa: E402
+import sbe_fence_hook  # noqa: E402
 
 EXIT_OK = 0
 EXIT_CONTROL_FAILED = 1
@@ -1023,15 +1029,27 @@ def _closing_caveat(command, code):
     verdict lines here to say something more specific would mean parsing another
     tool's output format, and a miscount in this line would be worse than no
     line at all.
+
+    THIRD BRANCH: `verify` is the one caller that can hand this a nonzero
+    code where nothing FAILED -- its own EXIT_USAGE, when every hard gate
+    read NO-DATA and none read PASS or FAIL (see `_cmd_verify`). Reporting
+    that with "at least one control FAILED above" would be a false FAIL, the
+    opposite defect from the exit-0-reads-as-a-pass one this function
+    already guards against, so it gets its own accurate line instead.
+    `review` never produces this code, so this branch never fires for it.
     """
     if code == EXIT_OK:
         sys.stdout.write(
             "\nsbe %s: exit 0 means no control FAILED. It does not mean a control passed. "
             "Read the verdict lines above: NO-DATA examined nothing and WAIVED suppressed a "
             "finding, and neither one is a pass.\n" % command)
-    else:
+    elif code == EXIT_CONTROL_FAILED:
         sys.stdout.write("\nsbe %s: exit %d, at least one control FAILED above.\n"
                          % (command, code))
+    else:
+        sys.stdout.write(
+            "\nsbe %s: exit %d. Nothing above FAILED; this exit code says only that nothing "
+            "could be examined either, and that is not a pass.\n" % (command, code))
 
 
 def _mint_evidence(target, delegates):
@@ -1399,6 +1417,44 @@ def _answer_about_named_paths(target, patterns):
             sys.stdout.write("%s: no check covers this file\n" % rel)
 
 
+#: Matches one hard-gate verdict line as `sbe_gate.py` prints it:
+#: "  <name>   <PASS|FAIL|NO-DATA>  <evidence text> [severity: gate]" (also
+#: matches the synthetic "exempt" FAIL line for a broken `.sbe-exempt`, which
+#: is not a named gate but is a real FAIL and must count as one).
+_HARD_GATE_LINE_RE = re.compile(r"^  (\S+)\s+(PASS|FAIL|NO-DATA)\s")
+#: Matches a waived hard gate: "  >> <name>   WAIVED  <reason>".
+_HARD_GATE_WAIVED_RE = re.compile(r"^  >> (\S+)\s+WAIVED\s")
+
+
+def _hard_gate_verdicts(lines):
+    """The verdict `tools/sbe_gate.py` printed for each hard gate, read off
+    its own stdout lines rather than its exit code, as {name: verdict}.
+
+    WHY THE LINES AND NOT THE EXIT CODE: `verify` never passes `--strict` to
+    this delegate (see the `delegates` tuple in `_cmd_verify`), and without
+    it `sbe_gate.py` exits 0 whether a hard gate PASSED, FAILED or read
+    NO-DATA -- only `--strict` with an actual FAIL moves that subprocess's
+    own exit code. So the printed line is the only place a hard gate's real
+    verdict survives for `verify` to read; this is the fix for the defect a
+    release manager hit (2026-09-08 persona dogfood, B1-S4): nine NO-DATA
+    lines under "BROTHERSBE HARD GATES" and `sbe verify` still exited 0, and
+    an approval-gate FAIL was found to exit 0 the same way while tracing it.
+
+    Returns one entry per hard gate line printed, PASS/FAIL/NO-DATA/WAIVED;
+    a gate whose artifact was entirely waived carries WAIVED, never absent.
+    """
+    verdicts = {}
+    for line in lines:
+        match = _HARD_GATE_LINE_RE.match(line)
+        if match:
+            verdicts[match.group(1)] = match.group(2)
+            continue
+        match = _HARD_GATE_WAIVED_RE.match(line)
+        if match:
+            verdicts[match.group(1)] = "WAIVED"
+    return verdicts
+
+
 def _cmd_verify(args):
     """The gates, in the order a reader wants them: design completeness first
     (an incomplete dossier makes every later verdict less meaningful), then the
@@ -1463,15 +1519,40 @@ def _cmd_verify(args):
     delegates = (("sbe_design.py", ["--strict"], "design"),
                 ("sbe_gate.py", [], "gate"),
                 ("sbe_score.py", score_flags, "score"))
-    for tool, flags, _kind in delegates:
+    hard_gate_verdicts = {}
+    for tool, flags, kind in delegates:
         result = delegate_teed(tool, list(flags) + [target])
         lines.extend(result["lines"])
         if result["code"] != EXIT_OK:
             worst = EXIT_CONTROL_FAILED
+        if kind == "gate":
+            hard_gate_verdicts = _hard_gate_verdicts(result["lines"])
     converge_result = _verify_converge_delegate(target)
     lines.extend(converge_result["lines"])
     if converge_result["code"] != EXIT_OK:
         worst = EXIT_CONTROL_FAILED
+    # The hard gates' own printed lines decide this, never `sbe_gate.py`'s
+    # exit code: see `_hard_gate_verdicts` for why that code cannot tell a
+    # FAIL from a NO-DATA here. A FAIL is a real, already-printed defect and
+    # always wins, over anything the rest of this function decided: it moves
+    # `worst` to EXIT_CONTROL_FAILED even where every other delegate above
+    # was clean. Short of a FAIL, a hard-gate population that is entirely
+    # NO-DATA -- not one PASS, not one FAIL -- is the shape this project's
+    # own law refuses to let read as clean (evals/test_no_data_class.py; "a
+    # population of all NO-DATA composed into a PASS: exit 0 is law death"):
+    # nothing here says the change is verified, so `worst` moves to
+    # EXIT_USAGE, the code this file already uses for a run that tells its
+    # caller nothing about their code. A single PASS among NO-DATA gates is
+    # the documented partial-honesty state and is left at EXIT_OK, same as
+    # before this check existed.
+    no_data_hard_gates = False
+    if hard_gate_verdicts:
+        if any(verdict == "FAIL" for verdict in hard_gate_verdicts.values()):
+            worst = EXIT_CONTROL_FAILED
+        elif worst == EXIT_OK and all(verdict == "NO-DATA"
+                                      for verdict in hard_gate_verdicts.values()):
+            worst = EXIT_USAGE
+            no_data_hard_gates = True
     # Minting evidence BEFORE recording decisions, though both write into
     # `target`: see `_mint_evidence`'s own docstring for why the order is
     # load-bearing rather than arbitrary. Both run before the closing
@@ -1480,6 +1561,10 @@ def _cmd_verify(args):
     # below is printed after it and carries no verdict.
     _mint_evidence(target, delegates)
     _record_decisions("verify", [target], lines, args.no_decisions)
+    if no_data_hard_gates:
+        sys.stdout.write(
+            "\nVERIFY: NO-DATA, none of the %d hard gates could run; nothing here says "
+            "the change is verified\n" % len(hard_gate_verdicts))
     _closing_caveat("verify", worst)
     # Information, never a gate: printed unconditionally, after the closing
     # caveat, on a FAIL the same as a PASS, and it cannot move `worst`, which
@@ -1491,7 +1576,26 @@ def _cmd_verify(args):
         "\nsbe verify: this run did not check regression, cross-device behaviour, "
         "performance, user experience or translation. Those are outside what any "
         "control above examines.\n")
+    _report_fence_registry(target)
     return worst
+
+
+def _report_fence_registry(target):
+    """D-003 (2026-09-08 persona dogfood, register A3-S3/A3-S4): named, not
+    silent. `sbe fences` already prints this to stderr on request; nothing
+    printed it where an operator running `sbe verify` would actually see it.
+    Information, never a gate, matching the two blocks above it in
+    `_cmd_verify`: it cannot move `worst`, prints on a FAIL the same as a
+    PASS, and reuses `sbe_fence_hook.read_fences` directly rather than a
+    second parse of what a fence registry is (rule 3 of that file's own
+    docstring)."""
+    try:
+        sbe_fence_hook.read_fences(target)
+    except sbe_fence_hook.OpenFail as e:
+        if getattr(e, "unfenced", False):
+            sys.stdout.write(
+                "sbe verify: NO FENCE REGISTRY -- %s. Every write here is "
+                "currently ALLOWED with nothing enforced.\n" % e)
 
 
 def _cmd_review(args):

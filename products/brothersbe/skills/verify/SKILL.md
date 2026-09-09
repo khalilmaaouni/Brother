@@ -85,7 +85,11 @@ a check that opened no file reads NO-DATA, never PASS.
 - **PASS** means required evidence was inspected and met the control.
 - **FAIL** means required evidence was inspected and violated it.
 - **NO-DATA** means the control examined nothing, and it names why. NO-DATA is never a pass,
-  and a run that opened no file reports NO-DATA rather than "clean".
+  and a run that opened no file reports NO-DATA rather than "clean". An all-NO-DATA run
+  exits 2 and is not a pass: when every hard gate reads NO-DATA and none reads PASS or FAIL,
+  `bin/sbe verify` refuses to exit 0, prints a named summary line, and exits the same code it
+  uses for a usage error, because a population of all NO-DATA composed into a green run tells
+  a caller nothing about the code either.
 
 Report the verdict with the command that produced it and the evidence it names. Never
 summarize a gate you did not run, and never re-word a NO-DATA into a pass because the work

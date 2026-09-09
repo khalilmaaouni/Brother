@@ -186,6 +186,31 @@ class ManagedRunNeedsNoSetup(_IsolatedTestCase):
                         "the claim must be journalled before the worker's "
                         "first write: %r" % types)
 
+    def test_the_child_carries_the_unit_id_its_worker_was_started_for(self):
+        """VN3b: journal.UNIT_ID_ENV_VAR is exported HERE and nowhere else,
+        because this is the only place in the estate that starts a process
+        for exactly one unit. Everything brother_run exports is run-scoped,
+        which is why every vault.recall event a hook journalled from inside
+        a worker carried unit_id None, and why
+        brother_run._recalled_records_for_unit (which matches on unit_id)
+        found nothing for every unit on every run
+        (docs/plan/research/vault-night-2026-09-08/VN4c-felt-surface-installed.md,
+        gap G3). Drop the export and that receipt goes empty again."""
+        lane = os.path.join(self.sandbox, "lane-unit-id")
+        os.makedirs(lane)
+        run_dir = os.path.join(self.sandbox, "run-unit-id")
+        os.makedirs(run_dir)
+        spawn = _StubSpawn(run_dir)
+        worker = loop_bridge.LaneWorker(spawn, ["irrelevant-argv"])
+        with mock.patch.dict(os.environ, {journal.RUN_DIR_ENV_VAR: run_dir}):
+            worker.run(_unit(unit_id="VN3b-1"), cwd=lane)
+
+        self.assertEqual(len(spawn.calls), 1)
+        self.assertEqual(
+            spawn.calls[0]["environ"].get(journal.UNIT_ID_ENV_VAR), "VN3b-1",
+            "the child was not told which unit it is working on: %r"
+            % spawn.calls[0]["environ"].get(journal.UNIT_ID_ENV_VAR))
+
 
 class TwoUnitsCannotShareAPath(_IsolatedTestCase):
     """Steering 7.9's overlapping-claim case: worker A holds a path, worker

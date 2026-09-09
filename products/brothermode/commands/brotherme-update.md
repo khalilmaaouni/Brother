@@ -6,6 +6,8 @@ description: Check the installed version against the newest release and explain 
 
 Outcome to produce: tell the user their installed version, the newest available version, whether they match, and the exact update steps for their install path.
 
+Follow skills/update/SKILL.md in this plugin exactly; it is the single source for the plugin-install update route (skills/update/SKILL.md refuses the pre-rename marketplace names below for a v3 install; the pinned clone steps here remain the verified route for that install path).
+
 1. Read the VERSION file at the BrotherMode root (the folder this command's plugin or skill is installed in). That is the installed version.
 2. Check the newest release tag: `git ls-remote --tags https://github.com/khalilmaaouni/BrotherModeUp.git`. If the network refuses, say plainly the check could not run, and do not guess a version.
 3. Tell the user, in plain words: their installed version, the newest version, and whether they match.

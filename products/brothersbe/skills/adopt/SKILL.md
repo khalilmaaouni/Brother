@@ -47,7 +47,10 @@ claude plugin validate "${CLAUDE_PLUGIN_ROOT}"
 
 The middle command prints the live fences the hook would actually enforce and names anything
 it could not read, which is the honest way to find out whether the write fence is real in this
-checkout or only documented.
+checkout or only documented. An unfenced repository (this command answering "no fence is
+enforceable here") is reported, on the write hook's own first write of a session and in
+`sbe verify`'s output, never silently refused, until a fence is declared with `sbe task open`
+or a STATE.md fence line (D-003).
 
 ## Report honestly, including the parts you could not reach
 

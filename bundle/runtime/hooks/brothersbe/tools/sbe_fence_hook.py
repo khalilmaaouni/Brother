@@ -151,7 +151,18 @@ class OpenFail(Exception):
 
     Always caught at the top of decide(); always produces an ALLOW plus a stderr
     line naming the reason. A named exception rather than a returned sentinel, so
-    a new code path cannot forget to check the sentinel and accidentally deny."""
+    a new code path cannot forget to check the sentinel and accidentally deny.
+
+    `unfenced`, when True, marks the ONE specific reason this project treats as
+    "this repository has no fence registry at all" (D-003, 2026-09-08 persona
+    dogfood, register A3-S3/A3-S4), as opposed to a registry that exists but
+    could not be trusted (unreadable, undecodable, a denied directory). Only
+    that specific case gets the visible once-per-session report decide() adds
+    below; the others keep the pre-existing stderr-only fail-open, unchanged."""
+
+    def __init__(self, message, unfenced=False):
+        super(OpenFail, self).__init__(message)
+        self.unfenced = unfenced
 
 
 # ---------------------------------------------------------------------------
@@ -1250,7 +1261,8 @@ def read_fences(cwd, root=None):
             "no fence registry was opened under %s; set %s to colon-separated "
             "glob patterns, put a STATE.md carrying a fence registry at the "
             "project root (see STATE.template.md), or open a task naming this "
-            "path with `sbe task open` (see .sbe/tasks.json)" % (cwd, REGISTRIES_ENV))
+            "path with `sbe task open` (see .sbe/tasks.json)" % (cwd, REGISTRIES_ENV),
+            unfenced=True)
     if not fences:
         # The notes ride along in the message, not just in the return value. A
         # registry whose only fence had no readable `files:` scope produces zero
@@ -1265,6 +1277,78 @@ def read_fences(cwd, root=None):
                (". Unenforceable fence line(s) found: " + " ".join(notes))
                if notes else ""))
     return FenceSet(fences, notes)
+
+
+# ---------------------------------------------------------------------------
+# D-003 (2026-09-08 persona dogfood, register A3-S3/A3-S4): "report first,
+# require an explicit fence before refusing". A repository with no fence
+# registry at all was already fail-open, honestly, but only on stderr, and
+# stderr with exit 0 is never read by the model (docs/HOOKS.md). So the
+# fail-open was true and nobody was ever actually told: the founder's own
+# line on the finding was "My dirty branch is fine, but that is luck, not
+# protection; Brother never got far enough to do anything to it."
+#
+# The fix is not a refusal. It is a NOTE on the one channel that reaches the
+# model on an ALLOW, hookSpecificOutput.additionalContext, the same
+# mechanism vault_recall_hook.py already established for exactly this
+# reason (see that file's own "never blocks" docstring). Shown once per
+# (session, repository) pair, via a marker file, so it is not wallpaper
+# repeated on every write in a long session.
+# ---------------------------------------------------------------------------
+
+def _unfenced_seen_path():
+    """The marker file recording which (session, project) pairs already saw
+    the "no fence registry" note. Mirrors vault_recall_hook.py's own SEEN
+    file: same technique (an append-only file of "session:repo" keys under
+    the config dir), same fail-open contract. Resolved the same way
+    detect_companion resolves its config dir above: brother_paths first, the
+    pre-C3 literal ~/.claude when that helper cannot be loaded, because a
+    reporting mechanism must not depend on the very helper it is reporting
+    around."""
+    paths = load_brother_paths()
+    if paths is None:
+        config_dir = os.environ.get(CLAUDE_CONFIG_DIR_ENV, "").strip() \
+            or os.path.join(os.path.expanduser("~"), ".claude")
+    else:
+        config_dir = paths.config_dir()
+    return os.path.join(config_dir, ".sbe_unfenced_seen")
+
+
+def _unfenced_seen():
+    """Never raises: an unreadable marker file degrades to "nothing seen yet",
+    which repeats the note rather than losing it, the safer direction for a
+    report that exists specifically to not go missing."""
+    try:
+        with open(_unfenced_seen_path(), encoding="utf-8") as f:
+            return set(f.read().split())
+    except (IOError, OSError):
+        return set()
+
+
+def _mark_unfenced_seen(key):
+    """Never raises: a marker this hook cannot write must not turn into a
+    blocked write or a crash. Worst case, the note repeats; it never falls
+    silent because the marker could not be recorded."""
+    try:
+        with open(_unfenced_seen_path(), "a", encoding="utf-8") as f:
+            f.write(key + "\n")
+    except (IOError, OSError):
+        pass
+
+
+def unfenced_context(reason):
+    """The additionalContext string for the once-per-session note. `reason`
+    is the OpenFail raised by read_fences for the "not opened" case, whose
+    message already names the cwd and the real, verified ways to declare a
+    fence (a STATE.md fence line, or `sbe task open`); reused verbatim rather
+    than re-typed, so this note can never drift from the escape read_fences
+    itself documents."""
+    return (
+        "BrotherSBE: this repository has no fence registry, so every write is "
+        "being ALLOWED with nothing enforced, and a push made this way would "
+        "leave no fence record either. %s This is reported once per session "
+        "for this repository; `sbe verify` also names it in its own output."
+        % reason)
 
 
 # ---------------------------------------------------------------------------
@@ -1563,8 +1647,12 @@ class Decision(object):
     check verdict. Keeping the shapes distinct keeps that lint honest rather than
     buying an allowlist entry for a function it was never meant to cover.
 
-    `payload` is None for ALLOW and for FAIL-OPEN, deliberately the same value,
-    so no failure path can produce a deny by accident."""
+    `payload` is None for a plain ALLOW and for most FAIL-OPEN reasons,
+    deliberately the same value, so no failure path can produce a deny by
+    accident. The ONE exception is the unfenced-repository report (D-003):
+    its payload carries hookSpecificOutput.additionalContext with no
+    permissionDecision key at all, which is still not a deny and can never
+    be read as one."""
 
     def __init__(self, payload, notes):
         self.payload = payload
@@ -1574,6 +1662,14 @@ class Decision(object):
 def decide(payload):
     """Return a Decision. `payload` is the parsed PreToolUse hook JSON."""
     notes = []
+    # Set only once the try body below confirms a session and a project; read
+    # ONLY inside the `unfenced` branch of the except clause, which is only
+    # ever reached after both are known (read_fences, where the unfenced
+    # OpenFail is raised, runs after both assignments succeed). Initialized
+    # here anyway so a future edit that moves that raise earlier fails open
+    # instead of hitting an UnboundLocalError in front of the operator.
+    my_session = ""
+    root = ""
     try:
         if not isinstance(payload, dict):
             raise OpenFail("hook payload was not a JSON object")
@@ -1727,6 +1823,14 @@ def decide(payload):
         notes.append(
             "sbe_fence_hook: FAILING OPEN, the write is allowed and the fence was "
             "NOT checked. Reason: %s" % e)
+        if e.unfenced and my_session and root:
+            key = "%s:%s" % (my_session, os.path.realpath(root))
+            if key not in _unfenced_seen():
+                _mark_unfenced_seen(key)
+                return Decision({"hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "additionalContext": unfenced_context(e),
+                }}, notes)
         return Decision(None, notes)
     except Exception as e:
         # The blanket catch is the point, not laziness: an unforeseen bug in this

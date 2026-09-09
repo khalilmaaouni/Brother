@@ -1,0 +1,6 @@
+{"type":"user","origin":{"kind":"human"},"message":{"role":"user","content":"turn 1: what does the intake need to know"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"noted, one more question"}],"usage":{"input_tokens":1200,"output_tokens":40}}}
+{"type":"user","origin":{"kind":"human"},"message":{"role":"user","content":"turn 2: here is the goal"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"drafting the plan now"}],"usage":{"input_tokens":1500,"output_tokens":60}}}
+{"type":"user","origin":{"kind":"human"},"message":{"role":"user","content":"turn 3: yes, that plan works"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"[INTAKE-ACCEPTED] locking the plan in"}],"usage":{"input_tokens":1600,"output_tokens":50}}}

@@ -11,9 +11,9 @@ The user wants to start a project. Their goal, in their own words: $ARGUMENTS
 
 Outcome to produce: one clear project brief (the Project Canvas) and one recommended first decision, in plain language, with a realistic time and cost range.
 
-Answer in the language the user wrote in, per references/honesty.md.
-
 Enter the guided kickoff flow of the brotherme skill. Follow the kickoff instructions at references/kickoff.md: size up the goal, ask only the questions whose answers change the scope, one decision at a time with a recommended option first.
+
+Read when adopting an existing repository: references/adopt-existing-repo.md
 
 ## The first minute: three beats, then the block, and NOTHING written
 
@@ -49,8 +49,6 @@ Say two things at that moment, in this order, and never skip the second:
 2. That when they later approve the page being published as a private page they can keep open in a browser, they are asked ONCE. Publishing that same page again afterwards does not ask again. That is the behaviour they want, and it is a thing to be told at the start rather than discovered later.
 
 FIRST RUN FOR THIS USER, a separate and rarer moment from the project setup above: the memory vault (the durable folder BrotherMode's own findings and session logs live in, distinct from this project's own records) is unbound on a fresh install, and nothing before row V2 ever asked or wrote it. Check with `python3 "${CLAUDE_PLUGIN_ROOT}/tools/bm_vault_cli.py" doctor` (the "vault path resolution" block prints "unset" on both lines when nothing is bound yet). If it is unset, this is the one consent moment: ask where their memory should live, the recommended default (`~/BrotherModeVault`) offered first, exactly as the brotherme skill's Welcome section describes, and never write it silently. Once they answer, whether the default or a folder of their own, run `python3 "${CLAUDE_PLUGIN_ROOT}/tools/bm_vault_cli.py" bind "<their folder>"` yourself: this is the one command that writes the config, so accepting the default or naming a folder is followed by one automated step rather than a promise to come back to it later. If it is already bound, say nothing and move on. Same install-path rule as below.
-
-Later, once memory exists to ask about, the words "vault doctor", "vault census" and "vault recall <query>" all route to that same command (`bm_vault_cli.py doctor` / `census` / `recall`), never a separate command of their own; see references/memory.md for the routing.
 
 RECORD THE OUTCOME FIRST, once the user has said in their own words what they want: run `python3 "${CLAUDE_PLUGIN_ROOT}/tools/bm_lead.py" outcome --project-id <id> --set "<their words>"` (the packaged console script is `bm-lead outcome`), then continue the guided kickoff. There is one command that records what the user is trying to achieve, and this is it, so the goal the status view reads back later is the goal they actually stated rather than a paraphrase gathered twice. Same install-path rule as below. It needs no --actor-name: the tool defaults it from `git config user.name`, then the `USER` environment variable, and names on stderr which one it used; pass --actor-name yourself only to record a different name (R-10, persona dogfood 2026-09-07 round 2, after a junior copying this exact command hit a usage error demanding a flag the doc never mentioned).
 

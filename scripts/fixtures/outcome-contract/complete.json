@@ -1,0 +1,62 @@
+{
+  "schema_version": "outcome-contract-v1",
+  "project": {
+    "project_id": "pilot-estate-01",
+    "name": "the pilot estate",
+    "repository": {
+      "name": "pilot-estate",
+      "branch": "main",
+      "remote": "origin"
+    },
+    "provenance": {
+      "project_id": "manifest",
+      "name": "manifest",
+      "repository": "git"
+    }
+  },
+  "language": "en",
+  "question": "Can the intake screen capture a national beverage bottler's project record before planning starts?",
+  "success_checks": [
+    {
+      "id": "sc-1",
+      "command": "python3 scripts/contract_check.py record.json",
+      "expect": "exit-0"
+    }
+  ],
+  "must_answer": [
+    {
+      "field": "ticket",
+      "why": "audit is required for this change"
+    }
+  ],
+  "affected_products": [
+    "brother"
+  ],
+  "ticket": {
+    "system": "jira",
+    "id": "PILOT-42"
+  },
+  "audit": {
+    "required": true,
+    "manifest": "docs/plan/audit-manifest.json"
+  },
+  "persona": "lead",
+  "state": "contracted",
+  "receipts": [
+    {
+      "id": "r-1",
+      "path": "docs/plan/receipts/r-1.json",
+      "verdict": "PASS",
+      "ref": "evidence:r-1.json"
+    }
+  ],
+  "questions": [],
+  "history": [
+    {
+      "at": "2026-09-08T09:00:00Z",
+      "by": "ask",
+      "note": "record opened"
+    }
+  ],
+  "decision": null
+}

@@ -1,0 +1,111 @@
+{
+  "schema": 1,
+  "what": "Brother Vault retrieval quality runs. One entry per scored run of scripts/score_vault_retrieval.py against benchmarks/fixtures/vault-retrieval/vault. Run this before and after any retrieval change; a change that moves the tuning set and not the held-out set moved the benchmark, not the retrieval.",
+  "corpus": "benchmarks/retrieval/vault-retrieval-v1.json",
+  "heldout_corpus": "benchmarks/retrieval/vault-retrieval-heldout-v1.json",
+  "heldout_rule": "scored once, at the close, by the orchestrator, against the final tree. No builder reads or tunes against it during the night.",
+  "production_number": "recall@2 at limit 2, which is the only pair of notes the point of need hook ever serves (vault_recall_hook.py line 1342). recall@5 is diagnostic.",
+  "latest_run": "20260908T131551Z-1fb2de25",
+  "runs": [
+    {
+      "stamp": "20260908T122315Z",
+      "source_revision": "62f49ded",
+      "tool": "products/brothermode/tools/bm_vault.py, unchanged from 62f49ded",
+      "note": "baseline, taken before any retrieval change lands tonight",
+      "files": {
+        "k5": "20260908T122315Z-62f49ded-k5.json",
+        "limit2": "20260908T122315Z-62f49ded-limit2.json"
+      },
+      "aggregate_k5": {
+        "n": 40,
+        "recall@1": 0.35,
+        "recall@2": 0.475,
+        "recall@5": 0.7,
+        "MRR": 0.4733,
+        "nDCG@5": 0.8634
+      },
+      "aggregate_limit2": {
+        "n": 40,
+        "recall@1": 0.35,
+        "recall@2": 0.475,
+        "recall@5": null,
+        "MRR": 0.4125,
+        "nDCG@5": 0.649
+      },
+      "by_band_k5_recall@1": {
+        "rare": 0.9333,
+        "mid": 0.0,
+        "crowded": 0.0
+      }
+    },
+    {
+      "stamp": "20260908T125450Z",
+      "source_revision": "1066f88d",
+      "tool": "products/brothermode/tools/bm_vault.py, unchanged from 1066f88d (VR3's context tiebreak and VR2's context_path are both in this tree)",
+      "note": "VR0c. The scorer now makes the call the hook makes today: --context, derived by importing vault_recall_hook._context_path rather than re-deriving it, plus --project when the tool lists it and a git root can be named (this tool lists neither, and the fixture's paths are in no repository, so no --project was sent). The fixture now gives every anchored note the repo-relative path of its own file, one module directory per anchor, so the note that owns a crowded basename is the ONLY carrier naming the directory the caller is working in. THE NUMBERS DID NOT MOVE, and the reason is measured, not guessed: the same scorer on the pre-VR0c fixture printed exactly these figures (ALL recall@1 0.3500, recall@2 0.4750, MRR 0.4125, nDCG@5 0.6490; crowded all zero), because bm_vault.py truncates the candidate list to --limit INSIDE _search and applies the context tiebreak to what comes back, so at the hook's production limit of 2 the tiebreak only ever sees the two source_of_record decoys and prints its own NO-DATA line. At --limit 12 on the same query it fires and reorders 2 groups. The signal is in the fixture; the ranker does not reach it yet.",
+      "options_sent": [
+        "--context"
+      ],
+      "files": {
+        "limit2_context": "20260908T125450Z-1066f88d-limit2-context.json"
+      },
+      "aggregate_limit2": {
+        "n": 40,
+        "recall@1": 0.35,
+        "recall@2": 0.475,
+        "recall@5": null,
+        "MRR": 0.4125,
+        "nDCG@5": 0.649
+      },
+      "by_band_limit2_recall@1": {
+        "crowded": 0.0,
+        "mid": 0.0,
+        "rare": 0.9333
+      }
+    },
+    {
+      "stamp": "20260908T131551Z",
+      "source_revision": "1fb2de25",
+      "tool": "products/brothermode/tools/bm_vault.py at 1fb2de25 (VR5x: cmd_check over-fetches to CONTEXT_OVERFETCH before the context tiebreak and cuts to --limit after it, and _CONTEXT_TIE_EPS goes 0.05 to 0.10)",
+      "note": "VR5x. Two changes, and the arms are comparable because BOTH were scored with the scorer sending --project: the scorer now takes the project from the corpus row rather than from a git root, because every fixture path sits in no repository and the hook's own git-root route can name nothing for them. The BEFORE figures below are therefore a fresh baseline on this tree, not the 1066f88d row above (that run sent no --project at all, because VR4 had not landed and bm_vault.py did not list the flag). WHAT MOVED: the mid band. cmd_check used to hand _search the caller's own --limit and apply the tiebreak to what came back, so at the hook's production limit of 2 the tiebreak saw two notes about something else and printed its own NO-DATA line; it now sees the whole band. Over-fetch alone took ALL recall@2 0.5750 to 0.6250 and the mid band 0.6000 to 0.7333; widening the epsilon to 0.10 took them to 0.6500 and 0.8000. The epsilon number is measured: adjacent ranks inside one anchor band sit 4.4 to 6.2 percent apart here, so 0.05 caught some adjacent pairs and missed others, and 0.10 saturates (0.20 and 0.50 score identically). WHAT DID NOT MOVE, and why it is a finding rather than an unknown: the crowded band stays 0.0000 at recall@1 and recall@2. The tiebreak now REACHES the note about the caller's directory there (its NO-DATA line is gone), but the two candidates holding the top two slots are source_of_record while that note is casual, authority outranks similarity lexicographically in _search, and _context_rank only reorders inside one authority level. Reaching the crowded band means deciding whether a context match may cross the authority plane, which is a decision rather than a builder's call. test_bm_vault's test_10_the_authority_plane_is_still_not_crossed pins it.",
+      "options_sent": [
+        "--context",
+        "--project"
+      ],
+      "files": {
+        "limit2_context_project": "20260908T131551Z-1fb2de25-limit2-context-project.json"
+      },
+      "aggregate_limit2_before": {
+        "n": 40,
+        "recall@1": 0.35,
+        "recall@2": 0.575,
+        "recall@5": null,
+        "MRR": 0.4625,
+        "nDCG@5": 0.6673
+      },
+      "aggregate_limit2": {
+        "n": 40,
+        "recall@1": 0.35,
+        "recall@2": 0.65,
+        "recall@5": null,
+        "MRR": 0.5,
+        "nDCG@5": 0.6793
+      },
+      "by_band_limit2_recall@2_before": {
+        "crowded": 0.0,
+        "mid": 0.6,
+        "rare": 0.9333
+      },
+      "by_band_limit2_recall@2": {
+        "crowded": 0.0,
+        "mid": 0.8,
+        "rare": 0.9333
+      },
+      "by_band_limit2_recall@1": {
+        "crowded": 0.0,
+        "mid": 0.0,
+        "rare": 0.9333
+      }
+    }
+  ]
+}

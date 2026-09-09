@@ -85,7 +85,7 @@ def main(argv):
                 continue
             expected_stem = case.get("expected_note")
             expected_id = stem_to_id.get(expected_stem)
-            fused, _ = bm._search(con, text=case["query"], limit=LIMIT, fast=True)
+            fused, _, _total = bm._search(con, text=case["query"], limit=LIMIT, fast=True)
             ranked = [nid for nid, _s in fused]
             rank = ranked.index(expected_id) + 1 if expected_id in ranked else None
             if rank is not None and not wanted:

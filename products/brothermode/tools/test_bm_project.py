@@ -40,10 +40,48 @@ bs = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(bs)
 sys.modules["bm_store"] = bs
 
+_rc_spec = importlib.util.spec_from_file_location(
+    "receipt_check", os.path.join(HERE, "..", "..", "..", "scripts",
+                                  "receipt_check.py"))
+rc = importlib.util.module_from_spec(_rc_spec)
+_rc_spec.loader.exec_module(rc)
+
 PROJECT_CLI = os.path.join(HERE, "bm_project.py")
 STORE_CLI = os.path.join(HERE, "bm_store.py")
+LEAD_CLI = os.path.join(HERE, "bm_lead.py")
 
 ACTOR = ("--actor-type", "model", "--actor-name", "tester")
+
+
+def _write_consented_config(path, vault):
+    """A scripts/setup.py config that reads as consented, the one gate
+    tools/bm_lead.py's _store_or_refuse checks before it opens anything.
+    Shape copied from test_bm_lead.py's own _write_consented_config: the
+    schema and its reader live in scripts/setup.py, this is not a second
+    place that shape is written down."""
+    d = os.path.dirname(path)
+    if not os.path.isdir(d):
+        os.makedirs(d)
+    with io.open(path, "w", encoding="utf-8") as fh:
+        json.dump({"setup_complete": True, "vault_path": vault,
+                   "privacy_notice_version": "2026-08-01",
+                   "installation_mode": "clone",
+                   "security_mode": "standard"}, fh)
+
+
+def _run_lead(args, root, config, vault):
+    """Drive bm_lead.py as a real subprocess against `root`, consented
+    through `config`. Same subprocess discipline _run above uses for
+    bm_project.py: a real process against a fresh tempdir, never an
+    in-process call that could share state with this test file."""
+    e = dict(os.environ)
+    e.pop("BROTHERMODE_ROOT", None)
+    e["BROTHERMODE_ROOT"] = root
+    e["BROTHERME_CONFIG"] = config
+    e["BROTHERMODE_VAULT"] = vault
+    e.pop("BROTHERMODE_VIEW", None)
+    return subprocess.run([sys.executable, LEAD_CLI] + list(args),
+                          cwd=root, capture_output=True, text=True, env=e)
 
 
 def _run(args, root, extra_env=None):
@@ -2274,6 +2312,896 @@ class TestListAndReviewWithoutProjectId(unittest.TestCase):
                      + list(ACTOR), root)
             self.assertEqual(r.returncode, 1)
             self.assertIn("no task", r.stderr)
+
+
+class TestR11StartHealsGitExposedStore(unittest.TestCase):
+    """R-11 (persona dogfood 2026-09-07, release manager persona B4
+    scenario B4-S1): the writable Store already tries to keep the raw
+    store out of git on every open (_ensure_git_excludes appends its
+    three lines to .git/info/exclude), but a higher-precedence rule in
+    the repository's OWN .gitignore can still re-include it (git checks
+    .gitignore at the worktree top after info/exclude and the later
+    rule wins), and until now `start` just relayed that refusal
+    ('git-exposed-store') to the founder. It now appends the same store
+    lines to .gitignore itself and retries the store open once."""
+
+    def _git(self, root, *args):
+        subprocess.run(["git", "-C", root] + list(args),
+                       check=True, capture_output=True, text=True)
+
+    def test_start_heals_a_gitignore_rule_that_re_includes_the_store(self):
+        with tempfile.TemporaryDirectory() as root:
+            self._git(root, "init", "-q")
+            self._git(root, "config", "user.email", "a@example.com")
+            self._git(root, "config", "user.name", "A Tester")
+            with io.open(os.path.join(root, "README.md"), "w",
+                        encoding="utf-8") as fh:
+                fh.write("hello\n")
+            self._git(root, "add", "README.md")
+            self._git(root, "commit", "-q", "-m", "init")
+
+            # Create the store the way a healthy first `init` does, with
+            # the containment check itself skipped so creation succeeds
+            # and info/exclude gets healed normally (matching a real
+            # first run: see bm_store.py's _ensure_git_excludes).
+            e = dict(os.environ)
+            e.pop("BROTHERMODE_ROOT", None)
+            e["BROTHERMODE_ROOT"] = root
+            e["BROTHERMODE_SKIP_GIT_CONTAINMENT"] = "1"
+            r = subprocess.run([sys.executable, STORE_CLI, "init"],
+                               cwd=root, capture_output=True, text=True,
+                               env=e)
+            self.assertEqual(r.returncode, 0, r.stderr)
+
+            # A later, higher-precedence rule re-includes the store: git
+            # reads .gitignore at the worktree top AFTER info/exclude, so
+            # this negation wins over the line info/exclude already
+            # holds, reproducing "a later rule re-includes it" from
+            # bm_store.py's own refusal message.
+            gitignore = os.path.join(root, ".gitignore")
+            with io.open(gitignore, "w", encoding="utf-8") as fh:
+                fh.write("!/%s/\n" % bs.STORE_DIRNAME)
+
+            r = _run(["start", "--project-id", "proj1", "--name", "Acme",
+                      "--goal", "Ship it"] + list(ACTOR) + ["--out-json"],
+                     root)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertTrue(os.path.isfile(bs.store_path(root)),
+                            "the store must exist after start heals the "
+                            "gitignore rule and retries")
+            with io.open(gitignore, encoding="utf-8") as fh:
+                content = fh.read()
+            self.assertIn("%s/" % bs.STORE_DIRNAME, content.splitlines(),
+                          "start must append the store line to "
+                          ".gitignore. Got:\n%s" % content)
+
+
+class TestDeliverWithoutProjectId(unittest.TestCase):
+    """F-004 (persona dogfood 2026-09-07 round 2, release manager
+    B4-S5): deliver still demanded --project-id even in a folder holding
+    exactly one project, the same gap R-1 already closed for review and
+    every bm_lead.py reader. It now infers the id the same way, through
+    bm_lead.py's own _resolve_project_id, instead of a second copy of
+    the exactly-one-project rule living in this file too. The flag still
+    wins when given; nothing about that path changes."""
+
+    def _started(self, root, project_id="proj1", name="Acme Rescue",
+                extra=()):
+        _init(root)
+        r = _run(["start", "--project-id", project_id, "--name", name,
+                  "--goal", "Ship the thing"]
+                 + list(extra) + list(ACTOR), root)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def _close_one_task(self, root, project_id="proj1", task_id="task1"):
+        """Walks one task through the full lifecycle to 'closed', the
+        same chain test_scripted_first_project_end_to_end drives, so
+        deliver has something real to report on without --partial."""
+        r = _run(["task", "add", "--project-id", project_id,
+                  "--task-id", task_id, "--title", "Do the thing"]
+                 + list(ACTOR), root)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        r = _run(["task", "transition", "--task-id", task_id,
+                  "--to", "ready", "--reason", "deps clear"]
+                 + list(ACTOR), root)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        r = _run(["task", "start", "--task-id", task_id,
+                  "--reason", "beginning"] + list(ACTOR), root)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        r = _run(["task", "transition", "--task-id", task_id,
+                  "--to", "awaiting review", "--reason", "work done"]
+                 + list(ACTOR), root)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        r = _run(["review", task_id, "--project-id", project_id,
+                  "--kind", "test", "--ref", "tools/test_all.py",
+                  "--reason", "checks passed"] + list(ACTOR), root)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        for state, reason in (
+                ("accepted", "owner approved"),
+                ("delivered", "handed off"),
+                ("monitored", "watching"),
+                ("closed", "monitoring window over")):
+            r = _run(["task", "transition", "--task-id", task_id,
+                      "--to", state, "--reason", reason]
+                     + list(ACTOR), root)
+            self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_deliver_without_project_id_resolves_the_only_project(self):
+        with tempfile.TemporaryDirectory() as root:
+            self._started(root)
+            self._close_one_task(root)
+            r = _run(["deliver"], root)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertNotIn("--project-id is required", r.stderr,
+                             "a folder holding exactly one project must "
+                             "never demand --project-id. Got:\n%s"
+                             % r.stderr)
+            self.assertIn("delivered proj1: all 1 task(s) closed",
+                          r.stdout)
+
+    def test_deliver_with_project_id_still_wins_over_inference(self):
+        with tempfile.TemporaryDirectory() as root:
+            self._started(root)
+            self._close_one_task(root)
+            r = _run(["deliver", "--project-id", "proj1"], root)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn("delivered proj1: all 1 task(s) closed",
+                          r.stdout)
+
+    def test_deliver_without_project_id_and_two_projects_is_refused(self):
+        with tempfile.TemporaryDirectory() as root:
+            self._started(root)
+            self._started(root, project_id="proj2", name="Other",
+                          extra=("--allow-second",))
+            r = _run(["deliver"], root)
+            self.assertEqual(r.returncode, 2)
+
+
+class TestNextWithoutProjectId(unittest.TestCase):
+    """F-004b (persona dogfood 2026-09-08): next demanded --project-id
+    even in a folder holding exactly one project, the same gap F-004
+    already closed for deliver. Routed through the identical bm_lead.py
+    _resolve_project_id call deliver already makes."""
+
+    def _started(self, root, project_id="proj1", name="Acme Rescue",
+                extra=()):
+        _init(root)
+        r = _run(["start", "--project-id", project_id, "--name", name]
+                 + list(extra) + list(ACTOR), root)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def _ready_task(self, root, project_id="proj1", task_id="task1",
+                    title="Do the thing"):
+        r = _run(["task", "add", "--project-id", project_id,
+                  "--task-id", task_id, "--title", title,
+                  "--status", "ready"] + list(ACTOR), root)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_next_without_project_id_resolves_the_only_project(self):
+        with tempfile.TemporaryDirectory() as root:
+            self._started(root)
+            self._ready_task(root)
+            r = _run(["next"], root)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertNotIn("--project-id is required", r.stderr,
+                             "a folder holding exactly one project must "
+                             "never demand --project-id. Got:\n%s"
+                             % r.stderr)
+            self.assertIn("task1", r.stdout)
+
+    def test_next_with_project_id_still_wins_over_inference(self):
+        with tempfile.TemporaryDirectory() as root:
+            self._started(root)
+            self._ready_task(root)
+            r = _run(["next", "--project-id", "proj1"], root)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn("task1", r.stdout)
+
+    def test_next_without_project_id_and_two_projects_is_refused(self):
+        with tempfile.TemporaryDirectory() as root:
+            self._started(root)
+            self._started(root, project_id="proj2", name="Other",
+                          extra=("--allow-second",))
+            r = _run(["next"], root)
+            self.assertEqual(r.returncode, 2)
+
+
+class TestDeliverEmptyFolderTreeRead(unittest.TestCase):
+    """F-005 (persona dogfood 2026-09-08): a folder deliver has never
+    seen a project in used to hit deliver's own bare usage refusal. It
+    now hands back bm_lead.py's own tree read of what the repository
+    already says (R-10), while keeping its writer's exit 2 (a reader in
+    the same spot exits 0; deliver is a writer and still refuses)."""
+
+    def test_deliver_in_a_folder_with_no_store_at_all_prints_the_tree_read(self):
+        with tempfile.TemporaryDirectory() as root:
+            r = _run(["deliver", "--project-id", "nope"], root)
+            self.assertEqual(r.returncode, 2, r.stdout)
+            self.assertIn("No Brother project here yet", r.stdout)
+            self.assertIn("Next: /brothermode:start", r.stdout)
+
+    def test_deliver_in_an_initialized_but_projectless_store_prints_it_too(self):
+        with tempfile.TemporaryDirectory() as root:
+            _init(root)
+            r = _run(["deliver"], root)
+            self.assertEqual(r.returncode, 2, r.stdout)
+            self.assertIn("No Brother project here yet", r.stdout)
+
+
+class TestDeliverRefusalNamesTasks(unittest.TestCase):
+    """R-13 (persona dogfood 2026-09-08): "cannot deliver: 4 of 4
+    task(s) have not reached the terminal state" named a headcount, no
+    task, no receipt, no cost. Every unfinished task now gets its own
+    line: a short id, its title, its state, and its newest evidence
+    reference (or 'no evidence')."""
+
+    def test_the_refusal_names_each_unfinished_task_and_its_evidence(self):
+        with tempfile.TemporaryDirectory() as root:
+            _init(root)
+            r = _run(["start", "--project-id", "proj1", "--name", "Acme",
+                      "--goal", "Ship it"] + list(ACTOR), root)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            r = _run(["task", "add", "--project-id", "proj1",
+                      "--task-id", "task1", "--title", "Wire the form"]
+                     + list(ACTOR), root)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            r = _run(["task", "add", "--project-id", "proj1",
+                      "--task-id", "task2", "--title", "Ship the release"]
+                     + list(ACTOR), root)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            r = _run(["task", "transition", "--task-id", "task1",
+                      "--to", "ready", "--reason", "deps clear"]
+                     + list(ACTOR), root)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            r = _run(["task", "start", "--task-id", "task1",
+                      "--reason", "beginning"] + list(ACTOR), root)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            r = _run(["task", "transition", "--task-id", "task1",
+                      "--to", "awaiting review", "--reason", "work done"]
+                     + list(ACTOR), root)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            r = _run(["review", "task1", "--project-id", "proj1",
+                      "--kind", "test", "--ref", "tools/test_all.py",
+                      "--reason", "checks passed"] + list(ACTOR), root)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            r = _run(["deliver", "--project-id", "proj1", "--raw"], root)
+            self.assertEqual(r.returncode, 1, r.stdout)
+            self.assertIn("Wire the form", r.stderr)
+            self.assertIn("Ship the release", r.stderr)
+            self.assertIn("tools/test_all.py", r.stderr)
+            self.assertIn("no evidence", r.stderr)
+            self.assertIn("Cost to finish: NO-DATA", r.stderr)
+
+
+CONTRACT_CHECK_CLI = os.path.normpath(
+    os.path.join(HERE, "..", "..", "..", "scripts", "contract_check.py"))
+
+
+def _contract_check(path):
+    """scripts/contract_check.py as a real subprocess, the grader every
+    adopt test below judges by: exit 0 PASS, 1 FAIL, 2 NO-DATA. Run as
+    its own process on purpose, so no test can be satisfied by the same
+    in-process call bm_project.py's own adopt already makes."""
+    return subprocess.run([sys.executable, CONTRACT_CHECK_CLI, path],
+                          capture_output=True, text=True)
+
+
+def _fixture_repo(tmp, git=True, suite=True):
+    """A fixture repository under `tmp`: one commit and a remote named
+    origin pointing at a bare repository beside it when git is True, and
+    a scripts/test_x.py suite when suite is True. Returns its path.
+
+    git=False builds the same tree with no repository at all, which is
+    the case that must land every project field on the literal NO-DATA
+    rather than on a guess."""
+    work = os.path.join(tmp, "work")
+    os.makedirs(work)
+
+    def _git(*args):
+        r = subprocess.run(["git"] + list(args), cwd=work,
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            raise AssertionError("git %s failed: %s"
+                                 % (" ".join(args), r.stderr))
+        return r
+
+    with io.open(os.path.join(work, "README.md"), "w",
+                 encoding="utf-8") as fh:
+        fh.write("fixture\n")
+    if suite:
+        os.makedirs(os.path.join(work, "scripts"))
+        with io.open(os.path.join(work, "scripts", "test_x.py"), "w",
+                     encoding="utf-8") as fh:
+            fh.write("print('ok')\n")
+    if git:
+        bare = os.path.join(tmp, "widget-service.git")
+        subprocess.run(["git", "init", "--bare", "-q", bare],
+                       capture_output=True, text=True)
+        _git("init", "-q")
+        _git("config", "user.email", "tester@example.invalid")
+        _git("config", "user.name", "Tester")
+        _git("add", "-A")
+        _git("commit", "-q", "-m", "fixture")
+        _git("remote", "add", "origin", bare)
+    return work
+
+
+class TestAdoptWritesTheTypedRecord(unittest.TestCase):
+    """U5 (A-prime amendment 1, docs/plan/PLAN-THREE-ENGINES-2026-09-08.md
+    step 3): `adopt` reads the repository and writes ONE outcome contract
+    record (docs/schema/outcome-contract-v1.json), asking at most one
+    question and never guessing a field.
+
+    Every test here judges the written file with
+    scripts/contract_check.py run as its own subprocess, not with an
+    assertion about the shape written by hand here: the schema is the
+    single source, and a test that reimplemented it would be a second
+    place the record's shape is written down."""
+
+    def _record(self, result):
+        """The record adopt says it wrote, read back off disk. The path
+        is the LAST line of stdout, which is what the door parses."""
+        lines = [ln for ln in result.stdout.splitlines() if ln.strip()]
+        self.assertTrue(lines, "adopt printed nothing: %s" % result.stderr)
+        path = lines[0].strip()
+        self.assertTrue(os.path.isfile(path),
+                        "adopt named %r, which is not a file (stdout %r, "
+                        "stderr %r)" % (path, result.stdout, result.stderr))
+        check = _contract_check(path)
+        self.assertEqual(check.returncode, 0,
+                         "contract_check refused the record adopt left on "
+                         "disk: %s%s" % (check.stdout, check.stderr))
+        with io.open(path, encoding="utf-8") as fh:
+            return path, json.load(fh)
+
+    def test_a_repository_with_a_suite_adopts_contracted_and_asks_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _fixture_repo(tmp, git=True, suite=True)
+            r = _run(["adopt", "--ask", "make the release honest"], root)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            _path, record = self._record(r)
+            self.assertEqual(record["state"], "contracted")
+            self.assertEqual(record["questions"], [])
+            self.assertEqual(len(record["success_checks"]), 1,
+                             record["success_checks"])
+            self.assertEqual(record["success_checks"][0]["command"],
+                             "python3 scripts/test_x.py")
+            self.assertEqual(
+                sorted(set(record["project"]["provenance"].values())),
+                ["git"], record["project"])
+            self.assertEqual(record["question"], "make the release honest")
+            # The repository's NAME is what its remote calls it, not the
+            # directory this copy happens to sit in (which is "work").
+            self.assertEqual(record["project"]["name"], "widget-service")
+            self.assertEqual(record["project"]["repository"]["name"],
+                             "widget-service")
+            self.assertTrue(
+                record["project"]["repository"]["remote"].endswith(
+                    "widget-service.git"),
+                record["project"]["repository"])
+            self.assertEqual(record["must_answer"], [])
+            self.assertEqual(record["affected_products"], ["brother"])
+
+    def test_a_repository_with_no_suite_asks_exactly_one_question(self):
+        """The ONE blocking question of amendment 1, and the only one
+        adopt ever asks: exit 3 (a code of its own, so the door can tell
+        an open question from a finished record), state draft, one
+        question naming success_checks."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _fixture_repo(tmp, git=True, suite=False)
+            r = _run(["adopt", "--ask", "make the release honest"], root)
+            self.assertEqual(r.returncode, 3, r.stderr)
+            _path, record = self._record(r)
+            self.assertEqual(record["state"], "draft")
+            self.assertEqual(len(record["questions"]), 1, record["questions"])
+            self.assertEqual(record["questions"][0]["field"], "success_checks")
+            self.assertIn("success_checks", r.stdout)
+            # A schema correction found by U5: a draft carries zero
+            # success_checks, never a NO-DATA placeholder entry standing
+            # in for the answer that has not arrived yet.
+            self.assertEqual(record["success_checks"], [])
+
+    def test_answering_that_one_question_lands_the_record_contracted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _fixture_repo(tmp, git=True, suite=False)
+            r = _run(["adopt", "--ask", "make the release honest",
+                      "--answer", "success_checks=python3 -m unittest"],
+                     root)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            _path, record = self._record(r)
+            self.assertEqual(record["state"], "contracted")
+            self.assertEqual(record["questions"], [])
+            self.assertEqual([c["command"] for c in record["success_checks"]],
+                             ["python3 -m unittest"])
+
+    def test_a_japanese_ask_is_ja_and_the_flag_overrides_the_detector(self):
+        """Two rules, not language identification: Japanese script means
+        ja, and --language always wins over whatever the rules said."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _fixture_repo(tmp, git=True, suite=True)
+            r = _run(["adopt", "--ask", "リリースを"
+                      "正直にしたい"], root)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            _path, record = self._record(r)
+            self.assertEqual(record["language"], "ja")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _fixture_repo(tmp, git=True, suite=True)
+            r = _run(["adopt", "--ask", "リリースを"
+                      "正直にしたい",
+                      "--language", "en"], root)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            _path, record = self._record(r)
+            self.assertEqual(record["language"], "en")
+
+    def test_no_git_leaves_every_repository_field_on_no_data(self):
+        """No field is guessed: a repository fact git cannot give is the
+        literal NO-DATA, with NO-DATA provenance, and the record still
+        satisfies the contract."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _fixture_repo(tmp, git=False, suite=True)
+            r = _run(["adopt", "--ask", "make the release honest"], root)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            _path, record = self._record(r)
+            repo = record["project"]["repository"]
+            self.assertEqual([repo["name"], repo["branch"], repo["remote"]],
+                             ["NO-DATA", "NO-DATA", "NO-DATA"])
+            self.assertEqual(
+                sorted(set(record["project"]["provenance"].values())),
+                ["NO-DATA"], record["project"])
+
+    def test_a_japanese_question_is_stored_without_unicode_escapes(self):
+        """R-7: every json.dump of the contract record in this file
+        passes ensure_ascii=False, so a Japanese question lands in the
+        file exactly as typed, never as a \\uXXXX sequence a future
+        reader has to decode. Checked against the RAW file bytes, not
+        json.load, which would silently decode an escape back to the
+        same string and hide the defect this guards against."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _fixture_repo(tmp, git=True, suite=True)
+            ask = "リリースを正直にしたい"
+            r = _run(["adopt", "--ask", ask], root)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            path = r.stdout.splitlines()[0].strip()
+            with io.open(path, encoding="utf-8") as fh:
+                raw_text = fh.read()
+            self.assertIn(ask, raw_text)
+            self.assertNotIn("\\u", raw_text)
+
+
+class TestAdoptReceiptsObserveTheChecksItFound(unittest.TestCase):
+    """R-12 (persona dogfood follow up, 2026-09-08/09): adopt used to
+    write receipts straight from .sbe/evidence/*.json and nothing else,
+    so a fresh repository with a real test suite but no .sbe directory
+    left the record with receipts: [] even though adopt had just
+    observed a real file on disk (scripts/test_x.py) to build that
+    suite's success_checks entry. A receipts list that is empty whenever
+    the repository has never run brothersbe is not "no evidence", it is
+    adopt throwing its own observation away.
+
+    Every receipt this test checks is resolved through
+    scripts/receipt_check.py's own resolve_receipt (imported, never
+    reimplemented here), so a passing test here is the same claim
+    `python3 scripts/receipt_check.py <record>` makes."""
+
+    def test_a_fresh_adopt_leaves_resolvable_receipts_for_its_checks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _fixture_repo(tmp, git=True, suite=True)
+            r = _run(["adopt", "--ask", "make the release honest"], root)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            path = r.stdout.splitlines()[0].strip()
+            check = _contract_check(path)
+            self.assertEqual(check.returncode, 0,
+                             "contract_check refused: %s%s"
+                             % (check.stdout, check.stderr))
+            with io.open(path, encoding="utf-8") as fh:
+                record = json.load(fh)
+            self.assertTrue(record["receipts"], record)
+            for receipt in record["receipts"]:
+                # resolve_receipt takes its root as a parameter exactly
+                # so a caller can check a record against the repository
+                # it is ABOUT, never against receipt_check.py's own
+                # module-level ROOT (this estate's repo, unrelated to
+                # the disposable fixture root adopt just wrote into).
+                status, reason = rc.resolve_receipt(
+                    receipt["ref"], root, os.path.expanduser("~"))
+                self.assertEqual(status, rc.RESOLVED,
+                                 "%s: %s" % (receipt, reason))
+
+    def test_a_repository_with_no_suite_leaves_no_check_receipts(self):
+        """A draft with no observed check has nothing to point a receipt
+        at, so the list stays whatever _adopt_receipts alone finds
+        (empty here, since the fixture holds no .sbe/evidence either)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _fixture_repo(tmp, git=True, suite=False)
+            r = _run(["adopt", "--ask", "make the release honest"], root)
+            self.assertEqual(r.returncode, 3, r.stderr)
+            path = r.stdout.splitlines()[0].strip()
+            with io.open(path, encoding="utf-8") as fh:
+                record = json.load(fh)
+            self.assertEqual(record["receipts"], [])
+
+
+class TestAdoptPrintsTheAcceptanceMarker(unittest.TestCase):
+    """scripts/intake_measure.py counts human turns up to its own
+    ACCEPTANCE_MARKER, "[INTAKE-ACCEPTED]", which docs/plan/WBS-TODAY.md's
+    Intake V2 TURNS number needs somewhere in the transcript to have
+    anything to count to. Nothing on this estate ever printed it before
+    this unit: adopt is the first, and only when it actually lands a
+    record in the "contracted" state a person (or the door) can act on
+    without answering anything more."""
+
+    def test_a_contracted_adopt_prints_the_marker_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _fixture_repo(tmp, git=True, suite=True)
+            r = _run(["adopt", "--ask", "make the release honest"], root)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            path = r.stdout.splitlines()[0].strip()
+            marker_lines = [ln for ln in r.stdout.splitlines()
+                           if "[INTAKE-ACCEPTED]" in ln]
+            self.assertEqual(len(marker_lines), 1, r.stdout)
+            self.assertIn(path, marker_lines[0])
+
+    def test_a_draft_adopt_prints_no_marker(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _fixture_repo(tmp, git=True, suite=False)
+            r = _run(["adopt", "--ask", "make the release honest"], root)
+            self.assertEqual(r.returncode, 3, r.stderr)
+            self.assertNotIn("[INTAKE-ACCEPTED]", r.stdout)
+
+
+class TestAdoptBindsTicketAndBranch(unittest.TestCase):
+    """U5b (founder decision D-002, persona dogfood 2026-09-07 B1-S1 and
+    B2-S2): a team living in Jira needs to bind a CR id and an existing
+    branch to the outcome contract. --ticket writes the schema's own
+    ticket object and turns audit.required on (a change bound to a
+    tracked ticket is audited); --branch writes project.repository.branch
+    and its provenance, git when the branch already exists, ask when the
+    plan still has to create it. Every record here is judged by
+    scripts/contract_check.py as its own subprocess, the same discipline
+    TestAdoptWritesTheTypedRecord uses above."""
+
+    def _record(self, result):
+        lines = [ln for ln in result.stdout.splitlines() if ln.strip()]
+        self.assertTrue(lines, "adopt printed nothing: %s" % result.stderr)
+        path = lines[0].strip()
+        self.assertTrue(os.path.isfile(path),
+                        "adopt named %r, which is not a file (stdout %r, "
+                        "stderr %r)" % (path, result.stdout, result.stderr))
+        check = _contract_check(path)
+        self.assertEqual(check.returncode, 0,
+                         "contract_check refused the record adopt left on "
+                         "disk: %s%s" % (check.stdout, check.stderr))
+        with io.open(path, encoding="utf-8") as fh:
+            return path, json.load(fh)
+
+    def test_ticket_writes_the_record_and_turns_audit_on(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _fixture_repo(tmp, git=True, suite=True)
+            r = _run(["adopt", "--ask", "bind PAY-142",
+                      "--ticket", "jira:PAY-142"], root)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            _path, record = self._record(r)
+            self.assertEqual(record["ticket"],
+                             {"system": "jira", "id": "PAY-142"})
+            self.assertTrue(record["audit"]["required"], record["audit"])
+            self.assertIn("ticket: jira:PAY-142", r.stdout)
+
+    def test_ticket_without_a_colon_is_refused_naming_the_shape(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _fixture_repo(tmp, git=True, suite=True)
+            r = _run(["adopt", "--ask", "bind a ticket",
+                      "--ticket", "PAY-142"], root)
+            self.assertEqual(r.returncode, 2, r.stdout)
+            self.assertIn("--ticket", r.stderr)
+            self.assertIn("SYSTEM:ID", r.stderr)
+
+    def test_branch_that_exists_gets_git_provenance(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _fixture_repo(tmp, git=True, suite=True)
+            br = subprocess.run(["git", "branch", "release-42"], cwd=root,
+                                capture_output=True, text=True)
+            self.assertEqual(br.returncode, 0, br.stderr)
+            r = _run(["adopt", "--ask", "bind release-42",
+                      "--branch", "release-42"], root)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            _path, record = self._record(r)
+            self.assertEqual(record["project"]["repository"]["branch"],
+                             "release-42")
+            self.assertEqual(record["project"]["provenance"]["repository"],
+                             "git")
+            self.assertIn("release-42", r.stderr)
+            self.assertIn("branch: release-42", r.stdout)
+
+    def test_branch_that_does_not_exist_gets_ask_provenance(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _fixture_repo(tmp, git=True, suite=True)
+            r = _run(["adopt", "--ask", "bind a new branch",
+                      "--branch", "feature-not-yet-cut"], root)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            _path, record = self._record(r)
+            self.assertEqual(record["project"]["repository"]["branch"],
+                             "feature-not-yet-cut")
+            self.assertEqual(record["project"]["provenance"]["repository"],
+                             "ask")
+            self.assertIn("created by the plan", r.stderr)
+
+    def test_ticket_with_no_audit_leaves_audit_required_false(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _fixture_repo(tmp, git=True, suite=True)
+            r = _run(["adopt", "--ask", "bind PAY-142 unaudited",
+                      "--ticket", "jira:PAY-142", "--no-audit"], root)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            _path, record = self._record(r)
+            self.assertEqual(record["ticket"],
+                             {"system": "jira", "id": "PAY-142"})
+            self.assertFalse(record["audit"]["required"], record["audit"])
+
+
+COMPLETE_FIXTURE = os.path.normpath(os.path.join(
+    HERE, "..", "..", "..", "scripts", "fixtures", "outcome-contract",
+    "complete.json"))
+
+
+def _contract_fixture(**overrides):
+    """scripts/fixtures/outcome-contract/complete.json, adjusted in
+    memory. The estate's own fixture is the base on purpose: a contract
+    typed out by hand here would be a second place the record's shape is
+    written down, and it would drift the day the schema moves."""
+    with io.open(COMPLETE_FIXTURE, encoding="utf-8") as fh:
+        record = json.load(fh)
+    record.update(overrides)
+    return record
+
+
+def _write_json(path, obj):
+    directory = os.path.dirname(path)
+    if directory and not os.path.isdir(directory):
+        os.makedirs(directory)
+    with io.open(path, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps(obj, indent=2, sort_keys=True) + "\n")
+    return path
+
+
+class TestDeliverGroundingGate(unittest.TestCase):
+    """U7 (A-prime amendment 3,
+    docs/plan/PLAN-THREE-ENGINES-2026-09-08.md step 7): deliver refuses an
+    answer whose language does not match the contract, or whose
+    must-answer fields are not populated from cited receipt or research
+    evidence.
+
+    The persona scenario this retires: the handover pack that told the
+    next engineer nothing to run, and the finance owner who asked for one
+    sentence with a number and got none. Both delivered clean, because
+    nothing between the ask and the packet ever compared the two."""
+
+    def _delivered_project(self, root):
+        """One project with a goal, one closed task, and real evidence on
+        record: everything deliver already demands, so every refusal
+        below is the GATE refusing and never one of the older checks."""
+        _init(root)
+        r = _run(["start", "--project-id", "proj1", "--name", "Acme Rescue",
+                  "--goal", "Ship the thing"] + list(ACTOR), root)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        r = _run(["task", "add", "--project-id", "proj1",
+                  "--task-id", "task1", "--title", "Do the thing"]
+                 + list(ACTOR), root)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        for state, reason in (("ready", "deps clear"), ("active", "begin"),
+                              ("awaiting review", "work done")):
+            r = _run(["task", "transition", "--task-id", "task1",
+                      "--to", state, "--reason", reason] + list(ACTOR), root)
+            self.assertEqual(r.returncode, 0, r.stderr)
+        r = _run(["review", "task1", "--project-id", "proj1",
+                  "--kind", "test", "--ref", "tools/test_all.py",
+                  "--reason", "checks passed"] + list(ACTOR), root)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        for state, reason in (("accepted", "owner approved"),
+                              ("delivered", "handed off"),
+                              ("monitored", "watching"),
+                              ("closed", "window over")):
+            r = _run(["task", "transition", "--task-id", "task1",
+                      "--to", state, "--reason", reason] + list(ACTOR), root)
+            self.assertEqual(r.returncode, 0, r.stderr)
+
+    def _contract(self, root, **overrides):
+        return _write_json(
+            os.path.join(root, "docs", "decisions", "inflight", "c.json"),
+            _contract_fixture(**overrides))
+
+    def _answers(self, root, obj):
+        return _write_json(os.path.join(root, "answers.json"), obj)
+
+    def _grounded_answer(self):
+        return {"language": "en",
+                "answers": [{"field": "ticket",
+                             "text": "PILOT-42 is the audit ticket.",
+                             "receipt_id": "r-1"}],
+                "summary": "delivered against PILOT-42"}
+
+    def _deliver(self, root, contract, answers):
+        return _run(["deliver", "--project-id", "proj1",
+                     "--contract", contract, "--answer-file", answers], root)
+
+    # -- (1) the wrong language ------------------------------------------
+    def test_an_answer_in_the_wrong_language_is_refused_naming_both(self):
+        with tempfile.TemporaryDirectory() as root:
+            self._delivered_project(root)
+            contract = self._contract(root, language="ja")
+            answers = self._answers(root, self._grounded_answer())
+            r = self._deliver(root, contract, answers)
+            self.assertEqual(r.returncode, 1, r.stdout)
+            self.assertIn("ja", r.stderr)
+            self.assertIn("en", r.stderr)
+            self.assertFalse(
+                os.path.exists(os.path.join(root, "DELIVERY-PACKET.md")),
+                "a refused delivery must not leave a packet behind")
+
+    # -- (2) a must-answer field with no answer at all ---------------------
+    def test_a_must_answer_field_with_no_answer_is_refused_by_name(self):
+        with tempfile.TemporaryDirectory() as root:
+            self._delivered_project(root)
+            contract = self._contract(root)
+            answers = self._answers(root, {"language": "en", "answers": [],
+                                           "summary": "nothing to say"})
+            r = self._deliver(root, contract, answers)
+            self.assertEqual(r.returncode, 1, r.stdout)
+            self.assertIn("ticket", r.stderr)
+
+    # -- (3) a citation naming a receipt the contract does not carry -------
+    def test_an_answer_citing_an_unknown_receipt_is_refused(self):
+        with tempfile.TemporaryDirectory() as root:
+            self._delivered_project(root)
+            contract = self._contract(root)
+            answer = self._grounded_answer()
+            answer["answers"][0]["receipt_id"] = "r-99"
+            answers = self._answers(root, answer)
+            r = self._deliver(root, contract, answers)
+            self.assertEqual(r.returncode, 1, r.stdout)
+            self.assertIn("r-99", r.stderr)
+
+    # -- (4) a citation of a receipt that FAILED ---------------------------
+    def test_an_answer_citing_a_failing_receipt_is_refused(self):
+        with tempfile.TemporaryDirectory() as root:
+            self._delivered_project(root)
+            failing = _contract_fixture()["receipts"]
+            failing[0]["verdict"] = "FAIL"
+            contract = self._contract(root, receipts=failing)
+            answers = self._answers(root, self._grounded_answer())
+            r = self._deliver(root, contract, answers)
+            self.assertEqual(r.returncode, 1, r.stdout)
+            self.assertIn("FAIL", r.stderr)
+
+    # -- (5) the grounded delivery -----------------------------------------
+    def test_a_grounded_answer_delivers_and_marks_the_contract_delivered(self):
+        with tempfile.TemporaryDirectory() as root:
+            self._delivered_project(root)
+            contract = self._contract(root)
+            answers = self._answers(root, self._grounded_answer())
+            r = self._deliver(root, contract, answers)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            with io.open(os.path.join(root, "DELIVERY-PACKET.md"),
+                         encoding="utf-8") as fh:
+                packet = fh.read()
+            self.assertIn("Grounding: 1 must-answer field(s), 1 cited from "
+                          "PASS receipts, language en matches the ask",
+                          packet)
+            with io.open(contract, encoding="utf-8") as fh:
+                record = json.load(fh)
+            self.assertEqual(record["state"], "delivered")
+            entry = record["must_answer"][0]
+            self.assertEqual(entry["field"], "ticket")
+            self.assertEqual(entry["receipt_id"], "r-1")
+            self.assertIn("PILOT-42", entry["answer"])
+            # The grader, run as its own process: the rewritten record is
+            # judged by the estate's own checker, never by an assertion
+            # about the shape written by hand here.
+            check = _contract_check(contract)
+            self.assertEqual(check.returncode, 0,
+                             "contract_check refused the delivered record: "
+                             "%s%s" % (check.stdout, check.stderr))
+
+    # -- (6) a draft cannot be delivered -----------------------------------
+    def test_a_draft_contract_cannot_be_delivered(self):
+        with tempfile.TemporaryDirectory() as root:
+            self._delivered_project(root)
+            contract = self._contract(root, state="draft")
+            answers = self._answers(root, self._grounded_answer())
+            r = self._deliver(root, contract, answers)
+            self.assertEqual(r.returncode, 1, r.stdout)
+            self.assertIn("draft", r.stderr)
+
+    # -- (7) the regression guard ------------------------------------------
+    def test_deliver_with_no_contract_at_all_behaves_exactly_as_before(self):
+        """No --contract, no record under docs/decisions/inflight/: the
+        gate never runs, deliver exits 0 the way it always did, and the
+        packet says NO-DATA rather than claiming a grounding nobody
+        checked. Without this a store that never adopted would be broken
+        by a gate it never asked for."""
+        with tempfile.TemporaryDirectory() as root:
+            self._delivered_project(root)
+            r = _run(["deliver", "--project-id", "proj1"], root)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn("delivered proj1: all 1 task(s) closed", r.stdout)
+            with io.open(os.path.join(root, "DELIVERY-PACKET.md"),
+                         encoding="utf-8") as fh:
+                packet = fh.read()
+            self.assertIn("Grounding: NO-DATA (no contract)", packet)
+
+    # -- (8) an empty must_answer needs no answer file at all --------------
+    def test_an_empty_must_answer_proceeds_without_an_answer_file(self):
+        """F-005a: --answer-file (and the language check it feeds) is
+        demanded only when there is something to answer. A contract
+        with no must_answer field asks nothing, so nothing is compared
+        against a file nobody had a reason to write."""
+        with tempfile.TemporaryDirectory() as root:
+            self._delivered_project(root)
+            contract = self._contract(root, must_answer=[])
+            r = _run(["deliver", "--project-id", "proj1",
+                      "--contract", contract], root)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            with io.open(os.path.join(root, "DELIVERY-PACKET.md"),
+                         encoding="utf-8") as fh:
+                packet = fh.read()
+            self.assertIn("Grounding: 0 must-answer field(s)", packet)
+            with io.open(contract, encoding="utf-8") as fh:
+                record = json.load(fh)
+            self.assertEqual(record["state"], "delivered")
+
+
+class TestAdoptCreatesTheStoreProject(unittest.TestCase):
+    """R-9 (persona dogfood 2026-09-08): adopt used to write only the
+    contract file, so `list`, `status` and `deliver` all still read as
+    if no project existed at all -- the contract and the store were two
+    records of the same decision that never met. adopt now creates the
+    same store project cmd_start creates, through the same
+    store.upsert_project call, when the record it writes is contracted;
+    a draft (an open question still on record) creates nothing."""
+
+    def test_adopt_creates_a_project_list_and_status_see_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _fixture_repo(tmp, git=True, suite=True)
+            r = _run(["adopt", "--ask", "make the release honest"], root)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn("created in the store", r.stdout)
+
+            r = _run(["list"], root)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn("widget-service", r.stdout)
+
+            config = os.path.join(tmp, "cfg", "config.json")
+            vault = os.path.join(tmp, "vault")
+            _write_consented_config(config, vault)
+            r = _run_lead(["status"], root, config, vault)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertNotIn("No Brother project here yet", r.stdout)
+
+    def test_re_adopting_the_same_repository_updates_the_existing_project(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _fixture_repo(tmp, git=True, suite=True)
+            r = _run(["adopt", "--ask", "make the release honest"], root)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn("created in the store", r.stdout)
+            r = _run(["adopt", "--ask", "make the release honest, again"],
+                     root)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn("already in the store, record updated", r.stdout)
+
+    def test_a_draft_adoption_creates_no_project(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _fixture_repo(tmp, git=True, suite=False)
+            r = _run(["adopt", "--ask", "make the release honest"], root)
+            self.assertEqual(r.returncode, 3, r.stderr)
+            self.assertIn("no project created in the store", r.stdout)
+            # A draft creates nothing at all, not even the store file
+            # itself: checked directly, since a plain `list` right after
+            # in a fresh git repository that never ran `bm_store.py init`
+            # hits that reader's OWN git-exposure gate first (unrelated
+            # to adopt: read_only Store checks git containment before it
+            # ever asks whether a store file exists), which would be a
+            # different thing to assert than "adopt created nothing".
+            self.assertFalse(
+                os.path.isfile(bs.store_path(root)),
+                "a draft adoption must leave no store file behind")
 
 
 if __name__ == "__main__":
