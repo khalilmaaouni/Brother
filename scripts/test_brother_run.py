@@ -6432,6 +6432,23 @@ class ADriftedRepositoryIsNamedOnResume(unittest.TestCase):
                   "--cwd", rig["repo"], "--runs-root", rig["tmp"]],
                  env=rig["env"])
         out = proc.stdout + proc.stderr
+        if proc.returncode != 0:
+            # Evidence for a Linux-only refusal seen at the 1.0.12 cut: the
+            # resumed run's own log, its claims and the target's git state,
+            # so the failure names its cause instead of only its verdict.
+            evidence = [out]
+            log_path = os.path.join(rig["run_dir"], "run.log")
+            if os.path.exists(log_path):
+                with open(log_path, encoding="utf-8", errors="replace") as fh:
+                    evidence.append("---- run.log tail ----\n" + "".join(fh.readlines()[-80:]))
+            if os.path.exists(rig["claims_path"]):
+                with open(rig["claims_path"], encoding="utf-8", errors="replace") as fh:
+                    evidence.append("---- claims.json ----\n" + fh.read())
+            git_state = sh(["git", "status", "--short", "--branch"], cwd=rig["repo"])
+            evidence.append("---- git status ----\n" + git_state.stdout + git_state.stderr)
+            locks = [f for f in os.listdir(os.path.join(rig["repo"], ".git")) if f.endswith(".lock")]
+            evidence.append("---- .git locks ----\n" + repr(locks))
+            out = "\n".join(evidence)
         self.assertEqual(proc.returncode, 0, out)
         self.assertIn("repository moved since the checkpoint:", out, out)
         self.assertIn(drift_rev[:12], out, out)
