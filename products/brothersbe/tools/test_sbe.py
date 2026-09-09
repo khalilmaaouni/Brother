@@ -2215,9 +2215,17 @@ class TestCliSurface(unittest.TestCase):
                          "clean scan")
 
     def test_verify_never_lets_exit_zero_read_as_a_pass(self):
-        """The aggregating commands exit 0 when nothing FAILED, and a run where
-        every check reported NO-DATA also exits 0. The closing line has to say
-        so, because an exit code cannot.
+        """The aggregating commands exit 0 when nothing FAILED and at least one
+        thing PASSED (or nothing at all could be checked at the design/score
+        level). `verify` carries ONE exception, fixed here (FX-F, persona
+        dogfood 2026-09-08, scenario B1-S4): a run whose every hard gate reads
+        NO-DATA, with none PASS and none FAIL, no longer exits 0. An empty
+        directory is exactly that population (`numbers`, `migration`,
+        `approval`, `ran`, `proof` all NO-DATA, nothing else printed a PASS or
+        a FAIL), so it now exits `EXIT_USAGE` and prints a named summary line;
+        see `test_verify_hard_gate_fail_still_exits_control_failed` and
+        `test_verify_one_pass_among_no_data_hard_gates_keeps_exit_ok` beside it
+        for the other two legs of the same truth table.
 
         CHANGED FOR CR-08. This test used to also be the one place that pinned
         `sbe verify` minting NOTHING: before this stage, a passing run over an
@@ -2229,28 +2237,101 @@ class TestCliSurface(unittest.TestCase):
         every time it runs, including here: `v` is not even a git repository,
         and the mint step still writes three receipts about it (each reading
         whatever `evidence.generate` can honestly observe there, never
-        crashing over the missing repo). So this test now also asserts the
-        receipts are present, not just that exit 0 keeps meaning "no control
-        FAILED" rather than "a control passed"; the honest exit-0 caveat is
-        unchanged and still has to be true at the same time evidence exists.
+        crashing over the missing repo). So this test still also asserts the
+        receipts are present: minting is unaffected by the exit-code fix
+        above, and a mint failure must not be masked by it either.
         """
+        cli = self._commands()
         v = tempfile.mkdtemp()
         try:
             out = self._run("verify", v)
-            self.assertEqual(out.returncode, 0)
-            self.assertIn("does not mean a control passed", out.stdout,
-                          "verify exited 0 over an empty directory without saying that no "
-                          "control passed")
+            self.assertEqual(out.returncode, cli.EXIT_USAGE,
+                             "an empty directory makes every hard gate read NO-DATA with no "
+                             "PASS and no FAIL; that must no longer read as a clean run: %s"
+                             % out.stdout)
+            self.assertIn(
+                "VERIFY: NO-DATA, none of the 5 hard gates could run", out.stdout,
+                "the all-NO-DATA hard gate population did not print its named summary "
+                "line: %s" % out.stdout)
+            self.assertNotIn("at least one control FAILED", out.stdout,
+                             "nothing here FAILED; the closing caveat must not claim a FAIL "
+                             "over a NO-DATA population: %s" % out.stdout)
             evidence_dir = os.path.join(v, ".sbe", "evidence")
             self.assertTrue(os.path.isdir(evidence_dir),
-                            "sbe verify exited 0 but minted no evidence store at all: %s"
-                            % out.stdout)
+                            "sbe verify minted no evidence store at all: %s" % out.stdout)
             minted = set(os.listdir(evidence_dir))
             self.assertEqual(minted, {"design.json", "gate.json", "score.json"},
                              "sbe verify must mint one receipt per delegate it runs "
                              "(design, gate, score), got %r" % minted)
         finally:
             shutil.rmtree(v, ignore_errors=True)
+
+    def test_verify_hard_gate_fail_still_exits_control_failed(self):
+        """FX-F: an empty `APPROVAL` file makes the `approval` hard gate FAIL
+        (a typed claim with no signature or review id behind it). Before this
+        fix `sbe verify` exited 0 anyway, because it never passes `--strict`
+        to `sbe_gate.py`, and reading only that subprocess's exit code (which
+        stays 0 without `--strict`, FAIL or not) could not see the FAIL its
+        own report had just printed. This is the other half of the truth
+        table `_hard_gate_verdicts` decides: a FAIL always wins.
+        """
+        cli = self._commands()
+        repo = tempfile.mkdtemp()
+        try:
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            subprocess.run(["git", "config", "user.email", "fixture@example.invalid"],
+                           cwd=repo, check=True)
+            subprocess.run(["git", "config", "user.name", "fixture"], cwd=repo, check=True)
+            with io.open(os.path.join(repo, "APPROVAL"), "w", encoding="utf-8"):
+                pass
+            subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-qm", "empty approval"], cwd=repo, check=True)
+            out = self._run("verify", repo)
+            self.assertEqual(out.returncode, cli.EXIT_CONTROL_FAILED,
+                             "an empty APPROVAL file FAILs the approval hard gate and must "
+                             "block the exit code, not just print the FAIL line: %s"
+                             % out.stdout)
+            self.assertIn("approval  FAIL", out.stdout)
+            self.assertIn("at least one control FAILED", out.stdout)
+        finally:
+            shutil.rmtree(repo, ignore_errors=True)
+
+    def test_verify_one_pass_among_no_data_hard_gates_keeps_exit_ok(self):
+        """FX-F regression guard: a single hard gate PASS (here, `numbers`,
+        via the working `full_fixture` `sbe_gate.py` itself declares) beside
+        four NO-DATA hard gates must NOT trip the new all-NO-DATA branch.
+        This is the documented honest partial state -- see the caveat text
+        `_closing_caveat` still prints for EXIT_OK -- and it read exit 0
+        before this fix and must keep doing so after it.
+        """
+        cli = self._commands()
+        repo = tempfile.mkdtemp()
+        try:
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            subprocess.run(["git", "config", "user.email", "fixture@example.invalid"],
+                           cwd=repo, check=True)
+            subprocess.run(["git", "config", "user.name", "fixture"], cwd=repo, check=True)
+            manifest = {"figures": [{
+                "label": "gmv", "snapshot_id": "snap-2026-07",
+                "query": "SELECT SUM(amount) FROM orders",
+                "second_derivation": "SELECT SUM(qty*price) FROM order_lines",
+                "rerun": {"ran": True, "primary": 17570, "secondary": 17570}}]}
+            with io.open(os.path.join(repo, "numbers-manifest.json"), "w",
+                        encoding="utf-8") as fh:
+                fh.write(json.dumps(manifest))
+            subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-qm", "numbers manifest"], cwd=repo, check=True)
+            out = self._run("verify", repo)
+            self.assertEqual(out.returncode, cli.EXIT_OK,
+                             "one hard gate PASS among NO-DATA gates must keep exiting 0: %s"
+                             % out.stdout)
+            self.assertIn("numbers   PASS", out.stdout)
+            self.assertIn("does not mean a control passed", out.stdout)
+            self.assertNotIn("VERIFY: NO-DATA", out.stdout,
+                             "a real PASS is present; the all-NO-DATA summary line must not "
+                             "print: %s" % out.stdout)
+        finally:
+            shutil.rmtree(repo, ignore_errors=True)
 
     def test_the_package_imports_with_nothing_installed(self):
         """Zero dependencies is a promise this project makes on its front page.
@@ -2331,7 +2412,17 @@ class TestVerifyMintsEvidence(unittest.TestCase):
         """Acceptance 1: a clean, committed scratch repo. `sbe verify`
         mints design, gate and score receipts at the same commit, and
         `sbe status` stops saying "no evidence store found" and counts
-        them."""
+        them.
+
+        FX-F NOTE: this fixture carries no hard-gate artifact at all (no
+        numbers-manifest.json, migration-receipt.json, APPROVAL or
+        ran-receipt.json), so every hard gate reads NO-DATA and `sbe verify`
+        now exits EXIT_USAGE, printing the third closing-caveat variant
+        rather than either of the first two. Minting is unaffected either
+        way, which is what this test is actually about, so the assertion
+        below widens to accept all three rather than pin one exit code this
+        test does not otherwise care about.
+        """
         self._write("README.md", "base\n")
         self._commit("base")
         self._write("app.py", "print('hi')\n")
@@ -2339,7 +2430,8 @@ class TestVerifyMintsEvidence(unittest.TestCase):
 
         out = self._sbe("verify", self.repo)
         self.assertEqual(out.stdout.count("does not mean a control passed")
-                         + out.stdout.count("at least one control FAILED"), 1, out.stdout)
+                         + out.stdout.count("at least one control FAILED")
+                         + out.stdout.count("nothing could be examined either"), 1, out.stdout)
 
         minted = set(os.listdir(self._evidence_dir()))
         self.assertEqual(minted, {"design.json", "gate.json", "score.json"}, minted)
@@ -2463,7 +2555,12 @@ class TestVerifyMintsEvidence(unittest.TestCase):
 
         for round_ in range(2):
             out = self._sbe("verify", self.repo)
-            self.assertIn(out.returncode, (0, 1), out.stdout + out.stderr)
+            # FX-F: this fixture has no hard-gate artifact, so every hard
+            # gate reads NO-DATA and verify now legitimately exits
+            # EXIT_USAGE (2) here too; the poisoning this test actually
+            # guards against is orthogonal to which of the three verify
+            # exits happens, so all three are accepted.
+            self.assertIn(out.returncode, (0, 1, 2), out.stdout + out.stderr)
             self._commit("round %d: evidence and decisions" % round_)
 
         status = self._sbe("status", self.repo, "--json")

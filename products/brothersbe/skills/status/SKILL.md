@@ -33,6 +33,22 @@ yet, the normal state of a new project. Say so in those plain terms, never as a 
 and recommend `/brothersbe:start` for the one setup step. See
 `${CLAUDE_PLUGIN_ROOT}/docs/CLI.md` for what each command covers.
 
+## Answer the question that was carried in, first
+
+R-12 (persona dogfood 2026-09-07, personas B4/A2/A4): a fixed report answered every question
+except the one the reader actually arrived with ("I asked it to audit a currency and it just
+told me the project is not ready to ship"). If the user's message carried a specific question
+(a number, a currency, a file, a date, or a plain "why"), answer that question first, in one
+sentence that contains the thing they asked for, drawn from the JSON fields named below; only
+then give the reframed shape. An incident ask (down, outage, hotfix, 2am, urgent, 落ちた) is
+never the progress path: name the incident and route straight to `/brothersbe:start`, leading
+with only the blocker sections that are actually live. An audit ask (audit, compliance,
+evidence for) leads with `soundEvidence` and `missingEvidence`, then names
+the sbe verify command for this project's own directory
+(`"${CLAUDE_PLUGIN_ROOT}/bin/sbe" verify <dir>`) so the reader can run the check
+themselves rather than take a summary's word for it. A routine ask, carrying
+none of the above, is unchanged: the reframed shape below is the whole answer.
+
 ## Reframe, do not relay
 
 Lead with the guided shape, in plain sentences, each sourced from a named field rather than a

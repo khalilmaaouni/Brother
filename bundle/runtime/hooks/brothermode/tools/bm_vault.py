@@ -38,6 +38,10 @@ floor: a decayed note is reordered, never removed, and nothing here ever writes 
   status-line  the one line naming the index age, read-only, for the point-of-need hook
   recall   a symptom, in words: what has this estate already learned about this
   check    a set of file paths: what has already gone wrong in these files
+           --context <repo-relative path> names WHERE the edited file lives, so
+           notes about that directory win ties among equal file-name matches
+           --project <name> boosts notes carrying that project: (recall takes it too);
+           absent, it is the project: line declared in the git root's PROJECT.md above --context, else that root's basename, else no boost at all
   status   what is indexed, how fresh, and what is missing
 
 STAGED RETRIEVAL (2026-08-28). Loading the dense embedder cost 30-75 SECONDS wall clock on this
@@ -55,8 +59,10 @@ import array
 import calendar
 import contextlib
 import datetime
+import glob
 import hashlib
 import importlib.util
+import inspect
 import io
 import json
 import math
@@ -193,6 +199,13 @@ def _consented():
         return False
 
 
+#: VN3, THE HOOK-TO-JOURNAL BRIDGE: the exact string vault_recall_hook.py's
+#: own VAULT_RECALL_JOURNAL_EVENT_TYPE and scripts/brother_run.py's own
+#: VAULT_RECALL_EVENT_TYPE both name, duplicated here (not imported, the
+#: same reasoning as the hook's own copy) so cmd_status's "latest run
+#: memory" read matches what the hook actually wrote.
+VAULT_RECALL_JOURNAL_EVENT_TYPE = "vault.recall"
+
 PROJECTS_ROOT = _config_path("projects")
 INDEX_PATH = _config_path("bm_vault_index.sqlite3")
 # VB2-05: the answer ledger. One JSON line per recall, sitting beside the index it reads,
@@ -238,6 +251,17 @@ _CJK_PROBE_RE = re.compile(
     u"[\u3041-\u30FF\u3400-\u9FFF\uF900-\uFAFF\uFF01-\uFF9F\u3000]")
 FRONT_NAME = re.compile(r"^name:\s*(.+)$", re.M)
 FRONT_DESC = re.compile(r"^description:\s*(.+)$", re.M)
+# M3 (2026-09-08 VN1 fix): an unforgeable machine marker, printed as its OWN output
+# line immediately after every genuine WITHHELD block cmd_check prints (never
+# interpolated next to a user-controlled field). vault_recall_hook.py carries an
+# identical copy of this constant (subprocess boundary, no shared import between the
+# two processes) and keys its withheld-block detection off this exact line, never off
+# the block's title text -- a note's own name: frontmatter is printed verbatim and
+# fully author-controlled, so a title literally reading "WITHHELD (...)" must never
+# be mistaken for a real withhold. The NUL byte here can never reach a printed title
+# or description: _upsert_note scrubs it from both at ingestion, the one place every
+# note source (file walk and correction-rule loader alike) funnels through.
+_WITHHELD_MARKER_LINE = "    \x00BM-VAULT-WITHHELD\x00"
 FRONT_TYPE = re.compile(r"^type:\s*(.+)$", re.M)
 #: The recording contract's supersedes: field, matched EXACTLY as bm_vault_graph.py
 #: matches it (whole value line, WIKILINK extracts the targets inside), so the two
@@ -250,7 +274,31 @@ FRONT_SUPERSEDES = re.compile(r"^supersedes:\s*(.*)$", re.M)
 # a flag on an ordinary hit, never as a WITHHELD branch. Symmetric like relates: in
 # bm_vault_graph.py: expanded both ways at rebuild time so either side surfaces it.
 FRONT_CONTRADICTS = re.compile(r"^contradicts:\s*(.*)$", re.M)
+#: VR4. The note own project: field. RR1 5.3: ~845 vault notes carry a clean value
+#: (brother 228, tonari-app 153, brothersbe 140) and _search never read one, so a
+#: session under one project competed on equal terms with every other project notes.
+FRONT_PROJECT = re.compile(r"^project:\s*(.+)$", re.M)
 RRF_K = 60          # the usual constant; large enough that no single signal dominates rank 1
+
+#: VR2 P4. The relevance floor applied to the fused candidate list BEFORE the
+#: authority sort: a candidate scoring below this fraction of the top fused
+#: score is dropped, so a source_of_record note that shares one common word
+#: with the query can no longer be lifted over every better-matching note
+#: (RR1 5.4: the tier ordering is right, the candidate set fed to it was not).
+#: It only ever REMOVES candidates, never adds one, and it never removes a
+#: direct exact-anchor match (see _search's protected set below). 0.25 is the
+#: value the plan names. NOT TUNED: the VR0 fixture did not exist when this
+#: landed, so retune it there before trusting the number. Read inside the
+#: function, never as a default argument, so a test can rebind it.
+RANK_FLOOR_FRAC = 0.25
+
+#: VR4. The multiplier applied to a candidate whose own project: matches the project
+#: the caller resolved. A MULTIPLIER, NEVER A FILTER (RR2 table item 3): a note with
+#: no project, or another project, keeps its score untouched and can still win, which
+#: is the whole difference between scoping and hiding. Applied after fusion and before
+#: the relevance floor, so the floor reads the boosted scores. Read inside the
+#: function, never as a default argument, so a test can rebind it.
+PROJECT_BOOST = 1.5
 
 
 def _connect():
@@ -386,17 +434,61 @@ def _normalized_stem(path):
     return unicodedata.normalize("NFKC", stem).casefold()
 
 
+FRONT_LESSON_ID = re.compile(r"^lesson_id:\s*(.+)$", re.M)
+
+
+def _declared_lesson_id(body):
+    """A note's own DECLARED lesson_id frontmatter value, or "" when it
+    declares none. Read from the fenced block only, the same way
+    _note_project reads project:, so a note merely discussing
+    "lesson_id: x" in its prose declares nothing.
+
+    Declared, never derived, is the whole point: bm_vault_contradiction's
+    own parser falls back to the filename stem when the field is absent,
+    and comparing THAT here would collapse this check back into the stem
+    comparison below."""
+    m = FRONT_LESSON_ID.search(_frontmatter_block(body or ""))
+    return m.group(1).strip() if m else ""
+
+
+def _claims_a_correction(body):
+    """True when a note carries type: correction or a non-empty
+    supersedes:, the two ways this vault's own notes legitimately re-use
+    an identity: a correction is SUPPOSED to name the id it replaces, and
+    refusing both sides of that pair would withhold the fix along with the
+    thing it fixes."""
+    block = _frontmatter_block(body or "")
+    m = FRONT_TYPE.search(block)
+    if m and m.group(1).strip().lower() == "correction":
+        return True
+    m = FRONT_SUPERSEDES.search(block)
+    return bool(m and m.group(1).strip())
+
+
 def _make_duplicate_probe(con):
     """LL-2: a duplicate_probe(lesson) for bm_vault_contradiction.evidence_tier,
     built once from the already-indexed `con` rather than a second disk walk.
-    Returns the path of a DIFFERENT note, in a different directory, sharing
-    this lesson's own filename stem (compared via _normalized_stem, so a
-    homoglyph twin using a lookalike character cannot slip past exact byte
-    comparison) with different body text -- the shape a harvest-folder
-    poisoning attack takes (same identity filed twice, no contradicts: edge
-    declared) -- or None. Every note's path and body is already in `notes`,
-    so this is a query over memory bm_vault.py already holds, never a fresh
-    read from disk.
+    Returns the path of a DIFFERENT note holding the same identity with
+    different body text -- the shape a harvest-folder poisoning attack takes
+    (same identity filed twice, no contradicts: edge declared) -- or None.
+    Two identities are compared, in this order:
+
+      declared lesson_id (VN-HP2, night run 2026-09-08, held-out pack
+                family F): both notes DECLARE the same lesson_id
+                frontmatter value. Directory is irrelevant here, unlike
+                the stem rule below: a declared id is a claim about
+                identity that a folder boundary does not scope, and the
+                held-out pack's own collision pair sits in ONE folder.
+                Exempt when either side carries type: correction or a
+                supersedes: field (see _claims_a_correction).
+
+      filename stem  the pre-existing rule, unchanged: a DIFFERENT
+                directory, the same stem (compared via _normalized_stem,
+                so a homoglyph twin using a lookalike character cannot
+                slip past exact byte comparison), different bodies.
+
+    Every note's path and body is already in `notes`, so this is a query
+    over memory bm_vault.py already holds, never a fresh read from disk.
     ponytail: full table scan per lookup; fine at vault size today, add an
     index on filename stem if this is ever measured slow."""
     def probe(lesson):
@@ -408,16 +500,24 @@ def _make_duplicate_probe(con):
         own_row = con.execute("SELECT body FROM notes WHERE path=? LIMIT 1",
                               (own_path,)).fetchone()
         own_body = (own_row["body"] if own_row else "") or ""
+        own_id = _declared_lesson_id(own_body)
+        own_correction = _claims_a_correction(own_body)
         for r in con.execute("SELECT path, body FROM notes"):
             other_path = r["path"]
             if not other_path or os.path.normpath(other_path) == os.path.normpath(own_path):
                 continue
+            other_body = r["body"] or ""
+            if other_body == own_body:
+                continue
+            if (own_id and not own_correction
+                    and _declared_lesson_id(other_body) == own_id
+                    and not _claims_a_correction(other_body)):
+                return other_path
             if _normalized_stem(other_path) != own_stem:
                 continue
             if os.path.dirname(os.path.abspath(other_path)) == own_dir:
                 continue
-            if (r["body"] or "") != own_body:
-                return other_path
+            return other_path
         return None
     return probe
 
@@ -495,6 +595,16 @@ def _load_bm_vault_read_audit():
     return mod
 
 
+def _note_project(body):
+    """The note own `project:` frontmatter value, lowercased and stripped, or "" when
+    absent. Read from the FENCED frontmatter block only, the same way supersedes: and
+    contradicts: are: a note whose prose merely discusses "project: brother" must not
+    claim that project, and a correction rule (which carries no fences at all) reads as
+    no project rather than as a wrong one."""
+    m = FRONT_PROJECT.search(_frontmatter_block(body or ""))
+    return m.group(1).strip().lower() if m else ""
+
+
 def _schema(con):
     con.executescript("""
         CREATE TABLE IF NOT EXISTS notes (
@@ -530,6 +640,17 @@ def _schema(con):
     cols = {r[1] for r in con.execute("PRAGMA table_info(notes)").fetchall()}
     if "content_hash" not in cols:
         con.execute("ALTER TABLE notes ADD COLUMN content_hash TEXT")
+    # VR4 project: the same guarded ALTER, and then BACKFILLED IN PLACE from the bodies
+    # this index already stores. Without the backfill an existing index would carry an
+    # empty column until every note happened to be edited, because _upsert_note returns
+    # early on an unchanged mtime; with it, no rebuild and no re-read of the vault is
+    # needed, and not one row is dropped. One-time cost, paid once per index.
+    if "project" not in cols:
+        con.execute("ALTER TABLE notes ADD COLUMN project TEXT")
+        rows = con.execute("SELECT id, body FROM notes").fetchall()
+        con.executemany("UPDATE notes SET project=? WHERE id=?",
+                        [(_note_project(r[1]), r[0]) for r in rows])
+        con.commit()
 
 
 # A LESSON is distilled guidance ("this is how it fails, do this instead"). A LOG is provenance
@@ -586,7 +707,59 @@ def _content_hash(body):
     return hashlib.sha256(body.encode("utf-8")).hexdigest()
 
 
-def _upsert_note(con, path, title, descr, source, kind, mtime, body):
+def _fts_delete(con, nid):
+    """Remove one note from notes_fts, in the ONE form an external-content FTS5 table takes.
+
+    notes_fts is content='notes', so it stores no copy of the text: to subtract a row's terms
+    FTS5 must be HANDED the values that row was indexed with, which is what the documented
+    'delete' command does. `DELETE FROM notes_fts WHERE rowid=?` (what this file issued until
+    2026-09-08) instead makes FTS5 read the CONTENT table at that moment, so a delete run after
+    the notes row was updated or deleted subtracts the wrong terms and leaves the old ones in
+    the index, still pointing at a rowid that no longer holds them.
+
+    Measured on the live index before this fix: MATCH 'brother' returned 1472 rowids of which
+    1094 had no notes row at all; 'vault' 2533 against 350 real. _term_hits reads that same
+    index to pick the rarest terms, and FTS5's own BM25 reads it for inverse document
+    frequency, so every ranking was computed against a phantom corpus.
+
+    CALL ORDER IS THE FIX: this runs BEFORE the notes row changes. A missing notes row leaves
+    nothing to subtract with, so nothing is issued rather than a guessed delete that would
+    corrupt the index further."""
+    row = con.execute("SELECT title, descr, body FROM notes WHERE id=?", (nid,)).fetchone()
+    if row is None:
+        return
+    con.execute("INSERT INTO notes_fts (notes_fts, rowid, title, descr, body) "
+                "VALUES ('delete',?,?,?,?)",
+                (nid, row["title"], row["descr"], row["body"]))
+
+
+def _fts_orphans(con):
+    """How many notes_fts rows name a note that is gone. Cheap: one row per indexed document
+    in the %_docsize shadow table, never a scan of the terms. Returns 0 when the shadow table
+    cannot be read, which is the same fail-open every reader in this file keeps."""
+    try:
+        return con.execute("SELECT COUNT(*) c FROM notes_fts_docsize "
+                           "WHERE id NOT IN (SELECT id FROM notes)").fetchone()["c"]
+    except sqlite3.Error:
+        return 0
+
+
+def _repair_fts_orphans(con):
+    """Rebuild the text index when it still carries rows for notes that no longer exist, and
+    return how many there were (0 = nothing done, nothing printed).
+
+    Every index written before the _fts_delete fix above carries them, and no incremental
+    delete can remove a term whose original text is gone, so FTS5's own 'rebuild' (which
+    reads the content table back in from scratch) is the only repair. It is a REFRESH-time
+    cost, once per polluted index, never per recall."""
+    n = _fts_orphans(con)
+    if n:
+        con.execute("INSERT INTO notes_fts(notes_fts) VALUES('rebuild')")
+        con.commit()
+    return n
+
+
+def _upsert_note(con, path, title, descr, source, kind, mtime, body, aug=""):
     """One note INSERT-or-UPDATE, fts/anchors/links kept in lockstep. Shared by the file walk and
     the correction-rule loader below so the two note sources have exactly one place to drift out
     of sync. Returns True on a fresh insert, False on a full refresh, "touched" when the mtime
@@ -598,29 +771,67 @@ def _upsert_note(con, path, title, descr, source, kind, mtime, body):
     anchors/links/fts rebuilt and the vector deleted for a re-embed that would recompute the exact
     same numbers. The mtime check above (in the caller, before the file is even read) is still the
     first and cheapest filter for the true no-op case; content_hash is the second, exact check for
-    the "touched but not modified" case that mtime alone cannot distinguish from a real edit."""
-    chash = _content_hash(body)
-    row = con.execute("SELECT id, mtime, content_hash FROM notes WHERE path=?", (path,)).fetchone()
-    if row and abs(row["mtime"] - mtime) < 0.001:
+    the "touched but not modified" case that mtime alone cannot distinguish from a real edit.
+
+    M3 (2026-09-08 VN1 fix): title and descr are printed verbatim, on their own single
+    line, into cmd_check's output, and both are entirely author-controlled (a note's own
+    name:/description: frontmatter, or a correction rule's own trigger_text/action_text).
+    Scrubbing the NUL byte here, at the ONE place both sources funnel through, is what
+    lets _WITHHELD_MARKER_LINE below serve as an unforgeable machine marker: neither
+    field can ever carry the byte the marker is built from, so a title or description
+    that merely reads like "WITHHELD (...)" can never be mistaken by a downstream
+    reader for a genuine WITHHELD block this file produced.
+
+    VR5 aug: a note's PROMOTED (canonical, clean record) aliases and question forms,
+    already formatted by bm_vault_enrich_index.promoted_suffix_map, joined onto the
+    indexed descr so a question phrased the way the note itself is NOT phrased still
+    reaches it. This is LongMemEval's fact augmented key expansion: paid once at index
+    time, zero cost at query time, and _search is untouched. It lands in the notes row
+    and not only in notes_fts, because notes_fts is an external content table and
+    _fts_delete must be handed the exact values the row was indexed with (see that
+    function). An unpromoted draft contributes nothing, so a note with no promoted
+    metadata gets aug="" and indexes byte-identically to before this row: the hash
+    below is then _content_hash(body + "") which IS _content_hash(body), so not one
+    existing index row is disturbed. The hash INCLUDES aug on purpose, so a promotion
+    alone, with the note file itself untouched, counts as a change here instead of
+    being skipped as unmodified content."""
+    title = (title or "").replace("\x00", "")
+    descr = (descr or "").replace("\x00", "")
+    aug = (aug or "").replace("\x00", "")
+    descr = descr + aug
+    chash = _content_hash(body + aug)
+    proj = _note_project(body)
+    row = con.execute("SELECT id, mtime, content_hash, descr FROM notes WHERE path=?",
+                      (path,)).fetchone()
+    # VR5 added the second half. An unchanged mtime used to be the whole gate, and a
+    # promotion moves neither the target note's mtime nor its bytes, so the note this
+    # row exists to enrich was exactly the note this line skipped. The comparison is
+    # against the descr AS INDEXED (author text plus promoted suffix), so it is true in
+    # both directions: a promotion adds the suffix, a demotion takes it away, and either
+    # way the stored value stops matching the value this pass would write. It never
+    # re-refreshes a settled note: what is compared is what the branches below write.
+    if row and abs(row["mtime"] - mtime) < 0.001 and (row["descr"] or "") == descr:
         return None
     if row and row["content_hash"] == chash:
         con.execute("UPDATE notes SET mtime=? WHERE id=?", (mtime, row["id"]))
         return "touched"
     if row:
         nid = row["id"]
+        # BEFORE the UPDATE, never after: _fts_delete subtracts the terms using the values
+        # still in the notes row, which are the values notes_fts was built from.
+        _fts_delete(con, nid)
         con.execute("UPDATE notes SET title=?,descr=?,source=?,kind=?,mtime=?,body=?,"
-                    "content_hash=? WHERE id=?",
-                    (title, descr, source, kind, mtime, body, chash, nid))
+                    "content_hash=?,project=? WHERE id=?",
+                    (title, descr, source, kind, mtime, body, chash, proj, nid))
         con.execute("DELETE FROM anchors WHERE note_id=?", (nid,))
         con.execute("DELETE FROM links WHERE note_id=?", (nid,))
-        con.execute("DELETE FROM notes_fts WHERE rowid=?", (nid,))
         con.execute("DELETE FROM vectors WHERE note_id=?", (nid,))
         fresh = False
     else:
         cur = con.execute(
-            "INSERT INTO notes (path,title,descr,source,kind,mtime,body,content_hash) "
-            "VALUES (?,?,?,?,?,?,?,?)",
-            (path, title, descr, source, kind, mtime, body, chash))
+            "INSERT INTO notes (path,title,descr,source,kind,mtime,body,content_hash,"
+            "project) VALUES (?,?,?,?,?,?,?,?,?)",
+            (path, title, descr, source, kind, mtime, body, chash, proj))
         nid = cur.lastrowid
         fresh = True
     con.execute("INSERT INTO notes_fts (rowid,title,descr,body) VALUES (?,?,?,?)",
@@ -785,6 +996,47 @@ def _status_line(con, roots, behind=None):
         age, total, "NO-DATA" if behind is None else behind)
 
 
+#: VN3 goal 2, THE SESSION START LINE: _status_line's own shape, read back out
+#: of the exact string it returns rather than recomputed, so the two lines can
+#: never disagree about the numbers. A NO-DATA status line (unreadable index)
+#: does not match and _loaded_line returns None for it -- never a fabricated
+#: "loaded" claim about an index that could not actually be read.
+_STATUS_LINE_RE = re.compile(
+    r"^vault-index: last indexed (?P<age>.+), (?P<total>\d+) notes, "
+    r"(?P<unindexed>NO-DATA|\d+) unindexed$")
+
+
+def _loaded_line(status):
+    """bm_vault.py's own 'vault-index: ...' status line, restated in the exact
+    SessionStart wording VN3 goal 2 requires: 'Vault loaded: K notes indexed,
+    last indexed N minutes ago, U unindexed'. It reports what was LOADED; it
+    never names a lesson, which is what keeps this line safe to put in front
+    of the model at every session start rather than gated behind consent's
+    point-of-need throttling. None when `status` is not that exact shape (a
+    NO-DATA status line), so a caller never prints a fabricated loaded line."""
+    m = _STATUS_LINE_RE.match(status)
+    if not m:
+        return None
+    return ("Vault loaded: %s notes indexed, last indexed %s, %s unindexed"
+           % (m.group("total"), m.group("age"), m.group("unindexed")))
+
+
+def _print_loaded_line(status):
+    """cmd_refresh's own two success branches share this: print bm_vault.py's
+    existing 'vault-index: ...' line UNCHANGED (vault_recall_hook.py's own
+    _status_line() parses that exact prefix; this never touches it), then VN3
+    goal 2's 'Vault loaded: ...' restatement on BOTH channels -- stdout, so
+    SessionStart's own additionalContext injection (bm_sessionstart.py's own
+    docstring: "Output is injected into session context") carries it into the
+    model's view, and stderr, so a human watching the session start sees the
+    same words in the terminal that the model was just given."""
+    print(status)
+    loaded = _loaded_line(status)
+    if loaded:
+        print(loaded)
+        sys.stderr.write(loaded + "\n")
+
+
 def cmd_status_line(args):
     """READ-ONLY: print the status line and touch nothing. vault_recall_hook.py runs this
     once per session, inside a PreToolUse hook, so it must never index and never be slow.
@@ -850,14 +1102,19 @@ def cmd_refresh(args):
         con = _connect()
         _schema(con)
         behind = _unindexed(con, roots)
+        orphans = _repair_fts_orphans(con)
     except (sqlite3.Error, OSError) as exc:
         print("vault-index: NO-DATA: the index could not be read (%s); recall serves whatever "
               "it already holds" % exc)
         return 0
+    if orphans:
+        _line = "vault-index: rebuilt the text index, %d orphan rows removed" % orphans
+        print(_line)
+        sys.stderr.write(_line + "\n")
     if behind == 0:
         # The common case, and the reason the check comes first: nothing to do, nothing
         # written, one line printed.
-        print(_status_line(con, roots, behind))
+        _print_loaded_line(_status_line(con, roots, behind))
         con.close()
         return 0
     con.close()
@@ -875,7 +1132,7 @@ def cmd_refresh(args):
                 print("vault-index: %s" % line.strip())
     try:
         con = _connect()
-        print(_status_line(con, roots))
+        _print_loaded_line(_status_line(con, roots))
         con.close()
     except (sqlite3.Error, OSError) as exc:
         print("vault-index: NO-DATA: the index could not be read after the refresh (%s)" % exc)
@@ -895,6 +1152,26 @@ def cmd_index(args):
     # A budget arrives only from cmd_refresh (the SessionStart step). A hand-run index passes
     # none and runs to completion, exactly as it always has.
     deadline = _deadline(args)
+    # VR5: every note's PROMOTED alias and question-form text, in ONE walk of the vault
+    # (see bm_vault_enrich_index.promoted_suffix_map for why not one call per note), and
+    # what the LAST pass indexed, so a promotion that changed nothing else on disk still
+    # reindexes its target. Imported here rather than at module scope on purpose: recall
+    # must not pay for an import it never uses, and this row's whole claim is that query
+    # time is untouched. A vault whose enrichment lane is not installed (or unreadable)
+    # leaves both maps empty and every note indexes exactly as it did before this row.
+    augs, prev_augs = {}, {}
+    try:
+        import bm_vault_enrich_index as _eix
+        augs = {os.path.join(vault, rel): suf
+                for rel, suf in _eix.promoted_suffix_map(vault).items()}
+        _row = con.execute("SELECT v FROM meta WHERE k='enrich_aug'").fetchone()
+        prev_augs = json.loads(_row["v"]) if _row is not None else {}
+        if not isinstance(prev_augs, dict):  # a hand-edited or corrupt meta row
+            prev_augs = {}
+    except (ImportError, OSError, ValueError, sqlite3.Error) as exc:
+        sys.stderr.write("bm_vault: promoted alias text unavailable this pass (%s); notes "
+                         "index without it\n" % exc)
+        augs, prev_augs = {}, {}
     seen, added, updated, touched, stopped = set(), 0, 0, 0, False
     for path, source in _walk(roots):
         if deadline is not None and time.time() >= deadline:
@@ -909,7 +1186,11 @@ def cmd_index(args):
         # unchanged mtime too, but only after paying for the disk read and front-matter parse on
         # every unchanged note on every run, which is exactly the cost this early exit avoids.
         row = con.execute("SELECT id, mtime FROM notes WHERE path=?", (path,)).fetchone()
-        if row and abs(row["mtime"] - mtime) < 0.001:
+        aug = augs.get(path, "")
+        # ...and the second half of the condition is VR5's: a promotion changes a DIFFERENT
+        # file (the enrichment note), so the target note's own mtime and content hash both
+        # sit still and every gate below this one would read it as unmodified.
+        if row and abs(row["mtime"] - mtime) < 0.001 and aug == prev_augs.get(path, ""):
             continue
         try:
             with open(path, encoding="utf-8", errors="replace") as f:
@@ -922,7 +1203,7 @@ def cmd_index(args):
         d = FRONT_DESC.search(body[:1200])
         descr = d.group(1).strip() if d else ""
         kind = _classify(path, body)
-        fresh = _upsert_note(con, path, title, descr, source, kind, mtime, body)
+        fresh = _upsert_note(con, path, title, descr, source, kind, mtime, body, aug=aug)
         if fresh is True:
             added += 1
         elif fresh is False:
@@ -941,6 +1222,11 @@ def cmd_index(args):
               "%d unchanged); the last-indexed stamp is unchanged so the next pass resumes"
               % (_budget_seconds(args) or 0.0, done, added, updated, touched))
         return 0
+    # Only on a COMPLETE walk, for the same reason the indexed_at stamp below is: a pass
+    # that stopped at its budget may have applied the new alias text to some notes and not
+    # others, and recording the new map would tell the next pass those others are current.
+    con.execute("INSERT OR REPLACE INTO meta (k,v) VALUES ('enrich_aug',?)",
+                (json.dumps(augs, sort_keys=True),))
     rule_added, rule_updated, rule_touched = _index_correction_rules(con, seen)
     added += rule_added
     updated += rule_updated
@@ -985,8 +1271,10 @@ def cmd_index(args):
     removed = 0
     for row in con.execute("SELECT id, path FROM notes").fetchall():
         if row["path"] not in seen:
+            # Same order as _upsert_note and for the same reason: the notes row is the only
+            # copy of the text notes_fts was built from, so it is subtracted first.
+            _fts_delete(con, row["id"])
             con.execute("DELETE FROM notes WHERE id=?", (row["id"],))
-            con.execute("DELETE FROM notes_fts WHERE rowid=?", (row["id"],))
             con.execute("DELETE FROM vectors WHERE note_id=?", (row["id"],))
             con.execute("DELETE FROM anchors WHERE note_id=?", (row["id"],))
             con.execute("DELETE FROM links WHERE note_id=?", (row["id"],))
@@ -1328,6 +1616,21 @@ def _rrf(ranked_lists):
     return sorted(fused.items(), key=lambda kv: -kv[1])
 
 
+def _path_segments(path, depth=3):
+    """The last `depth` DIRECTORY segments of a path, lowercased: the pieces
+    VR2 P3 tiebreak compares. A tools file inside a product gives its three
+    enclosing directory names. The basename is deliberately absent (it is what
+    already matched), and only the tail is kept, because every absolute path on
+    one machine shares its leading segments, and a set holding the user home
+    directory name would call every note a context match.
+    ponytail: a generic tail segment can still match by accident, and that only
+    ever swaps two candidates carrying the IDENTICAL fused score; make it a
+    suffix comparison if that is ever measured to matter."""
+    parts = os.path.dirname(str(path or '')).split(os.sep)
+    parts = [q for q in parts if len(q) > 1 and q not in ('.', '..')]
+    return {q.lower() for q in parts[-depth:]}
+
+
 def _split_kind(con, ids):
     """Return (lessons, logs) preserving the incoming rank order within each."""
     if not ids:
@@ -1634,7 +1937,8 @@ def _ja_disambiguate(con, text, analyzer_mod, fused, why, note):
     return [(nid, score) for nid, score in fused if nid not in excl]
 
 
-def _search(con, text=None, paths=None, limit=6, fast=False, explain=None, deny=None):
+def _search(con, text=None, paths=None, limit=6, fast=False, explain=None, deny=None,
+            context_path=None, project=None):
     """explain: pass a list to have staging decisions and per-signal timings appended to it as
     strings, in the order the signals ran; pass None (the default) to skip the bookkeeping.
 
@@ -1643,7 +1947,20 @@ def _search(con, text=None, paths=None, limit=6, fast=False, explain=None, deny=
     sort reads any body, so forbidden content never participates in what gets served. Denied
     notes are COUNTED into why["__policy_withheld__"], never named: title, path and content
     of a withheld note must not appear anywhere in the output, because naming what someone
-    may not see is itself a leak. None (the default) means no policy: today's behavior."""
+    may not see is itself a leak. None (the default) means no policy: today's behavior.
+
+    context_path: VR2 P3. The path the caller is actually working in (the file being
+    edited, not just its basename). When given, a candidate whose own path or one of
+    whose anchors shares a directory segment with it wins a TIE against a candidate
+    carrying the identical fused score. It is a tiebreak and nothing more: it never adds
+    a candidate, never removes one, and never outranks a real score difference. None
+    (the default) means no situation is known, which is every caller's behavior today.
+
+    project: VR4. The project the caller is working in. A candidate whose own
+    `project:` frontmatter equals it has its fused score MULTIPLIED by PROJECT_BOOST;
+    every other candidate keeps its score exactly. Never a filter: a note with no
+    project, or with another one, is unboosted, never penalised and never removed
+    (RR2 table item 3). None (the default) changes nothing for any caller."""
     why = {}
     lists = []
     denied_ids = set()
@@ -1841,6 +2158,91 @@ def _search(con, text=None, paths=None, limit=6, fast=False, explain=None, deny=
                     why.setdefault(nid, []).append(msg)
                 rescored.append((nid, score * factor))
             fused = sorted(rescored, key=lambda kv: kv[1], reverse=True)
+    # VR2, the search tail four protections (RR3 cause buckets d, e and g).
+    # Every one of them only REMOVES or REORDERS candidates: none adds a note
+    # that skips the policy trim, the authority sort, or the hook revalidation.
+    #
+    # The PROTECTED SET first: every candidate that matched by an EXACT anchor,
+    # which is the --paths branch above (why label 'names <basename>') and the
+    # anchor signal in text search (label 'anchor'). RR3 measured two queries
+    # where a note carrying the exact anchor never reached the top 5 while notes
+    # reading 'authority: source_of_record, linked from a match' took the slots.
+    # A protected candidate is never dropped by the floor below, and is never
+    # displaced inside --limit by a link-only candidate at the end of _search.
+    protected = set()
+    for _nid, _labels in why.items():
+        if isinstance(_nid, int) and isinstance(_labels, list) and any(
+                w == 'anchor' or w.startswith('names ') for w in _labels):
+            protected.add(_nid)
+    # One batched read of every candidate path and mtime. A dict scan from here
+    # on, never a query per candidate: this tail runs on every edit.
+    meta = {}
+    projects = {}
+    if fused:
+        _ids = [nid for nid, _ in fused]
+        _marks = ','.join('?' * len(_ids))
+        for r in con.execute(
+                'SELECT id, path, mtime, project FROM notes WHERE id IN (%s)' % _marks,
+                _ids).fetchall():
+            meta[r['id']] = (r['path'] or '', r['mtime'] or 0)
+            projects[r['id']] = (r['project'] or '').strip().lower()
+    # VR4: the project boost. Here on purpose: after every score exists and BEFORE
+    # the P3 tiebreak (which orders by score) and the P4 floor (which reads the top
+    # score), so both see the boosted numbers. PROJECT_BOOST is read now, not bound
+    # at definition time, so a test can rebind it and see the difference.
+    if project and fused:
+        want = project.strip().lower()
+        hit = [nid for nid, _ in fused if projects.get(nid) == want]
+        if hit:
+            boost = PROJECT_BOOST
+            fused = [(nid, sc * boost if projects.get(nid) == want else sc)
+                     for nid, sc in fused]
+            note('project boost: %d candidate(s) x%.2f for %s'
+                 % (len(hit), boost, want))
+        else:
+            note('NO-DATA project boost: no candidate carries project %s' % want)
+    # VR2 P3: the deterministic tiebreak. Candidates carrying the IDENTICAL
+    # fused score used to come out in whatever order fusion happened to build,
+    # so two runs of one query could disagree. Order is now (a) the context
+    # match, when the caller passed the path being worked in and the candidate
+    # own path or one of its anchors shares a directory segment with it, then
+    # (b) the newer note by mtime, then (c) the path ascending. Never random,
+    # never dict order. The authority sort below is stable, so this survives as
+    # the within-tier order rather than being thrown away by it.
+    if len(fused) > 1:
+        ctx_hit = set()
+        ctx_segs = _path_segments(context_path) if context_path else set()
+        if ctx_segs:
+            for _nid, (_path, _mt) in meta.items():
+                if _path_segments(_path) & ctx_segs:
+                    ctx_hit.add(_nid)
+            _marks = ','.join('?' * len(meta))
+            for r in con.execute(
+                    'SELECT note_id, anchor FROM anchors WHERE note_id IN (%s)'
+                    % _marks, list(meta)).fetchall():
+                if (r['note_id'] not in ctx_hit
+                        and _path_segments(r['anchor']) & ctx_segs):
+                    ctx_hit.add(r['note_id'])
+        fused = sorted(fused, key=lambda kv: (
+            -kv[1], 0 if kv[0] in ctx_hit else 1,
+            -meta.get(kv[0], ('', 0))[1], meta.get(kv[0], ('', 0))[0]))
+    # VR2 P4: the relevance floor, applied HERE on purpose. After fusion and
+    # decay (so the score it reads is the one the comparator would use as its
+    # second key) and BEFORE the authority sort, which is the whole point: it
+    # changes WHICH candidates reach the tier ordering, never the tier ordering
+    # itself. RR1 5.4: the authority plane is right, the candidate set fed to it
+    # was not, and a source_of_record note sharing one common word with the query
+    # was being lifted over every better-matching note. A protected exact-anchor
+    # candidate is never dropped, however low it scores: it is the one candidate
+    # a person is actually holding.
+    if fused and fused[0][1] > 0:
+        cutoff = fused[0][1] * RANK_FLOOR_FRAC
+        kept = [(nid, sc) for nid, sc in fused
+                if sc >= cutoff or nid in protected]
+        if len(kept) != len(fused):
+            note('floor: dropped %d candidate(s) below %.5f'
+                 % (len(fused) - len(kept), cutoff))
+            fused = kept
     # D08 part B: authority outranks similarity, LEXICOGRAPHICALLY, per bm_vault_authority's
     # contract: a source_of_record note with lower fused score beats a casual note with a higher
     # one, always, because blending them into one weighted score is how similarity smuggles
@@ -1900,6 +2302,29 @@ def _search(con, text=None, paths=None, limit=6, fast=False, explain=None, deny=
 
     if fused and auth is not None:
         fused = _authority_sort(fused)
+    # VR2 P2: collapse near-duplicate notes by normalized filename stem, BEFORE
+    # the limit cut. Measured on the live vault: 87 stems appear more than once,
+    # 124 surplus rows (Catalog 11 copies, Overview 10, MEMORY 9), and at the
+    # hook own --limit 2 two copies of one note is the entire answer. Run AFTER
+    # the authority sort, so the copy that survives is the highest RANKED one:
+    # within an authority tier that is the highest fused score, and across tiers
+    # a source_of_record copy is never dropped in favour of a casual twin.
+    # The collapsed count rides in why, and len(fused) returned below is the
+    # deduped total, so the caller 'N more matched' line counts real notes.
+    if len(fused) > 1:
+        seen_stems, deduped = set(), []
+        for nid, score in fused:
+            stem = _normalized_stem(meta.get(nid, ('', 0))[0])
+            if stem and stem in seen_stems:
+                continue
+            if stem:
+                seen_stems.add(stem)
+            deduped.append((nid, score))
+        if len(deduped) != len(fused):
+            why['__stem_collapsed__'] = len(fused) - len(deduped)
+            note('dedup: collapsed %d duplicate stem(s)'
+                 % (len(fused) - len(deduped)))
+            fused = deduped
     top = [nid for nid, _ in fused[:limit]]
     # C: link expansion. A note the top hits POINT AT is part of the same lesson; the vault
     # already carries this graph, so following it costs nothing and recovers notes whose wording
@@ -1907,6 +2332,7 @@ def _search(con, text=None, paths=None, limit=6, fast=False, explain=None, deny=
     if top:
         known = {nid for nid, _ in fused}
         expanded = False
+        link_only = set()
         for r in _linked_neighbors(con, top):
             if r["id"] not in known:
                 # VB2-01: link expansion must not resurrect a note the policy
@@ -1915,6 +2341,7 @@ def _search(con, text=None, paths=None, limit=6, fast=False, explain=None, deny=
                     continue
                 fused.append((r["id"], 0.0))
                 why.setdefault(r["id"], []).append("linked from a match")
+                link_only.add(r["id"])
                 expanded = True
         # Review finding 2026-08-30: a source-of-record note recovered by links used to be
         # appended AFTER the authority sort, ranking below every casual note, the exact
@@ -1922,7 +2349,24 @@ def _search(con, text=None, paths=None, limit=6, fast=False, explain=None, deny=
         # anything; expanded notes carry score 0.0, so within a tier they still rank last.
         if expanded and auth is not None:
             fused = _authority_sort(fused)
-    return fused[:limit], why
+        # VR2 P1: a link-only candidate can never displace a direct match.
+        # RR3 g, the night most serious finding: a note carrying the EXACT
+        # anchor never appeared in the top 5 while notes reading 'authority:
+        # source_of_record, linked from a match' took the slots, because the
+        # re-sort above ranks the whole list, expanded notes included, by
+        # authority tier first. Link expansion exists to FILL slots the direct
+        # signals left empty, so a stable partition puts every candidate that
+        # matched the query itself ahead of every candidate that only got here
+        # by a link. Order inside each half is the authority order untouched,
+        # and every note here still passed the policy trim and the authority
+        # sort: this reorders, it never adds a candidate or skips a verdict.
+        if link_only:
+            fused = ([kv for kv in fused if kv[0] not in link_only]
+                     + [kv for kv in fused if kv[0] in link_only])
+    # VN3: the total candidate count BEFORE the --limit slice, so a caller can
+    # tell "everything that matched fit" from "the limit cut real matches" --
+    # cmd_check's own "N more lesson(s) matched ... (limit K)" line reads this.
+    return fused[:limit], why, len(fused)
 
 
 def _link_stem(target):
@@ -2059,6 +2503,12 @@ def _print_hits(con, fused, why, header, roots=None, ledger_hits=None, withheld_
         seams = bm_vault_seams.active_seams()
         if seams:
             seam_suffix = "  [%s]" % bm_vault_seams.banner(seams)
+    else:
+        # N8(d) (2026-09-08 VN1 fix): an absent seams module used to leave
+        # seam_suffix silently empty, indistinguishable from "checked, no
+        # seam active" -- a caller could not tell a mutated run from a real
+        # one, exactly the failure Row P0-M above this exists to prevent.
+        print("NO-DATA: seam module unavailable, mutation state unknown")
     if "__nodata__" in why:
         print("NOTE: " + why.pop("__nodata__")[0])
     if not fused:
@@ -2070,20 +2520,31 @@ def _print_hits(con, fused, why, header, roots=None, ledger_hits=None, withheld_
         return 1
     print(header)
     freshness = _load_bm_freshness()
+    # VN1 (2026-09-08): MISSING AUTHORITY FAILS CLOSED FOR APPLICATION. A module this
+    # loop needs to tell a candidate or contradicted note apart from an ordinary one is
+    # authority, not enrichment -- when it fails to load, the loop below no longer
+    # trusts "every hit served exactly as before"; it withholds instead, per note,
+    # with a NO-DATA reason naming what went missing. lifecycle_error/contradiction_error
+    # (None when the load succeeded) are read below, at the point each check would
+    # otherwise run, to decide that.
+    lifecycle_error = None
     try:
         lifecycle = _load_bm_vault_lifecycle()
     except Exception as e:
         lifecycle = None
-        print("NOTE: D12 lifecycle contract unavailable (%s); candidate "
-              "withholding is off for this run, every hit is served exactly "
-              "as before" % e, file=sys.stderr)
+        lifecycle_error = e
+        print("NOTE: D12 lifecycle contract unavailable (%s); every note below is "
+              "withheld (NO-DATA) until this is fixed -- unable to tell a candidate "
+              "from an ordinary note without it" % e, file=sys.stderr)
+    contradiction_error = None
     try:
         contradiction = _load_bm_vault_contradiction()
     except Exception as e:
         contradiction = None
-        print("NOTE: contradiction resolver unavailable (%s); a CONTRADICTS "
-              "pair is served exactly as before, annotated but not "
-              "withheld" % e, file=sys.stderr)
+        contradiction_error = e
+        print("NOTE: contradiction resolver unavailable (%s); any note that is part "
+              "of a CONTRADICTS pair is withheld (NO-DATA) below rather than served "
+              "with a plain, unresolved annotation" % e, file=sys.stderr)
     duplicate_probe = _make_duplicate_probe(con) if contradiction is not None else None
     enrich = _load_enrichment()
     fresh_roots = roots if roots else freshness._default_roots()
@@ -2117,6 +2578,21 @@ def _print_hits(con, fused, why, header, roots=None, ledger_hits=None, withheld_
                                                                     row["source"]) + seam_suffix)
                 print("    superseded by: %s" % ", ".join(sorted(replaced_by)))
                 print("    %s" % row["path"])
+                print(_WITHHELD_MARKER_LINE)
+                continue
+            # VN1: the lifecycle contract failed to load above, so this loop cannot
+            # tell a candidate (unvalidated) note from an ordinary one for ANY note
+            # reaching this point -- the exact case the D12 check right below would
+            # otherwise have to decide. Withheld here, all of them, rather than
+            # guessing which ones the gate would have caught.
+            if lifecycle_error is not None:
+                withheld += 1
+                reason = "NO-DATA: lifecycle contract unavailable (%s)" % lifecycle_error
+                print("\n  WITHHELD (%s)  %s  [%s, %s]" % (
+                    reason, row["title"], row["kind"], row["source"]) + seam_suffix)
+                print("    reason: %s" % reason)
+                print("    %s" % row["path"])
+                print(_WITHHELD_MARKER_LINE)
                 continue
             # D12 (2026-08-30): a note explicitly declared "candidate" is written,
             # by anyone or anything, and nobody has validated it -- the lifecycle
@@ -2128,11 +2604,35 @@ def _print_hits(con, fused, why, header, roots=None, ledger_hits=None, withheld_
             # above -- an absent contract module degrades retrieval, it never
             # crashes it.
             if lifecycle is not None:
-                try:
-                    with open(row["path"], encoding="utf-8", errors="replace") as _fh:
-                        _promo_state, _rec, _prob = lifecycle.read_promotion(_fh.read())
-                except OSError:
+                if row["path"].startswith(CORRECTION_RULE_PATH_PREFIX):
+                    # A correction rule is a synthetic note (_index_correction_rules
+                    # above): its "path" is CORRECTION_RULE_PATH_PREFIX + rule_uuid,
+                    # never a real file, so it carries no promotion: frontmatter by
+                    # construction -- "legacy" is the correct classification here,
+                    # not a fallback for a read that failed, and there is nothing to
+                    # open. S6 below is about a REAL file that could not be read.
                     _promo_state = "legacy"
+                else:
+                    try:
+                        with open(row["path"], encoding="utf-8", errors="replace") as _fh:
+                            _promo_state, _rec, _prob = lifecycle.read_promotion(_fh.read())
+                    except OSError as e:
+                        # S6 (2026-09-08 VN1 fix): a real vault note whose promotion
+                        # state cannot even be read (its file vanished after
+                        # indexing, a permissions change, a race) is NOT the same as
+                        # a legacy note that simply never declared one -- "legacy"
+                        # there meant "known to have no promotion: field", which this
+                        # branch cannot actually know, it only knows the read failed.
+                        # Withheld outright, the same NO-DATA posture every other
+                        # unreadable-contract case in this loop already takes.
+                        withheld += 1
+                        reason = "NO-DATA: promotion state unreadable (%s)" % e
+                        print("\n  WITHHELD (%s)  %s  [%s, %s]" % (
+                            reason, row["title"], row["kind"], row["source"]) + seam_suffix)
+                        print("    reason: %s" % reason)
+                        print("    %s" % row["path"])
+                        print(_WITHHELD_MARKER_LINE)
+                        continue
                 # MUTATION SEAM, never set in production: BM_VAULT_DISABLE_LIFECYCLE_GATE
                 # turns off the D12 candidate withhold entirely.
                 if (_promo_state == "candidate"
@@ -2143,6 +2643,7 @@ def _print_hits(con, fused, why, header, roots=None, ledger_hits=None, withheld_
                     print("    reason: declared a candidate under the D12 lifecycle "
                           "contract; nobody has validated it yet")
                     print("    %s" % row["path"])
+                    print(_WITHHELD_MARKER_LINE)
                     continue
             state, reason = _note_freshness(con, freshness, nid, fresh_roots, idx_cache, state_con)
             if state == "stale":
@@ -2151,6 +2652,7 @@ def _print_hits(con, fused, why, header, roots=None, ledger_hits=None, withheld_
                                                                row["source"]) + seam_suffix)
                 print("    reason: %s" % reason)
                 print("    %s" % row["path"])
+                print(_WITHHELD_MARKER_LINE)
                 continue
             # THE PRECEDENCE LAW (founder steering 2026-09-05, sections 6 to
             # 11): current direct evidence beats current authoritative
@@ -2163,17 +2665,43 @@ def _print_hits(con, fused, why, header, roots=None, ledger_hits=None, withheld_
             # never reads as settled advice.
             resolved_note = None
             conflicting = _contradicted_by(con, row["path"])
+            if conflicting and contradiction is None:
+                # VN1: the resolver module never loaded (contradiction_error already
+                # printed above), so neither side of this pair can be told apart --
+                # withheld rather than served with the old plain, unresolved
+                # CONTRADICTS annotation.
+                withheld += 1
+                reason = "NO-DATA: contradiction resolver unavailable (%s)" % contradiction_error
+                print("\n  WITHHELD (%s)  %s vs %s  [%s, %s]" % (
+                    reason, row["title"], ", ".join(conflicting), row["kind"], row["source"]) + seam_suffix)
+                print("    reason: %s" % reason)
+                print("    %s" % row["path"])
+                print(_WITHHELD_MARKER_LINE)
+                continue
             if conflicting and contradiction is not None:
+                resolver_crashed = False
                 try:
                     verdict, winner_title, why_line = contradiction.recall_verdict(
                         con, row, conflicting, allowed_roots=fresh_roots)
                 except Exception as e:
-                    # An exception degrades to NO_DATA, never a withhold: a
-                    # resolver that broke is a reason to serve the old plain
-                    # annotation, exactly the same posture every sibling
-                    # contract module here keeps when it cannot load at all.
-                    verdict, winner_title, why_line = "NO_DATA", None, (
-                        "resolver error: %s" % e)
+                    # VN1: a crash here is NO-DATA about the resolution, never the
+                    # resolver's OWN honest NO_DATA verdict (the genuine "neither
+                    # side opted into this law" case handled a few lines below, which
+                    # never raises -- see recall_verdict's own docstring). The two
+                    # must never be read as the same thing: a crash withholds
+                    # outright, right here; only the resolver's real NO_DATA answer
+                    # falls through to the plain annotation.
+                    resolver_crashed = True
+                    verdict, winner_title, why_line = None, None, "resolver error: %s" % e
+                if resolver_crashed:
+                    withheld += 1
+                    reason = "NO-DATA: %s" % why_line
+                    print("\n  WITHHELD (%s)  %s vs %s  [%s, %s]" % (
+                        reason, row["title"], ", ".join(conflicting), row["kind"], row["source"]) + seam_suffix)
+                    print("    reason: %s" % reason)
+                    print("    %s" % row["path"])
+                    print(_WITHHELD_MARKER_LINE)
+                    continue
                 if verdict == "APPLY" and winner_title == row["title"]:
                     resolved_note = why_line
                 elif verdict != "NO_DATA":
@@ -2187,12 +2715,14 @@ def _print_hits(con, fused, why, header, roots=None, ledger_hits=None, withheld_
                     print("    reason: %s" % (why_line or "no current evidence resolves "
                                                 "this conflict"))
                     print("    %s" % row["path"])
+                    print(_WITHHELD_MARKER_LINE)
                     continue
-                # else verdict == "NO_DATA": neither side of this conflict
-                # opted into the resolver's metadata, so it falls through
-                # to the plain CONTRADICTS annotation below, exactly the
-                # pre-existing behavior for a note that never declared into
-                # this law.
+                # else verdict == "NO_DATA": the resolver's OWN genuine answer (never
+                # a crash -- that path already withheld and continued above), meaning
+                # neither side of this conflict opted into the resolver's metadata, so
+                # it falls through to the plain CONTRADICTS annotation below, exactly
+                # the pre-existing behavior for a note that never declared into this
+                # law.
             # LL-2, THE EVIDENCE TIER AT RECALL: the same evidence a
             # declared contradicts: pair already checks (evidence_locator,
             # verified_at, a duplicate slug) is now checked on EVERY hit,
@@ -2202,8 +2732,20 @@ def _print_hits(con, fused, why, header, roots=None, ledger_hits=None, withheld_
             # never served as applicable. EVIDENCED/UNVERIFIED are printed,
             # never withheld: UNVERIFIED is advisory only, read by
             # vault_recall_hook.py's own count of applied vs declined.
+            #
+            # B2 (2026-09-08 VN1 fix): this check itself is the module's ONLY
+            # gate against a forged evidence_locator, a forged verified_at, or
+            # a harvest-folder duplicate, so an absent module or a crashed
+            # evidence_tier() call is NOT a degrade-and-serve case the way a
+            # missing lifecycle/contradiction module is treated above --
+            # nothing else in this loop can tell a forged note from a real one,
+            # so EVERY hit (registered pair or not) is withheld outright,
+            # never served, whenever this check cannot actually run.
             tier, tier_reason, tier_seam = None, None, None
-            if contradiction is not None:
+            evidence_unavailable = None
+            if contradiction is None:
+                evidence_unavailable = "NO-DATA: evidence tier unavailable (contradiction module not loaded)"
+            else:
                 tier_lesson = contradiction._lesson_from_row(row["path"], row["body"])
                 # allowed_roots=fresh_roots: the same repository root this
                 # check was already scoped to (--root, or bm_freshness's
@@ -2217,41 +2759,50 @@ def _print_hits(con, fused, why, header, roots=None, ledger_hits=None, withheld_
                     tier, tier_reason, tier_seam = contradiction.evidence_tier(
                         tier_lesson, probe, duplicate_probe)
                 except Exception as e:
-                    tier, tier_reason, tier_seam = None, "tier resolver error: %s" % e, None
-                # MUTATION SEAM, never set in production: BM_VAULT_DISABLE_EVIDENCE_LOCATOR_CHECK
-                # or BM_VAULT_DISABLE_APPROVAL_FORGERY_CHECK, whichever tier_seam names as the
-                # check that actually produced this TIER_REFUSED (row P0-1, 2026-09-06
-                # follow-up). Before this attribution existed both gates keyed off
-                # BM_VAULT_DISABLE_EVIDENCE_LOCATOR_CHECK alone, so disabling it also freed a
-                # forged-approval row it never named; every other TIER_REFUSED reason (a
-                # duplicate slug, a forged-future-verified-at, an unparsable date, an escaping or
-                # dead evidence_locator) still shares BM_VAULT_DISABLE_EVIDENCE_LOCATOR_CHECK
-                # exactly as before, unchanged.
-                disable_env = ("BM_VAULT_DISABLE_APPROVAL_FORGERY_CHECK"
-                               if tier_seam == contradiction.SEAM_APPROVAL_FORGERY
-                               else "BM_VAULT_DISABLE_EVIDENCE_LOCATOR_CHECK")
-                if tier == contradiction.TIER_REFUSED and not os.environ.get(disable_env):
-                    withheld += 1
-                    # Night run 2026-09-07 (design-P0.md section 3,
-                    # steering 6.5): SEAM_SAFETY_PRECEDENCE prints its own
-                    # heading, POLICY-CONFLICT, never collapsed into the
-                    # generic (refused) heading a dead-locator or
-                    # forged-date withhold uses -- the note stays visible
-                    # right here as historical evidence either way, only
-                    # the heading names WHY it was never applied. No
-                    # second disable gate is invented for this seam:
-                    # `disable_env` above already falls to
-                    # BM_VAULT_DISABLE_EVIDENCE_LOCATOR_CHECK for it,
-                    # unchanged, since evidence_tier's own step 0 is the
-                    # only gate that ever produces this seam at all.
-                    withheld_label = ("policy-conflict"
-                                      if tier_seam == contradiction.SEAM_SAFETY_PRECEDENCE
-                                      else "refused")
-                    print("\n  WITHHELD (%s)  %s  [%s, %s]" % (
-                        withheld_label, row["title"], row["kind"], row["source"]) + seam_suffix)
-                    print("    reason: %s" % tier_reason)
-                    print("    %s" % row["path"])
-                    continue
+                    evidence_unavailable = "NO-DATA: evidence tier unavailable (%s)" % e
+            if evidence_unavailable is not None:
+                withheld += 1
+                print("\n  WITHHELD (%s)  %s  [%s, %s]" % (
+                    evidence_unavailable, row["title"], row["kind"], row["source"]) + seam_suffix)
+                print("    reason: %s" % evidence_unavailable)
+                print("    %s" % row["path"])
+                print(_WITHHELD_MARKER_LINE)
+                continue
+            # MUTATION SEAM, never set in production: BM_VAULT_DISABLE_EVIDENCE_LOCATOR_CHECK
+            # or BM_VAULT_DISABLE_APPROVAL_FORGERY_CHECK, whichever tier_seam names as the
+            # check that actually produced this TIER_REFUSED (row P0-1, 2026-09-06
+            # follow-up). Before this attribution existed both gates keyed off
+            # BM_VAULT_DISABLE_EVIDENCE_LOCATOR_CHECK alone, so disabling it also freed a
+            # forged-approval row it never named; every other TIER_REFUSED reason (a
+            # duplicate slug, a forged-future-verified-at, an unparsable date, an escaping or
+            # dead evidence_locator) still shares BM_VAULT_DISABLE_EVIDENCE_LOCATOR_CHECK
+            # exactly as before, unchanged.
+            disable_env = ("BM_VAULT_DISABLE_APPROVAL_FORGERY_CHECK"
+                           if tier_seam == contradiction.SEAM_APPROVAL_FORGERY
+                           else "BM_VAULT_DISABLE_EVIDENCE_LOCATOR_CHECK")
+            if tier == contradiction.TIER_REFUSED and not os.environ.get(disable_env):
+                withheld += 1
+                # Night run 2026-09-07 (design-P0.md section 3,
+                # steering 6.5): SEAM_SAFETY_PRECEDENCE prints its own
+                # heading, POLICY-CONFLICT, never collapsed into the
+                # generic (refused) heading a dead-locator or
+                # forged-date withhold uses -- the note stays visible
+                # right here as historical evidence either way, only
+                # the heading names WHY it was never applied. No
+                # second disable gate is invented for this seam:
+                # `disable_env` above already falls to
+                # BM_VAULT_DISABLE_EVIDENCE_LOCATOR_CHECK for it,
+                # unchanged, since evidence_tier's own step 0 is the
+                # only gate that ever produces this seam at all.
+                withheld_label = ("policy-conflict"
+                                  if tier_seam == contradiction.SEAM_SAFETY_PRECEDENCE
+                                  else "refused")
+                print("\n  WITHHELD (%s)  %s  [%s, %s]" % (
+                    withheld_label, row["title"], row["kind"], row["source"]) + seam_suffix)
+                print("    reason: %s" % tier_reason)
+                print("    %s" % row["path"])
+                print(_WITHHELD_MARKER_LINE)
+                continue
             print("\n  %s  [%s, %s]" % (row["title"], row["kind"], row["source"]) + seam_suffix)
             if row["descr"]:
                 print("    %s" % row["descr"][:160])
@@ -2521,8 +3072,21 @@ def _policy_deny(args, con):
         try:
             principals = _load_bm_vault_principals()
         except Exception as e:
-            print("principal registry unavailable (%s); revocation is NOT enforced"
-                  % e, file=sys.stderr)
+            msg = "principal registry unavailable (%s); revocation is NOT enforced" % e
+            print(msg, file=sys.stderr)
+            # S7 (2026-09-08 VN1 fix): an unreadable registry means a REVOKED identity
+            # cannot be told apart from a clean one -- the exact case enterprise mode's
+            # fail-closed policy branch below already refuses to treat as "nothing
+            # restricted". Same posture here: restricted notes stay withheld,
+            # unrestricted notes still serve, and the failure is recorded in
+            # `degraded` so the caller's own NOTE line names it, not only stderr.
+            if enterprise:
+                degraded.append(msg)
+                return (lambda path: _is_restricted(con, path)), None, None, degraded
+            # Outside enterprise mode the old behavior is unchanged (not trimmed by
+            # this registry), but the failure now reaches stdout too: a model reading
+            # only the recall output, never stderr, previously never saw it at all.
+            print("NOTE: %s" % msg)
             principals = None
         if principals is not None:
             vault_for_registry = _default_vault()
@@ -2598,8 +3162,14 @@ def cmd_recall(args):
         print("REFUSED: %s; recall trimmed to zero notes" % refusal_reason)
     explain = [] if args.get("explain") else None
     fast = bool(args.get("fast"))
-    fused, why = _search(con, text=text, limit=int(args.get("limit", 6)),
-                         fast=fast, explain=explain, deny=deny)
+    # VN3: _search now also returns the pre-limit total; recall does not render
+    # a "more matched" line (only cmd_check does), so it is unpacked and dropped.
+    # VR4: resolved exactly as cmd_check resolves it (one function, both surfaces).
+    project = _resolve_project(args)
+    sys.stderr.write(_project_note(project) + "\n")
+    fused, why, _total = _search(con, text=text, limit=int(args.get("limit", 6)),
+                                 fast=fast, explain=explain, deny=deny,
+                                 project=project)
     # A query-cache write (VB5-03) may have happened inside _search; this connection is never
     # committed anywhere else in this command, and an uncommitted write is lost when the
     # process exits, silently un-warming every "warm" repeat.
@@ -2682,6 +3252,327 @@ def cmd_recall(args):
 CONTENT_EXCERPT_CHARS = 2000   # same order of magnitude as _upsert_note's own embedding excerpt
 
 
+#: VR3: how close two fused scores must be before the edited file's own
+#: directory is allowed to decide which of them comes first. Deliberately narrow:
+#: this is a TIEBREAK, never a re-ranking, and it only ever reorders candidates
+#: that already share an authority level.
+#:
+#: VR5x WIDENED IT FROM 0.05 TO 0.10, on a measurement rather than a feeling. The
+#: five percent came from Reciprocal Rank Fusion putting adjacent ranks of ONE
+#: list about 1.6 percent apart; measured on the retrieval fixture, where a
+#: candidate is fused from several lists, adjacent ranks inside one anchor band
+#: actually sit between 4.4 and 6.2 percent apart, so a five percent band caught
+#: some adjacent pairs and missed others, which is arbitrary rather than narrow.
+#: Ten percent covers every adjacent pair measured there and SATURATES: scoring
+#: the same corpus at 0.20 and at 0.50 returns identical numbers, so the band is
+#: not what holds the rest back and this is still a tiebreak. Measured effect at
+#: the hook's own --limit 2: the mid band's recall@2 goes 0.7333 to 0.8000, the
+#: crowded band does not move at any band because what blocks it is the AUTHORITY
+#: plane (a source_of_record note outranks every casual one lexicographically),
+#: and this function deliberately does not cross that.
+_CONTEXT_TIE_EPS = 0.10
+
+#: VR5x: how many candidates cmd_check asks _search for when a --context was given,
+#: before the tiebreak runs and the list is cut back to the caller's --limit.
+#:
+#: THE DEFECT THIS CLOSES. _search returns at most `limit` candidates, and the
+#: tiebreak only ever saw that slice. At the point of need hook's production limit
+#: of 2, a crowded anchor's top two are two notes about something else, so the
+#: tiebreak printed "NO-DATA context tiebreak: no candidate names a path under ..."
+#: while the note about the caller's own directory sat further down the same list
+#: and was never a candidate for the reorder at all. Measured on the retrieval
+#: fixture: the same query at --limit 12 reaches that note; at --limit 2 it cannot.
+#:
+#: Twelve because the fixture's widest crowded band puts nine notes on one anchor
+#: and this must clear it with headroom. It costs ONE extra anchors query over a
+#: longer id list, not a query per note, and the cut back to `limit` happens before
+#: anything is printed, so no caller is served more notes than it asked for.
+CONTEXT_OVERFETCH = 12
+
+#: VR6: the served ORDER of candidates that all pass the same verdict.
+#:
+#: "authority-first" is the order this file has always produced: `_authority_sort`
+#: ranks on (authority tier, similarity), so a declared note outranks every casual
+#: one whatever the query was about, and `_context_rank` only ever reorders WITHIN
+#: one tier. "situation-first" keeps every bit of that and adds one narrow
+#: exception, in cmd_check only and only when a --context was given: a DIRECT
+#: anchor match whose own anchors sit under the caller's directory is served ahead
+#: of a higher-authority candidate that names no path under it.
+#:
+#: THE VERDICT IS NOT IN QUESTION and is not touched. apply, withhold, escalate and
+#: no-data are decided by authority and evidence exactly as before, every served
+#: note still prints its own authority label, and this reorders a list it never
+#: adds to or removes from. The constitution forbids resolving a CONFLICT between
+#: two notes by score or rank; it says nothing about the order in which
+#: non-conflicting candidates are served, which is all this decides.
+#:
+#: WHY IT EXISTS, measured on the retrieval fixture at the point of need hook's
+#: production --limit 2: for a crowded anchor the casual note that is the true
+#: lesson for the caller's own directory scores 0.132 while two source_of_record
+#: decoys about the same file name score 0.094 and 0.091, and the casual note still
+#: ranks fifth, so it is never served at all.
+#:
+#: BM_VAULT_ORDER_MODE overrides it for one run, which is how both settings are
+#: measured on one tree and how the tests below drive both. An unrecognised value
+#: falls back to the conservative "authority-first" and says so on stderr rather
+#: than guessing.
+ORDER_MODE = "situation-first"
+
+_ORDER_MODES = ("authority-first", "situation-first")
+
+
+def _order_mode():
+    """The order mode for THIS run. Read at call time, never bound as a default
+    argument: a default binds at definition time, so the env override and a test
+    that sets the module constant would both be ignored."""
+    mode = (os.environ.get("BM_VAULT_ORDER_MODE") or ORDER_MODE or "").strip().lower()
+    if mode not in _ORDER_MODES:
+        sys.stderr.write("NO-DATA order mode: %r is not one of %s, using %s\n"
+                         % (mode, ", ".join(_ORDER_MODES), _ORDER_MODES[0]))
+        return _ORDER_MODES[0]
+    return mode
+
+
+#: The one shape a PROJECT.md declaration takes: `project:` and a single bare slug.
+#: Anything else (a list, a quoted sentence, two words) is not a declaration and is
+#: left to the basename, because a half-read value is a guess wearing a fact's clothes.
+_DECLARED_PROJECT_RE = re.compile(r"^project:\s*([A-Za-z0-9_.-]+)\s*$")
+
+#: Returned by _declared_project when PROJECT.md declares two DIFFERENT slugs. Distinct
+#: from None, which means "declares nothing, use the basename": an ambiguity must not
+#: fall back to a basename that would silently pick a side.
+_DECLARED_AMBIGUOUS = object()
+
+
+def _declared_project(root):
+    """The slug `<root>/PROJECT.md` DECLARES, None when it declares none, and
+    _DECLARED_AMBIGUOUS when it declares two different ones.
+
+    Only that one file at that one path is read, and only its YAML frontmatter block
+    (or, when it opens with no `---`, its first 40 lines): a `project:` further down
+    is prose about projects, not the file's own declaration. Missing or unreadable is
+    None, never an error, since most repositories have no PROJECT.md at all."""
+    path = os.path.join(root, "PROJECT.md")
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            lines = [f.readline() for _ in range(40)]
+    except (IOError, OSError):
+        return None
+    if lines and lines[0].strip() == "---":
+        block = []
+        for line in lines[1:]:
+            if line.strip() == "---":
+                break
+            block.append(line)
+    else:
+        block = lines
+    found = []
+    for line in block:
+        m = _DECLARED_PROJECT_RE.match(line.strip())
+        if m and m.group(1).lower() not in found:
+            found.append(m.group(1).lower())
+    if len(found) > 1:
+        sys.stderr.write("NO-DATA project: %s declares %s; ambiguous, no project "
+                         "resolved\n" % (path, " and ".join(found)))
+        return _DECLARED_AMBIGUOUS
+    return found[0] if found else None
+
+
+def _resolve_project(args):
+    """The project a command is scoped to, resolved the SAME way for check and recall
+    so the two surfaces cannot drift: --project wins outright; otherwise, when a
+    --context was given and a .git sits above it, the slug that git root's PROJECT.md
+    DECLARES, and only failing that the basename of the git root; otherwise None.
+    Lowercased every way, to match what _note_project stores.
+
+    Declared beats basename because the two disagree in the NORMAL case, not the odd
+    one: notes carry `project: tonari-app` while the checkout is named TonariSimple,
+    so a basename-only resolution fired the boost exactly where the two happened to
+    coincide and nowhere else. A DECLARED value is not a guess: the estate law puts a
+    PROJECT.md at every project root, and this reads what that file states, at that
+    one path only. Still never guessed from the home directory or any parent tree,
+    and a PROJECT.md declaring two different slugs resolves to None with a line naming
+    the ambiguity: a guess that lands on the wrong project boosts the wrong notes
+    silently, and the honest answer when nothing says which project this is, is that
+    nothing does."""
+    p = args.get("project")
+    if isinstance(p, str) and p.strip():
+        return p.strip().lower()
+    ctx = args.get("context")
+    if not isinstance(ctx, str) or not ctx.strip():
+        return None
+    d = os.path.dirname(os.path.abspath(ctx))
+    while True:
+        if os.path.exists(os.path.join(d, ".git")):
+            declared = _declared_project(d)
+            if declared is _DECLARED_AMBIGUOUS:
+                return None
+            return declared or os.path.basename(d).lower() or None
+        parent = os.path.dirname(d)
+        if parent == d:
+            return None
+        d = parent
+
+
+def _project_note(project):
+    """The one stderr line both commands print. stderr, never stdout: vault_recall_hook
+    parses stdout and DEVNULLs stderr, so this says what scoping did to a person running
+    the command without adding a line to what reaches the model."""
+    return ("project boost: %s" % project if project
+            else "NO-DATA project boost: no project resolved")
+
+
+def _context_segments(path):
+    """The DIRECTORY segments of a path, lowercased, as a set.
+
+    The final segment (the file name) is dropped on purpose: the basename is
+    already what `check --paths` matched on, so counting it again would score
+    every candidate identically and break nothing. Both separators are split
+    on so a path-shaped anchor written either way still compares."""
+    parts = [p for p in re.split(r"[\\/]+", (path or "").strip()) if p and p != "."]
+    return set(p.lower() for p in parts[:-1])
+
+
+def _anchor_overlap(con, ids, want):
+    """{note_id: how many of `want`'s directory segments that note's anchors name}.
+
+    One query for the whole candidate list, and the best anchor wins for a note
+    that carries several. Read off the ANCHORS and never off the note's own vault
+    path: a note is about a directory because it NAMES it, and one that merely
+    sits in a vault folder of the same name is not (the reason _context_rank has
+    always measured it here)."""
+    overlap = dict((nid, 0) for nid in ids)
+    if not ids:
+        return overlap
+    marks = ",".join("?" * len(ids))
+    for r in con.execute(
+            "SELECT note_id, anchor FROM anchors WHERE note_id IN (%s)" % marks,
+            ids).fetchall():
+        shared = len(want & _context_segments(r["anchor"]))
+        if shared > overlap.get(r["note_id"], 0):
+            overlap[r["note_id"]] = shared
+    return overlap
+
+
+def _context_rank(con, fused, context_path):
+    """VR3 (RR1 section 5.7): break ties among equal-scoring candidates by WHERE
+    the edited file lives, and return (reordered, one honest line about it).
+
+    Applied in cmd_check ONLY, and only on the branch where this tree's
+    `_search` does not yet accept a context_path of its own (VR2 owns that
+    keyword; when it lands, `_search` does this inside the ranking and this
+    branch is never taken). It is a REORDER of what `_search` already returned:
+    it never adds a candidate, never removes one, and never lets a note skip a
+    verdict.
+
+    THE AUTHORITY PLANE IS NOT TOUCHED. `_search` sorts on the tuple
+    (authority rank, similarity), so a five percent score band can straddle a
+    tier boundary; a group here therefore requires the SAME authority level as
+    well as a near-equal score, and the two notes swapped are always peers of
+    the same tier. An absent authority module means `_search` did not tier-sort
+    either, so every candidate is treated as one tier, which is what its own
+    order already assumed.
+
+    The overlap is measured against each candidate's ANCHORS, not against the
+    note's own file path: a note is about `products/brothermode/tools/bm_vault.py`
+    because it NAMES that path (the ANCHOR regex keeps `/`, so a repo-relative
+    path is one anchor), and a vault note that merely happens to sit in a
+    directory called `tools` is not."""
+    want = _context_segments(context_path)
+    if not want:
+        return fused, "NO-DATA context tiebreak: --context carries no directory segment"
+    if len(fused) < 2:
+        return fused, "NO-DATA context tiebreak: fewer than two candidates to order"
+    ids = [nid for nid, _ in fused]
+    overlap = _anchor_overlap(con, ids, want)
+    if not any(overlap.values()):
+        return fused, ("NO-DATA context tiebreak: no candidate names a path under %s"
+                       % context_path)
+    try:
+        auth = _load_bm_vault_authority()
+    except Exception:  # sbe: allow-silent no authority module means no tier sort happened either
+        auth = None
+    level = {}
+    for nid in ids:
+        if auth is None:
+            level[nid] = ""
+            continue
+        row = con.execute("SELECT body FROM notes WHERE id=?", (nid,)).fetchone()
+        try:
+            lvl, problem = auth.read_authority(row["body"] if row else "")
+            level[nid] = "casual" if problem else (lvl or "casual")
+        except Exception:  # sbe: allow-silent an unreadable tier ranks casual, same as _search
+            level[nid] = "casual"
+    out, i, moved = [], 0, 0
+    while i < len(fused):
+        lead_score = fused[i][1]
+        lead_level = level[fused[i][0]]
+        j = i + 1
+        while j < len(fused):
+            nid, score = fused[j]
+            if level[nid] != lead_level:
+                break
+            span = max(abs(lead_score), abs(score))
+            if abs(lead_score - score) > _CONTEXT_TIE_EPS * span:
+                break
+            j += 1
+        group = fused[i:j]
+        # sorted() is stable, so equal overlap keeps the order _search chose.
+        ordered = sorted(group, key=lambda kv: -overlap[kv[0]])
+        if [n for n, _ in ordered] != [n for n, _ in group]:
+            moved += 1
+        out.extend(ordered)
+        i = j
+    if not moved:
+        return out, ("NO-DATA context tiebreak: the order already led with %s"
+                     % context_path)
+    return out, ("context tiebreak: %d group(s) reordered toward %s" % (moved, context_path))
+
+
+def _situation_first(con, fused, why, context_path):
+    """VR6: lift the DIRECT matches that name a path under the caller's own
+    directory above the candidates that do not, and return (reordered, one line).
+
+    Runs in cmd_check only, only under ORDER_MODE "situation-first", and only when
+    a --context was given. It is a STABLE PARTITION of the list `_search` and
+    `_context_rank` already produced: nothing is added, nothing removed, nothing
+    skips a verdict, and every note still prints its own authority label.
+
+    THE ONE PLANE IT CROSSES, deliberately, and nothing else. `_authority_sort`
+    ranks (tier, similarity), so a source_of_record note about some other
+    directory outranks the casual note that IS the recorded lesson for the file
+    being edited; `_context_rank` cannot fix that because it only reorders inside
+    one tier, and its own test_10 pins that limit. Here a candidate that names the
+    caller's directory may pass one that does not. Order INSIDE each half is the
+    authority order untouched, so a declared note that ALSO names the directory
+    still leads the casual one that does: between two notes equally about this
+    situation, authority still decides.
+
+    A LINK-ONLY candidate is never lifted (VR2 P1: a note that got here by a link
+    cannot displace a direct match), and the overlap is measured on anchors by
+    _anchor_overlap, for the reason written there."""
+    want = _context_segments(context_path)
+    if not want:
+        return fused, "NO-DATA situation-first: --context carries no directory segment"
+    if len(fused) < 2:
+        return fused, "NO-DATA situation-first: fewer than two candidates to order"
+    ids = [nid for nid, _ in fused]
+    overlap = _anchor_overlap(con, ids, want)
+    linked = set(nid for nid in ids
+                 if any(w.startswith("linked from a match") for w in why.get(nid, [])))
+    lifted = set(nid for nid in ids if overlap.get(nid) and nid not in linked)
+    if not lifted:
+        return fused, ("NO-DATA situation-first: no direct match names a path under %s"
+                       % context_path)
+    out = ([kv for kv in fused if kv[0] in lifted]
+           + [kv for kv in fused if kv[0] not in lifted])
+    if [nid for nid, _ in out] == ids:
+        return out, ("NO-DATA situation-first: the order already led with %s"
+                     % context_path)
+    return out, ("situation-first: %d candidate(s) about %s lifted over higher "
+                 "authority" % (len(lifted), context_path))
+
+
 def cmd_check(args):
     paths = args.get("paths", [])
     if not paths:
@@ -2699,12 +3590,76 @@ def cmd_check(args):
     explain = [] if args.get("explain") else None
     limit = int(args.get("limit", 5))
     fast = bool(args.get("fast"))
-    fused, why = _search(con, paths=paths, limit=limit, fast=fast, explain=explain)
+    # VR3 (RR1 section 5.7): --context carries the EDITED FILE'S path relative to
+    # its own repository, beside the bare basename --paths already sends. The
+    # basename stays the --paths value, so every existing caller of
+    # `check --paths` keeps exactly the behaviour it has; --context is additive
+    # and absent means today's code path, untouched.
+    #
+    # Where the tiebreak actually runs is decided HERE, at call time, by reading
+    # _search's own signature rather than by assuming a version: VR2 is adding
+    # `context_path` to _search so the situation can break ties INSIDE the
+    # ranking, which is the better place for it. While that keyword is absent
+    # this file does the narrow version itself on what _search returned. Neither
+    # branch is a guess about which tree this is.
+    context_path = args.get("context")
+    if not isinstance(context_path, str):
+        context_path = ""
+    search_kwargs = {}
+    if context_path:
+        try:
+            if "context_path" in inspect.signature(_search).parameters:
+                search_kwargs["context_path"] = context_path
+        except (TypeError, ValueError):  # sbe: allow-silent an unreadable signature means the fallback below
+            search_kwargs = {}
+    # VR4: the project this run is scoped to. A multiplier inside _search, never a
+    # filter, so a note carrying no project is unboosted and still reachable.
+    project = _resolve_project(args)
+    sys.stderr.write(_project_note(project) + "\n")
+    # VR5x: over-fetch, tiebreak, THEN cut. `total` stays what _search reported, so
+    # the "N more matched" line below still counts every candidate that matched and
+    # len(fused) is what was actually shown.
+    fetch = max(limit, CONTEXT_OVERFETCH) if context_path else limit
+    fused, why, total = _search(con, paths=paths, limit=fetch, fast=fast, explain=explain,
+                                project=project, **search_kwargs)
+    # Always, not only when _search lacks the keyword: _search's own tiebreak
+    # (VR2) fires on exact fused-score ties, which the --paths branch never
+    # produces (RRF ranks are distinct), so the epsilon-window reorder here is
+    # what lets the note about THIS directory lead a crowded anchor.
+    if context_path:
+        fused, context_note = _context_rank(con, fused, context_path)
+        # VR6: and then, under "situation-first" only, the one narrow crossing of
+        # the authority plane the tiebreak above cannot make. "authority-first"
+        # takes no branch here and prints no line, so that mode is byte-identical
+        # to the code before this row.
+        order_note = ""
+        if _order_mode() == "situation-first":
+            fused, order_note = _situation_first(con, fused, why, context_path)
+        fused = fused[:limit]
+        # stderr, never stdout: vault_recall_hook.py parses stdout and DEVNULLs
+        # stderr, so this says what the tiebreak did (including NO-DATA when it
+        # did nothing) to a person running the command without adding a line to
+        # what reaches the model.
+        sys.stderr.write(context_note + "\n")
+        if explain is not None:
+            explain.append(context_note)
+        if order_note:
+            sys.stderr.write(order_note + "\n")
+            if explain is not None:
+                explain.append(order_note)
     for line in explain or []:
         print("EXPLAIN %s" % line)
     roots = _freshness_roots(args)
     rc = _print_hits(con, fused, why,
                      "RECORDED FAILURES in the files you are about to touch:", roots=roots)
+    # VN3: the search found more than --limit kept. Printed as its own line (no
+    # leading two spaces, so vault_recall_hook.py's _NOTE_START_RE never mistakes
+    # it for a note title) so a caller can tell "everything that matched fit" from
+    # "the limit cut real matches" -- point-of-need memory that never says so is
+    # indistinguishable from a small vault.
+    if total > len(fused):
+        print("Vault: %d more lesson(s) matched %s and were not shown (limit %d)"
+             % (total - len(fused), ", ".join(os.path.basename(p) for p in paths), limit))
     # Content fallback. The anchor pass above only matches a FILE NAME some note already names,
     # so a brand-new path finds nothing even when its actual code repeats a documented failure
     # pattern verbatim. When that pass is empty or thin (the same under-fill condition _search's
@@ -2751,6 +3706,72 @@ def cmd_check(args):
     return rc
 
 
+def _load_journal_module():
+    """scripts/journal.py, loaded by path -- the same load-by-path shape and
+    the same "resolves only inside a monorepo checkout" honesty as
+    vault_recall_hook.py's own _load_journal() (VN3, THE HOOK-TO-JOURNAL
+    BRIDGE): journal.py lives at this MONOREPO's top-level scripts/, three
+    directories up from HERE (tools -> brothermode -> products -> repo
+    root), which resolves in a source checkout and returns None on an
+    installed plugin copy. None on any failure; read only by cmd_status's
+    own 'latest run memory' block below, never by anything that must not
+    degrade silently."""
+    try:
+        repo_root = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
+        path = os.path.join(repo_root, "scripts", "journal.py")
+        if not os.path.isfile(path):
+            return None
+        spec = importlib.util.spec_from_file_location("journal_for_bm_vault_status", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception:  # sbe: allow-silent optional journal bridge; status degrades to NO-DATA
+        return None
+
+
+def _newest_run_journal_dir(repo_root):
+    """The directory holding the most recently modified docs/plan/runs/*/
+    journal.jsonl under `repo_root`, or None when no run journal exists
+    there at all. mtime of the journal FILE itself (not its directory),
+    since that is what actually changes on every append -- the same signal
+    a reader would use to answer "which run is newest" by hand."""
+    candidates = glob.glob(os.path.join(repo_root, "docs", "plan", "runs", "*", "journal.jsonl"))
+    if not candidates:
+        return None
+    return os.path.dirname(max(candidates, key=os.path.getmtime))
+
+
+def _latest_run_memory_line():
+    """VN3 goal 5: 'latest run memory: N applied, M withheld (reasons: ...)'
+    read from the newest run journal this machine's own docs/plan/runs/
+    holds, or 'NO-DATA: <reason>' when the journal module cannot be loaded,
+    no run journal exists, or the newest one carries no vault.recall events
+    -- three different honest reasons, never folded into one guess."""
+    journal_mod = _load_journal_module()
+    if journal_mod is None:
+        return "latest run memory: NO-DATA: journal module unavailable"
+    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
+    run_dir = _newest_run_journal_dir(repo_root)
+    if run_dir is None:
+        return ("latest run memory: NO-DATA: no run journal found under %s"
+               % os.path.join(repo_root, "docs", "plan", "runs"))
+    events = journal_mod.read(run_dir)
+    if events is None:
+        return "latest run memory: NO-DATA: %s could not be read" % run_dir
+    records = []
+    for event in events:
+        if event.get("type") != VAULT_RECALL_JOURNAL_EVENT_TYPE:
+            continue
+        records.extend((event.get("payload") or {}).get("records") or [])
+    if not records:
+        return "latest run memory: NO-DATA: no run recall events"
+    applied = [r for r in records if r.get("verdict") == "APPLY"]
+    withheld = [r for r in records if r.get("verdict") != "APPLY"]
+    reasons = sorted({r.get("reason") for r in withheld if r.get("reason")})
+    return ("latest run memory: %d applied, %d withheld (reasons: %s)"
+           % (len(applied), len(withheld), ", ".join(reasons) if reasons else "none"))
+
+
 def cmd_status(args):
     con = _connect()
     _schema(con)
@@ -2779,6 +3800,10 @@ def cmd_status(args):
               "describing this problem in different words can be missed. Preferred: the bge "
               "wrapper tools/bm-embed-bge; fallback: swiftc -O tools/bm_embed.swift -o "
               "tools/bm-embed")
+    # VN3 goal 5: one line naming what the estate's own memory actually did on
+    # its most recent run, read from the run journal (VN3 goal 3's own
+    # vault.recall events), never recomputed or guessed here.
+    print(_latest_run_memory_line())
     return 0
 
 

@@ -4588,6 +4588,43 @@ class TheRecurrenceLoopCloses(unittest.TestCase):
             and e["unit_id"] == "U1")
         self.assertEqual(drafted["parent_ids"], [recurrence_event["event_id"]])
 
+    def test_a_drafted_lesson_prints_one_vault_saved_line(self):
+        """VN2, the write notice: the SAME refused-unit draft as the test
+        above, but this one checks stdout rather than the journal. One
+        'Vault saved: <uid> -> <relative path>' line, printed only after
+        the lesson file actually landed under lessons/."""
+        rec, claims = self._seeded_rec_and_claims()
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            _br.build_report(rec, claims, "abc123", "def456", changed=[])
+        out = buf.getvalue()
+        lines = [ln for ln in out.splitlines() if ln.startswith("Vault saved: ")]
+        self.assertEqual(len(lines), 1, out)
+        lessons_dir = os.path.join(self.run_dir, "lessons")
+        name = os.listdir(lessons_dir)[0]
+        self.assertEqual(lines[0],
+                         "Vault saved: U1 -> lessons/%s" % name, lines[0])
+        self.assertTrue(os.path.isfile(os.path.join(lessons_dir, name)))
+
+    def test_a_failed_lesson_draft_prints_no_vault_saved_line(self):
+        """The existing LESSON_DRAFT_FAILED path, forced by pre-creating
+        run_dir/lessons/ as a plain FILE so os.makedirs(lessons_dir,
+        exist_ok=True) raises FileExistsError (an OSError) before any
+        write is attempted: no 'Vault saved' line, honest failure recorded
+        on the journal instead."""
+        lessons_path = os.path.join(self.run_dir, "lessons")
+        with open(lessons_path, "w", encoding="utf-8") as fh:
+            fh.write("blocking file, not a directory")
+        rec, claims = self._seeded_rec_and_claims()
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            _br.build_report(rec, claims, "abc123", "def456", changed=[])
+        out = buf.getvalue()
+        self.assertNotIn("Vault saved", out, out)
+        failed = [e for e in journal.read(self.run_dir)
+                 if e["type"] == "lesson.draft_failed"]
+        self.assertEqual([e["unit_id"] for e in failed], ["U1"], failed)
+
     def test_surfaced_names_every_recalled_state_but_applied_only_the_applied_ones(self):
         """receipt_door.applied_memory's own three-way partition (E74):
         surfaced is everything recalled, applied is the narrower subset a
@@ -4634,6 +4671,83 @@ class TheRecurrenceLoopCloses(unittest.TestCase):
         self.assertIn("STALE: s.md", row[3], row[3])
         self.assertIn("unverified-one (unverified): %s" % _br.NODATA,
                       row[3], row[3])
+
+    def test_a_no_data_withhold_is_forwarded_into_declined_with_its_reason(self):
+        """Pins the recurrence loop to receipt_door.MEMORY_STATES so a state
+        added there (no-data, 8612e561) is never silently dropped from
+        declined again, as policy-conflict once had to be added by hand
+        (fbfcee70)."""
+        rows = [{"id": "U1", "objective": "x", "done_check": "true",
+                "status": "DONE", "check_passed_before": False,
+                "files_changed_by_unit": ["x.py"]}]
+        claims = {"U1": {"state": "done", "evidence": {
+            "check_command": "true", "exit_code": 0}}}
+        journal.append(self.run_dir, "vault.recall", unit_id="U1",
+                       payload={"records": [
+                           {"slug": "applied-one", "path": "/v/a.md",
+                            "state": "applied"},
+                           {"slug": "nodata-one", "path": "/v/n.md",
+                            "state": "no-data",
+                            "line": "NO-DATA: the evidence tier module "
+                                   "was unavailable"}]})
+        _br.build_report({"outcome": "x", "work_id": "w", "rows": rows},
+                        claims, "abc", "def", changed=[])
+        bm_recurrence = _br._load_bm_recurrence()
+        conn = bm_recurrence._connect(self.db_path)
+        try:
+            row = conn.execute(
+                "SELECT surfaced, applied, declined, reason FROM receipts "
+                "WHERE unit_id=?", ("run1:U1",)).fetchone()
+        finally:
+            conn.close()
+        self.assertIsNotNone(row, "no receipt was recorded for run1:U1")
+        surfaced = json.loads(row[0])
+        applied = json.loads(row[1])
+        declined = json.loads(row[2])
+        self.assertEqual(sorted(surfaced), ["applied-one", "nodata-one"])
+        self.assertEqual(applied, ["applied-one"])
+        self.assertEqual(declined, ["nodata-one"])
+        self.assertIn("nodata-one (no-data): NO-DATA: the evidence tier "
+                      "module was unavailable", row[3], row[3])
+
+    def test_every_non_applied_memory_state_is_forwarded(self):
+        """Walks receipt_door.MEMORY_STATES itself rather than a hardcoded
+        tuple, so this test fails the same way the loop fails whenever a
+        new state is added there and forgotten here."""
+        rows = [{"id": "U1", "objective": "x", "done_check": "true",
+                "status": "DONE", "check_passed_before": False,
+                "files_changed_by_unit": ["x.py"]}]
+        claims = {"U1": {"state": "done", "evidence": {
+            "check_command": "true", "exit_code": 0}}}
+        non_applied_states = [s for s in RD.MEMORY_STATES if s != "applied"]
+        # One vault.recall event per record (journal.append's own
+        # MAX_LINE_BYTES keeps a single append atomic, so a payload of all
+        # four records at once truncates to a NO-DATA marker; one record
+        # per event is also the shape _recalled_records_for_unit's own
+        # docstring names, "flattened across however many such events
+        # exist").
+        for state in non_applied_states:
+            journal.append(self.run_dir, "vault.recall", unit_id="U1",
+                           payload={"records": [
+                               {"slug": "%s-one" % state,
+                                "path": "/v/%s.md" % state,
+                                "state": state, "line": "LINE %s" % state}]})
+        _br.build_report({"outcome": "x", "work_id": "w", "rows": rows},
+                        claims, "abc", "def", changed=[])
+        bm_recurrence = _br._load_bm_recurrence()
+        conn = bm_recurrence._connect(self.db_path)
+        try:
+            row = conn.execute(
+                "SELECT declined, reason FROM receipts WHERE unit_id=?",
+                ("run1:U1",)).fetchone()
+        finally:
+            conn.close()
+        self.assertIsNotNone(row, "no receipt was recorded for run1:U1")
+        declined = json.loads(row[0])
+        self.assertEqual(declined,
+                         sorted("%s-one" % state for state in non_applied_states))
+        for state in non_applied_states:
+            self.assertIn("LINE %s" % state, row[1], row[1])
 
     def test_build_report_called_twice_never_double_records_or_double_drafts(self):
         """main() calls build_report twice per real run (a first pass for
@@ -4793,6 +4907,7 @@ def _isolated_policy_conflict_record():
 
         env = dict(os.environ)
         env["HOME"] = tmp
+        env["BROTHER_CONFIG_DIR"] = os.path.join(tmp, ".claude")
         env["BROTHERMODE_ROOT"] = tmp
         env["BM_FRESHNESS_ROOTS"] = tree
         env["BM_FRESHNESS_STATE"] = os.path.join(tmp, "freshness_state.sqlite3")
@@ -4928,6 +5043,270 @@ class AMemoryCannotRemoveAMandatoryCheck(unittest.TestCase):
         entry = section["policy-conflict"][0]
         self.assertEqual(entry["slug"], "skip-mandatory-check-lesson")
         self.assertIn("POLICY-CONFLICT", entry["line"])
+
+
+#: The marker every fixture note this file's own VN3 tests write carries in
+#: its body, per VN3's own brief ("Fixtures: invented content only, marker
+#: string GAUNTLET-POISON-LL3-FIXTURE-DO-NOT-COPY-INTO-A-REAL-VAULT
+#: allowed").
+_VN3_FIXTURE_MARKER = "GAUNTLET-POISON-LL3-FIXTURE-DO-NOT-COPY-INTO-A-REAL-VAULT"
+
+
+def _vn3_two_note_journal_records():
+    """Build ONE throwaway vault (the same _P0G fixture tree
+    _isolated_policy_conflict_record above uses) holding two REAL notes: one
+    whose applies_to anchor resolves against the fixture tree (state
+    "applied"), one whose does not (state "stale") -- run the real
+    bm_vault.py index + check --paths, then the real
+    vault_recall_hook.lesson_states AND its own _point_of_need (VN3's own
+    hook-to-journal bridge function), and return the journal_records
+    _point_of_need actually produced for both. Never a hand-journaled
+    literal, the same review-P0.md C2 reasoning
+    _isolated_policy_conflict_record's own docstring gives: a fixture that
+    never touches the real classifier proves nothing about it."""
+    tmp = tempfile.mkdtemp(prefix="vn3-two-note-")
+    try:
+        vault = os.path.join(tmp, "vault")
+        tree = os.path.join(tmp, "tree")
+        os.makedirs(vault)
+        os.makedirs(tree)
+        os.makedirs(os.path.join(tmp, ".claude"))
+        for fname, content in _P0G.FIXTURE_FILES.items():
+            fpath = os.path.join(tree, fname)
+            os.makedirs(os.path.dirname(fpath), exist_ok=True)
+            with open(fpath, "w", encoding="utf-8") as fh:
+                fh.write(content)
+        # Both notes mention poison_target.py in their body, so the anchor
+        # query below (over --paths, which names poison_target.py) finds
+        # both; their DECLARED applies_to differs, which is what
+        # vault_recall_hook.py's own curated-anchor check (never bm_vault's
+        # auto-extracted one) actually decides applied vs stale on.
+        _P0G.write_note(
+            vault, "10-Lessons", "vn3-applicable", "VN3 applicable lesson",
+            "%s: normalize() in poison_target.py strips whitespace; verified."
+            % _VN3_FIXTURE_MARKER,
+            applies_to="poison_target.py", evidence_locator="path:poison_target.py")
+        _P0G.write_note(
+            vault, "10-Lessons", "vn3-stale", "VN3 stale lesson",
+            "%s: a claim about poison_target.py whose own evidence is gone."
+            % _VN3_FIXTURE_MARKER,
+            applies_to="ghost_target.py")
+
+        env = dict(os.environ)
+        env["HOME"] = tmp
+        env["BROTHER_CONFIG_DIR"] = os.path.join(tmp, ".claude")
+        env["BROTHERMODE_ROOT"] = tmp
+        env["BM_FRESHNESS_ROOTS"] = tree
+        env["BM_FRESHNESS_STATE"] = os.path.join(tmp, "freshness_state.sqlite3")
+
+        indexed = subprocess.run(
+            [sys.executable, _P0G.VAULT_TOOL, "index", "--vault", vault],
+            env=env, cwd=tree, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        if indexed.returncode != 0:
+            raise RuntimeError("bm_vault.py index exited %d: %s"
+                               % (indexed.returncode,
+                                  indexed.stdout.decode("utf-8", "replace")[:400]))
+        checked = subprocess.run(
+            [sys.executable, _P0G.VAULT_TOOL, "check", "--paths"]
+            + sorted(_P0G.FIXTURE_FILES.keys())
+            + ["--limit", "30", "--fast", "--root", tree],
+            env=env, cwd=tree, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        out = checked.stdout.decode("utf-8", "replace")
+        hook = _P0G.load_hook()
+        records, out2 = hook.lesson_states(out, tree)
+        _lines, journal_records = hook._point_of_need(out2, records, tree)
+        return journal_records
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+class AVaultRecallJournalEventFeedsTheReceiptEndToEnd(unittest.TestCase):
+    """VN3 goal 4's own fixture test: one contradictory pair (an applied
+    lesson with current evidence holding, a stale one whose citation does
+    not) run through the REAL classifier (_vn3_two_note_journal_records
+    above), journaled as one vault.recall event the same shape
+    vault_recall_hook.py's cmd_check itself writes, then read back through
+    receipt_door.applied_memory and VN3's own memory_receipt_lines. Two
+    retrieved; one applied with its locator; one withheld with its reason;
+    the receipt names the same two; no note body reaches the journal or the
+    receipt anywhere."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="vn3-e2e-run-")
+        self.run_dir = os.path.join(self.tmp, "run1")
+        os.makedirs(self.run_dir)
+        self._orig_run_dir = os.environ.get(journal.RUN_DIR_ENV_VAR)
+        os.environ[journal.RUN_DIR_ENV_VAR] = self.run_dir
+
+    def tearDown(self):
+        if self._orig_run_dir is None:
+            os.environ.pop(journal.RUN_DIR_ENV_VAR, None)
+        else:
+            os.environ[journal.RUN_DIR_ENV_VAR] = self._orig_run_dir
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_journal_and_receipt_agree_and_carry_no_body(self):
+        journal_records = _vn3_two_note_journal_records()
+        self.assertEqual(len(journal_records), 2, journal_records)
+        # No body anywhere in what the classifier itself handed back, before
+        # this test ever writes a byte to the journal -- _point_of_need's
+        # own job (VN3 goal 1 and 3 both).
+        for rec in journal_records:
+            for value in rec.values():
+                self.assertNotIn(_VN3_FIXTURE_MARKER, str(value),
+                                 "a note's own body reached the journal record: %r" % rec)
+
+        # VN3b: ONE EVENT PER RECORD, each projected through the hook's own
+        # _journal_record onto the room this run's identity actually leaves.
+        # That projection is the whole fix for VN4c's gap G2
+        # (docs/plan/research/vault-night-2026-09-08/VN4c-felt-surface-installed.md):
+        # one event carrying both of these rich records measured 1064
+        # characters against a payload budget of 291, so journal.py truncated
+        # both away, and the escape hatch this test used to carry (assert the
+        # truncation shape, assert an empty receipt, return) fired on every
+        # single run. It is gone: the records now have to survive.
+        hook = _P0G.load_hook()
+        room = hook._journal_room(journal, self.run_dir, "vn3-e2e", "U1")
+        for rec in journal_records:
+            journal.append(self.run_dir, "vault.recall", unit_id="U1",
+                           session_id="vn3-e2e",
+                           payload={"records": [hook._journal_record(rec, room)]})
+        events = journal.read(self.run_dir)
+        self.assertIsNotNone(events)
+        self.assertEqual(len(events), 2, events)
+        for event in events:
+            self.assertNotIn(
+                "payload_truncated", event.get("payload") or {},
+                "a record was truncated away, which is the defect VN3b "
+                "closes: %r" % event)
+
+        recalled = _br._recalled_records_for_unit(events, "U1")
+        self.assertEqual(len(recalled), 2,
+                         "both records must reach the unit's receipt: %r"
+                         % recalled)
+
+        section = RD.applied_memory(recalled)
+        self.assertEqual(len(section["applied"]), 1, section)
+        self.assertEqual(len(section["stale"]), 1, section)
+        applied_entry = section["applied"][0]
+        stale_entry = section["stale"][0]
+        self.assertEqual(applied_entry.get("verdict"), "APPLY")
+        # THE REASON UNDER ITS OWN KEY, and not the locator:
+        # receipt_door.applied_memory forwards title, path, verdict, reason
+        # and line, and never an "evidence" key at all, so the assertion
+        # that used to sit here could only ever have failed -- it was
+        # unreachable behind the truncation escape hatch above, which fired
+        # on every run. `line` is the key VN3b's journalled record carries
+        # its reason text under, because that is the one both
+        # memory_receipt_lines and brother_run's own declined-reason string
+        # read (see vault_recall_hook._journal_record).
+        self.assertTrue(applied_entry.get("line"),
+                        "the applied entry names no reason: %r" % applied_entry)
+        self.assertEqual(stale_entry.get("verdict"), "WITHHELD")
+        self.assertTrue(stale_entry.get("line"),
+                        "the stale entry names no reason: %r" % stale_entry)
+
+        lines = RD.memory_receipt_lines(section)
+        self.assertEqual(len(lines), 2, lines)
+        applied_lines = [l for l in lines if l.startswith("applied ")]
+        withheld_lines = [l for l in lines if l.startswith("withheld (stale) ")]
+        self.assertEqual(len(applied_lines), 1, lines)
+        self.assertEqual(len(withheld_lines), 1, lines)
+
+        # NO BODIES ANYWHERE: the fixture marker (present in both notes'
+        # own body text) must never reach the journal payload as read back,
+        # or either receipt rendering -- only title, reason, path.
+        for rec in recalled:
+            for value in rec.values():
+                self.assertNotIn(_VN3_FIXTURE_MARKER, str(value),
+                                 "a note's own body leaked into the journal: %r" % rec)
+        for line in lines:
+            self.assertNotIn(_VN3_FIXTURE_MARKER, line,
+                             "a note's own body leaked into the receipt: %r" % line)
+
+    def test_an_event_carrying_no_records_renders_nothing_never_a_ledger(self):
+        """THE FLOOR, and it has to survive the fix: an event whose payload
+        holds no records (journal.py truncated it, or the recall found
+        nothing) renders an EMPTY memory partition. That is exactly the
+        state VN4c measured on every real run before VN3b, and a receipt
+        that says nothing there is right; a receipt that invents a ledger
+        would not be."""
+        journal.append(self.run_dir, "vault.recall", unit_id="U1",
+                       payload={"payload_truncated":
+                                "NO-DATA: the payload was 1064 characters, "
+                                "over the 512 byte line bound that keeps an "
+                                "append atomic, so it was truncated here"})
+        events = journal.read(self.run_dir)
+        recalled = _br._recalled_records_for_unit(events, "U1")
+        self.assertEqual(recalled, [], recalled)
+        section = RD.applied_memory(recalled)
+        self.assertEqual(RD.memory_receipt_lines(section), [])
+
+    #: One served note in bm_vault.py's own printed shape, the smallest
+    #: input that makes the real hook write one vault.recall event.
+    ONE_NOTE_OUT = (
+        "RECORDED FAILURES in the files you are about to touch:\n"
+        "\n  A file handle never bound to a name leaks  [lesson, session]\n"
+        "    Use with-open; the pre-write gate cannot see io.open(path).read().\n"
+        "    matched on: wording\n"
+        "    /Users/x/vault/40-Failures/a-file-handle-leak.md\n"
+    )
+
+    def test_the_hook_attributes_its_event_to_the_unit_its_worker_runs_for(self):
+        """VN4c gap G3, end to end and through the REAL hook: the unit id
+        loop_bridge.LaneWorker.run exports (journal.UNIT_ID_ENV_VAR) reaches
+        the event, so _recalled_records_for_unit's own unit match picks it
+        up and the receipt partition finally carries something. Before VN3b
+        the hook wrote unit_id None on purpose and this matcher returned
+        nothing, for every unit, on every run."""
+        tmp = tempfile.mkdtemp(prefix="vn3b-hook-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        tool = os.path.join(tmp, "bm_vault.py")
+        with open(tool, "w", encoding="utf-8") as fh:
+            fh.write("print(%r, end='')\n" % self.ONE_NOTE_OUT)
+        # BM_HOOK_OUTCOMES is resolved at the hook's IMPORT time, so it is
+        # set before load_hook() rather than around main(): a hook test
+        # without it appends to the founder's own real outcome log.
+        keys = ("BM_TOOLS", "BM_HOOK_OUTCOMES", "CLAUDE_SESSION_ID",
+                "CODEX_SESSION_ID", journal.RUN_DIR_ENV_VAR,
+                journal.UNIT_ID_ENV_VAR)
+        saved = {k: os.environ.get(k) for k in keys}
+        for key in ("CLAUDE_SESSION_ID", "CODEX_SESSION_ID"):
+            os.environ.pop(key, None)
+        os.environ.update({
+            "BM_TOOLS": tmp,
+            "BM_HOOK_OUTCOMES": os.path.join(tmp, "hook-outcomes.jsonl"),
+            journal.RUN_DIR_ENV_VAR: self.run_dir,
+            journal.UNIT_ID_ENV_VAR: "U1"})
+        saved_in, saved_out = sys.stdin, sys.stdout
+        sys.stdin = io.StringIO(json.dumps(
+            {"tool_input": {"file_path": "/tmp/a-file-handle-leak.md"},
+             "session_id": "vn3b-e2e"}))
+        sys.stdout = io.StringIO()
+        try:
+            hook = _P0G.load_hook()
+            # The consent gate is a different property, calibrated in the
+            # hook's own suite; this test is about attribution.
+            hook._consented = lambda: True
+            hook.TOOL = tool
+            hook.SEEN = os.path.join(tmp, "seen")
+            hook.main()
+        finally:
+            sys.stdin, sys.stdout = saved_in, saved_out
+            for key, value in saved.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+        events = [e for e in (journal.read(self.run_dir) or [])
+                  if e.get("type") == "vault.recall"]
+        self.assertEqual(len(events), 1, events)
+        self.assertEqual(events[0].get("unit_id"), "U1", events[0])
+        recalled = _br._recalled_records_for_unit(events, "U1")
+        self.assertEqual(len(recalled), 1,
+                         "the unit's own receipt read nothing: %r" % recalled)
+        lines = RD.memory_receipt_lines(RD.applied_memory(recalled))
+        self.assertEqual(len(lines), 1, lines)
 
 
 class TheFailureCaseDraftClosesTheVaultHalfOfTheLoop(unittest.TestCase):

@@ -348,7 +348,7 @@ class HookDowngradesRefusedToUnverified(unittest.TestCase):
              "applies_to: [test_poison_target.py]"],
             POISON_SKIP_TEST_A))
         hook = self._load_hook()
-        state, line, _note_type = hook._lesson_state(
+        state, line, _note_type, _evidence = hook._lesson_state(
             "a", os.path.join(self.vault, "a.md"), self.tree)
         # Night run 2026-09-07 (design-P0.md section 3, steering 6.5): a
         # safety-precedence refusal now reads its own state, never
@@ -414,7 +414,7 @@ class EvidenceTierExceptionNeverAppliesTheMemory(unittest.TestCase):
         self.addCleanup(setattr, hook.bm_vault_contradiction,
                         "evidence_tier", original)
         hook.bm_vault_contradiction.evidence_tier = _raises
-        state, line, _note_type = hook._lesson_state(
+        state, line, _note_type, _evidence = hook._lesson_state(
             "a", self.note_path, self.tree)
         self.assertEqual(state, "unverified")
         self.assertIsNotNone(line)

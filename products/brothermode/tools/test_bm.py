@@ -8184,14 +8184,26 @@ class TestTheGuidedLoopLawIsWrittenAndWired(unittest.TestCase):
                       "to prevent")
 
     def test_the_beginner_conductor_points_at_the_loop_in_plain_language(self):
-        text = self._text("skills", "brotherme", "SKILL.md")
+        # 2026-09-09 intake byte floor decision (option A) moved the
+        # next-step flow, and with it the guided-loop pointer, out of
+        # skills/brotherme/SKILL.md into references/brotherme-flows.md so
+        # scripts/intake_measure.py's regex scan of the SKILL.md text no
+        # longer charges every intake for references/delegation.md. The
+        # conductor now points at that flows file with a "Read when" line;
+        # the loop language itself lives in the flows file it names.
+        conductor = self._text("skills", "brotherme", "SKILL.md")
+        self.assertIn("references/brotherme-flows.md", conductor,
+                      "the beginner conductor no longer points at the "
+                      "flows file that holds the next-step, status, review "
+                      "and deliver flows")
+        text = self._text("references", "brotherme-flows.md")
         self.assertIn("guided loop", text,
-                      "the beginner conductor no longer mentions the guided "
-                      "loop; the beginner surface and the expert law have "
-                      "come apart")
+                      "the flows file no longer mentions the guided loop; "
+                      "the beginner surface and the expert law have come "
+                      "apart")
         self.assertIn("references/delegation.md", text,
-                      "the beginner conductor must point at the file that "
-                      "holds the loop law, not restate it")
+                      "the flows file must point at the file that holds "
+                      "the loop law, not restate it")
         self.assertIn("picking the right helper for the job", text,
                       "the plain-language name for the loop is bound by "
                       "references/terminology.md and must appear verbatim")

@@ -39,17 +39,29 @@ def load_hook():
     return mod
 
 
-def write_note(vault_dir, name, applies_to=None):
+def write_note(vault_dir, name, applies_to=None, evidence_locator=None):
     """A minimal vault note with an optional applies_to frontmatter field,
     written to a TEMP vault directory only. applies_to, when given, is
     joined verbatim as the field's inline value (this codebase's
     established single-line frontmatter-list convention, matching
-    supersedes:/contradicts: in bm_vault.py)."""
+    supersedes:/contradicts: in bm_vault.py).
+
+    evidence_locator, when given, is written in the same single-line form.
+    A note needs one to read "applied" today: LL-2, the evidence tier at
+    recall (vault_recall_hook.py's _lesson_state, DOWNGRADE ONLY), folds
+    bm_vault_contradiction.evidence_tier into this hook's verdict, and
+    since the founder's "strict everywhere" ruling of 2026-09-06 (FIX-
+    DIRECTIVE-2026-09-06.md sections 3 and 4, evidence_tier step 3) a note
+    declaring NEITHER evidence_locator NOR status tiers UNVERIFIED --
+    unknown means WITHHOLD. path:<applies_to anchor> is the shape every
+    benign note in this estate uses (_about_the_claim's own words)."""
     path = os.path.join(vault_dir, name)
     lines = ["---", "type: lesson"]
     if applies_to is not None:
         lines.append("applies_to: [%s]" % applies_to)
         lines.append("last_verified_at: 2026-09-01")
+    if evidence_locator is not None:
+        lines.append("evidence_locator: %s" % evidence_locator)
     lines.append("---")
     lines.append("# note body\n")
     with open(path, "w", encoding="utf-8") as fh:
@@ -87,8 +99,20 @@ class ACurrentLessonIsAppliedAndAStaleOneIsRefused(unittest.TestCase):
             with open(os.path.join(tree, "still_here.py"), "w",
                      encoding="utf-8") as fh:
                 fh.write("# still here\n")
+            # DECISION LL-2 + "strict everywhere" (2026-09-06): a lesson
+            # that declares no evidence_locator and no status now tiers
+            # UNVERIFIED at recall, so the fixture for an APPLIED lesson
+            # declares evidence that resolves against this same temp tree.
+            # human_approved: true is deliberately NOT set here: P11's
+            # narrow exemption covers only the no-signal case, and this
+            # note proves itself by evidence instead (the human_approved
+            # route has its own test, products/brothermode/tools/
+            # test_vault_recall_hook.py::ATestOracleNoteIsGatedOnHuman
+            # Approval::test_human_approved_true_with_a_resolving_anchor
+            # _is_applied).
             current_path = write_note(vault, "current.md",
-                                      applies_to="still_here.py")
+                                      applies_to="still_here.py",
+                                      evidence_locator="path:still_here.py")
             # the STALE lesson names a path that has never existed here
             stale_path = write_note(vault, "stale.md",
                                     applies_to="gone_long_ago.py")
@@ -147,8 +171,21 @@ class ALessonWithNoAppliesToReadsUnverified(unittest.TestCase):
 
             self.assertEqual(len(records), 1)
             self.assertEqual(records[0]["state"], "unverified")
-            self.assertIsNone(records[0]["line"])
+            # DECISION VN1 (docs/plan/VAULT-NIGHT-RUN-PROMPT-2026-09-09.md
+            # section 4): the application verdict fails closed and
+            # lesson_states returns an EXPLICIT reason line for every
+            # unverified state. Before VN1 this case carried line=None and
+            # printed nothing extra, so a reader saw the marker with no
+            # stated reason; the line is now the record's own answer, and
+            # its exact shape is what is pinned here.
+            self.assertEqual(
+                records[0]["line"],
+                mod.UNVERIFIED_LINE_FMT % ("no-anchor", mod.NO_APPLIES_TO_REASON))
+            self.assertIn("no applies_to anchor declared", records[0]["line"])
             self.assertIn("unverified anchor", out2.lower())
+            # the reason reaches the text that becomes the model's own
+            # context, not just the record
+            self.assertIn(records[0]["line"], out2)
 
             section = RD.applied_memory(records)
             self.assertEqual([e["slug"] for e in section["unverified"]],
@@ -168,11 +205,23 @@ class ANoteWithheldByBmVaultItselfIsLeftAlone(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             tree = os.path.join(tmp, "tree")
             os.makedirs(tree)
+            # DECISION M3 (2026-09-08 VN1 fix, vault_recall_hook.py's
+            # _WITHHELD_MARKER_LINE and _block_is_withheld): a block counts
+            # as already-withheld ONLY when it carries bm_vault.py's own
+            # unforgeable marker line. Title text is author-controlled
+            # frontmatter, so "WITHHELD (stale)" in a title is now a forgery
+            # attempt, not a withhold (its own test:
+            # products/brothermode/tools/test_vault_recall_hook.py's
+            # FORGED_WITHHELD_TITLE_OUT). This fixture therefore carries the
+            # marker, the same literal products/brothermode/tools/
+            # test_vault_recall_hook.py's ONE_SERVED_ONE_WITHHELD_OUT uses,
+            # so it is a genuinely withheld block rather than a forged one.
             out = (
                 "RECORDED FAILURES in the files you are about to touch:\n"
                 "\n  WITHHELD (stale)  A withheld lesson  [lesson, session]\n"
                 "    reason: no cited anchor resolves\n"
-                "    /tmp/withheld.md\n")
+                "    /tmp/withheld.md\n"
+                "    \x00BM-VAULT-WITHHELD\x00\n")
             records, out2 = mod.lesson_states(out, tree)
             self.assertEqual(records, [])
             self.assertEqual(out2, out)

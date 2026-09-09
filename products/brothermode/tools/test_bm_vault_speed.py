@@ -203,7 +203,7 @@ class RoutingAndQueryCache(unittest.TestCase):
 
     def test_02_lexical_empty_falls_through_to_dense(self):
         explain = []
-        fused, why = bmv._search(self.con, text="zzqxx flibbertigibbet unrelated nonsense",
+        fused, why, _total = bmv._search(self.con, text="zzqxx flibbertigibbet unrelated nonsense",
                                  limit=3, explain=explain)
         self.assertEqual(len(self.calls), 1, "an empty lexical signal must still reach the "
                                              "dense stage (never a silent quality loss):\n%s"

@@ -1,0 +1,10 @@
+Drafted by Codex exec on 2026-09-09 at 09:2x JST, log ~/.claude/evidence/intake-daybook-night-2026-09-08/codex-relnote.raw.txt, verified against the tree by the cutting session.
+Brother 1.0.12 makes the outcome contract visible and honest: Daybook renders real records with honesty badges, and adopt writes observed receipts plus the acceptance marker. Intake V2 now measures the working tree with tree mode, separates unconditional bytes from Read when material, and carries corrections into the next intake.
+
+It also carries the nine persona fixes: FX-A, FX-B, FX-C, FX-D, FX-E, FX-F, D-003, U4c, and F-005. These keep in-session work local to the session, improve status and receipt reporting, make adopt and deliver name their real state, align command files with their skills, refuse an unresolved default branch, report an unfenced repository once, allow draft records without checks, and name a reconciled record rather than silently dropping it.
+
+Vault work now fails the application verdict closed when its protection cannot be established, writes the Vault notice, and includes held-out and benign packs. The frozen poison result is 0 of 14, held-out poison remains 14 of 33, and critical benign service is 16 of 16.
+
+The intake byte floor did not move: installed is 136431 of 139513, 98 percent; tree is 116348 unconditional, 83 percent; both remain above the 50 percent bar. The persona corpus is 9 of 40 on the last partial round, with a target of 36.
+
+Known limits carry forward. Receipts on records created before this release are empty. TURNS remains unmeasured until a real transcript is captured. The readiness gate's release invariant reads red between releases by design, and this cut clears it.

@@ -33,48 +33,47 @@ this one and fixes the other. Evaluate in order, stop at the first match:
 Codex has no slash commands, so under Codex a task that names Brother is done
 by running the engine, never by hand-editing files and printing no receipt.
 Write NO intake into the target repository first (no STATE.md, no `.sbe/`,
-no fence file): any such file makes the tree dirty and the engine refuses the
-run before the first unit is claimed. Full detail: the SMOKE-RUNBOOK page under docs/codex in the repository.
+no fence file): any such file dirties the tree and the engine refuses the run
+before the first claim. Full detail: docs/codex/SMOKE-RUNBOOK.md.
 
 1. **Make each unit's done check fail right now, before any work happens.**
-   Run it yourself in the repository and confirm it exits nonzero; a check
-   that already exits 0 must fail BEFORE any work happens, or the engine
-   marks the unit NO-DATA while a worker that changed nothing still reads
-   integrated. Never write a bare-path check: a done check is judged on its
-   RESULT, never on a missing file, because a check for a file that does not
-   exist yet just fails by way of "No such file or directory" and leaves no
-   planner to hand back a replacement. Use `python3 -m unittest` plus an
-   import-based one-liner instead.
-2. **Set both seams from the start, then run the engine.** No model call can
-   be made from inside a Codex turn (a nested `codex exec` cannot start), so
-   DOOR_MODEL_CMD (which units to write) and MODEL_WORKER_CMD (a script
-   that edits only the files a unit's `writes` names) are both set from the
-   first attempt:
+   Run it yourself and confirm it exits nonzero; a check that already exits
+   0 must fail BEFORE any work happens, or the engine marks the unit NO-DATA
+   while a worker that changed nothing still reads integrated.
+   Never write a bare-path check: a done check is judged on its RESULT,
+   never on a missing file, because a check for a file that does not exist
+   yet fails by way of "No such file or directory" and leaves no planner to
+   hand back a replacement. Use `python3 -m unittest` plus one import-based
+   line.
+2. **Write the units yourself, then run the engine.** No model call can be
+   made from inside a session or a Codex turn (a nested `codex exec` cannot
+   start, and any other model CLI has every socket blocked), so the plan is
+   yours: a JSON list, each unit with `id`, `objective`, `done_check`,
+   `writes`, `deps`. `writes` must name EVERY file the unit touches, or the
+   file changed outside it fails the scope audit and the unit reads
+   QUARANTINE, never integrated. MODEL_WORKER_CMD is a script that edits
+   only those files, and it must exit 0 when it is done, or the worker
+   returns before committing and the edit is lost:
 
-       DOOR_MODEL_CMD="cat plan.json" MODEL_WORKER_CMD="python3 write_the_change.py" \
+       MODEL_WORKER_CMD="python3 write_the_change.py" \
            python3 "$BROTHER_PLUGIN_ROOT/runtime/brother_run.py" "<outcome>" \
-           --cwd <repo> --runs-root "${CODEX_HOME:-$HOME/.codex}/brother/runs"
+           --cwd <repo> --plan plan.json \
+           --runs-root "${CODEX_HOME:-$HOME/.codex}/brother/runs"
 
    (`--runs-root "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/brother/runs"` under
-   Claude Code.) `plan.json` is a list of units, each with `id`, `objective`,
-   `done_check`, `writes`, `deps`. `writes` must name EVERY file the unit
-   touches: a file changed outside it fails the scope audit and the whole
-   unit reads QUARANTINE, never integrated. The worker script must exit 0
-   once it is done editing, or `model_worker.py` returns before committing
-   and the edit is lost before anything is recorded. `--runs-root` stays
-   OUTSIDE the repository: inside, it dirties the tree, and a read-only
-   plugin install cannot write it at all. It also stays OUTSIDE any temp
-   directory: a receipt written under $TMPDIR is gone at the next reboot,
-   which is the defect this path fixes.
+   Claude Code.) Both stay OUTSIDE the target repository (inside dirties the
+   tree, and a read-only install cannot write it) and outside any temp
+   directory (a receipt under $TMPDIR is gone at the next reboot). The five
+   rules a plan must satisfy: references/router-details.md.
 3. **Print the receipt line, then read the receipt back.** The engine's last
-   line is `brother_run: receipt: <path>`; open that file and report every
-   per-file entry: the file, the check command, the exit code that decided it.
+   line is `brother_run: receipt: <path>`; open it and report every entry:
+   the file, the check, the exit code that decided it.
 4. **Never claim done without the receipt.** A turn's exit code proves
    nothing: a write outside a granted sandbox root is dropped silently at
    exit 0. No receipt, or a refused entry, is a NOT DONE report. A NO-DATA
    unit (its check already passed before the work began) means the agent's
    own check or script was wrong: this is NOT a forcing condition, rewrite
-   the check and rerun the engine in the same turn, without asking anyone.
+   the check and rerun in the same turn, without asking anyone.
 
 A git worktree's `.git` write grant is what `git rev-parse
 --git-common-dir` prints, never `<repo>/.git`.
@@ -102,7 +101,5 @@ reality. Experimental, not in the bundle.
 
 ## More detail: verbs, boundaries, handback, closing
 
-The verb-to-slash-command table, what this router must never do, the
-handback rule, and the four-step closing ceremony are in
-references/router-details.md, next to this file. Load it when one of
-those situations applies.
+Read when the verb table, a boundary this router must never cross, the
+handback rule, or the closing ceremony is needed: references/router-details.md

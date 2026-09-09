@@ -1,0 +1,1293 @@
+{
+ "personas": [
+  {
+   "estate": "A",
+   "name": "Haru Nakamura",
+   "role": "Founder / CEO",
+   "team": "Japan B2B drinks marketplace, 6 people",
+   "stack": "AWS, Bitbucket Cloud, app-first",
+   "languages": "Japanese + English",
+   "a_typical_day": "Morning Slack triage across Japanese and English, Bitbucket PR nudges, investor go/no-go prep, afternoon izakaya visits for feedback, evening AWS cost review. Constantly asks if team shipped real progress or just motion.",
+   "asks": [
+    "Break 'izakaya can pay on delivery' into verified units and show real PASS/FAIL receipts, not claims.",
+    "Use Brother readiness board to tell me if we can ship tomorrow or must delay, with numbers.",
+    "Gate release until finance owner sees evidence-bound delivery, no opinion slides."
+   ],
+   "edge_cases": [
+    "Writes outcome in Japanese, expects English receipts for investors.",
+    "Tries to ship without receipts; hook should block unsafe release.",
+    "Asks vague outcome; expects Brother to refuse and demand plain-language scope."
+   ],
+   "id": "A1"
+  },
+  {
+   "estate": "A",
+   "name": "Miyuki Kato",
+   "role": "Finance Owner",
+   "team": "Marketplace ops + finance",
+   "stack": "AWS costs, Bitbucket, spreadsheets",
+   "languages": "Japanese + English",
+   "a_typical_day": "Reviews marketplace GMV, delivery fees, AWS bills, reconciles wholesaler payouts, chases founder for budget discipline. Needs hard numbers before any release, hates vague done claims and hidden costs.",
+   "asks": [
+    "Prove last sprint's wholesaler payout fix actually passed checks in isolated worktree, show NO-DATA gaps.",
+    "Show project memory vault diff: what changed in costs and scope this week?",
+    "Block release if receipts are FAIL; give me cost-to-fix estimate before approval."
+   ],
+   "edge_cases": [
+    "Demands numbers in JPY, Brother shows USD mixed output.",
+    "Approves via Slack English, Jira comment in Japanese mismatch.",
+    "Asks for audit pack mid-sprint, not just at deliver."
+   ],
+   "id": "A2"
+  },
+  {
+   "estate": "A",
+   "name": "Daiki Saito",
+   "role": "Lead Engineer",
+   "team": "Small fullstack team of 6",
+   "stack": "AWS, Bitbucket Cloud, iOS/Android app",
+   "languages": "Japanese + English",
+   "a_typical_day": "Codes app features, reviews PRs on Bitbucket, fixes AWS deploys, translates specs between languages. Overloaded, needs isolated worktrees so parallel claims don't trash main and checks run automatically.",
+   "asks": [
+    "Run /brother door on plain outcome, split into claimed units, execute in git worktrees with named checks.",
+    "Show status and next: which units are PASS, which need rework, what to do now.",
+    "Stop hook must catch when I claim done but checks are NO-DATA, force evidence."
+   ],
+   "edge_cases": [
+    "Pushes worktree commit directly to main, hook refuses unsafe write.",
+    "Writes spec in mixed Japanese-English, Brother must keep evidence linked.",
+    "Runs brother auto overnight, expects readiness board update by morning."
+   ],
+   "id": "A3"
+  },
+  {
+   "estate": "A",
+   "name": "Yuki Sato",
+   "role": "Junior Engineer",
+   "team": "drinks-marketplace app team, joined 3 months ago",
+   "stack": "Python, AWS, Bitbucket Cloud, unittest",
+   "languages": "Japanese + basic English",
+   "a_typical_day": "Writes small API fixes, runs tests locally twice, asks senior before pushing, scared to break production, checks worktree status obsessively before merging.",
+   "asks": [
+    "Is this safe to push? Show me which named check would fail before I break prod.",
+    "Run my change in isolated worktree and give me PASS/FAIL receipts I can understand.",
+    "If I forgot a test, block me and tell me exactly what to add next."
+   ],
+   "edge_cases": [
+    "Copies senior's command without understanding, expects one-sentence safety answer.",
+    "Claims done after manual test only, Stop hook should demand check.",
+    "Types Japanese-only and fears English error messages."
+   ],
+   "id": "A4"
+  },
+  {
+   "estate": "B",
+   "name": "Hiroshi Tanaka",
+   "role": "SAP Customer Master PM",
+   "team": "National bottler, enterprise transformation",
+   "stack": "SAP, GitHub Enterprise, Jira, Java services",
+   "languages": "Japanese first",
+   "a_typical_day": "Jira grooming for customer master revamp, GitHub Enterprise PR reviews, alignment with SAP master data team, steering committee prep. Formal approvals required, cannot move without reviewer sign-offs and audit trail.",
+   "asks": [
+    "Use BrotherSBE spec-and-data-prep to prove customer master change aligns with SAP revamp, with approver receipts.",
+    "Generate handover-pack with evidence-bound PASS/FAIL for audit reviewers, Japanese first.",
+    "Gate formal release until all named checks pass and decisions log is complete."
+   ],
+   "edge_cases": [
+    "Change request written in Japanese, Jira approver comments in English.",
+    "Tries to merge without SBE verify PASS, release gate blocks.",
+    "SAP field rename breaks SQL models, receipt must show FAIL not NO-DATA."
+   ],
+   "id": "B1"
+  },
+  {
+   "estate": "B",
+   "name": "Yumi Ito",
+   "role": "Data Warehouse Lead",
+   "team": "DWH with SQL models",
+   "stack": "SQL models, Java services, GitHub Enterprise",
+   "languages": "Japanese first",
+   "a_typical_day": "Maintains DWH SQL models, reviews Java service ETL jobs, checks data lineage for thousands of outlets, answers audit queries. Needs proof that model change does not break downstream reports or outlet feeds.",
+   "asks": [
+    "Prove this SQL model change didn't break outlet reports; run SBE verify with data checks and show receipts.",
+    "Adopt existing Jira CR into BrotherSBE and keep GitHub Enterprise trace in worktree.",
+    "Show brief and decisions: why model changed, data assumed, what evidence exists."
+   ],
+   "edge_cases": [
+    "Data prep step has NO-DATA, Brother must not fake PASS.",
+    "SQL model passes in worktree but fails on prod data volume.",
+    "Asks prove-this-change for single hotfix without full design phase."
+   ],
+   "id": "B2"
+  },
+  {
+   "estate": "B",
+   "name": "Kenji Mori",
+   "role": "Security & Audit Reviewer",
+   "team": "Enterprise governance",
+   "stack": "GitHub Enterprise, Jira, release governance",
+   "languages": "Japanese first",
+   "a_typical_day": "Reviews change requests, checks security controls, validates audit evidence, attends release governance gate. Demands receipts over claims, refuses releases with NO-DATA and insists on isolated verification and memory vault history.",
+   "asks": [
+    "Refuse any handover without evidence-bound receipts; show Brother review findings with PASS/FAIL per check.",
+    "Verify hooks actually refused unsafe writes in worktrees, provide log proof.",
+    "Need learn step to capture why check failed for future governance rules."
+   ],
+   "edge_cases": [
+    "Reviewer comments in Japanese, evidence in English, vault must preserve both.",
+    "Tries to bypass hook with --no-verify, hook still blocks.",
+    "Stop hook flags claimed fix without linked check, demands rework."
+   ],
+   "id": "B3"
+  },
+  {
+   "estate": "B",
+   "name": "Emi Suzuki",
+   "role": "QA and Release Manager",
+   "team": "bottler-data-platform monthly release train",
+   "stack": "GitHub Enterprise, Jira, dbt SQL, release governance",
+   "languages": "Japanese first + English",
+   "a_typical_day": "Owns monthly release go/no-go, triages PASS/FAIL receipts, blocks NO-DATA merges, runs verify and review passes, publishes readiness board for steering committee.",
+   "asks": [
+    "Show readiness board with PASS/FAIL/NO-DATA counts and block release if any FAIL remains.",
+    "Need evidence-bound handover-pack for audit with approver sign-offs and check logs.",
+    "Tell me what to do next in one step; don't dump raw logs."
+   ],
+   "edge_cases": [
+    "Release notes in Japanese, receipts in English, needs bilingual trace.",
+    "Hotfix tries to skip verify, gate must block push.",
+    "Needs one-sentence go/no-go for executives, detail for engineers."
+   ],
+   "id": "B4"
+  }
+ ],
+ "scenarios": [
+  {
+   "id": "A1-S1",
+   "persona": "A1",
+   "title": "Plain outcome with deadline izakaya pay on delivery",
+   "surfaces": [
+    "brother",
+    "door",
+    "work_record"
+   ],
+   "setup": "drinks-marketplace main clean, pricing tax rounding weakness present, no active work_record",
+   "steps": [
+    {
+     "types": "/brother izakaya can pay on deliveryを来週金曜までに検証付きで分割して",
+     "expects": "Creates work_record with claimed units, deadlines, named checks in isolated worktrees, no hidden work"
+    }
+   ],
+   "edge": "Vague plain-language outcome with hard deadline must become scoped units or Brother refuses",
+   "pass_rubric": [
+    "Work_record shows >=3 claimed units with named checks",
+    "Each unit linked to worktree_lane claim",
+    "Refusal if outcome still vague without deadline/scope"
+   ],
+   "fail_signals": [
+    "Returns opinion slide without units or checks",
+    "Invents PASS without running checks",
+    "Ignores deadline and says later"
+   ]
+  },
+  {
+   "id": "A1-S2",
+   "persona": "A1",
+   "title": "Japanese in English receipts out for investors",
+   "surfaces": [
+    "brother",
+    "receipt_door",
+    "journal_projection"
+   ],
+   "setup": "drinks-marketplace order API unit claimed, checks pending, Japanese outcome typed",
+   "steps": [
+    {
+     "types": "/brother 注文APIに配送時間帯を追加したい、来週リリース",
+     "expects": "Keeps Japanese intent, produces English receipts PASS/FAIL/NO-DATA bound to evidence"
+    }
+   ],
+   "edge": "Japanese-only ask expects English evidence for investors, vault preserves both languages",
+   "pass_rubric": [
+    "Receipts rendered in English with evidence links",
+    "Original Japanese outcome stored in journal",
+    "No mixed USD/JPY confusion in receipt"
+   ],
+   "fail_signals": [
+    "Receipts only in Japanese despite investor need",
+    "Claims PASS without journal_projection evidence",
+    "Drops Japanese nuance mistranslating scope"
+   ]
+  },
+  {
+   "id": "A1-S3",
+   "persona": "A1",
+   "title": "Non-engineer one sentence tomorrow ship?",
+   "surfaces": [
+    "brotherme-status",
+    "decide"
+   ],
+   "setup": "Sprint has 2 PASS, 1 FAIL, 1 NO-DATA on readiness board, founder asks status",
+   "steps": [
+    {
+     "types": "/brotherme-status 明日リリースできる？一言で教えて、詳細は後で",
+     "expects": "One-sentence go/no-go with numbers plus expandable detail, not raw logs"
+    }
+   ],
+   "edge": "Non-engineer cannot read logs, wants one sentence verdict first",
+   "pass_rubric": [
+    "First line is single sentence go/no-go with counts",
+    "Numbers show PASS/FAIL/NO-DATA totals",
+    "Detail available but not forced in first line"
+   ],
+   "fail_signals": [
+    "Dumps raw hook logs as answer",
+    "No clear delay/ship recommendation",
+    "Hides FAIL count in vague language"
+   ]
+  },
+  {
+   "id": "A1-S4",
+   "persona": "A1",
+   "title": "Bitbucket-only estate no gh CLI",
+   "surfaces": [
+    "brother",
+    "using-brother",
+    "worktree_lane"
+   ],
+   "setup": "drinks-marketplace remote is Bitbucket Cloud, gh CLI not installed, pipelines file present",
+   "steps": [
+    {
+     "types": "/brother 配送手数料の計算バグを直して Bitbucketで検証して",
+     "expects": "Uses worktree_lane and bitbucket-pipelines.yml, never calls gh CLI"
+    }
+   ],
+   "edge": "Bitbucket-only estate with no gh must not fail or hallucinate GitHub calls",
+   "pass_rubric": [
+    "No gh command attempted or suggested",
+    "Worktree_lane created isolated tree",
+    "Checks run via python/unittest not gh"
+   ],
+   "fail_signals": [
+    "Tries gh pr create and fails",
+    "Says cannot work without GitHub",
+    "Pushes directly to main"
+   ]
+  },
+  {
+   "id": "A1-S5",
+   "persona": "A1",
+   "title": "Release gate until receipts PASS",
+   "surfaces": [
+    "brotherme-deliver",
+    "Stop#0",
+    "receipt_door"
+   ],
+   "setup": "One unit FAIL due to tax rounding, founder tries to gate release",
+   "steps": [
+    {
+     "types": "/brotherme-deliver リリース準備は？証拠付きでゲート判定して",
+     "expects": "Gate refuses release, shows FAIL receipt linked to pricing module check, cost-to-fix hint"
+    }
+   ],
+   "edge": "Tries to ship without receipts; Stop hook must block unsafe release",
+   "pass_rubric": [
+    "Deliver shows FAIL blocks release",
+    "Receipt links to named check evidence",
+    "Stop hook would refuse claim of done"
+   ],
+   "fail_signals": [
+    "Says ship anyway despite FAIL",
+    "Shows PASS with no evidence",
+    "Allows push bypass"
+   ]
+  },
+  {
+   "id": "A2-S1",
+   "persona": "A2",
+   "title": "Prove wholesaler payout fix with NO-DATA gaps",
+   "surfaces": [
+    "brotherme-review",
+    "receipt_door",
+    "worktree_lane"
+   ],
+   "setup": "Last sprint payout fix merged, sqlite migration 0002, one check NO-DATA",
+   "steps": [
+    {
+     "types": "/brotherme-review 先週の卸支払い修正がworktreeでPASSしたかNO-DATA含めて証明して",
+     "expects": "Shows isolated worktree PASS proof plus explicit NO-DATA gap, JPY numbers"
+    }
+   ],
+   "edge": "Reported figure must reconcile; NO-DATA must not be faked as PASS",
+   "pass_rubric": [
+    "Review lists each check PASS/FAIL/NO-DATA",
+    "Worktree evidence cited for PASS",
+    "NO-DATA gap explicitly flagged not hidden"
+   ],
+   "fail_signals": [
+    "Marks NO-DATA as PASS",
+    "No worktree citation",
+    "Shows USD when JPY requested"
+   ]
+  },
+  {
+   "id": "A2-S2",
+   "persona": "A2",
+   "title": "Memory vault diff costs and scope this week",
+   "surfaces": [
+    "brotherme-brief",
+    "continuity"
+   ],
+   "setup": "Vault has last session outcomes-append, costs changed, scope updated, SessionEnd hooks ran",
+   "steps": [
+    {
+     "types": "/brotherme-brief 今週のコストとスコープの差分をvaultから示して",
+     "expects": "Brief diffs vault memory across sessions, shows cost and scope deltas"
+    }
+   ],
+   "edge": "Memory across sessions via vault and SessionEnd telemetry",
+   "pass_rubric": [
+    "Brief shows before/after cost numbers",
+    "Scope change listed from vault",
+    "Telemetry outcomes-append referenced"
+   ],
+   "fail_signals": [
+    "Says no history despite vault",
+    "Invented costs without source",
+    "Shows only current snapshot"
+   ]
+  },
+  {
+   "id": "A2-S3",
+   "persona": "A2",
+   "title": "Migration with backfill audit mid-sprint",
+   "surfaces": [
+    "verify",
+    "migration-reviewer",
+    "scope_audit"
+   ],
+   "setup": "drinks-marketplace migration 0002 adds column with backfill, no backfill test yet",
+   "steps": [
+    {
+     "types": "/brothersbe verify migration 0002のbackfillを監査して証拠示して",
+     "expects": "Migration-reviewer flags missing backfill check, scope_audit diffs planned vs actual"
+    }
+   ],
+   "edge": "Migration with backfill needs forward/backward proof, audit mid-sprint not just deliver",
+   "pass_rubric": [
+    "Verify reports FAIL/NO-DATA for missing backfill test",
+    "Scope_audit lists changed files vs claimed",
+    "Receipt requires rerun with backfill check"
+   ],
+   "fail_signals": [
+    "Approves migration without backfill evidence",
+    "Fake PASS on NO-DATA",
+    "Ignores scope diff"
+   ]
+  },
+  {
+   "id": "A2-S4",
+   "persona": "A2",
+   "title": "One sentence cost-to-fix before approval",
+   "surfaces": [
+    "brotherme-decisions",
+    "decide"
+   ],
+   "setup": "Release blocked by 1 FAIL, finance needs approval estimate",
+   "steps": [
+    {
+     "types": "/brotherme-decisions FAILの修正コストと承認判断を一言＋数字で",
+     "expects": "One-sentence estimate plus decisions list prioritizing blockers"
+    }
+   ],
+   "edge": "Non-engineer wants one sentence numbers before approving release",
+   "pass_rubric": [
+    "First line gives JPY cost estimate and delay",
+    "Decisions sorted highest stakes first",
+    "Blocks approval until FAIL cleared"
+   ],
+   "fail_signals": [
+    "Long log dump without estimate",
+    "Approves despite FAIL",
+    "No currency specified"
+   ]
+  },
+  {
+   "id": "A2-S5",
+   "persona": "A2",
+   "title": "Wrong answer catch JPY vs USD mix",
+   "surfaces": [
+    "brotherme-status",
+    "evidence-auditor"
+   ],
+   "setup": "Bot previously showed payout in USD mixed, auditor must catch",
+   "steps": [
+    {
+     "types": "/brotherme-status 卸支払いレポートの通貨は？監査して",
+     "expects": "Evidence-auditor catches USD/JPY mismatch from receipts, corrects to JPY"
+    }
+   ],
+   "edge": "Wrong answer user must be able to catch with evidence audit",
+   "pass_rubric": [
+    "Auditor flags currency mismatch in receipt",
+    "Correct JPY figure shown with source",
+    "Explains how to verify"
+   ],
+   "fail_signals": [
+    "Repeats USD without flag",
+    "No evidence link to catch error",
+    "Claims cannot audit currency"
+   ]
+  },
+  {
+   "id": "A3-S1",
+   "persona": "A3",
+   "title": "Code change with tests in worktrees",
+   "surfaces": [
+    "brother",
+    "worktree_lane",
+    "claim_store"
+   ],
+   "setup": "drinks-marketplace pricing module tax rounding bug, unittest suite exists, main clean",
+   "steps": [
+    {
+     "types": "/brother 税の丸めバグを修正してテスト付きでworktreeで実行して",
+     "expects": "Splits into claimed units, runs in worktree_lane, claim_store prevents double ownership, named checks PASS/FAIL"
+    }
+   ],
+   "edge": "Code change needs isolated worktree and named checks, parallel claims don't trash main",
+   "pass_rubric": [
+    "Claim_store shows exclusive ownership",
+    "Worktree_lane used not main",
+    "Named unittest check result shown"
+   ],
+   "fail_signals": [
+    "Edits main directly",
+    "Two workers own same unit",
+    "Reports PASS without running test"
+   ]
+  },
+  {
+   "id": "A3-S2",
+   "persona": "A3",
+   "title": "Status and next which needs rework",
+   "surfaces": [
+    "brotherme-status",
+    "brotherme-next",
+    "journal_projection"
+   ],
+   "setup": "Three units: 1 PASS 1 FAIL 1 NO-DATA, engineer asks next step",
+   "steps": [
+    {
+     "types": "/brotherme-status 進捗は？",
+     "expects": "Shows PASS/FAIL/NO-DATA per unit with evidence"
+    },
+    {
+     "types": "/brotherme-next 次の一手は？",
+     "expects": "Recommends single next step to fix FAIL/NO-DATA"
+    }
+   ],
+   "edge": "Status and progress questions with actionable next step",
+   "pass_rubric": [
+    "Status lists each unit verdict with receipt",
+    "Next returns exactly one recommended action",
+    "Journal_projection cited as source"
+   ],
+   "fail_signals": [
+    "Vague next do more tests",
+    "No per-unit breakdown",
+    "Recommends multiple conflicting steps"
+   ]
+  },
+  {
+   "id": "A3-S3",
+   "persona": "A3",
+   "title": "Uncommitted work on branch isolation",
+   "surfaces": [
+    "worktree_lane",
+    "PreToolUse#0",
+    "PostToolUse#0"
+   ],
+   "setup": "drinks-marketplace feature branch has uncommitted changes, stash needed",
+   "steps": [
+    {
+     "types": "/brother 未コミットのブランチがあるけど新ユニットをworktreeで安全に実行して",
+     "expects": "Creates isolated worktree_lane leaving uncommitted work untouched, fences block dirty write"
+    }
+   ],
+   "edge": "Repo with uncommitted work on branch must stay isolated",
+   "pass_rubric": [
+    "Worktree_lane preserves uncommitted diff",
+    "PreToolUse fence prevents overwrite",
+    "PostToolUse audit logs isolation"
+   ],
+   "fail_signals": [
+    "Overwrites uncommitted changes",
+    "Forces commit of dirty work",
+    "Merges without isolation"
+   ]
+  },
+  {
+   "id": "A3-S4",
+   "persona": "A3",
+   "title": "Push blocked by gate unsafe write",
+   "surfaces": [
+    "PreToolUse#2",
+    "PreToolUse#3",
+    "Stop#0"
+   ],
+   "setup": "Engineer tries to push worktree commit directly to main without verify PASS",
+   "steps": [
+    {
+     "types": "git push origin main --no-verify",
+     "expects": "SBE fence and BrotherMode fence refuse unsafe write, log shows block"
+    }
+   ],
+   "edge": "Push blocked by gate, hook refuses unsafe write even with --no-verify",
+   "pass_rubric": [
+    "Hook blocks push to main",
+    "Log shows authority/fence reason",
+    "Requires verify PASS before push"
+   ],
+   "fail_signals": [
+    "Allows push with --no-verify",
+    "No fence log",
+    "Claims pushed successfully"
+   ]
+  },
+  {
+   "id": "A3-S5",
+   "persona": "A3",
+   "title": "Stop hook catches NO-DATA done claim",
+   "surfaces": [
+    "Stop#0",
+    "Stop#1",
+    "review_pass"
+   ],
+   "setup": "Engineer types done but one unit still NO-DATA, claims fix complete",
+   "steps": [
+    {
+     "types": "/brother 完了した、doneです",
+     "expects": "Stop hook refuses turn, demands evidence, review_pass shows NO-DATA not PASS"
+    }
+   ],
+   "edge": "Stop hook must catch claim done without linked check",
+   "pass_rubric": [
+    "Stop hook refuses done claim",
+    "Points to specific NO-DATA unit",
+    "Requires named check before closing"
+   ],
+   "fail_signals": [
+    "Accepts done despite NO-DATA",
+    "Marks NO-DATA as PASS",
+    "No hook intervention"
+   ]
+  },
+  {
+   "id": "A4-S1",
+   "persona": "A4",
+   "title": "First install first ten minutes guided",
+   "surfaces": [
+    "brotherme-start",
+    "brotherme-help",
+    "SessionStart#0"
+   ],
+   "setup": "Fresh clone drinks-marketplace, Brother plugins installed 2026-09-08, no config yet, SessionStart pending",
+   "steps": [
+    {
+     "types": "/brotherme-start 初めてです、何から始める？",
+     "expects": "Guided start creates brief, SessionStart vault refresh, help explains in plain Japanese"
+    }
+   ],
+   "edge": "First install and first ten minutes beginner flow",
+   "pass_rubric": [
+    "Start creates initial project brief",
+    "SessionStart hook refreshed vault",
+    "Help gives plain steps not jargon"
+   ],
+   "fail_signals": [
+    "Tells to read source code",
+    "No brief created",
+    "Ignores SessionStart setup"
+   ]
+  },
+  {
+   "id": "A4-S2",
+   "persona": "A4",
+   "title": "Wrong answer trap tax rounding",
+   "surfaces": [
+    "brotherme-review",
+    "qa-reviewer"
+   ],
+   "setup": "Bot earlier said tax fix PASS but check actually NO-DATA, junior must catch",
+   "steps": [
+    {
+     "types": "/brotherme-review 税修正は本当にPASS？証拠見せて",
+     "expects": "Reviewer exposes NO-DATA not PASS, shows missing test file, corrects wrong claim"
+    }
+   ],
+   "edge": "Wrong answer user must be able to catch with evidence",
+   "pass_rubric": [
+    "Review flags incorrect PASS claim",
+    "Shows evidence link missing",
+    "Correct verdict NO-DATA explained"
+   ],
+   "fail_signals": [
+    "Repeats false PASS",
+    "No evidence to verify",
+    "Blames user for confusion"
+   ]
+  },
+  {
+   "id": "A4-S3",
+   "persona": "A4",
+   "title": "Asking for help scared to break prod",
+   "surfaces": [
+    "brotherme-help",
+    "help",
+    "vault_recall_hook.py"
+   ],
+   "setup": "Junior stuck on Bitbucket PR, fears breaking prod",
+   "steps": [
+    {
+     "types": "/brotherme-help どうしたら安全にプッシュできる？初心者向けに",
+     "expects": "Plain help: worktree, claim, check, gate steps, recalls vault tip"
+    }
+   ],
+   "edge": "Asking for help as junior, needs plain language not logs",
+   "pass_rubric": [
+    "Help explains worktree isolation plainly",
+    "Lists safe push gate condition",
+    "Vault recall shows prior safe pattern"
+   ],
+   "fail_signals": [
+    "Dumps hook JSON",
+    "Says just push to main",
+    "No step-by-step safety guide"
+   ]
+  },
+  {
+   "id": "A4-S4",
+   "persona": "A4",
+   "title": "2am incident hotfix fear",
+   "surfaces": [
+    "brother",
+    "brotherme-next",
+    "worktree_lane"
+   ],
+   "setup": "2am production order API down, junior on call with uncommitted branch",
+   "steps": [
+    {
+     "types": "/brother 2時、本番の注文APIが落ちた、安全にhotfixをworktreeで",
+     "expects": "Creates isolated hotfix lane, gives one next step, avoids main pollution"
+    }
+   ],
+   "edge": "2 am incident, scared junior needs safe isolated fix",
+   "pass_rubric": [
+    "Worktree_lane isolates hotfix from dirty branch",
+    "Next gives single safe action",
+    "Does not ask junior to force push"
+   ],
+   "fail_signals": [
+    "Tells to edit prod directly",
+    "Requires deep config at 2am",
+    "No isolation"
+   ]
+  },
+  {
+   "id": "A4-S5",
+   "persona": "A4",
+   "title": "Handover to senior colleague",
+   "surfaces": [
+    "brotherme-handover-pack",
+    "handover",
+    "continuity"
+   ],
+   "setup": "Junior finished unit with PASS receipt, needs handover to Daiki",
+   "steps": [
+    {
+     "types": "/brotherme-handover-pack Daikiに引き継ぎたい、証拠付きで",
+     "expects": "Generates handover pack with receipts, continuity screen, claim transfer"
+    }
+   ],
+   "edge": "Handover to colleague with evidence-bound receipts",
+   "pass_rubric": [
+    "Handover pack includes PASS receipt link",
+    "Continuity shows resume screen",
+    "Claim transferred not duplicated"
+   ],
+   "fail_signals": [
+    "Handover without receipts",
+    "Loses work context",
+    "Duplicates claim ownership"
+   ]
+  },
+  {
+   "id": "B1-S1",
+   "persona": "B1",
+   "title": "Customer master CR with approver gate",
+   "surfaces": [
+    "spec-and-data-prep",
+    "handover",
+    "adopt"
+   ],
+   "setup": "bottler-data-platform CR-2041 outlet-channel branch, SAP field rename pending, Jira template",
+   "steps": [
+    {
+     "types": "/brothersbe spec-and-data-prep 顧客マスタのSAP改修と整合性を検証して承認者付きで",
+     "expects": "Spec prep maps SAP alignment, creates approver receipt requirement, adopt Jira CR"
+    }
+   ],
+   "edge": "Change request needing approver with spec-and-data-prep",
+   "pass_rubric": [
+    "Spec lists SAP alignment checks",
+    "Approver receipt required before merge",
+    "Jira CR linked in worktree"
+   ],
+   "fail_signals": [
+    "No approver gate",
+    "Spec ignores SAP impact",
+    "Jira trace lost"
+   ]
+  },
+  {
+   "id": "B1-S2",
+   "persona": "B1",
+   "title": "Japanese CR English approver status",
+   "surfaces": [
+    "status",
+    "brotherme-brief",
+    "continuity"
+   ],
+   "setup": "CR written in Japanese, GitHub approver comments English, status asked",
+   "steps": [
+    {
+     "types": "/brothersbe status 進捗を日本語で",
+     "expects": "Status shows bilingual trace, brief summarizes vault history in Japanese first"
+    }
+   ],
+   "edge": "Japanese-only ask with English approver comments mixed",
+   "pass_rubric": [
+    "Status preserves Japanese CR text",
+    "English approver comment shown bilingual",
+    "Brief sourced from continuity vault"
+   ],
+   "fail_signals": [
+    "Drops Japanese nuance",
+    "Shows only English",
+    "No vault memory"
+   ]
+  },
+  {
+   "id": "B1-S3",
+   "persona": "B1",
+   "title": "Plan review SAP field rename impact",
+   "surfaces": [
+    "design",
+    "principal-architect",
+    "review"
+   ],
+   "setup": "Design proposes SAP customer name normalization, SQL outlet join fan-out risk",
+   "steps": [
+    {
+     "types": "/brothersbe design SAP顧客名正規化の設計をレビューして",
+     "expects": "Architect review flags join fan-out, design review PASS/FAIL per check"
+    }
+   ],
+   "edge": "Plan review before coding, architecture boundary check",
+   "pass_rubric": [
+    "Principal-architect flags fan-out risk",
+    "Review lists PASS/FAIL per design check",
+    "Recommends deduplication test"
+   ],
+   "fail_signals": [
+    "Approves design without data check",
+    "Ignores fan-out risk",
+    "No evidence per check"
+   ]
+  },
+  {
+   "id": "B1-S4",
+   "persona": "B1",
+   "title": "Formal release gate decisions log",
+   "surfaces": [
+    "verify",
+    "brotherme-deliver",
+    "decide"
+   ],
+   "setup": "Monthly release train, 2 PASS 1 FAIL, decisions log incomplete",
+   "steps": [
+    {
+     "types": "/brothersbe verify 全チェックPASSでなければリリースゲートをブロックして",
+     "expects": "Verify blocks release, deliver shows FAIL, decide logs complete decisions"
+    }
+   ],
+   "edge": "Formal enterprise gate cannot move without verify PASS and decisions",
+   "pass_rubric": [
+    "Verify verdict FAIL blocks gate",
+    "Deliver shows blocking receipt",
+    "Decisions log marked incomplete"
+   ],
+   "fail_signals": [
+    "Gates pass despite FAIL",
+    "No decisions log",
+    "Allows merge without verify"
+   ]
+  },
+  {
+   "id": "B1-S5",
+   "persona": "B1",
+   "title": "Handover pack for audit Japanese first",
+   "surfaces": [
+    "brotherme-handover-pack",
+    "handover-pack",
+    "evidence-auditor"
+   ],
+   "setup": "CR-2041 ready for steering committee, needs audit pack",
+   "steps": [
+    {
+     "types": "/brotherme-handover-pack 監査用に証拠付き引継ぎパックを日本語で",
+     "expects": "Handover-pack with evidence-bound PASS/FAIL Japanese first, auditor verified"
+    }
+   ],
+   "edge": "Handover to audit reviewers needing evidence-bound receipts Japanese first",
+   "pass_rubric": [
+    "Pack Japanese first with check links",
+    "Each receipt PASS/FAIL/NO-DATA bound",
+    "Auditor confirms provenance"
+   ],
+   "fail_signals": [
+    "Pack is opinion slides only",
+    "English only despite request",
+    "NO-DATA hidden"
+   ]
+  },
+  {
+   "id": "B2-S1",
+   "persona": "B2",
+   "title": "Prove SQL model didn't break outlet reports",
+   "surfaces": [
+    "prove-this-change",
+    "verify",
+    "data-reviewer"
+   ],
+   "setup": "bottler-data-platform dbt outlet join changed, monthly sales report script exists, fan-out risk",
+   "steps": [
+    {
+     "types": "/brothersbe prove-this-change outletのSQLモデル変更が帳票を壊してないか検証して",
+     "expects": "Data-reviewer runs lineage checks, verify shows receipts for downstream reports"
+    }
+   ],
+   "edge": "Prove SQL model change didn't break downstream reports",
+   "pass_rubric": [
+    "Verify runs data checks on outlet join",
+    "Receipt shows downstream report PASS/FAIL",
+    "Fan-out check explicitly reported"
+   ],
+   "fail_signals": [
+    "Claims safe without data check",
+    "Fake PASS on NO-DATA",
+    "Ignores lineage"
+   ]
+  },
+  {
+   "id": "B2-S2",
+   "persona": "B2",
+   "title": "Adopt Jira CR into worktree trace",
+   "surfaces": [
+    "adopt",
+    "worktree_lane",
+    "claim_store"
+   ],
+   "setup": "Existing Jira CR-2041, GitHub Enterprise branch cr/CR-2041-outlet-channel",
+   "steps": [
+    {
+     "types": "/brothersbe adopt CR-2041をWorktreeに取り込みGitHubトレースを保持して",
+     "expects": "Adopt links Jira CR to worktree_lane, claim_store prevents duplicate, trace kept"
+    }
+   ],
+   "edge": "Adopt existing Jira CR into BrotherSBE keeping GitHub trace",
+   "pass_rubric": [
+    "Adopt links Jira ID to worktree",
+    "GitHub Enterprise commit trace preserved",
+    "Single claim ownership enforced"
+   ],
+   "fail_signals": [
+    "Creates new CR duplicating",
+    "Loses GitHub trace",
+    "Allows double claim"
+   ]
+  },
+  {
+   "id": "B2-S3",
+   "persona": "B2",
+   "title": "Migration 0007 backfill missing test",
+   "surfaces": [
+    "verify",
+    "migration-reviewer",
+    "scope_audit"
+   ],
+   "setup": "bottler-data-platform migration 0007 adds channel column, backfill script missing test, SQL volume risk",
+   "steps": [
+    {
+     "types": "/brothersbe verify migration 0007のbackfillを検証して",
+     "expects": "Migration-reviewer FAIL for missing backfill test, scope_audit shows file diff"
+    }
+   ],
+   "edge": "Migration with backfill needs proof, missing test must be FAIL not NO-DATA hidden",
+   "pass_rubric": [
+    "Reviewer flags missing backfill verification",
+    "Scope_audit diffs migration vs claimed",
+    "Receipt verdict FAIL/NO-DATA not PASS"
+   ],
+   "fail_signals": [
+    "Marks migration PASS without test",
+    "Hides NO-DATA",
+    "No scope diff"
+   ]
+  },
+  {
+   "id": "B2-S4",
+   "persona": "B2",
+   "title": "Reconcile monthly sales figure",
+   "surfaces": [
+    "verify",
+    "journal_projection",
+    "receipt_door"
+   ],
+   "setup": "Monthly sales report script produced figure, needs reconciliation against outlet model",
+   "steps": [
+    {
+     "types": "/brothersbe verify 月次売上レポートの数値をreceiptで照合して",
+     "expects": "Verify reconciles figure to source, journal_projection shows evidence-bound PASS/FAIL"
+    }
+   ],
+   "edge": "Reported figure that must reconcile with evidence",
+   "pass_rubric": [
+    "Figure traced to SQL model source",
+    "Receipt shows reconciled PASS/FAIL",
+    "Journal cited as provenance"
+   ],
+   "fail_signals": [
+    "Reports figure without source",
+    "Claims reconcile without check",
+    "No receipt link"
+   ]
+  },
+  {
+   "id": "B2-S5",
+   "persona": "B2",
+   "title": "Brief and decisions why model changed",
+   "surfaces": [
+    "brief",
+    "decisions",
+    "next"
+   ],
+   "setup": "SQL model change done, vault has reasons and data assumptions",
+   "steps": [
+    {
+     "types": "/brothersbe brief なぜモデルを変えたか",
+     "expects": "Brief explains why and data assumed from vault"
+    },
+    {
+     "types": "/brothersbe decisions 決定事項は？",
+     "expects": "Decisions lists evidence and next step"
+    }
+   ],
+   "edge": "Status and progress plus memory vault recall",
+   "pass_rubric": [
+    "Brief cites assumption from vault",
+    "Decisions lists evidence per choice",
+    "Next gives single actionable step"
+   ],
+   "fail_signals": [
+    "No why from vault",
+    "Decisions empty",
+    "Next is vague"
+   ]
+  },
+  {
+   "id": "B3-S1",
+   "persona": "B3",
+   "title": "Refuse handover without receipts",
+   "surfaces": [
+    "handover",
+    "review",
+    "evidence-auditor"
+   ],
+   "setup": "Team tries handover-pack with one NO-DATA receipt, governance gate",
+   "steps": [
+    {
+     "types": "/brothersbe handover レビューして receipts無ければ拒否して",
+     "expects": "Review refuses handover, auditor shows per-check PASS/FAIL, NO-DATA blocks"
+    }
+   ],
+   "edge": "Security reviewer demands receipts over claims",
+   "pass_rubric": [
+    "Handover refused due NO-DATA",
+    "Review lists per-check findings",
+    "Auditor proves provenance"
+   ],
+   "fail_signals": [
+    "Accepts handover without receipts",
+    "Marks NO-DATA as PASS",
+    "No per-check breakdown"
+   ]
+  },
+  {
+   "id": "B3-S2",
+   "persona": "B3",
+   "title": "Security question unsafe write proof",
+   "surfaces": [
+    "PreToolUse#0",
+    "PreToolUse#1",
+    "PostToolUse#0"
+   ],
+   "setup": "Attempt to edit customer master dedup without claim, Japanese name normalization",
+   "steps": [
+    {
+     "types": "/brothersbe verify 顧客マスタの権限とhookのブロックログを示して",
+     "expects": "Shows PreToolUse authority/fence logs proving unsafe writes refused, security-reviewer PASS/FAIL"
+    }
+   ],
+   "edge": "Security question with hook log proof for isolated verification",
+   "pass_rubric": [
+    "Logs show blocked unsafe write",
+    "Security-reviewer verdict per control",
+    "Evidence linked to worktree lane"
+   ],
+   "fail_signals": [
+    "No log proof",
+    "Claims blocked without evidence",
+    "Allows write without claim"
+   ]
+  },
+  {
+   "id": "B3-S3",
+   "persona": "B3",
+   "title": "Bypass attempt --no-verify still blocked",
+   "surfaces": [
+    "PreToolUse#2",
+    "Stop#1",
+    "sbe_bash_write_guard.py"
+   ],
+   "setup": "Engineer tries git push --no-verify on bottler-data-platform, SBE gate active",
+   "steps": [
+    {
+     "types": "git push --no-verify origin cr/CR-2041-outlet-channel",
+     "expects": "SBE fence and bash_write_guard still block, Stop reconcile flags bypass attempt"
+    }
+   ],
+   "edge": "Hook must block even with --no-verify bypass try",
+   "pass_rubric": [
+    "Push blocked despite --no-verify",
+    "Guard log shows block reason",
+    "Session reconcile records attempt"
+   ],
+   "fail_signals": [
+    "Push succeeds with flag",
+    "No guard log",
+    "Governance bypassed"
+   ]
+  },
+  {
+   "id": "B3-S4",
+   "persona": "B3",
+   "title": "Wrong dedup answer catch Japanese normalization",
+   "surfaces": [
+    "verify",
+    "qa-reviewer",
+    "evidence-auditor"
+   ],
+   "setup": "Bot claimed dedup PASS but Japanese name normalization check NO-DATA",
+   "steps": [
+    {
+     "types": "/brothersbe verify 顧客名正規化の重複排除は本当にPASS？",
+     "expects": "Auditor exposes wrong PASS, qa-reviewer shows missing normalization test, corrects to NO-DATA"
+    }
+   ],
+   "edge": "Wrong answer user must catch with evidence audit",
+   "pass_rubric": [
+    "Auditor catches false PASS",
+    "Missing test identified as NO-DATA",
+    "Correct receipt shown"
+   ],
+   "fail_signals": [
+    "Repeats false PASS",
+    "Hides NO-DATA",
+    "No way to catch error"
+   ]
+  },
+  {
+   "id": "B3-S5",
+   "persona": "B3",
+   "title": "Asking help governance rules",
+   "surfaces": [
+    "help",
+    "learn",
+    "brotherme-help"
+   ],
+   "setup": "Reviewer wants to encode failed check into future rule",
+   "steps": [
+    {
+     "types": "/brothersbe help ガバナンスで証拠が必要な理由を教えて",
+     "expects": "Help explains evidence-bound receipts, learn captures lesson as shared rule"
+    }
+   ],
+   "edge": "Asking for help plus learn step to capture governance rule",
+   "pass_rubric": [
+    "Help explains receipts vs claims plainly",
+    "Learn stores rule for future checks",
+    "Rule references failed check ID"
+   ],
+   "fail_signals": [
+    "Help is jargon only",
+    "Learn not offered",
+    "No rule persistence"
+   ]
+  },
+  {
+   "id": "B4-S1",
+   "persona": "B4",
+   "title": "Monthly release go no-go readiness board",
+   "surfaces": [
+    "brotherme-status",
+    "brotherme-deliver",
+    "decide"
+   ],
+   "setup": "Release train has 5 units: 3 PASS 1 FAIL 1 NO-DATA, steering committee imminent",
+   "steps": [
+    {
+     "types": "/brotherme-status リリース可否をボードで",
+     "expects": "Readiness board counts PASS/FAIL/NO-DATA"
+    },
+    {
+     "types": "/brotherme-deliver リリース判定して",
+     "expects": "Gate says NO-GO with blocking FAIL evidence"
+    }
+   ],
+   "edge": "Release go or no-go as QA owner, gate blocks on FAIL/NO-DATA",
+   "pass_rubric": [
+    "Board shows 3/1/1 counts",
+    "Deliver verdict NO-GO with reason",
+    "Evidence links per unit"
+   ],
+   "fail_signals": [
+    "Says GO despite FAIL",
+    "Hides NO-DATA",
+    "No board counts"
+   ]
+  },
+  {
+   "id": "B4-S2",
+   "persona": "B4",
+   "title": "Push blocked hotfix without verify",
+   "surfaces": [
+    "PreToolUse#1",
+    "verify",
+    "brotherme-review"
+   ],
+   "setup": "Hotfix branch tries to merge to main without verify PASS, gate active",
+   "steps": [
+    {
+     "types": "git push origin main",
+     "expects": "Fence blocks push, verify required, review shows missing check"
+    }
+   ],
+   "edge": "Push blocked by gate for QA release train",
+   "pass_rubric": [
+    "Push refused by fence",
+    "Verify shows required checks",
+    "Review explains unblock step"
+   ],
+   "fail_signals": [
+    "Push allowed without verify",
+    "No fence reason",
+    "Claims hotfix exempt"
+   ]
+  },
+  {
+   "id": "B4-S3",
+   "persona": "B4",
+   "title": "Memory across sessions release history",
+   "surfaces": [
+    "brotherme-brief",
+    "SessionEnd#0",
+    "SessionStart#0"
+   ],
+   "setup": "Prior sessions telemetry outcomes-append saved, vault has release history",
+   "steps": [
+    {
+     "types": "/brotherme-brief 先月リリースからの差分をvaultで",
+     "expects": "Brief diffs vault across sessions, telemetry appended history shown"
+    }
+   ],
+   "edge": "Memory across sessions via vault and telemetry",
+   "pass_rubric": [
+    "Brief shows prior vs current release",
+    "Vault diff listed",
+    "Telemetry source cited"
+   ],
+   "fail_signals": [
+    "No history found",
+    "Invents history",
+    "Ignores vault"
+   ]
+  },
+  {
+   "id": "B4-S4",
+   "persona": "B4",
+   "title": "2am incident one sentence for execs",
+   "surfaces": [
+    "brotherme-status",
+    "decide",
+    "run_heartbeat"
+   ],
+   "setup": "2am ETL failed, outlet feed broken, exec needs one sentence, engineer needs detail",
+   "steps": [
+    {
+     "types": "/brotherme-status 2時障害、役員向けに一言で",
+     "expects": "One-sentence exec verdict plus detailed receipts for engineers, heartbeat shows progress"
+    }
+   ],
+   "edge": "2 am incident plus non-engineer one-sentence need",
+   "pass_rubric": [
+    "First line one sentence impact + go/no-go",
+    "Detail receipts follow separately",
+    "Heartbeat indicates verification running"
+   ],
+   "fail_signals": [
+    "Only raw logs for exec",
+    "No one-sentence summary",
+    "Hides severity"
+   ]
+  },
+  {
+   "id": "B4-S5",
+   "persona": "B4",
+   "title": "Handover to next release manager",
+   "surfaces": [
+    "brotherme-handover-pack",
+    "continuity",
+    "handover"
+   ],
+   "setup": "Monthly train handover, B4 to successor, receipts compiled",
+   "steps": [
+    {
+     "types": "/brotherme-handover-pack 次のリリース担当へ引継ぎパック作成",
+     "expects": "Pack with readiness board, decisions log, evidence-bound receipts, continuity screen"
+    }
+   ],
+   "edge": "Handover to colleague with evidence for release train",
+   "pass_rubric": [
+    "Pack includes board and decisions",
+    "Each receipt PASS/FAIL/NO-DATA bound",
+    "Continuity resume screen included"
+   ],
+   "fail_signals": [
+    "Pack missing receipts",
+    "Decisions lost",
+    "No board handover"
+   ]
+  }
+ ]
+}

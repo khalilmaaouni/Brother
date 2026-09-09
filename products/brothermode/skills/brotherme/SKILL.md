@@ -54,9 +54,7 @@ Follow references/kickoff.md. In short: understand the goal, ask only questions 
 
 The kickoff ends in one Project Canvas: the outcome, who it is for, the recommended direction and why, what is included and excluded, how success will be checked, the main risks, the decisions made and still open, and the initial forecast. Read it back to the user in plain language and get their yes before building. Once approved, run `python3 "${CLAUDE_PLUGIN_ROOT}/tools/bm_project.py" start` with those details: it writes the project record into that project's own records and regenerates `CANVAS.md` at the top of the user's project folder from those rows. A plugin install exports `${CLAUDE_PLUGIN_ROOT}` for skill and command content, so that path resolves on its own; on a clone install, where the variable is unset, run `python3 tools/bm_project.py start` instead, from the BrotherMode root (the directory that holds `tools/`). Either way, run it from the user's project folder so it reads and writes that project's own records. Those records are the project's source of truth; `CANVAS.md` is a generated view of it, never hand-edited and never itself where the status and next-step flows read the current state from after a restart.
 
-## Next-step flow
-
-When the user asks what to do next, run `python3 "${CLAUDE_PLUGIN_ROOT}/tools/bm_project.py" next` (a plugin install exports `${CLAUDE_PLUGIN_ROOT}` for skill and command content, so that path resolves on its own; on a clone install, where the variable is unset, run `python3 tools/bm_project.py next` instead, from the BrotherMode root, the directory that holds `tools/`; either way, run it from the user's project folder so it reads that project's own records) and read its recommendation straight from those records, never from CANVAS.md by hand; recommend exactly one next step, stated first, with a short reason and a time range per references/forecasting.md. If a decision from the user is what blocks progress, present that decision instead, with a recommended option first, using the decision card format in references/kickoff.md. When work is being handed to a helper, the split follows the guided loop in references/delegation.md: the coordinator plans and judges, a cheaper helper executes, and the user hears only "picking the right helper for the job" unless they ask for the advanced view.
+Read when the ask is status, review, deliver or a next step: references/brotherme-flows.md
 
 ## Deep tour flow
 
@@ -67,18 +65,6 @@ Publishing it is a separate act and it is yours, not the command's. The command 
 For the developer half of the tour, run `python3 tools/bm_docs.py generate` from the project root and read the Documentation/ folder it writes: the process diagrams and the data model from Documentation/20-technical/, the decisions taken from Documentation/30-decisions/, and the code map from Documentation/20-technical/CODE-MAP.md. Offer that as a second, opt-in half for anyone who wants to help build, with the repository's own conventions in one short list (mirror the closest sibling file, every boundary call gets an explicit failure path, tests live beside the code they check, one writer per file at a time) and how to add an element cleanly (read the sibling, write the test, keep the seam small). Internal names belong only in that developer half; everything above it stays in plain words.
 
 Honest limit: a project with no BrotherMode record yet gets a static tour of the product instead of the live view, and the page says plainly which one it is showing. A young project's records fill only some of the page, which is the ordinary case and not a fault: every section with nothing in it yet says what will be there and names the one thing that fills it, never invented and never silently dropped. The same holds for the developer half (a fresh project produces no 20-technical pages at all, verified 2026-08-01). And the page is a picture of the records at the moment it was written, not a live screen: it says what it was built from and carries a short code that changes when the records change, so an old tab is visibly older than a fresh one.
-
-## Status flow
-
-When the user asks where things stand, produce the default status view from references/status-view.md: exactly Goal, Direction, Progress, Time remaining, Decision needed, Risk, Evidence, and Next step. Nothing more unless the user explicitly asks for the advanced view. What deserves proactive mention between status requests is governed by references/pulse.md.
-
-## Review flow
-
-When the user asks for a review, apply every point of references/definition-of-done.md to the work. Report each point as a pass or a not-yet with its evidence. Never drop or soften a failing point.
-
-## Deliver flow
-
-When the user asks to wrap up, run `python3 "${CLAUDE_PLUGIN_ROOT}/tools/bm_project.py" deliver` to generate the delivery packet from that project's own records; never fill DELIVERY-PACKET.md by hand. A plugin install exports `${CLAUDE_PLUGIN_ROOT}` for skill and command content, so that path resolves on its own; on a clone install, where the variable is unset, run `python3 tools/bm_project.py deliver` instead, from the BrotherMode root (the directory that holds `tools/`). Either way, run it from the user's project folder so it reads and writes that project's own records. Delivery requires proof: a verifying check that ran after the last change and passed. Without it, say plainly what remains and do not call the work delivered.
 
 ## Honesty about this product
 

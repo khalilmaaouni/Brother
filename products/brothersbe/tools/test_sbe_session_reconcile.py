@@ -807,6 +807,44 @@ class TestTasksModuleMissing(ReconcileCase):
                          "BROTHERSBE_SRC was set but the plugin cache copy loaded instead: %r"
                          % mod.MARKER)
 
+    def test_a_dropped_candidate_is_named_on_stderr(self):
+        """L11 (F-005): sbe_session_reconcile.py tools/sbe_score.py --repo-only
+        --strict flagged tasks_mod()'s `except Unusable: continue` as a silent
+        drop: a candidate tasks module that EXISTS but fails to import used to
+        vanish with no trace while the loop quietly moved to the next
+        candidate. Fixed to print one stderr line naming the dropped
+        candidate and the reason, then continue exactly as before. This test
+        feeds it a first candidate that exists and raises on import, and a
+        working BROTHERSBE_SRC candidate behind it, and asserts both that the
+        drop is named on stderr and that the run still completes (the second
+        candidate is returned, nothing raises that did not raise before)."""
+        broken_path = os.path.join(self._missing_root.name, "src", "brothersbe",
+                                   "tasks.py")
+        os.makedirs(os.path.dirname(broken_path), exist_ok=True)
+        write(broken_path, "raise RuntimeError('deliberately broken for the test')\n")
+        env_src = tempfile.TemporaryDirectory()
+        self.addCleanup(env_src.cleanup)
+        _write_stub_tasks_module(
+            os.path.join(env_src.name, "brothersbe", "tasks.py"), "from-env")
+        os.environ["BROTHERSBE_SRC"] = env_src.name
+        saved_stderr = sys.stderr
+        err = io.StringIO()
+        sys.stderr = err
+        try:
+            mod = sr.tasks_mod()
+        finally:
+            sys.stderr = saved_stderr
+        self.assertEqual(mod.MARKER, "from-env",
+                         "the broken first candidate should be skipped and the working "
+                         "BROTHERSBE_SRC candidate returned instead, but got: %r"
+                         % mod.MARKER)
+        self.assertIn(broken_path, err.getvalue(),
+                     "the dropped candidate's own path was not named on stderr: %r"
+                     % err.getvalue())
+        self.assertIn("RuntimeError", err.getvalue(),
+                     "the reason the candidate was dropped was not named on stderr: %r"
+                     % err.getvalue())
+
 
 class TestTheCiBackstop(ReconcileCase):
     """Spec 1.5: the same reconciliation over a commit range, with no session

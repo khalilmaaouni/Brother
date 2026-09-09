@@ -119,6 +119,7 @@ sys.path.insert(0, HERE)
 import autonomy_dial  # noqa: E402
 import brother_paths  # noqa: E402
 import claim_store  # noqa: E402
+import contract_check  # noqa: E402
 import decide  # noqa: E402
 import door  # noqa: E402
 import integrate  # noqa: E402
@@ -176,6 +177,20 @@ ATTEMPTS_DIRNAME = "attempts"
 #: this way needs no edit at all).
 RECEIPT_DIRNAME = "receipt"
 RECEIPT_FILENAME = "receipt.json"
+
+#: FX-A: where the session route keeps what it hands across two processes,
+#: the lanes it opened and the file naming them. A DIRECTORY for exactly the
+#: reason the receipt is one: _find_work_doc picks the Work document as "the
+#: one *.json that is neither claims nor target", so a handoff.json sitting
+#: at run_dir's own level would break --resume and --continue, and fault_lab
+#: keeps its own copy of that name list which this way needs no edit at all.
+SESSION_DIRNAME = "session"
+SESSION_HANDOFF_FILENAME = "handoff.json"
+#: The exit code that means the units are claimed and the work is the
+#: session's own: neither 0 (finished) nor 1 (something failed). Taken from
+#: loop_bridge rather than respelled, so the engine and the bridge can never
+#: disagree about what 3 means.
+EXIT_UNITS_ARE_YOURS = loop_bridge.EXIT_UNITS_ARE_YOURS
 
 #: How many outer claims (not in-lane repair sub-attempts, which loop_bridge
 #: already bounds itself via --max-attempts) a single unit may be given
@@ -356,7 +371,130 @@ def _resolve_runs_root(requested, default=None, probe=None):
         return fallback
 
 
-def run_door(outcome, store, dry_run=False, cwd=None):
+def in_claude_code_session(env=None):
+    """True when this process is running inside a Claude Code session.
+
+    D-001 (persona dogfood 2026-09-07, scenarios A1-S1, A1-S4 and A3-S1).
+    The marker variables are brother_paths' own, not a second spelling of
+    them: CLAUDECODE and CLAUDE_CODE_ENTRYPOINT, which the client exports to
+    everything a session starts. brother_paths.client() is deliberately NOT
+    used here, because its last rung identifies a host from a plugin manifest
+    on disk, which answers "claude" in a plain terminal on a machine with the
+    bundle installed. That would refuse the documented headless path on the
+    strength of an install, and the headless path is exactly what this rule
+    must leave alone."""
+    env = os.environ if env is None else env
+    return any(env.get(var) for var in brother_paths.CLAUDE_MARKER_VARS)
+
+
+def plan_model_cmd(plan_path):
+    """The decomposer for a plan the session already wrote: a command that
+    prints that file and nothing else.
+
+    ONE VALIDATION PATH, NOT TWO. door.py owns the contract (work_record's
+    check_units, the interpreter rewrite, the lens inference, the refusal
+    text), and a --plan that reimplemented any of it would drift from the
+    decomposed path the first time either side moved. So a plan file enters
+    through the SAME seam a Codex turn already uses, documented verbatim in
+    door.CODEX_SANDBOX_HINT: DOOR_MODEL_CMD="cat plan.json". The prompt door
+    writes to this child's stdin is ignored, which is the point: the answer
+    was decided before the engine started."""
+    return "cat %s" % shlex.quote(os.path.abspath(plan_path))
+
+
+#: The record state that means a question is still open: the door refuses to
+#: plan against it, because a plan built on an unanswered question plans for
+#: the wrong outcome. The value is the schema's own first `state` enum
+#: entry, and this is the only line that spells it outside the schema; a
+#: record reaching the comparison below has already passed contract_check,
+#: so a state the schema does not know cannot get this far.
+DRAFT_STATE = "draft"
+#: The one command that writes an outcome contract record: Intake V2's adopt
+#: (unit U5 of docs/plan/PLAN-THREE-ENGINES-2026-09-08.md). Named in every
+#: refusal below, so a person is never told what is missing without being
+#: told what writes it.
+ADOPT_COMMAND = "bm_project.py adopt"
+
+
+def check_contract(path):
+    """THE OUTCOME CONTRACT GATE (A-prime amendment 2,
+    docs/plan/PLAN-THREE-ENGINES-2026-09-08.md step 5): the record that says
+    what language to answer in, what question was actually asked, and what
+    checks would prove it done, read BEFORE any plan is.
+
+    Returns (exit_code, record_or_None, lines): 0 and the record when the run
+    may proceed; 1 and the checker's own FAIL lines when the record does not
+    follow the schema, or when the record is still a draft with an open
+    question; 2 when the record or the schema could not be read as JSON at
+    all, because a record nobody could open is "could not look", never
+    "looked and found nothing wrong".
+
+    The verdict is contract_check's, imported rather than shelled out to, so
+    there is ONE implementation of the schema and its hand rules and the
+    door cannot drift from the checker the estate's own gate runs.
+    """
+    try:
+        schema = contract_check.load_json(contract_check.default_schema(),
+                                          "schema")
+        record = contract_check.load_json(path, "record")
+    except contract_check.NoData as exc:
+        return 2, None, ["brother_run: %s: %s" % (NODATA, exc)]
+    if not isinstance(record, dict):
+        return 2, None, ["brother_run: %s: the outcome contract at %s is not "
+                         "a JSON object" % (NODATA, path)]
+
+    problems = contract_check.check(record, schema)
+    if problems:
+        lines = ["contract_check: FAIL: %s" % p for p in problems]
+        lines.append("brother_run: the outcome contract at %s does not "
+                     "follow docs/schema/outcome-contract-v1.json, so there "
+                     "is nothing settled to plan against; fix the record "
+                     "(%s writes one) and run this again"
+                     % (path, ADOPT_COMMAND))
+        return 1, None, lines
+
+    if record.get("state") == DRAFT_STATE:
+        lines = ["brother_run: the outcome contract at %s is still a draft: "
+                 "a question about it is open, and a plan built on an "
+                 "unanswered question plans for the wrong outcome." % path]
+        for q in record.get("questions") or []:
+            if isinstance(q, dict):
+                lines.append("  open question (%s): %s"
+                             % (q.get("field", "?"), q.get("question", "?")))
+        lines.append("  answer it, move state to 'contracted' (%s), and run "
+                     "this command again." % ADOPT_COMMAND)
+        return 1, None, lines
+
+    return 0, record, []
+
+
+def unmet_contract_checks(contract, units):
+    """A-prime amendment 2, the plan half: the ids of the contract's
+    `success_checks` whose command no unit of the plan actually runs.
+
+    A contract promises what would prove the outcome; a plan that never runs
+    those commands cannot deliver that proof, however green it goes. A check
+    counts as covered when its command IS a unit's done_check or is the START
+    of one, so a unit may add its own arguments or chain a second command
+    after it, and may not quietly substitute a different command for it.
+
+    Empty list means the plan runs every check the contract promised.
+    """
+    done_checks = [(u.get("done_check") or "").strip()
+                   for u in units if isinstance(u, dict)]
+    missing = []
+    for check in contract.get("success_checks") or []:
+        if not isinstance(check, dict):
+            continue
+        command = (check.get("command") or "").strip()
+        if not command:
+            continue
+        if not any(dc.startswith(command) for dc in done_checks):
+            missing.append((check.get("id", "?"), command))
+    return missing
+
+
+def run_door(outcome, store, dry_run=False, cwd=None, plan_path=None):
     """door.py, exactly as its own test suite drives it. Returns
     (ok, record_or_none, text): text is door's own combined stdout+stderr,
     verbatim, since a refusal explains itself in words this should not
@@ -372,8 +510,17 @@ def run_door(outcome, store, dry_run=False, cwd=None):
     scope at 'scripts/integrate.py', a real file in the ENGINE, not the
     outcome's actual target). `--store` stays an absolute path, so nothing
     else in door.py depends on its own cwd; only where the decomposer looks
-    when it reasons about "the current directory" changes."""
+    when it reasons about "the current directory" changes.
+
+    D-001: `plan_path`, when given, is a JSON list of units the SESSION
+    wrote, so no model is asked anything. It is handed to door.py as its
+    --model-cmd (see plan_model_cmd), with retries turned off: a file does
+    not answer differently the second time it is read, so a plan that fails
+    validation is refused once, by name, instead of three times.
+    """
     args = [sys.executable, DOOR, outcome, "--store", store]
+    if plan_path:
+        args += ["--model-cmd", plan_model_cmd(plan_path), "--max-retries", "0"]
     if dry_run:
         args.append("--dry-run")
     proc = subprocess.run(args, capture_output=True, text=True, cwd=cwd)
@@ -420,13 +567,25 @@ def _find_work_doc(run_dir):
     return os.path.join(run_dir, files[0]) if len(files) == 1 else None
 
 
-def _write_run_target(run_dir, cwd):
+def _write_run_target(run_dir, cwd, contract_path=None, contract=None):
     """Record which repository this run is FOR, written once at run start
     (never on resume, which reuses whatever a run already recorded) so a
     later --continue can match a crashed run back to the repo a bare
-    invocation is sitting in, without a person naming the run directory."""
+    invocation is sitting in, without a person naming the run directory.
+
+    A-prime amendment 2: when the run was given an outcome contract, the
+    marker also carries WHICH record it was, the language the answer owes,
+    and the question actually asked, so delivery (unit U7) reads them from
+    the run rather than being told them again. Three fields, never a copy of
+    the record: the record itself stays the single source and its path is
+    right here."""
+    doc = {"cwd": os.path.abspath(cwd)}
+    if contract_path and isinstance(contract, dict):
+        doc["contract"] = {"path": os.path.abspath(contract_path),
+                           "language": contract.get("language"),
+                           "question": contract.get("question")}
     with open(os.path.join(run_dir, TARGET_FILENAME), "w", encoding="utf-8") as fh:
-        json.dump({"cwd": os.path.abspath(cwd)}, fh, indent=1)
+        json.dump(doc, fh, indent=1)
 
 
 def _read_run_target(run_dir):
@@ -906,6 +1065,22 @@ def run_loop(plan_path, claims_path, cwd, slots):
     round's own text below so it reaches the run log the same way every
     other word loop_bridge says already does (see the round loop's
     log.note(loop_text...) in main())."""
+    # FX-A: THE SESSION ROUTE IS DECIDED HERE, inside the one function that
+    # runs a round, and not in main() around it. That placement is the whole
+    # lesson of the first attempt at this fix: main() choosing the route
+    # BEFORE calling this function stepped over every test that stands in
+    # for run_loop (the seam this docstring already calls load-bearing), and
+    # seven of them went red at once. A stand-in replaces the round, so the
+    # round is where a decision about how the round is run belongs.
+    #
+    # A handoff on disk wins over everything: it names lanes that hold real
+    # work, and the spawned path would re-acquire and destroy them (see the
+    # note in main() where the two are read).
+    if os.path.isfile(session_handoff_path(
+            os.path.dirname(os.path.abspath(plan_path)))):
+        return session_round(plan_path, claims_path, cwd, slots)
+    if session_units_are_yours():
+        return hand_units_to_the_session(plan_path, claims_path, cwd, slots)
     owner = "brother-run-%d" % os.getpid()
     args = ["--plan", plan_path, "--claims", claims_path, "--cwd", cwd,
             "--owner", owner]
@@ -943,6 +1118,145 @@ def run_loop(plan_path, claims_path, cwd, slots):
             "NO-DATA: claim renewal failed for %s: %s\n"
             % (unit_id or "(store)", why) for unit_id, why in failures)
     return code, text
+
+
+
+def session_units_are_yours(env=None):
+    """True when this run must hand its units to the session instead of
+    spawning a worker for each of them.
+
+    FX-A, the worker half of D-001 (persona dogfood 2026-09-07, scenarios
+    A1-S1, A1-S4, A3-S1 and A3-S3). D-001 closed the DECOMPOSER half: inside
+    a coding session the engine refuses to spawn a headless decomposer and
+    names the --plan route instead, because a model command spawned from
+    inside a session cannot reach a model, it hangs or exits with an empty
+    error. scripts/model_worker.py resolves its command the same way and had
+    no such guard, so every BUILD IT run reached the worker and died there:
+    three attempts, empty stderr, no worktree and no test run.
+
+    THE TWO CONDITIONS, and they are the same two D-001 uses, deliberately.
+    in_claude_code_session() is the marker-variable reading, shared rather
+    than respelled. MODEL_WORKER_CMD is the worker's own opt-in, exactly as
+    DOOR_MODEL_CMD is the decomposer's: a session that names its own worker
+    is taken at its word, session or not, so this stays a routing rule and
+    never the removal of a capability."""
+    env = os.environ if env is None else env
+    return (in_claude_code_session(env)
+            and not (env.get("MODEL_WORKER_CMD") or "").strip())
+
+
+def session_handoff_path(run_dir):
+    return os.path.join(run_dir, SESSION_DIRNAME, SESSION_HANDOFF_FILENAME)
+
+
+def _session_loop(plan_path, claims_path, cwd, slots, extra):
+    """loop_bridge.main() for one session-route call, in-process, captured.
+
+    Shares run_loop's shape (and its four load-bearing arguments) but never
+    its worker: the two extra flags below are the whole difference, and the
+    owner is derived from the RUN rather than from this process's pid,
+    because the two halves of this route run in two different processes and
+    a claim taken by the first has to be re-taken by the second under the
+    same name. claim_store.acquire() is idempotent for one owner and
+    exclusive against every other, which is exactly the property needed.
+
+    THE LEASE IS STILL A LEASE, said plainly rather than papered over: a
+    claim expires after claim_store's own TTL, and a session that spends
+    longer than that on its units comes back to claims that have lapsed. It
+    re-takes its own without argument (same owner), so nothing is lost here;
+    what the lapse permits is a DIFFERENT run reclaiming the unit in the
+    meantime, exactly as it may for a worker that outlived its lease. There
+    is no background renewal on this route because there is no process to
+    run one: the engine is not running while the session works."""
+    run_dir = os.path.dirname(os.path.abspath(plan_path))
+    owner = "brother-session-%s" % os.path.basename(os.path.normpath(run_dir))
+    args = ["--plan", plan_path, "--claims", claims_path, "--cwd", cwd,
+            "--owner", owner] + list(extra)
+    if slots is not None:
+        args += ["--slots", str(slots)]
+    tools_dir = _source_tools_dir()
+    if tools_dir:
+        args += ["--tools", tools_dir]
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code = loop_bridge.main(args)
+    return code, out.getvalue() + err.getvalue()
+
+
+def hand_units_to_the_session(plan_path, claims_path, cwd, slots):
+    """Claim the ready batch, open its lanes, record them. (code, text)."""
+    run_dir = os.path.dirname(os.path.abspath(plan_path))
+    handoff = session_handoff_path(run_dir)
+    os.makedirs(os.path.dirname(handoff), exist_ok=True)
+    journal.append(run_dir, "session.handoff",
+                   parent_ids=journal.previous(run_dir),
+                   payload={"handoff": handoff})
+    return _session_loop(plan_path, claims_path, cwd, slots,
+                         ["--handoff", handoff])
+
+
+def session_round(plan_path, claims_path, cwd, slots):
+    """run_loop's counterpart on the session route: the same round, over the
+    lanes the session has since worked in, with nothing spawned.
+
+    THE HANDOFF IS CONSUMED HERE, whichever way the round went. A handoff
+    names ONE batch, and the batch that follows it needs lanes of its own;
+    leaving the file behind would make the next call reuse lanes that have
+    already been merged and retired. Deleting it is what makes the next
+    invocation hand over the NEXT batch instead."""
+    run_dir = os.path.dirname(os.path.abspath(plan_path))
+    handoff = session_handoff_path(run_dir)
+    journal.append(run_dir, "dispatch.round",
+                   parent_ids=journal.previous(run_dir),
+                   payload={"slots": slots, "session": True})
+    _write_capsule(run_dir)
+    code, text = _session_loop(plan_path, claims_path, cwd, slots,
+                               ["--lanes", handoff, "--max-attempts", "1"])
+    try:
+        os.remove(handoff)
+    except OSError as exc:
+        text += ("NO-DATA: the handoff at %s could not be removed (%s), so "
+                 "the next continue may reuse a retired lane; remove it by "
+                 "hand\n" % (handoff, exc))
+    return code, text
+
+
+def session_handover_block(run_dir, cwd, runs_root):
+    """The one block a person reads when the units become theirs.
+
+    Everything a session needs to do the work and nothing it does not: per
+    unit its id, what it is for, the worktree it happens in, the check that
+    decides it and the paths it may write; then the exact command that
+    verifies them. Read from the handoff on disk rather than rebuilt from
+    the record, so the paths printed are the paths that were actually
+    opened."""
+    try:
+        with open(session_handoff_path(run_dir), encoding="utf-8") as fh:
+            record = json.load(fh)
+    except (OSError, ValueError) as exc:
+        return ("%s: the units were handed over but the record naming their "
+                "worktrees could not be read: %s" % (NODATA, exc))
+    units = record.get("units") or {}
+    lines = ["brother_run: %d piece(s) of work are yours. This is a coding "
+             "session, so no worker was spawned: a model command started from "
+             "inside one cannot reach a model. Each piece has its own "
+             "worktree. Make the change there, run its check there, and leave "
+             "the work in that tree; committing it is this engine's job."
+             % len(units), ""]
+    for uid in sorted(units):
+        lane = units[uid]
+        lines.append("  %s  %s" % (uid, lane.get("objective") or ""))
+        lines.append("      worktree:   %s" % lane.get("worktree"))
+        lines.append("      done_check: %s"
+                     % (lane.get("done_check") or NODATA))
+        lines.append("      writes:     %s"
+                     % (", ".join(lane.get("writes") or []) or NODATA))
+    lines.append("")
+    lines.append("When every piece above is done, run this. It commits what "
+                 "it finds in each worktree, runs each check there, merges "
+                 "what passes and writes the receipt:")
+    lines.append("  %s" % _next_command(cwd, runs_root, ["--continue"]))
+    return "\n".join(lines)
 
 
 def _head(cwd):
@@ -1901,6 +2215,34 @@ def _existing_event_id(events, event_type, uid):
     return None
 
 
+def _inside_git_repo(path):
+    """True if `path` sits inside a git working tree: walk upward from it
+    looking for a .git entry (a directory for an ordinary checkout, a file
+    for a worktree). No subprocess call: VN2's write notice only needs
+    this cheap fact before printing one line, not git's own ref
+    resolution. Mirrors bm_vault_intake.py's own helper of the same name;
+    the two tools share no import path to hang one copy off of."""
+    cur = os.path.abspath(path)
+    while True:
+        if os.path.exists(os.path.join(cur, ".git")):
+            return True
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            return False
+        cur = parent
+
+
+def _print_vault_saved(title, note_path, rel_note):
+    """VN2, the write notice: one 'Vault saved: <title> -> <path>' line,
+    printed ONLY after the file is confirmed on disk (exists, non-empty).
+    This writer never commits what it drafts, so a destination inside a
+    git working tree always gets the "(unstaged)" suffix."""
+    if not (os.path.exists(note_path) and os.path.getsize(note_path) > 0):
+        return
+    suffix = " (unstaged)" if _inside_git_repo(note_path) else ""
+    print("Vault saved: %s -> %s%s" % (title, rel_note, suffix))
+
+
 def _lesson_note_text(uid, receipt, run_id):
     """A vault-shaped failure note for a refused or NO-DATA unit, honest
     about where it came from: source_receipt names the run, human_approved
@@ -2003,12 +2345,17 @@ def _record_recurrence_and_draft_lessons(record, receipts, run_dir):
             declined = []
             reason_parts = []
             applied_set = set(applied)
-            # P0-1: policy-conflict is ALSO a recorded judgement about a
-            # surfaced lesson (a vault memory that tried to weaken a
-            # required check, refused before it ever reached "applied"),
-            # so it is forwarded into declined exactly like stale and
-            # unverified already are, for the same LL-4 reason above.
-            for state in ("stale", "unverified", "policy-conflict"):
+            # P0-1: every non-applied MEMORY_STATES value (today stale,
+            # unverified, policy-conflict, no-data) is ALSO a recorded
+            # judgement about a surfaced lesson, forwarded into declined
+            # exactly like stale and unverified already were, for the same
+            # LL-4 reason above. Derived from receipt_door.MEMORY_STATES
+            # rather than a hardcoded tuple, so a state added there
+            # (policy-conflict in fbfcee70, no-data in 8612e561) can never
+            # again be silently skipped here.
+            for state in receipt_door.MEMORY_STATES:
+                if state == "applied":
+                    continue
                 for entry in section.get(state, []):
                     slug = entry.get("slug")
                     if not slug or slug in applied_set or slug in declined:
@@ -2053,12 +2400,14 @@ def _record_recurrence_and_draft_lessons(record, receipts, run_dir):
                            parent_ids=journal.previous(run_dir), unit_id=uid,
                            payload={"error": str(exc)[:200]})
             continue
+        rel_path = os.path.relpath(path, run_dir)
+        _print_vault_saved(uid, path, rel_path)
         journal.append(
             run_dir, LESSON_DRAFTED_EVENT_TYPE,
             parent_ids=([recurrence_event_id] if recurrence_event_id
                        else journal.previous(run_dir)),
             unit_id=uid,
-            payload={"path": os.path.relpath(path, run_dir),
+            payload={"path": rel_path,
                     "verdict": _verdict_for(receipt)})
 
 
@@ -3898,6 +4247,25 @@ def main(argv=None):
                          "with --resume, which carries its own outcome")
     ap.add_argument("--cwd", default=".", help="the repository to work in")
     ap.add_argument("--slots", type=int, default=3)
+    ap.add_argument("--plan", metavar="FILE",
+                    help="a JSON list of units to run, written by whoever "
+                         "asked (id, objective, done_check, writes, deps), "
+                         "instead of asking a model to decompose the "
+                         "outcome. The units are validated by the same "
+                         "contract the decomposed path uses and a plan that "
+                         "fails it is refused with nothing written. This is "
+                         "the route inside a coding session, where a nested "
+                         "headless model command cannot run")
+    ap.add_argument("--contract", metavar="FILE",
+                    help="the outcome contract record this run is for "
+                         "(docs/schema/outcome-contract-v1.json): the "
+                         "requested language, the question actually asked, "
+                         "the checks that would prove it done, the ticket "
+                         "and audit fields, the affected products. Checked "
+                         "before any plan is read, and every check it "
+                         "promises must be run by some unit of the plan. "
+                         "Required inside a coding session; written by "
+                         "%s" % ADOPT_COMMAND)
     ap.add_argument("--dry-run", action="store_true",
                     help="decompose and validate only; nothing is claimed, "
                          "written or run")
@@ -3955,6 +4323,57 @@ def main(argv=None):
                          "same refusal the merge would give later after "
                          "every worker had spent its attempts")
     args = ap.parse_args(list(sys.argv[1:] if argv is None else argv))
+
+    # A PATH SOMEBODY TYPED IS A TRUST BOUNDARY, checked here rather than
+    # left to the door: an absent plan file would otherwise reach door.py as
+    # a decomposer that prints nothing, and come back as an unreadable-JSON
+    # refusal that names neither the file nor the typo in it.
+    if args.plan and not os.path.isfile(args.plan):
+        print("brother_run: --plan names no file at %s, so there is nothing "
+              "to run; write the units there first, or drop --plan to have "
+              "the outcome decomposed" % args.plan, file=sys.stderr)
+        return 1
+
+    # THE OUTCOME CONTRACT PRECEDES THE PLAN (A-prime amendment 2,
+    # docs/plan/PLAN-THREE-ENGINES-2026-09-08.md step 5, unit U6). Checked
+    # HERE: before the door is asked, before the plan file is read, before
+    # a run directory exists, so a record that does not say what was asked
+    # refuses with the repository and the runs root exactly as they were
+    # found. The scenarios this retires are the ones where the answer never
+    # read the question: an answer in the wrong language, an outcome nobody
+    # asked for, a delivery with no check behind it.
+    contract = None
+    if args.contract:
+        code, contract, lines = check_contract(args.contract)
+        for line in lines:
+            print(line, file=sys.stderr)
+        if code:
+            return code
+        # THE PLAN MUST RUN WHAT THE CONTRACT PROMISED. Only checkable when
+        # the plan is on disk here; the decomposed path has no plan to read
+        # until the door has written one, and refusing a model's plan for
+        # this belongs to the plan checker, not to this hand-off.
+        if args.plan:
+            try:
+                with open(args.plan, encoding="utf-8") as fh:
+                    units = json.load(fh)
+            except (OSError, ValueError):
+                units = None  # door.py refuses an unreadable plan by name
+            if isinstance(units, list):
+                missing = unmet_contract_checks(contract, units)
+                if missing:
+                    print("brother_run: the plan at %s does not run every "
+                          "check the outcome contract promises, so a green "
+                          "run would prove less than the contract claims:"
+                          % args.plan, file=sys.stderr)
+                    for check_id, command in missing:
+                        print("  %s: no unit's done_check runs %r"
+                              % (check_id, command), file=sys.stderr)
+                    print("  give one unit each of these commands as its "
+                          "done_check (or as the start of it), and run this "
+                          "again; nothing was claimed or run.",
+                          file=sys.stderr)
+                    return 1
 
     cwd = os.path.abspath(args.cwd)
     runs_root = _resolve_runs_root(args.runs_root)
@@ -4159,10 +4578,75 @@ def main(argv=None):
                       "differ" % (prior_outcome, args.outcome))
 
         if resume_match is None:
-            print("brother_run: working out what %r breaks down into"
-                  % args.outcome)
+            # D-001, THE NESTED CALL THAT NEVER WORKS (persona dogfood
+            # 2026-09-07, personas A1 and A3, scenarios A1-S1, A1-S4 and
+            # A3-S1: the largest block of the 28 failing scenarios). Asked
+            # to build something from inside a Claude Code session, the
+            # engine spawned the host's own headless client to decompose the
+            # outcome. That child hangs or exits with nothing on stderr, and
+            # door.py then retried it twice more. What the user saw, in his
+            # words: "it tried the same broken internal call three times and
+            # gave up, no worktree, no test run, nothing".
+            #
+            # So inside a session the engine does not try. It names the
+            # route instead: the session's own model writes the units, this
+            # engine validates and runs them. Nothing is written here, the
+            # run directory is a path and not yet a directory, and the two
+            # opt-ins stay open for anyone who wants the old behaviour
+            # anyway (DOOR_MODEL_CMD here, --model-cmd on door.py itself).
+            # Outside a session the default is untouched, which is what
+            # keeps the documented headless path a capability rather than a
+            # casualty.
+            if (args.plan is None and in_claude_code_session()
+                    and not os.environ.get("DOOR_MODEL_CMD")):
+                print("%s: this is a coding session, and a model command "
+                      "spawned from inside one cannot reach a model: it "
+                      "hangs or exits with an empty error, and no worktree "
+                      "is ever made. Decompose the outcome yourself into 2 "
+                      "to 9 units, write them to a file as a JSON list of "
+                      "{\"id\", \"objective\", \"done_check\", "
+                      "\"writes\", \"deps\"}, and run this command again "
+                      "with --plan <that file>. To spawn a headless "
+                      "decomposer anyway, name it in DOOR_MODEL_CMD."
+                      % NODATA, file=sys.stderr)
+                return 2
+            # A-PRIME AMENDMENT 2, THE SESSION HALF. The session route is
+            # --plan (the block above), and on that route the contract is
+            # not optional: a session is where an ask arrives in a person's
+            # own words, and where an answer that never read the question
+            # gets written. Outside a session --contract stays optional,
+            # exactly as --plan does, so this is a routing rule and not the
+            # removal of a capability.
+            #
+            # WHY THIS READS args.plan AND NOT MERELY THE SESSION. The one
+            # other way to plan from inside a session is DOOR_MODEL_CMD, an
+            # escape hatch a person names deliberately, and D-001 already
+            # takes a session that names its own decomposer at its word.
+            # Refusing that too would put this rule ahead of an explicit
+            # instruction, and it would make every subprocess test of the
+            # engine depend on whether the developer's own shell happens to
+            # be a coding session, which is a property of the shell and not
+            # of the engine.
+            if (args.plan and args.contract is None
+                    and in_claude_code_session()):
+                print("%s: this is a coding session, and a plan needs an "
+                      "outcome contract before it: the record holding the "
+                      "language the answer owes, the question actually "
+                      "asked, the checks that would prove it done, and the "
+                      "ticket and audit fields when they are required. "
+                      "Write it with the intake (%s), then run this command "
+                      "again with --contract <that record>."
+                      % (NODATA, ADOPT_COMMAND), file=sys.stderr)
+                return 2
+            if args.plan:
+                print("brother_run: running the plan you wrote (%s)"
+                      % args.plan)
+            else:
+                print("brother_run: working out what %r breaks down into"
+                      % args.outcome)
             ok, record, door_text = run_door(args.outcome, run_dir,
-                                             dry_run=args.dry_run, cwd=cwd)
+                                             dry_run=args.dry_run, cwd=cwd,
+                                             plan_path=args.plan)
             if os.path.isdir(run_dir):
                 log.to(run_dir)
             # A REFUSAL IS THE USER'S BUSINESS, in the door's own words: it
@@ -4191,7 +4675,9 @@ def main(argv=None):
                 # reuse whatever a run already recorded rather than
                 # re-stamping it, so a run is only ever associated with the
                 # repository it was actually decomposed for.
-                _write_run_target(run_dir, cwd)
+                _write_run_target(run_dir, cwd,
+                                  contract_path=args.contract,
+                                  contract=contract)
                 # THE CREATOR, stamped on disk once and never overwritten
                 # (see _stamp_harness), so every later resume can still
                 # name the engine whose plan and prechecks this record
@@ -4723,6 +5209,18 @@ def main(argv=None):
         log.note(loop_text.rstrip())
         log.note("brother_run: loop_bridge round %d exited %s"
                  % (round_no, loop_code))
+        # FX-A: THE ONE NEW WAY A ROUND CAN END. Inside a coding session no
+        # worker is spawned, so this round claimed the batch, opened a
+        # worktree for each unit and stopped; the block names them and the
+        # command that verifies them. The run is unfinished by construction
+        # and --continue finds it, which is what the block's own last line
+        # says. Nothing else in this loop applies: no unit was verified, so
+        # there is no integration to write back and no progress to measure.
+        if loop_code == EXIT_UNITS_ARE_YOURS:
+            block = session_handover_block(run_dir, cwd, runs_root)
+            log.note(block)
+            print(block)
+            return EXIT_UNITS_ARE_YOURS
         claims = _read_claims(claims_path)
         done_now = {uid for uid, c in (claims or {}).items()
                     if str(c.get("state", "")) in ("done", "integrated")}

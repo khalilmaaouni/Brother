@@ -246,7 +246,15 @@ def tasks_mod():
             continue
         try:
             return _load("brothersbe_tasks_for_reconcile", path)
-        except Unusable:
+        except Unusable as e:
+            # sbe: was a silent `except Unusable: continue` (L11 finding,
+            # 1174-file lint, F-005): a candidate tasks module that exists
+            # but fails to import vanished with no trace and the loop moved
+            # on as if it had never been tried. Loud now: name the dropped
+            # candidate and why, on stderr, then continue exactly as before
+            # -- nothing here changes which module tasks_mod() returns or
+            # whether TasksModuleMissing is raised.
+            _warn("sbe_session_reconcile: dropped candidate tasks module: %s" % e)
             continue
     raise TasksModuleMissing(tried)
 

@@ -116,6 +116,18 @@ FRAME_CLOSE = "----- END RETRIEVED MEMORY: UNTRUSTED DATA -----\n"
 #: are indented four spaces or more, so this is a stable block boundary.
 _NOTE_START_RE = re.compile(r"^  \S")
 
+#: VN3 goal 1: bm_vault.py's own cmd_check prints this EXACT line (no
+#: leading two spaces, so it never matches _NOTE_START_RE and is never
+#: mistaken for a note block) whenever _search found more candidates than
+#: --limit kept. Matched here so this hook can pull it out of `out` and
+#: render it as its own line before the untrusted frame, per goal 1.
+#: VR3 adds the two capture groups (the cut count, then the limit) so the
+#: "showing K of N" line below is derived from THIS line and nothing else --
+#: one source for both, so they can never disagree. group(0) is unchanged, so
+#: every existing reader of this match keeps exactly what it had.
+_MORE_MATCHED_RE = re.compile(
+    r"(?m)^Vault: (\d+) more lesson\(s\) matched .+ and were not shown \(limit (\d+)\)\n?")
+
 #: bm_vault.py's cmd_check prints this EXACT line (_print_hits) when a query
 #: matched nothing: "NO-DATA <header>" then this fixed explanation, and
 #: nothing else. It starts with two spaces then a non-space character, same
@@ -126,6 +138,27 @@ _NOTE_START_RE = re.compile(r"^  \S")
 _NO_DATA_EXPLANATION = (
     "  Nothing in the vault or project memory matched. That is a real "
     "answer: say so, rather than assuming the estate has never met this.")
+
+#: M3 (2026-09-08 VN1 fix): bm_vault.py's own unforgeable marker (identical copy,
+#: subprocess boundary, no shared import between the two processes -- see its own
+#: definition and docstring in tools/bm_vault.py). Printed as its OWN full output
+#: line immediately after every genuine WITHHELD block, never interpolated next to
+#: a note's title. A note's name: frontmatter is printed verbatim into its title
+#: line and is entirely author-controlled, so a title literally reading
+#: "WITHHELD (...)" must never be read by this hook as a block bm_vault.py itself
+#: already withheld -- _block_is_withheld below is the ONLY test for that, and it
+#: never inspects title text.
+_WITHHELD_MARKER_LINE = "    \x00BM-VAULT-WITHHELD\x00"
+
+
+def _block_is_withheld(block):
+    """True only when `block` (a list of output lines starting at a note title)
+    carries bm_vault.py's own unforgeable marker line somewhere in it, or is the
+    fixed NO-DATA explanation. Never decided from the title line's text: see
+    _WITHHELD_MARKER_LINE above for why a title cannot forge this."""
+    if block and block[0] == _NO_DATA_EXPLANATION:
+        return True
+    return any(line == _WITHHELD_MARKER_LINE for line in block)
 
 
 def _is_no_data(out):
@@ -144,6 +177,37 @@ def _note_titles(out):
     no note."""
     return [ln for ln in out.split("\n")
             if _NOTE_START_RE.match(ln) and ln != _NO_DATA_EXPLANATION]
+
+
+def _served_and_withheld_titles(out):
+    """(served_titles, withheld_count). S5 (2026-09-08 VN1 fix): _note_titles above
+    counts every note-START line, WITHHELD tombstones included, so a banner built
+    from len(_note_titles(out)) reported "Recalled 2 lesson(s)" even when both were
+    withheld and nothing was actually served. served_titles is _note_titles(out)
+    restricted to blocks _block_is_withheld says NO to (the same unforgeable-marker
+    test the tombstoners above use, never title text); withheld_count is how many
+    blocks were excluded.
+
+    KNOWN LIMIT, found by VN3's own live smoke test and left AS FOUND rather than
+    fixed here: a block lesson_states itself reclassified (STALE, unverified,
+    policy-conflict) carries a title PREFIX, never bm_vault.py's own unforgeable
+    marker, so this banner still counts it as served even though VN3's own
+    per-note "Vault recalled/withheld" lines (cmd_check, built from `records`
+    directly) correctly call it withheld. Retitling this function's own contract
+    (title-blind, marker-only) would ripple through most of this suite's existing
+    fixtures, which lean on exactly that blindness; VN3 leaves the fix for a
+    dedicated pass rather than widen this unit's blast radius."""
+    lines = out.split("\n")
+    starts = [i for i, line in enumerate(lines) if _NOTE_START_RE.match(line)]
+    served, withheld = [], 0
+    for k, idx in enumerate(starts):
+        end = starts[k + 1] if k + 1 < len(starts) else len(lines)
+        block = lines[idx:end]
+        if _block_is_withheld(block):
+            withheld += 1
+        else:
+            served.append(block[0])
+    return served, withheld
 
 #: Floor, not a filter: these catch the cheap, common shapes of "content
 #: pretending to be a directive to the agent reading it". The frame above is
@@ -171,6 +235,29 @@ def _block_path(lines, start, end):
         if line.startswith("    ") and line.strip():
             return line.strip()
     return "unknown"
+
+
+def _block_end(lines, start, next_start):
+    """N8(c) (2026-09-08 VN1 fix): the true end of the note block starting at
+    `start`. When `next_start` is given (another note follows), that IS the
+    end, unchanged. For the LAST block, the naive len(lines) swallowed
+    whatever bm_vault.py or this hook prints AFTER the final note -- a
+    trailing NOTE:/event:/derived-from-vault: line, none of it part of any
+    note -- into that note's own block, where _tombstone_note_blocks then
+    discarded it along with the tombstoned body. A note's own content lines
+    are always indented (bm_vault.py's own _print_hits prints every one with
+    at least one leading space); the first NON-indented, non-blank line after
+    the title is bm_vault.py's or this hook's own top-level output resuming,
+    never the note's."""
+    if next_start is not None:
+        return next_start
+    end = len(lines)
+    for i in range(start + 1, len(lines)):
+        line = lines[i]
+        if line and not line[0].isspace():
+            end = i
+            break
+    return end
 
 
 # E74: stale-memory defense. A note can carry an EXPLICIT applies_to list
@@ -320,13 +407,23 @@ def _anchor_resolves(anchor, tree):
 
 
 def _lesson_state(slug, path, tree):
-    """(state, line, note_type) for one recalled lesson: "applied" (line
-    None), "unverified" (line None when no applies_to is declared, or the
-    UNVERIFIED_LINE_FMT reason when human_approved is explicitly false), or
-    "stale" (the exact STALE_LINE_FMT refusal, naming the FIRST anchor that
-    failed to resolve). note_type is the note's own type: frontmatter value,
-    or None, carried through unchanged by every branch so a caller (the
-    receipt) can show it beside the slug regardless of state.
+    """(state, line, note_type, evidence) for one recalled lesson: "applied"
+    (line None), "unverified" (line None when no applies_to is declared, or
+    the UNVERIFIED_LINE_FMT reason when human_approved is explicitly false),
+    or "stale" (the exact STALE_LINE_FMT refusal, naming the FIRST anchor
+    that failed to resolve). note_type is the note's own type: frontmatter
+    value, or None, carried through unchanged by every branch so a caller
+    (the receipt) can show it beside the slug regardless of state.
+
+    evidence (VN3, the point-of-need line's own "current evidence X holds"):
+    None for every non-applied state (nothing "holds" for a lesson that was
+    not applied); for "applied" it is the most specific citation available --
+    bm_vault_contradiction's own declared evidence_locator when the tier
+    check ran and found one, else the first applies_to anchor that resolved
+    (the anchor itself IS the evidence when there is no more specific
+    locator). Never fabricated: the BM_VAULT_DISABLE_ANCHOR_CHECK seam
+    (never set in production) reaches "applied" with nothing actually
+    checked, so its evidence stays None rather than claiming anything holds.
 
     P11: human_approved false is checked FIRST and short-circuits applies_to
     entirely -- a drafted, unreviewed lesson (P12's recurrence loop writes
@@ -341,17 +438,19 @@ def _lesson_state(slug, path, tree):
     applies_to, _last_verified, note_type, human_approved = _read_note_frontmatter(path)
     if human_approved is False:
         return ("unverified", UNVERIFIED_LINE_FMT % (slug, HUMAN_NOT_APPROVED_REASON),
-                note_type)
+                note_type, None)
     if not applies_to:
         # MUTATION SEAM, never set in production: BM_VAULT_DISABLE_ANCHOR_CHECK
         # turns off this withhold entirely, so a lesson with no applies_to
         # anchor at all reads "applied" instead of "unverified".
         if os.environ.get("BM_VAULT_DISABLE_ANCHOR_CHECK"):
-            return "applied", None, note_type
-        return "unverified", UNVERIFIED_LINE_FMT % (slug, NO_APPLIES_TO_REASON), note_type
+            return "applied", None, note_type, None
+        return ("unverified", UNVERIFIED_LINE_FMT % (slug, NO_APPLIES_TO_REASON),
+                note_type, None)
     for anchor in applies_to:
         if not _anchor_resolves(anchor, tree):
-            return "stale", STALE_LINE_FMT % (slug, anchor, tree), note_type
+            return "stale", STALE_LINE_FMT % (slug, anchor, tree), note_type, None
+    evidence = applies_to[0]  # VN3: the anchor that holds, default "applied" evidence
     # LL-2, THE EVIDENCE TIER AT RECALL: applies_to passed, so the old E74
     # verdict alone would say "applied". Fold in bm_vault_contradiction's own
     # evidence tier, DOWNGRADE ONLY, never an upgrade: a lesson this hook
@@ -384,7 +483,7 @@ def _lesson_state(slug, path, tree):
                 return ("unverified", EVIDENCE_TIER_LINE_FMT % (
                     bm_vault_contradiction.TIER_UNVERIFIED, slug,
                     "evidence_tier raised %s: %s" % (type(e).__name__, e)),
-                    note_type)
+                    note_type, None)
             # P11 EXEMPTION, narrow: an explicit human_approved: true is
             # itself a current human decision (doc 24.4's own precedence,
             # "current evidence and current human decisions win"; the
@@ -431,20 +530,113 @@ def _lesson_state(slug, path, tree):
                 state = ("policy-conflict"
                         if tier_seam == bm_vault_contradiction.SEAM_SAFETY_PRECEDENCE
                         else "unverified")
-                return state, EVIDENCE_TIER_LINE_FMT % (tier, slug, reason), note_type
+                return state, EVIDENCE_TIER_LINE_FMT % (tier, slug, reason), note_type, None
             if tier == bm_vault_contradiction.TIER_UNVERIFIED:
-                return "unverified", EVIDENCE_TIER_LINE_FMT % (tier, slug, reason), note_type
-    return "applied", None, note_type
+                return ("unverified", EVIDENCE_TIER_LINE_FMT % (tier, slug, reason),
+                        note_type, None)
+            # Tier survived every downgrade above (EVIDENCED, or exempted
+            # UNVERIFIED per P11 above): the note's own declared
+            # evidence_locator is more specific than the anchor default set
+            # before this block ran, so it overrides evidence when present.
+            locator = lesson.get("evidence_locator", bm_vault_contradiction.NO_DATA)
+            if locator and locator != bm_vault_contradiction.NO_DATA:
+                evidence = locator
+    return "applied", None, note_type, evidence
+
+
+#: A title line always ends in "  [kind, source]" (bm_vault.py's own
+#: _print_hits) possibly followed by a seam suffix of the same shape; this
+#: keeps only the text before the FIRST such bracket group, which is the
+#: note's own title, never its [kind, source] tag.
+_TITLE_ONLY_RE = re.compile(r"^(.*?)  \[")
+
+#: The leading state markers a title line can carry, this file's own three
+#: (STALE, unverified, policy-conflict, all from lesson_states above) and
+#: bm_vault.py's own WITHHELD(...) shape (supersession, D12 candidate, a
+#: refused evidence tier, or _tombstone_note_blocks' own NO-DATA reason) --
+#: stripped so _title_only always returns the note's OWN title, never the
+#: state annotation glued in front of it.
+_TITLE_PREFIX_RE = re.compile(
+    r"^(?:WITHHELD \([^)]*\)\s+|STALE \(not applied\):\s+|\[unverified anchor\]\s+)")
+
+
+def _title_only(title_line):
+    """The bare title text from a note's title line (any of the shapes this
+    hook or bm_vault.py prints it in: plain, "STALE (not applied): ...",
+    "[unverified anchor] ...", "WITHHELD (...)  ..."), stripped of its
+    leading two-space indent, any leading state-marker prefix
+    (_TITLE_PREFIX_RE), and trailing "  [kind, source]" tag. Falls back to
+    the stripped whole line when the tag shape is not found (never crashes
+    on an unexpected title)."""
+    text = _TITLE_PREFIX_RE.sub("", title_line.strip(), count=1)
+    m = _TITLE_ONLY_RE.match(text)
+    return m.group(1) if m else text
+
+
+def _tombstone_note_blocks(out, reason):
+    """(records, out2), the fail-closed twin of lesson_states below, used ONLY when
+    lesson_states itself raised: this hook cannot tell which of these note blocks
+    would revalidate without the code that just crashed, so -- the same "cannot tell,
+    withhold all" posture bm_vault.py's own lifecycle-load-failure withhold takes
+    (VN1, 2026-09-08) -- every ordinary block in `out` not already WITHHELD by
+    bm_vault.py itself is rewritten to a bare tombstone: title, reason, path, body
+    dropped. No lesson text of any kind reaches the caller from a block this
+    function touches.
+
+    records carries one {"slug", "path", "state", "line", "note_type", "title",
+    "evidence"} dict per tombstoned block, same shape lesson_states returns
+    (VN3 added "title" and "evidence"; "evidence" is always None here, since
+    nothing was ever verified for a tombstoned block), state always "no-data" so
+    scripts/receipt_door.py's applied_memory (MEMORY_STATES) drops it out of every
+    partition rather than ever counting it as applied, stale, unverified, or
+    policy-conflict."""
+    lines = out.split("\n")
+    starts = [i for i, line in enumerate(lines) if _NOTE_START_RE.match(line)]
+    if not starts:
+        return [], out
+    records = []
+    out_lines = []
+    prev = 0
+    for k, idx in enumerate(starts):
+        out_lines.extend(lines[prev:idx])
+        end = _block_end(lines, idx, starts[k + 1] if k + 1 < len(starts) else None)
+        block = lines[idx:end]
+        title_line = block[0]
+        if _block_is_withheld(block):
+            out_lines.extend(block)
+            prev = end
+            continue
+        path = _block_path(lines, idx, end)
+        slug = os.path.splitext(os.path.basename(path))[0] if path != "unknown" else "unknown"
+        line = "recall: NO-DATA %s: %s" % (slug, reason)
+        records.append({"slug": slug, "path": path, "state": "no-data", "line": line,
+                        "note_type": None, "title": _title_only(title_line), "evidence": None})
+        out_lines.append("  WITHHELD (%s)  %s" % (reason, title_line.strip()))
+        out_lines.append("    reason: %s" % reason)
+        out_lines.append("    %s" % path)
+        # N8(c) (2026-09-08 VN1 fix): a tombstoned block replaces `block` with
+        # exactly the 3 lines above, so anything _block_end correctly excluded
+        # from `block` (a trailing NOTE:/event:/derived-from-vault: line that
+        # bm_vault.py or this hook prints AFTER the last note, with no note of
+        # its own to attach to) is preserved below via out_lines.extend
+        # (lines[prev:]) -- never swallowed into the last note's own tombstone
+        # the way it was before _block_end existed.
+        prev = end
+    out_lines.extend(lines[prev:])
+    return records, "\n".join(out_lines)
 
 
 def lesson_states(out, tree):
     """(records, out2). records is one {"slug", "path", "state", "line",
-    "note_type"} dict per ordinary note block present in `out` (bm_vault.py's
-    check output), in the order the blocks appear; out2 is `out` with a STALE
-    heading or an unverified-anchor marker inserted into each such block's
-    own title line, so the model sees the state at the point it would
-    otherwise read the note as plain advice. note_type is the note's type:
-    frontmatter value (e.g. data_semantic, test_oracle) or None.
+    "note_type", "title", "evidence"} dict per ordinary note block present in
+    `out` (bm_vault.py's check output), in the order the blocks appear; out2
+    is `out` with a STALE heading or an unverified-anchor marker inserted
+    into each such block's own title line, so the model sees the state at
+    the point it would otherwise read the note as plain advice. note_type is
+    the note's type: frontmatter value (e.g. data_semantic, test_oracle) or
+    None. title (VN3) is the note's own bare title text, read straight off
+    the block's own title line, never recomputed from the vault. evidence
+    (VN3) is _lesson_state's own answer: None except for state "applied".
 
     A block already printed WITHHELD by bm_vault.py itself (supersession,
     D12 candidate, or its own auto-extracted-anchor staleness) is left
@@ -473,15 +665,26 @@ def lesson_states(out, tree):
     # the unknown seam on its title line, never a record claiming a state
     # this hook could not actually verify.
     if bm_vault_seams is None:
-        active_seams = ()
+        # N8(d) (2026-09-08 VN1 fix): treating an ABSENT module the same as
+        # "checked, nothing active" was exactly the silent-fallback this row's
+        # own comment warns against -- withheld here now, the same posture
+        # the UnknownSeamError branch right below already takes for a module
+        # that loaded but could not classify the seam.
+        #
+        # N8(b): routed through _tombstone_note_blocks (not a bare title-line
+        # replace) so descr/annotations/tier text is actually dropped, not
+        # merely left under a relabeled title -- the same body-content leak
+        # M3 closed for a forged title applies here too.
+        reason = "NO-DATA: seam module unavailable, mutation state unknown"
+        _, out2 = _tombstone_note_blocks(out, reason)
+        return [], out2
     else:
         try:
             active_seams = bm_vault_seams.active_seams()
         except bm_vault_seams.UnknownSeamError as exc:
-            withheld = "WITHHELD (%s)" % exc
-            out_lines = [withheld if _NOTE_START_RE.match(line) else line
-                        for line in lines]
-            return [], "\n".join(out_lines)
+            # N8(b): same routing as the branch above, for the same reason.
+            _, out2 = _tombstone_note_blocks(out, "NO-DATA: %s" % exc)
+            return [], out2
     records = []
     out_lines = []
     prev = 0
@@ -490,15 +693,16 @@ def lesson_states(out, tree):
         end = starts[k + 1] if k + 1 < len(starts) else len(lines)
         block = lines[idx:end]
         title_line = block[0]
-        if title_line.strip().startswith("WITHHELD") or title_line == _NO_DATA_EXPLANATION:
+        if _block_is_withheld(block):
             out_lines.extend(block)
             prev = end
             continue
         path = _block_path(lines, idx, end)
         slug = os.path.splitext(os.path.basename(path))[0] if path != "unknown" else "unknown"
-        state, line, note_type = _lesson_state(slug, path, tree)
+        state, line, note_type, evidence = _lesson_state(slug, path, tree)
         record = {"slug": slug, "path": path, "state": state, "line": line,
-                  "note_type": note_type}
+                  "note_type": note_type, "title": _title_only(title_line),
+                  "evidence": evidence}
         if active_seams:
             record["mutation"] = {"disabled": list(active_seams)}
         records.append(record)
@@ -515,6 +719,27 @@ def lesson_states(out, tree):
                 # P11: human_approved false carries a reason (unlike the
                 # plain "no applies_to declared" case, which stays line=None
                 # and prints nothing extra, exactly as before).
+                out_lines.append("    " + line)
+        elif state == "policy-conflict":
+            # VN3 fix: policy-conflict (night run 2026-09-07's
+            # SEAM_SAFETY_PRECEDENCE branch inside _lesson_state, the SAME
+            # evidence_tier check bm_vault.py's own _print_hits already runs
+            # -- this branch is reached only when a note somehow survives
+            # THAT check but is still policy-conflict here, e.g. a seam
+            # difference between the two calls) fell into the bare `else`
+            # below before this fix, leaving the title byte-for-byte
+            # identical to a genuinely applied note: a lesson that tried to
+            # weaken a SAFETY control is the single most dangerous state to
+            # leave unmarked, and this function's own docstring promises
+            # "the model sees the state at the point it would otherwise read
+            # the note as plain advice" for every state it names -- a
+            # promise this branch was silently breaking for the one state
+            # that matters most. Marked exactly like the unverified branch
+            # above: a title prefix plus its reason line, never a body drop
+            # (this function's documented design keeps content visible with
+            # a caveat; only _tombstone_note_blocks drops it entirely).
+            out_lines.append("  WITHHELD (policy-conflict)  " + title_line.strip())
+            if line:
                 out_lines.append("    " + line)
         else:
             out_lines.append(title_line)
@@ -580,6 +805,14 @@ def wrap_untrusted(out):
 # directory: the index lives at <that root>/tools/bm_vault.py, same as
 # CLAUDE_PLUGIN_ROOT below, so all three rungs share the same os.path.join.
 CONFIG_PATH = os.path.join(_config_dir(), "bm_vault.json")
+
+#: VN3, THE HOOK-TO-JOURNAL BRIDGE: the exact string
+#: scripts/brother_run.py's own VAULT_RECALL_EVENT_TYPE names, duplicated
+#: here (not imported: _load_journal() loads journal.py by path, and
+#: brother_run.py is a much larger module this hook has no reason to load)
+#: so both processes journal and read the same event type without either
+#: importing the other.
+VAULT_RECALL_JOURNAL_EVENT_TYPE = "vault.recall"
 
 
 def _config():
@@ -665,6 +898,13 @@ CHARS_PER_TOKEN_EST = 4
 #: is what this change closes.
 TIMEOUT_S = 12
 
+
+#: VR3: how long `git rev-parse --show-toplevel` gets before the context path
+#: falls back to the last three path segments. One process, no network, on a
+#: directory that is almost always already in the OS cache; small on purpose,
+#: because this runs BEFORE the recall query on the same edit and every second
+#: here is a second added to an edit the founder is waiting on.
+GIT_ROOT_TIMEOUT_S = 3
 
 #: How long the read-only status line gets. It is a stat per note and one query (measured
 #: 0.05s over 1170 notes), so this is a wide margin rather than an estimate; it stays well
@@ -862,6 +1102,390 @@ def _load_bm_repo_scope():
         return None
 
 
+def _load_journal():
+    """VN3, THE HOOK-TO-JOURNAL BRIDGE: journal.py, loaded by path, from
+    EITHER of the two layouts this hook actually ships in.
+
+    Both start three directories up from HERE, and the two differ only in
+    what sits there:
+
+      source checkout   HERE = <repo>/products/brothermode/tools
+                        three up = <repo>, and the module is <repo>/scripts/journal.py
+      installed bundle  HERE = <root>/runtime/hooks/brothermode/tools
+                        three up = <root>/runtime, and the module is <root>/runtime/journal.py
+
+    VN3b, and the reason this function changed: it tried the source path
+    ALONE, so an installed plugin copy (which carries no scripts/ directory
+    of its own) resolved a path that does not exist, returned None, and
+    never wrote a vault.recall event at all. VN4c measured exactly that
+    (docs/plan/research/vault-night-2026-09-08/VN4c-felt-surface-installed.md,
+    gap G1): the felt surface of the whole receipt memory partition was
+    dead for every user who was not running from this monorepo. The first
+    candidate that EXISTS wins; neither existing still degrades to None,
+    the same posture every other optional sibling this hook loads by path
+    already takes: no journal event that run, never a crash."""
+    try:
+        import importlib.util
+        repo_root = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
+        for path in (os.path.join(repo_root, "scripts", "journal.py"),
+                     os.path.join(repo_root, "journal.py")):
+            if os.path.isfile(path):
+                break
+        else:
+            return None
+        spec = importlib.util.spec_from_file_location("journal_for_vault_recall", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception:  # sbe: allow-silent optional journal bridge; recall continues without it
+        return None
+
+
+#: VN3 field cap: every string field on a journal record is capped here, per
+#: the spec's own "cap each field to 200 chars" line, so one adversarial or
+#: pathological note (a title, a path, a reason) can never make one journal
+#: line ineligible for journal.py's own atomic-append bound (MAX_LINE_BYTES).
+JOURNAL_FIELD_CAP = 200
+
+
+def _capped(text, cap=None):
+    """`text` as a string of at most `cap` characters (JOURNAL_FIELD_CAP when
+    the caller names none), or None for None.
+
+    `cap=None` rather than `cap=JOURNAL_FIELD_CAP`: a default argument binds
+    at DEFINITION time, so the second form would freeze whatever the module
+    constant held at import and quietly ignore any later rebinding of it."""
+    if text is None:
+        return None
+    return str(text)[:(JOURNAL_FIELD_CAP if cap is None else cap)]
+
+
+#: VN3b: the per-field caps of the record that is actually JOURNALLED, which
+#: is a much smaller thing than the rich record _point_of_need hands back.
+#: The reason is arithmetic, measured rather than guessed
+#: (docs/plan/research/vault-night-2026-09-08/VN4c-felt-surface-installed.md,
+#: gap G2): journal.py keeps one line under MAX_LINE_BYTES so an O_APPEND
+#: write stays atomic, MAX_LINE_BYTES is PIPE_BUF and PIPE_BUF is 512 on
+#: macOS, and an event's own identity fields (event id, run id, session id,
+#: unit id, timestamp, type) spend 230 to 370 of those 512 bytes before a
+#: payload is written at all. A VN3 record carrying a full path, a title, a
+#: 64 character digest, a locator, a revision and a reason measured 435
+#: characters, so EVERY vault.recall event ever written was truncated to a
+#: NO-DATA string and the receipt's memory partition was always empty.
+JOURNAL_RECORD_CAPS = {"slug": 60, "line": 60, "title": 48,
+                       "evidence": 32, "note_type": 24, "path": 64}
+
+#: The order the record's OPTIONAL fields are given up in when this run's
+#: own identity leaves too little room, least-read first. `path` goes first
+#: because it is both the largest field and the one the slug already stands
+#: in for (the slug IS the note file's own name, minus its directory and
+#: extension), then the digest and the locator, which nothing in this estate
+#: reads back (grep: neither scripts/receipt_door.py's applied_memory nor
+#: scripts/brother_run.py's receipt builder touches either), then the note
+#: type, then the title, for which the slug is a readable stand-in. What is
+#: NEVER given up: slug (the recurrence key, and the receipt's fallback
+#: name), state (applied_memory drops a record whose state it does not
+#: recognise), verdict (applied_memory only forwards VN3's own fields for a
+#: record that carries one) and reason (the words the receipt prints).
+JOURNAL_RECORD_OPTIONAL = ("path", "content_sha256", "evidence",
+                           "note_type", "title")
+
+#: The longest stamp datetime.isoformat() produces for an aware UTC time. A
+#: stamp whose microseconds are zero renders SHORTER, never longer, so
+#: measuring against this can only ever over-reserve, which is the safe
+#: direction for a bound.
+_JOURNAL_LONGEST_STAMP = "2026-09-08T12:34:56.789012+00:00"
+
+
+def _record_bytes(record):
+    """The bytes `record` adds to an event line: exactly its own serialized
+    length, because journal.append writes payload={"records": [record]} and
+    the empty-list form is already counted by _journal_room below."""
+    return len(json.dumps(record, sort_keys=True).encode("utf-8"))
+
+
+def _journal_room(journal_mod, run_dir, session_id, unit_id):
+    """How many bytes ONE record may spend and still leave the whole event
+    line under journal.MAX_LINE_BYTES.
+
+    MEASURED, NEVER ASSUMED, and that is the point: the room left over is a
+    property of THIS run (its run id is a timestamp plus up to 40 characters
+    of the outcome's slug, its session id is whatever the client generated,
+    its unit id is whatever the plan named), so a static cap that fits one
+    run silently truncates another. This builds the same event
+    journal.append will build, with the longest form of every field this
+    hook does not control, and subtracts.
+
+    parent_ids is empty on purpose and is not a field this hook may spend:
+    one parent id costs about 50 of these bytes, which is most of a reason
+    line, and the vault.recall events are siblings of one recall rather than
+    a chain."""
+    probe = {
+        "event_id": "0" * 32,
+        "parent_ids": [],
+        "run_id": os.path.basename(os.path.normpath(str(run_dir))),
+        "session_id": session_id,
+        "unit_id": unit_id,
+        "at": _JOURNAL_LONGEST_STAMP,
+        "type": VAULT_RECALL_JOURNAL_EVENT_TYPE,
+        "payload": {"records": []},
+    }
+    spent = len((json.dumps(probe, sort_keys=True) + "\n").encode("utf-8"))
+    return journal_mod.MAX_LINE_BYTES - spent
+
+
+def _journal_record(rec, room):
+    """One of _point_of_need's rich records, projected onto the fields the
+    receipt actually reads and shrunk until it fits `room` bytes.
+
+    WHAT THE RECEIPT READS, which is what decides this shape rather than a
+    preference: scripts/receipt_door.py's applied_memory reads state (and
+    DROPS a record whose state it does not recognise), slug, note_type,
+    line, verdict, title, path and reason; memory_receipt_lines then prints
+    label, title-or-slug, reason-or-line and path;
+    scripts/brother_run.py's own receipt builder reads slug and state for
+    the recurrence counters and `line` ALONE for the declined reason (the
+    LL-4 fix). So exactly ONE of the two text fields is carried, under the
+    name `line`, because that is the one both readers look at:
+    memory_receipt_lines falls back to it and brother_run reads nothing
+    else. Its VALUE is _point_of_need's own `reason`, which is `line`'s own
+    tail, so the shorter of the two texts rides under the key that serves
+    both sides, and neither reader loses anything. content_sha256,
+    evidence, revision and effect are read by nothing at all; the first two
+    ride along while there is room, the last two never do.
+
+    THE SHRINK ORDER is JOURNAL_RECORD_OPTIONAL above, then the reason
+    halved (the same halving journal._line itself uses, for the same reason:
+    escaping means an encoded length cannot be computed from a raw one).
+    slug, state and verdict are never shrunk: a truncated slug is a
+    DIFFERENT note's key as far as the recurrence store is concerned, which
+    is worse than a short reason. If even those three do not fit,
+    journal._line's own truncation takes over and says so in the line it
+    writes, which is the honest floor this function cannot go below."""
+    out = {
+        "slug": _capped(rec.get("slug"), JOURNAL_RECORD_CAPS["slug"]),
+        "state": rec.get("state"),
+        "verdict": rec.get("verdict"),
+        "line": _capped(rec.get("reason"), JOURNAL_RECORD_CAPS["line"]),
+    }
+    for key in ("path", "note_type", "title", "evidence"):
+        if rec.get(key):
+            out[key] = _capped(rec.get(key), JOURNAL_RECORD_CAPS[key])
+    if rec.get("content_sha256"):
+        # 16 hex, not 64: nothing compares this digest (bm_vault_ledger.py
+        # recomputes against its OWN recorded hash, never this one), so it
+        # is a provenance handle a reader can eyeball, and 48 characters of
+        # a 512 byte line is a reason line's worth of room.
+        out["content_sha256"] = str(rec["content_sha256"])[:16]
+    for key in JOURNAL_RECORD_OPTIONAL:
+        if _record_bytes(out) <= room:
+            return out
+        out.pop(key, None)
+    reason = out.get("line") or ""
+    while reason and _record_bytes(out) > room:
+        reason = reason[:len(reason) // 2]
+        out["line"] = reason
+    return out
+
+
+def _sha256_of_note(path):
+    """The note file's own content_sha256, or "NO-DATA" when the file
+    cannot be read (raced-deleted, permissions, or -- a fixture path never
+    naming a real file, embeds a stray null byte) -- never a fabricated
+    hash, the same NO-DATA-not-a-guess posture this whole hook already
+    takes."""
+    try:
+        with open(path, "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()
+    except (OSError, ValueError):
+        return "NO-DATA"
+
+
+_git_revision_cache = []
+
+
+def _git_revision(tree):
+    """git HEAD short hash for `tree`, or "NO-DATA" when git is absent, the
+    tree is not a repository, or the call fails for any other reason.
+    Cached once per process (this hook runs one check per invocation, so one
+    call is all this ever needs) the same way _status_line caches its own
+    single subprocess answer."""
+    if not _git_revision_cache:
+        rev = "NO-DATA"
+        try:
+            out = subprocess.run(
+                ["git", "-C", tree, "rev-parse", "--short", "HEAD"],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                timeout=3).stdout.decode("utf-8", "replace").strip()
+            if out:
+                rev = out
+        except Exception:  # sbe: allow-silent a missing or slow git must never delay an edit
+            pass
+        _git_revision_cache.append(rev)
+    return _git_revision_cache[0]
+
+
+def _block_reason_from_marker_text(block):
+    """The reason a bm_vault-withheld block (carries the unforgeable marker
+    line) already prints on ITS OWN second line: "reason: X" or
+    "superseded by: X, Y". Returns None when neither shape is present (an
+    unexpected block layout), never guessed."""
+    if len(block) < 2:
+        return None
+    second = block[1].strip()
+    for prefix in ("reason:", "superseded by:"):
+        if second.startswith(prefix):
+            return second[len(prefix):].strip()
+    return None
+
+
+def _point_of_need(out, records, tree):
+    """(lines, journal_records) for VN3 goal 1 and goal 3, built in ONE pass
+    over `out`'s note blocks so both readings can never disagree about which
+    notes were retrieved.
+
+    lines: one "Vault recalled: <title>  (current evidence <locator or
+    anchor> holds)  <path>" string per applied note, one "Vault withheld:
+    <title>  (<reason>)  <path>" string per every other note (both the ones
+    lesson_states/_tombstone_note_blocks classified in `records`, state !=
+    "applied", and the ones bm_vault.py itself already withheld before
+    lesson_states ever saw them -- supersession, D12 candidate, refused
+    evidence tier -- read straight off the reason text those blocks already
+    print, never re-decided here).
+
+    journal_records: one dict per line above, in the same order, carrying
+    the base {"slug","path","state","line","note_type"} shape
+    scripts/brother_run.py's own VAULT_RECALL_EVENT_TYPE docstring documents
+    plus VN3's own fields: title, verdict ("APPLY" or "WITHHELD"), reason,
+    content_sha256 (of the note file on disk), evidence ("NO-DATA" unless
+    verdict is APPLY), revision (this tree's git HEAD short, or "NO-DATA"),
+    effect (always the literal "NO-DATA": nothing here observes whether
+    applying or withholding this lesson actually helped the edit that
+    followed -- the LAW's own "effect stays NO-DATA unless observed").
+    Every string field is capped to JOURNAL_FIELD_CAP characters.
+
+    `records` is consumed via an iterator, one entry per block this
+    function determines was NOT already withheld by bm_vault.py itself --
+    exactly the set lesson_states/_tombstone_note_blocks produced records
+    for, in the same order, so the two never drift apart."""
+    lines_out = []
+    journal_records = []
+    revision = _git_revision(tree)
+    lines = out.split("\n")
+    starts = [i for i, ln in enumerate(lines) if _NOTE_START_RE.match(ln)]
+    rec_iter = iter(records)
+    for k, idx in enumerate(starts):
+        end = _block_end(lines, idx, starts[k + 1] if k + 1 < len(starts) else None)
+        block = lines[idx:end]
+        if block[0] == _NO_DATA_EXPLANATION:
+            continue  # the fixed "nothing matched" line, not a note
+        if _block_is_withheld(block):
+            title = _title_only(block[0])
+            reason = _block_reason_from_marker_text(block) or "withheld"
+            # bm_vault.py's own withheld shape is always: title, reason-line,
+            # path-line, marker-line, in that order, immediately followed by
+            # a blank separator line -- _block_path's "last indented,
+            # non-blank line" rule would pick the MARKER line here (a
+            # pre-existing quirk _attribute_notes already carries: its own
+            # "source" attribution shows the marker for a withheld block
+            # too), so the path is read directly off the line just before
+            # the marker's own position in `block`, found by index rather
+            # than by counting from the end (a trailing blank line the last
+            # block's own _block_end call keeps would otherwise throw a
+            # fixed offset off).
+            try:
+                path = block[block.index(_WITHHELD_MARKER_LINE) - 1].strip()
+            except (ValueError, IndexError):
+                path = _block_path(lines, idx, end)
+            lines_out.append("Vault withheld: %s  (%s)  %s" % (title, reason, path))
+            slug = os.path.splitext(os.path.basename(path))[0] if path != "unknown" else "unknown"
+            # state "no-data": bm_vault.py's own upstream withholds this branch
+            # covers (supersession, D12 candidate, a refused evidence tier) have
+            # no MEMORY_STATES bucket of their own (scripts/receipt_door.py's
+            # own five: applied, stale, unverified, policy-conflict, no-data);
+            # "no-data" is that vocabulary's own catch-all for "withheld before
+            # this hook's state machine ever ran", the exact bucket
+            # _tombstone_note_blocks already uses for the same reason, so
+            # applied_memory routes this record instead of dropping it as an
+            # unrecognized state.
+            journal_records.append({
+                "slug": _capped(slug), "path": _capped(path), "state": "no-data",
+                "line": None, "note_type": None, "title": _capped(title),
+                "verdict": "WITHHELD", "reason": _capped(reason),
+                "content_sha256": _sha256_of_note(path), "evidence": "NO-DATA",
+                "revision": revision, "effect": "NO-DATA",
+            })
+            continue
+        rec = next(rec_iter, None)
+        if rec is None:  # sbe: allow-silent a records/blocks misalignment must never crash the hook
+            continue
+        title = rec.get("title") or rec.get("slug") or "unknown"
+        rpath = rec.get("path") or _block_path(lines, idx, end)
+        if rec.get("state") == "applied":
+            evidence = str(rec.get("evidence") or "an anchor")
+            lines_out.append("Vault recalled: %s  (current evidence %s holds)  %s"
+                             % (title, evidence[:JOURNAL_FIELD_CAP], rpath))
+            verdict, reason = "APPLY", "current evidence holds"
+        else:
+            reason_line = rec.get("line") or ""
+            reason = reason_line.split(": ", 2)[-1] if reason_line else (rec.get("state") or "withheld")
+            lines_out.append("Vault withheld: %s  (%s)  %s"
+                             % (title, reason[:JOURNAL_FIELD_CAP], rpath))
+            verdict, evidence = "WITHHELD", "NO-DATA"
+        journal_records.append({
+            "slug": _capped(rec.get("slug")), "path": _capped(rpath),
+            "state": rec.get("state"), "line": _capped(rec.get("line")),
+            "note_type": rec.get("note_type"), "title": _capped(title),
+            "verdict": verdict, "reason": _capped(reason),
+            "content_sha256": _sha256_of_note(rpath), "evidence": _capped(evidence),
+            "revision": revision, "effect": "NO-DATA",
+        })
+    return lines_out, journal_records
+
+
+def _context_path(path):
+    """The edited file's path RELATIVE TO ITS OWN REPOSITORY, which is the
+    situation the recall is for. Never absolute, never the home directory,
+    never invented (RR1 section 5.7: the hook sent a bare basename, so editing
+    products/brothermode/tools/bm_vault.py and editing an unrelated bm_vault.py
+    somewhere else retrieved identically).
+
+    `git -C <dir> rev-parse --show-toplevel` decides it, with an explicit
+    failure path on every branch: a non-zero exit, a missing git, a timeout, an
+    unreadable directory and a path outside the root it reported all fall
+    through to the same fallback, the LAST THREE SEGMENTS of the path (two
+    directories and the file name). That fallback is the honest answer for a
+    file that is genuinely not in a repository, and it is still more situation
+    than the basename alone.
+
+    HOME IS REFUSED as a repository root: a dotfiles checkout makes ~ a git
+    root, and "everything under my home directory" is not a project. It falls
+    back like any other miss."""
+    abs_path = os.path.abspath(path)
+    parent = os.path.dirname(abs_path)
+    root = ""
+    if os.path.isdir(parent):
+        try:
+            proc = subprocess.run(["git", "-C", parent, "rev-parse", "--show-toplevel"],
+                                  stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                  timeout=GIT_ROOT_TIMEOUT_S)
+            if proc.returncode == 0:
+                root = proc.stdout.decode("utf-8", "replace").strip()
+        except Exception:  # sbe: allow-silent no git, no repo, or too slow: the fallback below is the answer
+            root = ""
+    if root:
+        try:
+            same_as_home = os.path.realpath(root) == os.path.realpath(os.path.expanduser("~"))
+        except Exception:  # sbe: allow-silent an unresolvable home is not a reason to trust the root
+            same_as_home = True
+        if not same_as_home:
+            rel = os.path.relpath(abs_path, root)
+            if not rel.startswith(".."):
+                return rel.replace(os.sep, "/")
+    segments = [seg for seg in abs_path.replace(os.sep, "/").split("/") if seg]
+    return "/".join(segments[-3:])
+
+
 def cmd_check():
     # The gate, before anything else: no consent means no read of the
     # vault and no write of the seen marker, so this returns before even
@@ -912,13 +1536,22 @@ def cmd_check():
     base = os.path.basename(path)
     if not base or base.endswith((".log", ".png", ".json.bak")):
         return 0
+    context = _context_path(path)
     # Show each file's lessons ONCE per session. A note repeated on every edit becomes wallpaper,
     # and wallpaper is not read, which is the failure this hook exists to correct.
-    key = "%s:%s" % (session, base)
+    #
+    # VR3: keyed on the CONTEXT path, not the basename, so two files that merely
+    # share a name in two different directories are two different situations and
+    # both get their own recall -- keying on the basename silenced the second one
+    # for the rest of the session. Whitespace is collapsed because _seen() splits
+    # its file on whitespace, so a path carrying a space would write a key that
+    # can never be read back and the recall would repeat on every edit.
+    key = "%s:%s" % (session, re.sub(r"\s+", "_", context or base))
     if key in _seen():
         return 0
     try:
-        out = subprocess.run([sys.executable, TOOL, "check", "--paths", base, "--limit", "2"],
+        out = subprocess.run([sys.executable, TOOL, "check", "--paths", base,
+                              "--context", context, "--limit", "2"],
                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                              timeout=TIMEOUT_S).stdout.decode("utf-8", "replace")
     except Exception:
@@ -938,10 +1571,40 @@ def cmd_check():
     records = []
     try:
         records, out = lesson_states(out, tree)
-    except Exception:  # sbe: allow-silent revalidation must never break recall itself
-        pass
-    titles = _note_titles(out)
-    if titles and "RECORDED FAILURES" in out:
+    except Exception as e:
+        # VN1 (2026-09-08): a broken revalidator is NO-DATA about whether these notes
+        # still apply, never a reason to serve them unrevalidated -- the failure this
+        # law exists to close. Every ordinary block in `out` is rewritten to a bare
+        # WITHHELD tombstone (title, reason, path; no body) by _tombstone_note_blocks,
+        # which can itself never raise (same shape as lesson_states, no I/O of its
+        # own), so this degrades the SERVED TEXT, never the hook: still no crash, no
+        # delayed edit.
+        records, out = _tombstone_note_blocks(
+            out, "NO-DATA: revalidation unavailable: %s" % e)
+    # VN3 goal 1: bm_vault.py's own "N more lesson(s) matched ... (limit K)" line,
+    # pulled out of `out` here (never a note block, so lesson_states/
+    # _tombstone_note_blocks already passed it through untouched) so it renders as
+    # its own line before the untrusted frame rather than being buried inside it.
+    more_line = ""
+    # VR3 (RR1 section 5.8): truncation was severe and INVISIBLE -- --limit 2 at
+    # this hook, and nothing anywhere said how many real matches the 2 cut. Both
+    # numbers come out of the one line above (its cut count plus its own stated
+    # limit), never from a second count that could disagree with it.
+    showing_line = ""
+    _more_match = _MORE_MATCHED_RE.search(out)
+    if _more_match:
+        more_line = _more_match.group(0).rstrip("\n") + "\n"
+        try:
+            _cut, _shown = int(_more_match.group(1)), int(_more_match.group(2))
+            showing_line = "Vault: showing %d of %d matched\n" % (_shown, _shown + _cut)
+        except (TypeError, ValueError):  # sbe: allow-silent an unparseable count is no count, never a guessed one
+            showing_line = ""
+        out = out[:_more_match.start()] + out[_more_match.end():]
+    # S5 (2026-09-08 VN1 fix): titles is now SERVED notes only -- a tombstoned block
+    # (WITHHELD by any of the paths above) no longer counts as "recalled"; the banner
+    # names the excluded count instead of silently absorbing it into the total.
+    titles, withheld_titles = _served_and_withheld_titles(out)
+    if (titles or withheld_titles) and "RECORDED FAILURES" in out:
         age = _status_line()
         # Row P0-M: LOUD. A standalone line, not just the per-hit marker
         # already folded into `out` by bm_vault.py's own _print_hits (the
@@ -954,12 +1617,23 @@ def cmd_check():
             seam_banner = bm_vault_seams.banner()
             if seam_banner:
                 seam_line = seam_banner + "\n"
-        context = ("Recalled %d lesson(s) from the Vault for %s\n" % (len(titles), base)
+        # VN3 goal 1: one "Vault recalled: ..." or "Vault withheld: ..." line per
+        # retrieved note, built from the SAME records this call already computed
+        # (never a second opinion), so these lines and the banner above can never
+        # name a different set of notes than what actually reached the model.
+        point_lines, journal_records = _point_of_need(out, records, tree)
+        point_block = ("\n".join(point_lines) + "\n") if point_lines else ""
+        withheld_suffix = (", %d withheld" % withheld_titles) if withheld_titles else ""
+        context = ("Recalled %d lesson(s)%s from the Vault for %s\n"
+                   % (len(titles), withheld_suffix, base)
                    + seam_line
                    # The same age line the session start printed, carried into the model's
                    # own view: a lesson recalled from a three day old index is worth less
                    # than one recalled from a current one, and only this line says which.
                    + ((age + "\n") if age else "")
+                   + point_block
+                   + showing_line
+                   + more_line
                    + wrap_untrusted(out))
         # The WORKING channel: stdout, exit 0, this exact shape. stderr with
         # exit 0 (the earlier version of this hook) is never read by the
@@ -988,6 +1662,11 @@ def cmd_check():
         # working recall into a failed edit.
         if bm_vault_heat_temporal is not None:
             for record in records:
+                # VN1: a "no-data" record is a bare tombstone from
+                # _tombstone_note_blocks (title/path only, no body ever reached the
+                # model) -- never a real showing, so it never heats.
+                if record.get("state") == "no-data":
+                    continue
                 slug = record.get("slug")
                 if slug and slug != "unknown":
                     try:
@@ -995,15 +1674,76 @@ def cmd_check():
                     except Exception:  # sbe: allow-silent counter must never break recall
                         pass
         # V5: one hash-chained read-audit row per note actually shown above (never a
-        # withheld one -- lesson_states never returns those, see its own docstring).
-        # A load or write failure degrades to nothing here; bm_vault_read_audit.py's
-        # own record_read already prints the NO-DATA line itself, and this hook never
-        # blocks or delays the edit for it either way.
+        # withheld one -- lesson_states never returns those, see its own docstring;
+        # a VN1 "no-data" tombstone is the same case by the same reasoning, so it is
+        # skipped here too). A load or write failure degrades to nothing here;
+        # bm_vault_read_audit.py's own record_read already prints the NO-DATA line
+        # itself, and this hook never blocks or delays the edit for it either way.
         read_audit = _load_bm_vault_read_audit()
         if read_audit is not None:
             for rec in records:
+                if rec.get("state") == "no-data":
+                    continue
                 read_audit.record_read(note=rec.get("path"), surface="recall_hook",
                                        session=session, query=path)
+        # VN3 goal 3, THE HOOK-TO-JOURNAL BRIDGE: bounded vault.recall events,
+        # written ONLY after the context above was actually emitted (never before,
+        # never on a failure path), and ONLY when a run directory can be identified
+        # without inventing one. journal.run_dir_from_env() answers "" for an
+        # ordinary interactive session (not running inside a brother_run.py-
+        # orchestrated run) -- the common case -- and that is silent, never a
+        # fabricated directory.
+        #
+        # VN3b, ONE EVENT PER RECORD rather than one event carrying every
+        # record, which is the whole fix for gap G2: journal.py keeps a line
+        # under MAX_LINE_BYTES (PIPE_BUF, 512 on macOS) so an O_APPEND write
+        # stays atomic, and it does that by shrinking the PAYLOAD. One event
+        # carrying two rich records measured 1064 characters against a payload
+        # budget of 291, so the records were dropped and the receipt's memory
+        # partition was empty on every run ever measured. One record per line,
+        # projected by _journal_record onto the fields the receipt reads and
+        # shrunk to the room _journal_room measured for THIS run, fits by
+        # construction. The events are siblings, not a chain: parent_ids stays
+        # empty because one parent id costs about 50 of the 512 bytes.
+        # _recalled_records_for_unit already flattens across however many
+        # events a unit has, so nothing downstream had to change for this.
+        #
+        # VN3b, THE UNIT: journal.unit_id_from_env() reads BROTHER_UNIT_ID,
+        # which loop_bridge.LaneWorker.run exports for the one process that IS
+        # a unit's worker. Unset for an ordinary session, and unset stays None
+        # -- honestly unknown, never invented -- which is exactly what it meant
+        # before this variable existed.
+        journal_mod = _load_journal()
+        if journal_mod is not None:
+            run_dir = journal_mod.run_dir_from_env()
+            if run_dir:
+                # hasattr, not a plain call: _load_journal loads journal.py BY
+                # PATH from whichever layout it found, so a hook paired with an
+                # older copy of that module must degrade to "unit unknown"
+                # rather than raise AttributeError inside a PreToolUse hook.
+                unit_id = (journal_mod.unit_id_from_env()
+                           if hasattr(journal_mod, "unit_id_from_env") else None)
+                room = _journal_room(journal_mod, run_dir, session, unit_id)
+                cap = len(titles) + withheld_titles
+                bounded = journal_records[:cap] if cap else journal_records
+                for rec in bounded:
+                    try:
+                        journal_mod.append(
+                            run_dir, VAULT_RECALL_JOURNAL_EVENT_TYPE,
+                            unit_id=unit_id, session_id=session,
+                            payload={"records": [_journal_record(rec, room)]})
+                    except Exception:  # sbe: allow-silent a broken journal append must never cost the recall
+                        pass
+            # else: NO-DATA, run_dir_from_env() answered "" -- not running inside a
+            # brother_run.py-orchestrated run, printed nowhere per goal 3's own
+            # instruction ("write nothing, print nothing").
+        # else: NO-DATA -- scripts/journal.py could not be located from this
+        # installed hook (see _load_journal's own docstring: it resolves only
+        # inside a source checkout of this monorepo, never from an installed
+        # plugin copy, which carries no scripts/ of its own). No event is
+        # written and nothing is printed about it, the same silent-degrade
+        # posture every other optional sibling module in this hook already
+        # takes for an absent contract module.
     return 0
 
 

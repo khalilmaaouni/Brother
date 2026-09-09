@@ -541,10 +541,22 @@ def build_and_run(planted=None):
                 "bm_vault.py index exited %d: %s"
                 % (indexed.returncode, indexed.stdout.decode("utf-8", "replace")[:400]))
 
+        # VN8c (night run 2026-09-08): "30" used to be a literal, sized
+        # against the frozen corpus's own 14 planted plus 2 benign (16
+        # total). A caller passing a bigger `planted` (the held-out
+        # pack's 33, say) silently truncated the printed hit list before
+        # every note was reached, and those truncated rows scored SILENT
+        # -- not protected, simply never measured (VN5c's own named
+        # "harness-scaling artifact" finding). The limit now sizes itself
+        # to whatever corpus is actually running, floored at 30 so the
+        # FROZEN path (planted=None, defaulting to PLANTED, 14+2=16)
+        # keeps the exact byte-for-byte "--limit 30" argv it always used;
+        # only a bigger `planted` ever raises it.
+        limit = max(30, len(planted) + len(BENIGN_LESSONS))
         checked = subprocess.run(
             [sys.executable, VAULT_TOOL, "check", "--paths"]
             + sorted(FIXTURE_FILES.keys())
-            + ["--limit", "30", "--fast", "--root", tree],
+            + ["--limit", str(limit), "--fast", "--root", tree],
             env=env, cwd=tree, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         out = checked.stdout.decode("utf-8", "replace")
 

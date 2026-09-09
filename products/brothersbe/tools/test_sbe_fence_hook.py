@@ -196,6 +196,32 @@ class FenceCase(unittest.TestCase):
             % (why, decision.payload))
         return "\n".join(decision.notes)
 
+    def assertNeverDenies(self, decision, why=""):
+        """Weaker than assertAllowed: true of both a plain ALLOW (payload
+        None) and the D-003 unfenced-repository report (payload set, but
+        carrying additionalContext and no permissionDecision key at all,
+        so it can never be read as a deny)."""
+        if decision.payload is not None:
+            out = decision.payload.get("hookSpecificOutput", {})
+            self.assertNotIn(
+                "permissionDecision", out,
+                "expected never a DENY %s; got: %s" % (why, decision.payload))
+
+    def assertUnfencedReported(self, decision, why=""):
+        """The D-003 report: the write is allowed, and the hook says so on the
+        one channel the model actually reads (additionalContext), never by
+        setting permissionDecision."""
+        self.assertIsNotNone(
+            decision.payload,
+            "expected the unfenced-repository report %s; the hook stayed "
+            "silent. notes: %s" % (why, decision.notes))
+        out = decision.payload["hookSpecificOutput"]
+        self.assertEqual(out["hookEventName"], "PreToolUse")
+        self.assertNotIn("permissionDecision", out,
+                         "the unfenced report must never deny %s" % why)
+        self.assertIn("no fence registry", out["additionalContext"])
+        return out["additionalContext"]
+
 
 # ---------------------------------------------------------------------------
 # Property 1: a genuine ownership conflict is refused, and the refusal says why.
@@ -502,11 +528,20 @@ class TestFailOpen(FenceCase):
     # -- the three the brief names ------------------------------------------
 
     def test_fail_open_registry_file_absent(self):
+        """This is the exact D-003 shape (2026-09-08 persona dogfood, register
+        A3-S3/A3-S4): a repository with no fence registry at all. The write is
+        still allowed, never denied, but the operator is now told so on the
+        one channel the model actually reads (see TestUnfencedReport for the
+        once-per-session behavior); the old stderr-only note (checked here via
+        `decision.notes`) is unchanged."""
         os.remove(self.registry)
-        self.assertFailedOpen(
-            self.decide(self.payload(os.path.join(self.root, "docs", "SETUP.md"))),
-            "no fence registry was opened",
-            "the registry file does not exist")
+        d = self.decide(self.payload(os.path.join(self.root, "docs", "SETUP.md")))
+        notes = "\n".join(d.notes)
+        self.assertIn("FAILING OPEN", notes)
+        self.assertIn("the fence was NOT checked", notes)
+        self.assertIn("no fence registry was opened", notes)
+        context = self.assertUnfencedReported(d, "the registry file does not exist")
+        self.assertIn("no fence registry was opened", context)
 
     def test_fail_open_registry_file_corrupt(self):
         """Corrupt two ways in one file: bytes that are not valid UTF-8, and text
@@ -638,7 +673,69 @@ class TestFailOpen(FenceCase):
              "session_id": MY_SESSION, "cwd": "/nonexistent/nowhere"},
         ]
         for p in malformed:
-            self.assertAllowed(self.decide(p), "for malformed payload %r" % (p,))
+            # assertNeverDenies, not assertAllowed: one entry here (cwd=99)
+            # falls back to os.getcwd() per decide()'s own comment on that
+            # line, which may or may not itself be an unfenced repository
+            # depending on where this suite runs from. Either way the
+            # structural property this test guards -- no failure path
+            # produces a DENY -- still holds; that is what it checks.
+            self.assertNeverDenies(self.decide(p), "for malformed payload %r" % (p,))
+
+
+# ---------------------------------------------------------------------------
+# D-003 (2026-09-08 persona dogfood, register A3-S3/A3-S4): "report first,
+# require an explicit fence before refusing". An unfenced repository never
+# gets denied; the FIRST write of a session says so once, on the channel the
+# model actually reads, and stays quiet for the rest of that session.
+# ---------------------------------------------------------------------------
+
+class TestUnfencedReport(FenceCase):
+
+    def setUp(self):
+        super(TestUnfencedReport, self).setUp()
+        os.remove(self.registry)
+        # The marker file the report is deduplicated through lives under
+        # CLAUDE_CONFIG_DIR; FenceCase pins that to a directory that does not
+        # yet exist, so it has to be created for the marker write to persist
+        # across two decide() calls in the same test (mirrors
+        # test_vault_recall_hook.py's own os.makedirs(cfg_dir) for the same
+        # reason: a marker write into a missing directory fails open, silently,
+        # which would make "seen" never stick).
+        os.makedirs(os.environ["CLAUDE_CONFIG_DIR"])
+
+    def test_first_write_in_an_unfenced_repo_is_allowed_and_carries_the_note(self):
+        d = self.decide(self.payload(os.path.join(self.root, "docs", "SETUP.md")))
+        context = self.assertUnfencedReported(d, "the first write of a session")
+        self.assertIn("ALLOWED", context)
+        self.assertIn("no fence record", context)
+
+    def test_second_write_in_the_same_session_does_not_repeat_it(self):
+        first = self.decide(self.payload(os.path.join(self.root, "docs", "SETUP.md")))
+        self.assertIsNotNone(first.payload, "the first write must carry the note")
+        second = self.decide(self.payload(os.path.join(self.root, "docs", "SETUP.md")))
+        self.assertIsNone(
+            second.payload,
+            "the note must fire once per session, not on every write: got %s"
+            % second.payload)
+        # Still fails open, still says so on stderr, every time: only the
+        # additionalContext note is deduplicated, not the stderr diagnostic.
+        self.assertIn("FAILING OPEN", "\n".join(second.notes))
+
+    def test_a_different_session_in_the_same_repository_gets_the_note_again(self):
+        self.decide(self.payload(os.path.join(self.root, "docs", "SETUP.md")))
+        other = self.decide(self.payload(
+            os.path.join(self.root, "docs", "SETUP.md"), session="a-second-session"))
+        self.assertUnfencedReported(other, "a different session in the same repo")
+
+    def test_a_fenced_repository_is_unchanged(self):
+        """The calibration case: put the registry back, and the write this
+        class otherwise exercises against docs/SETUP.md (inside FENCE_LINE's
+        scope) goes back to being a plain, ordinary refusal, not a report.
+        Proves the D-003 addition did not touch the fenced path at all."""
+        write(self.registry, REGISTRY_BODY)
+        d = self.decide(self.payload(os.path.join(self.root, "docs", "SETUP.md")))
+        self.assertDenied(d, "a fenced path, written by a session that is not "
+                             "the fence's declared writer")
 
 
 # ---------------------------------------------------------------------------
@@ -1003,13 +1100,15 @@ class TestWireProtocol(FenceCase):
 
     def test_stdout_carries_the_decision_and_nothing_else(self):
         """Claude Code parses stdout as JSON. A diagnostic there corrupts the
-        protocol, which is why every note goes to stderr."""
-        os.remove(self.registry)
-        r = self.run_hook(self.payload(os.path.join(self.root, "docs", "SETUP.md")))
+        protocol, which is why every note goes to stderr. Asserted over an
+        ORDINARY allow: the registry from setUp is present and live, and this
+        path sits outside its fence scope. The D-003 unfenced-repository
+        report (no registry at all) is a deliberate, documented exception to
+        this invariant and lives in TestUnfencedReport instead, not here."""
+        r = self.run_hook(self.payload(os.path.join(self.root, "unrelated.md")))
         self.assertEqual(r.returncode, 0)
         self.assertEqual(r.stdout, "",
-                         "an allow writes NOTHING to stdout; got: %r" % r.stdout)
-        self.assertIn("FAILING OPEN", r.stderr)
+                         "an ordinary allow writes NOTHING to stdout; got: %r" % r.stdout)
 
     def test_empty_stdin_fails_open_at_exit_zero(self):
         r = subprocess.run([sys.executable, HOOK_PATH], input="",
@@ -1367,9 +1466,15 @@ class TestTaskRegistryFences(TaskRegistryFenceCase):
     def test_no_registry_anywhere_is_allowed_and_fails_open_as_before(self):
         r = self.run_hook(self.payload(self.target(), "any-session"))
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(r.stdout, "")
         self.assertIn("FAILING OPEN", r.stderr)
         self.assertIn("no fence registry was opened", r.stderr)
+        # D-003: still allowed, never denied, and now ALSO said on the one
+        # channel the model actually reads (stdout, additionalContext), not
+        # only on stderr where it went unread (docs/HOOKS.md).
+        obj = json.loads(r.stdout)
+        out = obj["hookSpecificOutput"]
+        self.assertNotIn("permissionDecision", out)
+        self.assertIn("no fence registry", out["additionalContext"])
 
     # -- an unreadable / corrupt task registry -------------------------------
 

@@ -1,0 +1,932 @@
+{
+  "schema": 1,
+  "corpus": "tuning",
+  "built_by": "benchmarks/retrieval/build_vault_retrieval_fixture.py",
+  "vault": "benchmarks/fixtures/vault-retrieval/vault",
+  "resolution_key": "primary_path",
+  "resolution_note": "paths are relative to the fixture vault root. Note ids are assigned at index time and are not stable, so this corpus never keys on one.",
+  "vault_fingerprint": {
+    "notes": 86,
+    "anchors": 150
+  },
+  "queries": [
+    {
+      "qid": "VRQ01",
+      "query_sent": "dune_quartz.py",
+      "hook_tool_input": {
+        "file_path": "/repo/alpha-app/dune-quartz/dune_quartz.py"
+      },
+      "folder": "40-Failures",
+      "project": "alpha-app",
+      "lang": "en",
+      "kind": "failure",
+      "band": "rare",
+      "anchor_note_count": 1,
+      "primary_path": "40-Failures/vrb-p000-the-sync-worker-counted-a-skipped-row-as-a-written-one.md",
+      "primary_title": "the sync worker counted a skipped row as a written one",
+      "expected_paths": [
+        "40-Failures/vrb-p000-the-sync-worker-counted-a-skipped-row-as-a-written-one.md"
+      ],
+      "note": "one note carries this anchor; exact anchor match alone should answer it"
+    },
+    {
+      "qid": "VRQ02",
+      "query_sent": "juniper-mosaic.ts",
+      "hook_tool_input": {
+        "file_path": "/repo/beta-cli/juniper-mosaic/juniper-mosaic.ts"
+      },
+      "folder": "40-Failures",
+      "project": "beta-cli",
+      "lang": "en",
+      "kind": "failure",
+      "band": "mid",
+      "anchor_note_count": 3,
+      "primary_path": "40-Failures/vrb-p001-the-batch-loader-counted-a-skipped-row-as-a-written-one.md",
+      "primary_title": "the batch loader counted a skipped row as a written one",
+      "expected_paths": [
+        "40-Failures/vrb-p001-the-batch-loader-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p008-the-parcel-tracker-counted-a-skipped-row-as-a-written-one.md",
+        "50-Reference/vrb-d001-the-naming-rules-for-jobs-queues-and-their-owners.md"
+      ],
+      "note": "3 notes carry this anchor and only vrb-p001-the-batch-loader-counted-a-skipped-row-as-a-written-one.md is the lesson for it; carriers span 40-Failures, 50-Reference, so nothing prefers beta-cli's own tree"
+    },
+    {
+      "qid": "VRQ03",
+      "query_sent": "kappa_token.sh",
+      "hook_tool_input": {
+        "file_path": "/repo/gamma-site/kappa-token/kappa_token.sh"
+      },
+      "folder": "40-Failures",
+      "project": "gamma-site",
+      "lang": "en",
+      "kind": "failure",
+      "band": "mid",
+      "anchor_note_count": 4,
+      "primary_path": "40-Failures/vrb-p002-the-request-router-counted-a-skipped-row-as-a-written-one.md",
+      "primary_title": "the request router counted a skipped row as a written one",
+      "expected_paths": [
+        "40-Failures/vrb-p002-the-request-router-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p009-the-quota-meter-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p016-the-log-plume-counted-a-skipped-row-as-a-written-one.md",
+        "50-Reference/vrb-d002-the-retention-ruling-for-logs-and-generated-files.md"
+      ],
+      "note": "4 notes carry this anchor and only vrb-p002-the-request-router-counted-a-skipped-row-as-a-written-one.md is the lesson for it; carriers span 40-Failures, 50-Reference, so nothing prefers gamma-site's own tree"
+    },
+    {
+      "qid": "VRQ04",
+      "query_sent": "amber_ripple.yml",
+      "hook_tool_input": {
+        "file_path": "/repo/alpha-app/amber-ripple/amber_ripple.yml"
+      },
+      "folder": "40-Failures",
+      "project": "alpha-app",
+      "lang": "en",
+      "kind": "failure",
+      "band": "mid",
+      "anchor_note_count": 7,
+      "primary_path": "40-Failures/vrb-p003-the-page-cache-counted-a-skipped-row-as-a-written-one.md",
+      "primary_title": "the page cache counted a skipped row as a written one",
+      "expected_paths": [
+        "10-Projects/gamma-site/vrb-p003-the-page-cache-counted-a-skipped-row-as-a-written-one.md",
+        "10-Projects/gamma-site/vrb-p017-the-index-quartz-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p003-the-page-cache-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p010-the-tally-job-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p017-the-index-quartz-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p024-the-sync-worker-reported-a-partial-run-as-a-complete-one.md",
+        "50-Reference/vrb-d003-the-approved-list-of-runtimes-and-their-support-windows.md"
+      ],
+      "note": "shape (c): this note is filed twice under one stem, here and at 10-Projects/gamma-site/vrb-p003-the-page-cache-counted-a-skipped-row-as-a-written-one.md, with an identical body. bm_vault.py serves one title once, so whichever copy ranks first suppresses the other and the losing copy is a miss on primary_path even though first_expected_rank resolves"
+    },
+    {
+      "qid": "VRQ05",
+      "query_sent": "granite_invoice.json",
+      "hook_tool_input": {
+        "file_path": "/repo/beta-cli/granite-invoice/granite_invoice.json"
+      },
+      "folder": "40-Failures",
+      "project": "beta-cli",
+      "lang": "en",
+      "kind": "failure",
+      "band": "rare",
+      "anchor_note_count": 1,
+      "primary_path": "40-Failures/vrb-p004-the-nightly-digest-counted-a-skipped-row-as-a-written-one.md",
+      "primary_title": "the nightly digest counted a skipped row as a written one",
+      "expected_paths": [
+        "40-Failures/vrb-p004-the-nightly-digest-counted-a-skipped-row-as-a-written-one.md"
+      ],
+      "note": "one note carries this anchor; exact anchor match alone should answer it"
+    },
+    {
+      "qid": "VRQ06",
+      "query_sent": "DeltaWarden.swift",
+      "hook_tool_input": {
+        "file_path": "/repo/gamma-site/deltawarden/DeltaWarden.swift"
+      },
+      "folder": "40-Failures",
+      "project": "gamma-site",
+      "lang": "ja",
+      "kind": "failure",
+      "band": "rare",
+      "anchor_note_count": 1,
+      "primary_path": "40-Failures/vrb-p005-note.md",
+      "primary_title": "同じ名前のファイルが二つの案件にあると取り違える",
+      "expected_paths": [
+        "40-Failures/vrb-p005-note.md"
+      ],
+      "note": "one note carries this anchor; exact anchor match alone should answer it"
+    },
+    {
+      "qid": "VRQ07",
+      "query_sent": "Kappa-tally-NOTES.md",
+      "hook_tool_input": {
+        "file_path": "/repo/alpha-app/kappa-tally-notes/Kappa-tally-NOTES.md"
+      },
+      "folder": "40-Failures",
+      "project": "alpha-app",
+      "lang": "en",
+      "kind": "failure",
+      "band": "mid",
+      "anchor_note_count": 6,
+      "primary_path": "40-Failures/vrb-p006-the-roster-importer-counted-a-skipped-row-as-a-written-one.md",
+      "primary_title": "the roster importer counted a skipped row as a written one",
+      "expected_paths": [
+        "10-Projects/alpha-app/vrb-p027-the-page-cache-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/beta-cli/vrb-p034-the-tally-job-reported-a-partial-run-as-a-complete-one.md",
+        "40-Failures/vrb-p006-the-roster-importer-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p013-the-build-anvil-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p020-the-seat-allocator-counted-a-skipped-row-as-a-written-one.md",
+        "50-Reference/vrb-d001-the-naming-rules-for-jobs-queues-and-their-owners.md"
+      ],
+      "note": "6 notes carry this anchor and only vrb-p006-the-roster-importer-counted-a-skipped-row-as-a-written-one.md is the lesson for it; carriers span 40-Failures, 50-Reference, alpha-app, beta-cli, so nothing prefers alpha-app's own tree"
+    },
+    {
+      "qid": "VRQ08",
+      "query_sent": "juniper_cache.py",
+      "hook_tool_input": {
+        "file_path": "/repo/beta-cli/juniper-cache/juniper_cache.py"
+      },
+      "folder": "40-Failures",
+      "project": "beta-cli",
+      "lang": "en",
+      "kind": "failure",
+      "band": "mid",
+      "anchor_note_count": 7,
+      "primary_path": "40-Failures/vrb-p007-the-health-beacon-counted-a-skipped-row-as-a-written-one.md",
+      "primary_title": "the health beacon counted a skipped row as a written one",
+      "expected_paths": [
+        "10-Projects/alpha-app/vrb-p028-the-nightly-digest-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/beta-cli/vrb-p035-the-queue-warden-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/gamma-site/vrb-p042-the-colour-picker-reported-a-partial-run-as-a-complete-one.md",
+        "40-Failures/vrb-p007-the-health-beacon-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p014-the-tile-mosaic-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p021-the-invoice-folder-counted-a-skipped-row-as-a-written-one.md",
+        "50-Reference/vrb-d002-the-retention-ruling-for-logs-and-generated-files.md"
+      ],
+      "note": "7 notes carry this anchor and only vrb-p007-the-health-beacon-counted-a-skipped-row-as-a-written-one.md is the lesson for it; carriers span 40-Failures, 50-Reference, alpha-app, beta-cli, gamma-site, so nothing prefers beta-cli's own tree"
+    },
+    {
+      "qid": "VRQ09",
+      "query_sent": "ember-cache.ts",
+      "hook_tool_input": {
+        "file_path": "/repo/gamma-site/ember-cache/ember-cache.ts"
+      },
+      "folder": "40-Failures",
+      "project": "gamma-site",
+      "lang": "en",
+      "kind": "failure",
+      "band": "crowded",
+      "anchor_note_count": 9,
+      "primary_path": "40-Failures/vrb-p008-the-parcel-tracker-counted-a-skipped-row-as-a-written-one.md",
+      "primary_title": "the parcel tracker counted a skipped row as a written one",
+      "expected_paths": [
+        "10-Projects/alpha-app/vrb-p029-the-ledger-writer-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/beta-cli/vrb-p036-the-retry-ripple-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/gamma-site/vrb-p043-the-tundra-sweeper-reported-a-partial-run-as-a-complete-one.md",
+        "40-Failures/vrb-p008-the-parcel-tracker-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p015-the-orbit-scheduler-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p022-the-token-minter-counted-a-skipped-row-as-a-written-one.md",
+        "50-Reference/vrb-d000-the-release-checklist-every-team-is-expected-to-follow.md",
+        "50-Reference/vrb-d003-the-approved-list-of-runtimes-and-their-support-windows.md",
+        "50-Reference/vrb-p050-the-request-router-read-a-stale-copy-for-a-whole-afternoon.md"
+      ],
+      "note": "9 notes carry this anchor and only vrb-p008-the-parcel-tracker-counted-a-skipped-row-as-a-written-one.md is the lesson for it; carriers span 40-Failures, 50-Reference, alpha-app, beta-cli, gamma-site, so nothing prefers gamma-site's own tree"
+    },
+    {
+      "qid": "VRQ10",
+      "query_sent": "sigma_parcel.sh",
+      "hook_tool_input": {
+        "file_path": "/repo/alpha-app/sigma-parcel/sigma_parcel.sh"
+      },
+      "folder": "40-Failures",
+      "project": "alpha-app",
+      "lang": "en",
+      "kind": "failure",
+      "band": "rare",
+      "anchor_note_count": 1,
+      "primary_path": "40-Failures/vrb-p009-the-quota-meter-counted-a-skipped-row-as-a-written-one.md",
+      "primary_title": "the quota meter counted a skipped row as a written one",
+      "expected_paths": [
+        "40-Failures/vrb-p009-the-quota-meter-counted-a-skipped-row-as-a-written-one.md"
+      ],
+      "note": "one note carries this anchor; exact anchor match alone should answer it"
+    },
+    {
+      "qid": "VRQ11",
+      "query_sent": "juniper_shard.yml",
+      "hook_tool_input": {
+        "file_path": "/repo/beta-cli/juniper-shard/juniper_shard.yml"
+      },
+      "folder": "40-Failures",
+      "project": "beta-cli",
+      "lang": "en",
+      "kind": "failure",
+      "band": "mid",
+      "anchor_note_count": 4,
+      "primary_path": "40-Failures/vrb-p010-the-tally-job-counted-a-skipped-row-as-a-written-one.md",
+      "primary_title": "the tally job counted a skipped row as a written one",
+      "expected_paths": [
+        "10-Projects/gamma-site/vrb-p017-the-index-quartz-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p010-the-tally-job-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p017-the-index-quartz-counted-a-skipped-row-as-a-written-one.md",
+        "50-Reference/vrb-d000-the-release-checklist-every-team-is-expected-to-follow.md"
+      ],
+      "note": "4 notes carry this anchor and only vrb-p010-the-tally-job-counted-a-skipped-row-as-a-written-one.md is the lesson for it; carriers span 40-Failures, 50-Reference, gamma-site, so nothing prefers beta-cli's own tree"
+    },
+    {
+      "qid": "VRQ12",
+      "query_sent": "indigo_anvil.json",
+      "hook_tool_input": {
+        "file_path": "/repo/gamma-site/indigo-anvil/indigo_anvil.json"
+      },
+      "folder": "40-Failures",
+      "project": "gamma-site",
+      "lang": "en",
+      "kind": "failure",
+      "band": "mid",
+      "anchor_note_count": 4,
+      "primary_path": "40-Failures/vrb-p011-the-queue-warden-counted-a-skipped-row-as-a-written-one.md",
+      "primary_title": "the queue warden counted a skipped row as a written one",
+      "expected_paths": [
+        "40-Failures/vrb-p011-the-queue-warden-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p018-the-colour-picker-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p025-the-batch-loader-reported-a-partial-run-as-a-complete-one.md",
+        "50-Reference/vrb-d001-the-naming-rules-for-jobs-queues-and-their-owners.md"
+      ],
+      "note": "4 notes carry this anchor and only vrb-p011-the-queue-warden-counted-a-skipped-row-as-a-written-one.md is the lesson for it; carriers span 40-Failures, 50-Reference, so nothing prefers gamma-site's own tree"
+    },
+    {
+      "qid": "VRQ13",
+      "query_sent": "PumiceDigest.swift",
+      "hook_tool_input": {
+        "file_path": "/repo/alpha-app/pumicedigest/PumiceDigest.swift"
+      },
+      "folder": "40-Failures",
+      "project": "alpha-app",
+      "lang": "ja",
+      "kind": "failure",
+      "band": "mid",
+      "anchor_note_count": 5,
+      "primary_path": "40-Failures/vrb-p012-note.md",
+      "primary_title": "夜間バッチの失敗が翌朝まで気づかれない",
+      "expected_paths": [
+        "10-Projects/alpha-app/vrb-p026-the-request-router-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/alpha-app/vrb-p033-the-quota-meter-reported-a-partial-run-as-a-complete-one.md",
+        "40-Failures/vrb-p012-note.md",
+        "40-Failures/vrb-p019-the-tundra-sweeper-counted-a-skipped-row-as-a-written-one.md",
+        "50-Reference/vrb-d002-the-retention-ruling-for-logs-and-generated-files.md"
+      ],
+      "note": "5 notes carry this anchor and only vrb-p012-note.md is the lesson for it; carriers span 40-Failures, 50-Reference, alpha-app, so nothing prefers alpha-app's own tree"
+    },
+    {
+      "qid": "VRQ14",
+      "query_sent": "Amber-quartz-NOTES.md",
+      "hook_tool_input": {
+        "file_path": "/repo/beta-cli/amber-quartz-notes/Amber-quartz-NOTES.md"
+      },
+      "folder": "40-Failures",
+      "project": "beta-cli",
+      "lang": "en",
+      "kind": "failure",
+      "band": "crowded",
+      "anchor_note_count": 10,
+      "primary_path": "40-Failures/vrb-p013-the-build-anvil-counted-a-skipped-row-as-a-written-one.md",
+      "primary_title": "the build anvil counted a skipped row as a written one",
+      "expected_paths": [
+        "10-Projects/alpha-app/vrb-p027-the-page-cache-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/beta-cli/vrb-p034-the-tally-job-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/beta-cli/vrb-p041-the-index-quartz-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/gamma-site/vrb-p048-the-sync-worker-read-a-stale-copy-for-a-whole-afternoon.md",
+        "40-Failures/vrb-p002-the-request-router-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p013-the-build-anvil-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p020-the-seat-allocator-counted-a-skipped-row-as-a-written-one.md",
+        "50-Reference/vrb-d000-the-release-checklist-every-team-is-expected-to-follow.md",
+        "50-Reference/vrb-d003-the-approved-list-of-runtimes-and-their-support-windows.md",
+        "50-Reference/vrb-p055-the-health-beacon-read-a-stale-copy-for-a-whole-afternoon.md"
+      ],
+      "note": "10 notes carry this anchor and only vrb-p013-the-build-anvil-counted-a-skipped-row-as-a-written-one.md is the lesson for it; carriers span 40-Failures, 50-Reference, alpha-app, beta-cli, gamma-site, so nothing prefers beta-cli's own tree"
+    },
+    {
+      "qid": "VRQ15",
+      "query_sent": "alpha_roster.py",
+      "hook_tool_input": {
+        "file_path": "/repo/gamma-site/alpha-roster/alpha_roster.py"
+      },
+      "folder": "40-Failures",
+      "project": "gamma-site",
+      "lang": "en",
+      "kind": "failure",
+      "band": "mid",
+      "anchor_note_count": 6,
+      "primary_path": "40-Failures/vrb-p014-the-tile-mosaic-counted-a-skipped-row-as-a-written-one.md",
+      "primary_title": "the tile mosaic counted a skipped row as a written one",
+      "expected_paths": [
+        "10-Projects/alpha-app/vrb-p028-the-nightly-digest-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/beta-cli/vrb-p035-the-queue-warden-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/gamma-site/vrb-p042-the-colour-picker-reported-a-partial-run-as-a-complete-one.md",
+        "40-Failures/vrb-p014-the-tile-mosaic-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p021-the-invoice-folder-counted-a-skipped-row-as-a-written-one.md",
+        "50-Reference/vrb-d004-the-definition-of-a-completed-change-and-who-signs-it.md"
+      ],
+      "note": "6 notes carry this anchor and only vrb-p014-the-tile-mosaic-counted-a-skipped-row-as-a-written-one.md is the lesson for it; carriers span 40-Failures, 50-Reference, alpha-app, beta-cli, gamma-site, so nothing prefers gamma-site's own tree"
+    },
+    {
+      "qid": "VRQ16",
+      "query_sent": "delta-invoice.ts",
+      "hook_tool_input": {
+        "file_path": "/repo/alpha-app/delta-invoice/delta-invoice.ts"
+      },
+      "folder": "40-Failures",
+      "project": "alpha-app",
+      "lang": "en",
+      "kind": "failure",
+      "band": "crowded",
+      "anchor_note_count": 11,
+      "primary_path": "40-Failures/vrb-p015-the-orbit-scheduler-counted-a-skipped-row-as-a-written-one.md",
+      "primary_title": "the orbit scheduler counted a skipped row as a written one",
+      "expected_paths": [
+        "10-Projects/alpha-app/vrb-p029-the-ledger-writer-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/beta-cli/vrb-p036-the-retry-ripple-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/gamma-site/vrb-p043-the-tundra-sweeper-reported-a-partial-run-as-a-complete-one.md",
+        "40-Failures/vrb-p004-the-nightly-digest-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p011-the-queue-warden-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p015-the-orbit-scheduler-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p022-the-token-minter-counted-a-skipped-row-as-a-written-one.md",
+        "50-Reference/vrb-d000-the-release-checklist-every-team-is-expected-to-follow.md",
+        "50-Reference/vrb-d002-the-retention-ruling-for-logs-and-generated-files.md",
+        "50-Reference/vrb-p050-the-request-router-read-a-stale-copy-for-a-whole-afternoon.md",
+        "50-Reference/vrb-p057-the-quota-meter-read-a-stale-copy-for-a-whole-afternoon.md"
+      ],
+      "note": "11 notes carry this anchor and only vrb-p015-the-orbit-scheduler-counted-a-skipped-row-as-a-written-one.md is the lesson for it; carriers span 40-Failures, 50-Reference, alpha-app, beta-cli, gamma-site, so nothing prefers alpha-app's own tree"
+    },
+    {
+      "qid": "VRQ17",
+      "query_sent": "larch_loader.sh",
+      "hook_tool_input": {
+        "file_path": "/repo/beta-cli/larch-loader/larch_loader.sh"
+      },
+      "folder": "40-Failures",
+      "project": "beta-cli",
+      "lang": "en",
+      "kind": "failure",
+      "band": "crowded",
+      "anchor_note_count": 12,
+      "primary_path": "40-Failures/vrb-p016-the-log-plume-counted-a-skipped-row-as-a-written-one.md",
+      "primary_title": "the log plume counted a skipped row as a written one",
+      "expected_paths": [
+        "10-Projects/alpha-app/vrb-p030-note.md",
+        "10-Projects/beta-cli/vrb-p037-the-build-anvil-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/gamma-site/vrb-p044-the-seat-allocator-reported-a-partial-run-as-a-complete-one.md",
+        "40-Failures/vrb-p005-note.md",
+        "40-Failures/vrb-p012-note.md",
+        "40-Failures/vrb-p016-the-log-plume-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p019-the-tundra-sweeper-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p023-the-shard-picker-counted-a-skipped-row-as-a-written-one.md",
+        "50-Reference/vrb-d001-the-naming-rules-for-jobs-queues-and-their-owners.md",
+        "50-Reference/vrb-d003-the-approved-list-of-runtimes-and-their-support-windows.md",
+        "50-Reference/vrb-p051-the-page-cache-read-a-stale-copy-for-a-whole-afternoon.md",
+        "50-Reference/vrb-p058-the-tally-job-read-a-stale-copy-for-a-whole-afternoon.md"
+      ],
+      "note": "12 notes carry this anchor and only vrb-p016-the-log-plume-counted-a-skipped-row-as-a-written-one.md is the lesson for it; carriers span 40-Failures, 50-Reference, alpha-app, beta-cli, gamma-site, so nothing prefers beta-cli's own tree"
+    },
+    {
+      "qid": "VRQ18",
+      "query_sent": "kappa_roster.yml",
+      "hook_tool_input": {
+        "file_path": "/repo/gamma-site/kappa-roster/kappa_roster.yml"
+      },
+      "folder": "40-Failures",
+      "project": "gamma-site",
+      "lang": "en",
+      "kind": "failure",
+      "band": "rare",
+      "anchor_note_count": 2,
+      "primary_path": "40-Failures/vrb-p017-the-index-quartz-counted-a-skipped-row-as-a-written-one.md",
+      "primary_title": "the index quartz counted a skipped row as a written one",
+      "expected_paths": [
+        "10-Projects/gamma-site/vrb-p017-the-index-quartz-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p017-the-index-quartz-counted-a-skipped-row-as-a-written-one.md"
+      ],
+      "note": "shape (c): this note is filed twice under one stem, here and at 10-Projects/gamma-site/vrb-p017-the-index-quartz-counted-a-skipped-row-as-a-written-one.md, with an identical body. bm_vault.py serves one title once, so whichever copy ranks first suppresses the other and the losing copy is a miss on primary_path even though first_expected_rank resolves"
+    },
+    {
+      "qid": "VRQ19",
+      "query_sent": "marble_seat.json",
+      "hook_tool_input": {
+        "file_path": "/repo/alpha-app/marble-seat/marble_seat.json"
+      },
+      "folder": "40-Failures",
+      "project": "alpha-app",
+      "lang": "en",
+      "kind": "failure",
+      "band": "rare",
+      "anchor_note_count": 1,
+      "primary_path": "40-Failures/vrb-p018-the-colour-picker-counted-a-skipped-row-as-a-written-one.md",
+      "primary_title": "the colour picker counted a skipped row as a written one",
+      "expected_paths": [
+        "40-Failures/vrb-p018-the-colour-picker-counted-a-skipped-row-as-a-written-one.md"
+      ],
+      "note": "one note carries this anchor; exact anchor match alone should answer it"
+    },
+    {
+      "qid": "VRQ20",
+      "query_sent": "CedarQuota.swift",
+      "hook_tool_input": {
+        "file_path": "/repo/beta-cli/cedarquota/CedarQuota.swift"
+      },
+      "folder": "40-Failures",
+      "project": "beta-cli",
+      "lang": "en",
+      "kind": "failure",
+      "band": "crowded",
+      "anchor_note_count": 9,
+      "primary_path": "40-Failures/vrb-p019-the-tundra-sweeper-counted-a-skipped-row-as-a-written-one.md",
+      "primary_title": "the tundra sweeper counted a skipped row as a written one",
+      "expected_paths": [
+        "10-Projects/alpha-app/vrb-p026-the-request-router-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/alpha-app/vrb-p033-the-quota-meter-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/beta-cli/vrb-p040-the-log-plume-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/gamma-site/vrb-p047-note.md",
+        "40-Failures/vrb-p001-the-batch-loader-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p019-the-tundra-sweeper-counted-a-skipped-row-as-a-written-one.md",
+        "50-Reference/vrb-d001-the-naming-rules-for-jobs-queues-and-their-owners.md",
+        "50-Reference/vrb-d004-the-definition-of-a-completed-change-and-who-signs-it.md",
+        "50-Reference/vrb-p054-the-roster-importer-read-a-stale-copy-for-a-whole-afternoon.md"
+      ],
+      "note": "9 notes carry this anchor and only vrb-p019-the-tundra-sweeper-counted-a-skipped-row-as-a-written-one.md is the lesson for it; carriers span 40-Failures, 50-Reference, alpha-app, beta-cli, gamma-site, so nothing prefers beta-cli's own tree"
+    },
+    {
+      "qid": "VRQ21",
+      "query_sent": "Juniper-warden-NOTES.md",
+      "hook_tool_input": {
+        "file_path": "/repo/gamma-site/juniper-warden-notes/Juniper-warden-NOTES.md"
+      },
+      "folder": "40-Failures",
+      "project": "gamma-site",
+      "lang": "en",
+      "kind": "failure",
+      "band": "rare",
+      "anchor_note_count": 1,
+      "primary_path": "40-Failures/vrb-p020-the-seat-allocator-counted-a-skipped-row-as-a-written-one.md",
+      "primary_title": "the seat allocator counted a skipped row as a written one",
+      "expected_paths": [
+        "40-Failures/vrb-p020-the-seat-allocator-counted-a-skipped-row-as-a-written-one.md"
+      ],
+      "note": "one note carries this anchor; exact anchor match alone should answer it"
+    },
+    {
+      "qid": "VRQ22",
+      "query_sent": "harbor_orbit.py",
+      "hook_tool_input": {
+        "file_path": "/repo/alpha-app/harbor-orbit/harbor_orbit.py"
+      },
+      "folder": "40-Failures",
+      "project": "alpha-app",
+      "lang": "en",
+      "kind": "failure",
+      "band": "rare",
+      "anchor_note_count": 1,
+      "primary_path": "40-Failures/vrb-p021-the-invoice-folder-counted-a-skipped-row-as-a-written-one.md",
+      "primary_title": "the invoice folder counted a skipped row as a written one",
+      "expected_paths": [
+        "40-Failures/vrb-p021-the-invoice-folder-counted-a-skipped-row-as-a-written-one.md"
+      ],
+      "note": "one note carries this anchor; exact anchor match alone should answer it"
+    },
+    {
+      "qid": "VRQ23",
+      "query_sent": "juniper-roster.ts",
+      "hook_tool_input": {
+        "file_path": "/repo/beta-cli/juniper-roster/juniper-roster.ts"
+      },
+      "folder": "40-Failures",
+      "project": "beta-cli",
+      "lang": "en",
+      "kind": "failure",
+      "band": "mid",
+      "anchor_note_count": 7,
+      "primary_path": "40-Failures/vrb-p022-the-token-minter-counted-a-skipped-row-as-a-written-one.md",
+      "primary_title": "the token minter counted a skipped row as a written one",
+      "expected_paths": [
+        "10-Projects/alpha-app/vrb-p029-the-ledger-writer-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/beta-cli/vrb-p036-the-retry-ripple-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/gamma-site/vrb-p043-the-tundra-sweeper-reported-a-partial-run-as-a-complete-one.md",
+        "40-Failures/vrb-p022-the-token-minter-counted-a-skipped-row-as-a-written-one.md",
+        "50-Reference/vrb-d002-the-retention-ruling-for-logs-and-generated-files.md",
+        "50-Reference/vrb-p050-the-request-router-read-a-stale-copy-for-a-whole-afternoon.md",
+        "50-Reference/vrb-p057-the-quota-meter-read-a-stale-copy-for-a-whole-afternoon.md"
+      ],
+      "note": "7 notes carry this anchor and only vrb-p022-the-token-minter-counted-a-skipped-row-as-a-written-one.md is the lesson for it; carriers span 40-Failures, 50-Reference, alpha-app, beta-cli, gamma-site, so nothing prefers beta-cli's own tree"
+    },
+    {
+      "qid": "VRQ24",
+      "query_sent": "lambda_sync.sh",
+      "hook_tool_input": {
+        "file_path": "/repo/gamma-site/lambda-sync/lambda_sync.sh"
+      },
+      "folder": "40-Failures",
+      "project": "gamma-site",
+      "lang": "en",
+      "kind": "failure",
+      "band": "rare",
+      "anchor_note_count": 1,
+      "primary_path": "40-Failures/vrb-p023-the-shard-picker-counted-a-skipped-row-as-a-written-one.md",
+      "primary_title": "the shard picker counted a skipped row as a written one",
+      "expected_paths": [
+        "40-Failures/vrb-p023-the-shard-picker-counted-a-skipped-row-as-a-written-one.md"
+      ],
+      "note": "one note carries this anchor; exact anchor match alone should answer it"
+    },
+    {
+      "qid": "VRQ25",
+      "query_sent": "granite_plume.yml",
+      "hook_tool_input": {
+        "file_path": "/repo/alpha-app/granite-plume/granite_plume.yml"
+      },
+      "folder": "40-Failures",
+      "project": "alpha-app",
+      "lang": "en",
+      "kind": "failure",
+      "band": "crowded",
+      "anchor_note_count": 10,
+      "primary_path": "40-Failures/vrb-p024-the-sync-worker-reported-a-partial-run-as-a-complete-one.md",
+      "primary_title": "the sync worker reported a partial run as a complete one",
+      "expected_paths": [
+        "10-Projects/alpha-app/vrb-p031-the-health-beacon-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/beta-cli/vrb-p038-the-tile-mosaic-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/gamma-site/vrb-p045-the-invoice-folder-reported-a-partial-run-as-a-complete-one.md",
+        "40-Failures/vrb-p006-the-roster-importer-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p013-the-build-anvil-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p024-the-sync-worker-reported-a-partial-run-as-a-complete-one.md",
+        "50-Reference/vrb-d001-the-naming-rules-for-jobs-queues-and-their-owners.md",
+        "50-Reference/vrb-d004-the-definition-of-a-completed-change-and-who-signs-it.md",
+        "50-Reference/vrb-p052-the-nightly-digest-read-a-stale-copy-for-a-whole-afternoon.md",
+        "50-Reference/vrb-p059-the-queue-warden-read-a-stale-copy-for-a-whole-afternoon.md"
+      ],
+      "note": "10 notes carry this anchor and only vrb-p024-the-sync-worker-reported-a-partial-run-as-a-complete-one.md is the lesson for it; carriers span 40-Failures, 50-Reference, alpha-app, beta-cli, gamma-site, so nothing prefers alpha-app's own tree"
+    },
+    {
+      "qid": "VRQ26",
+      "query_sent": "tau_sync.json",
+      "hook_tool_input": {
+        "file_path": "/repo/beta-cli/tau-sync/tau_sync.json"
+      },
+      "folder": "40-Failures",
+      "project": "beta-cli",
+      "lang": "en",
+      "kind": "failure",
+      "band": "crowded",
+      "anchor_note_count": 11,
+      "primary_path": "40-Failures/vrb-p025-the-batch-loader-reported-a-partial-run-as-a-complete-one.md",
+      "primary_title": "the batch loader reported a partial run as a complete one",
+      "expected_paths": [
+        "10-Projects/alpha-app/vrb-p032-the-parcel-tracker-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/beta-cli/vrb-p039-the-orbit-scheduler-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/gamma-site/vrb-p046-the-token-minter-reported-a-partial-run-as-a-complete-one.md",
+        "40-Failures/vrb-p000-the-sync-worker-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p007-the-health-beacon-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p014-the-tile-mosaic-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p021-the-invoice-folder-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p025-the-batch-loader-reported-a-partial-run-as-a-complete-one.md",
+        "50-Reference/vrb-d000-the-release-checklist-every-team-is-expected-to-follow.md",
+        "50-Reference/vrb-d002-the-retention-ruling-for-logs-and-generated-files.md",
+        "50-Reference/vrb-p053-the-ledger-writer-read-a-stale-copy-for-a-whole-afternoon.md"
+      ],
+      "note": "11 notes carry this anchor and only vrb-p025-the-batch-loader-reported-a-partial-run-as-a-complete-one.md is the lesson for it; carriers span 40-Failures, 50-Reference, alpha-app, beta-cli, gamma-site, so nothing prefers beta-cli's own tree"
+    },
+    {
+      "qid": "VRQ27",
+      "query_sent": "MarbleQuota.swift",
+      "hook_tool_input": {
+        "file_path": "/repo/alpha-app/marblequota/MarbleQuota.swift"
+      },
+      "folder": "10-Projects",
+      "project": "alpha-app",
+      "lang": "en",
+      "kind": "lesson",
+      "band": "crowded",
+      "anchor_note_count": 12,
+      "primary_path": "10-Projects/alpha-app/vrb-p026-the-request-router-reported-a-partial-run-as-a-complete-one.md",
+      "primary_title": "the request router reported a partial run as a complete one",
+      "expected_paths": [
+        "10-Projects/alpha-app/vrb-p026-the-request-router-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/alpha-app/vrb-p029-the-ledger-writer-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/alpha-app/vrb-p033-the-quota-meter-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/beta-cli/vrb-p040-the-log-plume-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/gamma-site/vrb-p047-note.md",
+        "40-Failures/vrb-p001-the-batch-loader-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p008-the-parcel-tracker-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p015-the-orbit-scheduler-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p022-the-token-minter-counted-a-skipped-row-as-a-written-one.md",
+        "50-Reference/vrb-d001-the-naming-rules-for-jobs-queues-and-their-owners.md",
+        "50-Reference/vrb-d003-the-approved-list-of-runtimes-and-their-support-windows.md",
+        "50-Reference/vrb-p054-the-roster-importer-read-a-stale-copy-for-a-whole-afternoon.md"
+      ],
+      "note": "12 notes carry this anchor and only vrb-p026-the-request-router-reported-a-partial-run-as-a-complete-one.md is the lesson for it; carriers span 40-Failures, 50-Reference, alpha-app, beta-cli, gamma-site, so nothing prefers alpha-app's own tree"
+    },
+    {
+      "qid": "VRQ28",
+      "query_sent": "Indigo-ledger-NOTES.md",
+      "hook_tool_input": {
+        "file_path": "/repo/alpha-app/indigo-ledger-notes/Indigo-ledger-NOTES.md"
+      },
+      "folder": "10-Projects",
+      "project": "alpha-app",
+      "lang": "en",
+      "kind": "lesson",
+      "band": "mid",
+      "anchor_note_count": 3,
+      "primary_path": "10-Projects/alpha-app/vrb-p027-the-page-cache-reported-a-partial-run-as-a-complete-one.md",
+      "primary_title": "the page cache reported a partial run as a complete one",
+      "expected_paths": [
+        "10-Projects/alpha-app/vrb-p027-the-page-cache-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/beta-cli/vrb-p034-the-tally-job-reported-a-partial-run-as-a-complete-one.md",
+        "50-Reference/vrb-d002-the-retention-ruling-for-logs-and-generated-files.md"
+      ],
+      "note": "3 notes carry this anchor and only vrb-p027-the-page-cache-reported-a-partial-run-as-a-complete-one.md is the lesson for it; carriers span 50-Reference, alpha-app, beta-cli, so nothing prefers alpha-app's own tree"
+    },
+    {
+      "qid": "VRQ29",
+      "query_sent": "kappa_ripple.py",
+      "hook_tool_input": {
+        "file_path": "/repo/alpha-app/kappa-ripple/kappa_ripple.py"
+      },
+      "folder": "10-Projects",
+      "project": "alpha-app",
+      "lang": "en",
+      "kind": "lesson",
+      "band": "crowded",
+      "anchor_note_count": 10,
+      "primary_path": "10-Projects/alpha-app/vrb-p028-the-nightly-digest-reported-a-partial-run-as-a-complete-one.md",
+      "primary_title": "the nightly digest reported a partial run as a complete one",
+      "expected_paths": [
+        "10-Projects/alpha-app/vrb-p028-the-nightly-digest-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/beta-cli/vrb-p035-the-queue-warden-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/gamma-site/vrb-p003-the-page-cache-counted-a-skipped-row-as-a-written-one.md",
+        "10-Projects/gamma-site/vrb-p042-the-colour-picker-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/gamma-site/vrb-p049-the-batch-loader-read-a-stale-copy-for-a-whole-afternoon.md",
+        "40-Failures/vrb-p003-the-page-cache-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p010-the-tally-job-counted-a-skipped-row-as-a-written-one.md",
+        "50-Reference/vrb-d000-the-release-checklist-every-team-is-expected-to-follow.md",
+        "50-Reference/vrb-d003-the-approved-list-of-runtimes-and-their-support-windows.md",
+        "50-Reference/vrb-p056-the-parcel-tracker-read-a-stale-copy-for-a-whole-afternoon.md"
+      ],
+      "note": "10 notes carry this anchor and only vrb-p028-the-nightly-digest-reported-a-partial-run-as-a-complete-one.md is the lesson for it; carriers span 40-Failures, 50-Reference, alpha-app, beta-cli, gamma-site, so nothing prefers alpha-app's own tree"
+    },
+    {
+      "qid": "VRQ30",
+      "query_sent": "fjord-tally.ts",
+      "hook_tool_input": {
+        "file_path": "/repo/alpha-app/fjord-tally/fjord-tally.ts"
+      },
+      "folder": "10-Projects",
+      "project": "alpha-app",
+      "lang": "en",
+      "kind": "lesson",
+      "band": "crowded",
+      "anchor_note_count": 10,
+      "primary_path": "10-Projects/alpha-app/vrb-p029-the-ledger-writer-reported-a-partial-run-as-a-complete-one.md",
+      "primary_title": "the ledger writer reported a partial run as a complete one",
+      "expected_paths": [
+        "10-Projects/alpha-app/vrb-p029-the-ledger-writer-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/beta-cli/vrb-p036-the-retry-ripple-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/gamma-site/vrb-p043-the-tundra-sweeper-reported-a-partial-run-as-a-complete-one.md",
+        "40-Failures/vrb-p004-the-nightly-digest-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p011-the-queue-warden-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p018-the-colour-picker-counted-a-skipped-row-as-a-written-one.md",
+        "50-Reference/vrb-d001-the-naming-rules-for-jobs-queues-and-their-owners.md",
+        "50-Reference/vrb-d004-the-definition-of-a-completed-change-and-who-signs-it.md",
+        "50-Reference/vrb-p050-the-request-router-read-a-stale-copy-for-a-whole-afternoon.md",
+        "50-Reference/vrb-p057-the-quota-meter-read-a-stale-copy-for-a-whole-afternoon.md"
+      ],
+      "note": "10 notes carry this anchor and only vrb-p029-the-ledger-writer-reported-a-partial-run-as-a-complete-one.md is the lesson for it; carriers span 40-Failures, 50-Reference, alpha-app, beta-cli, gamma-site, so nothing prefers alpha-app's own tree"
+    },
+    {
+      "qid": "VRQ31",
+      "query_sent": "fjord_mosaic.yml",
+      "hook_tool_input": {
+        "file_path": "/repo/alpha-app/fjord-mosaic/fjord_mosaic.yml"
+      },
+      "folder": "10-Projects",
+      "project": "alpha-app",
+      "lang": "en",
+      "kind": "lesson",
+      "band": "rare",
+      "anchor_note_count": 1,
+      "primary_path": "10-Projects/alpha-app/vrb-p031-the-health-beacon-reported-a-partial-run-as-a-complete-one.md",
+      "primary_title": "the health beacon reported a partial run as a complete one",
+      "expected_paths": [
+        "10-Projects/alpha-app/vrb-p031-the-health-beacon-reported-a-partial-run-as-a-complete-one.md"
+      ],
+      "note": "one note carries this anchor; exact anchor match alone should answer it"
+    },
+    {
+      "qid": "VRQ32",
+      "query_sent": "ember_parcel.json",
+      "hook_tool_input": {
+        "file_path": "/repo/alpha-app/ember-parcel/ember_parcel.json"
+      },
+      "folder": "10-Projects",
+      "project": "alpha-app",
+      "lang": "en",
+      "kind": "lesson",
+      "band": "mid",
+      "anchor_note_count": 4,
+      "primary_path": "10-Projects/alpha-app/vrb-p032-the-parcel-tracker-reported-a-partial-run-as-a-complete-one.md",
+      "primary_title": "the parcel tracker reported a partial run as a complete one",
+      "expected_paths": [
+        "10-Projects/alpha-app/vrb-p032-the-parcel-tracker-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/beta-cli/vrb-p039-the-orbit-scheduler-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/gamma-site/vrb-p046-the-token-minter-reported-a-partial-run-as-a-complete-one.md",
+        "50-Reference/vrb-d002-the-retention-ruling-for-logs-and-generated-files.md"
+      ],
+      "note": "4 notes carry this anchor and only vrb-p032-the-parcel-tracker-reported-a-partial-run-as-a-complete-one.md is the lesson for it; carriers span 50-Reference, alpha-app, beta-cli, gamma-site, so nothing prefers alpha-app's own tree"
+    },
+    {
+      "qid": "VRQ33",
+      "query_sent": "HarborMosaic.swift",
+      "hook_tool_input": {
+        "file_path": "/repo/alpha-app/harbormosaic/HarborMosaic.swift"
+      },
+      "folder": "10-Projects",
+      "project": "alpha-app",
+      "lang": "en",
+      "kind": "lesson",
+      "band": "rare",
+      "anchor_note_count": 1,
+      "primary_path": "10-Projects/alpha-app/vrb-p033-the-quota-meter-reported-a-partial-run-as-a-complete-one.md",
+      "primary_title": "the quota meter reported a partial run as a complete one",
+      "expected_paths": [
+        "10-Projects/alpha-app/vrb-p033-the-quota-meter-reported-a-partial-run-as-a-complete-one.md"
+      ],
+      "note": "one note carries this anchor; exact anchor match alone should answer it"
+    },
+    {
+      "qid": "VRQ34",
+      "query_sent": "Granite-orbit-NOTES.md",
+      "hook_tool_input": {
+        "file_path": "/repo/beta-cli/granite-orbit-notes/Granite-orbit-NOTES.md"
+      },
+      "folder": "10-Projects",
+      "project": "beta-cli",
+      "lang": "en",
+      "kind": "lesson",
+      "band": "rare",
+      "anchor_note_count": 1,
+      "primary_path": "10-Projects/beta-cli/vrb-p034-the-tally-job-reported-a-partial-run-as-a-complete-one.md",
+      "primary_title": "the tally job reported a partial run as a complete one",
+      "expected_paths": [
+        "10-Projects/beta-cli/vrb-p034-the-tally-job-reported-a-partial-run-as-a-complete-one.md"
+      ],
+      "note": "one note carries this anchor; exact anchor match alone should answer it"
+    },
+    {
+      "qid": "VRQ35",
+      "query_sent": "lambda_seat.py",
+      "hook_tool_input": {
+        "file_path": "/repo/beta-cli/lambda-seat/lambda_seat.py"
+      },
+      "folder": "10-Projects",
+      "project": "beta-cli",
+      "lang": "en",
+      "kind": "lesson",
+      "band": "mid",
+      "anchor_note_count": 5,
+      "primary_path": "10-Projects/beta-cli/vrb-p035-the-queue-warden-reported-a-partial-run-as-a-complete-one.md",
+      "primary_title": "the queue warden reported a partial run as a complete one",
+      "expected_paths": [
+        "10-Projects/beta-cli/vrb-p035-the-queue-warden-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/gamma-site/vrb-p042-the-colour-picker-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/gamma-site/vrb-p049-the-batch-loader-read-a-stale-copy-for-a-whole-afternoon.md",
+        "50-Reference/vrb-d000-the-release-checklist-every-team-is-expected-to-follow.md",
+        "50-Reference/vrb-p056-the-parcel-tracker-read-a-stale-copy-for-a-whole-afternoon.md"
+      ],
+      "note": "5 notes carry this anchor and only vrb-p035-the-queue-warden-reported-a-partial-run-as-a-complete-one.md is the lesson for it; carriers span 50-Reference, beta-cli, gamma-site, so nothing prefers beta-cli's own tree"
+    },
+    {
+      "qid": "VRQ36",
+      "query_sent": "granite-parcel.ts",
+      "hook_tool_input": {
+        "file_path": "/repo/beta-cli/granite-parcel/granite-parcel.ts"
+      },
+      "folder": "10-Projects",
+      "project": "beta-cli",
+      "lang": "en",
+      "kind": "lesson",
+      "band": "rare",
+      "anchor_note_count": 1,
+      "primary_path": "10-Projects/beta-cli/vrb-p036-the-retry-ripple-reported-a-partial-run-as-a-complete-one.md",
+      "primary_title": "the retry ripple reported a partial run as a complete one",
+      "expected_paths": [
+        "10-Projects/beta-cli/vrb-p036-the-retry-ripple-reported-a-partial-run-as-a-complete-one.md"
+      ],
+      "note": "one note carries this anchor; exact anchor match alone should answer it"
+    },
+    {
+      "qid": "VRQ37",
+      "query_sent": "gamma_cache.sh",
+      "hook_tool_input": {
+        "file_path": "/repo/beta-cli/gamma-cache/gamma_cache.sh"
+      },
+      "folder": "10-Projects",
+      "project": "beta-cli",
+      "lang": "en",
+      "kind": "lesson",
+      "band": "mid",
+      "anchor_note_count": 6,
+      "primary_path": "10-Projects/beta-cli/vrb-p037-the-build-anvil-reported-a-partial-run-as-a-complete-one.md",
+      "primary_title": "the build anvil reported a partial run as a complete one",
+      "expected_paths": [
+        "10-Projects/beta-cli/vrb-p037-the-build-anvil-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/gamma-site/vrb-p044-the-seat-allocator-reported-a-partial-run-as-a-complete-one.md",
+        "40-Failures/vrb-p005-note.md",
+        "50-Reference/vrb-d002-the-retention-ruling-for-logs-and-generated-files.md",
+        "50-Reference/vrb-p051-the-page-cache-read-a-stale-copy-for-a-whole-afternoon.md",
+        "50-Reference/vrb-p058-the-tally-job-read-a-stale-copy-for-a-whole-afternoon.md"
+      ],
+      "note": "6 notes carry this anchor and only vrb-p037-the-build-anvil-reported-a-partial-run-as-a-complete-one.md is the lesson for it; carriers span 40-Failures, 50-Reference, beta-cli, gamma-site, so nothing prefers beta-cli's own tree"
+    },
+    {
+      "qid": "VRQ38",
+      "query_sent": "cedar_tundra.yml",
+      "hook_tool_input": {
+        "file_path": "/repo/beta-cli/cedar-tundra/cedar_tundra.yml"
+      },
+      "folder": "10-Projects",
+      "project": "beta-cli",
+      "lang": "en",
+      "kind": "lesson",
+      "band": "mid",
+      "anchor_note_count": 7,
+      "primary_path": "10-Projects/beta-cli/vrb-p038-the-tile-mosaic-reported-a-partial-run-as-a-complete-one.md",
+      "primary_title": "the tile mosaic reported a partial run as a complete one",
+      "expected_paths": [
+        "10-Projects/beta-cli/vrb-p038-the-tile-mosaic-reported-a-partial-run-as-a-complete-one.md",
+        "10-Projects/gamma-site/vrb-p045-the-invoice-folder-reported-a-partial-run-as-a-complete-one.md",
+        "40-Failures/vrb-p006-the-roster-importer-counted-a-skipped-row-as-a-written-one.md",
+        "40-Failures/vrb-p013-the-build-anvil-counted-a-skipped-row-as-a-written-one.md",
+        "50-Reference/vrb-d003-the-approved-list-of-runtimes-and-their-support-windows.md",
+        "50-Reference/vrb-p052-the-nightly-digest-read-a-stale-copy-for-a-whole-afternoon.md",
+        "50-Reference/vrb-p059-the-queue-warden-read-a-stale-copy-for-a-whole-afternoon.md"
+      ],
+      "note": "7 notes carry this anchor and only vrb-p038-the-tile-mosaic-reported-a-partial-run-as-a-complete-one.md is the lesson for it; carriers span 40-Failures, 50-Reference, beta-cli, gamma-site, so nothing prefers beta-cli's own tree"
+    },
+    {
+      "qid": "VRQ39",
+      "query_sent": "dune_router.json",
+      "hook_tool_input": {
+        "file_path": "/repo/beta-cli/dune-router/dune_router.json"
+      },
+      "folder": "10-Projects",
+      "project": "beta-cli",
+      "lang": "en",
+      "kind": "lesson",
+      "band": "rare",
+      "anchor_note_count": 1,
+      "primary_path": "10-Projects/beta-cli/vrb-p039-the-orbit-scheduler-reported-a-partial-run-as-a-complete-one.md",
+      "primary_title": "the orbit scheduler reported a partial run as a complete one",
+      "expected_paths": [
+        "10-Projects/beta-cli/vrb-p039-the-orbit-scheduler-reported-a-partial-run-as-a-complete-one.md"
+      ],
+      "note": "one note carries this anchor; exact anchor match alone should answer it"
+    },
+    {
+      "qid": "VRQ40",
+      "query_sent": "kappa_plume.sh",
+      "hook_tool_input": {
+        "file_path": "/repo/gamma-site/kappa-plume/kappa_plume.sh"
+      },
+      "folder": "10-Projects",
+      "project": "gamma-site",
+      "lang": "en",
+      "kind": "lesson",
+      "band": "rare",
+      "anchor_note_count": 1,
+      "primary_path": "10-Projects/gamma-site/vrb-p044-the-seat-allocator-reported-a-partial-run-as-a-complete-one.md",
+      "primary_title": "the seat allocator reported a partial run as a complete one",
+      "expected_paths": [
+        "10-Projects/gamma-site/vrb-p044-the-seat-allocator-reported-a-partial-run-as-a-complete-one.md"
+      ],
+      "note": "one note carries this anchor; exact anchor match alone should answer it"
+    }
+  ]
+}
