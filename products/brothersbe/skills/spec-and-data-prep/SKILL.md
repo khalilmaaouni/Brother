@@ -55,8 +55,8 @@ metric with no denominator declared is refused, not estimated.
 
 ## If they want more
 
-The full card, with real captured output, is
-`docs/cards/CARD-technical-ba-data-prep.md`.
+The evidence steps above are self-contained and include the captured output
+needed for this preparation.
 
 ## Invoking it on purpose
 

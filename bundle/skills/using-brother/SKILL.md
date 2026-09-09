@@ -34,7 +34,8 @@ Codex has no slash commands, so under Codex a task that names Brother is done
 by running the engine, never by hand-editing files and printing no receipt.
 Write NO intake into the target repository first (no STATE.md, no `.sbe/`,
 no fence file): any such file dirties the tree and the engine refuses the run
-before the first claim. Full detail: docs/codex/SMOKE-RUNBOOK.md.
+before the first claim. The complete portable procedure is the rest of this
+installed skill and its `references/` directory.
 
 1. **Make each unit's done check fail right now, before any work happens.**
    Run it yourself and confirm it exits nonzero; a check that already exits

@@ -91,11 +91,9 @@ it, and a check that examined nothing reads NO-DATA rather than PASS.
 
 ## If they want more
 
-The full cards, with real captured output, are
-`docs/cards/CARD-technical-change.md` for the service and contract side and
-the warehouse and pipeline side alike, and `docs/cards/CARD-technical-qa.md`
-for turning a run into a receipt a reviewer accepts. The command reference is
-`docs/commands.md`. Neither card is required to do the work above.
+The evidence steps above are self-contained. Capture the service, contract,
+warehouse, pipeline, and receipt evidence that applies to the change. None is
+required when it does not apply.
 
 ## Invoking it on purpose
 

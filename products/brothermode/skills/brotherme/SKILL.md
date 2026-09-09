@@ -21,7 +21,7 @@ Six names are the public surface. They are NOT six equal, invocable peers today,
 | `status` | Works. `skills/status/` |
 | `deliver` | Works. `skills/deliver/` |
 | `doctor` | Works. `skills/doctor/` |
-| `verify` | A NAME FOR A FLOW, NOT AN ENTRY POINT. It is a routing name over the existing review and deliver flow, and it introduces no engine. Settled by ruling on 2026-08-11: it keeps no folder of its own, so the canonical count stays at nine and ruling B5 of `docs/decisions/V3-FREEZE-2026-08-07.md` is untouched. Ask for a review and you get exactly the flow this name describes. No `skills/verify/` exists and none will. |
+| `verify` | A NAME FOR A FLOW, NOT AN ENTRY POINT. It is a routing name over the existing review and deliver flow, and it introduces no engine. It keeps no folder of its own, so the canonical count stays at nine. Ask for a review and you get exactly the flow this name describes. No `skills/verify/` exists and none will. |
 | `toolkit` | NOT BUILT. It arrives with the Toolkit release. No stub, no placeholder folder, no silently failing entry point. |
 
 Never present a name in that table as available when the right-hand column says otherwise. A user who types a name that does nothing learns that this product's own page cannot be trusted, which costs more than the missing feature.
