@@ -30,6 +30,7 @@ a friendlier page.
 """
 import json
 import os
+import shlex
 import re
 import sys
 import tempfile
@@ -414,8 +415,8 @@ class AGeneratedReceiptMatchesTheContract(unittest.TestCase):
         """)
         model = TBR.write_stub(tmp, "writer_model.py", TBR.WRITER_MODEL)
         env = dict(os.environ)
-        env["DOOR_MODEL_CMD"] = "%s %s" % (sys.executable, decomposer)
-        env["MODEL_WORKER_CMD"] = "%s %s" % (sys.executable, model)
+        env["DOOR_MODEL_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(decomposer))
+        env["MODEL_WORKER_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(model))
         proc = TBR.sh([sys.executable, TBR.BROTHER_RUN,
                        "make add() refuse non-numeric input and cover it",
                        "--cwd", repo, "--runs-root", tmp], env=env)

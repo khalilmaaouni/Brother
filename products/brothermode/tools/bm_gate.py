@@ -221,16 +221,16 @@ def cmd_ask(root, args):
     if paths:
         owned = _store_claims(root)
         if owned is None:
-            sys.stderr.write("bm_gate: NO-DATA on file ownership (no readable fence store); "
-                             "path collision was NOT checked\n")
-        else:
-            hits = _overlap(paths, owned)
-            if hits:
-                for p, q, name in hits[:6]:
-                    print("COLLIDE %s is owned by active fence %r (as %s)" % (p, name, q))
-                print("WAIT %d another lane holds these paths; do not start, re-plan the task "
-                      "or wait for that fence to close" % RETRY_MAX_SEC)
-                return 75
+            print("NO-DATA no readable fence store; path collision could not be checked, "
+                  "so this ask is refused rather than risked")
+            return 2
+        hits = _overlap(paths, owned)
+        if hits:
+            for p, q, name in hits[:6]:
+                print("COLLIDE %s is owned by active fence %r (as %s)" % (p, name, q))
+            print("WAIT %d another lane holds these paths; do not start, re-plan the task "
+                  "or wait for that fence to close" % RETRY_MAX_SEC)
+            return 75
 
     waiting_already = bool(args.get("waiting"))
     reason = _pressure_reason(m, klass, waiting_already)

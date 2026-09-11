@@ -515,12 +515,24 @@ def main(argv=None):
         print("  done-check: %s" % str(it.get("done_check", NODATA))[:200])
         return 0
 
+    # THE MACHINE READABLE FORM RETURNS FIRST, before the delivery line below.
+    # --json is read by a parser (scripts/test_reporting_adversarial.py is one),
+    # so stdout in this mode carries JSON and nothing else. The delivery line
+    # was added to this function by the 2026-09-07 ruling AFTER --json already
+    # existed, and printing it above this branch put a human report in front of
+    # every JSON reader: the flag still exited 0, so the break was invisible
+    # until a parser tried to read it.
+    secs = sections(doc)
+    if args.json:
+        print(json.dumps(secs, indent=2, sort_keys=True))
+        return 0
+
     # THE DELIVERY LINE, founder ruling 2026-09-07 (question UI, "A: The
-    # delivery line"): printed FIRST, before the readiness bars below,
-    # because one goal with named steps and clocks is what reads as progress
-    # to him; row counts do not. Imported, never shelled out to, so this and
-    # `delivery_status.py`'s own CLI can never print a different number for
-    # the same step. NO-DATA (never a crash) when no delivery file exists.
+    # delivery line"): printed FIRST on the human report, before the readiness
+    # bars below, because one goal with named steps and clocks is what reads as
+    # progress to him; row counts do not. Imported, never shelled out to, so
+    # this and `delivery_status.py`'s own CLI can never print a different number
+    # for the same step. NO-DATA (never a crash) when no delivery file exists.
     d_doc, d_err = DS.load()
     if d_doc is None:
         print("%s: %s" % (DS.NODATA, d_err))
@@ -528,11 +540,6 @@ def main(argv=None):
         for line in DS.render_lines(d_doc)[0]:
             print(line)
     print("")
-
-    secs = sections(doc)
-    if args.json:
-        print(json.dumps(secs, indent=2, sort_keys=True))
-        return 0
 
     claims = 0
     for s in secs:

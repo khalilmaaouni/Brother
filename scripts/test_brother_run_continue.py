@@ -57,9 +57,9 @@ def _leave_unfinished(scratch, runs_root, cwd, outcome, unit_id, filename):
     """ % (unit_id, filename, filename)
     env = dict(os.environ)
     env["DOOR_MODEL_CMD"] = "%s %s" % (
-        sys.executable, tbr.write_stub(scratch, "decomposer.py", decomposer_body))
+        shlex.quote(sys.executable), shlex.quote(tbr.write_stub(scratch, "decomposer.py", decomposer_body)))
     env["MODEL_WORKER_CMD"] = "%s %s" % (
-        sys.executable, tbr.write_stub(scratch, "failing_model.py", tbr.FAILING_MODEL))
+        shlex.quote(sys.executable), shlex.quote(tbr.write_stub(scratch, "failing_model.py", tbr.FAILING_MODEL)))
     return tbr.sh([sys.executable, BROTHER_RUN, outcome,
                   "--cwd", cwd, "--runs-root", runs_root], env=env)
 
@@ -113,7 +113,7 @@ class ContinueIgnoresOtherRepos(unittest.TestCase):
         # cheap, and still fully hermetic (no network).
         env = dict(os.environ)
         env["MODEL_WORKER_CMD"] = "%s %s" % (
-            sys.executable, tbr.write_stub(scratch, "failing2.py", tbr.FAILING_MODEL))
+            shlex.quote(sys.executable), shlex.quote(tbr.write_stub(scratch, "failing2.py", tbr.FAILING_MODEL)))
         proc = tbr.sh([sys.executable, BROTHER_RUN, "--continue",
                       "--cwd", repo1, "--runs-root", runs_root], env=env)
         out = proc.stdout + proc.stderr
@@ -154,7 +154,7 @@ class ContinueWithMultipleUnfinishedRuns(unittest.TestCase):
         # failing model (hermetic, no network).
         env = dict(os.environ)
         env["MODEL_WORKER_CMD"] = "%s %s" % (
-            sys.executable, tbr.write_stub(scratch, "failing2.py", tbr.FAILING_MODEL))
+            shlex.quote(sys.executable), shlex.quote(tbr.write_stub(scratch, "failing2.py", tbr.FAILING_MODEL)))
         picked = tbr.sh([sys.executable, BROTHER_RUN, "--continue", "2",
                         "--cwd", repo, "--runs-root", runs_root], env=env)
         pout = picked.stdout + picked.stderr
@@ -180,8 +180,8 @@ class ContinueIgnoresATerminalRun(unittest.TestCase):
         """)
         model = tbr.write_stub(scratch, "writer.py", tbr.WRITER_MODEL)
         env = dict(os.environ)
-        env["DOOR_MODEL_CMD"] = "%s %s" % (sys.executable, decomposer)
-        env["MODEL_WORKER_CMD"] = "%s %s" % (sys.executable, model)
+        env["DOOR_MODEL_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(decomposer))
+        env["MODEL_WORKER_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(model))
         proc = tbr.sh([sys.executable, BROTHER_RUN, "a file that fully lands",
                       "--cwd", repo, "--runs-root", runs_root], env=env)
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
@@ -249,8 +249,8 @@ class ARefusalNamesItsNextCommand(unittest.TestCase):
         # command is therefore the same ask, not --continue.
         env = dict(os.environ)
         env["DOOR_MODEL_CMD"] = "%s %s" % (
-            sys.executable,
-            tbr.write_stub(scratch, "no_model.py", tbr.FAILING_MODEL))
+            shlex.quote(sys.executable),
+            shlex.quote(tbr.write_stub(scratch, "no_model.py", tbr.FAILING_MODEL)))
         outcome = "an outcome the door cannot read a plan for"
         proc = tbr.sh([sys.executable, BROTHER_RUN, outcome,
                        "--cwd", repo, "--runs-root", runs_root], env=env)
@@ -293,8 +293,8 @@ class ThePrintedCommandContinuesTheSameRun(unittest.TestCase):
         # same runs root, same run directory.
         env = dict(os.environ)
         env["MODEL_WORKER_CMD"] = "%s %s" % (
-            sys.executable, tbr.write_stub(scratch, "writer.py",
-                                           tbr.WRITER_MODEL))
+            shlex.quote(sys.executable), shlex.quote(tbr.write_stub(scratch, "writer.py",
+                                           tbr.WRITER_MODEL)))
         again = tbr.sh(shlex.split(cmd), env=env)
         out = again.stdout + again.stderr
         self.assertIn("brother_run: resuming", out, out)

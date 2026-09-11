@@ -572,7 +572,7 @@ def main(argv=None):
                                     mask_self_naming_note(
                                         gen_note.decode("utf-8"))):
                                 print(line)
-                        except UnicodeDecodeError:
+                        except UnicodeDecodeError:  # sbe: allow-silent binary release-note bytes cannot yield a textual diff, while the mismatch remains recorded
                             pass
 
     print("reproduce-export: %d allowlisted file(s) regenerated from %s"

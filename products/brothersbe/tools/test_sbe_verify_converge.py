@@ -203,6 +203,13 @@ class VerifyConvergeScenario(unittest.TestCase):
             self._write(os.path.join(CHANGE_DIR, name), body)
         self._write(os.path.join(CHANGE_DIR, "07-verification.md"), VERIFICATION_BODY)
         self._write(os.path.join(CHANGE_DIR, "08-behaviour.md"), BEHAVIOUR_BODY)
+        # B1's Proof backticks `widget()`, so the `proof` hard gate owes a
+        # ran-receipt naming it, and since FX-F a hard-gate FAIL moves
+        # `sbe verify` to exit 1. Recorded here (test_sbe_proof_gate.py's own
+        # receipt shape) so that FAIL cannot come from the proof gate and the
+        # isolation this class's docstring promises holds again.
+        self._write(os.path.join(CHANGE_DIR, "ran-receipt.json"),
+                    {"checks": [{"name": "widget()", "exit_code": 0, "duration_ms": 812}]})
         self._write(os.path.join(CHANGE_DIR, "00-intake.json"),
                     {"answers": answers, "tier": tier, "override": override,
                      "override_reason": override_reason})

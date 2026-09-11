@@ -390,7 +390,7 @@ def _parse_ts(value):
     text = value[:-1] + "+00:00" if value.endswith("Z") else value
     try:
         return datetime.datetime.fromisoformat(text)
-    except ValueError:
+    except ValueError:  # sbe: allow-silent an unusable session timestamp is intentionally indistinguishable from missing evidence in this detector
         return None
 
 

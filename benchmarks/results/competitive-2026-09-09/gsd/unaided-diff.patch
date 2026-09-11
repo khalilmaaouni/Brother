@@ -1,0 +1,13 @@
+diff --git a/pricing.py b/pricing.py
+index 571a162..0c0cbd4 100644
+--- a/pricing.py
++++ b/pricing.py
+@@ -13,7 +13,5 @@ def apply_discount(price, pct):
+     pct is a whole number of percent, e.g. 20 means 20 percent off, so
+     apply_discount(50, 20) must return 40.0.
+ 
+-    BUG: this subtracts pct as a flat amount instead of as a percentage of
+-    price, so apply_discount(50, 20) currently returns 30.
+     """
+-    return price - pct
++    return price * (1 - pct / 100)

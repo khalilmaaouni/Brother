@@ -1,0 +1,18 @@
+# Reference index
+
+- [Routing](routing.md)
+- [Commands and entry points](commands-and-entrypoints.md)
+- [Outcome contract](outcome-contract.md)
+- [Verdicts](verdicts.md)
+- [Evidence and independence](evidence.md)
+- [Receipt model](receipt-model.md)
+- [Work units](work-units.md)
+- [Safety boundaries](safety-boundaries.md)
+- [Hooks](hooks.md)
+- [Vault](vault.md)
+- [State and files](state-and-files.md)
+- [Configuration](configuration.md)
+- [Install matrix](install-matrix.md)
+- [Troubleshooting](troubleshooting.md)
+- [Documentation assurance](documentation-assurance.md)
+- [Adapter contract](ADAPTER-CONTRACT.md)

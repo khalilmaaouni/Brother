@@ -1,7 +1,7 @@
 {
   "generated": "2026-09-05",
-  "log": "/Users/khalil.maaouni/.claude/evidence/lane-e53-real-command-log.jsonl",
-  "lessons": "/Users/khalil.maaouni/.claude/repeat-guard/lessons.jsonl",
+  "log": "~/.claude/evidence/lane-e53-real-command-log.jsonl",
+  "lessons": "~/.claude/repeat-guard/lessons.jsonl",
   "commands": 1157,
   "failures": 772,
   "described_failures": 4,

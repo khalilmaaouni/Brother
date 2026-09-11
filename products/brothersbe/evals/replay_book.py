@@ -239,6 +239,15 @@ VOLATILE_VERSION = re.compile(r"\bv?\d+\.\d+\.\d+-rc\.\d+\b")
 VOLATILE_PYVER = re.compile(
     r"^(python\s+(?:PASS|FAIL)\s+)\d+\.\d+\.\d+(?=\s*\(floor is )", re.M)
 
+# The doctor's platform line prints the machine's kernel release and its live
+# interpreter version: "platform  PASS  Darwin 25.6.0, python 3.13.14 at ...".
+# Both are the machine's, by the reasoning VOLATILE_PYVER gives above: an OS
+# update on the replaying machine (Darwin 25.5.0 to 25.6.0, 2026-09) turned
+# three book blocks red with no book or tool change. Only the two version
+# tokens mask; the verdict, the OS name, the paths and the shell stay compared.
+VOLATILE_PLATFORM = re.compile(
+    r"^(platform\s+(?:PASS|FAIL)\s+\S+ )\S+(, python )\d+\.\d+\.\d+", re.M)
+
 # The doctor's install-identity line counts how many OTHER copies of this
 # plugin are installed elsewhere on the machine that ran the check: "N
 # installed copies examined: M match this source at V, K are lagging
@@ -315,6 +324,7 @@ def stable(text):
     text = VOLATILE_TESTID.sub(r"(\1)", text)
     text = VOLATILE_CARETS.sub("", text)
     text = VOLATILE_PYVER.sub(r"\1<python-version>", text)
+    text = VOLATILE_PLATFORM.sub(r"\1<os-release>\2<python-version>", text)
     text = VOLATILE_VERSION.sub("<version>", text)
     text = VOLATILE_INSTALL_COUNT.sub(
         r"\g<1><n>\g<2><n>\g<3><version>\g<5><n>\g<6>", text)

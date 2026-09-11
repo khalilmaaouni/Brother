@@ -236,12 +236,29 @@ class TheVaultCounter(unittest.TestCase):
     def test_the_default_reads_both_the_repo_and_user_run_roots(self):
         """No override at all: the real default must be the two-root list,
         never just RUNS_ROOT alone, or a real user run is invisible to this
-        counter (the defect this test guards)."""
+        counter (the defect this test guards).
+
+        HERMETIC SINCE 2026-09-10. This used to assert that BOTH root paths
+        appear in the reported command, which is only true on a machine where
+        both directories exist. receipts_bound names the roots it FOUND, so on
+        a fresh checkout or a CI runner the absent one is correctly missing
+        from that string and the old assertion failed on a tool that was
+        behaving. Measured: the Linux runner reported "1/2 run root(s)
+        present" and the test read that as a defect. The claim under test is
+        how many roots the default CONSIDERS, which the tool states as the
+        denominator, so that is what is asserted here."""
         count, command, err = B.receipts_bound()
-        self.assertIsNone(err)
-        self.assertIsNotNone(count)
-        self.assertIn(B.RUNS_ROOT, command)
-        self.assertIn(B.USER_RUNS_ROOT, command)
+        self.assertIn("/2 run root(s)", command,
+                      "the default must consider both roots, and the count "
+                      "of considered roots is the denominator it prints")
+        if err is None:
+            self.assertIsNotNone(count)
+        else:
+            # No root exists on this machine, which is NO-DATA and not a
+            # failure; the error still has to name both roots it looked in.
+            self.assertIsNone(count)
+            self.assertIn(B.RUNS_ROOT, err)
+            self.assertIn(B.USER_RUNS_ROOT, err)
 
     # -- notes written this week (vault frontmatter) -------------------------
 

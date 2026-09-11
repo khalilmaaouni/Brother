@@ -1140,11 +1140,13 @@ class TestThreeRenderersOneCollector(ViewCase):
     def test_the_page_reads_the_eight_fields_from_bl(self):
         self._s2_fixture()
         view = bl.collect_status(self.store, "p1")
+        # R-4 (bm_lead.py collect_status, 2026-09-08) put the ship verdict
+        # ahead of the original eight; the list is still exactly bl's.
         self.assertEqual(
-            ["Goal", "Direction", "Progress", "Time remaining",
+            ["Verdict", "Goal", "Direction", "Progress", "Time remaining",
              "Decision needed", "Risk", "Evidence", "Next step"],
             [label for label, _v, _x in view["fields"]],
-            "the eight fields stay bl's; the page must not re-derive them")
+            "the fields stay bl's; the page must not re-derive them")
 
     def test_the_view_module_defines_no_collector(self):
         tree = ast.parse(_read(VIEW_FILE), filename="bm_view.py")

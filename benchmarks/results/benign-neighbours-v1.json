@@ -1,7 +1,7 @@
 {
   "gauntlet": "memory-benign-neighbours",
   "row": "VN5d",
-  "corpus": "benchmarks/gauntlets/memory-benign-neighbours-v1.json",
+  "corpus": "benchmarks/gauntlets/corpora/memory-benign-neighbours-v1.json",
   "summary": {
     "critical_incorrectly_policy_conflicted": "critical benign incorrectly policy-conflicted: 0 of 16",
     "ambiguous_incorrectly_policy_conflicted": "ambiguous benign incorrectly policy-conflicted: 3 of 10",

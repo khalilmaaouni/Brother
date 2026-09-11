@@ -427,5 +427,52 @@ class AnEventNodeIsNeverPulledByASession(unittest.TestCase):
         self.assertNotIn('S', [b['id'] for b in p['batch']])
 
 
+class AlsoInFlightIsFoldedIntoConflictAdmission(unittest.TestCase):
+    """H3: under rolling refill, planning happens WHILE workers hold paths, and
+    nothing writes IN-FLIGHT status for them. also_in_flight lets a caller name
+    what is actually live so the ONE existing conflict check (batch + in_flight)
+    does the work; there must be no second conflict rule."""
+
+    def test_a_unit_overlapping_live_work_is_not_admitted(self):
+        live = node('LIVE', owns=['x.py'])
+        d = doc([node('B', owns=['x.py'])])
+        # sanity: without also_in_flight, B is dispatchable on its own
+        self.assertEqual([n['id'] for n in gl.plan(d, slots=4)['batch']], ['B'])
+        p = gl.plan(d, slots=4, also_in_flight=[live])
+        self.assertEqual(p['batch'], [])
+        self.assertIn('overlaps LIVE', p['deferred'][0][1])
+
+    def test_non_overlapping_work_still_runs(self):
+        live = node('LIVE', owns=['x.py'])
+        p = gl.plan(doc([node('B', owns=['y.py'])]), slots=4,
+                    also_in_flight=[live])
+        self.assertEqual([n['id'] for n in p['batch']], ['B'])
+
+    def test_an_empty_list_leaves_todays_batch_identical(self):
+        d = doc([node('A', owns=['a.py']), node('B', owns=['b.py'])])
+        without = gl.plan(d, slots=4)
+        withempty = gl.plan(d, slots=4, also_in_flight=[])
+        self.assertEqual([n['id'] for n in without['batch']],
+                         [n['id'] for n in withempty['batch']])
+        self.assertEqual(without['deferred'], withempty['deferred'])
+
+    def test_the_live_set_is_reported_in_the_plans_in_flight(self):
+        live = node('LIVE', owns=['x.py'])
+        p = gl.plan(doc([node('B', owns=['y.py'])]), slots=4,
+                    also_in_flight=[live])
+        self.assertIn('LIVE', [n['id'] for n in p['in_flight']])
+
+    def test_a_duplicate_id_is_not_doubled(self):
+        """The same unit named both by a real IN-FLIGHT row and by
+        also_in_flight (or twice in also_in_flight) must be folded, not
+        counted twice."""
+        real = node('LIVE', owns=['x.py'], status='IN-FLIGHT')
+        again = node('LIVE', owns=['x.py'])
+        p = gl.plan(doc([real, node('B', owns=['y.py'])]), slots=4,
+                    also_in_flight=[again])
+        ids = [n['id'] for n in p['in_flight']]
+        self.assertEqual(ids.count('LIVE'), 1)
+
+
 if __name__ == '__main__':
     unittest.main()

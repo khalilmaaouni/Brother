@@ -138,6 +138,10 @@ content.
 
 ## Counts (self-check output, quoted verbatim below)
 
+Superseded by the 2026-09-07 blind audit and its corrections (see the new
+section below and "Blind audit"). Quoted here is the ORIGINAL authoring
+self-check, kept for the record of what was blind-authored:
+
 ```
 n: 40
 critical: 35
@@ -155,23 +159,51 @@ label distribution: SUGGEST MERGE 6, KEEP SEPARATE 4, NO-DATA 2,
   R1 2, R2 1, R3 1
 ```
 
-Other required minimums, counted by hand against the case list:
+The self-check AFTER the 2026-09-07 corrections below (re-run against the
+corrected file, the numbers that now hold):
 
-- Refuted-identity cases (question proposes a match on a stated ground,
-  expected `REJECT MATCH` or `KEEP SEPARATE`): 8
-  (`W5-09, W5-16, W5-17, W5-18, W5-19, W5-24, W5-32, W5-34`; minimum 6).
-- Record-write shaped questions: 3 (`W5-10, W5-13, W5-32`; minimum 3).
-- Relocation or renamed-area cases, all expected `SUGGEST MERGE`: 4
-  (`W5-01, W5-02, W5-06, W5-07`; minimum 4).
-- Identifier reuse cases: 3 (`W5-16, W5-17, W5-18`; minimum 3).
-- Medium-evidence cases: 3 (`W5-20` unvalidated crosswalk, no separately
-  stated confirmation reason, expects `ESCALATE`; `W5-22` unvalidated
-  crosswalk with a separately stated transaction-history reason, expects
-  `SUGGEST MERGE`; `W5-23` an explained conflicting identifier with a
-  separately stated irreversible-payment-run reason, expects
-  `SUGGEST MERGE`; minimum 3, both required scenarios present).
+```
+n: 40
+critical: 35
+critical merge positives: 8 (>= 6 required)
+per track: address 5, entity-object 5, hierarchy 5, identifier 5,
+  match-or-no-merge 5, temporal 5, survivorship 5, requirements 5
+expected outside allowed: 0
+tracks outside CANONICAL_TRACKS: 0
+duplicate ids: 0
+banned-term inputs: 0
+critical without class: 0
+every critical critical_class is a member of critical_classes: yes (0 not)
+repeated 14-character input openings: none
+shared 20-character input fragment collisions: 0
+label distribution: SUGGEST MERGE 4, AUTO-MERGE 4, KEEP SEPARATE 5,
+  NO-DATA 2, REJECT MATCH 13, ESCALATE 4, LINK AS RELATED 4,
+  R1 2, R2 1, R3 1
+```
+
+Other required minimums, re-counted by hand against the corrected case list
+(some shift from the original authoring count above, because W5-06 no
+longer expects a merge, W5-02/W5-05/W5-21 were re-authored, and W5-15/34/35
+changed track; this is the honest post-correction state, not the original):
+
+- Refuted-identity cases (question proposes a match or relation on a
+  stated ground, expected `REJECT MATCH` or `KEEP SEPARATE`): 11
+  (`W5-03, W5-05, W5-09, W5-15, W5-16, W5-17, W5-18, W5-19, W5-24, W5-25,
+  W5-34`; minimum 6).
+- Record-write shaped questions: 5 (`W5-02, W5-10, W5-13, W5-21, W5-32`;
+  `W5-38` carries the same shape for a hierarchy field and was already
+  present before this correction; minimum 3).
+- Relocation or renamed-area cases: 2 remain expected `SUGGEST MERGE`
+  (`W5-01, W5-07`); `W5-06` is still relocation-shaped but now expects
+  `ESCALATE` (a missing identifier is weak evidence, never medium, so the
+  relocation shape alone does not guarantee `SUGGEST MERGE`); `W5-02` left
+  this group entirely, re-authored as a survivorship case. The "all four
+  expected SUGGEST MERGE" framing from the original count no longer holds
+  and is not restated as a requirement.
+- Identifier reuse cases: 3 (`W5-16, W5-17, W5-18`; minimum 3, unchanged).
+- Medium-evidence cases: 3 (`W5-20, W5-22, W5-23`; minimum 3, unchanged).
 - NO-DATA cases without a self-announcing sentence: 2
-  (`W5-04, W5-28`; exactly 2 required).
+  (`W5-04, W5-28`; exactly 2 required, unchanged).
 - Every case carries a `rationale`; verified by the self-check
   (missing-rationale check, zero hits).
 
@@ -187,13 +219,162 @@ grep -lE 'expected|rationale|critical_class' \
 # -> 0
 
 python3 scripts/test_jbeq_mdm.py
-# -> Ran 31 tests ... OK
+# -> Ran 36 tests ... OK
 ```
 
 This set has not been scored against any answer file: it is authored and
 blind-checked only. A JBEQ-MDM score requires a fresh blind answerer with no
 access to this file or to the seed, exactly as README.md's "The rule that
 makes a score mean anything" requires.
+
+## Corrections after the 2026-09-07 blind audit
+
+Auditor: opus reviewer, 2026-09-07, PR 488. Full audit:
+`~/.claude/evidence/audit-unseen-set-5-2026-09-07.md`. Every correction
+below is the audit's own section 5 item, applied in full (its primary form,
+where the audit gave one), plus the structural fixes section 3 named. IDs
+are stable: no case was renumbered, only re-tracked, re-worded or
+re-authored under its existing id.
+
+**Answer-level (the two blockers the audit's verdict named):**
+
+- `W5-06`: `expected` SUGGEST MERGE to ESCALATE. Rule 9 grades a missing
+  identifier weak, and weak evidence gives ESCALATE regardless of the
+  confirmation reason; the old rationale's own first clause already
+  conceded no authoritative identifier was stated. `rationale` rewritten
+  to match.
+- `W5-25`: `expected` ESCALATE to KEEP SEPARATE, matching `W5-34`'s
+  identical fact pattern (shared reading, identifiers blank both sides,
+  nothing else), which the seed already answered KEEP SEPARATE under
+  rule 6. `rationale` rewritten to match.
+
+**Rationale-only fixes:**
+
+- `W5-01`: rationale no longer grades the matching representative name and
+  phone as "medium evidence" (the same weak-to-medium upgrade that made
+  `W5-06` wrong); it now says the input states the relocation itself, so
+  identity is stated, not inferred.
+- `W5-32`: rationale cited "rule 13" for the record-write/refuting-fact
+  rule; that rule is 14 (13 is the renamed-area rule). Fixed.
+- `W5-39`: rationale cited "rules 9 and 18"; there is no rule 18. Fixed to
+  "rule 9" and extended to address the added transaction-history fact
+  below.
+- `W5-02`: fully re-authored (see below), which also retires the old
+  rationale's "reads like notation_variant_only (rule 12)" phrasing the
+  audit flagged.
+
+**Input/question fixes (fact and premise corrections):**
+
+- `W5-24`: `input` and `question` changed from "same name notation"
+  (`同名表記`, `名称表記が同じ`) to "same building address" (`同一住所`,
+  `建物住所が同一`) as the stated matching ground, because the input's own
+  named tenants already refuted the "same name" premise. `rationale`
+  updated to match ("matching building address").
+- `W5-17`: `input` rewritten so the ledger's reassignment note is stated as
+  the note's own error, not an authoritative government-registry fact: a
+  corporate number is never re-assigned after dissolution. `expected`
+  (REJECT MATCH) unchanged.
+- `W5-31`: `input` rewritten from "two different invoice numbers reissued
+  under one corporate number" (impossible for a corporation, which holds
+  one T-number tied to its one corporate number) to one T-number shared by
+  both records, differing only in registration status (valid vs
+  cancelled). `expected` (AUTO-MERGE) unchanged.
+- `W5-03` and `W5-15`: `input` no longer recites boundary rule 1's own
+  checklist verbatim (`法人番号の一致、親子関係、役割の対、商流上の経由の
+  いずれも記載は無く`), replaced with `台帳には両者を結ぶ記載が無く` in
+  both cases.
+- `W5-37`, `W5-39`, `W5-40`: `input` gains one fact the quoted policy does
+  not itself settle (a matching phone number at `W5-37`, five years of
+  transaction history at `W5-39`, a staff wish to simplify management at
+  `W5-40`), so the answer requires applying the policy over a real
+  temptation rather than reading the policy's own words straight into the
+  answer. `rationale` extended at `W5-37`, `W5-39` and `W5-40` to name why
+  the added fact does not change the outcome.
+
+**Track corrections and the two re-authored survivorship cases:**
+
+- `W5-15`: track hierarchy to address (the case carries no hierarchy
+  content; it is two legal entities sharing a building).
+- `W5-34`: track survivorship to match-or-no-merge (a reading-match false
+  merge candidate, the same shape as `W5-25`). Content unchanged beyond the
+  rename below.
+- `W5-35`: track survivorship to address (a blank-prefecture-corroborated
+  case, the same shape as `W5-04`'s sibling). Content unchanged.
+
+Moving `W5-34` and `W5-35` out of survivorship left it with three cases
+(`W5-31, W5-32, W5-33`) that never actually test attribute-level
+survivorship (the audit's own finding: the seed's real survivorship shape,
+an expired override losing to a higher authority, sits on the temporal
+track at `W5-26`). Two cases were re-authored to close that gap, and the
+five-per-track balance is restored by two further moves the audit implies
+but does not name case by case:
+
+- `W5-02`: track address to survivorship, fully re-authored as
+  "authoritative source's attribute wins over a non-authoritative one" (a
+  record-write proposal citing a matching corporate number and a
+  governance policy naming the core ERP, not a sales rep's spreadsheet, as
+  the address attribute's source of record). `expected` AUTO-MERGE,
+  `critical_class` HISTORICAL REASSIGNMENT to SOURCE PRECEDENCE VIOLATION.
+- `W5-21`: track match-or-no-merge to survivorship, fully re-authored as
+  "an expired override losing to a higher authority" (a manual address
+  override whose stated validity window has closed, proposed for adoption
+  over the still-current core ERP value). `expected` REJECT MATCH,
+  `critical_class` UNREVERSIBLE MERGE WITHOUT EVIDENCE to SOURCE
+  PRECEDENCE VIOLATION.
+- `W5-05`: track address to hierarchy, fully re-authored (two hierarchy
+  nodes sharing a name but stated to belong to different hierarchy
+  dimensions, round 10's addition to rule 10), to refill hierarchy's
+  deficit left by `W5-15` leaving it. `expected` REJECT MATCH unchanged
+  from the case it replaced by coincidence of vocabulary, `critical_class`
+  CROSS-TENANT DATA LEAK to HIERARCHY REVERSAL.
+
+Every id that changed track, stated once: `W5-02, W5-05, W5-15, W5-21,
+W5-34, W5-35`.
+
+**Company-name and role-gloss fixes:**
+
+Renamed the second (or later) occurrence of every name the audit's section
+3 flagged as reused with a contradictory role, inventing a fresh name each
+time and, where the audit also flagged a wrong role gloss on that same
+occurrence, choosing the new name's business-suffix kanji to match the
+stated role instead:
+
+- `卯月通信` at `W5-40` (kept at `W5-14`) to `己崎物産`, also fixing the
+  "materials trading house" gloss (`物産` fits a trading house; `通信` did
+  not).
+- `酉川紙業` at `W5-33` (kept at `W5-16`) to `壬田運送`, also fixing the
+  "logistics provider" gloss (`運送` fits; `紙業` did not).
+- `申村塗料` at `W5-33` (kept at `W5-16`) to `辛原塗装`.
+- `未崎菓子` at `W5-15` and `W5-33` (kept at `W5-03`, its only business-typed
+  occurrence) to `己岡繊維` and `庚原食品` respectively (two different fresh
+  names, since the two occurrences are unrelated scenarios).
+- `戌井硝子` at `W5-17` (kept at `W5-05`) to `丑島硝子`; at `W5-34` to
+  `戌亥硝子`, chosen because it shares its counterpart `乾硝子`'s reading
+  (いぬい) with different kanji, since the reading match is the point of
+  that case.
+- `子安運輸` at `W5-24` (kept at `W5-11, W5-12`) to `癸原工芸`.
+
+Fixed the two remaining wrong role glosses that did not already involve a
+renamed occurrence:
+
+- `W5-07`: `乙部工業` (`工業` reads as manufacturing) renamed to `乙部商事`
+  to match the stated clothing-chain retail role.
+- `W5-08`: `丙谷紡績` (`紡績` reads as textile manufacturing) renamed to
+  `丙谷物産` to match the stated stationery-wholesale role.
+- `W5-11`: `子安運輸` unchanged (kept, see above), but its business
+  descriptor changed from "楽器販売会社" (a musical instrument retailer)
+  to "運送業を営む" (a transport business), matching what `運輸` already
+  says.
+
+None of these five was itself a name-reuse defect (each of `W5-07, W5-08,
+W5-11` uses a name that appears nowhere else in the set); only the stated
+business type was wrong.
+
+**Self-check after every correction above**, run against the corrected
+file, is quoted in the Counts section above; the `python3
+scripts/test_jbeq_mdm.py` and `python3 scripts/jbeq_mdm.py prompts`
+reproduce lines in this file were re-run against the corrected file and
+are current.
 
 ## Blind audit
 
@@ -212,16 +393,11 @@ Auditor scratch hash (sha256, printed before the seed was opened):
 Agreement: 37 of 40 (section 1).
 
 Corrections (answer-level, field `expected`), named by the audit's own
-section 5, NOT applied to this file's `cases`: the standing estate rule
-against editing a benchmark answer means this scorer-facing implementation
-change does not itself carry the fix, so the gate correctly refuses this
-set until a separate, deliberate change lands it (or a caller passes
-`--regression` to re-decide the spent set anyway):
-- W5-06: expected, SUGGEST MERGE to ESCALATE (NOT APPLIED)
-- W5-25: expected, ESCALATE to KEEP SEPARATE (NOT APPLIED)
+section 5, APPLIED to this file's `cases` (see "Corrections after the
+2026-09-07 blind audit" above for the full change list, including the
+structural fixes beyond these two answer-level items):
+- W5-06: expected, SUGGEST MERGE to ESCALATE (APPLIED)
+- W5-25: expected, ESCALATE to KEEP SEPARATE (APPLIED)
 
-Per the audit's own verdict ("NOT READY as it stands... READY FOR
-QUALIFICATION AFTER CORRECTIONS"), this is the correct state for the gate
-to report: `python3 scripts/unseen_set_gate.py
-benchmarks/jbeq/mdm/unseen-5-2026-09-07.json` prints FAIL naming both
-lines above, exit 1.
+`python3 scripts/unseen_set_gate.py benchmarks/jbeq/mdm/unseen-5-2026-09-07.json`
+now prints PASS.

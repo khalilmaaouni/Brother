@@ -17,6 +17,14 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import loop_bridge as B  # noqa: E402
+import claim_store as C  # noqa: E402
+
+#: D5: a real dev checkout of the sibling tools, so a full B.main() call can
+#: load_parts() for real rather than needing a third fake stood up for it.
+#: run() itself is stood in for below, so nothing here ever spawns a worker.
+TOOLS_DIR = os.path.normpath(os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..",
+    "products", "brothermode", "tools"))
 
 # E100: one sandbox for every temp tree this process makes, removed at exit.
 import os as _e100_os, sys as _e100_sys  # noqa: E402
@@ -584,6 +592,135 @@ class DispatchIsActuallyConcurrent(unittest.TestCase):
         self.assertEqual(got["dispatched"], [])
 
 
+class ARenewedLeaseSurvivesAWorkerLongerThanItsLease(unittest.TestCase):
+    """D5, first half. brother_run.run_loop guards its one blocking call into
+    loop_bridge.main() with claim_store.BackgroundRenewal, started right
+    before the call and stopped right after. Run standalone (the estate's
+    own documented `python3 scripts/loop_bridge.py --cwd <dir> --worker-cmd
+    <cmd>`), nothing guarded the equivalent wait inside main() itself, so a
+    unit whose worker outlived the lease read abandoned under a still-live
+    run. This exercises the fix through B.main() itself: only graph_loop and
+    run() are stood in for; the claim, the renewal and the release are real.
+    """
+
+    def test_a_batch_slower_than_the_lease_is_not_read_as_abandoned(self):
+        import threading
+        import time
+        old_ttl = os.environ.get(C.TTL_ENV_VAR)
+        os.environ[C.TTL_ENV_VAR] = "0.3"
+        started = threading.Event()
+        allow_finish = threading.Event()
+
+        def fake_run(plan, parts, worker, cwd=None, max_attempts=3,
+                    max_in_flight=None, lanes=None):
+            started.set()
+            allow_finish.wait(5)
+            return {"dispatched": [{"id": "U1", "verdict": "PASS",
+                                    "scope": {"verdict": "OK"}}],
+                   "isolation": {}}
+
+        old_load, old_plan, old_run = B.graph_loop.load, B.graph_loop.plan, B.run
+        result = {}
+        seen = {}
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                store = os.path.join(d, "claims.json")
+                fake_plan = {"batch": [node("U1")], "deferred": [], "blocked": []}
+                B.graph_loop.load = lambda *a, **k: {}
+                B.graph_loop.plan = lambda *a, **k: fake_plan
+                B.run = fake_run
+                argv = ["--claims", store, "--cwd", d, "--tools", TOOLS_DIR,
+                       "--owner", "owner-a", "--null-worker", "--plan", "x"]
+                t = threading.Thread(
+                    target=lambda: result.__setitem__("code", B.main(argv)))
+                t.start()
+                self.assertTrue(started.wait(5), "run() never started")
+                # Well past the 0.3s lease: if nothing renews it, the claim
+                # below reads abandoned.
+                time.sleep(0.7)
+                found, why = C.reconcile(store)
+                seen["found"], seen["why"] = found, why
+                allow_finish.set()
+                t.join(timeout=5)
+        finally:
+            B.graph_loop.load, B.graph_loop.plan, B.run = old_load, old_plan, old_run
+            if old_ttl is None:
+                os.environ.pop(C.TTL_ENV_VAR, None)
+            else:
+                os.environ[C.TTL_ENV_VAR] = old_ttl
+
+        found = seen["found"]
+        self.assertIsNotNone(found, seen["why"])
+        self.assertEqual(len(found), 1, found)
+        self.assertEqual(found[0]["status"], "in-flight",
+                         "the claim read %r past its lease while the worker "
+                         "was still running: renewal did not hold it"
+                         % (found[0],))
+        self.assertEqual(result.get("code"), 0)
+
+
+class RenewalStopsWhenTheWorkerFinishes(unittest.TestCase):
+    """D5, second half. The background renewal must stop the moment run()
+    (standing in for the worker batch) returns, so a claim whose owner then
+    genuinely dies is reclaimable on the ordinary lease and dead-pid rules
+    rather than kept alive forever by a thread nobody ever stopped."""
+
+    def test_renewal_does_not_outlive_the_run_call(self):
+        import threading
+        import time
+        old_ttl = os.environ.get(C.TTL_ENV_VAR)
+        os.environ[C.TTL_ENV_VAR] = "0.2"
+        calls = []
+        lock = threading.Lock()
+        real_renew_owned = C.renew_owned
+
+        def counting_renew_owned(*a, **k):
+            with lock:
+                calls.append(1)
+            return real_renew_owned(*a, **k)
+
+        def fake_run(plan, parts, worker, cwd=None, max_attempts=3,
+                    max_in_flight=None, lanes=None):
+            time.sleep(0.5)  # several renewal intervals (0.1s each)
+            return {"dispatched": [{"id": "U1", "verdict": "PASS",
+                                    "scope": {"verdict": "OK"}}],
+                   "isolation": {}}
+
+        old_load, old_plan, old_run = B.graph_loop.load, B.graph_loop.plan, B.run
+        C.renew_owned = counting_renew_owned
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                store = os.path.join(d, "claims.json")
+                fake_plan = {"batch": [node("U1")], "deferred": [], "blocked": []}
+                B.graph_loop.load = lambda *a, **k: {}
+                B.graph_loop.plan = lambda *a, **k: fake_plan
+                B.run = fake_run
+                argv = ["--claims", store, "--cwd", d, "--tools", TOOLS_DIR,
+                       "--owner", "owner-b", "--null-worker", "--plan", "x"]
+                code = B.main(argv)
+                self.assertEqual(code, 0)
+                with lock:
+                    count_at_return = len(calls)
+                self.assertGreater(count_at_return, 0,
+                                   "renewal never ran during the slow batch")
+                time.sleep(0.5)  # long enough for 2+ more cycles if still looping
+                with lock:
+                    count_after_wait = len(calls)
+        finally:
+            C.renew_owned = real_renew_owned
+            B.graph_loop.load, B.graph_loop.plan, B.run = old_load, old_plan, old_run
+            if old_ttl is None:
+                os.environ.pop(C.TTL_ENV_VAR, None)
+            else:
+                os.environ[C.TTL_ENV_VAR] = old_ttl
+
+        self.assertEqual(count_after_wait, count_at_return,
+                         "renewal kept calling renew_owned after run() (the "
+                         "worker) had already finished: %d calls by the time "
+                         "main() returned, %d after a further wait"
+                         % (count_at_return, count_after_wait))
+
+
 class AnUndeclaredWriteIsNotIntegrableHoweverGreenItIs(unittest.TestCase):
     """Parity blocker P0.3's acceptance test, from the directive: a worker
     deliberately writes one undeclared file, and the expected result is
@@ -671,6 +808,236 @@ class AnUndeclaredWriteIsNotIntegrableHoweverGreenItIs(unittest.TestCase):
         self.assertEqual(scope["verdict"], "NO-DATA")
 
 
+class TheLaneBranchNameHasOneImplementation(unittest.TestCase):
+    """C6 REPAIR consolidation round: worktree_lane.branch_for is now the
+    ONE place that turns a unit id into a lane branch name. Before this,
+    loop_bridge.main() carried its own byte-for-byte copy of the same
+    character rule (the exact dict comprehension a 2026-09-09 adversarial
+    review flagged) and integrate._lane_worktree_path_by_slug derived its
+    slug by slicing whatever branch string it was handed rather than
+    asking worktree_lane. This pins that all three surfaces still agree,
+    on a unit id that actually exercises the rule (a slash and a colon,
+    characters the sanitizer must fold to '-')."""
+
+    UID = "some/odd:id"
+
+    def test_loop_bridge_lane_branches_matches_worktree_lane_branch_for(self):
+        """B._lane_branches is the exact call loop_bridge.main() makes to
+        build the lane_branches dict integrate() and _reclaim_unmerged_lanes
+        both consume; this is that real code path, not a reimplementation
+        copied into the test for comparison."""
+        import worktree_lane as W
+        iso = {"lanes": {self.UID: "/does/not/matter"}}
+        got = B._lane_branches(iso)
+        self.assertEqual(got[self.UID], W.branch_for(self.UID))
+
+    def test_integrates_stray_lookup_finds_the_directory_worktree_lane_built(self):
+        """The real regression this consolidation guards against: a lane
+        whose `checkout -b` failed (acquire() returns branch=None, a real
+        detached worktree left on disk under the SANITIZED unit id) must
+        still be found by integrate.cleanup_lane's fallback lookup, even
+        for a unit id with characters the sanitizer has to fold. Before
+        this consolidation that fallback re-derived its own slug by
+        slicing the branch string loop_bridge computed; now it asks
+        worktree_lane.branch_for directly for the same unit id
+        cleanup_lane already carries."""
+        import worktree_lane as W
+        import integrate as I
+        import subprocess as sp
+        repo = tempfile.mkdtemp(prefix="c7-sanitizer-repo-")
+        run = lambda *a: sp.run(["git"] + list(a), cwd=repo,
+                                capture_output=True, text=True)
+        run("init", "-q", "-b", "main")
+        run("config", "user.email", "a@b.c")
+        run("config", "user.name", "t")
+        with open(os.path.join(repo, "base.txt"), "w", encoding="utf-8") as fh:
+            fh.write("base\n")
+        run("add", "-A")
+        run("commit", "-q", "-m", "base")
+        real = sp.run
+
+        lane_root = tempfile.mkdtemp(prefix="c7-sanitizer-lanes-")
+        expected_branch = W.branch_for(self.UID)
+        lane_path = os.path.join(lane_root, expected_branch[len("lane/"):])
+
+        def checkout_b_fails(cmd, **kw):
+            if "checkout" in cmd and "-b" in cmd:
+                class _F:
+                    returncode, stdout, stderr = (
+                        1, "", "monkeypatched checkout -b failure")
+                return _F()
+            if "--git-dir" in cmd:
+                return real(cmd, capture_output=True, text=True, cwd=lane_path)
+            return real(cmd, capture_output=True, text=True, cwd=repo)
+
+        path, branch, problem = W.acquire(repo, self.UID, root=lane_root,
+                                          runner=checkout_b_fails)
+        self.assertIsNone(branch, "the scenario needs acquire's own "
+                                  "branch=None path: %r" % problem)
+        self.assertTrue(os.path.isdir(path))
+
+        # loop_bridge's OWN computed name for this unit id: the exact value
+        # B._lane_branches (and therefore main()) would hand cleanup_lane,
+        # never acquire()'s real (None) return.
+        removed, detail = I.cleanup_lane(repo, expected_branch, self.UID)
+        self.assertFalse(removed,
+                         "a worktree never checked out to its own branch "
+                         "must be retained, not reported removed: %s"
+                         % detail)
+        self.assertIn("found by directory name instead", detail)
+        self.assertTrue(os.path.isdir(path),
+                        "the stray worktree the by-slug lookup found must "
+                        "not have been touched")
+
+    def test_crash_orphaned_claim_never_re_derives_a_branch_name(self):
+        """C12 (2026-09-09 adversarial review, round 3): the reviewer
+        named worktree_lane._crash_orphaned_claim as a possible second
+        re-derivation of the lane branch name, hedged "if it re-derives".
+        Inspected: it takes only unit_id, reads the journal by unit_id
+        alone, and builds no branch string of any kind. Pinned by source
+        rather than trusted from memory, so an edit that starts
+        concatenating BRANCH_PREFIX or repeating the sanitizer's
+        character rule inside it is caught here."""
+        import inspect
+        import worktree_lane as W
+        src = inspect.getsource(W._crash_orphaned_claim)
+        self.assertNotIn("BRANCH_PREFIX", src)
+        self.assertNotIn("isalnum", src)
+
+    def test_loop_bridge_builds_no_lane_branch_name_of_its_own(self):
+        """C12: the reviewer's other named surface. B._lane_branches
+        (pinned above as byte-for-byte worktree_lane.branch_for) is
+        loop_bridge.py's only lane-branch construction; this confirms no
+        OTHER spot in the file still concatenates the lane prefix onto a
+        unit id by hand instead of calling branch_for."""
+        with open(B.__file__, encoding="utf-8") as fh:
+            src = fh.read()
+        offending = [line for line in src.splitlines()
+                    if ('"lane/" +' in line or "'lane/' +" in line
+                        or '"lane/"+' in line or "'lane/'+" in line)]
+        self.assertEqual(offending, [], offending)
+
+
+class OrphanedLanesAreRetiredWhenIsolationFails(unittest.TestCase):
+    """CONT-0, U3: found live -- when worktree_lane.Lanes.isolated is False
+    for a batch (even one unit's lane failing turns off the whole batch's
+    isolation, by W5's fail-closed rule), the integrate() call in main()
+    never ran for ANY unit in that batch, so it never reached cleanup_lane
+    for the lanes that DID get created. Nothing else in this file's own
+    flow ever tears those down (worktree_lane.Lanes.release_all exists but
+    nothing calls it), so they were left on disk forever.
+    _reclaim_unmerged_lanes is the fix: routed from main() whenever
+    lane_branches is non-empty and the batch could not integrate."""
+
+    def _repo(self):
+        import subprocess as sp
+        d = tempfile.mkdtemp(prefix="orphan-lane-canon-")
+        run = lambda *a: sp.run(["git"] + list(a), cwd=d, capture_output=True,
+                                text=True)
+        run("init", "-q", "-b", "main")
+        run("config", "user.email", "a@b.c")
+        run("config", "user.name", "t")
+        with open(os.path.join(d, "base.txt"), "w", encoding="utf-8") as fh:
+            fh.write("base\n")
+        run("add", "-A")
+        run("commit", "-q", "-m", "base")
+        return d
+
+    def test_a_clean_never_integrated_lane_is_removed_when_routed(self):
+        """The mechanism, proven directly on disk: a lane freshly acquired
+        and never committed to is clean and its branch tip equals HEAD
+        (its own ancestor), so cleanup_lane's own rule says remove it."""
+        import worktree_lane as W
+        import subprocess as sp
+        repo = self._repo()
+        path, branch, problem = W.acquire(repo, "U1")
+        self.assertTrue(path, problem)
+        self.assertTrue(os.path.isdir(path))
+        B._reclaim_unmerged_lanes(repo, {"U1": branch}, "test reason")
+        self.assertFalse(os.path.isdir(path))
+        r = sp.run(["git", "rev-parse", "--verify", "--quiet",
+                   "refs/heads/" + branch], cwd=repo, capture_output=True,
+                  text=True)
+        self.assertNotEqual(r.returncode, 0, "the branch should be gone too")
+
+    def test_a_lane_holding_real_uncommitted_work_is_retained_not_lost(self):
+        """The safety property this routing depends on: cleanup_lane never
+        discards a lane carrying work nobody has looked at."""
+        import worktree_lane as W
+        repo = self._repo()
+        path, branch, problem = W.acquire(repo, "U2")
+        self.assertTrue(path, problem)
+        with open(os.path.join(path, "unsaved.txt"), "w",
+                 encoding="utf-8") as fh:
+            fh.write("a worker's real, unmerged output\n")
+        B._reclaim_unmerged_lanes(repo, {"U2": branch}, "test reason")
+        self.assertTrue(os.path.isdir(path),
+                        "a lane with real uncommitted work must survive an "
+                        "unintegrated batch's teardown")
+
+    def test_a_lane_that_never_got_its_own_branch_is_retained_not_skipped(self):
+        """REPAIR C6 (2026-09-09 adversarial review of lane/continuity,
+        round 2): lane_branches (this module's own CONT-0 U3 comment,
+        right above the call site) is computed UNCONDITIONALLY from the
+        unit id, never from worktree_lane.acquire()'s real return, so a
+        unit whose `checkout -b` failed (acquire() then returns
+        branch=None, leaving a real, detached, still-registered worktree
+        behind) still gets routed through cleanup_lane with the
+        SANITIZED branch name here, exactly like every other lane in the
+        batch. Before REPAIR C6 this read as nothing left and reported
+        removed; this proves _reclaim_unmerged_lanes still routes it
+        (never filters it out beforehand) and that cleanup_lane itself
+        now retains it rather than losing it silently."""
+        import worktree_lane as W
+        import subprocess as sp
+        repo = self._repo()
+        real = sp.run
+
+        # worktree_lane._git() never forwards `cwd` to a caller-supplied
+        # runner, so this routes each call by content: "checkout -b" is
+        # faked (the scenario), the breadcrumb's "rev-parse --git-dir"
+        # runs inside the lane path, everything else runs in `repo`.
+        lane_root = tempfile.mkdtemp(prefix="c6-loop-bridge-root-")
+        lane_path = os.path.join(lane_root, "U3")
+
+        def checkout_b_fails(cmd, **kw):
+            if "checkout" in cmd and "-b" in cmd:
+                class _F:
+                    returncode, stdout, stderr = (
+                        1, "", "monkeypatched checkout -b failure")
+                return _F()
+            if "--git-dir" in cmd:
+                return real(cmd, capture_output=True, text=True, cwd=lane_path)
+            return real(cmd, capture_output=True, text=True, cwd=repo)
+
+        path, branch, problem = W.acquire(repo, "U3", root=lane_root,
+                                          runner=checkout_b_fails)
+        self.assertIsNone(branch, "the scenario needs acquire's own "
+                                  "branch=None path: %r" % problem)
+        self.assertTrue(os.path.isdir(path))
+
+        # loop_bridge's own computed name, never acquire()'s real (None)
+        # return: this is the exact dict shape main() builds.
+        B._reclaim_unmerged_lanes(repo, {"U3": "lane/U3"}, "test reason")
+
+        self.assertTrue(os.path.isdir(path),
+                        "a worktree that was never checked out to its own "
+                        "branch must not be reported gone: it is still "
+                        "real, on disk, and still registered with git")
+        r = sp.run(["git", "worktree", "list", "--porcelain"], cwd=repo,
+                  capture_output=True, text=True)
+        self.assertIn(os.path.realpath(path),
+                     [os.path.realpath(l[len("worktree "):])
+                      for l in r.stdout.splitlines()
+                      if l.startswith("worktree ")],
+                     "git's own registration for it must survive too")
+
+    def test_no_lanes_and_no_cwd_are_both_a_no_op(self):
+        """Never touches disk when there is nothing to reclaim."""
+        B._reclaim_unmerged_lanes(None, {"U1": "lane/U1"}, "no cwd")
+        B._reclaim_unmerged_lanes("/some/repo", {}, "no lanes")
+
+
 class AMachineWideRefusalIsAnAlertAndADependencyWaitIsNot(unittest.TestCase):
     """2026-08-31: eleven units ready, none claimed, every refusal reading 'no
     free slot: capacity is 0' because free disk was under the floor. The
@@ -720,6 +1087,372 @@ class AMachineWideRefusalIsAnAlertAndADependencyWaitIsNot(unittest.TestCase):
         msg = B.machine_wide_refusal(plan)
         self.assertIn("capacity is 0", msg)
         self.assertIn("held elsewhere", msg)
+
+
+class ALaneWithNoBranchIsRefusedNotGuessed(unittest.TestCase):
+    """H2: a branch a lane never actually got must never be reconstructed
+    from the unit id, because a guessed name can collide with a stale
+    branch of the same name left by an abandoned attempt."""
+
+    def test_a_missing_branch_is_refused_with_no_data(self):
+        isolation = {"isolated": True, "branches": {"A": "lane/A", "B": None}}
+        branches, refused = B.integrable_branches(isolation)
+        self.assertEqual(branches, {"A": "lane/A"})
+        self.assertIn("B", refused)
+        self.assertTrue(refused["B"].startswith("NO-DATA:"))
+
+    def test_an_isolation_record_with_no_branches_map_yields_nothing(self):
+        """An older or absent isolation shape must never fall back to
+        reconstructing names from the unit ids it does carry."""
+        isolation = {"isolated": True, "lanes": {"A": "/tmp/lane-a"}}
+        branches, refused = B.integrable_branches(isolation)
+        self.assertEqual(branches, {})
+        self.assertEqual(refused, {})
+
+    def test_an_empty_isolation_yields_nothing(self):
+        branches, refused = B.integrable_branches({})
+        self.assertEqual(branches, {})
+        self.assertEqual(refused, {})
+
+    def test_run_reports_the_branch_each_lane_actually_got(self):
+        """The isolation record's own branches map, not a reconstruction,
+        is what a caller downstream must be able to read."""
+        class FakeLanes(object):
+            isolated = True
+            lanes = {"A": {"path": "/tmp/lane-a", "branch": "lane/A"},
+                     "B": {"path": "/tmp/lane-b", "branch": None}}
+
+            def why(self):
+                return ""
+
+            def safe_concurrency(self, requested):
+                return requested
+
+            def path_for(self, uid):
+                return self.lanes[uid]["path"]
+
+        plan = {"batch": [node("A"), node("B")], "deferred": [], "blocked": []}
+        outcome = B.run(plan, parts(), Worker(), cwd=None, lanes=FakeLanes())
+        self.assertEqual(outcome["isolation"]["branches"],
+                         {"A": "lane/A", "B": None})
+
+
+class RollingDispatchIsPureOrchestration(unittest.TestCase):
+    """H4: rolling_dispatch() is PLAN, START, WAIT, INTEGRATE with everything
+    injected, so its guarantees test without git, models or sleeping. It is
+    not wired into main() or run() by this unit; these tests exercise the
+    seam directly."""
+
+    def test_a_dependent_starts_while_an_unrelated_slow_sibling_is_still_live(self):
+        """Assert on the LIVE SET at the dependent's admission, not on wall
+        clock: a timing assertion would pass even on a wave system where the
+        dependent merely starts later."""
+        live_view = {}
+        admitted_while = {}
+        ready_map = {frozenset(): ["SLOW"], frozenset(["SLOW"]): ["DEP"]}
+
+        def plan_ready(live_ids):
+            return list(ready_map.get(frozenset(live_ids), []))
+
+        def start(uid):
+            if uid == "DEP":
+                admitted_while["DEP"] = set(live_view.get("live", set()))
+            return uid
+
+        order = iter([("SLOW", "slow-result"), ("DEP", "dep-result")])
+
+        def wait_any(handles):
+            return next(order)
+
+        def integrate(unit, result):
+            return {"id": unit["id"], "result": result}
+
+        records = B.rolling_dispatch(plan_ready, start, wait_any, integrate,
+                                     cap=2, live_view=live_view)
+        self.assertIn("SLOW", admitted_while["DEP"])
+        self.assertEqual(sorted(r["id"] for r in records), ["DEP", "SLOW"])
+
+    def test_the_cap_is_never_exceeded(self):
+        concurrent, max_seen = [0], [0]
+
+        def plan_ready(live_ids):
+            return ["A", "B", "C", "D"]
+
+        def start(uid):
+            concurrent[0] += 1
+            max_seen[0] = max(max_seen[0], concurrent[0])
+            return uid
+
+        def wait_any(handles):
+            handle = handles[0]
+            concurrent[0] -= 1
+            return handle, "ok"
+
+        def integrate(unit, result):
+            return {"id": unit["id"]}
+
+        records = B.rolling_dispatch(plan_ready, start, wait_any, integrate, cap=2)
+        self.assertLessEqual(max_seen[0], 2)
+        self.assertEqual(sorted(r["id"] for r in records), ["A", "B", "C", "D"])
+
+    def test_integration_is_never_concurrent(self):
+        in_integrate = [False]
+
+        def plan_ready(live_ids):
+            return ["A", "B"]
+
+        def start(uid):
+            return uid
+
+        def wait_any(handles):
+            return handles[0], "ok"
+
+        def integrate(unit, result):
+            self.assertFalse(in_integrate[0], "integrate re-entered")
+            in_integrate[0] = True
+            try:
+                return {"id": unit["id"]}
+            finally:
+                in_integrate[0] = False
+
+        records = B.rolling_dispatch(plan_ready, start, wait_any, integrate, cap=2)
+        self.assertEqual(len(records), 2)
+
+    def test_the_planner_is_told_what_is_live(self):
+        seen = []
+        ready_map = {frozenset(): ["A"], frozenset(["A"]): ["B"]}
+
+        def plan_ready(live_ids):
+            seen.append(frozenset(live_ids))
+            return list(ready_map.get(frozenset(live_ids), []))
+
+        def start(uid):
+            return uid
+
+        order = iter([("A", "ok"), ("B", "ok")])
+
+        def wait_any(handles):
+            return next(order)
+
+        def integrate(unit, result):
+            return {"id": unit["id"]}
+
+        B.rolling_dispatch(plan_ready, start, wait_any, integrate, cap=2)
+        self.assertIn(frozenset(["A"]), seen)
+
+    def test_no_unit_is_dispatched_twice(self):
+        """A planner that keeps re-offering a unit while it is already live
+        (its own bug) must not fool this loop into starting it again."""
+        starts = []
+        ready_map = {frozenset(): ["A"], frozenset(["A"]): ["A"]}
+
+        def plan_ready(live_ids):
+            return list(ready_map.get(frozenset(live_ids), []))
+
+        def start(uid):
+            starts.append(uid)
+            return uid
+
+        def wait_any(handles):
+            return handles[0], "ok"
+
+        def integrate(unit, result):
+            return {"id": unit["id"]}
+
+        B.rolling_dispatch(plan_ready, start, wait_any, integrate, cap=3)
+        self.assertEqual(starts.count("A"), 1)
+
+    def test_a_blocked_graph_terminates_rather_than_spinning(self):
+        calls = [0]
+
+        def plan_ready(live_ids):
+            calls[0] += 1
+            return []
+
+        def start(uid):
+            self.fail("start must never be called on a blocked graph")
+
+        def wait_any(handles):
+            self.fail("wait_any must never be called with nothing live")
+
+        def integrate(unit, result):
+            self.fail("integrate must never be called")
+
+        records = B.rolling_dispatch(plan_ready, start, wait_any, integrate, cap=2)
+        self.assertEqual(records, [])
+        self.assertEqual(calls[0], 1)
+
+
+class TheBreakerOpensOnConsecutiveAccountLimitFailures(unittest.TestCase):
+    """SR-4: the recorded night where six lanes died together on one account
+    limit, each burning its own three attempts before anyone noticed it was
+    the same failure six times over, not six different ones."""
+
+    def setUp(self):
+        # Hygiene, not a requirement: every test here injects its own
+        # Breaker, but reset the shared module singleton anyway so a stray
+        # rate_limit/overloaded marker in some unrelated test's fixture text
+        # can never leak a consecutive count across test order.
+        B._BREAKER = B.Breaker()
+
+    def _breaker(self, open_after=3, cooldown=120, max_failovers=10):
+        self.sleeps = []
+        return B.Breaker(open_after=open_after, cooldown=cooldown,
+                         max_failovers=max_failovers,
+                         clock=lambda: 1000.0,
+                         sleep=lambda s: self.sleeps.append(s))
+
+    def test_one_pause_and_no_burned_attempts_after_it_opens(self):
+        class RateLimited(object):
+            def __init__(self):
+                self.seen = []
+
+            def run(self, unit, cwd=None):
+                self.seen.append(unit["unit_id"])
+                return {"worker_claim": "", "artifacts": [],
+                        "status": "unavailable",
+                        "cost": {"tokens": 0, "minutes": 0},
+                        "note": "exited 1: account limit "
+                                "(failure_class=rate_limit)"}
+
+        worker = RateLimited()
+        brk = self._breaker()
+        plan = {"batch": [node(n) for n in "ABCDEF"],
+               "deferred": [], "blocked": []}
+        got = B.run(plan, parts(), worker, max_in_flight=1, breaker=brk)
+
+        self.assertEqual(self.sleeps, [120])
+        self.assertEqual(worker.seen, ["A", "B", "C"])
+        refused = [r for r in got["dispatched"] if r["id"] in "DEF"]
+        self.assertEqual(len(refused), 3)
+        for r in refused:
+            self.assertIn("breaker", r["reason"])
+            self.assertEqual(r["verdict"], "NO-DATA")
+
+    def test_a_success_between_two_failures_resets_the_counter(self):
+        class Mixed(object):
+            def __init__(self, classes):
+                self.classes = list(classes)
+                self.seen = []
+
+            def run(self, unit, cwd=None):
+                self.seen.append(unit["unit_id"])
+                cls = self.classes.pop(0)
+                if cls is None:
+                    return {"worker_claim": "ok", "artifacts": [],
+                            "status": "returned",
+                            "cost": {"tokens": 0, "minutes": 0}}
+                return {"worker_claim": "", "artifacts": [],
+                        "status": "unavailable",
+                        "cost": {"tokens": 0, "minutes": 0},
+                        "note": "exited 1 (failure_class=%s)" % cls}
+
+        worker = Mixed(["rate_limit", "rate_limit", None,
+                        "rate_limit", "rate_limit"])
+        brk = self._breaker()
+        plan = {"batch": [node(n) for n in "ABCDE"],
+               "deferred": [], "blocked": []}
+        got = B.run(plan, parts(), worker, max_in_flight=1, breaker=brk)
+
+        self.assertEqual(self.sleeps, [])
+        self.assertEqual(worker.seen, ["A", "B", "C", "D", "E"])
+        self.assertEqual(len(got["dispatched"]), 5)
+
+    def test_the_run_wide_cap_stops_admission_for_good(self):
+        # open_after=1: a single rate_limit failure opens or re-opens it.
+        # cooldown=0: the fixed fake clock reads the cooldown as elapsed
+        # immediately, so the very next admit() is the one half-open trial.
+        brk = self._breaker(open_after=1, cooldown=0, max_failovers=2)
+        self.assertTrue(brk.admit())
+        brk.record("rate_limit")        # opens: failover 1/2
+        self.assertTrue(brk.admit())    # the one half-open trial
+        brk.record("rate_limit")        # the trial failed: failover 2/2, DEAD
+        self.assertFalse(brk.admit())
+        self.assertIn("for good", brk.refusal_reason())
+
+        class NeverAsked(object):
+            def run(self, unit, cwd=None):
+                raise AssertionError(
+                    "must never be dispatched once the breaker is dead")
+
+        plan = {"batch": [node("Z")], "deferred": [], "blocked": []}
+        got = B.run(plan, parts(), NeverAsked(), max_in_flight=1, breaker=brk)
+        rec = got["dispatched"][0]
+        self.assertIn("for good", rec["reason"])
+
+
+class AFailedHalfOpenTrialReopensWithAFreshCooldown(unittest.TestCase):
+    """SR-4: a half-open trial that fails again must reopen the breaker on
+    a FRESH cooldown. Before the fix, with the default open_after=3, the
+    failed trial only counted one consecutive failure, the breaker kept its
+    OLD opened_at, and the very next admit() granted another trial at once,
+    so a persistent account limit kept spending attempts. The clock here
+    MOVES: the test advances it by hand, and sleep only records the pause."""
+
+    def setUp(self):
+        self.now = [1000.0]
+        self.sleeps = []
+        self.brk = B.Breaker(open_after=3, cooldown=120, max_failovers=10,
+                             clock=lambda: self.now[0],
+                             sleep=lambda s: self.sleeps.append(s))
+        for _ in range(3):
+            self.assertTrue(self.brk.admit())
+            self.brk.record("rate_limit")
+        self.assertEqual(self.brk.state, "open")
+        self.assertFalse(self.brk.admit())
+        self.now[0] += 121  # past the first cooldown
+        self.assertTrue(self.brk.admit())   # the one half-open trial
+        self.assertFalse(self.brk.admit())  # and only one
+
+    def test_a_failed_trial_waits_a_fresh_cooldown_from_its_own_failure(self):
+        self.now[0] += 5  # the trial fails at t=1126
+        self.brk.record("rate_limit")
+        self.assertEqual(self.brk.state, "open")
+        self.assertFalse(self.brk.admit())
+        self.now[0] += 119  # 119s after the trial failed: still cooling
+        self.assertFalse(self.brk.admit())
+        self.now[0] += 2    # 121s after the trial failed: one trial again
+        self.assertTrue(self.brk.admit())
+        self.assertFalse(self.brk.admit())
+        self.assertEqual(self.sleeps, [120, 120])
+        self.assertEqual(self.brk.failover_count, 2)
+
+    def test_a_successful_trial_closes_the_breaker(self):
+        self.brk.record("other")
+        self.assertEqual(self.brk.state, "closed")
+        for _ in range(3):
+            self.assertTrue(self.brk.admit())
+        self.assertEqual(self.sleeps, [120])
+
+
+class TheBreakerAlsoGatesRollingDispatch(unittest.TestCase):
+    """SR-4, the rolling half: the same breaker guards rolling_dispatch(),
+    the second of the two paths the brief names by name."""
+
+    def test_an_open_breaker_refuses_without_ever_calling_start(self):
+        brk = B.Breaker(open_after=1, cooldown=999,
+                        clock=lambda: 0.0, sleep=lambda s: None)
+        brk.record("rate_limit")  # one failure opens it (open_after=1)
+
+        def plan_ready(live_ids):
+            return ["A"]
+
+        def start(uid):
+            raise AssertionError("start must never be called while the "
+                                 "breaker is open")
+
+        def wait_any(handles):
+            raise AssertionError("wait_any must never be called with "
+                                 "nothing live")
+
+        def integrate(unit, result):
+            raise AssertionError("integrate must never be called")
+
+        records = B.rolling_dispatch(plan_ready, start, wait_any, integrate,
+                                     cap=2, breaker=brk)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["id"], "A")
+        self.assertIn("breaker", records[0]["record"]["reason"])
 
 
 if __name__ == "__main__":

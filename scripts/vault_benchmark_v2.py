@@ -330,9 +330,13 @@ def d06_entity_crosswalk(ctx):
     if not multi:
         return FAIL, ("%d entities declare source_ids but none is named in two systems, "
                       "so nothing is crossed" % len(decls))
+    # ADOPTION DENOMINATOR (2026-09-10): a PASS on a floor of one entity cannot
+    # be told apart from wide adoption unless the corpus size rides along.
     return PASS, ("%d entities declare %d source-IDs, %d crossing 2+ systems, 0 dangling: "
-                  "a foreign name resolves to the thing it denotes"
-                  % (len(decls), sum(len(e) for _, e in decls), multi))
+                  "a foreign name resolves to the thing it denotes (%d of %d notes are "
+                  "entities)"
+                  % (len(decls), sum(len(e) for _, e in decls), multi,
+                     len(decls), len(notes)))
 
 
 CLAIM_LINE = re.compile(
@@ -424,7 +428,9 @@ def d09_bitemporal_facts(ctx):
     # third unconditional-verdict probe found tonight. All five in use is the
     # capability this row measures; per-field counts stay in the message so a
     # single token on one note reads as thin rather than as done.
-    return PASS, ("all five temporal fields are in use: " +
+    # ADOPTION DENOMINATOR (2026-09-10): each field count already rides in the
+    # message; add the corpus size so a reader sees adoption, not a bare PASS.
+    return PASS, ("all five temporal fields are in use (of %d notes): " % len(notes) +
                   ", ".join("%s on %d" % (f, present[f]) for f in required))
 
 
@@ -432,7 +438,8 @@ def d10_contradictions_preserved(ctx):
     notes = ctx["notes"]
     contradicts = [n for n in notes if field(n["front"], "contradicts")]
     if contradicts:
-        return PASS, "%d note(s) carry contradicts:" % len(contradicts)
+        # ADOPTION DENOMINATOR (2026-09-10): report the corpus size beside the count.
+        return PASS, "%d of %d note(s) carry contradicts:" % (len(contradicts), len(notes))
     return FAIL, ("no contradicts: edge exists in the contract, so a conflicting assertion can only "
                   "be written by overwriting or by silently coexisting")
 
@@ -487,8 +494,10 @@ def d12_candidate_validated_canonical(ctx):
         return FAIL, ("%d note(s) hold a state above candidate with NO promotion record: "
                       "auto-promotion wearing a legal-looking state" % unrecorded)
     if recorded:
+        # ADOPTION DENOMINATOR (2026-09-10): recorded promotions against the corpus size.
         return PASS, ("%d recorded promotion(s), %d candidate(s), 0 unrecorded: model output "
-                      "provably does not become truth by being written" % (recorded, candidates))
+                      "provably does not become truth by being written (%d of %d notes)"
+                      % (recorded, candidates, recorded, len(notes)))
     return FAIL, ("no note carries a recorded promotion on the promotion: field: the state "
                   "machine exists in tooling (bm_vault_lifecycle.py) and the corpus does not "
                   "use it yet, so model output and validated truth are still indistinguishable "
@@ -574,8 +583,10 @@ def d14_typed_ontology(ctx):
                 entity_decls += 1
                 break
     if entity_decls:
+        # ADOPTION DENOMINATOR (2026-09-10): entity declarations against the corpus size.
         return PASS, ("%d note(s) declare an entity they are about, so something can be said "
-                      "ABOUT a thing rather than only about a document" % entity_decls)
+                      "ABOUT a thing rather than only about a document (%d of %d notes)"
+                      % (entity_decls, entity_decls, len(notes)))
     return FAIL, ("no note declares an entity, and all %d typed edge(s) are document to document "
                   "(%s). type: values are all document kinds (%s), which is a taxonomy of PAGES, "
                   "not an ontology of THINGS: nothing here can be said about a customer, a system "
@@ -585,17 +596,45 @@ def d14_typed_ontology(ctx):
                      ", ".join(sorted(types))))
 
 
+def _reads_links_table(src):
+    r"""FIXED 2026-09-10 (D15 defect 1): the prior gate was
+    ``bool(re.search(r"links\s+WHERE|JOIN\s+links|multi.?hop", src))``, which is
+    exactly the token-appearing-in-a-file shape this file's own header forbids.
+    Measured on bm_vault.py: the ONLY two matches of "links WHERE" are cleanup
+    statements (``DELETE FROM links WHERE note_id=?``, twice), so the row was
+    certified by a DELETE. The real read-time traversal a few hundred lines
+    away (``SELECT DISTINCT n.id, n.path FROM links l JOIN notes n ON n.title
+    = l.target WHERE l.note_id IN (%s) ...``) never matched "JOIN links" at
+    all, because the JOIN there is on notes, not links.
+
+    This refuses that shape: it walks every occurrence of a links-table
+    reference in a FROM/JOIN position and asks which statement keyword
+    (SELECT or DELETE) most recently preceded it. A DELETE FROM links clears
+    the table during writes and proves nothing about retrieval; only a SELECT
+    that names links in FROM/JOIN is a read this row may credit. A file with
+    only the two DELETE statements above must NOT satisfy this function; a
+    file also carrying the SELECT ... FROM links ... JOIN notes ... query
+    must.
+    """
+    for m in re.finditer(r"\b(FROM|JOIN)\s+links\b", src, re.IGNORECASE):
+        window = src[max(0, m.start() - 200):m.start()]
+        stmt_starts = list(re.finditer(r"\b(SELECT|DELETE)\b", window, re.IGNORECASE))
+        if stmt_starts and stmt_starts[-1].group(1).upper() == "SELECT":
+            return True
+    return False
+
+
 def d15_graph_value_proven(ctx):
     tool = os.path.join(ctx["tools"], "bm_vault.py")
     if not os.path.exists(tool):
         return NODATA, "no bm_vault.py to inspect"
     with open(tool, encoding="utf-8", errors="replace") as fh:
         src = fh.read()
-    walks = bool(re.search(r"links\s+WHERE|JOIN\s+links|multi.?hop", src))
+    walks = _reads_links_table(src)
     if not walks:
-        return FAIL, ("retrieval never traverses the link graph: it resolves through an anchors "
-                      "table and a lexical search, so no multi-hop value can be claimed and the "
-                      "structural-orphan metric measures browsing, not retrieval")
+        return FAIL, ("retrieval never READS the link graph in a SELECT: any match of the links "
+                      "table is a DELETE (cleanup, not retrieval), so no multi-hop value can be "
+                      "claimed and the structural-orphan metric measures browsing, not retrieval")
     # EXTENDED 2026-08-30 per the VB-15 probe proposal: the measurement now
     # exists on disk, so the probe reads it structurally. Five checks: pairing
     # (every query ran both arms), arithmetic (summary matches rows), verdict

@@ -41,6 +41,7 @@ Python 3, standard library only.
 import argparse
 import json
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -186,13 +187,118 @@ def sample_block():
     return "\n\n".join(sample_lines())
 
 
+#: EVAD unit U1 (release 1.0.13). The router's own words for a bare
+#: invocation with no unfinished work: NO_UNFINISHED_RUN_LINE is copied
+#: from bundle/commands/brother.md ("None: it prints 'no unfinished run
+#: found' at exit 0") and matches the literal string brother_run.py prints
+#: at that branch. ASK_OUTCOME_LINE is copied verbatim from
+#: bundle/skills/using-brother/SKILL.md's Step 2 ("Say exactly this and
+#: nothing else: ..."). Neither is retyped anywhere else: a session that
+#: changes either source file and not this constant fails
+#: TheFirstRunTranscriptIsWhatTheShippedCodePrints below.
+NO_UNFINISHED_RUN_LINE = "no unfinished run found"
+ASK_OUTCOME_LINE = (
+    "Brother turns AI-assisted work into something checkable instead of "
+    "just trusted. What are you trying to do right now: start or check on "
+    "a project, or get a change proven safe before it ships?")
+
+#: The two path components brother_run.py joins onto a run directory to
+#: get the path its last stdout line names (RECEIPT_DIRNAME and
+#: RECEIPT_FILENAME there, same literal strings here).
+RECEIPT_DIRNAME = "receipt"
+RECEIPT_FILENAME = "receipt.json"
+
+
+#: CDX-2 (Codex review of f24b7bb3): the transcript's per-file lines
+#: printed a bare "exited N", discarding checks()'s own state and reason
+#: and hiding that test_mathlib.py's check is NO-DATA (never re-run with
+#: mathlib.py's change reverted, so it does not prove the test on its
+#: own). "unit" is swapped for "check" in the printed reason because
+#: receipt_door's wording uses that word and
+#: FIRST_RUN_BANNED_WORDS (test_readme_honesty.py) keeps Brother's
+#: internal vocabulary out of this stranger-facing block; the swap
+#: changes no fact, only the noun a stranger has not been taught.
+def _transcript_verdict(entry):
+    """The parenthetical after "exited N" on a per-file line: this file's
+    own checks() state, plus its reason when one was recorded, so a
+    NO-DATA check never reads as though it had been proven."""
+    reason = re.sub(r"\bunit\b", "check", entry.get("reason") or "")
+    word = "verified" if entry.get("state") == "verified" else "NO-DATA"
+    return "%s: %s" % (word, reason) if reason else word
+
+
+def first_run_transcript():
+    """The README's 'Your first run, start to finish' block: the install
+    command README.md already carries, then the toy setup a stranger needs
+    before any of the rest of this block means anything (the checks named
+    below run against mathlib.py and test_mathlib.py, and neither file
+    exists until a reader creates it; the exact starting content is what
+    the stored run's own done_checks assume: add() with no type guard yet,
+    and a test file with no matching type/numeric/error/raise test yet, so
+    both checks are the ones the stored run recorded as failing before its
+    two changes landed), the router's own no-unfinished-work and
+    ask-outcome sentences, the stored run's own outcome, one line per
+    changed file naming its check and captured exit code (the same
+    RUN_FACTS checks() reads), and the engine's own last-line shape ending
+    in the stored run's receipt path. No line here is invented: a step
+    this repository has no recorded output for (the interactive mechanics
+    between typing the outcome and the engine's last line, for instance)
+    is left out rather than guessed at."""
+    run_dir = LOG_PATH.rsplit("/", 1)[0]
+    receipt_path = os.path.join(run_dir, RECEIPT_DIRNAME, RECEIPT_FILENAME)
+    lines = [
+        "mkdir mathlib-toy && cd mathlib-toy",
+        "git init -q",
+        # A fresh machine has no git identity, and on Linux git refuses the
+        # commit below with "empty ident name ... not allowed" (measured on
+        # the ubuntu CI runner, exit 128). Scoped to the toy repository with
+        # --local, so the reader's global git configuration is never touched.
+        "git config --local user.name \"Toy User\"",
+        "git config --local user.email \"toy@example.invalid\"",
+        "cat > mathlib.py <<'EOF'",
+        "def add(a, b):",
+        "    return a + b",
+        "EOF",
+        "cat > test_mathlib.py <<'EOF'",
+        "import mathlib",
+        "",
+        "",
+        "def test_add_ints():",
+        "    assert mathlib.add(1, 2) == 3",
+        "",
+        "",
+        "def test_add_floats():",
+        "    assert mathlib.add(1.5, 2) == 3.5",
+        "EOF",
+        "git add mathlib.py test_mathlib.py",
+        "git commit -q -m \"toy mathlib, before the fix\"",
+        "claude plugin marketplace add khalilmaaouni/Brother && "
+        "claude plugin install brother@brother",
+        "/brother",
+        NO_UNFINISHED_RUN_LINE,
+        ASK_OUTCOME_LINE,
+        RUN_FACTS["record"]["outcome"],
+    ]
+    for entry in checks():
+        lines.append("%s: check %s exited %s (%s)"
+                     % (entry["file"], entry["check_command"],
+                        entry["exit_code"], _transcript_verdict(entry)))
+    lines.append("brother_run: receipt: %s" % receipt_path)
+    return "\n".join(lines)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--checks", action="store_true",
                     help="print the per-file check list as JSON instead of "
                          "the README block")
+    ap.add_argument("--first-run", action="store_true",
+                    help="print the 'Your first run, start to finish' "
+                         "block instead of the receipt sample")
     args = ap.parse_args(argv)
-    if args.checks:
+    if args.first_run:
+        print(first_run_transcript())
+    elif args.checks:
         print(json.dumps(checks(), indent=1))
     else:
         print(sample_block())

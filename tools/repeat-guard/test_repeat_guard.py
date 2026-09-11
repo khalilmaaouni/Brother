@@ -144,7 +144,7 @@ def last_row(home, payload):
 
 
 def main():
-    real_logs_before = real_logs.snapshot()
+    real_logs_before = real_logs.snapshot_for_tests()
     with tempfile.TemporaryDirectory() as home:
         os.makedirs(os.path.join(home, ".claude", "repeat-guard"))
         cmd = "pytest tests/test_thing.py -k broken"

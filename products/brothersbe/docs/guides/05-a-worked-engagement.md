@@ -38,7 +38,14 @@ printf 'breaking\ny\ny\ny\nmany\nfeature\nthe ops lead\npartner orders land in t
 ```
 
 ```
-Does this change a data model, an API contract, or a file interface others depend on? (no/additive/breaking; additive means nothing that exists today has to change) Does it cross a service, system, or team boundary? (y/n) Is it reversible in under an hour? (y/n) Does it touch money, partner data, personal data, or production state? (y/n) How many downstream consumers break if it is wrong? (none/some/many) Is this a feature or a defect? (feature/defect) Who wants this? (a named human) What outcome is desired? What is the value hypothesis (why is this worth doing)? tier T3 (artifacts required: 01, 02, 03, 04, 05, 06, 07, 08) written to ./00-intake.json
+sbe_intake: . is not under a design root (design), so `sbe status` and the team report will not discover this dossier. The readers look in design/order-intake. Writing it where you asked anyway.
+5 questions now, then a few more once the tier is known (10 at most). Answer them ahead of time with --answers FILE.
+Does this change a data model, an API contract, or a file interface others depend on? (no/additive/breaking; additive means nothing that exists today has to change) Does it cross a service, system, or team boundary? (y/n) Is it reversible in under an hour? (y/n) Does it touch money, partner data, personal data, or production state? (y/n) How many downstream consumers break if it is wrong? (none/some/many) tier T3: up to 5 more questions.
+question 6 of 10
+Is this a feature or a defect? (feature/defect) question 7 of 10
+Who wants this? (a named human) question 8 of 10
+What outcome is desired? question 9 of 10
+What is the value hypothesis (why is this worth doing)? tier T3 (artifacts required: 01, 02, 03, 04, 05, 06, 07, 08) written to ./00-intake.json
 To override this tier, edit that file and set all three fields: "tier" (the tier you are moving to), "override" (the same tier, declaring the move), and "override_reason" (at least 3 words and 12 characters). A move with any of the three missing or disagreeing FAILs the design check as an edit rather than an override.
 ```
 
@@ -976,6 +983,10 @@ step that surfaces any design waiver as something a human is shown:
         run: python3 tools/test_sbe_vault_scope.py
       - name: verify converge
         run: python3 tools/test_sbe_verify_converge.py
+      - name: verify fence report
+        run: python3 tools/test_sbe_verify_fence_report.py
+      - name: verify path
+        run: python3 tools/test_sbe_verify_path.py
       - name: windows sim
         run: python3 tools/test_sbe_windows_sim.py
       # Row E33 (2026-09-03): these two suites existed on disk and ran in

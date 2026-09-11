@@ -307,6 +307,11 @@ def load_denylist(path=None):
 #: could not run, NO-DATA, never a FAIL: run_gate below reports it that way.
 GATE_TIMEOUT_FLOOR_SECONDS = 120
 GATE_TIMEOUT_CAP_SECONDS = 1800
+#: required_fast.sh is not a 60 second gate: it was measured at
+#: 994 s, 1357 s and 961 s in three separate checkouts on
+#: 2026-09-10. Its floor is set above the largest of those so an
+#: unloaded machine still gives it room to finish.
+REQUIRED_FAST_FLOOR_SECONDS = 1500
 
 
 def gate_timeout(load15=None, cores=None, floor=None, cap=None):
@@ -952,7 +957,7 @@ def build_identity_check_dir(identity_dir, allowlist, remote, branch, root=ROOT)
     build_export_tree(identity_dir, allowlist, root)
     # -f: same reasoning as build_orphan_commit above; the allowlist and
     # denylist are the only filters, never a copied .gitignore.
-    _run(["git", "add", "-A", "-f"], identity_dir)
+    _stage_all_from_disk(identity_dir, _run)
     status = _run(["git", "status", "--porcelain"], identity_dir)
     if (status.stdout or "").strip():
         author = "%s <%s>" % (AUTHOR_NAME, AUTHOR_EMAIL)
@@ -1473,7 +1478,7 @@ def push_appended(allowlist, remote, branch, root=ROOT, tag=None,
         # module docstring, THE ALLOWLIST AND DENYLIST ARE THE ONLY
         # FILTERS); staged BEFORE tag_time_checks below so that check reads
         # the exact bytes this add just staged, never the working copy.
-        run(["git", "add", "-A", "-f"], d)
+        _stage_all_from_disk(d, run)
         if tag:
             with tempfile.TemporaryDirectory(
                     prefix="brother-export-staged-") as staged:
@@ -1636,6 +1641,18 @@ def push_appended(allowlist, remote, branch, root=ROOT, tag=None,
         return EXIT_OK, lines
 
 
+def _stage_all_from_disk(export_dir, runner):
+    """Stage exactly the names on disk. The index is emptied first because
+    on a case-insensitive disk (the macOS default) `git add -A` keeps a
+    tracked path's OLD letter case when only the case changed: 1.0.13's
+    export shipped docs/how-to/USE-THE-VAULT.md while its manifest,
+    computed from disk, named use-the-vault.md, so the release failed its
+    own reproduction. -f: the allowlist and denylist are the only filters."""
+    runner(["git", "rm", "-r", "-q", "--cached", "--ignore-unmatch", "."],
+           export_dir)
+    return runner(["git", "add", "-A", "-f"], export_dir)
+
+
 def clear_working_tree(export_dir):
     """Remove everything in `export_dir` except .git, so a file the
     allowlist dropped (or the fetched tip carried) does not survive into
@@ -1711,11 +1728,27 @@ def check_readiness_gate(export_dir):
                        "tree (exit %s, %s)"
                        % (READINESS_GATE_REL, proc.returncode, last)]
     verdict = verdicts[-1]
+    # CDX-3, Codex review of f24b7bb3, blocker 3: this used to be
+    # `if proc.returncode != 0 or "NOT READY" in verdict: refuse`, so any
+    # OTHER line (a NO-DATA verdict included) fell through to the return
+    # True below. An in-memory probe fed "GATE: NO-DATA" at exit 0 and got
+    # back (True, ['readiness: GATE: NO-DATA']), which is exactly the
+    # thing this function's own docstring says can never happen. NO-DATA
+    # is refused first, with its own NO-DATA-prefixed reason, before the
+    # generic NOT READY / anything-else refusal below.
     if proc.returncode != 0 or "NOT READY" in verdict:
         return False, (["REFUSED: the export tree's own readiness gate does "
                         "not read READY (exit %s): %s"
                         % (proc.returncode, verdict)]
                        + _readiness_failing_items(text))
+    # The order matters: a NOT READY verdict that merely NAMES a NO-DATA
+    # item (E67's exact line, "Restore drill (NO-DATA)") is a refusal,
+    # measured on the 1.0.13 assembly where the reverse order turned two
+    # NOT READY fixtures into NO-DATA refusals with the wrong prefix.
+    if "NO-DATA" in verdict:
+        return False, ["NO-DATA: the export tree's own readiness gate "
+                       "reported NO-DATA rather than READY (exit %s): %s"
+                       % (proc.returncode, verdict)]
     return True, ["readiness: %s" % verdict]
 
 
@@ -1757,7 +1790,20 @@ def check_required_fast(export_dir):
         return False, ["NO-DATA: the export tree carries no "
                        "scripts/required_fast.sh, so its own required "
                        "check could not be run on it"]
-    proc = _run(["sh", script], export_dir, timeout=600)
+    # 600 SECONDS WAS SMALLER THAN THE GATE IT WRAPS, so this check could
+    # only ever return NO-DATA, and NO-DATA is never a pass, so the export
+    # refused every time and nothing was ever published through it.
+    # MEASURED 2026-09-10 on this machine, summing required_fast.sh's own
+    # per-check seconds: 994 s on the release tree, 1357 s on plain main, and
+    # a peer measured 961 s independently in a third checkout. Every figure is
+    # above 600. The gate grew past its own wrapper and nothing noticed,
+    # because a timeout reports NO-DATA rather than naming the check that ran
+    # long.
+    # The budget now scales with load like every other gate here, with a floor
+    # matched to the measurement rather than to the 60 seconds of CPU the
+    # scaling rule assumes, and the existing 1800 s cap still bounds it.
+    proc = _run(["sh", script], export_dir,
+                timeout=gate_timeout(floor=REQUIRED_FAST_FLOOR_SECONDS))
     text = ((proc.stdout or "") + (proc.stderr or "")).strip()
     summary = re.search(r"^pass\s+(\d+)\s+fail\s+(\d+)\s+no-data\s+(\d+)",
                         text, re.M)
@@ -2035,7 +2081,16 @@ def tag_time_checks(export_dir, version):
         verifier = os.path.join(product_dir, "scripts", "verify-install.sh")
         if not os.path.isfile(verifier):
             continue
-        proc = _run(["bash", verifier], product_dir, timeout=600)
+        # THE SAME BUG, ONE LAYER ALONG THE SAME PATH. This wraps each
+        # product's own verify-install.sh, looped over every directory under
+        # products/, inside the function that gates the push. It is latent
+        # rather than live (those verifiers finished inside 600 s on
+        # 2026-09-10), and latent is where the other one was until the gate it
+        # wrapped grew. A wrapper smaller than the thing it wraps returns
+        # NO-DATA, and NO-DATA is never a pass, so the export refuses and
+        # nothing publishes. Same budget rule as check_required_fast.
+        proc = _run(["bash", verifier], product_dir,
+                    timeout=gate_timeout(floor=REQUIRED_FAST_FLOOR_SECONDS))
         text = ((proc.stdout or "") + (proc.stderr or "")).strip()
         last = text.splitlines()[-1] if text else "(no output)"
         if proc.returncode != 0:

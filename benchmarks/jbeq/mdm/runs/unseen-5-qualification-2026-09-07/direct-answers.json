@@ -1,0 +1,17 @@
+{
+ "W5-02": "AUTO-MERGE",
+ "W5-21": "REJECT MATCH",
+ "W5-26": "R1",
+ "W5-27": "R2",
+ "W5-28": "NO-DATA",
+ "W5-29": "R3",
+ "W5-30": "R1",
+ "W5-31": "AUTO-MERGE",
+ "W5-32": "REJECT MATCH",
+ "W5-33": "LINK AS RELATED",
+ "W5-36": "AUTO-MERGE",
+ "W5-37": "KEEP SEPARATE",
+ "W5-38": "REJECT MATCH",
+ "W5-39": "ESCALATE",
+ "W5-40": "LINK AS RELATED"
+}

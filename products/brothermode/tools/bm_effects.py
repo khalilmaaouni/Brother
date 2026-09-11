@@ -185,6 +185,9 @@ REGISTRY = {
         "alert list": PURE_READ,
         "forecast show": PURE_READ,
         "receipt list": PURE_READ,
+        # list (R-1, 2026-09-07) opens bs.ReadOnlyStore via _read_store()
+        # and only prints the project ids the store holds.
+        "list": PURE_READ,
         "start": LEDGER_WRITE,
         "task add": LEDGER_WRITE,
         "task start": LEDGER_WRITE,
@@ -196,6 +199,9 @@ REGISTRY = {
         "alert resolve": LEDGER_WRITE,
         "deliver": LEDGER_WRITE,
         "export": PROJECT_WRITE,
+        # adopt (U5, 2026-09-08) writes one outcome contract record into
+        # the repository, docs/decisions/inflight/<slug>.json or --out.
+        "adopt": PROJECT_WRITE,
         "purge": DESTRUCTIVE_EXTERNAL_ACTION,
     },
 

@@ -49,6 +49,10 @@ SEAM_VARS = (
     "BM_VAULT_DISABLE_CREDENTIAL_GATE",
     "BM_VAULT_DISABLE_DENYLIST_GATE",
     "BM_VAULT_DISABLE_LIFECYCLE_GATE",
+    # bm_vault_contradiction.py's SUPERSESSION_ACK_DISABLE_ENV, wired in
+    # 2026-09-08 without joining this list, so setting it made every
+    # consumer that calls active_seams() refuse it as an unknown seam.
+    "BM_VAULT_DISABLE_SUPERSESSION_ACK_CHECK",
 )
 
 #: Same set as SEAM_VARS, as a frozenset, for membership checks below and

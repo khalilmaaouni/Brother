@@ -322,8 +322,12 @@ class SessionStartPostConsentCase(unittest.TestCase):
 
     def test_consented_sessionstart_still_prints_the_digest(self):
         digest_first_line = _read_text(DIGEST).splitlines()[0]
+        # R-4 (b25e08794, 2026-09-08) prints DIGEST.md only to a maintainer,
+        # BROTHERMODE_MAINTAINER=1; this proves consent never swallows it
+        # for the reader it is still printed to.
+        env = dict(self.env, BROTHERMODE_MAINTAINER="1")
         r = subprocess.run(
-            [sys.executable, SESSIONSTART], cwd=self.project, env=self.env, input="{}",
+            [sys.executable, SESSIONSTART], cwd=self.project, env=env, input="{}",
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             universal_newlines=True, timeout=120)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)

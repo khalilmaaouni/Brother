@@ -129,6 +129,52 @@ class EveryClauseExistsBecauseSomethingBreaksWithoutIt(unittest.TestCase):
         self.assertEqual(problems, [])
         self.assertIsNotNone(rec)
 
+    def test_a_change_kind_outside_the_vocabulary_is_refused(self):
+        """U5 follow-up finding 1 (adversarial review, 2026-09-09):
+        row["change_kind"] gets the same treatment evidence_family and
+        oracle_source already get above: a value outside the declared
+        vocabulary is a typo or an invention, refused at declaration."""
+        rec, problems = W.create("o", [unit(change_kind="mystery")])
+        self.assertIsNone(rec)
+        self.assertIn("not one of behaviour, documentation or generated",
+                     problems[0])
+
+    def test_the_declared_change_kind_vocabulary_is_accepted(self):
+        rec, problems = W.create("o", [unit(change_kind="behaviour")])
+        self.assertEqual(problems, [])
+        self.assertIsNotNone(rec)
+
+
+class ChangeKindAndRedCheckSurviveCreate(unittest.TestCase):
+    """U5 follow-up finding 1 (adversarial review, 2026-09-09): create()
+    built every row from a fixed whitelist that silently dropped
+    change_kind and red_check before the record ever reached disk, so a
+    unit supplying either had it stripped, and receipt_door.red_check_gap
+    (which reads both straight off the row) could never see them."""
+
+    def test_change_kind_survives_into_the_row(self):
+        rec, problems = W.create("o", [unit(change_kind="behaviour")])
+        self.assertEqual(problems, [])
+        self.assertEqual(rec["rows"][0]["change_kind"], "behaviour")
+
+    def test_a_row_that_never_declared_change_kind_gets_the_empty_string(self):
+        """The same default shape evidence_family/oracle_source already
+        get above: the entire pre-U5 corpus never wrote this field."""
+        rec, _ = W.create("o", [unit()])
+        self.assertEqual(rec["rows"][0]["change_kind"], "")
+
+    def test_red_check_survives_into_the_row(self):
+        red = {"command": "pytest", "exit_code": 1,
+               "output_location": "/tmp/r.log", "revision": "deadbeef",
+               "pre_implementation": True}
+        rec, problems = W.create("o", [unit(red_check=red)])
+        self.assertEqual(problems, [])
+        self.assertEqual(rec["rows"][0]["red_check"], red)
+
+    def test_a_row_that_never_supplied_red_check_carries_no_key_at_all(self):
+        rec, _ = W.create("o", [unit()])
+        self.assertNotIn("red_check", rec["rows"][0])
+
 
 class ItReportsEVERYProblemNotTheFirst(unittest.TestCase):
     """A caller fixing one at a time learns the contract slowly, by being

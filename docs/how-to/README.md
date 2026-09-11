@@ -1,0 +1,16 @@
+# How-to guides
+
+- [Install on Claude Code](install-claude-code.md)
+- [Install on Codex](install-codex.md)
+- [Run Brother](run-brother.md)
+- [Resume unfinished work](resume-work.md)
+- [Write an outcome contract](write-an-outcome-contract.md)
+- [Write a schedulable plan](write-a-schedulable-plan.md)
+- [Review a receipt](review-a-receipt.md)
+- [Verify a migration](verify-a-migration.md)
+- [Verify a decision-grade number](verify-a-number.md)
+- [Use the Vault](use-the-vault.md)
+- [Recover from failure/refusal](recover-from-failure.md)
+- [Scope/disable hooks](scope-hooks.md)
+- [Adopt on a team](adopt-on-a-team.md)
+- [Prepare a release](prepare-a-release.md)

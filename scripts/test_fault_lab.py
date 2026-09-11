@@ -21,12 +21,19 @@ install` is stubbed, out of this checkout's own bundle/runtime. The four
 lifecycle scenarios still need a real binary and are not driven here.
 """
 import ast
+import contextlib
+import io
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import fault_lab as FL  # noqa: E402
+import fault_barrier as FB  # noqa: E402
 
 # E100: one sandbox for every temp tree this process makes, removed at exit.
 import os as _e100_os, sys as _e100_sys  # noqa: E402
@@ -234,6 +241,132 @@ class TheDataScienceScenarioBodiesActuallyRun(unittest.TestCase):
         out = proc.stdout + proc.stderr
         self.assertIn("ds-seed", out, out[:2000])
         self.assertIn("differing_value=True", out, out[:2000])
+
+
+class TheSevenLifecycleBoundariesAreDrivenForReal(unittest.TestCase):
+    """CONT-0's own done-check: a real SIGKILL of the real
+    scripts/brother_run.py process at each of the seven named lifecycle
+    boundaries, then a bare second invocation, asserting the six rows from
+    files and CLI output alone (fault_lab.scenario_boundary, in process:
+    never through `claude plugin install`, which needs a real launcher and
+    the network, neither available here; see that function's own docstring
+    for why this is CONT-0's approved route instead of install_artifact()).
+
+    Six boundaries are reachable through the owned modules' own barrier
+    seam (BROTHER_FAULT_BARRIER); the seventh, after_receipt_before_
+    acceptance, lives entirely inside scripts/brother_run.py's own main(),
+    a file this unit does not own and must not edit, so it is asserted
+    NO-DATA by construction rather than skipped silently.
+
+    Slow by design, like the two data-science driving tests above: each
+    case is a real process, really killed, really resumed."""
+
+    def _assert_boundary(self, name):
+        # 60s, not 30: matches the barrier's own internal deadline
+        # (_fault_barrier blocks up to 60s waiting for a release marker
+        # that these tests never create), and under concurrent system
+        # load (this suite alongside other work) a shorter window flaked
+        # once here, passing reliably alone in under 3s.
+        r = FL.scenario_boundary(name, timeout=60)
+        self.assertTrue(r["ok"], "%s: %s\n%s" % (name, r["detail"],
+                                                   r["output"][-4000:]))
+
+    def test_before_claim(self):
+        self._assert_boundary("before_claim")
+
+    def test_after_claim_before_edit(self):
+        self._assert_boundary("after_claim_before_edit")
+
+    def test_after_edit_before_check(self):
+        self._assert_boundary("after_edit_before_check")
+
+    def test_after_check_before_integration(self):
+        self._assert_boundary("after_check_before_integration")
+
+    def test_during_integration(self):
+        self._assert_boundary("during_integration")
+
+    def test_after_integration_before_receipt(self):
+        self._assert_boundary("after_integration_before_receipt")
+
+    def test_after_receipt_before_acceptance_is_honest_no_data(self):
+        """The one boundary this unit cannot reach without editing a file it
+        does not own. Asserted NO-DATA, never simulated and called PASS."""
+        r = FL.scenario_boundary("after_receipt_before_acceptance")
+        self.assertFalse(r["ok"])
+        self.assertIn("NO-DATA", r["detail"])
+        self.assertIn("brother_run.py", r["detail"])
+
+
+class TheMarkerFileIsOpenedSafely(unittest.TestCase):
+    """FINDING 9 (2026-09-10 security review): fault_barrier.wait() used to
+    open the STARTED marker by path with a plain open(started, 'w') after
+    only checking its REALPATH resolved under the system temp directory,
+    leaving a swap window: a symlink placed at the marker path (itself
+    still resolving under temp, so the containment check passes) was
+    followed and written through, under a world-writable temp directory.
+    This does not need fault_lab's SIGKILL rig at all -- fault_barrier.wait
+    takes a plain env dict, so the marker swap is driven directly against
+    the real function, no subprocess and no timing race required."""
+
+    def setUp(self):
+        self.throwaway = tempfile.mkdtemp(prefix="fault-barrier-symlink-")
+        self.addCleanup(shutil.rmtree, self.throwaway, ignore_errors=True)
+
+    def test_a_symlinked_started_marker_is_refused_by_the_open_itself(self):
+        target = os.path.join(self.throwaway, "outside-target")
+        with open(target, "w", encoding="utf-8") as fh:
+            fh.write("pre-existing")
+        started_link = os.path.join(self.throwaway, "started")
+        os.symlink(target, started_link)
+        release = os.path.join(self.throwaway, "release")
+        env = {
+            "BROTHER_FAULT_BARRIER": "x",
+            "BROTHER_FAULT_LAB": "1",
+            "BROTHER_FAULT_BARRIER_STARTED": started_link,
+            "BROTHER_FAULT_BARRIER_RELEASE": release,
+        }
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            FB.wait("x", env=env)
+        with open(target, "r", encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), "pre-existing",
+                             "a symlinked marker must never be written "
+                             "through")
+        self.assertTrue(os.path.islink(started_link),
+                        "the symlink itself must be left in place, not "
+                        "replaced")
+
+
+class TheFaultLabMarkerGatesTheBarrierNotTheStubSeam(unittest.TestCase):
+    """M-6: fault_barrier.wait()'s gate 2 used to check the stub worker
+    seam (MODEL_WORKER_CMD/DOOR_MODEL_CMD), but brother_run.py's own
+    session_units_are_yours documents MODEL_WORKER_CMD as a real
+    PRODUCTION capability, so that gate would guard nothing in a real run
+    that happened to set it. BROTHER_FAULT_LAB=1 is the dedicated marker
+    now required instead, and fault_lab.run_env() -- the one place this
+    module builds a scenario's environment -- is where it is set."""
+
+    def test_run_env_sets_the_dedicated_fault_lab_marker(self):
+        env = FL.run_env(None, "decomposer.py", "worker.py")
+        self.assertEqual(env.get("BROTHER_FAULT_LAB"), "1",
+                         "every environment fault_lab.py builds must carry "
+                         "the marker fault_barrier.wait()'s gate 2 checks")
+
+    def test_the_stub_seams_alone_no_longer_pass_the_barrier_gate(self):
+        """The exact regression M-6 closes: both stub seams active, no
+        BROTHER_FAULT_LAB, must still be a no-op."""
+        d = tempfile.mkdtemp(prefix="fault-lab-marker-gate-")
+        started = os.path.join(d, "started")
+        release = os.path.join(d, "release")
+        env = {"BROTHER_FAULT_BARRIER": "x",
+              "MODEL_WORKER_CMD": "true", "DOOR_MODEL_CMD": "true",
+              "BROTHER_FAULT_BARRIER_STARTED": started,
+              "BROTHER_FAULT_BARRIER_RELEASE": release}
+        FB.wait("x", env=env)
+        self.assertFalse(os.path.exists(started),
+                         "the stub seams alone must never activate the "
+                         "barrier now that gate 2 checks BROTHER_FAULT_LAB")
 
 
 if __name__ == "__main__":

@@ -88,6 +88,15 @@ ORACLE_SOURCES = frozenset((
     "prior_release", "generated_from_impl", "human_observation", "none",
 ))
 
+#: U5 (red-before-green witness, 2026-09-09; adversarial review of
+#: 3409fcec, finding 1): the vocabulary receipt_door.py's own
+#: CHANGE_KIND_BEHAVIOUR/CHANGE_KIND_DOCUMENTATION/CHANGE_KIND_GENERATED
+#: name (spelled again here, in literals, because receipt_door.py already
+#: imports this module and importing back would cycle). Empty is also
+#: valid, meaning "not this gate's business", the same as EVIDENCE_FAMILIES
+#: and ORACLE_SOURCES above.
+CHANGE_KINDS = frozenset(("behaviour", "documentation", "generated"))
+
 
 def write_record(path, doc):
     """The ONE way a Work document reaches disk: temp file beside the
@@ -189,6 +198,11 @@ def check_units(units):
         if fam not in (None, "") and str(fam) not in EVIDENCE_FAMILIES:
             problems.append("%s declares evidence_family %r, which is not "
                             "one of E1 to E18" % (where, fam))
+        kind = u.get("change_kind")
+        if kind not in (None, "") and str(kind) not in CHANGE_KINDS:
+            problems.append("%s declares change_kind %r, which is not one "
+                            "of behaviour, documentation or generated"
+                            % (where, kind))
         src = u.get("oracle_source")
         if src not in (None, "") and str(src) not in ORACLE_SOURCES:
             problems.append("%s declares oracle_source %r, which is not one "
@@ -227,6 +241,31 @@ def _cycles(units):
     for node in sorted(graph):
         walk(node, [])
     return sorted(set(problems))
+
+
+def _row_from_unit(u):
+    """One row of create()'s own shape (the scheduler's `rows`, not the
+    caller's `units`). change_kind is always present, empty string when
+    undeclared, the same convention evidence_family and oracle_source
+    already use. red_check (U5 finding 1) is passed through only when the
+    caller actually gave one, a dict, never invented and never defaulted:
+    an absent key is the honest fact that no witness was ever recorded,
+    and receipt_door.red_check_evidence already reads that absence as
+    NO-DATA rather than needing an empty placeholder here."""
+    row = {"id": str(u["id"]),
+           "title": u.get("title") or u.get("name") or str(u["id"]),
+           "status": u.get("status") or "SCHEDULED",
+           "depends_on": [str(d) for d in (u.get("depends_on") or [])],
+           "owns": list(u.get("owns") or []),
+           "done_check": u["done_check"],
+           "evidence": u.get("evidence", ""),
+           "evidence_family": str(u.get("evidence_family") or ""),
+           "oracle_source": str(u.get("oracle_source") or ""),
+           "independence": independence_for(u.get("oracle_source")),
+           "change_kind": str(u.get("change_kind") or "")}
+    if isinstance(u.get("red_check"), dict):
+        row["red_check"] = u["red_check"]
+    return row
 
 
 def create(outcome, units, work_id=None, store=None, lens_inferred=None,
@@ -269,17 +308,7 @@ def create(outcome, units, work_id=None, store=None, lens_inferred=None,
         # The scheduler reads `rows` and `features` alike, so units land in
         # `rows`: the shape is the existing contract rather than a new one, and
         # a second shape would need a second scheduler.
-        "rows": [{"id": str(u["id"]),
-                  "title": u.get("title") or u.get("name") or str(u["id"]),
-                  "status": u.get("status") or "SCHEDULED",
-                  "depends_on": [str(d) for d in (u.get("depends_on") or [])],
-                  "owns": list(u.get("owns") or []),
-                  "done_check": u["done_check"],
-                  "evidence": u.get("evidence", ""),
-                  "evidence_family": str(u.get("evidence_family") or ""),
-                  "oracle_source": str(u.get("oracle_source") or ""),
-                  "independence": independence_for(u.get("oracle_source"))}
-                 for u in units],
+        "rows": [_row_from_unit(u) for u in units],
         "features": [],
     }
     if store:

@@ -60,7 +60,21 @@ class TestCharterNamesRealFiles(unittest.TestCase):
 
 
 class TestCapClaimMatchesTheTest(unittest.TestCase):
-    """The README's claim about the surface test must match that test's contents."""
+    """The document that claims (or disclaims) the surface caps must match
+    that test's contents.
+
+    Re-anchored 2026-09-10 (docs/decisions/readme-claims-moved-2026-09-10.md):
+    the wholesale documentation replacement dropped both of README.md's old
+    sentences about this and put nothing in their place. A grep of the new
+    corpus for cap, concurren, headcount and writer found no reachable page
+    that reasserts the claim; docs/CHARTER.md's "The surface caps,
+    withdrawn" section still states it in full ("tests/test_surface.py no
+    longer counts skills, commands, agents, or hooks against any number"),
+    but README.md does not link to CHARTER.md (checked: 0 hits for
+    "charter", case-insensitive, in README.md), and README.md is off
+    limits to this change. So the comparison is re-anchored to CHARTER.md,
+    the page that actually carries the claim, rather than to README.md,
+    which no longer carries or links to it."""
 
     # A cap assertion would have to compare a count against one of these numbers.
     CAP_NUMBERS = ("9", "4", "13", "5", "31")
@@ -73,29 +87,30 @@ class TestCapClaimMatchesTheTest(unittest.TestCase):
                 return True
         return False
 
-    def test_readme_and_surface_test_agree(self):
-        readme = read(README)
-        claims_enforced = "The caps `tests/test_surface.py` enforces today" in readme
-        says_unenforced = "There is no headcount cap" in readme
+    def test_charter_and_surface_test_agree(self):
+        charter = read(CHARTER)
+        says_withdrawn = (
+            "no longer counts skills, commands, agents, or hooks against "
+            "any number" in charter
+        )
         counts = self._test_counts_surfaces()
 
         if counts:
-            self.assertTrue(
-                claims_enforced,
-                "tests/test_surface.py now counts surfaces, so the README must say so "
-                "instead of calling the caps UNENFORCED. The pair moves together.",
+            self.assertFalse(
+                says_withdrawn,
+                "tests/test_surface.py now counts surfaces again, but "
+                "docs/CHARTER.md still says the caps are withdrawn and "
+                "uncounted. The pair moved apart: update CHARTER.md's "
+                "'The surface caps, withdrawn' section or fix the test.",
             )
         else:
-            self.assertFalse(
-                claims_enforced,
-                "the README claims tests/test_surface.py enforces the surface caps, and "
-                "that file contains no cap assertion. This is the exact defect of "
-                "2026-08-24: a claim written once while the control changed underneath it.",
-            )
             self.assertTrue(
-                says_unenforced,
-                "the caps are not enforced by any file, so the README must say UNENFORCED "
-                "in those words. A rule is not a control unless a file enforces it.",
+                says_withdrawn,
+                "tests/test_surface.py enforces no headcount cap, and "
+                "docs/CHARTER.md must keep saying so in these words, or a "
+                "reader has no way to tell the caps are gone. This is the "
+                "exact defect of 2026-08-24: a claim written once while "
+                "the control changed underneath it.",
             )
 
 

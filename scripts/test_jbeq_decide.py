@@ -1676,6 +1676,38 @@ class TestTemporalRules(unittest.TestCase):
         self.assertEqual(result["rule_fired"], "temporal_gap_is_nodata")
         self.assertIn("dormancy", result["why"])
 
+    # TM-01 shape (blind round 12, 2026-09-07): as_of "2024-02" is before
+    # candidate_effective_date "2024-06-01", lifecycle is stated closed,
+    # but prior_valid_to "2024-03-31" (the closure date) is itself after
+    # as_of: the record was still live as of as_of, so lifecycle=closed
+    # (today's status) must not send this to rule_r's unconditional
+    # lifecycle bar. Round 12 found the engine answering NO-DATA via
+    # rule_r here instead of R1.
+    def test_before_closure_with_prior_valid_to_is_r1(self):
+        s = self._temporal_sheet(lifecycle="closed", effective_dates={
+            "as_of": "2024-02", "candidate_effective_date": "2024-06-01",
+            "conflict": False, "prior_valid_to": "2024-03-31",
+        })
+        result = jbeq_decide.decide(s)
+        self.assertEqual(result["answer"], "R1")
+        self.assertEqual(result["rule_fired"], "temporal_before_closure_is_r1")
+
+    # TM-09 shape (blind round 12, 2026-09-07): as_of "2026-03-15" is
+    # before candidate_effective_date "2026-04-01", lifecycle is stated
+    # closed, and prior_valid_to "2025-12-31" (the closure date) is at or
+    # before as_of: the record really was already closed by as_of, so
+    # temporal_before_closure_is_r1 must not fire and the case still
+    # reaches rule_r's lifecycle clause, KEEP SEPARATE remapped to
+    # NO-DATA (round 12's own correct answer, must not regress).
+    def test_after_closure_with_prior_valid_to_stays_nodata(self):
+        s = self._temporal_sheet(lifecycle="closed", effective_dates={
+            "as_of": "2026-03-15", "candidate_effective_date": "2026-04-01",
+            "conflict": False, "prior_valid_to": "2025-12-31",
+        })
+        result = jbeq_decide.decide(s)
+        self.assertEqual(result["answer"], "NO-DATA")
+        self.assertEqual(result["rule_fired"], "rule_r")
+
     def test_disabling_at_or_after_successor_is_r2_flips_away_from_r2(self):
         s = self._temporal_sheet(effective_dates={
             "as_of": "2026-09-05", "candidate_effective_date": "2026-01-15",

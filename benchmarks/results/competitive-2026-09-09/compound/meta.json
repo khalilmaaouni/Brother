@@ -1,0 +1,19 @@
+{
+ "arm": "compound",
+ "route": "in-session subagent (route two), not a throwaway home",
+ "model_id": "claude-sonnet-5",
+ "plugin_version": "compound-engineering 3.23.4",
+ "workflow_used": "ce-work",
+ "declared_files": [
+  "pricing.py"
+ ],
+ "tokens_used": 213028,
+ "tokens_source": "orchestrator's subagent usage report (subagent_tokens), includes the workflow's own reading",
+ "interventions": 0,
+ "questions_asked_to_user": 0,
+ "wall_seconds": 2417,
+ "wall_seconds_note": "from dispatch stamp to artifact write; the agent's own duration was 2299 s",
+ "exit_code": 0,
+ "committed": "yes: fix(pricing): apply discount as a percentage, not a flat subtraction",
+ "deviation": "the ce-code-review reviewer dispatch was refused by the orchestrating session's spend guard; ce-work took its own documented non-interactive review-unavailable path"
+}

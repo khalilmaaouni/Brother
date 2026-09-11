@@ -95,7 +95,7 @@ export CLAUDE_CONFIG_DIR="$CONFIG_DIR"
 # machine already runs BrotherMode day to day. Isolating only HOME and
 # CLAUDE_CONFIG_DIR is NOT enough on a machine that already has these set:
 # a first refresh run without this block indexed 988 real notes from
-# /Users/khalil.maaouni/Documents/Kay Vault instead of the 4-note fixture
+# ~/Documents/Kay Vault instead of the 4-note fixture
 # vault, entirely by the product's own documented precedence, not a bug in
 # it. Unset here so this control measures the FIXTURE vault, and named here
 # because a stranger's own machine with no BrotherMode history will never

@@ -132,7 +132,12 @@ MUTANTS = {
         "guards": "the forgotten-contract-field family: a durable record "
                   "silently missing a field its consumer needs",
         "target": "work_record.py",
-        "anchor_old": '                  "depends_on": [str(d) for d in '
+        # The field line lost seven spaces of indent when work_record.py's
+        # Work document writer was refactored into one atomic helper (E61), so
+        # the old 18-space anchor matched nothing, the mutant could never be
+        # applied, and the gate read NO-DATA instead of KILLED. Same field,
+        # same deletion, the anchor now carries the line as it actually is.
+        "anchor_old": '           "depends_on": [str(d) for d in '
                       '(u.get("depends_on") or [])],\n',
         "anchor_new": "",
         "killer": "test_work_record.py",

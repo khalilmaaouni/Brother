@@ -82,7 +82,7 @@ def parse_ruling_timestamp(ruling_text):
     try:
         y, mo, d = (int(x) for x in date_s.split("-"))
         return datetime.datetime(y, mo, d, int(hour_s), int(min1 + min2), tzinfo=JST)
-    except ValueError:
+    except ValueError:  # sbe: allow-silent a malformed ruling timestamp has no defensible time, so the caller falls through to git provenance
         return None
 
 
@@ -120,7 +120,7 @@ def first_add_commits(path, repo_root):
         try:
             times.append(datetime.datetime.strptime(rest.strip(), "%Y-%m-%d %H:%M:%S %z"))
         except ValueError:
-            continue
+            continue  # sbe: allow-silent malformed timestamp contributes no ordering evidence
     return (min(times) if times else None), hashes
 
 

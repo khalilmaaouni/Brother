@@ -122,7 +122,9 @@ class ClaudeAdapter(object):
 
     #: Copied from scripts/model_worker.py's own CLAUDE_ARGV rather than
     #: retyped, so a change there cannot drift silently from what this file
-    #: reports.
+    #: reports. The worker appends "--fallback-model <chain>" at call time
+    #: (model_worker._claude_argv, from BROTHER_FALLBACK_MODELS), so the
+    #: live argv can be longer than this base.
     HEADLESS_ARGV = ["claude", "-p", "--output-format", "json",
                     "--permission-mode", "acceptEdits"]
 

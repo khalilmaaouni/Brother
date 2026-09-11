@@ -38,11 +38,14 @@ its refusal. Every run since E59 has one.
 Python 3, standard library only. No network.
 """
 import argparse
+import datetime
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
@@ -138,6 +141,86 @@ def _read_json(path):
         return None, str(exc)
 
 
+def _event_epoch(at):
+    """Seconds since the epoch for one journal event's own "at" field
+    (ISO 8601, UTC, journal.append's own format), or None when it is
+    missing or unparseable -- never a guess at when an event with no
+    readable timestamp happened."""
+    if not at:
+        return None
+    try:
+        return datetime.datetime.fromisoformat(str(at)).timestamp()
+    except ValueError:  # sbe: allow-silent documented contract (see docstring): an unparseable "at" yields None, and every caller (_gap_days, then the `is not None` gate before the gap is ever printed) already treats None as "unknown," never as a crash or a lost record
+        return None
+
+
+def _gap_days(events, now_ts):
+    """Days between now_ts and the LAST event this journal recorded
+    (append order, so events[-1] is the most recent), or None when there
+    are no events yet or the last one carries no readable timestamp. The
+    one fact a run resumed days later needs named: how long the journal
+    has sat untouched, in the unit a person reads at a glance rather than
+    the raw seconds dead_reason() already prints for a single lease."""
+    if not events:
+        return None
+    at = _event_epoch(events[-1].get("at"))
+    return None if at is None else (now_ts - at) / 86400.0
+
+
+def _path_overlaps(changed, owned):
+    """True when a changed path and a unit's declared write scope name
+    the same file or one lies under the other. Mirrors brother_run.py's
+    own _path_overlaps (the dirty-tree check ahead of a claim) rather than
+    inventing a second rule for what "the same path" means."""
+    a, b = str(changed).strip("/"), str(owned).strip("/")
+    return bool(a) and bool(b) and (
+        a == b or a.startswith(b + "/") or b.startswith(a + "/"))
+
+
+_REVISION_SHAPE = re.compile(r"^[0-9a-fA-F]{7,64}$")
+
+
+def _files_changed_between(cwd, old_rev, new_rev):
+    """Paths `git diff --name-only` reports between two revisions of the
+    run's own target repository, or None when there is nothing to ask
+    (no cwd, no prior revision, the two revisions are the same) or git
+    cannot answer. This is commit history, never a working-tree diff --
+    the same "paths only, never a file's contents" boundary this module
+    already holds for _changed_files().
+
+    old_rev is the PRIOR capsule.json's own canonical_revision, read off
+    disk by capsule() and untrusted (a corrupted or tampered file, not
+    only ever this module's own write): a value shaped like a git option
+    (starting with "-") would otherwise be read by git as a flag rather
+    than a revision -- argument injection into this process's own git
+    call. Both revisions are checked against a plain commit-hash shape
+    before either reaches an argv, and "--end-of-options" sits ahead of
+    them in the argv itself as a second, independent belt against the
+    same class of value. A revision that fails the shape check returns a
+    NO-DATA string instead of calling git at all, naming only the shape
+    of the problem and the first 12 characters of the bad value -- never
+    the value verbatim, since it may be attacker-controlled."""
+    if not cwd or not old_rev or not new_rev or old_rev == new_rev:
+        return None
+    for rev in (old_rev, new_rev):
+        if not _REVISION_SHAPE.match(rev):
+            return ("%s: a prior revision does not look like a git commit "
+                    "hash (starts with %r), refusing to pass it to git"
+                    % (NODATA, rev[:12]))
+    try:
+        proc = subprocess.run(["git", "diff", "--name-only",
+                              "--end-of-options", old_rev, new_rev],
+                              cwd=cwd, capture_output=True, text=True,
+                              timeout=30)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        sys.stderr.write("continuity: could not diff %s..%s in %s (%s)\n"
+                         % (old_rev, new_rev, cwd, exc))
+        return None
+    if proc.returncode != 0:
+        return None
+    return [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+
+
 def _runs_root_from(run_dir):
     """The runs_root run_dir_for(outcome, runs_root) was called with, read
     back off the path shape it always builds: runs_root/docs/plan/runs/name.
@@ -222,12 +305,21 @@ def _bucket_for(uid, row, held, reconcile_findings, reconcile_problem,
     return "abandoned", finding.get("detail", "")
 
 
-def _next_action(units, buckets):
-    """One recommended line, priority order: an abandoned lease can be
-    safely resumed; an unclear one must not be, and a person is named
-    instead; an active one says to wait; a pending one names what to claim
-    next; nothing left says so."""
+def _next_action(units, buckets, stale=()):
+    """One recommended line, priority order: a unit whose declared files
+    changed upstream while this run sat still must be re-verified before
+    anything else, because resuming it or trusting its prior claim would
+    trust evidence a moved file has since invalidated; an abandoned lease
+    can then be safely resumed; an unclear one must not be, and a person
+    is named instead; an active one says to wait; a pending one names
+    what to claim next; nothing left says so."""
     by_id = {u["id"]: u for u in units}
+    if stale:
+        uid = stale[0]
+        return ("re-verify: %s's declared files changed upstream while "
+                "this run sat still (%s); check it against the new "
+                "canonical revision before resuming or continuing anything"
+                % (uid, by_id[uid]["detail"] or "the repository moved"))
     if buckets["abandoned"]:
         uid = buckets["abandoned"][0]
         return ("resume: %s's claim expired while still marked claimed (%s); "
@@ -366,6 +458,8 @@ def capsule(run_dir, clock=None):
                       "this capsule can be built from)"
                       % (NODATA, journal.JOURNAL_FILENAME, run_dir))
     events = journal.read(run_dir) or []
+    now_ts = (clock or time.time)()
+    gap_days = _gap_days(events, now_ts)
 
     doc_path = _work_doc_path(run_dir)
     record = None
@@ -390,6 +484,55 @@ def capsule(run_dir, clock=None):
         model_adapter = "the engine's default worker adapter (scripts/model_worker.py)"
     canonical_revision = _canonical_revision(target_cwd)
 
+    prior_cap, _ = _read_json(os.path.join(run_dir, CAPSULE_FILENAME))
+    prior_revision = (prior_cap or {}).get("canonical_revision")
+    moved_files = None
+    revision_unreadable = None
+    if (canonical_revision is None and prior_revision
+            and NODATA not in prior_revision):
+        # git could not answer THIS time (a missing checkout, a transient
+        # failure) while a prior checkpoint recorded a real revision. This
+        # is not "nothing to compare", it is "cannot tell", and treating it
+        # as clean is the asymmetry a missing answer must never buy: the
+        # argument-shaped-revision branch below already refuses to call a
+        # moved file clean when git cannot be trusted, so a missing current
+        # revision gets the same refusal rather than silently skipping the
+        # stale check and letting next_action say resume.
+        revision_unreadable = ("%s: could not read the current git HEAD of "
+                               "%s, so whether anything changed since %s "
+                               "cannot be told"
+                               % (NODATA, target_cwd, prior_revision))
+    elif (canonical_revision and prior_revision and NODATA not in prior_revision
+            and prior_revision != canonical_revision):
+        diffed = _files_changed_between(target_cwd, prior_revision,
+                                        canonical_revision)
+        if isinstance(diffed, str):
+            # _files_changed_between refused an argument-shaped revision
+            # rather than calling git; treat every row still holding a
+            # declared file as unverifiable, never as clean, since we
+            # cannot say what did or did not move.
+            revision_unreadable = diffed
+        else:
+            moved_files = diffed
+    stale_files = {}
+    if moved_files:
+        for row in rows:
+            if row.get("status") == "DONE":
+                continue
+            uid = str(row.get("id"))
+            hits = sorted(set(f for f in moved_files
+                              for own in (row.get("owns") or [])
+                              if _path_overlaps(f, own)))
+            if hits:
+                stale_files[uid] = hits
+    elif revision_unreadable:
+        for row in rows:
+            if row.get("status") == "DONE":
+                continue
+            if row.get("owns"):
+                stale_files[str(row.get("id"))] = [revision_unreadable]
+    stale_ids = list(stale_files)
+
     journal_claims = journal_projection.claims_from_journal(events)
     claims_path = os.path.join(run_dir, brother_run.CLAIMS_FILENAME)
     claims_path_exists = os.path.isfile(claims_path)
@@ -410,6 +553,21 @@ def capsule(run_dir, clock=None):
         attempt = held.get("attempt") if held else None
         if attempt is None and bucket == "abandoned":
             attempt = (reconcile_by_unit.get(uid) or {}).get("attempt")
+        if uid in stale_files and bucket != "integrated":
+            hits = stale_files[uid]
+            if revision_unreadable and hits == [revision_unreadable]:
+                # The prior revision itself failed the shape check, so
+                # neither it nor a file list is safe to name here -- the
+                # marker _files_changed_between returned already carries
+                # only the truncated, non-verbatim shape of the problem.
+                detail = ("%s, so any prior result for it is stale%s"
+                          % (revision_unreadable,
+                             ("; " + detail) if detail else ""))
+            else:
+                detail = ("%s: %s changed upstream between %s and %s, so any "
+                          "prior result for it is stale%s"
+                          % (NODATA, ", ".join(hits), prior_revision,
+                             canonical_revision, ("; " + detail) if detail else ""))
         buckets[bucket].append(uid)
         units.append({
             "id": uid,
@@ -435,7 +593,7 @@ def capsule(run_dir, clock=None):
             "%s: no dispatch.round event recorded yet" % NODATA),
         "model_adapter": model_adapter,
     }
-    next_action = _next_action(units, buckets)
+    next_action = _next_action(units, buckets, stale_ids)
 
     # ZONE 3 (row S13): the eleven items the four fields above do not
     # already answer under their own names, plus those four again under
@@ -457,6 +615,9 @@ def capsule(run_dir, clock=None):
             why = last_row.get("objective") or last_row.get("title")
         why_we_were_there = why or (
             "%s: no reason recorded for %s" % (NODATA, last_uid))
+    if gap_days is not None and gap_days >= 1:
+        where_we_were = ("%.1f day(s) since the last recorded activity -- %s"
+                         % (gap_days, where_we_were))
 
     worktrees = _worktrees(target_cwd)
     if worktrees is None:

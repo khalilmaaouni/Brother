@@ -11,6 +11,7 @@ import hashlib
 import io
 import json
 import os
+import shlex
 import re
 import subprocess
 import sys
@@ -20,6 +21,7 @@ import textwrap
 import threading
 import time
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -28,6 +30,7 @@ import brother_run as _br  # noqa: E402
 import claim_store  # noqa: E402
 import decide  # noqa: E402
 import door  # noqa: E402
+import integrate  # noqa: E402
 import journal  # noqa: E402
 import loop_bridge  # noqa: E402
 import receipt_door as RD  # noqa: E402
@@ -441,6 +444,390 @@ class DeliveryEvidenceOrRefusal(unittest.TestCase):
             self.assertEqual(json.load(fh)["rows"][0]["evidence"], "old")
 
 
+class TheResumeSettleStepClosesTwoRedBoundaries(unittest.TestCase):
+    """RESUME-FIX F1/F2 (2026-09-09): _settle_units_already_delivered is
+    the pre-round-1 step that keeps a unit an earlier, killed attempt of
+    THIS SAME run already finished from ever being redispatched. Proven
+    directly here against the function itself, never through a real
+    kill+resume (fault_lab's own seven-boundary matrix,
+    scripts.test_fault_lab.TheSevenLifecycleBoundariesAreDrivenForReal,
+    already drives the real SIGKILL for both boundaries this closes); a
+    regression in the settle step's own logic is caught here fast,
+    without paying for a real kill on every run of this suite.
+
+    BEFORE this fix existed, both cases below redispatched: a fresh
+    worktree_lane.acquire() call was the caller's only option, and
+    claim_store.acquire() (not owned by this unit) reclaims by lease
+    liveness alone, never by state, so a unit already finished looked
+    exactly as claimable as one that never started."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="settle-")
+
+    def test_f1_a_claim_already_released_done_is_settled_without_a_fresh_check(self):
+        """The claim was already released state=="done", with real
+        evidence, BEFORE this process ever made a new claim (the
+        after_integration_before_receipt boundary). Settling must use
+        THAT evidence, never invent a new one, and must never call
+        claim_store.acquire/release at all (nothing to reclaim: it was
+        never left "claimed")."""
+        repo, rev = _git_repo_with_file(self.tmp, "one.txt")
+        doc = _write_doc(self.tmp, [{"id": "U1", "status": "SCHEDULED",
+                                     "done_check": "test -f one.txt",
+                                     "owns": ["one.txt"]}])
+        claims_path = os.path.join(self.tmp, "claims.json")
+        evidence = {"check_command": "test -f one.txt", "exit_code": 0,
+                   "output": "", "output_truncated": False,
+                   "canonical_rev": rev}
+        with open(claims_path, "w", encoding="utf-8") as fh:
+            json.dump({"U1": {"state": "done", "evidence": evidence}}, fh)
+        record = {"path": doc, "rows": [{"id": "U1", "status": "SCHEDULED"}]}
+        log = _br.RunLog()
+
+        _br._settle_units_already_delivered(record, claims_path, repo, log)
+
+        with open(doc, encoding="utf-8") as fh:
+            row = json.load(fh)["rows"][0]
+        self.assertEqual(row["status"], "DONE")
+        self.assertTrue(any("U1 was already delivered by an earlier "
+                            "attempt" in l for l in log.lines), log.lines)
+        # Untouched: the claim was already released, so settling never
+        # calls acquire/release on it, and its evidence is byte for byte
+        # what was already there.
+        with open(claims_path, encoding="utf-8") as fh:
+            self.assertEqual(json.load(fh)["U1"]["evidence"], evidence)
+
+    def test_f2_a_dead_claim_whose_lane_already_merged_is_settled_and_released(self):
+        """The claim is still state=="claimed" and dead (the
+        during_integration boundary): the lane's own --no-ff merge already
+        landed on canonical before the kill, but release() never ran, so
+        no evidence exists anywhere yet. Settling must build one (by
+        re-running the unit's own done_check against canonical, and
+        reading the real merge commit's own file list), take the dead
+        claim over, and release it done -- never leave it claimed
+        forever, and never hand it to a worker."""
+        repo, rev = _git_repo_with_file(self.tmp, "one.txt")
+        branch = "lane/U1"
+        sh(["git", "branch", branch], cwd=repo)
+        sh(["git", "checkout", "-q", branch], cwd=repo)
+        with open(os.path.join(repo, "two.txt"), "w", encoding="utf-8") as fh:
+            fh.write("two\n")
+        sh(["git", "add", "-A"], cwd=repo)
+        sh(["git", "commit", "-q", "-m", "the worker's own write"], cwd=repo)
+        sh(["git", "checkout", "-q", "main"], cwd=repo)
+        merged = sh(["git", "merge", "--no-ff", "-m", "merge", branch],
+                   cwd=repo)
+        self.assertEqual(merged.returncode, 0, merged.stderr)
+        self.assertTrue(integrate._already_integrated(repo, branch))
+
+        row_dict = {"id": "U1", "status": "SCHEDULED",
+                   "done_check": "test -f two.txt", "owns": ["two.txt"]}
+        doc = _write_doc(self.tmp, [dict(row_dict)])
+        claims_path = os.path.join(self.tmp, "claims.json")
+        with open(claims_path, "w", encoding="utf-8") as fh:
+            json.dump({"U1": {"state": "claimed",
+                             "expires_at": time.time() - 100,
+                             "pid": 999999999, "hostname": "nowhere"}}, fh)
+        record = {"path": doc, "rows": [dict(row_dict)]}
+        log = _br.RunLog()
+
+        _br._settle_units_already_delivered(record, claims_path, repo, log)
+
+        with open(doc, encoding="utf-8") as fh:
+            row = json.load(fh)["rows"][0]
+        self.assertEqual(row["status"], "DONE", row)
+        self.assertEqual(row.get("files_changed_by_unit"), ["two.txt"])
+        with open(claims_path, encoding="utf-8") as fh:
+            claim = json.load(fh)["U1"]
+        self.assertEqual(claim["state"], "done")
+        self.assertEqual(claim["evidence"]["exit_code"], 0)
+        self.assertTrue(any("U1 was already delivered by an earlier "
+                            "attempt" in l for l in log.lines), log.lines)
+
+    def test_a_live_claim_is_never_touched(self):
+        """A claim still leased to a live owner is somebody else's; the
+        settle step must leave it exactly as it is and never redispatch
+        it early either."""
+        repo, rev = _git_repo_with_file(self.tmp, "one.txt")
+        doc = _write_doc(self.tmp, [{"id": "U1", "status": "SCHEDULED",
+                                     "done_check": "test -f one.txt",
+                                     "owns": ["one.txt"]}])
+        claims_path = os.path.join(self.tmp, "claims.json")
+        live_claim = {"state": "claimed", "expires_at": time.time() + 600,
+                     "pid": os.getpid(), "hostname": claim_store._hostname()}
+        with open(claims_path, "w", encoding="utf-8") as fh:
+            json.dump({"U1": dict(live_claim)}, fh)
+        record = {"path": doc, "rows": [{"id": "U1", "status": "SCHEDULED"}]}
+        log = _br.RunLog()
+
+        _br._settle_units_already_delivered(record, claims_path, repo, log)
+
+        with open(doc, encoding="utf-8") as fh:
+            row = json.load(fh)["rows"][0]
+        self.assertEqual(row["status"], "SCHEDULED")
+        with open(claims_path, encoding="utf-8") as fh:
+            self.assertEqual(json.load(fh)["U1"]["state"], "claimed")
+
+    def test_a_malformed_expires_at_is_reported_not_raised(self):
+        """R2, repair round 3: settle's own docstring promises 'never
+        raises', but claim_store.live() does float(claim['expires_at']),
+        which throws ValueError on a non-numeric value with nothing here
+        to catch it. Before this fix, one unit with a malformed claims.json
+        field aborted the whole call -- BEFORE the intent screen -- so the
+        run never reached a person at all. Two units share one claims
+        file here: U1's claim carries a string expires_at, U2's claim is
+        an ordinary already-released F1 case. The call must not raise,
+        must settle U2 exactly as before (proving one bad claim costs only
+        itself), must leave U1 SCHEDULED for the normal round loop, and
+        must name U1 and the field on the log."""
+        repo, rev = _git_repo_with_file(self.tmp, "one.txt")
+        doc = _write_doc(self.tmp, [
+            {"id": "U1", "status": "SCHEDULED",
+             "done_check": "test -f one.txt", "owns": ["one.txt"]},
+            {"id": "U2", "status": "SCHEDULED",
+             "done_check": "test -f one.txt", "owns": ["one.txt"]}])
+        claims_path = os.path.join(self.tmp, "claims.json")
+        evidence = {"check_command": "test -f one.txt", "exit_code": 0,
+                   "output": "", "output_truncated": False,
+                   "canonical_rev": rev}
+        with open(claims_path, "w", encoding="utf-8") as fh:
+            json.dump({
+                "U1": {"state": "claimed", "expires_at": "not-a-number",
+                       "pid": 999999999, "hostname": "nowhere"},
+                "U2": {"state": "done", "evidence": evidence},
+            }, fh)
+        record = {"path": doc, "rows": [
+            {"id": "U1", "status": "SCHEDULED"},
+            {"id": "U2", "status": "SCHEDULED"}]}
+        log = _br.RunLog()
+
+        # Must not raise: this call runs before the intent screen, and a
+        # raise here used to abort the whole run.
+        _br._settle_units_already_delivered(record, claims_path, repo, log)
+
+        with open(doc, encoding="utf-8") as fh:
+            rows = {r["id"]: r for r in json.load(fh)["rows"]}
+        self.assertEqual(rows["U1"]["status"], "SCHEDULED",
+                         "a malformed claim must be left for the normal "
+                         "round loop, never invented past")
+        self.assertEqual(rows["U2"]["status"], "DONE",
+                         "one malformed claim must cost only its own "
+                         "unit; U2's ordinary settle must still happen")
+        self.assertTrue(
+            any(_br.NODATA in l and "U1" in l and "expires_at" in l
+                for l in log.lines),
+            log.lines)
+
+    def test_c1_a_release_failure_after_reclaiming_a_dead_claim_is_not_settled(self):
+        """C-1 (backend review, 2026-09-09): claim_store.release()'s own
+        (held, problem) return used to be discarded outright. Stubbed here
+        to fail with a lock timeout, exactly the shape a real contended
+        lock produces: the unit must NOT be added to settled_ids (so
+        _mark_integrated never marks its row DONE), the failure must be
+        printed to stderr naming the unit and the problem, and M-1's
+        cleanup_lane call must never run for a settle that never actually
+        happened."""
+        repo, rev = _git_repo_with_file(self.tmp, "one.txt")
+        branch = "lane/U1"
+        sh(["git", "branch", branch], cwd=repo)
+        sh(["git", "checkout", "-q", branch], cwd=repo)
+        with open(os.path.join(repo, "two.txt"), "w", encoding="utf-8") as fh:
+            fh.write("two\n")
+        sh(["git", "add", "-A"], cwd=repo)
+        sh(["git", "commit", "-q", "-m", "the worker's own write"], cwd=repo)
+        sh(["git", "checkout", "-q", "main"], cwd=repo)
+        merged = sh(["git", "merge", "--no-ff", "-m", "merge", branch], cwd=repo)
+        self.assertEqual(merged.returncode, 0, merged.stderr)
+
+        row_dict = dict(id="U1", status="SCHEDULED",
+                        done_check="test -f two.txt", owns=["two.txt"])
+        doc = _write_doc(self.tmp, [dict(row_dict)])
+        claims_path = os.path.join(self.tmp, "claims.json")
+        claim_seed = dict(state="claimed", expires_at=time.time() - 100,
+                          pid=999999999, hostname="nowhere")
+        with open(claims_path, "w", encoding="utf-8") as fh:
+            json.dump(dict(U1=claim_seed), fh)
+        record = dict(path=doc, rows=[dict(row_dict)])
+        log = _br.RunLog()
+        err = io.StringIO()
+        with mock.patch.object(claim_store, "release",
+                               return_value=(None, "lock timeout")), \
+             mock.patch.object(integrate, "cleanup_lane") as cleanup, \
+             contextlib.redirect_stderr(err):
+            _br._settle_units_already_delivered(record, claims_path, repo, log)
+
+        with open(doc, encoding="utf-8") as fh:
+            row = json.load(fh)["rows"][0]
+        self.assertEqual(row["status"], "SCHEDULED",
+                         "a release that fails must never be reported as "
+                         "settled")
+        self.assertIn(_br.NODATA, err.getvalue())
+        self.assertIn("U1", err.getvalue())
+        self.assertIn("lock timeout", err.getvalue())
+        cleanup.assert_not_called()
+
+    def test_c2_a_concurrent_resume_waits_out_the_lock_and_settles_nothing(self):
+        """C-2 (backend review, 2026-09-09): the settle path used to run
+        its whole read-modify-write with no lock of its own. A resume
+        lock already held (simulated: the lock file exists, its recorded
+        pid is this very test process, so it never reads dead and is
+        never reclaimed) must make this attempt wait out ITS OWN short
+        timeout and settle nothing, rather than racing the holder's read-
+        modify-write of the same Work document and claims.json. Once the
+        lock is released, the identical call settles normally, proving
+        the wait is real contention, not a permanent refusal."""
+        repo, rev = _git_repo_with_file(self.tmp, "one.txt")
+        doc = _write_doc(self.tmp, [dict(id="U1", status="SCHEDULED",
+                                         done_check="test -f one.txt",
+                                         owns=["one.txt"])])
+        claims_path = os.path.join(self.tmp, "claims.json")
+        evidence = dict(check_command="test -f one.txt", exit_code=0,
+                       output="", output_truncated=False, canonical_rev=rev)
+        with open(claims_path, "w", encoding="utf-8") as fh:
+            json.dump(dict(U1=dict(state="done", evidence=evidence)), fh)
+        record = dict(path=doc, rows=[dict(id="U1", status="SCHEDULED")])
+        log = _br.RunLog()
+
+        lock_path = os.path.join(self.tmp, "resume.lock")
+        with open(lock_path, "w", encoding="utf-8") as fh:
+            fh.write("%d:%s" % (os.getpid(), claim_store._hostname()))
+        real_lock = claim_store.Lock
+
+        def short_lock(path, timeout=10.0, clock=None):
+            return real_lock(path, timeout=0.3, clock=clock)
+
+        try:
+            with mock.patch.object(claim_store, "Lock", short_lock):
+                _br._settle_units_already_delivered(record, claims_path,
+                                                     repo, log)
+        finally:
+            os.remove(lock_path)
+
+        with open(doc, encoding="utf-8") as fh:
+            row = json.load(fh)["rows"][0]
+        self.assertEqual(row["status"], "SCHEDULED",
+                         "a concurrent resume must settle nothing while "
+                         "this run's own resume lock is held elsewhere")
+        self.assertTrue(
+            any(_br.NODATA in l and "resume" in l for l in log.lines),
+            log.lines)
+
+        _br._settle_units_already_delivered(record, claims_path, repo, log)
+        with open(doc, encoding="utf-8") as fh:
+            row = json.load(fh)["rows"][0]
+        self.assertEqual(row["status"], "DONE")
+
+    def test_m7_an_unreadable_claims_json_settles_nothing(self):
+        """M-7 (backend review, 2026-09-09): _read_claims used to return
+        {} on ANY read failure, indistinguishable from "nothing
+        claimed yet". A torn claims.json here must be reported by name,
+        not read as an empty store that silently leaves every already-
+        delivered unit looking unclaimed."""
+        repo, rev = _git_repo_with_file(self.tmp, "one.txt")
+        doc = _write_doc(self.tmp, [dict(id="U1", status="SCHEDULED",
+                                         done_check="test -f one.txt",
+                                         owns=["one.txt"])])
+        claims_path = os.path.join(self.tmp, "claims.json")
+        with open(claims_path, "w", encoding="utf-8") as fh:
+            fh.write("{not valid json")
+        record = dict(path=doc, rows=[dict(id="U1", status="SCHEDULED")])
+        log = _br.RunLog()
+
+        _br._settle_units_already_delivered(record, claims_path, repo, log)
+
+        with open(doc, encoding="utf-8") as fh:
+            row = json.load(fh)["rows"][0]
+        self.assertEqual(row["status"], "SCHEDULED")
+        self.assertTrue(
+            any(_br.NODATA in l and claims_path in l for l in log.lines),
+            log.lines)
+
+    def test_m7_the_second_claims_read_failing_settles_nothing_either(self):
+        """M-7: the RE-read right before _mark_integrated (after settling
+        decisions were already made from the first, successful read) can
+        itself fail, e.g. a concurrent write tearing the file mid-resume.
+        Feeding _mark_integrated an empty dict in that case used to make
+        every settled unit look like it carries no evidence at all and
+        get refused with a false reason; this must instead settle nothing
+        and say why, leaving the unit for the normal round loop."""
+        repo, rev = _git_repo_with_file(self.tmp, "one.txt")
+        doc = _write_doc(self.tmp, [dict(id="U1", status="SCHEDULED",
+                                         done_check="test -f one.txt",
+                                         owns=["one.txt"])])
+        claims_path = os.path.join(self.tmp, "claims.json")
+        evidence = dict(check_command="test -f one.txt", exit_code=0,
+                       output="", output_truncated=False, canonical_rev=rev)
+        real_claims = dict(U1=dict(state="done", evidence=evidence))
+        with open(claims_path, "w", encoding="utf-8") as fh:
+            json.dump(real_claims, fh)
+        record = dict(path=doc, rows=[dict(id="U1", status="SCHEDULED")])
+        log = _br.RunLog()
+
+        with mock.patch.object(_br, "_read_claims",
+                               side_effect=[dict(real_claims), None]):
+            _br._settle_units_already_delivered(record, claims_path, repo, log)
+
+        with open(doc, encoding="utf-8") as fh:
+            row = json.load(fh)["rows"][0]
+        self.assertEqual(row["status"], "SCHEDULED",
+                         "a failed re-read must settle nothing, never "
+                         "half-apply from a decision already made")
+        self.assertTrue(
+            any(_br.NODATA in l and claims_path in l for l in log.lines),
+            log.lines)
+
+    def test_m1_a_settled_f2_unit_also_cleans_up_its_lane(self):
+        """M-1 (backend review, 2026-09-09): a unit settled through the
+        during_integration branch never goes through integrate()'s own
+        flow, so integrate()'s own cleanup_lane call, the one every other
+        lane retires through, never ran for it either, leaking the
+        worktree, its branch and its temp base forever. Reusing the F2
+        fixture: after settling, cleanup_lane must have retired the now-
+        merged, now-orphaned lane branch (a plain branch here, no
+        separate worktree directory, matching cleanup_lane's own "no
+        worktree, branch still exists, contained in canonical" case)."""
+        repo, rev = _git_repo_with_file(self.tmp, "one.txt")
+        branch = "lane/U1"
+        sh(["git", "branch", branch], cwd=repo)
+        sh(["git", "checkout", "-q", branch], cwd=repo)
+        with open(os.path.join(repo, "two.txt"), "w", encoding="utf-8") as fh:
+            fh.write("two\n")
+        sh(["git", "add", "-A"], cwd=repo)
+        sh(["git", "commit", "-q", "-m", "the worker's own write"], cwd=repo)
+        sh(["git", "checkout", "-q", "main"], cwd=repo)
+        merged = sh(["git", "merge", "--no-ff", "-m", "merge", branch], cwd=repo)
+        self.assertEqual(merged.returncode, 0, merged.stderr)
+        self.assertTrue(integrate._already_integrated(repo, branch))
+        precheck = sh(["git", "rev-parse", "--verify", "--quiet",
+                       "refs/heads/" + branch], cwd=repo)
+        self.assertEqual(precheck.returncode, 0,
+                         "the branch must still exist before settling, "
+                         "matching what a real F2 kill leaves behind")
+
+        row_dict = dict(id="U1", status="SCHEDULED",
+                        done_check="test -f two.txt", owns=["two.txt"])
+        doc = _write_doc(self.tmp, [dict(row_dict)])
+        claims_path = os.path.join(self.tmp, "claims.json")
+        claim_seed = dict(state="claimed", expires_at=time.time() - 100,
+                          pid=999999999, hostname="nowhere")
+        with open(claims_path, "w", encoding="utf-8") as fh:
+            json.dump(dict(U1=claim_seed), fh)
+        record = dict(path=doc, rows=[dict(row_dict)])
+        log = _br.RunLog()
+
+        _br._settle_units_already_delivered(record, claims_path, repo, log)
+
+        with open(doc, encoding="utf-8") as fh:
+            row = json.load(fh)["rows"][0]
+        self.assertEqual(row["status"], "DONE", row)
+        postcheck = sh(["git", "rev-parse", "--verify", "--quiet",
+                        "refs/heads/" + branch], cwd=repo)
+        self.assertEqual(postcheck.returncode, 1,
+                         "cleanup_lane must have removed the now-merged, "
+                         "now-orphaned lane branch once the unit was "
+                         "settled")
+
+
 def write_stub(tmpdir, name, body):
     path = os.path.join(tmpdir, name)
     with open(path, "w", encoding="utf-8") as fh:
@@ -504,8 +891,8 @@ class TwoUnitsIntegrate(unittest.TestCase):
         """)
         self.model = write_stub(self.tmp, "writer_model.py", WRITER_MODEL)
         self.env = dict(os.environ)
-        self.env["DOOR_MODEL_CMD"] = "%s %s" % (sys.executable, self.decomposer)
-        self.env["MODEL_WORKER_CMD"] = "%s %s" % (sys.executable, self.model)
+        self.env["DOOR_MODEL_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(self.decomposer))
+        self.env["MODEL_WORKER_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(self.model))
 
     def test_a_python_done_check_is_resolved_end_to_end(self):
         """The harsh EVAD killer, end to end: a decomposer that emits a
@@ -525,7 +912,7 @@ class TwoUnitsIntegrate(unittest.TestCase):
             ]))
         """)
         env = dict(self.env)
-        env["DOOR_MODEL_CMD"] = "%s %s" % (sys.executable, dec)
+        env["DOOR_MODEL_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(dec))
         proc = sh([sys.executable, BROTHER_RUN, "a marker file exists",
                   "--cwd", self.repo, "--runs-root", self.tmp], env=env)
         out = proc.stdout + proc.stderr
@@ -599,8 +986,8 @@ class TwoUnitsIntegrate(unittest.TestCase):
             print("stub model did no work on purpose")
         """)
         env = dict(self.env)
-        env["DOOR_MODEL_CMD"] = "%s %s" % (sys.executable, dec)
-        env["MODEL_WORKER_CMD"] = "%s %s" % (sys.executable, do_nothing)
+        env["DOOR_MODEL_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(dec))
+        env["MODEL_WORKER_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(do_nothing))
         proc = sh([sys.executable, BROTHER_RUN, "a ghost file exists",
                   "--cwd", self.repo, "--runs-root", self.tmp], env=env)
         out = proc.stdout + proc.stderr
@@ -625,7 +1012,7 @@ class DecomposerAlwaysInvalid(unittest.TestCase):
             ]))
         """)
         env = dict(os.environ)
-        env["DOOR_MODEL_CMD"] = "%s %s" % (sys.executable, decomposer)
+        env["DOOR_MODEL_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(decomposer))
 
         proc = sh([sys.executable, BROTHER_RUN, "an outcome nobody can schedule",
                   "--cwd", repo, "--runs-root", tmp], env=env)
@@ -655,8 +1042,8 @@ class WorkerModelFails(unittest.TestCase):
         """)
         model = write_stub(tmp, "failing_model.py", FAILING_MODEL)
         env = dict(os.environ)
-        env["DOOR_MODEL_CMD"] = "%s %s" % (sys.executable, decomposer)
-        env["MODEL_WORKER_CMD"] = "%s %s" % (sys.executable, model)
+        env["DOOR_MODEL_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(decomposer))
+        env["MODEL_WORKER_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(model))
 
         proc = sh([sys.executable, BROTHER_RUN, "a file that will never appear",
                   "--cwd", repo, "--runs-root", tmp], env=env)
@@ -748,8 +1135,8 @@ class TheRunsJournalChainsFromOpenToAcceptance(unittest.TestCase):
         """)
         self.model = write_stub(self.tmp, "writer_model.py", WRITER_MODEL)
         self.env = dict(os.environ)
-        self.env["DOOR_MODEL_CMD"] = "%s %s" % (sys.executable, self.decomposer)
-        self.env["MODEL_WORKER_CMD"] = "%s %s" % (sys.executable, self.model)
+        self.env["DOOR_MODEL_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(self.decomposer))
+        self.env["MODEL_WORKER_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(self.model))
 
     def test_the_journal_chains_by_parent_id_and_names_both_units(self):
         proc = sh([sys.executable, BROTHER_RUN, "two files exist",
@@ -838,13 +1225,13 @@ class RetryLeavesAPerAttemptTrace(unittest.TestCase):
         self.counter = os.path.join(self.tmp, "canon_fail_counter.txt")
         checker = write_stub(self.tmp, "check_logger.py",
                              CHECK_LOGGER % (self.canon, self.counter))
-        check_cmd = "%s %s" % (sys.executable, checker)
+        check_cmd = "%s %s" % (shlex.quote(sys.executable), shlex.quote(checker))
         self.decomposer = write_stub(self.tmp, "decomposer.py",
                                      DECOMPOSER_WITH_GIVEN_CHECK % check_cmd)
         self.model = write_stub(self.tmp, "writer_model.py", WRITER_MODEL)
         self.env = dict(os.environ)
-        self.env["DOOR_MODEL_CMD"] = "%s %s" % (sys.executable, self.decomposer)
-        self.env["MODEL_WORKER_CMD"] = "%s %s" % (sys.executable, self.model)
+        self.env["DOOR_MODEL_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(self.decomposer))
+        self.env["MODEL_WORKER_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(self.model))
 
     def test_the_failed_attempts_check_output_survives_the_retry(self):
         proc = sh([sys.executable, BROTHER_RUN, "r1 exists",
@@ -1053,6 +1440,91 @@ class StampPrechecksMarksUnitsBeforeAnyWorker(unittest.TestCase):
         self.assertNotIn("check_looks_broken", by_id["U1"])
         self.assertNotEqual(by_id["U2"]["check_exit_before"], 0)
         self.assertIs(by_id["U2"]["check_looks_broken"], True)
+
+
+class StampPrechecksAlsoWitnessesTheRedCheck(unittest.TestCase):
+    """U5 follow-up finding 1 (adversarial review of 3409fcec, 2026-09-09):
+    nothing on the product path ever stamped row["red_check"] or
+    row["change_kind"], so receipt_door.red_check_gap could never see a
+    witness even when one was captured. _stamp_prechecks already runs
+    every not-yet-DONE unit's own done_check against the untouched tree
+    before any worker starts; this is that same capture, read back."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="stamp-red-check-")
+        self.repo, _rev = _git_repo_with_file(self.tmp, "one.txt")
+
+    def test_a_failing_check_gets_a_red_check_witness(self):
+        doc = _write_doc(self.tmp, [
+            {"id": "U1", "status": "SCHEDULED", "done_check": "false",
+             "owns": ["mathlib.py"]},
+        ])
+        rows = _br._stamp_prechecks(doc, self.repo)
+        red = rows[0]["red_check"]
+        self.assertEqual(red["command"], "false")
+        self.assertEqual(red["exit_code"], 1)
+        self.assertTrue(red["pre_implementation"])
+        self.assertTrue(os.path.isfile(red["output_location"]))
+        self.assertEqual(red["revision"], _br._head(self.repo))
+        # The write-scope classifier: mathlib.py is code, so an
+        # undeclared unit is stamped "behaviour".
+        self.assertEqual(rows[0]["change_kind"], "behaviour")
+
+    def test_a_passing_check_still_gets_a_red_check_witness(self):
+        """check_passed_before True is a DIFFERENT gap (CHECK
+        DISCRIMINATION, already refused elsewhere); red_check itself is
+        stamped off the captured exit code alone, whatever it was."""
+        doc = _write_doc(self.tmp, [
+            {"id": "U1", "status": "SCHEDULED", "done_check": "true",
+             "owns": ["mathlib.py"]},
+        ])
+        rows = _br._stamp_prechecks(doc, self.repo)
+        self.assertEqual(rows[0]["red_check"]["exit_code"], 0)
+
+    def test_a_check_that_cannot_run_gets_no_red_check_at_all(self):
+        doc = _write_doc(self.tmp, [
+            {"id": "U1", "status": "SCHEDULED", "done_check": "",
+             "owns": ["mathlib.py"]},
+        ])
+        rows = _br._stamp_prechecks(doc, self.repo)
+        self.assertNotIn("red_check", rows[0])
+
+    def test_a_done_row_is_never_stamped(self):
+        doc = _write_doc(self.tmp, [
+            {"id": "U1", "status": "DONE", "done_check": "false",
+             "owns": ["mathlib.py"]},
+        ])
+        rows = _br._stamp_prechecks(doc, self.repo)
+        self.assertNotIn("red_check", rows[0])
+        self.assertNotIn("change_kind", rows[0])
+
+    def test_an_owns_scope_naming_only_docs_is_not_stamped_behaviour(self):
+        doc = _write_doc(self.tmp, [
+            {"id": "U1", "status": "SCHEDULED", "done_check": "false",
+             "owns": ["README.md"]},
+        ])
+        rows = _br._stamp_prechecks(doc, self.repo)
+        self.assertNotIn("change_kind", rows[0])
+
+    def test_a_units_own_declared_change_kind_is_never_overwritten(self):
+        doc = _write_doc(self.tmp, [
+            {"id": "U1", "status": "SCHEDULED", "done_check": "false",
+             "owns": ["mathlib.py"], "change_kind": "generated"},
+        ])
+        rows = _br._stamp_prechecks(doc, self.repo)
+        self.assertEqual(rows[0]["change_kind"], "generated")
+
+    def test_the_red_check_survives_the_round_trip_to_disk(self):
+        doc = _write_doc(self.tmp, [
+            {"id": "U1", "status": "SCHEDULED", "done_check": "false",
+             "owns": ["mathlib.py"]},
+        ])
+        _br._stamp_prechecks(doc, self.repo)
+        with open(doc, encoding="utf-8") as fh:
+            saved = json.load(fh)
+        saved_row = saved["rows"][0]
+        self.assertEqual(saved_row["red_check"]["exit_code"], 1)
+        self.assertEqual(saved_row["change_kind"], "behaviour")
 
 
 class TheUnitCheckLinesTheIntentScreenShows(unittest.TestCase):
@@ -2936,7 +3408,7 @@ class RewriteBrokenChecksAsksThePlannerOnce(unittest.TestCase):
         doc = self._doc()
         rows = _br._rewrite_broken_checks(
             doc, self.checkcwd, self.log,
-            model_cmd="%s %s" % (sys.executable, stub))
+            model_cmd="%s %s" % (shlex.quote(sys.executable), shlex.quote(stub)))
         with open(log_path, encoding="utf-8") as fh:
             captured = fh.read()
         # ASKED EXACTLY ONCE for this unit.
@@ -2954,7 +3426,7 @@ class RewriteBrokenChecksAsksThePlannerOnce(unittest.TestCase):
         doc = self._doc()
         rows = _br._rewrite_broken_checks(
             doc, self.checkcwd, self.log,
-            model_cmd="%s %s" % (sys.executable, stub))
+            model_cmd="%s %s" % (shlex.quote(sys.executable), shlex.quote(stub)))
         row = rows[0]
         self.assertTrue(row["check_rewritten"])
         self.assertEqual(row["check_original"],
@@ -2983,7 +3455,7 @@ class RewriteBrokenChecksAsksThePlannerOnce(unittest.TestCase):
         doc = self._doc()
         rows = _br._rewrite_broken_checks(
             doc, self.checkcwd, self.log,
-            model_cmd="%s %s" % (sys.executable, stub))
+            model_cmd="%s %s" % (shlex.quote(sys.executable), shlex.quote(stub)))
         row = rows[0]
         self.assertTrue(row["check_rewritten"])
         self.assertEqual(row["check_original"],
@@ -3005,7 +3477,7 @@ class RewriteBrokenChecksAsksThePlannerOnce(unittest.TestCase):
         original = ("python3 -c 'this is not python('")
         rows = _br._rewrite_broken_checks(
             doc, self.checkcwd, self.log,
-            model_cmd="%s %s" % (sys.executable, stub))
+            model_cmd="%s %s" % (shlex.quote(sys.executable), shlex.quote(stub)))
         row = rows[0]
         self.assertEqual(row["done_check"], original)
         self.assertNotIn("check_rewritten", row)
@@ -3029,7 +3501,7 @@ class RewriteBrokenChecksAsksThePlannerOnce(unittest.TestCase):
         doc = self._doc()
         _br._rewrite_broken_checks(
             doc, self.checkcwd, self.log,
-            model_cmd="%s %s" % (sys.executable, stub))
+            model_cmd="%s %s" % (shlex.quote(sys.executable), shlex.quote(stub)))
         with open(log_path, encoding="utf-8") as fh:
             self.assertEqual(fh.read(), "x")
 
@@ -3064,7 +3536,7 @@ class RewriteBrokenChecksAsksThePlannerOnce(unittest.TestCase):
         doc = self._doc()
         rows = _br._rewrite_broken_checks(
             doc, self.checkcwd, self.log,
-            model_cmd="%s %s" % (sys.executable, stub))
+            model_cmd="%s %s" % (shlex.quote(sys.executable), shlex.quote(stub)))
         row = rows[0]
         self.assertNotIn("check_rewritten", row)
         self.assertEqual(row["done_check"], original)
@@ -3087,7 +3559,7 @@ class RewriteBrokenChecksAsksThePlannerOnce(unittest.TestCase):
         doc = self._doc()
         rows = _br._rewrite_broken_checks(
             doc, self.checkcwd, self.log,
-            model_cmd="%s %s" % (sys.executable, stub))
+            model_cmd="%s %s" % (shlex.quote(sys.executable), shlex.quote(stub)))
         row = rows[0]
         self.assertNotIn("check_rewritten", row)
         self.assertEqual(row["done_check"], original)
@@ -3121,7 +3593,7 @@ class RewriteBrokenChecksAsksThePlannerOnce(unittest.TestCase):
         ])
         rows = _br._rewrite_broken_checks(
             doc, self.checkcwd, self.log,
-            model_cmd="%s %s" % (sys.executable, stub))
+            model_cmd="%s %s" % (shlex.quote(sys.executable), shlex.quote(stub)))
         with open(log_path, encoding="utf-8") as fh:
             captured = fh.read()
         # ASKED TWICE, and the second ask carries the refusal reason.
@@ -3161,7 +3633,7 @@ class RewriteBrokenChecksAsksThePlannerOnce(unittest.TestCase):
         doc = self._doc()
         rows = _br._rewrite_broken_checks(
             doc, self.checkcwd, self.log,
-            model_cmd="%s %s" % (sys.executable, stub))
+            model_cmd="%s %s" % (shlex.quote(sys.executable), shlex.quote(stub)))
         row = rows[0]
         self.assertTrue(row["check_rewritten"])
         self.assertEqual(row["done_check"], "test -f fixed.txt")
@@ -3181,7 +3653,7 @@ class RewriteBrokenChecksAsksThePlannerOnce(unittest.TestCase):
         doc = self._doc()
         rows = _br._rewrite_broken_checks(
             doc, self.checkcwd, self.log,
-            model_cmd="%s %s" % (sys.executable, stub))
+            model_cmd="%s %s" % (shlex.quote(sys.executable), shlex.quote(stub)))
         row = rows[0]
         self.assertTrue(row["check_rewritten"])
         self.assertEqual(row["done_check"], "python3 scripts/test_x.py")
@@ -3262,8 +3734,8 @@ class BrokenCheckUnitsAreRefusedBeforeAnyWorker(unittest.TestCase):
                                 INVOCATION_LOGGING_MODEL)
         self.log_path = os.path.join(self.tmp, "worker_invocations.log")
         self.env = dict(os.environ)
-        self.env["DOOR_MODEL_CMD"] = "%s %s" % (sys.executable, self.decomposer)
-        self.env["MODEL_WORKER_CMD"] = "%s %s" % (sys.executable, self.model)
+        self.env["DOOR_MODEL_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(self.decomposer))
+        self.env["MODEL_WORKER_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(self.model))
         self.env["WORKER_INVOCATION_LOG"] = self.log_path
 
     def _invocations(self):
@@ -3340,8 +3812,8 @@ class ARewrittenCheckLetsTheUnitProceedEndToEnd(unittest.TestCase):
         """)
         self.model = write_stub(self.tmp, "writer_model.py", WRITER_MODEL)
         self.env = dict(os.environ)
-        self.env["DOOR_MODEL_CMD"] = "%s %s" % (sys.executable, self.decomposer)
-        self.env["MODEL_WORKER_CMD"] = "%s %s" % (sys.executable, self.model)
+        self.env["DOOR_MODEL_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(self.decomposer))
+        self.env["MODEL_WORKER_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(self.model))
 
     def test_the_rewritten_unit_is_claimed_run_and_integrated(self):
         proc = sh([sys.executable, BROTHER_RUN, "one unit, a broken check "
@@ -3425,8 +3897,8 @@ class TheDirtyTreeIsRefusedBeforeAnyClaim(unittest.TestCase):
         self.model = write_stub(self.tmp, "writer_model.py", WRITER_MODEL)
         self.decomposer_log = os.path.join(self.tmp, "decomposer.log")
         self.env = dict(os.environ)
-        self.env["DOOR_MODEL_CMD"] = "%s %s" % (sys.executable, self.decomposer)
-        self.env["MODEL_WORKER_CMD"] = "%s %s" % (sys.executable, self.model)
+        self.env["DOOR_MODEL_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(self.decomposer))
+        self.env["MODEL_WORKER_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(self.model))
         self.env["DECOMPOSER_LOG"] = self.decomposer_log
         # Bytecode in both cases: the exemption must hold on the refusing
         # run (never counted, never named) and on the clean run (never a
@@ -3576,12 +4048,12 @@ class RealUsageReachesTheCostBlock(unittest.TestCase):
             ]))
         """)
         self.env = dict(os.environ)
-        self.env["DOOR_MODEL_CMD"] = "%s %s" % (sys.executable, self.decomposer)
+        self.env["DOOR_MODEL_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(self.decomposer))
 
     def _run(self, model_body, name):
         model = write_stub(self.tmp, name, model_body)
         env = dict(self.env)
-        env["MODEL_WORKER_CMD"] = "%s %s" % (sys.executable, model)
+        env["MODEL_WORKER_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(model))
         # The stub answers in the claude CLI's --output-format json shape,
         # so the client under test is pinned to claude. Left to detection,
         # a suite run from inside a Codex turn inherits CODEX_CI and friends
@@ -3799,7 +4271,7 @@ class AResumedRunRerunsAnAbandonedClaimUpToTheBound(unittest.TestCase):
                                 INVOCATION_LOGGING_MODEL)
         self.log_path = os.path.join(self.tmp, "worker_invocations.log")
         self.env = dict(os.environ)
-        self.env["MODEL_WORKER_CMD"] = "%s %s" % (sys.executable, self.model)
+        self.env["MODEL_WORKER_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(self.model))
         self.env["WORKER_INVOCATION_LOG"] = self.log_path
 
     def _abandon(self, attempt):
@@ -3985,8 +4457,8 @@ class EveryUnitRefusedBeforeWorkIsOneLine(unittest.TestCase):
                                 INVOCATION_LOGGING_MODEL)
         self.log_path = os.path.join(self.tmp, "worker_invocations.log")
         self.env = dict(os.environ)
-        self.env["DOOR_MODEL_CMD"] = "%s %s" % (sys.executable, self.decomposer)
-        self.env["MODEL_WORKER_CMD"] = "%s %s" % (sys.executable, self.model)
+        self.env["DOOR_MODEL_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(self.decomposer))
+        self.env["MODEL_WORKER_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(self.model))
         self.env["WORKER_INVOCATION_LOG"] = self.log_path
 
     def test_all_refused_before_work_is_one_line_and_exit_1(self):
@@ -4141,8 +4613,8 @@ class StubRunFixture(unittest.TestCase):
         dec = write_stub(self.tmp, "decomposer.py", decomposer_body)
         model = write_stub(self.tmp, "writer_model.py", model_body)
         env = dict(os.environ)
-        env["DOOR_MODEL_CMD"] = "%s %s" % (sys.executable, dec)
-        env["MODEL_WORKER_CMD"] = "%s %s" % (sys.executable, model)
+        env["DOOR_MODEL_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(dec))
+        env["MODEL_WORKER_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(model))
         proc = sh([sys.executable, BROTHER_RUN, outcome,
                   "--cwd", self.repo, "--runs-root", self.tmp], env=env)
         return proc, proc.stdout + proc.stderr
@@ -4258,7 +4730,7 @@ class EachUnitCarriesItsOwnFileList(StubRunFixture):
                  "done_check": %r, "writes": ["base.txt"],
                  "deps": []},
             ]))
-        """ % ("%s %s" % (sys.executable, check)), NON_OVERWRITING_MODEL)
+        """ % ("%s %s" % (shlex.quote(sys.executable), shlex.quote(check))), NON_OVERWRITING_MODEL)
         self.assertEqual(proc.returncode, 0, out)
         self.assertIn("A1 delivered:", out, out)
         self.assertIn("N1 is NO-DATA: no file changed, so nothing here "
@@ -4429,8 +4901,8 @@ class AClaimLongerThanItsLeaseIsRenewedNotAbandoned(StubRunFixture):
         """)
         model = write_stub(self.tmp, "writer_model.py", SLOW_WRITER_MODEL)
         env = dict(os.environ)
-        env["DOOR_MODEL_CMD"] = "%s %s" % (sys.executable, dec)
-        env["MODEL_WORKER_CMD"] = "%s %s" % (sys.executable, model)
+        env["DOOR_MODEL_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(dec))
+        env["MODEL_WORKER_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(model))
         env["BROTHER_CLAIM_TTL_SECONDS"] = "4"
         proc = subprocess.Popen(
             [sys.executable, BROTHER_RUN, "a slow unit integrates",
@@ -5627,8 +6099,8 @@ class TheFirstRunLeavesAReceipt(unittest.TestCase):
         """)
         self.model = write_stub(self.tmp, "writer_model.py", WRITER_MODEL)
         self.env = dict(os.environ)
-        self.env["DOOR_MODEL_CMD"] = "%s %s" % (sys.executable, self.decomposer)
-        self.env["MODEL_WORKER_CMD"] = "%s %s" % (sys.executable, self.model)
+        self.env["DOOR_MODEL_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(self.decomposer))
+        self.env["MODEL_WORKER_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(self.model))
 
     def _run(self, env=None):
         proc = sh([sys.executable, BROTHER_RUN,
@@ -5894,8 +6366,8 @@ class ThePriceIsSaidBeforeTheWait(unittest.TestCase):
         """)
         self.model = write_stub(self.tmp, "writer_model.py", WRITER_MODEL)
         self.env = dict(os.environ)
-        self.env["DOOR_MODEL_CMD"] = "%s %s" % (sys.executable, self.decomposer)
-        self.env["MODEL_WORKER_CMD"] = "%s %s" % (sys.executable, self.model)
+        self.env["DOOR_MODEL_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(self.decomposer))
+        self.env["MODEL_WORKER_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(self.model))
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
@@ -6039,8 +6511,8 @@ class MetricsAreRecordedUnderTwoSlots(unittest.TestCase):
 
     def _run(self, decomposer, slots):
         env = dict(os.environ)
-        env["DOOR_MODEL_CMD"] = "%s %s" % (sys.executable, decomposer)
-        env["MODEL_WORKER_CMD"] = "%s %s" % (sys.executable, self.model)
+        env["DOOR_MODEL_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(decomposer))
+        env["MODEL_WORKER_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(self.model))
         runs_root = tempfile.mkdtemp(prefix="e87-runs-", dir=self.tmp)
         repo = make_repo(runs_root)
         proc = sh([sys.executable, BROTHER_RUN, "two files exist",
@@ -6061,9 +6533,9 @@ class MetricsAreRecordedUnderTwoSlots(unittest.TestCase):
         the second slot open."""
         dec = self._decomposer("dec_ok.py", [
             ("A1", "one.txt", "test -f one.txt && %s %s A1"
-             % (sys.executable, self.check)),
+             % (shlex.quote(sys.executable), shlex.quote(self.check))),
             ("A2", "two.txt", "test -f two.txt && %s %s A2"
-             % (sys.executable, self.check)),
+             % (shlex.quote(sys.executable), shlex.quote(self.check))),
         ])
         proc, out, runs_root = self._run(dec, 2)
         self.assertEqual(proc.returncode, 0, out)
@@ -6079,9 +6551,9 @@ class MetricsAreRecordedUnderTwoSlots(unittest.TestCase):
         the second slot never was the variable."""
         dec = self._decomposer("dec_ok1.py", [
             ("A1", "one.txt", "test -f one.txt && %s %s A1"
-             % (sys.executable, self.check)),
+             % (shlex.quote(sys.executable), shlex.quote(self.check))),
             ("A2", "two.txt", "test -f two.txt && %s %s A2"
-             % (sys.executable, self.check)),
+             % (shlex.quote(sys.executable), shlex.quote(self.check))),
         ])
         proc, out, _root = self._run(dec, 1)
         self.assertEqual(proc.returncode, 0, out)
@@ -6230,9 +6702,9 @@ class IntentResolutionIsReusedOnResume(unittest.TestCase):
         """ % (unit_id, filename, filename)
         env = dict(os.environ)
         env["DOOR_MODEL_CMD"] = "%s %s" % (
-            sys.executable, write_stub(scratch, "decomposer.py", decomposer_body))
+            shlex.quote(sys.executable), shlex.quote(write_stub(scratch, "decomposer.py", decomposer_body)))
         env["MODEL_WORKER_CMD"] = "%s %s" % (
-            sys.executable, write_stub(scratch, "failing_model.py", FAILING_MODEL))
+            shlex.quote(sys.executable), shlex.quote(write_stub(scratch, "failing_model.py", FAILING_MODEL)))
         proc = sh([sys.executable, BROTHER_RUN, outcome,
                   "--cwd", cwd, "--runs-root", runs_root], env=env)
         return proc, env
@@ -6389,6 +6861,60 @@ class TheCheckpointRevisionHelpersReadHonestly(unittest.TestCase):
             repo = make_repo(tmp)
             self.assertEqual(
                 _br._commits_between(repo, "deadbeef", "cafef00d"), 0)
+
+
+class TheResumeScreenNamesTheCheckpointsOwnAge(unittest.TestCase):
+    """2026-09-09 review of commit 68c02d56 (should-fix): --continue's
+    resume screen reads capsule.json straight off disk by design
+    (_print_resume_screen's own docstring), and the capsule's own "day(s)
+    since the last recorded activity" line (continuity.capsule()'s zone3
+    WHERE WE WERE) is baked in at WRITE time against whatever the journal
+    held then. A capsule checkpointed seconds before a kill records a gap
+    of 0, and reading that same file back unchanged three days later on
+    --continue still says 0 -- the days-gap line never reaches the door a
+    person actually reads. This proves the fix: _print_resume_screen now
+    also names the checkpoint's own age at PRINT time, read from the
+    capsule file's own mtime (write_capsule's os.replace is the last write
+    this file ever gets), in the same "day(s) since the last recorded
+    activity" wording capsule() itself uses."""
+
+    def _capsule_run_dir(self, run_dir):
+        rec, problems = WR.create(
+            "the resume-screen-age proof",
+            [{"id": "U1", "done_check": "true", "owns": ["a.txt"]}],
+            store=run_dir)
+        self.assertFalse(problems, problems)
+        journal.append(run_dir, "run.opened",
+                       parent_ids=journal.previous(run_dir),
+                       payload={"cwd": run_dir, "resumed": False})
+        import continuity
+        ok, problem = continuity.write_capsule(run_dir)
+        self.assertTrue(ok, problem)
+
+    def test_a_three_day_old_capsule_names_its_own_age_on_print(self):
+        with tempfile.TemporaryDirectory() as run_dir:
+            self._capsule_run_dir(run_dir)
+            cap_path = os.path.join(run_dir, _br.CAPSULE_FILENAME)
+            three_days_ago = time.time() - 3 * 86400.0
+            os.utime(cap_path, (three_days_ago, three_days_ago))
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                _br._print_resume_screen(run_dir, "resume-screen-age")
+            text = out.getvalue() + err.getvalue()
+        self.assertIn("day(s) since the last recorded activity", text, text)
+        self.assertIn("3.0 day", text, text)
+
+    def test_a_fresh_capsule_names_no_age_at_all(self):
+        """The control: a checkpoint written moments ago must stay silent
+        about its age, the same way the days-gap line inside the capsule
+        itself says nothing when there is nothing to say."""
+        with tempfile.TemporaryDirectory() as run_dir:
+            self._capsule_run_dir(run_dir)
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                _br._print_resume_screen(run_dir, "resume-screen-age-control")
+            text = out.getvalue() + err.getvalue()
+        self.assertNotIn("day(s) since the last recorded activity", text, text)
 
 
 class ADriftedRepositoryIsNamedOnResume(unittest.TestCase):

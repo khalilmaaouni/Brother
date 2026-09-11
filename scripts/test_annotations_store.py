@@ -102,6 +102,53 @@ class Remove(unittest.TestCase):
             self.assertFalse(AS.remove(d, "zzz"))
 
 
+class AMalformedStoreIsNeverRewritten(unittest.TestCase):
+    """OpenRouter review lane L7, reproduced 2026-09-11: a hand-edited store
+    with one JSON typo loaded as [], so the next add wrote a one-entry file
+    over every stored correction and still reported success."""
+
+    def malformed(self, d):
+        path = AS.store_path(d)
+        os.makedirs(os.path.dirname(path))
+        text = '[{"id": "a1", "option": "A"}, {"id": "a2", "option": "B"},]'
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        return path, text
+
+    def test_add_refuses_and_leaves_the_file_byte_identical(self):
+        with tempfile.TemporaryDirectory() as d:
+            path, text = self.malformed(d)
+            rec = os.path.join(d, "r.json")
+            with open(rec, "w", encoding="utf-8") as fh:
+                json.dump({"annotations": [{"option": "C", "criterion": "k",
+                                            "note": "n"}]}, fh)
+            added, skipped, error = AS.add_from_record(d, rec)
+            self.assertEqual((added, skipped), (0, 0))
+            self.assertIsNotNone(error)
+            with open(path, encoding="utf-8") as fh:
+                self.assertEqual(fh.read(), text)
+
+    def test_remove_refuses_and_leaves_the_file_byte_identical(self):
+        with tempfile.TemporaryDirectory() as d:
+            path, text = self.malformed(d)
+            real_root = AS.ROOT
+            AS.ROOT = d
+            try:
+                self.assertEqual(AS.main(["remove", "a1"]), 2)
+            finally:
+                AS.ROOT = real_root
+            with open(path, encoding="utf-8") as fh:
+                self.assertEqual(fh.read(), text)
+
+    def test_a_missing_store_still_accepts_the_first_add(self):
+        with tempfile.TemporaryDirectory() as d:
+            rec = os.path.join(d, "r.json")
+            with open(rec, "w", encoding="utf-8") as fh:
+                json.dump({"annotations": [{"option": "C", "criterion": "k",
+                                            "note": "n"}]}, fh)
+            self.assertEqual(AS.add_from_record(d, rec), (1, 0, None))
+
+
 class AnnotationFor(unittest.TestCase):
     """The render-side lookup: matched on option and criterion alone, never
     on which record an entry first came from."""

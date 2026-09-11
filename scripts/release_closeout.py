@@ -1510,7 +1510,7 @@ def _ssh_signing_public_key(key_id, run, cwd):
             try:
                 with open(cand, encoding="utf-8") as fh:
                     content = fh.read().strip()
-            except OSError:
+            except OSError:  # sbe: allow-silent one configured signing-key candidate may be unreadable, so the next candidate remains usable
                 continue
             if content.split(" ", 1)[0].startswith(
                     ("ssh-", "ecdsa-", "sk-")):
@@ -1584,7 +1584,7 @@ def _retry_ssh_verify(gate, ev, checkout, tag):
     finally:
         try:
             os.remove(allowed_path)
-        except OSError:
+        except OSError:  # sbe: allow-silent the temporary allowed-signers file is best-effort cleanup after verification has already returned its verdict
             pass
 
 

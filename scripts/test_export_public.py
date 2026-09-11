@@ -8,6 +8,7 @@ looks for it, publishes exactly what the tool exists to stop.
 """
 import contextlib
 import hashlib
+import inspect
 import json
 import os
 import re
@@ -2513,6 +2514,61 @@ class ATagRefusesAnExportTreeItsOwnProductsCannotVerify(unittest.TestCase):
                              lines)
 
 
+class TheExportTreesReadinessGateVerdictMustBeParsedStrictly(
+        unittest.TestCase):
+    """CDX-3, Codex review of f24b7bb3, blocker 3: check_readiness_gate
+    used to refuse only on a nonzero exit or a "NOT READY" verdict, so any
+    OTHER GATE: line, a NO-DATA verdict included, fell through to a pass.
+    An in-memory probe fed "GATE: NO-DATA" at exit 0 and got back
+    (True, ['readiness: GATE: NO-DATA']), which contradicts the
+    function's own docstring: NO-DATA is never a pass. Mirrors
+    TheExportTreeMustClearItsOwnRequiredFastCheck below: a fake gate
+    script, never the real multi-minute battery, keeps this fast and
+    deterministic, and calls check_readiness_gate directly rather than
+    through the full push_appended pipeline."""
+
+    def _write_fake_gate(self, export_dir, line, exit_code=0):
+        scripts = os.path.join(export_dir, "scripts")
+        os.makedirs(scripts, exist_ok=True)
+        with open(os.path.join(scripts, "readiness_gate.py"), "w",
+                  encoding="utf-8") as fh:
+            fh.write("#!/usr/bin/env python3\n"
+                     "print(%r)\n"
+                     "import sys\nsys.exit(%d)\n" % (line, exit_code))
+
+    def test_ready_at_exit_0_passes(self):
+        with tempfile.TemporaryDirectory() as export_dir:
+            self._write_fake_gate(export_dir, "GATE: READY")
+            ok, lines = EP.check_readiness_gate(export_dir)
+            self.assertTrue(ok, lines)
+            self.assertIn("readiness: GATE: READY", lines)
+
+    def test_not_ready_refuses(self):
+        with tempfile.TemporaryDirectory() as export_dir:
+            self._write_fake_gate(export_dir, "GATE: NOT READY",
+                                  exit_code=1)
+            ok, lines = EP.check_readiness_gate(export_dir)
+            self.assertFalse(ok, lines)
+            self.assertTrue(any(l.startswith("REFUSED:") for l in lines),
+                            lines)
+
+    def test_no_data_at_exit_0_is_refused_never_a_pass(self):
+        with tempfile.TemporaryDirectory() as export_dir:
+            self._write_fake_gate(export_dir, "GATE: NO-DATA")
+            ok, lines = EP.check_readiness_gate(export_dir)
+            self.assertFalse(ok, lines)
+            self.assertTrue(any(l.startswith("NO-DATA:") for l in lines),
+                            lines)
+
+    def test_ready_verdict_with_nonzero_exit_refuses(self):
+        with tempfile.TemporaryDirectory() as export_dir:
+            self._write_fake_gate(export_dir, "GATE: READY", exit_code=1)
+            ok, lines = EP.check_readiness_gate(export_dir)
+            self.assertFalse(ok, lines)
+            self.assertTrue(any(l.startswith("REFUSED:") for l in lines),
+                            lines)
+
+
 class TheExportTreeMustClearItsOwnRequiredFastCheck(unittest.TestCase):
     """required-fast is becoming a mandatory GitHub check on the public
     repository's release pull requests (docs/plan/EXPORT-ALLOWLIST.txt,
@@ -2969,21 +3025,55 @@ class TheRealExportTreeIsWhatTheReadmeSendsAReaderTo(unittest.TestCase):
 
     def test_the_v1_0_1_allowlist_shape_is_still_refused(self):
         """The positive control, so the test above is known to
-        discriminate rather than to pass on any tree at all. The public tag
-        v1.0.1 carried README.md and the two vault pages and neither guide
-        directory, and its "Choose your path" table sent three of four
-        readers nowhere. Built here from that same narrower allowlist, over
-        the CURRENT README, the walk must still find them dead."""
+        discriminate rather than to pass on any tree at all. Re-anchored
+        2026-09-10 (docs/decisions/readme-claims-moved-2026-09-10.md): the
+        old v1.0.1 allowlist shape named three targets
+        (docs/for-engineers/00-START-HERE.md and siblings) the CURRENT
+        README no longer mentions at all, so they could never go dead
+        again under today's text and the control would pass on any tree,
+        which is exactly the failure this test exists to catch in the
+        checker it guards.
+
+        docs/personas/architect.md is the replacement target, chosen and
+        verified rather than invented: `git ls-files docs/personas/
+        architect.md` confirms it is a real, hub-tracked file (not a
+        retired name), the CURRENT README's "Choose the shortest path"
+        section links it verbatim, and today's real
+        docs/plan/EXPORT-ALLOWLIST.txt carries it only via the single bare
+        `docs/personas` line. Removing exactly that one line from today's
+        real allowlist and rebuilding is the current-shape equivalent of
+        the old test's narrower v1.0.1 allowlist: a real page the export
+        would otherwise carry, genuinely withheld by dropping one real
+        allowlist entry, over the CURRENT README's own real link."""
+        target = "docs/personas/architect.md"
+        tracked = subprocess.run(
+            ["git", "ls-files", target], cwd=EP.ROOT,
+            capture_output=True, text=True, check=True).stdout.strip()
+        self.assertEqual(
+            tracked, target,
+            "%s must be a real, hub-tracked file for this control to mean "
+            "anything; it is not (git ls-files found: %r)"
+            % (target, tracked))
+        with open(os.path.join(EP.ROOT, "README.md"), encoding="utf-8") as fh:
+            real_readme = fh.read()
+        self.assertIn(
+            target, real_readme,
+            "the control assumes the CURRENT README links %s; it no "
+            "longer does, so this control needs a different target"
+            % target)
+        real_allowlist = EP.load_allowlist()
+        self.assertIn(
+            "docs/personas", real_allowlist,
+            "the control assumes today's real allowlist carries a bare "
+            "'docs/personas' line; it does not, so this control no longer "
+            "removes anything real")
+        narrow_allowlist = [line for line in real_allowlist
+                            if line != "docs/personas"]
         narrow = os.path.join(self.tmp, "v101")
         os.makedirs(narrow, exist_ok=True)
-        EP.build_export_tree(narrow, ["README.md", "LICENSE",
-                                      "docs/explanation/VAULT.md",
-                                      "docs/how-to/USE-THE-VAULT.md"])
+        EP.build_export_tree(narrow, narrow_allowlist)
         _pages, dead = self.readme_link_closure(narrow)
-        for target in ("docs/for-engineers/00-START-HERE.md",
-                       "docs/for-engineers/STARTUP-WEEK.md",
-                       "docs/for-analysts/00-START-HERE.md"):
-            self.assertIn("README.md points at %s" % target, dead, dead)
+        self.assertIn("README.md points at %s" % target, dead, dead)
 
     def test_the_whole_tree_link_check_names_only_pages_outside_that_reach(
             self):
@@ -3011,24 +3101,51 @@ class TheRealExportTreeIsWhatTheReadmeSendsAReaderTo(unittest.TestCase):
 
     def test_the_readme_paths_the_choose_your_path_table_names_are_carried(
             self):
-        """The exact three the auditor clicked, named here so a failure
-        says which page went missing rather than only 'a link is dead'."""
+        """Re-anchored 2026-09-10
+        (docs/decisions/readme-claims-moved-2026-09-10.md): the old
+        README's "Choose your path" table (three hardcoded targets under
+        docs/for-engineers/ and docs/for-analysts/) is gone; the current
+        README carries a "Choose the shortest path" section instead
+        (Learn, Do, Look up, Professional lenses). The intent that must
+        survive: every path that section names has to exist in the real
+        export tree, or a reader following it lands on nothing, which is
+        the 2026-09-04 audit's finding replayed on whatever the routing
+        section is called next."""
         with open(os.path.join(self.tree, "README.md"), encoding="utf-8") as fh:
             readme = fh.read()
-        for target in ("docs/for-engineers/00-START-HERE.md",
-                       "docs/for-engineers/STARTUP-WEEK.md",
-                       "docs/for-analysts/00-START-HERE.md"):
-            self.assertIn(target, readme, target)
+        start = readme.find("## Choose the shortest path")
+        self.assertNotEqual(
+            start, -1,
+            "README.md's routing section ('## Choose the shortest path') "
+            "has been renamed or removed; update this test's anchor to "
+            "match")
+        end = readme.find("\n## ", start + 1)
+        section = readme[start:end] if end != -1 else readme[start:]
+        targets = [t.split("#", 1)[0] for t in EP.MD_LINK_RE.findall(section)
+                   if t and not t.startswith(
+                       ("http://", "https://", "mailto:", "#"))]
+        self.assertTrue(targets, "the routing section names no path at all")
+        for target in targets:
             self.assertTrue(os.path.isfile(os.path.join(self.tree, target)),
-                            "README.md links %s and the export tree does "
-                            "not carry it" % target)
+                            "README.md's routing section links %s and the "
+                            "export tree does not carry it" % target)
 
     def test_every_readme_prove_command_names_a_script_the_tree_carries(self):
         """The full check runs each suite (minutes); this asserts the
-        cheap half of it, that the file exists at all, for every command."""
+        cheap half of it, that the file exists at all, for every command.
+
+        RESTORED 2026-09-10 (docs/decisions/readme-claims-moved-2026-09-10.md,
+        superseding section): the 2026-09-10 re-anchor asserted the README
+        names NO prove command, matching the replaced corpus. That absence
+        made the product untaggable: export_public.check_readme_prove_commands
+        treats a README naming none as NO-DATA and refuses the tag, so the cut
+        dry run for 1.0.13 refused while this fast check read green. The
+        README names a prove command again, and this assertion is back to the
+        form its own re-anchor docstring said to restore."""
         with open(os.path.join(self.tree, "README.md"), encoding="utf-8") as fh:
             commands = EP.readme_prove_commands(fh.read())
-        self.assertTrue(commands, "README.md names no prove command")
+        self.assertTrue(commands, "README.md names no prove command, which "
+                        "makes check_readme_prove_commands refuse every tag")
         for command in commands:
             rel = command.split()[-1]
             self.assertTrue(os.path.isfile(os.path.join(self.tree, rel)),
@@ -3326,6 +3443,81 @@ class ThePreflightTagTimeChecksFlagOnADryRun(unittest.TestCase):
             self.assertNotIn("readiness gate does not read READY",
                              proc.stdout)
             self.assertNotIn("tag-time checks", proc.stdout)
+
+
+
+class TheRequiredFastGateGetsMoreTimeThanItNeeds(unittest.TestCase):
+    """A wrapper smaller than the gate it wraps can only ever report NO-DATA.
+
+    Found 2026-09-10: check_required_fast passed a hardcoded timeout=600 to a
+    gate measured at 994 s, 1357 s and 961 s in three separate checkouts on
+    the same day. NO-DATA is never a pass, so the export refused every time
+    and nothing could be published through it. The timeout was not wrong when
+    it was written; the gate grew past it, and a timeout reports NO-DATA
+    rather than naming the check that ran long, so nothing said so.
+    """
+
+    #: The largest run measured that day. The budget must clear it even on an
+    #: idle machine, where the load scaling contributes nothing.
+    LARGEST_MEASURED_RUN_SECONDS = 1357
+
+    def test_an_idle_machine_still_gives_the_gate_more_than_its_longest_run(self):
+        budget = EP.gate_timeout(floor=EP.REQUIRED_FAST_FLOOR_SECONDS,
+                                load15=0.0, cores=8)
+        self.assertGreater(
+            budget, self.LARGEST_MEASURED_RUN_SECONDS,
+            "on an idle machine the required-fast gate gets %d s, which is not "
+            "more than its longest measured run of %d s, so it would time out "
+            "and the export would refuse as NO-DATA"
+            % (budget, self.LARGEST_MEASURED_RUN_SECONDS))
+
+    def test_no_call_site_anywhere_hardcodes_a_fixed_budget(self):
+        # THE WHOLE MODULE, not one named function. The first version of this
+        # test inspected check_required_fast alone and stayed green while an
+        # identical hardcoded 600 second budget sat in tag_time_checks, the
+        # function that gates the push. scripts/test_decide.py already says
+        # this about itself: a guard that covers only the first instance
+        # silently stops guarding the moment the capability is used again,
+        # which is exactly when it starts to matter.
+        src = inspect.getsource(EP)
+        self.assertNotIn(
+            "timeout=600", src,
+            "a hardcoded 600 second budget is back somewhere in "
+            "export_public.py, and 600 is smaller than every measured run of "
+            "the gates this file wraps")
+        self.assertIn(
+            "REQUIRED_FAST_FLOOR_SECONDS", src,
+            "check_required_fast should take its budget from the measured "
+            "floor, so the number moves when the measurement does")
+
+
+class ACaseOnlyRenameShipsUnderItsNewName(unittest.TestCase):
+    """Gauntlet t3 on the 1.0.13 export, 2026-09-11: docs/how-to/USE-THE-VAULT.md
+    was renamed to use-the-vault.md in the hub, the manifest (computed from
+    disk) named the new case, but `git add -A` on a case-insensitive disk kept
+    the tracked OLD case, so reproduce_export.py --verify-tree failed on the
+    genuine release and three lowercase links broke on a case-sensitive host."""
+
+    def test_the_new_letter_case_is_what_gets_staged(self):
+        with tempfile.TemporaryDirectory() as d:
+            def g(*args):
+                return subprocess.run(["git"] + list(args), cwd=d, check=True,
+                                      capture_output=True, text=True)
+            g("init", "-q")
+            g("config", "user.name", "t")
+            g("config", "user.email", "t@example.invalid")
+            os.makedirs(os.path.join(d, "docs"))
+            with open(os.path.join(d, "docs", "USE-THE-VAULT.md"), "w") as fh:
+                fh.write("x\n")
+            g("add", "-A")
+            g("commit", "-q", "-m", "base")
+            EP.clear_working_tree(d)
+            os.makedirs(os.path.join(d, "docs"))
+            with open(os.path.join(d, "docs", "use-the-vault.md"), "w") as fh:
+                fh.write("x\n")
+            EP._stage_all_from_disk(d, EP._run)
+            self.assertEqual(g("ls-files").stdout.split(),
+                             ["docs/use-the-vault.md"])
 
 
 if __name__ == "__main__":

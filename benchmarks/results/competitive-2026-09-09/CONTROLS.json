@@ -1,0 +1,44 @@
+{
+ "spec_version": "2026-09-06",
+ "source": {
+  "document": "docs/plan/FIX-DIRECTIVE-2026-09-06.md",
+  "sections": [
+   26,
+   27,
+   28,
+   29,
+   30
+  ]
+ },
+ "gate_before_use_note": "The spec gate_before_use field normally holds row P1-4 to PARTIAL until the P0 rows on docs/plan/READINESS-ROADMAP-2026-08-29.json close. This round ran on 2026-09-09 ahead of that closure, on instruction from the operator of this session; see RECORD.md for the exact instruction.",
+ "model_id": "claude-sonnet-5",
+ "start_commit": "d61667577f109b5a175f26a251f36734edb76cca",
+ "start_commit_note": "Produced by re-running TASK.md Setup section on this machine on 2026-09-08/09. Differs from the spec file own illustrative example (ce3f05034d593e784fdaf75e07200024c375f13c) because the fixture tree changed since that example was captured.",
+ "token_budget": 400000,
+ "intervention_budget": 0,
+ "machine": {
+  "hostname": "the founder's laptop (name withheld: machine internals are private)",
+  "os": "Darwin",
+  "os_version": "25.5.0",
+  "cpu_model": "Apple M3",
+  "cpu_count": 8,
+  "memory_gb": 16,
+  "measured_at": "2026-09-08T22:06:03Z"
+ },
+ "arms_run_this_round": [
+  "brother",
+  "gsd",
+  "compound"
+ ],
+ "arms_not_run_this_round": [
+  "superpowers",
+  "bmad",
+  "vanilla_claude_code"
+ ],
+ "why_only_three": "Scoped this way by the dispatching session for this round; not a claim that section 26 full five-arm list was run.",
+ "raw_artifacts": {
+  "convention": "One run directory per competitor arm, contract documented in RUBRIC.md and read by scripts/competitive_score.py: diff.patch, meta.json (declared_files, tokens_used, interventions), optionally receipt.json and transcript.txt.",
+  "root": "benchmarks/results/competitive-2026-09-09/"
+ },
+ "publish_rule": "Directive section 26: publish raw artifacts, never only a composite score. scripts/competitive_score.py enforces this mechanically by refusing to print a composite unless every dimension in RUBRIC.md is measured."
+}

@@ -374,6 +374,8 @@ class ChecksDerivedFromARunDirectory(unittest.TestCase):
                         "check_passed_before": False,
                         "files_changed_by_unit": ["mathlib.py"],
                     }],
+                    "review_skip": {"reason": "covered by its own test class",
+                                    "skipped_by": "test fixture"},
                 }, fh)
         if claims:
             with open(os.path.join(self.run, "claims.json"), "w",
@@ -489,6 +491,240 @@ class ChecksDerivedFromARunDirectory(unittest.TestCase):
                 "--run-dir", self.run, "--checks-file", "whatever.json",
                 "--dir", self.tmp])
         self.assertIn("pass one, never both", buf.getvalue())
+
+
+class ReviewReceiptFromARunDirectory(unittest.TestCase):
+    """A peer plugin (Compound Engineering) refuses to close a unit without
+    a code-review receipt or an explicit, recorded skip. Brother's
+    acceptance seam required a human's sign-off but nothing on that path
+    ever required the review half of it. review_from_run_dir reads the
+    run's own directory for either review.json (review_pass's own finding
+    shape: check_command and check_exit_code re-executed) or an explicit
+    review_skip in the run's own Work document, and refuses, by name,
+    when neither is there."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="accept-delivery-review-")
+        self.run = os.path.join(self.tmp, "run")
+        os.makedirs(self.run)
+        self.canonical_rev = "da88480d731ddfa3cb2862066d56a43e"
+        self.write_work()
+        self.write_claims()
+
+    def write_work(self, review_skip=None):
+        doc = {
+            "work_id": "W-toy",
+            "outcome": "guard non-numeric input",
+            "rows": [{
+                "id": "guard",
+                "title": "raise TypeError on non-numeric input",
+                "done_check": "python3 -m pytest test_mathlib.py -q",
+                "owns": ["mathlib.py"],
+                "depends_on": [],
+                "status": "DONE",
+                "check_passed_before": False,
+                "files_changed_by_unit": ["mathlib.py"],
+            }],
+        }
+        if review_skip is not None:
+            doc["review_skip"] = review_skip
+        with open(os.path.join(self.run, "W-toy.json"), "w",
+                  encoding="utf-8") as fh:
+            json.dump(doc, fh)
+
+    def write_claims(self):
+        with open(os.path.join(self.run, "claims.json"), "w",
+                  encoding="utf-8") as fh:
+            json.dump({"guard": {
+                "state": "done", "unit_id": "guard",
+                "evidence": {
+                    "canonical_rev": self.canonical_rev,
+                    "check_command": "python3 -m pytest test_mathlib.py -q",
+                    "exit_code": 0, "output": "1 passed",
+                    "output_truncated": False,
+                }}}, fh)
+
+    def write_review(self, reviewed_revision):
+        with open(os.path.join(self.run, "review.json"), "w",
+                  encoding="utf-8") as fh:
+            json.dump({
+                "reviewer": "backend-reviewer",
+                "reviewed_revision": reviewed_revision,
+                "scope": ["mathlib.py"],
+                "findings": [{
+                    "check_command": "python3 -m pytest test_mathlib.py -q",
+                    "check_exit_code": 0,
+                }],
+            }, fh)
+
+    def test_no_review_json_and_no_skip_is_refused_naming_what_is_missing(self):
+        review, reason = ad.review_from_run_dir(self.run)
+        self.assertIsNone(review)
+        self.assertIn("review.json", reason)
+        self.assertIn("review_skip", reason)
+
+    def test_a_review_skip_with_reason_and_name_is_accepted(self):
+        self.write_work(review_skip={
+            "reason": "docs-only change, no risk boundary crossed",
+            "skipped_by": "Khalil Maaouni"})
+        review, reason = ad.review_from_run_dir(self.run)
+        self.assertEqual(reason, "")
+        self.assertTrue(review["skipped"])
+        self.assertEqual(review["skipped_by"], "Khalil Maaouni")
+
+    def test_a_review_skip_with_no_reason_is_refused(self):
+        self.write_work(review_skip={"skipped_by": "Khalil Maaouni"})
+        review, reason = ad.review_from_run_dir(self.run)
+        self.assertIsNone(review)
+        self.assertIn("reason", reason)
+
+    def test_a_review_json_at_the_delivered_revision_is_accepted(self):
+        self.write_review(self.canonical_rev)
+        review, reason = ad.review_from_run_dir(self.run)
+        self.assertEqual(reason, "")
+        self.assertEqual(review["reviewer"], "backend-reviewer")
+        self.assertEqual(review["findings"][0]["check_exit_code"], 0)
+
+    def test_a_review_json_at_a_different_revision_is_refused_naming_both(self):
+        self.write_review("stale00000000000000000000000000000000")
+        review, reason = ad.review_from_run_dir(self.run)
+        self.assertIsNone(review)
+        self.assertIn(self.canonical_rev, reason)
+        self.assertIn("stale00000000000000000000000000000000", reason)
+
+    def test_a_review_json_missing_a_required_field_is_refused(self):
+        with open(os.path.join(self.run, "review.json"), "w",
+                  encoding="utf-8") as fh:
+            json.dump({"reviewer": "backend-reviewer",
+                      "reviewed_revision": self.canonical_rev,
+                      "scope": ["mathlib.py"]}, fh)
+        review, reason = ad.review_from_run_dir(self.run)
+        self.assertIsNone(review)
+        self.assertIn("findings", reason)
+
+    def test_a_review_skip_with_no_skipped_by_is_refused(self):
+        self.write_work(review_skip={
+            "reason": "docs-only change, no risk boundary crossed"})
+        review, reason = ad.review_from_run_dir(self.run)
+        self.assertIsNone(review)
+        self.assertIn("skipped_by", reason)
+
+    def test_disagreeing_claims_revisions_refuse_the_review(self):
+        """_claims_delivered_revision used to return "" when a run's claims
+        disagreed on canonical_rev, and review_from_run_dir only compares
+        when it has a delivered value, so disagreement silently DISABLED
+        the revision check instead of refusing. Two claims at two
+        revisions, a review at a third: this must refuse, naming both."""
+        with open(os.path.join(self.run, "claims.json"), "w",
+                  encoding="utf-8") as fh:
+            json.dump({
+                "guard": {"state": "done", "unit_id": "guard",
+                         "evidence": {"canonical_rev": "revA"}},
+                "other": {"state": "done", "unit_id": "other",
+                         "evidence": {"canonical_rev": "revB"}},
+            }, fh)
+        self.write_review("revC")
+        review, reason = ad.review_from_run_dir(self.run)
+        self.assertIsNone(review)
+        self.assertIn("revA", reason)
+        self.assertIn("revB", reason)
+
+    def test_a_blank_scope_entry_is_refused(self):
+        with open(os.path.join(self.run, "review.json"), "w",
+                  encoding="utf-8") as fh:
+            json.dump({
+                "reviewer": "backend-reviewer",
+                "reviewed_revision": self.canonical_rev,
+                "scope": ["mathlib.py", "   "],
+                "findings": [],
+            }, fh)
+        review, reason = ad.review_from_run_dir(self.run)
+        self.assertIsNone(review)
+        self.assertIn("scope", reason)
+
+    def test_a_finding_with_a_blank_check_command_is_refused(self):
+        with open(os.path.join(self.run, "review.json"), "w",
+                  encoding="utf-8") as fh:
+            json.dump({
+                "reviewer": "backend-reviewer",
+                "reviewed_revision": self.canonical_rev,
+                "scope": ["mathlib.py"],
+                "findings": [{"check_command": "   ", "check_exit_code": 0}],
+            }, fh)
+        review, reason = ad.review_from_run_dir(self.run)
+        self.assertIsNone(review)
+        self.assertIn("check_command", reason)
+
+    def test_a_finding_whose_check_command_is_no_data_is_refused(self):
+        with open(os.path.join(self.run, "review.json"), "w",
+                  encoding="utf-8") as fh:
+            json.dump({
+                "reviewer": "backend-reviewer",
+                "reviewed_revision": self.canonical_rev,
+                "scope": ["mathlib.py"],
+                "findings": [{"check_command": ad.NODATA,
+                             "check_exit_code": None}],
+            }, fh)
+        review, reason = ad.review_from_run_dir(self.run)
+        self.assertIsNone(review)
+        self.assertIn(ad.NODATA, reason)
+
+    def test_a_finding_whose_check_exit_code_is_not_an_int_is_refused(self):
+        with open(os.path.join(self.run, "review.json"), "w",
+                  encoding="utf-8") as fh:
+            json.dump({
+                "reviewer": "backend-reviewer",
+                "reviewed_revision": self.canonical_rev,
+                "scope": ["mathlib.py"],
+                "findings": [{"check_command": "true",
+                             "check_exit_code": "0"}],
+            }, fh)
+        review, reason = ad.review_from_run_dir(self.run)
+        self.assertIsNone(review)
+        self.assertIn("check_exit_code", reason)
+
+    def test_the_cli_refuses_a_run_with_no_review_evidence(self):
+        buf = io.StringIO()
+        with redirect_stderr(buf):
+            code = ad.main([
+                "--name", "toy delivery", "--ref", "toy-no-review",
+                "--accepted-by", "Khalil Maaouni",
+                "--accepted-at", "2026-09-09", "--recorded-by", "person",
+                "--run-dir", self.run, "--dir", os.path.join(self.tmp, "out")])
+        self.assertEqual(code, 2)
+        self.assertIn("review", buf.getvalue())
+
+    def test_the_cli_records_a_run_whose_review_json_matches_the_revision(self):
+        self.write_review(self.canonical_rev)
+        out = os.path.join(self.tmp, "out")
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            code = ad.main([
+                "--name", "toy delivery", "--ref", "toy-reviewed",
+                "--accepted-by", "Khalil Maaouni",
+                "--accepted-at", "2026-09-09", "--recorded-by", "person",
+                "--run-dir", self.run, "--dir", out,
+                "--pattern-root", os.path.join(self.tmp, "vault")])
+        self.assertEqual(code, 0, buf.getvalue())
+        with open(ad.record_path("toy-reviewed", out), encoding="utf-8") as fh:
+            entry = json.load(fh)
+        self.assertEqual(entry["review"]["reviewer"], "backend-reviewer")
+
+    def test_record_itself_refuses_a_run_with_no_review_value(self):
+        """Defense in depth: record() never trusts that its caller already
+        ran review_from_run_dir. A run cited with no review at all is
+        refused here too, not only by main()."""
+        ok, reason = ad.record(
+            "toy", "toy-direct", "Khalil Maaouni", "2026-09-09", "person",
+            directory=self.tmp, checks=[{"file": "mathlib.py",
+                                         "check_command": "true",
+                                         "exit_code": 0}],
+            run={"run_id": "run", "receipt_digest": "sha256:" + "0" * 64,
+                "receipt_files": ["W-toy.json", "claims.json"],
+                "run_dir_local": "~/run", "run_dir_in_repository": False},
+            review=None)
+        self.assertFalse(ok)
+        self.assertIn("review", reason)
 
 
 class EveryShippedDeliveryRecordCarriesItsPerFileChecks(unittest.TestCase):

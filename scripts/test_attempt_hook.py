@@ -29,7 +29,7 @@ HOOK = os.path.join(HERE, "attempt_hook.py")
 #: directly. Shared with every other hook suite: scripts/real_logs.py.
 def setUpModule():
     global _REAL_LOGS_BEFORE
-    _REAL_LOGS_BEFORE = real_logs.snapshot()
+    _REAL_LOGS_BEFORE = real_logs.snapshot_for_tests()
 
 
 def tearDownModule():

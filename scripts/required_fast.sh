@@ -119,6 +119,32 @@ run_check "virgin-unit-proof"   python3 scripts/virgin_unit_proof.py
 # v1.0.0 tag failed this gate the night the battery still read green,
 # because only readiness-gate-self (the suite) was registered anywhere.
 run_check "readiness-gate"      python3 scripts/readiness_gate.py
+
+# THE KEY COMPONENTS, every one of them, 2026-09-10. The law of 2026-09-10
+# says a component that must gate merges declares ci_gated and its guard goes
+# in THIS set. All eight declared it and none was here, so the clause that
+# enforces it passed vacuously over all eight while their guards sat in a
+# 264 check battery no workflow runs. Measured before adding: the eight
+# together cost about nine seconds, against a set that runs about sixteen
+# minutes, so the objection that the fast gate cannot afford them was false.
+run_check "key-components"      python3 scripts/key_components.py
+run_check "intake-screen"       python3 scripts/test_decide.py
+# The readiness board and board status read the private roadmap, which the
+# public export never ships (the public repository's CI runs this same file
+# on the export tree). Absent there, they report NO-DATA, as plugin-manifest
+# does below, rather than a failure the tree cannot fix.
+if [ -f docs/plan/READINESS-ROADMAP-2026-08-29.json ]; then
+  run_check "readiness-board"   python3 scripts/test_gen_readiness_board.py
+  run_check "board-status"      python3 scripts/test_board_status.py
+else
+  run_check "readiness-board"   sh -c 'echo "NO-DATA: this tree carries no docs/plan/READINESS-ROADMAP-2026-08-29.json, a private hub file the public export never ships"; exit 2'
+  run_check "board-status"      sh -c 'echo "NO-DATA: this tree carries no docs/plan/READINESS-ROADMAP-2026-08-29.json, a private hub file the public export never ships"; exit 2'
+fi
+run_check "daybook"             python3 scripts/test_daybook.py
+run_check "handover-ceremony"   python3 scripts/test_handover_ceremony.py
+run_check "closing-ceremony"    python3 scripts/test_close_ceremony_check.py
+run_check "doc-assurance"       python3 scripts/doc_assurance.py --selftest
+run_check "system-inventory"    python3 scripts/test_system_doc.py
 if command -v claude >/dev/null 2>&1; then
   run_check "plugin-manifest"   claude plugin validate .
 else

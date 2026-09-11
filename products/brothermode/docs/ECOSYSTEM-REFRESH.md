@@ -86,4 +86,4 @@ Two ways to change that, both ratified in principle and neither built:
 The honest recommendation is both, because they fail in different ways: the
 schedule does the work and the check notices when the schedule does not.
 
-Last checked: 2026-08-11.
+Last checked: 2026-09-11.

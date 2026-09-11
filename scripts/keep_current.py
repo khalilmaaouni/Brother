@@ -74,9 +74,9 @@ def sh(args, cwd=None, timeout=900):
         return proc.returncode, proc.stdout or ""
     except FileNotFoundError as exc:
         return None, "command not found: %s" % exc
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired:  # sbe: allow-silent timeout is returned as the caller's explicit non-success result
         return None, "timed out after %ds: %s" % (timeout, " ".join(args))
-    except OSError as exc:
+    except OSError as exc:  # sbe: allow-silent this subprocess boundary returns the OS failure as the caller's explicit non-success result
         return None, "could not run %s: %s" % (" ".join(args), exc)
 
 

@@ -77,8 +77,6 @@ design
 # Everything else under docs/ is private hub material from this line onward.
 docs/VERSIONING.md
 docs/releases
-docs/explanation/VAULT.md
-docs/how-to/USE-THE-VAULT.md
 # Added 2026-09-03, a critic reading the published v1.0.0 tag found both
 # missing: README.md cites docs/CHARTER.md directly and two public test
 # files (tests/test_truth_claims.py, tests/test_surface.py) read it at
@@ -154,7 +152,6 @@ docs/plan/ROADMAP-PUBLIC.html
 # private terms before it was added.
 docs/plan/EXPORT-ALLOWLIST.txt
 docs/for-engineers/00-START-HERE.md
-docs/for-engineers/STARTUP-WEEK.md
 docs/for-analysts/00-START-HERE.md
 # Added 2026-09-04, row BO2. Listing only the three pages README.md links
 # left the export carrying three guides that link onward to eight siblings
@@ -165,22 +162,11 @@ docs/for-analysts/00-START-HERE.md
 # under them points anywhere else. All eight scanned clean of private terms
 # before being added (the exporter's own private_terms_scan over the
 # candidate tree, PASS).
-docs/for-engineers/A-REAL-RUN.md
-docs/for-engineers/A-WORKED-EXAMPLE.md
-docs/for-engineers/ADOPTING-ON-YOUR-TEAM.md
-docs/for-engineers/CHEATSHEET.md
-docs/for-engineers/DAY-ONE.md
-docs/for-engineers/END-TO-END.md
-docs/for-analysts/A-WORKED-EXAMPLE.md
-docs/for-analysts/DAY-ONE.md
 # Added 2026-09-07, row S31: CONTRIBUTING.md's own "Where to start" section
 # points a stranger at these three drafted good first issues. Named leaf by
 # leaf, never as a directory (the 2026-09-04 security finding above), so a
 # future file added under this folder never exports until it is named here
 # too. All three scanned clean of the private terms before being added.
-docs/onboarding/good-first-issues/01-register-orphaned-suites-check-all.md
-docs/onboarding/good-first-issues/02-denylist-duplicate-guard.md
-docs/onboarding/good-first-issues/03-register-acceptance-trial-suite.md
 scripts
 tests
 tools
@@ -508,4 +494,34 @@ docs/plan/delivery-receipt-v1.schema.json
 # docs/schema is the single source of the outcome contract schema; the bundle runtime carries a copy
 # (bundle_runtime.py DATA_FILES) and regenerates its manifest from this source, so an export without it
 # reads the manifest as stale (found at the 1.0.12 cut, 2026-09-09).
-docs/schema/outcome-contract-v1.json
+
+# 2026-09-10, the documentation replacement corpus. The whole public
+# narrative layer was replaced in one change (README.md plus docs/), so the
+# fourteen leaf entries this block replaces now name nothing tracked. A dead
+# entry is SILENT: build_export_tree skips a path with no tracked files and
+# prints nothing, so a stale list ships less than it claims and no gate says
+# so. Directory entries are used only where the whole directory IS the
+# public corpus and nothing private can land there unreviewed.
+docs/README.md
+docs/STYLE-GUIDE.md
+docs/architecture
+docs/assurance
+docs/explanation
+docs/how-to
+docs/ja
+docs/personas
+docs/reference
+docs/schema
+docs/tutorials
+# docs/decisions and docs/onboarding stay LEAF entries on purpose. The hub
+# tracks 135 files under docs/decisions (internal decision and session
+# records, which its own README calls data rather than public pages), so a
+# bare directory line there would export every one of them. Only the README
+# is public.
+docs/decisions/README.md
+# One record leaves as a leaf because public text cites it: the README's
+# small-change figures and the 1.0.13 release note name its decided block,
+# and readme-honesty checks every figure against it (1.0.13 cut, founder's
+# go-live night: the public CI refused the release PR without it).
+docs/decisions/light-path-for-small-changes-2026-09-04.json
+docs/onboarding/README.md

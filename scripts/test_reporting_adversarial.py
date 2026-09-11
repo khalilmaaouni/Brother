@@ -95,11 +95,16 @@ class ADoneClaimNeverInflatesThePercentage(unittest.TestCase):
         # papers over; the human-readable path is exercised separately below.
         self.assertEqual(code, 0, out + err)
         secs = json.loads(out)
+        # Every section's claims, not only the rows': the human-readable line
+        # below sums them all, and the live board may carry an honest claim in
+        # another section (the learning loop did on 2026-09-11).
+        self.board_claims = sum(s["counts"]["claimed"] for s in secs)
         return next(s for s in secs if s["key"] == "rows")
 
     def _claim_case(self, evidence):
         base = real_roadmap()
         base_rows = self._rows_section(base, "base.json")
+        base_claims = self.board_claims
         self.assertEqual(base_rows["counts"]["claimed"], 0,
                          "the real roadmap already carries an unevidenced claim")
 
@@ -122,7 +127,10 @@ class ADoneClaimNeverInflatesThePercentage(unittest.TestCase):
         combined = out + err
         self.assertEqual(code, 1, combined)
         self.assertIn("claim", combined.lower())
-        self.assertIn("1 item", combined)
+        # Exactly one claim more than the unmutated board named: the one row
+        # this case added, whatever honest claims other sections already hold.
+        self.assertIn("%d item(s) say DONE and carry no evidence" % (base_claims + 1),
+                      combined)
         self.assertIn("not", combined.lower())
 
     def test_empty_evidence_is_a_claim_excluded_from_the_percentage(self):

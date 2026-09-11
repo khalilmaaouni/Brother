@@ -53,6 +53,27 @@ def load_annotations(root):
     return data if isinstance(data, list) else []
 
 
+def _load_for_rewrite(root):
+    """(entries, error) for a caller about to rewrite the whole store. Unlike
+    load_annotations, an unreadable or malformed store is an error here: a
+    rewrite built on [] would erase every correction already in it."""
+    path = store_path(root)
+    if not os.path.isfile(path):
+        return [], None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError) as exc:
+        data, why = None, str(exc)
+    else:
+        why = "it holds %s, not a list" % type(data).__name__
+    if isinstance(data, list):
+        return data, None
+    return None, ("%s: the store %s could not be read (%s); refusing to rewrite "
+                  "it, which would erase every correction in it. Fix or move "
+                  "the file, then run this again." % (NODATA, path, why))
+
+
 def save_annotations(root, entries):
     path = store_path(root)
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -102,7 +123,9 @@ def add_from_record(root, record_path):
     if not incoming:
         return 0, 0, None
 
-    entries = load_annotations(root)
+    entries, error = _load_for_rewrite(root)
+    if error:
+        return 0, 0, error
     have = {_dedupe_key(e) for e in entries}
     record_name = os.path.basename(record_path)
     added, skipped = 0, 0
@@ -130,7 +153,10 @@ def remove(root, entry_id):
     found. Not finding an id to remove is a normal outcome (someone already
     removed it, or mistyped it), so this returns a bool rather than
     raising."""
-    entries = load_annotations(root)
+    entries, error = _load_for_rewrite(root)
+    if error:
+        print(error, file=sys.stderr)
+        return False
     kept = [e for e in entries if str(e.get("id")) != entry_id]
     if len(kept) == len(entries):
         return False

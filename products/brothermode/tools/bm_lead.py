@@ -142,7 +142,7 @@ def _consent_state():
     try:
         cfg, _cfg_error = mod.read_config()
         return bool(mod.is_consented(cfg))
-    except Exception:
+    except (ImportError, OSError, AttributeError):
         return False
 
 
@@ -319,7 +319,7 @@ def _av():
     instead of a traceback."""
     try:
         return _load("bm_autosave")
-    except Exception:
+    except (OSError, AttributeError):
         return None
 
 
@@ -330,13 +330,13 @@ def _repo_identity(av, root):
         top = av.resolve_toplevel(root)
         if top:
             name = os.path.basename(top.rstrip(os.sep)) or top
-    except Exception:
+    except (OSError, AttributeError):
         pass
     try:
         r = av._run_git(root, "rev-parse", "--abbrev-ref", "HEAD")
         if r.returncode == 0 and r.stdout.strip():
             branch = r.stdout.strip()
-    except Exception:
+    except (OSError, AttributeError):
         pass
     return name, branch
 
@@ -351,7 +351,7 @@ def _recent_commits(av, root, count=5):
         if r.returncode != 0:
             return []
         return [line for line in r.stdout.splitlines() if line.strip()]
-    except Exception:
+    except (OSError, AttributeError):
         return []
 
 
@@ -391,7 +391,7 @@ def _receipt_summary(root):
         try:
             mtime = os.path.getmtime(path)
         except OSError:
-            continue
+            continue  # sbe: allow-silent vanished status file is absent from this best-effort summary
         file_count += 1
         if mtime > newest_mtime:
             newest_mtime, newest_name = mtime, name
@@ -449,7 +449,7 @@ def _test_suites(root):
             if os.path.basename(dirpath) in ("tests", "test"):
                 count = sum(len(fs) for _d, _ds, fs in os.walk(dirpath))
                 found.append((os.path.relpath(dirpath, root), count))
-    except OSError:
+    except OSError:  # sbe: allow-silent inaccessible test tree yields no discovery result
         pass
     return found
 
@@ -468,7 +468,7 @@ def _dossiers_and_change_requests(root):
                           if d not in skip and not d.startswith(".")]
             if os.path.basename(dirpath) in ("design", "dossiers"):
                 found.append(os.path.relpath(dirpath, root))
-    except OSError:
+    except OSError:  # sbe: allow-silent inaccessible dossier tree yields no discovery result
         pass
     docs_dir = os.path.join(root, "docs")
     if os.path.isdir(docs_dir):
@@ -476,7 +476,7 @@ def _dossiers_and_change_requests(root):
             for name in sorted(os.listdir(docs_dir)):
                 if name.startswith("CR-") or name.startswith("CHANGE-REQUEST"):
                     found.append(os.path.join("docs", name))
-        except OSError:
+        except OSError:  # sbe: allow-silent unreadable docs directory has no discoverable request
             pass
     return found
 
@@ -628,7 +628,7 @@ def _default_actor_name():
             name = (r.stdout or "").strip()
             if r.returncode == 0 and name:
                 return name, "git config user.name"
-        except Exception:
+        except (OSError, AttributeError):
             pass
     user = os.environ.get("USER") or os.environ.get("USERNAME")
     if user:

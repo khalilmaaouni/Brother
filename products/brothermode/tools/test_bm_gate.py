@@ -139,6 +139,14 @@ class AdmissionGate(unittest.TestCase):
         self.assertTrue(code == 2 and "NO-DATA" in out,
                         "forecast without a store is NO-DATA: %s" % out[:90])
 
+    def test_10_ask_with_paths_and_no_fence_store_is_no_data_never_go(self):
+        # A None claim set is NO-DATA; NO-DATA must never yield GO. Uses "build" (capacity 2,
+        # untouched by the earlier cases) so this is not fighting another test for the slot.
+        code, out = run(self.tmp, ["ask", "build", "--lane", "lane-e", "--paths", "a/b.swift"],
+                        PERMISSIVE)
+        self.assertTrue(code == 2 and "NO-DATA" in out,
+                        "ask with paths but no store is NO-DATA, never GO: %s" % out[:90])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)

@@ -84,7 +84,8 @@
   },
   {
    "path": "driver.py",
-   "sha256": "a05f7173521f1ff0263c3028f9531493d4449571f9f45301a578fa48ac685bc2"
+   "sha256": "923f0b696c4e7d63012b446864d35e1e55b1fa151036f32e20ee60ee88e8f205",
+   "amended": "as run the sha256 was a05f7173521f1ff0263c3028f9531493d4449571f9f45301a578fa48ac685bc2 (commit a7c9589fc); commit fe6c90e37 later appended one comment, an sbe allow-silent marker, to line 513 and changed no code, so the hash above is the file on disk today and the as-run bytes stay recoverable from a7c9589fc"
   },
   {
    "path": "final_git_log.txt",

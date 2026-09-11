@@ -14,7 +14,7 @@
           },
           "reason": "Superpowers ships a red-green-refactor TDD skill. BrotherMode's own native floor is discipline plus the gate battery, deliberately not a TDD engine (decision 22), so TDD is routed rather than built.",
           "flip_condition": "Routing friction against Superpowers is MEASURED, not felt (decision 22); only then does a minimal native TDD core get built.",
-          "degrade_path": "Fall back to the native floor: the gate battery (tools/test_all.py) alone, with no automated red-green cycling and nothing that enforces writing a test before the code it covers; that discipline is on the operator, not the machine.",
+          "degrade_path": "Fall back to the native floor: the gate battery (tools/test_all.py) alone, with no automated red-green cycling and nothing that enforces writing a test before the code it covers; that discipline is on the operator, not the machine. scripts/receipt_door.py does check the RECEIPT SIDE of the same discipline (U5, 2026-09-09): a behaviour-changing unit whose done_check was never recorded failing before the work, or whose recorded red check exited 0, reads NO-DATA on delivery rather than PASS.",
           "enabled": true
         }
       ]
