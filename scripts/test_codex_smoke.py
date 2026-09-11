@@ -41,6 +41,7 @@ import contextlib
 import io
 import json
 import os
+import shlex
 import re
 import subprocess
 import sys
@@ -263,12 +264,12 @@ class TheDocumentedCommand(unittest.TestCase):
             os.makedirs(path, exist_ok=True)
         env = codex_smoke.codex_env(os.environ, codex_home, home)
         env["DOOR_MODEL_CMD"] = "%s %s" % (
-            sys.executable, codex_smoke.write_stub(
+            shlex.quote(sys.executable), shlex.quote(codex_smoke.write_stub(
                 os.path.join(stubs, "decomposer.py"),
-                codex_smoke.DECOMPOSER_STUB))
+                codex_smoke.DECOMPOSER_STUB)))
         env["MODEL_WORKER_CMD"] = "%s %s" % (
-            sys.executable, codex_smoke.write_stub(
-                os.path.join(stubs, "model.py"), codex_smoke.MODEL_STUB))
+            shlex.quote(sys.executable), shlex.quote(codex_smoke.write_stub(
+                os.path.join(stubs, "model.py"), codex_smoke.MODEL_STUB)))
         turn = codex_smoke.stub_turn(self.binary, env, toy,
                                      command_for(toy, runs_root),
                                      sandbox=sandbox)
@@ -288,8 +289,9 @@ class TheDocumentedCommand(unittest.TestCase):
                  "    return a + b\n")
         return ("%s -c \"open('mathlib.py','w').write(%r)\" && "
                 "git worktree add %s -b regression HEAD"
-                % (sys.executable, guard,
-                   os.path.join(os.path.dirname(toy), "isolation-worktree")))
+                % (shlex.quote(sys.executable), guard,
+                   shlex.quote(os.path.join(os.path.dirname(toy),
+                                            "isolation-worktree"))))
 
     def _landed(self, toy):
         """(patched, isolated) as facts on disk."""
@@ -330,8 +332,9 @@ class TheDocumentedCommand(unittest.TestCase):
         def engine(toy, runs_root):
             return ("%s %s 'make add() refuse non-numeric input' --cwd %s "
                     "--runs-root %s --quiet"
-                    % (sys.executable, os.path.join(HERE, "brother_run.py"),
-                       toy, runs_root))
+                    % (shlex.quote(sys.executable),
+                       shlex.quote(os.path.join(HERE, "brother_run.py")),
+                       shlex.quote(toy), shlex.quote(runs_root)))
 
         body, toy, runs_root = self._turn(codex_smoke.SANDBOX_MODE, engine)
         if "brother_run: receipt: " not in body:
@@ -465,7 +468,7 @@ class TheSignedInShape(unittest.TestCase):
     def _run_engine(self, toy, runs_root, plan_path, worker_cmd, outcome,
                     timeout=55):
         env = dict(os.environ)
-        env["DOOR_MODEL_CMD"] = "cat %s" % plan_path
+        env["DOOR_MODEL_CMD"] = "cat %s" % shlex.quote(plan_path)
         env["MODEL_WORKER_CMD"] = worker_cmd
         start = time.time()
         proc = subprocess.run(
@@ -490,7 +493,7 @@ class TheSignedInShape(unittest.TestCase):
         noop = self._stub(work, "noop_worker.py", NOOP_WORKER_STUB)
         proc, elapsed = self._run_engine(
             toy, os.path.join(work, "runs"), plan_path,
-            "%s %s" % (sys.executable, noop),
+            "%s %s" % (shlex.quote(sys.executable), shlex.quote(noop)),
             "make add() refuse non-numeric input")
         self.assertLess(elapsed, 60,
                         "the signed-in shape must resolve without a real "
@@ -522,7 +525,7 @@ class TheSignedInShape(unittest.TestCase):
         worker = self._stub(work, "fix_worker.py", SIGNED_IN_FIX_WORKER_STUB)
         proc, elapsed = self._run_engine(
             toy, os.path.join(work, "runs"), plan_path,
-            "%s %s" % (sys.executable, worker),
+            "%s %s" % (shlex.quote(sys.executable), shlex.quote(worker)),
             "make add() refuse non-numeric input")
         self.assertLess(elapsed, 60,
                         "the fixed shape must resolve fast:\n%s"

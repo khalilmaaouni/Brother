@@ -103,14 +103,33 @@ class ExtractCommandsTest(unittest.TestCase):
         self.assertNotIn("no unfinished run found", texts)
 
     def test_real_guide_has_no_unhandled_slash_lines(self):
-        """The real guide's only one-line slash-starting text block is
-        `/brother`. If a future edit adds a second one, this test names it
-        rather than letting an untested command silently join the proof."""
-        with open(PGC.GUIDE_PATH, encoding="utf-8") as fh:
-            guide_text = fh.read()
-        slashes = [text for kind, text in PGC.extract_commands(guide_text)
-                  if kind == "slash"]
-        self.assertEqual(slashes, ["/brother"])
+        """The Claude entry path documents exactly ONE slash command, the
+        Brother door. If a future edit adds a second one, this test names it
+        rather than letting an untested command silently join the proof.
+
+        RE-ANCHORED 2026-09-10, when the documentation corpus was replaced.
+        The interactive step moved from the deleted
+        docs/how-to/USE-WITH-CLAUDE-CODE.md to the root README, so this reads
+        BOTH pages of the entry path. Reading the guide alone would now pass
+        with an empty list, which is a test that cannot fail.
+
+        It pins the door, not the sentence: the README phrases the example
+        outcome in prose that is free to change, and pinning that wording
+        would make every copy edit a red build. What must not change is that
+        there is exactly one slash command and it is the one door."""
+        slashes = []
+        for page in PGC.CLAUDE_ENTRY_PAGES:
+            with open(page, encoding="utf-8") as fh:
+                slashes += [text for kind, text
+                            in PGC.extract_commands(fh.read())
+                            if kind == "slash"]
+        self.assertEqual(len(slashes), 1,
+                         "the Claude entry path documents %d slash command(s), "
+                         "not 1: %r" % (len(slashes), slashes))
+        self.assertTrue(slashes[0] == "/brother"
+                        or slashes[0].startswith("/brother "),
+                        "the one documented slash command is %r, which is not "
+                        "the Brother door" % slashes[0])
 
 
 class SectionSpliceTest(unittest.TestCase):

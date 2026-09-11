@@ -693,7 +693,11 @@ class TestHandoverIntegration(TeamScenario):
         self.git("commit", "-qm", "chg-a dossier and source")
         self.handover("prepare", doss, "--outgoing", "alice@example.com",
                       "--receiver", "bob@example.com")
-        code, text, _ = self.handover("acknowledge", doss, "--receiver", "bob@example.com")
+        # Since R-2 acceptance over absent evidence is refused; this scenario
+        # carries none and is about status, so it takes the recorded escape.
+        code, text, _ = self.handover("acknowledge", doss, "--receiver", "bob@example.com",
+                                      "--force", "--why", "fixture: no evidence; this case is "
+                                      "about status reading an acknowledged handover")
         self.assertEqual(code, 0, text)
         code, text, _ = self.team("--json")
         data = json.loads(text[text.index("{"):])
@@ -729,7 +733,11 @@ class TestHandoverIntegration(TeamScenario):
         self.git("commit", "-qm", "chg-a dossier and source")
         self.handover("prepare", doss, "--outgoing", "alice@example.com",
                       "--receiver", "bob@example.com")
-        code, text, _ = self.handover("acknowledge", doss, "--receiver", "bob@example.com")
+        # Since R-2 acceptance over absent evidence is refused; this scenario
+        # carries none and is about status, so it takes the recorded escape.
+        code, text, _ = self.handover("acknowledge", doss, "--receiver", "bob@example.com",
+                                      "--force", "--why", "fixture: no evidence; this case is "
+                                      "about status reading an acknowledged handover")
         self.assertEqual(code, 0, text)
         code, text, _ = self.team()
         self.assertIn("ownership", text.lower(),

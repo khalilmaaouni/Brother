@@ -6,6 +6,7 @@ import io
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -187,6 +188,164 @@ class JudgeTests(unittest.TestCase):
         # test only proves the NO-DATA short-circuit before any call is made.
         code = judge.main(["--evidence-dir", self.tmp])
         self.assertEqual(code, 2)
+
+
+class JudgeCLITests(unittest.TestCase):
+    """judge.py calls the headless Claude CLI via subprocess.run(judge.JUDGE_ARGV);
+    every test here patches judge.subprocess.run so no real 'claude' process is
+    ever launched, and no network call is made."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="persona-judgecli-")
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.old_env = os.environ.get("PERSONA_PRIVATE_TERMS")
+        self.addCleanup(self._restore_env)
+        terms_path = os.path.join(self.tmp, "terms.txt")
+        with open(terms_path, "w") as fh:
+            fh.write("Longmadeupname\n")
+        os.environ["PERSONA_PRIVATE_TERMS"] = terms_path
+
+    def _restore_env(self):
+        if self.old_env is None:
+            os.environ.pop("PERSONA_PRIVATE_TERMS", None)
+        else:
+            os.environ["PERSONA_PRIVATE_TERMS"] = self.old_env
+
+    def write_result(self, rows):
+        write_jsonl(os.path.join(self.tmp, "transcripts", "results.jsonl"), rows)
+
+    def envelope(self, verdict_dict, is_error=False, returncode=0):
+        result_text = "" if verdict_dict is None else json.dumps(verdict_dict)
+        fake = type("FakeCompletedProcess", (), {})()
+        fake.stdout = json.dumps({"is_error": is_error, "result": result_text})
+        fake.stderr = ""
+        fake.returncode = returncode
+        return fake
+
+    def judgments(self):
+        with open(os.path.join(self.tmp, "judgments.jsonl")) as fh:
+            return [json.loads(line) for line in fh]
+
+    def run_judge(self):
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            code = judge.main(["--evidence-dir", self.tmp])
+        return code
+
+    def test_timeout_yields_no_data_and_next_scenario_still_judged(self):
+        self.write_result([
+            {"scenario": "S1", "persona": "P1", "round": 1, "verdict": "PASS"},
+            {"scenario": "S2", "persona": "P1", "round": 1, "verdict": "PASS"},
+        ])
+        good = self.envelope({"verdict": "PASS", "trust_after": 5})
+        with patch("judge.subprocess.run", side_effect=[subprocess.TimeoutExpired(cmd="claude", timeout=300), good]):
+            code = self.run_judge()
+        rows = self.judgments()
+        self.assertEqual(rows[0]["scenario"], "S1")
+        self.assertEqual(rows[0]["verdict"], "NO-DATA")
+        self.assertIn("timed out", rows[0]["judge_error"])
+        self.assertEqual(rows[1]["scenario"], "S2")
+        self.assertEqual(rows[1]["verdict"], "PASS")
+        self.assertEqual(code, 1)  # one of two scenarios failed to judge
+
+    def test_claude_missing_yields_no_data(self):
+        self.write_result([{"scenario": "S1", "persona": "P1", "round": 1, "verdict": "PASS"}])
+        with patch("judge.subprocess.run", side_effect=OSError("claude: command not found")):
+            self.run_judge()
+        rows = self.judgments()
+        self.assertEqual(rows[0]["verdict"], "NO-DATA")
+        self.assertIn("command not found", rows[0]["judge_error"])
+
+    def test_is_error_true_yields_no_data(self):
+        self.write_result([{"scenario": "S1", "persona": "P1", "round": 1, "verdict": "PASS"}])
+        bad = self.envelope({"whatever": 1}, is_error=True)
+        with patch("judge.subprocess.run", return_value=bad):
+            self.run_judge()
+        rows = self.judgments()
+        self.assertEqual(rows[0]["verdict"], "NO-DATA")
+        self.assertIn("is_error", rows[0]["judge_error"])
+
+    def test_a_nonzero_exit_is_no_data_even_with_a_verdict_on_stdout(self):
+        """Review m2: the exit code is read, not ignored. A limit exits 1 with
+        its reason on stderr or in the envelope; either way no judgment."""
+        self.write_result([{"scenario": "S1", "persona": "P1", "round": 1, "verdict": "PASS"}])
+        limited = self.envelope(None, returncode=1)
+        limited.stdout = ""
+        limited.stderr = "You've hit your limit · resets 3pm"
+        passed_but_failed = self.envelope({"verdict": "PASS", "trust_after": 5}, returncode=1)
+        for fake, needle in ((limited, "hit your limit"), (passed_but_failed, "exited 1")):
+            with open(os.path.join(self.tmp, "judgments.jsonl"), "w"):
+                pass
+            with patch("judge.subprocess.run", return_value=fake):
+                code = self.run_judge()
+            rows = self.judgments()
+            self.assertEqual(rows[0]["verdict"], "NO-DATA", needle)
+            self.assertIn("exited 1", rows[0]["judge_error"])
+            self.assertIn(needle, rows[0]["judge_error"])
+            self.assertEqual(code, 1)
+
+    def test_empty_result_yields_no_data(self):
+        self.write_result([{"scenario": "S1", "persona": "P1", "round": 1, "verdict": "PASS"}])
+        empty = self.envelope(None, is_error=False)
+        with patch("judge.subprocess.run", return_value=empty):
+            self.run_judge()
+        rows = self.judgments()
+        self.assertEqual(rows[0]["verdict"], "NO-DATA")
+        self.assertIn("empty result", rows[0]["judge_error"])
+
+    def test_an_answer_with_no_valid_verdict_is_no_data_not_a_judgment(self):
+        """Measured live on 2026-09-11: the headless child answered one scenario
+        with another harness's shape, {"ok": true, "reason": ...}, and the
+        judge wrote it down as a judgment with no verdict and no error."""
+        for answer in ({"ok": True, "reason": "a hook's answer, not a verdict"},
+                       {"verdict": "MAYBE", "trust_after": 3}):
+            self.write_result([{"scenario": "S1", "persona": "P1", "round": 1, "verdict": "PASS"}])
+            if os.path.exists(os.path.join(self.tmp, "judgments.jsonl")):
+                os.remove(os.path.join(self.tmp, "judgments.jsonl"))
+            with patch("judge.subprocess.run", return_value=self.envelope(answer)):
+                code = self.run_judge()
+            rows = self.judgments()
+            self.assertEqual(rows[0]["verdict"], "NO-DATA", answer)
+            self.assertIn("verdict", rows[0]["judge_error"])
+            self.assertEqual(code, 1, "a malformed answer is a failed judge call")
+
+    def test_good_json_answer_parsed_into_verdict_record(self):
+        self.write_result([{"scenario": "S1", "persona": "P1", "round": 1, "verdict": "PASS"}])
+        good = self.envelope({"verdict": "PASS", "trust_after": 5, "would_use_tomorrow": True})
+        with patch("judge.subprocess.run", return_value=good):
+            code = self.run_judge()
+        rows = self.judgments()
+        self.assertEqual(rows[0]["scenario"], "S1")
+        self.assertEqual(rows[0]["persona"], "P1")
+        self.assertEqual(rows[0]["verdict"], "PASS")
+        self.assertEqual(rows[0]["trust_after"], 5)
+        self.assertEqual(code, 0)
+
+    def test_argv_carries_output_format_model_and_fallback_model(self):
+        self.write_result([{"scenario": "S1", "persona": "P1", "round": 1, "verdict": "PASS"}])
+        good = self.envelope({"verdict": "PASS", "trust_after": 5})
+        with patch("judge.subprocess.run", return_value=good) as m:
+            self.run_judge()
+        argv = m.call_args[0][0]
+        self.assertIn("--output-format", argv)
+        self.assertIn("json", argv)
+        self.assertIn("--model", argv)
+        self.assertIn("sonnet", argv)
+        self.assertIn("--fallback-model", argv)
+        self.assertIn("haiku", argv)
+
+    def test_brief_sent_to_runner_is_the_scrubbed_transcript(self):
+        T = os.path.join(self.tmp, "transcripts")
+        os.makedirs(T, exist_ok=True)
+        with open(os.path.join(T, "P1-S1.md"), "w") as fh:
+            fh.write("session log mentioning Longmadeupname right here\n")
+        self.write_result([{"scenario": "S1", "persona": "P1", "round": 1, "verdict": "PASS"}])
+        good = self.envelope({"verdict": "PASS", "trust_after": 5})
+        with patch("judge.subprocess.run", return_value=good) as m:
+            self.run_judge()
+        sent = m.call_args.kwargs["input"]
+        self.assertNotIn("Longmadeupname", sent)
+        self.assertIn("[client]", sent)
 
 
 class PrivateTermsTests(unittest.TestCase):

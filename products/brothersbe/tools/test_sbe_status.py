@@ -942,7 +942,11 @@ class TestHandoverIntegration(StatusFixture):
         code, text, _ = self.handover("prepare", self.repo, "--outgoing", "alice@example.com",
                                       "--receiver", "bob@example.com")
         self.assertEqual(code, 0, text)
-        code, text, _ = self.handover("acknowledge", self.repo, "--receiver", "bob@example.com")
+        # Since R-2 acceptance over absent evidence is refused; this scenario
+        # carries none and is about status, so it takes the recorded escape.
+        code, text, _ = self.handover("acknowledge", self.repo, "--receiver", "bob@example.com",
+                                      "--force", "--why", "fixture: no evidence; this case is "
+                                      "about status reading an acknowledged handover")
         self.assertEqual(code, 0, text)
         code, data, text = self.status_json("--base", self.base)
         entry = self._handover_of(data)

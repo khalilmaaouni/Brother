@@ -108,6 +108,12 @@ DEFAULT_TIMEOUT = float(os.environ.get("BROTHERMODE_TEST_TIMEOUT", "900"))
 # is reported in eight seconds rather than after a full minute of other suites.
 # The store suite is the foundation every other one stands on.
 SUITES = (
+    # Registered 2026-09-10 with the vault ship branch. Both shipped in
+    # the same change as the code they cover, and the inventory gate
+    # correctly refused to start without them: a suite on disk that the
+    # gate does not know about is a suite nobody runs.
+    "test_bm_embed_exit_code.py",
+    "test_bm_vault_staleness_label.py",
     # Registered 2026-08-29. These four shipped today and the gate correctly
     # REFUSED to run without them, which is the same refusal that made the
     # superseded local main look like a draft. A suite on disk that the gate

@@ -18,6 +18,7 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import claim_store as C  # noqa: E402
+import fault_barrier as FB  # noqa: E402
 
 # E100: one sandbox for every temp tree this process makes, removed at exit.
 import os as _e100_os, sys as _e100_sys  # noqa: E402
@@ -451,21 +452,34 @@ class ADeadLockHolderIsReclaimedNotWaitedOut(unittest.TestCase):
 
     def test_a_lock_file_with_garbage_content_keeps_the_timeout_behavior(self):
         """Unreadable or malformed content must never be guessed at: fall
-        back to the plain wait, exactly as before this fix existed."""
+        back to the plain wait, exactly as before this fix existed.
+
+        REPAIR C3: retention is never silent either, so an unparseable
+        record prints why the lock was kept, matching this file's existing
+        "reclaiming is never silent" rule for the opposite decision."""
         p = store()
         lock_path = p + ".lock"
         os.makedirs(os.path.dirname(lock_path), exist_ok=True)
         with open(lock_path, "w", encoding="utf-8") as fh:
             fh.write("not a pid at all")
-        with self.assertRaises(TimeoutError):
-            with C._Lock(p, timeout=0.3):
-                pass
+        import io
+        from contextlib import redirect_stderr
+        stderr = io.StringIO()
+        with redirect_stderr(stderr):
+            with self.assertRaises(TimeoutError):
+                with C._Lock(p, timeout=0.3):
+                    pass
         self.assertTrue(os.path.exists(lock_path),
                          "a lock this code cannot trust must not be removed")
+        self.assertIn("retain", stderr.getvalue().lower(),
+                      "an unparseable record must print why it was kept")
 
     def test_a_lock_naming_another_host_keeps_the_timeout_behavior(self):
         """A pid from another host's namespace means nothing here, so the
-        hostname guard must stop this before pid_alive is even consulted."""
+        hostname guard must stop this before pid_alive is even consulted.
+        The dead pid proves the ORDER: pid_alive(dead.pid) would say False
+        (reclaim) if it ran first, so a record that is kept here proves the
+        hostname check ran BEFORE any pid test, not merely alongside it."""
         dead = subprocess.Popen([sys.executable, "-c", "pass"])
         dead.wait()
         p = store()
@@ -478,6 +492,147 @@ class ADeadLockHolderIsReclaimedNotWaitedOut(unittest.TestCase):
                 pass
         self.assertTrue(os.path.exists(lock_path),
                          "a lock from another host must not be reclaimed by pid alone")
+
+    def test_exit_never_unlinks_a_file_that_is_no_longer_its_own(self):
+        """FINDING 7 (2026-09-10 security review): __exit__ used to unlink
+        self.path whenever self.fd was set, with no proof the file at that
+        path was still the one it opened. If another process (a reclaim, or
+        anything else) had already replaced the lock file by the time this
+        holder exits, the old __exit__ would delete THAT NEW file out from
+        under its owner. Driven directly: swap the lock file for a fresh
+        one while the lock is held, exit, and assert the fresh file
+        survives."""
+        p = store()
+        lock = C._Lock(p)
+        lock.__enter__()
+        replaced_content = b"999999:someone-else"
+        os.unlink(lock.path)
+        fd = os.open(lock.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.write(fd, replaced_content)
+        os.close(fd)
+        lock.__exit__(None, None, None)
+        self.assertTrue(os.path.exists(lock.path),
+                        "a lock file replaced by another process must "
+                        "survive this holder's exit")
+        with open(lock.path, "rb") as fh:
+            self.assertEqual(fh.read(), replaced_content,
+                             "the survivor must be the REPLACEMENT file, "
+                             "not a coincidental recreation of the old one")
+
+
+class RetentionPrintsOnceAndOldFormatLocksParseAsSameHostPids(unittest.TestCase):
+    """M-2 and M-3, both found live in the 2026-09-09 assurance run:
+    _reclaim_if_dead used to print its retention line on EVERY poll of a
+    lock it would never reclaim (measured: 20 lines in 0.5s, about 6000
+    before integrate's 300s timeout), and a pre-change integrate lock
+    (plain str(pid), no colon) was retained forever because partition(':')
+    on colon-free content reads hostname as '', which never matches
+    _hostname(). Both fixes together: at most one retention line per
+    __enter__ call, and a colon-free int body is a same-host pid, not a
+    foreign one."""
+
+    def test_an_unparseable_lock_prints_the_retention_line_exactly_once(self):
+        p = store()
+        lock_path = p + ".lock"
+        os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+        with open(lock_path, "w", encoding="utf-8") as fh:
+            fh.write("not a pid at all")
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            with self.assertRaises(TimeoutError):
+                with C._Lock(p, timeout=0.5):
+                    pass
+        lines = [ln for ln in stderr.getvalue().splitlines() if ln.strip()]
+        self.assertEqual(len(lines), 1,
+                         "one __enter__ call polling every %.3fs for 0.5s "
+                         "must print its retention decision once, not once "
+                         "per poll: %r" % (C._Lock.POLL_INTERVAL,
+                                           stderr.getvalue()))
+        self.assertIn("retain", lines[0].lower())
+
+    def test_empty_lock_content_is_retried_silently_and_still_acquires(self):
+        """M-2: __enter__ creates the lock file (os.open) and writes
+        "pid:hostname" (os.write) as two separate syscalls; a waiter that
+        reads between them sees an empty file. That is not malformed, it
+        is too young, so this must retry in silence rather than print the
+        unparseable-content retention line for perfectly healthy
+        contention, and it must still acquire once the real writer finishes
+        and releases."""
+        p = store()
+        lock_path = p + ".lock"
+        os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+
+        def slow_writer():
+            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            time.sleep(0.15)  # the window a waiter can read "" in
+            os.write(fd, ("%d:%s" % (os.getpid(), C._hostname())).encode())
+            os.close(fd)
+            time.sleep(0.1)
+            os.unlink(lock_path)
+
+        import threading
+        t = threading.Thread(target=slow_writer)
+        t.start()
+        time.sleep(0.02)  # let the writer create the still-empty file first
+        try:
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                with C._Lock(p, timeout=2.0):
+                    pass
+        finally:
+            t.join(timeout=5)
+        self.assertNotIn("could not be parsed", stderr.getvalue(),
+                         "an empty lock body must never be treated as "
+                         "unparseable: %r" % (stderr.getvalue(),))
+
+    def test_an_old_format_lock_naming_a_dead_pid_is_reclaimed_within_one_poll(self):
+        """M-3: the pre-change integrate lock wrote plain str(pid), no
+        colon at all. partition(':') on that gives hostname '', which used
+        to mismatch _hostname() on every host and retain the lock for the
+        full timeout even though its pid was long dead."""
+        dead = subprocess.Popen([sys.executable, "-c", "pass"])
+        dead.wait()
+        p = store()
+        lock_path = p + ".lock"
+        os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+        with open(lock_path, "w", encoding="utf-8") as fh:
+            fh.write(str(dead.pid))
+        stderr = io.StringIO()
+        start = time.time()
+        with contextlib.redirect_stderr(stderr):
+            with C._Lock(p, timeout=30.0):
+                pass
+        elapsed = time.time() - start
+        self.assertLess(elapsed, 5.0,
+                        "an old-format lock naming a dead pid must reclaim "
+                        "within a poll or two, not wait out the timeout")
+        self.assertIn(str(dead.pid), stderr.getvalue())
+        self.assertIn("reclaiming", stderr.getvalue())
+
+    def test_an_old_format_lock_naming_a_live_pid_is_retained_with_one_line(self):
+        """M-3 (parsing) and M-2 (print-once) together: a colon-free body
+        naming THIS test process's own, definitely-live pid must be read
+        as a same-host pid, retained (never stolen from a live owner), and
+        print exactly one retention line over the whole poll, not one per
+        poll."""
+        p = store()
+        lock_path = p + ".lock"
+        os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+        with open(lock_path, "w", encoding="utf-8") as fh:
+            fh.write(str(os.getpid()))
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            with self.assertRaises(TimeoutError):
+                with C._Lock(p, timeout=0.5):
+                    pass
+        self.assertTrue(os.path.exists(lock_path),
+                        "a live pid must never be reclaimed")
+        lines = [ln for ln in stderr.getvalue().splitlines() if ln.strip()]
+        self.assertEqual(len(lines), 1,
+                         "retention for a live pid must print exactly once "
+                         "per __enter__, not once per poll: %r"
+                         % (stderr.getvalue(),))
+        self.assertIn(str(os.getpid()), lines[0])
 
 
 class TheLeaseLengthObeysItsEnvironmentOverride(unittest.TestCase):
@@ -507,6 +662,58 @@ class TheLeaseLengthObeysItsEnvironmentOverride(unittest.TestCase):
         what this function always returns."""
         os.environ[C.TTL_ENV_VAR] = "4"
         self.assertEqual(C.effective_ttl(9), 9.0)
+
+
+class APreExistingClaimsFileIsStillReadCorrectly(unittest.TestCase):
+    """D5, third check. This change (loop_bridge now calling renew_owned()
+    via BackgroundRenewal on a path that never did before) adds no field and
+    no key to a claim record; it only calls functions that already existed.
+    A claims.json written by a session that predates D5 carries exactly the
+    field set claim_store has always written (see acquire()'s own claim
+    dict), and every one of those functions must still read it exactly as
+    before: acquire() still refuses a live claim to a second owner, renew()
+    still pushes its lease, renew_owned()/BackgroundRenewal still renew it,
+    and reconcile() still calls it in-flight while the lease holds."""
+
+    def test_an_old_shape_claim_still_acquires_renews_and_reconciles(self):
+        p = store()
+        clock = FakeClock()
+        old_claim = {
+            "unit_id": "U1", "owner": "session-old", "work_id": "W1",
+            "attempt": 1, "worker_id": "session-old/U1/1",
+            "pid": os.getpid(), "hostname": C._hostname(),
+            "claimed_at": clock(), "expires_at": clock() + 3600,
+            "state": "claimed", "reclaimed_from": None,
+        }
+        with open(p, "w", encoding="utf-8") as fh:
+            json.dump({"U1": old_claim}, fh)
+
+        # acquire(): still exclusive against a live claim it did not write.
+        stolen, problem = C.acquire(p, "U1", "session-new", clock=clock)
+        self.assertIsNone(stolen)
+        self.assertIn("claimed by session-old", problem)
+
+        # renew(): still pushes the lease for the owner already on disk.
+        renewed, why = C.renew(p, "U1", "session-old", ttl=7200, clock=clock)
+        self.assertIsNotNone(renewed, why)
+        self.assertEqual(renewed["expires_at"], clock() + 7200)
+
+        # renew_owned()/BackgroundRenewal: still finds and renews it by owner.
+        ids, problems = C.renew_owned(p, "session-old", ttl=60, clock=clock)
+        self.assertEqual(ids, ["U1"])
+        self.assertEqual(problems, [])
+
+        # reconcile(): still in-flight, never abandoned, while the lease holds.
+        found, problem = C.reconcile(p, clock=clock)
+        self.assertIsNotNone(found, problem)
+        self.assertEqual(found[0]["status"], "in-flight")
+
+        # The file on disk still carries exactly the keys this claim was
+        # written with, plus nothing this change would need to add.
+        with open(p, encoding="utf-8") as fh:
+            on_disk = json.load(fh)["U1"]
+        for key in old_claim:
+            self.assertIn(key, on_disk)
 
 
 class RenewalReportsItsFailuresInsteadOfRaising(unittest.TestCase):
@@ -560,6 +767,150 @@ class RenewalReportsItsFailuresInsteadOfRaising(unittest.TestCase):
         self.assertIn("could not be read", failures[0][1])
         self.assertIn("claim_store: renewal failed for (store)",
                       err.getvalue())
+
+
+class TheFaultBarrierIsInertOutsideTheStubWorkerSeam(unittest.TestCase):
+    """REPAIR C1 (2026-09-09 adversarial review): claim_store.py,
+    integrate.py and loop_bridge.py each carried a byte-for-byte copy of
+    this blocking function. It is now one function in fault_barrier.py,
+    imported by all three; these tests drive that shared implementation
+    directly, since claim_store.py's own _fault_barrier is now a one-line
+    call to it (fault_barrier.wait).
+
+    M-6: gate 2 now requires BROTHER_FAULT_LAB=1 rather than the stub
+    worker seam (MODEL_WORKER_CMD/DOOR_MODEL_CMD). brother_run.py's own
+    session_units_are_yours documents MODEL_WORKER_CMD as a real
+    PRODUCTION capability (a coding session naming its own worker), so a
+    production run could carry it and the old gate would then guard
+    nothing; BROTHER_FAULT_LAB has no such legitimate production use."""
+
+    def test_barrier_env_set_with_the_seams_but_without_the_lab_marker_is_inert(self):
+        """M-6: the seams that used to be gate 2 (MODEL_WORKER_CMD,
+        DOOR_MODEL_CMD) are BOTH set here, exactly as a production run
+        using its own worker could set MODEL_WORKER_CMD, yet without
+        BROTHER_FAULT_LAB=1 this must still return immediately and touch
+        neither marker path."""
+        d = tempfile.mkdtemp(prefix="fault-barrier-nolab-")
+        started = os.path.join(d, "started")
+        release = os.path.join(d, "release")
+        env = {"BROTHER_FAULT_BARRIER": "x",
+              "MODEL_WORKER_CMD": "cat", "DOOR_MODEL_CMD": "cat",
+              "BROTHER_FAULT_BARRIER_STARTED": started,
+              "BROTHER_FAULT_BARRIER_RELEASE": release}
+        FB.wait("x", env=env)  # must return at once, not hang
+        self.assertFalse(os.path.exists(started),
+                         "BROTHER_FAULT_LAB not set: STARTED must never "
+                         "be written even with both stub seams active")
+
+    def test_started_pointing_outside_temp_is_refused_without_writing(self):
+        """STARTED (and RELEASE) must resolve under the system temp
+        directory; a path elsewhere is refused, and nothing is written to
+        it, whatever the lab marker and barrier name say."""
+        d = tempfile.mkdtemp(prefix="fault-barrier-outside-")
+        outside_started = os.path.join(
+            os.path.expanduser("~"), ".fault-barrier-test-started-%d"
+            % os.getpid())
+        self.addCleanup(lambda: os.path.exists(outside_started)
+                        and os.unlink(outside_started))
+        release = os.path.join(d, "release")
+        env = {"BROTHER_FAULT_BARRIER": "x", "BROTHER_FAULT_LAB": "1",
+              "BROTHER_FAULT_BARRIER_STARTED": outside_started,
+              "BROTHER_FAULT_BARRIER_RELEASE": release}
+        FB.wait("x", env=env)
+        self.assertFalse(os.path.exists(outside_started),
+                         "a STARTED path outside system temp must never "
+                         "be written")
+
+    def test_a_different_barrier_name_is_a_no_op(self):
+        d = tempfile.mkdtemp(prefix="fault-barrier-name-")
+        started = os.path.join(d, "started")
+        release = os.path.join(d, "release")
+        env = {"BROTHER_FAULT_BARRIER": "other", "BROTHER_FAULT_LAB": "1",
+              "BROTHER_FAULT_BARRIER_STARTED": started,
+              "BROTHER_FAULT_BARRIER_RELEASE": release}
+        FB.wait("x", env=env)
+        self.assertFalse(os.path.exists(started))
+
+    def test_a_released_barrier_returns_promptly(self):
+        d = tempfile.mkdtemp(prefix="fault-barrier-release-")
+        started = os.path.join(d, "started")
+        release = os.path.join(d, "release")
+        with open(release, "w", encoding="utf-8") as fh:
+            fh.write("go")
+        env = {"BROTHER_FAULT_BARRIER": "x", "BROTHER_FAULT_LAB": "1",
+              "BROTHER_FAULT_BARRIER_STARTED": started,
+              "BROTHER_FAULT_BARRIER_RELEASE": release}
+        FB.wait("x", env=env)  # release already present: returns at once
+        self.assertTrue(os.path.exists(started),
+                        "an active barrier under BROTHER_FAULT_LAB must "
+                        "still write STARTED")
+
+    def test_an_unreleased_barrier_raises_rather_than_hangs(self):
+        d = tempfile.mkdtemp(prefix="fault-barrier-timeout-")
+        started = os.path.join(d, "started")
+        release = os.path.join(d, "release")  # never created
+        env = {"BROTHER_FAULT_BARRIER": "x", "BROTHER_FAULT_LAB": "1",
+              "BROTHER_FAULT_BARRIER_STARTED": started,
+              "BROTHER_FAULT_BARRIER_RELEASE": release}
+        old_timeout = FB.TIMEOUT_SECONDS
+        FB.TIMEOUT_SECONDS = 0.2
+        try:
+            with self.assertRaises(TimeoutError):
+                FB.wait("x", env=env)
+        finally:
+            FB.TIMEOUT_SECONDS = old_timeout
+
+    def test_claim_stores_own_fault_barrier_delegates_to_the_shared_one(self):
+        """claim_store.py no longer carries its own barrier body; a call
+        through its (still test-only) seam is inert exactly like a direct
+        fault_barrier.wait call would be, proving the delegation is wired,
+        not merely present as an unused import."""
+        old_environ = dict(os.environ)
+        try:
+            os.environ.pop("MODEL_WORKER_CMD", None)
+            os.environ.pop("DOOR_MODEL_CMD", None)
+            os.environ["BROTHER_FAULT_BARRIER"] = "before_claim"
+            d = tempfile.mkdtemp(prefix="fault-barrier-claimstore-")
+            started = os.path.join(d, "started")
+            os.environ["BROTHER_FAULT_BARRIER_STARTED"] = started
+            os.environ["BROTHER_FAULT_BARRIER_RELEASE"] = os.path.join(
+                d, "release")
+            C._fault_barrier("before_claim")  # must return at once
+            self.assertFalse(os.path.exists(started))
+        finally:
+            os.environ.clear()
+            os.environ.update(old_environ)
+
+
+class AttemptAwareReleaseRefusesAStaleAttempt(unittest.TestCase):
+    """A late result from a replaced attempt must not close the live claim."""
+
+    def test_a_stale_attempt_is_refused(self):
+        p = store()
+        C.acquire(p, "U1", "session-a")
+        C.acquire(p, "U1", "session-a")
+        held, problem = C.release(p, "U1", "session-a", state="done",
+                                  attempt=1)
+        self.assertIsNone(held)
+        self.assertIn("attempt", problem)
+        self.assertIn("stale", problem)
+
+    def test_the_live_attempt_still_releases(self):
+        p = store()
+        C.acquire(p, "U1", "session-a")
+        claim, _ = C.acquire(p, "U1", "session-a")
+        held, problem = C.release(p, "U1", "session-a", state="done",
+                                  attempt=claim["attempt"])
+        self.assertIsNotNone(held, problem)
+        self.assertEqual(held["state"], "done")
+
+    def test_a_caller_naming_no_attempt_is_unaffected(self):
+        p = store()
+        C.acquire(p, "U1", "session-a")
+        C.acquire(p, "U1", "session-a")
+        held, problem = C.release(p, "U1", "session-a", state="done")
+        self.assertIsNotNone(held, problem)
+        self.assertEqual(held["state"], "done")
 
 
 if __name__ == "__main__":

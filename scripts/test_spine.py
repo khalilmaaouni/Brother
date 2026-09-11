@@ -131,5 +131,132 @@ class TheSpine(unittest.TestCase):
                          "a rerun duplicated integrations:\n" + log)
 
 
+class RollingRunStartsADependentWhileASiblingIsStillLive(unittest.TestCase):
+    """H4 wired: rolling_run() must let a dependent start the instant its
+    one real dependency lands, beside an unrelated sibling that is still
+    running, rather than waiting for the whole batch that admitted it.
+
+    Proven on OBSERVED STATE, never on wall clock: B's worker blocks on a
+    real file it polls for, so it provably cannot finish until this test
+    releases it, and D's worker writes its own marker the moment it starts.
+    A wave scheduler (dispatch a batch, wait for ALL of it, dispatch the
+    next) would also eventually run D after A finishes; what only a rolling
+    scheduler can do is start D while B, an entirely unrelated, still
+    running sibling from the SAME original batch, has not finished. That
+    is the fact this test pins: D.started must appear before B.release is
+    ever written, with B.started already down and B.done still absent."""
+
+    def setUp(self):
+        self.repo = tempfile.mkdtemp(prefix="spine-roll-")
+        for a in (["init", "-q", "-b", "main"],
+                  ["config", "user.email", "a@b.c"],
+                  ["config", "user.name", "t"]):
+            sh(["git"] + a, self.repo)
+        with open(os.path.join(self.repo, "base.txt"), "w", encoding="utf-8") as fh:
+            fh.write("base\n")
+        sh(["git", "add", "-A"], self.repo)
+        sh(["git", "commit", "-q", "-m", "R0"], self.repo)
+
+        self.claims = os.path.join(tempfile.mkdtemp(), "claims.json")
+        self.marks = tempfile.mkdtemp(prefix="marks-")
+
+        # A and B are both immediately ready and write-disjoint, so a cap of
+        # 2 admits them together in the first batch. D depends on A alone
+        # and is write-disjoint from B, so once A lands D has nothing left
+        # to wait on: the only question is whether the scheduler offers it
+        # before B, its unrelated batch-mate, is done.
+        self.doc = {"rows": [
+            {"id": "A", "depends_on": [], "owns": ["a.txt"],
+             "done_check": "test -f a.txt", "in_ship_v1": True},
+            {"id": "B", "depends_on": [], "owns": ["b.txt"],
+             "done_check": "test -f b.txt", "in_ship_v1": True},
+            {"id": "D", "depends_on": ["A"], "owns": ["d.txt"],
+             "done_check": "test -f d.txt", "in_ship_v1": True},
+        ]}
+
+        self.worker_script = os.path.join(tempfile.mkdtemp(), "worker.sh")
+        with open(self.worker_script, "w", encoding="utf-8") as fh:
+            fh.write(
+                '#!/bin/sh\n'
+                'brief=$(cat)\n'
+                'unit=$(printf \'%s\' "$brief" | python3 -c '
+                '"import json,sys; print(json.load(sys.stdin).get(\'unit_id\',\'\'))" '
+                '2>/dev/null)\n'
+                'case "$unit" in\n'
+                '  A) touch "$MARK_DIR/A.started"; echo made-a > a.txt ;;\n'
+                '  D) touch "$MARK_DIR/D.started"; echo made-d > d.txt ;;\n'
+                '  B)\n'
+                '    touch "$MARK_DIR/B.started"\n'
+                '    i=0\n'
+                '    while [ ! -f "$MARK_DIR/B.release" ]; do\n'
+                '      sleep 0.05; i=$((i+1))\n'
+                '      if [ "$i" -gt 600 ]; then break; fi\n'
+                '    done\n'
+                '    echo made-b > b.txt\n'
+                '    touch "$MARK_DIR/B.done"\n'
+                '    ;;\n'
+                'esac\n'
+                'git add -A && git commit -qm "work for $unit"\n')
+        os.chmod(self.worker_script, 0o755)
+
+    def _mark(self, name):
+        return os.path.join(self.marks, name)
+
+    def _wait_for(self, path, timeout=30.0):
+        import time
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if os.path.exists(path):
+                return True
+            time.sleep(0.05)
+        return False
+
+    def test_dependent_starts_while_unrelated_sibling_still_runs(self):
+        import threading
+        import loop_bridge as B  # noqa: E402  (local: avoid a module-level cycle with sys.path setup above)
+
+        parts, problem = B.load_parts()
+        self.assertIsNotNone(parts, problem)
+
+        environ = dict(os.environ, MARK_DIR=self.marks)
+        worker = B.LaneWorker(parts["spawn"], ["sh", self.worker_script],
+                              environ=environ)
+
+        outcome = {}
+
+        def _go():
+            outcome["result"] = B.rolling_run(
+                self.doc, parts, worker, cwd=self.repo, cap=2,
+                store=self.claims, owner="roll-test")
+
+        thread = threading.Thread(target=_go)
+        thread.start()
+
+        self.assertTrue(self._wait_for(self._mark("B.started")),
+                        "B\'s worker never started at all")
+        # THE PROOF. D must start before B is released, which this test
+        # controls: B literally cannot reach B.done until B.release exists,
+        # so D.started appearing first is not a timing accident, it is the
+        # only order the file dependency allows.
+        self.assertTrue(self._wait_for(self._mark("D.started"), timeout=30.0),
+                        "D never started while its unrelated sibling B was "
+                        "still running, the scheduler is waving, not "
+                        "rolling")
+        self.assertFalse(os.path.exists(self._mark("B.done")),
+                         "B had already finished by the time D started, so "
+                         "this proves nothing about rolling admission")
+
+        # Release B and let the round close.
+        open(self._mark("B.release"), "w", encoding="utf-8").close()
+        thread.join(timeout=60)
+        self.assertIn("result", outcome, "rolling_run never returned")
+
+        for fname in ("a.txt", "b.txt", "d.txt"):
+            self.assertTrue(os.path.exists(os.path.join(self.repo, fname)),
+                            fname)
+        log = sh(["git", "log", "--oneline"], self.repo).stdout
+        self.assertEqual(log.count("Brother integrated "), 3, log)
+
+
 if __name__ == "__main__":
     unittest.main()

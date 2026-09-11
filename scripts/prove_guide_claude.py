@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
-"""S23's real done_check: prove docs/how-to/USE-WITH-CLAUDE-CODE.md runs
+"""S23's real done_check: prove docs/how-to/install-claude-code.md runs
 verbatim on a throwaway home against the published plugin, with every exit
 code quoted.
+
+The page named above replaced docs/how-to/USE-WITH-CLAUDE-CODE.md in the
+2026-09-10 documentation replacement. This first line is harvested into the
+generated SYSTEM.md, so leaving the old name here would have made the
+generated record describe a page the tree no longer has.
 
 Mirrors scripts/clean_install_e2e.sh's throwaway-HOME mechanism (a fresh
 $HOME so `claude plugin marketplace add`/`install`/`update`/`uninstall`
@@ -35,7 +40,22 @@ import sys
 import tempfile
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-GUIDE_PATH = os.path.join(REPO, "docs", "how-to", "USE-WITH-CLAUDE-CODE.md")
+#: REPOINTED 2026-09-10. The documentation corpus was replaced wholesale
+#: and docs/how-to/USE-WITH-CLAUDE-CODE.md no longer exists. Its runnable
+#: half, the plugin install, upgrade and uninstall commands this script
+#: actually proves, now lives here.
+GUIDE_PATH = os.path.join(REPO, "docs", "how-to", "install-claude-code.md")
+
+#: The interactive half moved to the root README, which is where the one
+#: slash command a reader types now appears. Both pages together are the
+#: Claude entry path, so a check that a second untested slash command has
+#: not appeared must read both. Reading only the guide would pass
+#: vacuously, because the guide now carries no slash line at all, and a
+#: check that cannot fail is worse than no check.
+CLAUDE_ENTRY_PAGES = (
+    os.path.join(REPO, "README.md"),
+    GUIDE_PATH,
+)
 PUBLIC_URL = "https://github.com/khalilmaaouni/Brother.git"
 
 #: The currently published release, read live 2026-09-06 from the public

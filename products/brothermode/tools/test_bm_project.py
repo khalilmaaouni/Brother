@@ -2616,7 +2616,7 @@ def _fixture_repo(tmp, git=True, suite=True):
     if git:
         bare = os.path.join(tmp, "widget-service.git")
         subprocess.run(["git", "init", "--bare", "-q", bare],
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, check=True)
         _git("init", "-q")
         _git("config", "user.email", "tester@example.invalid")
         _git("config", "user.name", "Tester")
@@ -2766,6 +2766,32 @@ class TestAdoptWritesTheTypedRecord(unittest.TestCase):
                 raw_text = fh.read()
             self.assertIn(ask, raw_text)
             self.assertNotIn("\\u", raw_text)
+
+    def test_a_secret_typed_into_ask_or_answer_never_reaches_the_record(self):
+        """The record lands under docs/decisions/inflight/, inside the
+        repository tree git commits, so a secret-shaped string the person
+        typed into --ask or --answer must pass through bs.redact_text (the
+        same funnel every generated document in this product uses) before
+        it reaches the file, its file NAME (the slug of the ask), or the
+        store. Built by concatenation so no scanner reads a live-looking
+        key in this source file."""
+        secret = "s" + "k_live_" + "Q7" * 8
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _fixture_repo(tmp, git=True, suite=False)
+            r = _run(["adopt", "--ask", "rotate %s before the release" % secret,
+                      "--answer", "success_checks=make check %s" % secret],
+                     root)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            path, record = self._record(r)
+            with io.open(path, encoding="utf-8") as fh:
+                raw_text = fh.read()
+            self.assertNotIn(secret, raw_text)
+            # The slug lowercases and turns "_" into "-", so the file name
+            # is checked for the key's own body, not its literal spelling.
+            self.assertNotIn("q7q7q7q7", os.path.basename(path))
+            self.assertNotIn("q7q7q7q7", raw_text)
+            self.assertNotIn(secret, r.stdout)
+            self.assertIn("[REDACTED]", record["question"])
 
 
 class TestAdoptReceiptsObserveTheChecksItFound(unittest.TestCase):
@@ -3100,6 +3126,32 @@ class TestDeliverGroundingGate(unittest.TestCase):
                              "contract_check refused the delivered record: "
                              "%s%s" % (check.stdout, check.stderr))
 
+    # -- (5b) a secret in an answer never reaches the rewritten record -----
+    def test_a_secret_in_an_answer_is_redacted_in_the_delivered_record(self):
+        """The answer file's text (typically model written) is copied into
+        the contract record under docs/decisions/inflight/, inside the
+        tree git commits, so it passes through bs.redact_text first. Built
+        by concatenation so no scanner reads a live-looking key here."""
+        secret = "gh" + "p_" + "A1b2" * 5
+        with tempfile.TemporaryDirectory() as root:
+            self._delivered_project(root)
+            contract = self._contract(root)
+            answer = self._grounded_answer()
+            answer["answers"][0]["text"] = "PILOT-42, token %s" % secret
+            answers = self._answers(root, answer)
+            r = self._deliver(root, contract, answers)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            with io.open(contract, encoding="utf-8") as fh:
+                raw_text = fh.read()
+            self.assertNotIn(secret, raw_text)
+            record = json.loads(raw_text)
+            self.assertIn("PILOT-42", record["must_answer"][0]["answer"])
+            self.assertIn("[REDACTED]", record["must_answer"][0]["answer"])
+            check = _contract_check(contract)
+            self.assertEqual(check.returncode, 0,
+                             "contract_check refused the delivered record: "
+                             "%s%s" % (check.stdout, check.stderr))
+
     # -- (6) a draft cannot be delivered -----------------------------------
     def test_a_draft_contract_cannot_be_delivered(self):
         with tempfile.TemporaryDirectory() as root:
@@ -3202,6 +3254,42 @@ class TestAdoptCreatesTheStoreProject(unittest.TestCase):
             self.assertFalse(
                 os.path.isfile(bs.store_path(root)),
                 "a draft adoption must leave no store file behind")
+
+
+class TheAdoptRecordNeverCarriesARemotePassword(unittest.TestCase):
+    """Lane F review, 2026-09-11: adopt records `git remote get-url origin`
+    in a file under docs/decisions/, which git commits, so a URL with a
+    password or token in it would land in history."""
+
+    def _mod(self):
+        spec = importlib.util.spec_from_file_location(
+            "bm_project_under_test", PROJECT_CLI)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def _remote(self, url):
+        class R:
+            returncode = 0
+            stdout = url + "\n"
+
+        class AV:
+            @staticmethod
+            def _run_git(root, *args):
+                return R()
+        return self._mod()._git_remote(AV, "/nonexistent")
+
+    def test_an_https_user_and_password_are_dropped(self):
+        self.assertEqual(self._remote("https://someone:s3cret@github.com/o/r.git"),
+                         "https://github.com/o/r.git")
+
+    def test_a_token_in_the_user_slot_is_dropped(self):
+        self.assertEqual(self._remote("https://tok3n@example.com/o/r.git"),
+                         "https://example.com/o/r.git")
+
+    def test_the_scp_form_carries_no_password_and_is_kept(self):
+        self.assertEqual(self._remote("git@github.com:o/r.git"),
+                         "git@github.com:o/r.git")
 
 
 if __name__ == "__main__":

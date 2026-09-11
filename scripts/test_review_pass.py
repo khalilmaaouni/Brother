@@ -240,6 +240,25 @@ class ASeededDefectScoresOnlyWhenItsCheckDiscriminates(unittest.TestCase):
                                      "did not pass" % (name, variant))
 
 
+class TheStampCarriesWhatAcceptDeliveryNeeds(unittest.TestCase):
+    """accept_delivery.review_from_run_dir requires reviewed_revision (the
+    revision the diff was read at) and a non-empty scope (the paths read)
+    on any review.json shape it accepts. review_unit already knows both
+    (rev is its own parameter, files is the unit's own scope), so nothing
+    upstream has to invent them; a run's real review.json must carry them
+    or accept_delivery's gate refuses it as it should."""
+
+    def test_a_ran_review_carries_reviewed_revision_and_scope(self):
+        truth = load_truth("bom")
+        with tempfile.TemporaryDirectory(prefix="s32-fields-") as tmp:
+            stamp, _marker = run_fixture("bom", "seeded", tmp)
+        self.assertEqual("ran", stamp["state"])
+        self.assertTrue(stamp["reviewed_revision"],
+                        "review_unit's stamp names no reviewed_revision")
+        self.assertEqual(truth["unit"]["files_changed_by_unit"],
+                         stamp["scope"])
+
+
 class TheDocsOnlyControlDispatchesNoReviewer(unittest.TestCase):
     """The negative control. Nothing about a README crosses a risk boundary,
     so the assertion is not that the reviewer found nothing: it is that no

@@ -28,15 +28,15 @@ except ImportError:
 #: argv (which would embed sys.executable and an absolute path).
 GOOD_OUTPUT = {
     "repeat_control": (0, (
-        "attempt ledger: 78 record(s) at /Users/someone/.claude/attempt-ledger/"
+        "attempt ledger: 78 record(s) at /Users/you/.claude/attempt-ledger/"
         "attempts.jsonl (no session id or timestamp in this file's shape)\n"
         "hook outcome: vault_recall shown 1469 lesson(s) over 22 session(s), "
         "costing about 270396 token(s) of context (estimate)\n"
         "primary repeat signal (E53.5 replay, reused from lesson_repeat_trial.py): "
         "shown before the repeat: 4 of 4 failure(s) with recall as it happened, "
         "0 of 4 with memory off, replayed from 1190 command(s) in "
-        "/Users/someone/.claude/evidence against 54 lesson(s) in "
-        "/Users/someone/.claude/repeat-guard/lessons.jsonl\n"
+        "/Users/you/.claude/evidence against 54 lesson(s) in "
+        "/Users/you/.claude/repeat-guard/lessons.jsonl\n"
         "secondary repeat signal (same-sig cross-session collision detector):\n"
         "recall on: 26 session(s), 28633 tool call(s), 26 lesson(s) shown, NO-DATA: x\n"
         "recall off: 531 session(s), 65125 tool call(s), 0 lesson(s) shown, NO-DATA: x\n"

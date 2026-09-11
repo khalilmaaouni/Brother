@@ -64,7 +64,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
-DEFAULT_CORPUS = os.path.join(REPO_ROOT, "benchmarks", "gauntlets",
+DEFAULT_CORPUS = os.path.join(REPO_ROOT, "benchmarks", "gauntlets", "corpora",
                               "memory-benign-neighbours-v1.json")
 RESULTS_DIR = os.path.join(REPO_ROOT, "benchmarks", "results")
 

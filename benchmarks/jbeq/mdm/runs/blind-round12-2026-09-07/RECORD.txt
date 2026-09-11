@@ -1,0 +1,216 @@
+JBEQ-MDM blind round 12, 2026-09-07, frozen 70 under hub main d18ec785 (the
+temporal rules and their prompt, the lot-number value, every earlier fix).
+Extractor: a fresh Claude subagent (sonnet, effort high) reading only the
+extractor prompt, the schema and the 70 prompts; hashes recorded in
+HASHES-phase1.txt before any answer was read. A regression number by
+construction; the temporal track is scored from the engine's own answers.
+
+PHASE 1 (blind). Files opened, in order: EXTRACTOR-PROMPT.md,
+fact-sheet-schema.json, then all 70 files under round12-prompts/. No other
+file under benchmarks/jbeq/mdm was opened before fact-sheets.json and
+extractor-notes.md were written and hashed (HASHES-phase1.txt):
+  fact-sheets.json    d2e21b84ff5639aa46a70a22e2720a89a14b80a482c62e294228dc9d50792717
+  extractor-notes.md  07f9f02b59b09bef7a47441a553668f94332a66fbd041f9064b9baff1c457cd4
+Rerun in this run directory after copying (must match):
+  fact-sheets.json    d2e21b84ff5639aa46a70a22e2720a89a14b80a482c62e294228dc9d50792717
+  extractor-notes.md  07f9f02b59b09bef7a47441a553668f94332a66fbd041f9064b9baff1c457cd4
+
+PHASE 2 (no longer blind).
+
+validate: `python3 scripts/jbeq_decide.py validate fact-sheets.json` ->
+  "validate: 70 fact sheet(s) OK", exit=0. Zero off-enum values; zero fixes
+  needed.
+
+decide: `python3 scripts/jbeq_decide.py decide fact-sheets.json --out
+  engine-answers.json --decisions decisions.jsonl` -> "wrote 70 answer(s)
+  to engine-answers.json and decisions.jsonl", exit=0.
+
+UNSUPPORTED_TRACKS (scripts/jbeq_decide.py: {"survivorship", "requirements"})
+  all came back NO-DATA from the engine, as designed. Read now, not blind,
+  and answered directly into direct-answers.json:
+    RQ-01 DECIDED   (2026-08-20 governance minutes, explicit approval, "no
+                     objections"; extracted rule restates it exactly)
+    RQ-02 INFERRED  (ticket states payment terms "are managed in ERP,
+                     together with the contract"; ERP-as-source is one
+                     short logical step from that stated fact, not a named
+                     decision)
+    RQ-03 ASSUMED   (requirement states only "same corporate number ->
+                     merge" and is explicitly silent on store records; the
+                     extracted rule assumes the silent case is covered)
+    RQ-04 UNKNOWN   (BRD explicitly defers the normalization rule to a
+                     separate future decision; the extracted rule names a
+                     specific choice the source gives no basis for at all)
+    RQ-05 DECIDED   (2026-09-01 decision record, explicit, dated, approver
+                     named by role; extracted rule restates it exactly)
+    SV-01 法人登記   (official legal name: the registry is the system of
+                     record for a company's legal name)
+    SV-02 税務当局   (qualified invoice issuer number: the tax authority's
+                     own registration is authoritative for its own number)
+    SV-03 ERP        (payment terms: contract document is stated as
+                     attached to the ERP record)
+    SV-04 CRM        (sales rep: CRM holds the current value and its
+                     update timestamp is stated as newer than ERP's)
+    SV-05 手動オーバーライド (override set 2026-08-01, expires 2026-12-31,
+                     current date stated 2026-09-05: still active)
+    SV-06 法人登記   (override expired 2026-03-31; registry already
+                     reflects the 2026-04-01 name change, so the registry
+                     governs again)
+    SV-07 MDM        (golden ID: MDM is definitionally the golden-ID
+                     system of record, not an ad hoc CRM-side number)
+    SV-08 法人登記   (ERP update's own source_timestamp, 2026-02-10,
+                     predates the registry's already-reflected 2026-04-01
+                     change, despite arriving physically later)
+    SV-09 販売マスタ (CRM's blank is stated as "not yet entered", not a
+                     deletion instruction, so the populated sales-master
+                     value stands)
+    SV-10 NO-DATA    (neither record carries any source type, updater or
+                     timestamp at all; nothing to decide on)
+
+merge: engine-answers.json (70) with direct-answers.json (15) into
+  answers.json (70), overriding only the 15 unsupported-track NO-DATA
+  entries; verified no other key touched (merge.py's own printed diff,
+  15 of 15 overrides, all on RQ-*/SV-* keys).
+
+score: `python3 scripts/jbeq_mdm.py score answers.json --seed
+  seed-2026-09-05.json` (jbeq_mdm.py score has no --regression flag; ran
+  without it, per the brief's own conditional):
+
+  scorer: 2026-09-06.2 (REJECT MATCH and KEEP SEPARATE score as one class
+  for a refuted identity, founder ruling 2026-09-06)
+  address              9 of 10
+  entity-object        9 of 10
+  hierarchy            10 of 10
+  identifier           4 of 5
+  match-or-no-merge    9 of 10
+  requirements         5 of 5
+  survivorship         10 of 10
+  temporal             9 of 10
+  engine-decided: 55 of 60
+  direct-answered (not blind, not evidence about the engine): 10 of 10
+  critical WRONG TM-01 [HISTORICAL REASSIGNMENT] expected R1, answered NO-DATA
+  critical false merges: 0 of 33
+  critical wrong: 1 of 33 (TM-01)
+  conservative wrongs: 0
+  JBEQ-MDM NOT READY
+  exit=1
+
+  Total: 65 of 70 (55 engine-decided + 10 direct-answered, both counted in
+  the 65; requirements 5/5 and survivorship 10/10 are wholly inside the
+  direct-answered 10/10 plus already-correct entries the engine could not
+  reach).
+
+EVERY CRITICAL WRONG, with rule_fired (only one; the scorer names no other):
+
+  TM-01 expected R1, answered NO-DATA. rule_fired=rule_r. why: "rule rule_r
+  chose 'KEEP SEPARATE', which is outside this case's own allowed_answers
+  ['R1', 'R2', 'NO-DATA']; remapped along CAUTION_RANK to the nearest
+  allowed answer instead of NO-DATA: stated_relation=none and
+  lifecycle='closed': a closed, relocated or reused-identifier record is
+  never folded into a live one".
+
+  Root cause, stated plainly: the fact sheet set lifecycle="closed" for
+  TM-01 because R1 (港南店) is stated as eventually closed (valid_to
+  2024-03-31), which is a true fact about the record overall. But the
+  question's as_of date is 2024-02, which is BEFORE that closure. rule_r
+  gates on lifecycle=='closed' as a flat boolean and never consults
+  effective_dates.as_of against effective_dates.prior_valid_to (which the
+  fact sheet DID carry, correctly, as "2024-03-31") to see the closure
+  postdates the asked-about date. Compare TM-09, which hits the exact same
+  rule_r path (also lifecycle='closed') and is NOT flagged wrong: there,
+  the as_of date (2026-03-15) genuinely falls in the gap after R1's own
+  closure and before R2 reopens, so NO-DATA is the right answer for that
+  one. The same lifecycle value and the same rule produce a right answer
+  in one case and a wrong one in the sibling case, because the gate does
+  not look at the dates it has available. This is a rule_r ordering/scope
+  gap worth a follow-up fix (consult prior_valid_to vs as_of before
+  applying the lifecycle gate, or run the temporal_before_successor /
+  temporal_at_or_after_successor rules ahead of rule_r on the temporal
+  track), not solely an extraction defect: the fact sheet's own dates were
+  correct and sufficient to distinguish the two cases; the engine did not
+  use them.
+
+TM-01 TO TM-10, this round vs round 11 (git show
+  hub/main:benchmarks/jbeq/mdm/runs/blind-round11-2026-09-06/decisions.jsonl):
+
+  case   round12 answer / rule_fired          round11 answer / rule_fired
+  TM-01  NO-DATA / rule_r                      NO-DATA / rule_r
+  TM-02  R1 / temporal_before_successor_is_r1  NO-DATA / 1
+  TM-03  R2 / temporal_at_or_after_successor_is_r2  NO-DATA / 1
+  TM-04  R2 / temporal_at_or_after_successor_is_r2  NO-DATA / 1
+  TM-05  R1 / temporal_before_successor_is_r1  NO-DATA / 1
+  TM-06  NO-DATA / A                           NO-DATA / A
+  TM-07  R1 / temporal_before_successor_is_r1  NO-DATA / rule_r
+  TM-08  R2 / temporal_at_or_after_successor_is_r2  NO-DATA / rule_r
+  TM-09  NO-DATA / rule_r                      NO-DATA / rule_r
+  TM-10  R1 / temporal_before_successor_is_r1  NO-DATA / 1
+
+  Round 11 answered all 10 temporal cases NO-DATA (it predates the
+  temporal record rules named in this round's brief). Round 12 reaches a
+  definite R1/R2 answer on 8 of 10 via the new temporal_before_successor_is_r1
+  / temporal_at_or_after_successor_is_r2 rules, and the scorer confirms 7
+  of those 8 correct (TM-02,03,04,05,07,08,10 all pass; only TM-01 is
+  wrong, for the rule_r-ordering reason above). TM-06 and TM-09 are
+  unchanged NO-DATA in both rounds via rule A and rule_r respectively, and
+  TM-09 is confirmed correct this round (not flagged as a critical wrong).
+
+OTHER NAMED CASES, answer and rule_fired (all four scored correctly; none
+  appear in the critical-wrong list above):
+
+  AD-03  REJECT MATCH / L   "location_comparison=different_administrative_area:
+         the two addresses disagree at the administrative-area level
+         despite any town or lot number match"
+  AD-05  SUGGEST MERGE / L  "location_comparison=same_area_renamed: the
+         addresses name the same place under an old and a new
+         administrative name, but a rename is a fact about the map, not
+         confirmation the two registry rows are one (founder ruling
+         2026-09-06, decision-p0-3-same-area-renamed-2026-09-06)"
+  HI-09  REJECT MATCH / C   "tenant_boundary='none', stated_difference=
+         'different_hierarchy_dimension' states the two are not the same
+         or must never link"
+  ID-05  REJECT MATCH / rule_r  "stated_relation=none and
+         authoritative_identifier=conflicting: the identifiers that
+         should govern this decision disagree outright"
+
+  W-03: no such case id exists in this round's 70 (AD/EO/HI/ID/MM/RQ/SV/TM
+  only); nothing to compare.
+
+DONE CHECKS:
+  - hashes and rerun: see PHASE 1 block above, both match.
+  - validate line and exit: "validate: 70 fact sheet(s) OK", exit=0.
+  - full score.txt: quoted above and filed as score.txt in this directory.
+  - temporal comparison: table above.
+  - dash scan: grepping for em-dash and en-dash characters over this run
+    directory's .md/.txt files: no output, exit 1 (no matches).
+  - `git status --short`: only this run directory's files, checked below
+    before the final commit.
+
+jbeq_regression.py --help (quoted in full):
+
+  usage: jbeq_regression.py [-h] [--fixture {a,b,c}] [--write-baseline]
+                            [--force]
+
+  JBEQ-MDM regression harness: re-decide the pinned round 6 fact sheets
+
+  options:
+    -h, --help         show this help message and exit
+    --fixture {a,b,c}  which pinned fixture to run against (default: b)
+    --write-baseline   write the selected fixture's baseline from the
+                       engine as it stands right now
+    --force            with --write-baseline, overwrite an existing
+                       baseline file
+
+  What pinning this round as fixture "d" would take (NOT done; no default
+  changed, nothing pinned): (1) copy this round's fact-sheets.json (or the
+  relevant subset) to a new pinned file
+  benchmarks/jbeq/mdm/regression-sheets-2026-09-07d.json, chmod 444, with
+  a regression-sheets-2026-09-07d.origin.txt naming provenance and its own
+  sha256, matching the a/b/c fixtures' own pattern; (2) add a "d" entry to
+  the FIXTURES dict in scripts/jbeq_regression.py (lines ~77-99) pointing
+  "sheets" at that file and "baseline" at
+  benchmarks/jbeq/mdm/regression-baseline-2026-09-07d.json, and widen
+  --fixture's choices to {a,b,c,d}; (3) run `python3 scripts/jbeq_regression.py
+  --write-baseline --fixture d` once to capture the current engine's
+  answers as the frozen baseline, then chmod 444 it with its own
+  origin/sha256 note; (4) DEFAULT_FIXTURE stays "b" unless a separate,
+  deliberate decision moves it, per the file's own comment discipline
+  around changing that constant.

@@ -146,11 +146,11 @@ def _parse_stamp(value):
         s = s[:-1] + '+00:00'
     try:
         return datetime.datetime.fromisoformat(s)
-    except ValueError:
+    except ValueError:  # sbe: allow-silent a malformed history stamp cannot identify an ordering, so this row is deliberately excluded
         pass
     try:
         return datetime.datetime.strptime(s, '%Y-%m-%d')
-    except ValueError:
+    except ValueError:  # sbe: allow-silent a date-only fallback is optional, and an invalid value has no safe normalized timestamp to report
         return None
 
 

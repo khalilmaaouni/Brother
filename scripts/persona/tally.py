@@ -39,7 +39,7 @@ def main(argv=None):
             for line in fh:
                 try:
                     r = json.loads(line)
-                except ValueError:
+                except ValueError:  # sbe: allow-silent a malformed result line cannot supply a scenario tally, so the evidence reader continues
                     continue
                 if r.get("scenario"):
                     rows.append(r)

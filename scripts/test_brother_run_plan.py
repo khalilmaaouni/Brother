@@ -22,6 +22,7 @@ all, which is the entire point of tests one and two.
 """
 import json
 import os
+import shlex
 import re
 import shutil
 import subprocess
@@ -218,7 +219,7 @@ class PlanFileRunBase(unittest.TestCase):
         for var in (tuple(brother_paths.CLAUDE_MARKER_VARS)
                     + tuple(brother_paths.CODEX_MARKER_VARS)):
             self.env.pop(var, None)
-        self.env["MODEL_WORKER_CMD"] = "%s %s" % (sys.executable, self.model)
+        self.env["MODEL_WORKER_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(self.model))
         self.env["BROTHER_TEST_SPAWN_LOG"] = self.spawn_log
         self.env["PATH"] = self.shim_dir + os.pathsep + self.env.get("PATH", "")
 
@@ -301,7 +302,7 @@ class InsideASessionTheEngineNamesTheRouteInsteadOfNesting(PlanFileRunBase):
         """)
         env = dict(self.env)
         env["CLAUDECODE"] = "1"
-        env["DOOR_MODEL_CMD"] = "%s %s" % (sys.executable, decomposer)
+        env["DOOR_MODEL_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(decomposer))
         proc = sh([sys.executable, BROTHER_RUN, "one file exists",
                    "--cwd", self.repo, "--runs-root", self.tmp], env=env)
         out = proc.stdout + proc.stderr
@@ -419,7 +420,7 @@ class AtMostThreeLanesRunTogether(PlanFileRunBase):
         # rather than in the person's output (loop_bridge's narration is the
         # engine talking to its maintainer): three lanes claimed in the first
         # round, never four, with the fourth unit claimed in the second.
-        match = re.search(r"verbatim, is in (\S+run\.log)", out)
+        match = re.search(r"verbatim, is in (.+?run\.log)", out)
         self.assertIsNotNone(match, "the run log was never named: %s" % out)
         with open(match.group(1), encoding="utf-8") as fh:
             log = fh.read()

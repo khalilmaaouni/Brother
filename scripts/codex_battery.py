@@ -2,7 +2,7 @@
 """X8/C7.2 Codex battery: proves the public Brother plugin works on a real
 signed-in Codex, at a given tag (default v1.0.8, the first tag that ships
 brothermode as a sibling Codex plugin beside brother; see --tag/--prev-tag).
-See /Users/khalil.maaouni/brother-hub/docs/codex/SMOKE-RUNBOOK.md.
+See docs/codex/SMOKE-RUNBOOK.md.
 
 Idempotent per leg. Rerunning replays every leg (each leg recreates its own
 throwaway state); it never touches the real ~/.codex except to read
@@ -315,7 +315,7 @@ def leg_b10():
     body = p.stdout + p.stderr
     write_log(logf, "$ ( cd <worktree checkout> && python3 scripts/codex_smoke.py )\n"
               "# substituted the session's own worktree checkout for the shared\n"
-              "# /Users/khalil.maaouni/brother-hub path: this agent runs isolated\n"
+              "# ~/brother-hub path: this agent runs isolated\n"
               "# in a worktree and git/tree operations against the shared checkout\n"
               "# are refused by the single writer fence.\n", body)
     m = re.search(r"^(PASS|FAIL|NO-DATA).*$", body, re.MULTILINE)
@@ -381,7 +381,7 @@ def run_codex_exec(argv, home, cwd, logf, timeout_s=1200):
                         marker_seen = True
                         say("watcher: end marker 'tokens used' seen in %s, "
                             "waiting for process exit" % os.path.basename(logf))
-                except OSError:
+                except OSError:  # sbe: allow-silent a watcher log race merely delays end-marker observation until the next poll
                     pass
             time.sleep(5)
 
@@ -449,7 +449,7 @@ def receipt_under_temp(path):
     for base in (tempfile.gettempdir(), "/tmp", "/private/tmp"):
         try:
             base_real = os.path.realpath(base)
-        except OSError:
+        except OSError:  # sbe: allow-silent an unreadable temp base cannot establish receipt persistence, so another configured base is checked
             continue
         if real == base_real or real.startswith(base_real + os.sep):
             return True
@@ -777,7 +777,7 @@ def selftest():
     try:
         p.parse_args(["--prep-only", "--signed-in"])
         raise AssertionError("expected --prep-only and --signed-in to be mutually exclusive")
-    except SystemExit:
+    except SystemExit:  # sbe: allow-silent argparse rejection is the asserted outcome of this mutual-exclusion self-test
         pass
 
     assert pubclone_dir_for("v1.0.8") == os.path.join(EVID, "public-clone-v1.0.8")

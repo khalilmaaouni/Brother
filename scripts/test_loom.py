@@ -16,6 +16,7 @@ decoration and an answer nobody could refuse is not an answer.
 """
 import json
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -364,8 +365,8 @@ class ARealRunParksTheRiskyPieceAndFinishesAfterTheRelease(unittest.TestCase):
         """)
         model = write_stub(cls.tmp, "writer_model.py", WRITER_MODEL)
         cls.env = dict(os.environ)
-        cls.env["DOOR_MODEL_CMD"] = "%s %s" % (sys.executable, decomposer)
-        cls.env["MODEL_WORKER_CMD"] = "%s %s" % (sys.executable, model)
+        cls.env["DOOR_MODEL_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(decomposer))
+        cls.env["MODEL_WORKER_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(model))
         cls.outcome = "the archive is tidy and one file exists"
         cls.first = sh([sys.executable, BROTHER_RUN, cls.outcome,
                         "--cwd", cls.repo, "--runs-root", cls.tmp,

@@ -56,16 +56,35 @@ SLICE_WORKER string constant.
 import argparse
 import glob
 import json
+import re
 import subprocess
 import os
 import sys
+import threading
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import brother_paths  # noqa: E402
+import fault_barrier  # noqa: E402
 import graph_loop  # noqa: E402
 import journal  # noqa: E402
 import run_heartbeat  # noqa: E402
+
+
+def _fault_barrier(name):
+    """Call the shared, gated fault-injection barrier."""
+    fault_barrier.wait(name)
+
+
+def _lane_branches(iso):
+    """Return the canonical lane names for every recorded lane id.
+
+    This remains the compatibility helper for lane cleanup. Integration uses
+    ``integrable_branches`` below, which refuses a unit whose acquisition
+    record says that it never actually received this branch.
+    """
+    return {uid: worktree_lane.branch_for(uid) for uid in iso.get("lanes", {})}
 
 #: WHERE THE LOOP'S THREE MOVING PARTS ARE FOUND, in order, and the order is the
 #: whole point. The first version of this file hardcoded one developer's home
@@ -146,6 +165,7 @@ def _version_key(tools_path):
     """Numeric ordering for a versioned install dir (…/<version>/tools), so
     1.10.0 outranks 1.2.3; a non-numeric name sorts last, not crashes."""
     name = os.path.basename(os.path.dirname(tools_path))
+    _fault_barrier("after_claim_before_edit")
     try:
         return tuple(int(x) for x in name.split("."))
     except ValueError:
@@ -454,10 +474,14 @@ def run_node(node, parts, worker, cwd=None, max_attempts=3):
     scope = _audit_scope(unit, before, cwd)
 
     beat.phase(node["id"], "running the done check")
+    _fault_barrier("after_edit_before_check")
     verdict = verify.verify(unit, cwd=cwd)
+    # SR-4: the breaker reads ONLY this token, from the worker's own failure
+    # text, never from status or verdict. See failure_class_of() below.
     record = {"id": node["id"], "worker_status": worker_result.get("status"),
               "verdict": verdict.get("verdict"), "reason": verdict.get("reason"),
-              "repair": None, "scope": scope}
+              "repair": None, "scope": scope,
+              "failure_class": failure_class_of(worker_result)}
     # THE REAL COUNT, when the worker gave one (bm_worker_spawn's additive
     # "usage" key, sourced from model_worker.py's own reading of the claude
     # CLI's --output-format json usage object). Only this FIRST attempt's
@@ -497,6 +521,141 @@ def run_node(node, parts, worker, cwd=None, max_attempts=3):
     record["verdict"] = fixed["final_verdict"].get("verdict")
     beat.done(node["id"], "done after repair: %s" % (record["verdict"] or "?"))
     return record
+
+
+#: SR-4: the recorded night six lanes died on one account limit, each
+#: burning its own three attempts before anyone noticed it was the same
+#: failure six times over. Three consecutive rate_limit/overloaded outcomes,
+#: anywhere across lanes, open the breaker.
+BREAKER_OPEN_AFTER = 3
+#: Seconds a freshly-opened breaker refuses new dispatch before granting one
+#: half-open trial.
+BREAKER_COOLDOWN_SECONDS = 120
+#: Run-wide ceiling on how many times the breaker may (re)open in one run.
+#: Past this it is dead for good: a breaker that keeps reopening forever is
+#: not protecting the run, it is the run.
+BREAKER_MAX_FAILOVERS = 10
+
+#: The only vocabulary a failure class is ever read from: the worker's own
+#: failure text, exactly as SR-1 emits it on its own branch. Never inferred
+#: from status or verdict; absent token reads as "other".
+_FAILURE_CLASS_RE = re.compile(
+    r"failure_class=(rate_limit|overloaded|timeout|empty|other)")
+#: The only two classes the breaker counts. Every other outcome, a clean
+#: success included, resets the consecutive count: one timeout is not the
+#: account being down.
+_BREAKER_CLASSES = ("rate_limit", "overloaded")
+
+
+def failure_class_of(worker_result):
+    """The failure_class token from a worker result's own 'note', or
+    'other' when none is present."""
+    text = (worker_result or {}).get("note") or ""
+    m = _FAILURE_CLASS_RE.search(text)
+    return m.group(1) if m else "other"
+
+
+class Breaker(object):
+    """Cross-lane circuit breaker over rate_limit / overloaded outcomes.
+
+    CLOSED admits everything. BREAKER_OPEN_AFTER consecutive rate_limit-or-
+    overloaded outcomes OPEN it: no new unit is admitted until
+    BREAKER_COOLDOWN_SECONDS has elapsed, at which point exactly one
+    HALF-OPEN trial is admitted. That trial's outcome decides what is next:
+    any other class CLOSES the breaker; another rate_limit/overloaded
+    REOPENS it and counts one failover. Past BREAKER_MAX_FAILOVERS the
+    breaker is DEAD for the rest of the run, whatever the clock says.
+
+    clock and sleep are injected so a test can freeze time and observe the
+    pause without waiting on it; production leaves both at their real
+    stdlib defaults.
+    """
+
+    def __init__(self, open_after=BREAKER_OPEN_AFTER,
+                cooldown=BREAKER_COOLDOWN_SECONDS,
+                max_failovers=BREAKER_MAX_FAILOVERS,
+                clock=time.time, sleep=time.sleep):
+        self.open_after = open_after
+        self.cooldown = cooldown
+        self.max_failovers = max_failovers
+        self.clock = clock
+        self.sleep = sleep
+        self._lock = threading.Lock()
+        self.state = "closed"  # closed | open | dead
+        self.consecutive = 0
+        self.failover_count = 0
+        self.opened_at = None
+        self._trial_active = False
+        self._open_consecutive = 0
+        self._open_class = ""
+
+    def admit(self):
+        """True if a NEW unit may be dispatched right now."""
+        with self._lock:
+            if self.state == "dead":
+                return False
+            if self.state == "closed":
+                return True
+            if self._trial_active or self.clock() - self.opened_at < self.cooldown:
+                return False
+            self._trial_active = True  # the one half-open trial
+            return True
+
+    def record(self, failure_class):
+        """The outcome of one dispatched unit (a run_node record's own
+        'failure_class', 'other' for a clean success)."""
+        with self._lock:
+            if self.state == "dead":
+                return
+            was_trial = self._trial_active
+            self._trial_active = False
+            if failure_class not in _BREAKER_CLASSES:
+                self.consecutive = 0
+                if self.state == "open" and was_trial:
+                    self.state = "closed"
+                    print("breaker closed: the half-open trial returned %s"
+                         % failure_class, file=sys.stderr)
+                return
+            self.consecutive += 1
+            # A failed half-open trial reopens at once with a fresh cooldown;
+            # without it the stale opened_at let the next admit() grant
+            # another trial immediately (PASS3 QA, 2026-09-11).
+            if was_trial or self.consecutive >= self.open_after:
+                self._open(failure_class)
+
+    def _open(self, failure_class):
+        self.state = "open"
+        self.opened_at = self.clock()
+        self.failover_count += 1
+        self._open_consecutive = self.consecutive
+        self._open_class = failure_class
+        self.consecutive = 0
+        print("NO-DATA: breaker open on %s (consecutive=%d), cooling down "
+             "%ss (failover %d/%d)"
+             % (failure_class, self._open_consecutive, self.cooldown,
+                self.failover_count, self.max_failovers), file=sys.stderr)
+        self.sleep(self.cooldown)
+        if self.failover_count >= self.max_failovers:
+            self.state = "dead"
+            print("NO-DATA: breaker dead for good: %d failovers reached "
+                 "the run-wide cap of %d"
+                 % (self.failover_count, self.max_failovers),
+                 file=sys.stderr)
+
+    def refusal_reason(self):
+        if self.state == "dead":
+            return ("breaker dead for good: %d failovers reached the "
+                    "run-wide cap of %d"
+                    % (self.failover_count, self.max_failovers))
+        return ("breaker open: %d consecutive %s failures, cooling down "
+                "for %ss" % (self._open_consecutive, self._open_class,
+                            self.cooldown))
+
+
+#: The module-wide default: a caller that never names its own Breaker still
+#: gets cross-lane protection, and every test that cares about isolation
+#: resets this in its own setUp() rather than relying on one never firing.
+_BREAKER = Breaker()
 
 
 #: How many admitted nodes may be in flight at once. The batch is ALREADY
@@ -814,7 +973,7 @@ class SessionWorker(object):
 
 
 def run(plan, parts, worker, cwd=None, max_attempts=3, max_in_flight=None,
-        isolate=True, lanes=None):
+        isolate=True, lanes=None, breaker=None):
     """Every dispatchable node, and an explicit account of every refused one.
 
     CONCURRENT, and safe BECAUSE of the scheduler rather than despite it. Until
@@ -873,11 +1032,25 @@ def run(plan, parts, worker, cwd=None, max_attempts=3, max_in_flight=None,
             return lanes.path_for(node.get("id")) or cwd
         return cwd
 
+    # SR-4: read at call time, not as a default parameter, so a test's own
+    # `B._BREAKER = B.Breaker()` reassignment is seen here.
+    brk = breaker if breaker is not None else _BREAKER
+
+    def _dispatch_one(node, cwd_n):
+        """run_node, gated by the breaker: an open breaker refuses before
+        the worker is ever asked, so a refused unit burns no attempt."""
+        if not brk.admit():
+            return {"id": node.get("id"), "worker_status": None,
+                    "verdict": "NO-DATA", "reason": brk.refusal_reason(),
+                    "repair": None}
+        rec = run_node(node, parts, worker, cwd_n, max_attempts)
+        brk.record(rec.get("failure_class", "other"))
+        return rec
+
     results = [None] * len(batch)
     if batch and cap > 0:
         with concurrent.futures.ThreadPoolExecutor(max_workers=cap) as pool:
-            futures = {pool.submit(run_node, n, parts, worker, _cwd_for(n),
-                                   max_attempts): i
+            futures = {pool.submit(_dispatch_one, n, _cwd_for(n)): i
                        for i, n in enumerate(batch)}
             for fut in concurrent.futures.as_completed(futures):
                 i = futures[fut]
@@ -885,6 +1058,7 @@ def run(plan, parts, worker, cwd=None, max_attempts=3, max_in_flight=None,
                     results[i] = fut.result()
                 except Exception as exc:  # noqa: BLE001
                     # sbe: allow-silent the exception becomes this node's record
+                    brk.record("other")
                     results[i] = {"id": batch[i].get("id"),
                                   "worker_status": "unavailable",
                                   "verdict": "NO-DATA",
@@ -904,6 +1078,14 @@ def run(plan, parts, worker, cwd=None, max_attempts=3, max_in_flight=None,
     isolation = {"isolated": bool(lanes is not None and lanes.isolated),
                  "lanes": {uid: lane["path"]
                            for uid, lane in (lanes.lanes.items() if lanes else [])},
+                 # H2: the branch each lane ACTUALLY got, not a name rebuilt
+                 # from the unit id. acquire() returns branch=None when its
+                 # own `git checkout -b` failed ("a lane without its own
+                 # branch is still isolated"), and a caller that reconstructs
+                 # the name anyway can pick up a stale branch of the same
+                 # name left by an abandoned attempt. See integrable_branches().
+                 "branches": {uid: lane["branch"]
+                              for uid, lane in (lanes.lanes.items() if lanes else [])},
                  "note": lane_note,
                  "ownership": ("the caller owns these lanes and must release them "
                                "after integration; loop_bridge does not, because "
@@ -914,6 +1096,305 @@ def run(plan, parts, worker, cwd=None, max_attempts=3, max_in_flight=None,
             "in_flight_cap": cap,
             "isolation": isolation}
 
+
+def integrable_branches(isolation):
+    """(branches, refused) from an isolation record's own `branches` map.
+
+    H2: a lane's branch must be carried, never rebuilt from the unit id.
+    acquire() returns branch=None when its own `git checkout -b` failed ("a
+    lane without its own branch is still isolated"), and reconstructing the
+    name anyway risks merging a stale branch of the same name left by an
+    abandoned attempt. So only a truthy branch is kept; every other unit is
+    refused by name, with a NO-DATA reason, rather than guessed.
+
+    An isolation record carrying no `branches` map at all (an older shape,
+    or none given) yields nothing here, on either side: there is nothing
+    real to integrate from and nothing invented to stand in for it."""
+    branches_in = (isolation or {}).get("branches") or {}
+    branches, refused_units = {}, {}
+    for uid, branch in branches_in.items():
+        if branch:
+            branches[uid] = branch
+        else:
+            refused_units[uid] = ("NO-DATA: unit %s has no lane branch on "
+                                  "record (its own checkout failed), so "
+                                  "nothing was merged for it" % uid)
+    return branches, refused_units
+
+
+def _reclaim_unmerged_lanes(cwd, lane_branches, why):
+    """Retire clean, already-landed lanes after a failed batch isolation."""
+    if not cwd or not lane_branches:
+        return
+    print("NO-DATA: %s; each lane created for this round is still retired "
+          "through cleanup_lane" % why, file=sys.stderr)
+    for uid, branch in sorted(lane_branches.items()):
+        integrate_mod.cleanup_lane(cwd, branch, uid)
+
+
+def rolling_dispatch(plan_ready, start, wait_any, integrate, cap,
+                     live_view=None, breaker=None):
+    """PLAN, START, WAIT, INTEGRATE, with everything injected so its
+    guarantees test without git, models or sleeping. PURE ORCHESTRATION: not
+    wired into main() or run() by this unit; this lands the seam and its
+    proof only, and nothing in the live path changes here.
+
+    `plan_ready(live_ids)` returns the unit ids admissible right now, given
+    what is live; `start(uid)` begins one and returns a handle; `wait_any
+    (list(live))` blocks for exactly one live handle to finish and returns
+    (handle, result); `integrate(unit, result)` is called SERIALLY, on this
+    thread, strictly between the wait that produced a result and the next
+    fill, so two integrations can never overlap.
+
+    `live` maps a handle to the unit id it is running. Never exceeds `cap`,
+    never starts the same id twice in this run (even a planner that keeps
+    re-offering a live id is refused by the `started` guard below, not
+    trusted to police itself). When nothing is live, this returns rather
+    than asking `plan_ready` forever, so a blocked graph terminates instead
+    of spinning. `live_view["live"]`, when `live_view` is given, is kept as
+    the current live id set after every start and every completion.
+
+    WIRED, W9.5b: rolling_run() below assembles the four callables from the
+    real claim store, real worktree lanes, a real spawned worker per unit
+    and real serial integration, and calls this unchanged. Nothing about
+    this function's own contract moved to make that possible."""
+    live = {}
+    started = set()
+    records = []
+    # SR-4: read at call time, not as a default parameter, so a test's own
+    # `B._BREAKER = B.Breaker()` reassignment is seen here.
+    brk = breaker if breaker is not None else _BREAKER
+
+    def _report():
+        if live_view is not None:
+            live_view["live"] = set(live.values())
+
+    while True:
+        while len(live) < cap:
+            ready = [uid for uid in (plan_ready(list(live.values())) or [])
+                    if uid not in started]
+            if not ready:
+                break
+            for uid in ready:
+                if len(live) >= cap:
+                    break
+                # An open (or dead) breaker refuses admission before start()
+                # is ever called, so a refused unit never spawns a worker.
+                # Marked started so a constant plan_ready() cannot re-offer
+                # it forever.
+                if not brk.admit():
+                    started.add(uid)
+                    records.append({"id": uid,
+                                    "record": {"verdict": "NO-DATA",
+                                              "reason": brk.refusal_reason()}})
+                    continue
+                handle = start(uid)
+                live[handle] = uid
+                started.add(uid)
+                _report()
+        if not live:
+            return records
+        handle, result = wait_any(list(live))
+        uid = live.pop(handle)
+        _report()
+        records.append(integrate({"id": uid}, result))
+
+
+def _row_for(doc, uid):
+    """The live row/feature dict inside `doc` for `uid`, or None.
+
+    graph_loop.plan() derives its `done` set fresh from `doc` on every call
+    (n['status'] in ('DONE', ...)), so mutating the SAME dict object rolling_
+    run() was handed, rather than a copy, is what lets a unit's integration
+    unlock a dependent on the very next plan_ready() call. `nodes(doc)`
+    builds fresh dicts and is useless for this; this walks `doc` itself."""
+    for r in doc.get("rows", []) + doc.get("features", []):
+        if r.get("id") == uid:
+            return r
+    return None
+
+
+def rolling_run(doc, parts, worker, cwd, cap, store, owner=None, work_id="",
+                max_attempts=3, isolate=True, live_view=None, run_id=None,
+                harness_revision=None):
+    """The live wiring for rolling_dispatch(): real durable claims, real
+    isolated lanes, a real spawned worker per unit, real serial integration,
+    one unit dispatched the instant any other finishes rather than one whole
+    batch at a time.
+
+    THE GAIN OVER run(): run() computes ONE batch, dispatches all of it, and
+    only then integrates; a unit whose sole blocker sat inside that same
+    batch waits for the WHOLE batch to finish before it is even offered,
+    which is a wave, not a rolling front. Here `plan_ready` is asked again
+    the instant any one live unit completes, with the current live set
+    folded into graph_loop.plan() via `also_in_flight` (its own H3
+    parameter) on every call, so a dependent can start the moment its one
+    dependency lands, beside unrelated siblings still running.
+
+    LANES ARE PRE-OPENED ONCE, for every unit `doc` could dispatch this run
+    (every node not already DONE, SUPERSEDED, ADDRESSED or IN-FLIGHT),
+    through worktree_lane.Lanes exactly as run() opens them for its one
+    known batch. `cap` is passed straight through Lanes.safe_concurrency():
+    a lane that could not be created drops writer concurrency to 1 rather
+    than ever sharing a tree, decided BEFORE the first unit is claimed. The
+    batch that will actually run is not known in advance the way run()'s is
+    (it grows as dependencies clear), so this opens lanes for the whole
+    candidate set up front rather than reinventing the fail-closed rule
+    per-unit; a unit whose lane failed to open is never offered by
+    `plan_ready` (see `branch_refused` below), the same as a batch member
+    run() could not isolate.
+
+    CLAIM BEFORE SPAWN still holds although the claim is acquired inside the
+    worker thread this function submits, immediately before run_node() can
+    spawn anything: the invariant is about ORDER within one unit's own
+    execution, not about which thread performs the acquire, and no worker
+    for a unit starts before that unit's claim exists.
+
+    Serial integration is a property of rolling_dispatch() itself (called
+    unmodified, below): it runs `integrate_fn` on its own thread, strictly
+    between the wait that produced a result and the next fill, so no thread
+    pool is placed around it here."""
+    import concurrent.futures
+
+    owner = owner or ("pid-%d" % os.getpid())
+    all_nodes = graph_loop.nodes(doc)
+    by_id = {n["id"]: n for n in all_nodes}
+    eligible = [n["id"] for n in all_nodes
+               if n["status"] not in ("DONE", "SUPERSEDED", "ADDRESSED",
+                                      "IN-FLIGHT")]
+
+    lanes, lane_note = None, ""
+    if isolate and eligible and cwd and worktree_lane is not None:
+        lanes = worktree_lane.Lanes(cwd, eligible)
+        cap = lanes.safe_concurrency(cap)
+        lane_note = lanes.why()
+    else:
+        cap = 1
+        lane_note = ("isolation is unavailable, so writer concurrency is 1 "
+                     "rather than a shared tree")
+    isolated = bool(lanes is not None and lanes.isolated)
+    # H2, reused rather than rebuilt: only a branch a lane actually got is
+    # ever merged from. A unit missing one here is simply never offered by
+    # plan_ready below, exactly as a batch member run() could not isolate is
+    # never dispatched.
+    lane_branches, branch_refused = integrable_branches(
+        {"branches": {uid: lane["branch"]
+                     for uid, lane in (lanes.lanes.items() if lanes else [])}})
+
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=max(1, cap))
+    claims = {}
+
+    def _node_cwd(uid):
+        if isolated:
+            return lanes.path_for(uid) or cwd
+        return cwd
+
+    def _claim_and_run(node):
+        # CLAIM BEFORE SPAWN, on this worker thread: the claim is acquired
+        # and only then does run_node() have any chance to spawn a process.
+        uid = node["id"]
+        claim, problem = claim_store.acquire(store, uid, owner,
+                                             work_id=work_id)
+        if claim is None:
+            return {"claim": None,
+                    "record": {"id": uid, "verdict": "NO-DATA",
+                              "reason": "could not claim: %s" % problem,
+                              "integrable": False}}
+        claims[uid] = claim
+        # "CLAIMED (" is the claim-announcement substring every consumer of
+        # this log greps for (test_receipt_door.py's MACHINERY, fault_lab.py,
+        # tiny_task_cost.py, test_spine.py, test_repair_drain.py), a
+        # convention run()'s own batch announcement set. Rolling dispatch
+        # claims one unit at a time rather than a whole batch, so each unit
+        # is its own batch of 1 here, never a count it did not actually
+        # claim at once.
+        print("CLAIMED (1): %s" % claim["worker_id"])
+        print("CLAIMED    %-10s %s" % (uid, claim["worker_id"]))
+        record = run_node(node, parts, worker, _node_cwd(uid), max_attempts)
+        return {"claim": claim, "record": record}
+
+    def plan_ready(live_ids):
+        # H3: the live set goes straight to graph_loop.plan()'s own
+        # also_in_flight parameter, on every re-plan, so a unit still
+        # running (and therefore still holding its write set) is never
+        # admitted a second time and never collides with a sibling.
+        live_nodes = [by_id[u] for u in live_ids if u in by_id]
+        p = graph_loop.plan(doc, slots=cap, also_in_flight=live_nodes)
+        return [n["id"] for n in dispatchable(p) if n["id"] not in branch_refused]
+
+    def start(uid):
+        return pool.submit(_claim_and_run, by_id[uid])
+
+    def wait_any(handles):
+        done, _pending = concurrent.futures.wait(
+            handles, return_when=concurrent.futures.FIRST_COMPLETED)
+        fut = next(iter(done))
+        try:
+            result = fut.result()
+        except Exception as exc:  # noqa: BLE001
+            # sbe: allow-silent the exception becomes this unit's NO-DATA record
+            result = {"claim": None,
+                     "record": {"verdict": "NO-DATA",
+                               "reason": "the worker raised %s: %s"
+                                         % (type(exc).__name__, exc)}}
+        return fut, result
+
+    def integrate_fn(unit, result):
+        uid = unit["id"]
+        node = by_id[uid]
+        claim = result.get("claim")
+        record = result.get("record") or {}
+        branch = lane_branches.get(uid)
+        merged, int_verdict = False, {}
+        # QUARANTINE (or NO-DATA scope) never integrates even on a PASS
+        # verdict: run_node() already set integrable=False for those, so
+        # gating on it here is the same rule this estate already enforces
+        # in run(), not a second copy of the judgement.
+        if isolated and branch and integrate_mod is not None and cwd:
+            if record.get("integrable") and record.get("verdict") == "PASS":
+                int_verdict = integrate_mod.integrate_one(
+                    cwd, branch, node, run_id=run_id,
+                    harness_revision=harness_revision)
+                merged = int_verdict.get("verdict") in (
+                    integrate_mod.INTEGRATED, integrate_mod.ALREADY_INTEGRATED)
+            integrate_mod.cleanup_lane(cwd, branch, uid)
+        # T1 FOLLOW-UP, same sidecar run() feeds: read-merge-write so an
+        # earlier unit's usage is not lost when this one releases. Rolling
+        # dispatch has no "round" to fold a batch into, so this runs once
+        # per unit instead of once per round; the sidecar shape and path
+        # are identical either way (usage_sidecar_path, read/write_usage_sidecar).
+        usage = record.get("usage")
+        if isinstance(usage, dict) and usage:
+            usage_path = usage_sidecar_path(store)
+            usage_data = read_usage_sidecar(usage_path)
+            usage_data[uid] = usage
+            write_usage_sidecar(usage_path, usage_data)
+
+        state = "done" if merged else "failed"
+        if claim is not None:
+            claim_store.release(store, uid, owner, state=state,
+                                evidence=int_verdict.get("evidence"),
+                                attempt=claim.get("attempt"))
+        if merged:
+            # THE WORK DOCUMENT UNLOCKS THE NEXT plan_ready() CALL: see
+            # _row_for()'s own docstring for why this must be the same dict
+            # graph_loop.plan() reads, not a copy.
+            row = _row_for(doc, uid)
+            if row is not None:
+                row["status"] = "DONE"
+        return {"id": uid, "state": state, "record": record,
+               "integration": int_verdict}
+
+    try:
+        records = rolling_dispatch(plan_ready, start, wait_any, integrate_fn,
+                                   cap, live_view=live_view)
+    finally:
+        pool.shutdown(wait=True)
+
+    return {"records": records, "in_flight_cap": cap,
+           "isolation": {"isolated": isolated, "note": lane_note,
+                         "branches": lane_branches},
+           "branch_refused": branch_refused}
 
 
 # ---------------------------------------------------------------------------
@@ -1215,10 +1696,27 @@ def main(argv=None):
         worker = LaneWorker(parts["spawn"],
                             args.worker_cmd or default_worker_cmd)
 
-    outcome = run({"batch": [n for n, _c in claimed],
-                   "refused": plan.get("refused", [])},
-                  parts, worker, cwd=args.cwd, max_attempts=args.max_attempts,
-                  lanes=prepared)
+    # D5: nothing renewed this bridge's own claims on the standalone path.
+    # brother_run.run_loop guards its ONE blocking call into loop_bridge.main()
+    # with claim_store.BackgroundRenewal, started right before the call and
+    # stopped right after (see run_loop's own docstring in brother_run.py,
+    # the file this mirrors). Run standalone, as the estate's own documented
+    # command does (python3 scripts/loop_bridge.py --cwd <dir> --worker-cmd
+    # <cmd>), nothing wrapped the equivalent blocking call HERE: the wait on
+    # every worker in the batch, below. A unit whose worker outlived the
+    # lease read abandoned under a still-live run. Same class, same fix,
+    # same primitive: no second renewal mechanism gets written.
+    renewal = claim_store.BackgroundRenewal(store, owner).start()
+    try:
+        outcome = run({"batch": [n for n, _c in claimed],
+                       "refused": plan.get("refused", [])},
+                      parts, worker, cwd=args.cwd, max_attempts=args.max_attempts,
+                      lanes=prepared)
+    finally:
+        renewal_failures = renewal.stop()
+    for unit_id, why in renewal_failures:
+        print("NO-DATA: claim renewal failed for %s: %s"
+              % (unit_id or "(store)", why), file=sys.stderr)
 
     # RELEASE WITH THE STATE IT ENDED IN, so the record says what happened
     # rather than merely that somebody once held it.
@@ -1232,12 +1730,18 @@ def main(argv=None):
     # because closed-but-not-landed is the lie the whole spine exists to stop.
     iso = outcome.get("isolation") or {}
     integrated = {}
+    lane_branches, branch_refused = integrable_branches(iso)
     if integrate_mod is not None and args.cwd and iso.get("isolated"):
-        lane_branches = {uid: "lane/" + "".join(
-            ch if ch.isalnum() or ch in "-_" else "-" for ch in uid)[:48]
-            for uid in iso.get("lanes", {})}
+        # H2: the branch each lane ACTUALLY got, never a name rebuilt from
+        # the unit id; see integrable_branches() for why that reconstruction
+        # was a defect. A refused unit is named to stderr and excluded from
+        # what integration is even asked to look at.
+        for uid, why in sorted(branch_refused.items()):
+            print("  %s" % why, file=sys.stderr)
+        _fault_barrier("after_check_before_integration")
         units_by_id = {n["id"]: n for n, _c in claimed}
-        results = [by_id.get(n["id"]) or {"id": n["id"]} for n, _c in claimed]
+        results = [by_id.get(n["id"]) or {"id": n["id"]} for n, _c in claimed
+                   if n["id"] not in branch_refused]
         for verdict in integrate_mod.integrate(args.cwd, results, lane_branches,
                                                units_by_id):
             integrated[verdict["unit"]] = verdict
@@ -1248,6 +1752,11 @@ def main(argv=None):
         print("NO-DATA: the integration module could not be loaded, so green "
               "units were NOT merged and are released as failed rather than "
               "silently closed", file=sys.stderr)
+    elif args.cwd and lane_branches:
+        _reclaim_unmerged_lanes(
+            args.cwd, lane_branches,
+            "isolation was not established for this batch (%s), so nothing "
+            "here was merged" % iso.get("note", ""))
 
     # T1 FOLLOW-UP: fold this round's real usage into the sidecar beside the
     # claim store (read-merge-write, so an earlier round's units are not
@@ -1262,7 +1771,7 @@ def main(argv=None):
     if usage_data:
         write_usage_sidecar(usage_path, usage_data)
 
-    for node, _claim in claimed:
+    for node, claim in claimed:
         rec = by_id.get(node["id"]) or {}
         int_verdict = integrated.get(node["id"]) or {}
         # ALREADY-INTEGRATED counts as merged, and getting this wrong would have
@@ -1276,8 +1785,13 @@ def main(argv=None):
         # only the state string. A record that later reads this claim (see
         # brother_run._mark_integrated) refuses to call a unit integrated
         # unless this evidence is here and independently checks out.
+        # H1: this round's own attempt number goes along, so a hung earlier
+        # attempt's late completion (racing in on the same unit_id) cannot
+        # satisfy the owner check and close a record this round no longer
+        # owns the outcome of.
         claim_store.release(store, node["id"], owner, state=state,
-                            evidence=int_verdict.get("evidence"))
+                            evidence=int_verdict.get("evidence"),
+                            attempt=claim.get("attempt"))
         print("  %-10s %-8s scope=%-10s integrated=%s"
               % (node["id"], state,
                  (rec.get("scope") or {}).get("verdict"), merged))
@@ -1286,6 +1800,7 @@ def main(argv=None):
                                else "NOT established", 
                                (", " + iso["note"]) if iso.get("note") else ""))
     failed = [r for r in outcome.get("dispatched", []) if r.get("verdict") != "PASS"]
+    _fault_barrier("after_integration_before_receipt")
     return 1 if failed else 0
 
 

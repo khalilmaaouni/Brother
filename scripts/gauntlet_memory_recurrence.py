@@ -198,15 +198,19 @@ def seed_contradictory(vault, tree):
     points at the same current file for a pattern that is NOT there, so it
     FAILS. Exactly one side's evidence holds, so the resolver's tier 1
     (current direct evidence) applies LESSON_SLUG and withholds the other,
-    never picked on recency or wording."""
+    never picked on recency or wording.
+
+    Neither note declares `scope`: since bm_vault_contradiction.py's
+    _scope_mismatch (2026-09-08) that field names the PROJECT a lesson is
+    declared for, compared against the current tree's identity, so a file
+    name there refused the winning lesson as out of scope. Both sides left
+    undeclared still pair as one same-scope contradiction via contradicts:."""
     target_path = os.path.join(tree, TARGET_FILE)
     write_note(vault, LESSON_SLUG, LESSON_TITLE, LESSON_BODY,
                applies_to=TARGET_FILE, contradicts=OPPOSITE_SLUG,
-               scope=TARGET_FILE,
                evidence_locator="grep:%s:%s" % (target_path, EVIDENCE_HOLD_PATTERN))
     write_note(vault, OPPOSITE_SLUG, "never validate", OPPOSITE_BODY,
                applies_to=TARGET_FILE, contradicts=LESSON_SLUG,
-               scope=TARGET_FILE,
                evidence_locator="grep:%s:%s" % (target_path, EVIDENCE_FAIL_PATTERN))
 
 
@@ -222,11 +226,9 @@ def seed_contradictory_absent_evidence(vault, tree):
     target_path = os.path.join(tree, TARGET_FILE)
     write_note(vault, LESSON_SLUG, LESSON_TITLE, LESSON_BODY,
                applies_to=TARGET_FILE, contradicts=OPPOSITE_SLUG,
-               scope=TARGET_FILE,
                evidence_locator="grep:%s:%s" % (target_path, EVIDENCE_FAIL_PATTERN))
     write_note(vault, OPPOSITE_SLUG, "never validate", OPPOSITE_BODY,
                applies_to=TARGET_FILE, contradicts=LESSON_SLUG,
-               scope=TARGET_FILE,
                evidence_locator="grep:%s:%s" % (target_path, EVIDENCE_FAIL_PATTERN))
 
 

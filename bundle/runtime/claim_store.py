@@ -75,9 +75,20 @@ import tempfile
 import threading
 import time
 
+import fault_barrier
 import journal
 
 NODATA = "NO-DATA"
+
+
+def _fault_barrier(name):
+    """REPAIR C1: the shared, gated implementation now lives in
+    fault_barrier.py, one function in one module instead of three
+    verbatim copies. See that module's docstring for the three gates
+    that keep it inert in production (barrier name match, the stub
+    worker seam already active, STARTED/RELEASE under system temp)
+    and the bounded timeout that raises instead of hanging."""
+    fault_barrier.wait(name)
 
 #: How long a claim survives without being renewed. Twenty minutes matches the
 #: progress deadline this estate already uses, deliberately: a worker that has
@@ -158,14 +169,51 @@ class _Lock(object):
     notices, which is the same dead-owner gap live() closes for claim
     records, so it reuses the same pieces: the owning pid and hostname are
     written into the lock file at acquire, and a waiter that hits EEXIST
-    reads them back before it commits to sitting out the whole timeout."""
+    reads them back before it commits to sitting out the whole timeout.
+
+    REPAIR (consolidation round): integrate.py used to carry a second,
+    verbatim copy of this whole class (same O_EXCL dance, same pid/hostname
+    record, same dead-pid reclaim, same retention print) under its own name.
+    This is now the only implementation; integrate._Lock subclasses it,
+    overriding the four class attributes below (LABEL, TIMEOUT_REASON,
+    JOURNAL_ON_RECLAIM, POLL_INTERVAL) to keep its own wording, its own
+    "no journal write on reclaim" behavior, and its own poll interval
+    exactly as they were before this move -- nothing about either module's
+    observable behavior changed, only where the rule lives."""
+
+    #: Printed as "<LABEL>: reclaiming ..." / "<LABEL>: retaining ..." /
+    #: "<LABEL>: could not release ...". A subclass names itself here rather
+    #: than this module hardcoding one caller's identity into shared code.
+    LABEL = "claim_store"
+    #: %-formatted with (self.path, self.timeout) for the TimeoutError raised
+    #: when the wait runs out without a reclaim.
+    TIMEOUT_REASON = ("another process has held the claim store lock at %s "
+                       "for more than %.0fs. That is not a reason to proceed "
+                       "without it")
+    #: claim_store's own lock reclaim has always also written a
+    #: "claim.reclaimed" journal event (E59: reclaiming is never silent, and
+    #: the journal is the durable half of that once the terminal is gone).
+    #: integrate's lock never did; JOURNAL_ON_RECLAIM=False on that subclass
+    #: keeps it that way rather than growing a new side effect on this move.
+    JOURNAL_ON_RECLAIM = True
+    #: How long __enter__ sleeps between retries once it decides not to
+    #: reclaim and not to time out yet.
+    POLL_INTERVAL = 0.02
 
     def __init__(self, path, timeout=10.0, clock=None):
         self.path, self.timeout, self.clock = path + ".lock", timeout, clock
         self.fd = None
+        #: M-2: at most one retention line per __enter__ call, reset below.
+        #: Without this, a waiter polling every POLL_INTERVAL against a lock
+        #: this code will never reclaim (unparseable content, a live owner,
+        #: a foreign host) printed the same retention line on every single
+        #: poll -- measured: 20 lines in 0.5s, about 6000 before a 300s
+        #: caller timeout, for a decision that never changed between polls.
+        self._retention_printed = False
 
     def __enter__(self):
         deadline = _now(self.clock) + self.timeout
+        self._retention_printed = False
         while True:
             try:
                 self.fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
@@ -178,20 +226,53 @@ class _Lock(object):
                     continue  # a stale lock just got removed, try again at once
                 if _now(self.clock) >= deadline:
                     raise TimeoutError(
-                        "another process has held the claim store lock at %s for "
-                        "more than %.0fs. That is not a reason to proceed without "
-                        "it" % (self.path, self.timeout))
-                time.sleep(0.02)
+                        self.TIMEOUT_REASON % (self.path, self.timeout))
+                time.sleep(self.POLL_INTERVAL)
+
+    def _print_retention_once(self, message):
+        """M-2: the first retention decision of this __enter__ call is
+        printed; every later poll that reaches the same decision (the
+        content still does not parse, the same owner is still alive) stays
+        silent, because printing it again says nothing new."""
+        if not self._retention_printed:
+            self._retention_printed = True
+            print(message, file=sys.stderr)
+
+    def _journal_run_dir(self):
+        """Where a claim.reclaimed event belongs when JOURNAL_ON_RECLAIM is
+        True. claim_store's own lock always lives inside the one run
+        directory its claim store belongs to, so the default just derives
+        it from the lock's own path. M-4: integrate's lock overrides this,
+        because an integration lock lives in a repository's .git directory,
+        never inside a run directory, so it cannot reuse this default."""
+        return _run_dir(self.path)
 
     def _reclaim_if_dead(self):
         """True when a stale lock was just removed and the caller should
         retry the acquire immediately, rather than sitting out the timeout.
 
-        PID unreadable, malformed, or written by another host: never guess,
-        return False so the existing timeout wait is unchanged. Only a pid
-        that is both on THIS host and verifiably gone (pid_alive, the same
-        check live() uses for claim records) gets reclaimed, and reclaiming
-        is never silent: the dead pid and the reclaim are printed.
+        PID unreadable or malformed: never guess, return False so the
+        existing timeout wait is unchanged. Only a pid that is both on THIS
+        host and verifiably gone (pid_alive, the same check live() uses for
+        claim records) gets reclaimed, and reclaiming is never silent: the
+        dead pid and the reclaim are printed every time (the reclaim ends
+        this __enter__'s polling loop, so it can never repeat within one
+        call the way a retention decision can).
+
+        M-2: an EMPTY body is not malformed, it is too young. __enter__
+        creates the file (os.open) and writes "pid:hostname" (os.write) as
+        two separate syscalls; a waiter that reads between them sees "",
+        which used to fall into the unparseable branch and print a
+        retention line for perfectly healthy contention. This now retries
+        in silence instead, exactly as if the create had not raced at all.
+
+        M-3: content with NO COLON that still parses as an int is the
+        pre-change integrate lock format (it wrote plain str(pid), no
+        hostname). partition(':') on that gives hostname '', which used to
+        mismatch _hostname() on every host, including this one, and retain
+        the lock silently for the full timeout even when its pid was long
+        dead. A colon-free, int-parseable body is now read as a same-host
+        pid instead of a foreign one.
 
         THE KNOWN MICRO-RACE: two waiters can both read this same dead-owner
         content and both decide to reclaim. unlink-then-O_EXCL is still the
@@ -202,30 +283,82 @@ class _Lock(object):
         lock, so the race is tolerated by construction, not solved away."""
         try:
             with open(self.path, "rb") as fh:
-                pid_s, _, hostname = fh.read().decode().partition(":")
-            pid = int(pid_s)
-        except (OSError, ValueError):
+                content = fh.read().decode()
+        except OSError:
+            self._print_retention_once(
+                "%s: retaining lock %s, its content could not "
+                "be parsed as pid:hostname; the existing timeout wait "
+                "stands" % (self.LABEL, self.path))
             return False
-        if hostname != _hostname() or pid_alive(pid):
+        if not content:
+            # M-2: too young, not malformed. See the docstring above.
+            return False
+        pid_s, sep, hostname = content.partition(":")
+        if not sep:
+            # M-3: the pre-change integrate lock wrote str(pid) alone.
+            hostname = _hostname()
+        try:
+            pid = int(pid_s)
+        except ValueError:
+            self._print_retention_once(
+                "%s: retaining lock %s, its content could not "
+                "be parsed as pid:hostname; the existing timeout wait "
+                "stands" % (self.LABEL, self.path))
+            return False
+        if hostname != _hostname():
+            self._print_retention_once(
+                "%s: retaining lock %s, owning pid %d is recorded on "
+                "another host (%s); the existing timeout wait stands"
+                % (self.LABEL, self.path, pid, hostname))
+            return False
+        if pid_alive(pid):
+            self._print_retention_once(
+                "%s: retaining lock %s, owning pid %d is still alive on "
+                "this host; the existing timeout wait stands"
+                % (self.LABEL, self.path, pid))
             return False
         try:
             os.unlink(self.path)
         except FileNotFoundError:
             return True  # another waiter already reclaimed it; try again
-        print("claim_store: reclaiming lock %s, owning pid %d is dead"
-              % (self.path, pid), file=sys.stderr)
-        # E59: reclaiming is never silent, and the journal is the durable
-        # half of that rule: the stderr line above dies with the terminal.
-        run_dir = _run_dir(self.path)
-        journal.append(run_dir, "claim.reclaimed",
-                       parent_ids=journal.previous(run_dir),
-                       payload={"dead_pid": pid, "lock": os.path.basename(
-                           self.path)})
+        print("%s: reclaiming lock %s, owning pid %d is dead"
+              % (self.LABEL, self.path, pid), file=sys.stderr)
+        if self.JOURNAL_ON_RECLAIM:
+            # E59: reclaiming is never silent, and the journal is the durable
+            # half of that rule: the stderr line above dies with the terminal.
+            run_dir = self._journal_run_dir()
+            journal.append(run_dir, "claim.reclaimed",
+                           parent_ids=journal.previous(run_dir),
+                           payload={"dead_pid": pid, "lock": os.path.basename(
+                               self.path)})
         return True
 
     def __exit__(self, *exc):
         if self.fd is not None:
+            # FINDING 7 (2026-09-10 security review): unlinking self.path
+            # unconditionally raced a swap under this same name -- a
+            # reclaim, or anything else that recreated the file while this
+            # holder still thought it owned it -- and deleted whatever
+            # file was there by exit time, not necessarily the one this
+            # fd opened. Proving inode identity before unlinking closes
+            # that: a missing path or a different inode means someone
+            # else owns the name now, so the descriptor is closed and the
+            # file is left alone rather than deleted on a guess.
+            try:
+                held_ino = os.fstat(self.fd).st_ino
+            except OSError:
+                held_ino = None
             os.close(self.fd)
+            try:
+                current_ino = os.stat(self.path).st_ino
+            except OSError:
+                current_ino = None
+            if held_ino is None or held_ino != current_ino:
+                print("%s: not unlinking %s: it is no longer the file this "
+                      "process opened (replaced by another process); the "
+                      "descriptor was closed without touching it"
+                      % (self.LABEL, self.path), file=sys.stderr)
+                return False
             try:
                 os.unlink(self.path)
             except OSError as e:
@@ -234,8 +367,8 @@ class _Lock(object):
                 # own law is "reclaiming is never silent", and a lock that fails
                 # to release is a stuck lock, so it is named on stderr rather
                 # than only surfacing minutes later as an unexplained TimeoutError.
-                print("claim_store: could not release lock %s: %s"
-                      % (self.path, e), file=sys.stderr)
+                print("%s: could not release lock %s: %s"
+                      % (self.LABEL, self.path, e), file=sys.stderr)
         return False
 
 
@@ -317,6 +450,7 @@ def live(claim, now):
 def acquire(path, unit_id, owner, work_id="", ttl=None,
             clock=None, attempt=None):
     """(claim, problem). Exclusive. Never returns a claim somebody else holds."""
+    _fault_barrier("before_claim")
     ttl = effective_ttl(ttl)
     now = _now(clock)
     try:
@@ -389,7 +523,8 @@ def renew(path, unit_id, owner, ttl=None, clock=None):
         return None, "could not take the claim store lock: %s" % exc
 
 
-def release(path, unit_id, owner, state="done", clock=None, evidence=None):
+def release(path, unit_id, owner, state="done", clock=None, evidence=None,
+            attempt=None):
     """Close a claim with the state it ended in. Never deletes the record.
 
     The record is the only durable evidence that this unit was run, by whom, on
@@ -401,7 +536,14 @@ def release(path, unit_id, owner, state="done", clock=None, evidence=None):
     revision it ran against), threaded here so the claim's `state` string is
     never the only thing surviving to a delivery record. Omitted (None) when
     the caller has none to give, e.g. a unit that never reached integration;
-    a caller must never invent one to fill this in."""
+    a caller must never invent one to fill this in.
+
+    `attempt`, row H1: one controller owns every unit it dispatches, so the
+    owner check alone lets a hung attempt's late completion satisfy it and
+    close the record belonging to the attempt that REPLACED it. A caller
+    that names the attempt it holds is refused when the claim has since
+    moved to a different one. Omitted (None), a caller keeps today's
+    owner-only behaviour."""
     try:
         with _Lock(path, clock=clock):
             data, problem = _read(path)
@@ -413,6 +555,10 @@ def release(path, unit_id, owner, state="done", clock=None, evidence=None):
             if held.get("owner") != owner:
                 return None, ("unit %s is owned by %s, so %s may not release it"
                               % (unit_id, held.get("owner"), owner))
+            if attempt is not None and int(held.get("attempt", 0)) != int(attempt):
+                return None, ("unit %s is on attempt %s, so the result of "
+                              "attempt %s is stale and may not close it"
+                              % (unit_id, held.get("attempt"), attempt))
             held["state"] = state
             held["released_at"] = _now(clock)
             held["expires_at"] = 0

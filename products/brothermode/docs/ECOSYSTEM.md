@@ -61,10 +61,10 @@ raw flexibility... it carries none of the governance overhead this project
 asks a session to pay on every write" (docs/market/CATEGORY.md, this
 repository).
 
-Licence and pricing, snapshot read 2026-08-11: not open source. The public
-GitHub repo ships install scripts, docs, and plugins, not the compiled
-agent. Its LICENSE.md states "Anthropic PBC. All rights reserved. Use is
-subject to Anthropic's Commercial Terms of Service"
+Licence and pricing, re-read 2026-09-11, unchanged since 2026-08-11: not
+open source. The public GitHub repo ships install scripts, docs, and
+plugins, not the compiled agent. Its LICENSE.md states "Anthropic PBC. All
+rights reserved. Use is subject to Anthropic's Commercial Terms of Service"
 ([github.com/anthropics/claude-code/blob/main/LICENSE.md](https://github.com/anthropics/claude-code/blob/main/LICENSE.md)).
 Pricing, double-sourced from [claude.com/pricing](https://claude.com/pricing):
 the Free plan does not include Claude Code; Pro is $17/month billed
@@ -120,19 +120,24 @@ installed governance layer required at all. For a team that already lives
 in GitHub Issues, that is strictly less setup than installing and
 configuring BrotherMode on a local Claude Code install.
 
-Licence and pricing, snapshot read 2026-08-11: not open source. The CLI's
-public repo ships under a proprietary EULA, the "GitHub Copilot CLI
-License," which permits running it but forbids modifying it or creating
-derivative works
+Licence and pricing, re-read 2026-09-11, unchanged since 2026-08-11: not
+open source. The CLI's public repo ships under a proprietary EULA, the
+"GitHub Copilot CLI License," which permits running it but forbids
+modifying it or creating derivative works
 ([github.com/github/copilot-cli/blob/main/LICENSE.md](https://github.com/github/copilot-cli/blob/main/LICENSE.md)).
 Pricing, double-sourced from
 [github.com/features/copilot/plans](https://github.com/features/copilot/plans):
 Free is $0/month with 2,000 completions and 50 chat requests; Pro is
 $10/month with unlimited completions; Pro+ is $39/month with access to
 premium models including Opus; Max is $100/month for "sustained,
-high-volume agent workflows." Coding-agent delegation is gated to Pro+ and
-Max. Business and Enterprise per-seat pricing could not be confirmed on
-GitHub's own page and is left out here; see "What we could not verify."
+high-volume agent workflows." Re-read 2026-09-11 on that same page:
+GitHub's own coding agent, described above, is now available on all plans
+including Free, a change from the Pro+-and-Max gating recorded on
+2026-08-11. What stays gated to Pro+, Max, Business, and Enterprise is a
+separate, preview-labelled feature, delegating a task to a third-party
+coding agent such as Claude or Codex from inside Copilot. Business and
+Enterprise per-seat pricing could not be confirmed on GitHub's own page and
+is left out here; see "What we could not verify."
 
 Concrete handoff seam: coding agent reads MCP tool configuration set as
 JSON in a repository's own GitHub settings panel, and otherwise works
@@ -166,7 +171,7 @@ in one GUI. BrotherMode assumes a Claude Code terminal or IDE session plus
 its own hook and store setup, a real barrier for someone who does not want
 to touch a command line.
 
-Licence and pricing, snapshot read 2026-08-11: Cursor is widely reported as
+Licence and pricing, re-read 2026-09-11, unchanged since 2026-08-11: Cursor is widely reported as
 proprietary, a closed fork of VS Code, but in this research that specific
 claim traces only to a third-party blog, not an independently opened
 primary source, so it is UNVERIFIED (Cursor's own pages carry no license
@@ -217,7 +222,7 @@ docs, does not even fire correctly on Codex's own exec path
 (docs/mistakes/M19-the-codex-fence-does-not-fire-in-exec-mode.md, this
 repository, referenced in README.md).
 
-Licence and pricing, snapshot read 2026-08-11: fully open source, Apache
+Licence and pricing, re-read 2026-09-11, unchanged since 2026-08-11: fully open source, Apache
 License 2.0: "Copyright 2025 OpenAI Licensed under the Apache License,
 Version 2.0"
 ([github.com/openai/codex/blob/main/LICENSE](https://github.com/openai/codex/blob/main/LICENSE)).
@@ -275,7 +280,7 @@ per action type, so it is approval-by-default with a configurable escape
 hatch, not an absolute invariant
 ([docs.cline.bot/features/auto-approve](https://docs.cline.bot/features/auto-approve)).
 
-Licence and pricing, snapshot read 2026-08-11: Apache 2.0, open source,
+Licence and pricing, re-read 2026-09-11, unchanged since 2026-08-11: Apache 2.0, open source,
 confirmed independently on both [cline.bot](https://cline.bot/) and
 [github.com/cline/cline](https://github.com/cline/cline). Cline itself
 carries no subscription fee; cost is entirely the model API key the user
@@ -311,18 +316,19 @@ window at any given time." superpowers' own strength is enforcing one
 specific, opinionated practice, refusing code written before a failing
 test exists, more strictly than a general-purpose tool asks for by default,
 and it is the most widely adopted third-party skill pack for Claude Code:
-270,311 stars and 24,163 forks, read from the GitHub API on 2026-08-11
-(single-sourced, GitHub is the sole authority on its own star count).
+285,065 stars and 25,492 forks, re-read from the GitHub API on 2026-09-11,
+up from 270,311 stars and 24,163 forks on 2026-08-11 (single-sourced,
+GitHub is the sole authority on its own star count).
 
 Where it beats BrotherMode: superpowers is free, MIT-licensed, and has an
-active community of contributors and 270,000-plus stars behind it, a scale
+active community of contributors and 285,000-plus stars behind it, a scale
 of peer review and usage no single-founder project can match. It also
 enforces one practice, test-first development, with a hard refusal of code
 before a failing test exists, more strictly than BrotherMode's own broader
 law set asks for by default. BrotherMode's own comparison page already
 concedes exactly this tradeoff (docs/market/CATEGORY.md, this repository).
 
-Licence and pricing, snapshot read 2026-08-11: the Skills format itself
+Licence and pricing, re-read 2026-09-11, unchanged since 2026-08-11: the Skills format itself
 follows "the Agent Skills open standard," per
 [code.claude.com/docs/en/skills](https://code.claude.com/docs/en/skills),
 an open specification, though the underlying agentskills.io standard page
@@ -330,7 +336,7 @@ itself was not independently opened in the underlying research, so that
 governance detail is UNVERIFIED. Claude Code, the runtime skills run on, is
 proprietary as described in section 1. superpowers is MIT licensed,
 confirmed both by GitHub's API (license MIT, actively pushed as of
-2026-08-08) and by its own plugin.json declaring `"license": "MIT"`.
+2026-09-11) and by its own plugin.json declaring `"license": "MIT"`.
 Neither carries a separate price; cost is whatever the underlying Claude
 Code session already costs.
 
@@ -349,45 +355,51 @@ The six tools above are coding agents and the skills that ride them. There
 is a closer category: multi-agent orchestration and process layers that,
 like BrotherMode, sit on top of a coding agent rather than replace it. This
 section was researched separately from the six-tool pass above: every
-number below was read live on 2026-08-15 from the GitHub API or the
-project's own repository pages, and carries that date rather than the
-page-level date at the bottom.
+number below was re-read live on 2026-09-11 from the GitHub API, up from a
+prior read on 2026-08-15, and carries that date rather than the page-level
+date at the bottom.
 
 - **Ruflo** ([github.com/ruvnet/ruflo](https://github.com/ruvnet/ruflo)),
   formerly claude-flow, renamed around its v3.5 (reported by third-party
-  coverage; the rename is visible on the repository itself). 67,852 stars,
-  v3.38.9, releasing near daily as of 2026-08-15. Swarm topologies, vector
-  memory, a plugin catalog, multi-provider routing, and a cost-tracker
-  plugin. Where it beats BrotherMode: sheer feature surface, shipping
-  velocity, and reach. What its own release notes disclosed, quoted from
-  its releases feed on 2026-08-15: a memory search labeled HNSW had been
-  brute-force cosine similarity for an unspecified period, and explicit
-  provider configuration was being silently discarded on some execution
-  paths, both since fixed. No documented per-file ownership or conflict
-  mechanism was found in its README.
+  coverage; the rename is visible on the repository itself). 72,062 stars,
+  v3.41.2, releasing several times a day as of 2026-09-11 (the ten most
+  recent releases span 2026-08-22 to 2026-09-10, with three releases on
+  2026-09-10 and three more on 2026-09-09 alone). Swarm topologies, vector
+  memory, a plugin
+  catalog, multi-provider routing, and a cost-tracker plugin. Where it beats
+  BrotherMode: sheer feature surface, shipping velocity, and reach. What its
+  own release notes disclosed, quoted from its releases feed on 2026-08-15:
+  a memory search labeled HNSW had been brute-force cosine similarity for an
+  unspecified period, and explicit provider configuration was being
+  silently discarded on some execution paths, both since fixed. No
+  documented per-file ownership or conflict mechanism was found in its
+  README as of that same read.
 - **BMAD-METHOD**
   ([github.com/bmad-code-org/BMAD-METHOD](https://github.com/bmad-code-org/BMAD-METHOD),
-  the org renamed from bmadcode): 51,907 stars, v6.11.0. A full-lifecycle
-  role framework whose web bundles let non-technical people join planning
-  conversations. Its coordination is durable context passed between
-  sessions and human-mediated collaboration, deliberately not an enforced
-  mechanism.
+  the org renamed from bmadcode): 52,893 stars, v6.12.0 (released
+  2026-09-04, cross-checked against registry.npmjs.org/bmad-method). A
+  full-lifecycle role framework whose web bundles let non-technical people
+  join planning conversations. Its coordination is durable context passed
+  between sessions and human-mediated collaboration, deliberately not an
+  enforced mechanism.
 - **spec-kit** ([github.com/github/spec-kit](https://github.com/github/spec-kit)):
-  128,294 stars, v0.16.4, official GitHub backing, executable specs for a
-  whole organization. Its README does not document multi-session
-  coordination or concurrent-write handling.
+  135,497 stars, v1.0.6 (released 2026-09-10, up from v0.16.4 on
+  2026-08-15, its first stable 1.0 release), official GitHub backing,
+  executable specs for a whole organization. Its README did not document
+  multi-session coordination or concurrent-write handling as of that
+  release.
 - **claude-task-master** and **affaan-m/claude-swarm** appear in
-  orchestration comparisons but were stale or dormant when read
-  (last releases 2026-03-31 and 2026-02-11 respectively); treating them as
-  active competitors would overstate the field. A related caution from the
-  same pass: parruda/claude-swarm and its successor repository both
-  returned 404 while RubyGems still listed them as live source links, so
-  any comparison built from package indexes rather than opened pages would
-  have profiled a ghost.
+  orchestration comparisons but were stale or dormant on re-check
+  (last releases still 2026-03-31 and 2026-02-11 respectively, unchanged
+  since 2026-08-15); treating them as active competitors would overstate
+  the field. A related caution from the same pass: parruda/claude-swarm and
+  its successor repository both returned 404 while RubyGems still listed
+  them as live source links, so any comparison built from package indexes
+  rather than opened pages would have profiled a ghost.
 - **metaswarm** ([github.com/dsifry/metaswarm](https://github.com/dsifry/metaswarm)):
-  392 stars, v0.12.0, a nine-phase TDD-gated workflow across three coding
-  CLIs, with coverage thresholds blocking before a pull request. No cost
-  controls documented.
+  414 stars, v0.12.0 (unchanged since 2026-08-15), a nine-phase TDD-gated
+  workflow across three coding CLIs, with coverage thresholds blocking
+  before a pull request. No cost controls documented.
 
 What none of them documented, checked project by project on 2026-08-15: an
 enforced one-writer-per-file mechanism (affaan-m/claude-swarm's pessimistic
@@ -484,13 +496,33 @@ internal stages on the way there.
 
 ## Last checked
 
-This page was last checked against primary sources on 2026-08-11. It is
-re-checked weekly; if you are reading this much later than that, treat the
-prices in particular as stale and verify them yourself before relying on
-them.
+This page was last checked against primary sources on 2026-09-11, the
+first re-check since the 2026-08-11 pass. It is re-checked weekly; if you
+are reading this much later than that, treat the prices in particular as
+stale and verify them yourself before relying on them.
+
+Sources opened on 2026-09-11: api.github.com (repos/obra/superpowers,
+repos/ruvnet/ruflo, repos/bmad-code-org/BMAD-METHOD, repos/github/spec-kit,
+repos/dsifry/metaswarm, repos/eyaltoledano/claude-task-master,
+repos/affaan-m/claude-swarm, repos/github/gh-copilot,
+repos/github/copilot-cli, repos/openai/codex, repos/cline/cline, and their
+`releases/latest` and `contents/LICENSE*` endpoints), claude.com/pricing,
+github.com/features/copilot/plans, cursor.com/pricing,
+learn.chatgpt.com/docs/pricing.md, and docs.cline.bot/features/plan-and-act.
+
+What changed since 2026-08-11: GitHub's own coding agent is now available
+on all Copilot plans including Free (section 2); superpowers, Ruflo,
+BMAD-METHOD, and spec-kit all gained stars and shipped new releases,
+spec-kit's the largest jump, from v0.16.4 to its first stable v1.0.6
+(sections 6 and 7); metaswarm gained a small number of stars with no new
+release. What did not change: every price on the page, every licence, and
+every quoted non-goals or handoff-seam statement, each re-read at the URL
+already cited beside it. The unresolved items in "What we could not
+verify" remain unresolved; none of the pages re-opened today carried the
+missing information.
 
 The line below is the one a check reads, so it stays in this exact shape.
 Do not update it without running the pass in docs/ECOSYSTEM-REFRESH.md:
 a fresh date over stale content is worse than an honest old one.
 
-Last checked: 2026-08-11.
+Last checked: 2026-09-11.

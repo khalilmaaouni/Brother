@@ -922,6 +922,30 @@ class DoctorCase(unittest.TestCase):
         self.assertIn("auto-loaded", r.stdout)
         self.assertIn("denied a foreign write", r.stdout)
 
+    def test_a_bundle_layout_loader_copy_is_read_where_its_hooks_json_points(self):
+        """2026-09-11: the umbrella bundle installs the fence at
+        runtime/hooks/brothermode/tools/, and its hooks.json names that
+        path. Doctor used to look only at tools/ and called the live fence
+        on the 1.0.12 plugin cache dead. It must follow the command."""
+        plugin = os.path.join(self.home, ".claude", "skills", "brother")
+        os.makedirs(os.path.join(plugin, "hooks"))
+        os.makedirs(os.path.join(plugin, "runtime", "hooks", "brothermode"))
+        os.symlink(self.tools, os.path.join(
+            plugin, "runtime", "hooks", "brothermode", "tools"))
+        with io.open(os.path.join(plugin, "hooks", "hooks.json"), "w",
+                     encoding="utf-8") as fh:
+            fh.write(json.dumps({"hooks": {"PreToolUse": [{
+                "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
+                "hooks": [{
+                    "type": "command",
+                    "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/runtime/hooks/"
+                               "brothermode/tools/bm_fence_hook.py\""}]}]}}))
+        self.write_settings({"hooks": {"SessionStart": []}})
+        r = self.run_doctor()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("registered hook is dead", r.stdout)
+        self.assertIn("denied a foreign write", r.stdout)
+
     def test_calibrated_2_missing_fence_hook_is_detected(self):
         """The required case from the loop spec: doctor notices that no fence
         is wired at all, which is exactly what every install before this one

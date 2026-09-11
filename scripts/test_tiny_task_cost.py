@@ -17,6 +17,7 @@ paragraph must still state a wait, quoted from a timed run rather than left
 at NO-DATA. Driven backwards against the wording that shipped before this
 change, which stops at NO-DATA and fails here.
 """
+import json
 import os
 import shutil
 import sys
@@ -177,6 +178,107 @@ class TheInstrumentMeasuresARealTinyTask(unittest.TestCase):
         # The engine's own cost is never quoted as the wait a person with a
         # real model pays, and the record says so in its own words.
         self.assertIn(NODATA, result["wall_clock_note"])
+
+
+class TheRetryRecordIsReadFromDiskNeverEstimated(unittest.TestCase):
+    """TEST HARDENING (night run 2026-09-09): retry_evidence(),
+    _sole_claim_id() and retry_record_for() are what the two eligible-
+    fixture tests in test_fast_route.py now lean on to prove a worker
+    retry is never silent. The 5 live suite runs this hardening was
+    proven against never actually hit worker_sessions > 1 (no machine
+    load), so this class proves the plumbing directly, against a
+    fabricated run directory shaped exactly like brother_run.py's own
+    ATTEMPTS_DIRNAME/CLAIMS_FILENAME output (_write_attempt_trace,
+    claim_store.acquire), never against a live subprocess."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="ttc-retry-fixture-")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _seed_run(self, runs_root, uid, attempt_states, claim_attempt):
+        run_dir = os.path.join(runs_root, "docs", "plan", "runs",
+                               "20260909T000000-t")
+        os.makedirs(run_dir, exist_ok=True)
+        with open(os.path.join(run_dir, "run.log"), "w",
+                 encoding="utf-8") as fh:
+            fh.write("seed\n")
+        with open(os.path.join(run_dir, _br.CLAIMS_FILENAME), "w",
+                 encoding="utf-8") as fh:
+            json.dump({uid: {"attempt": claim_attempt, "state": "done"}}, fh)
+        safe = _br._safe_uid_segment(uid)
+        for n, state in enumerate(attempt_states, start=1):
+            attempt_dir = os.path.join(run_dir, _br.ATTEMPTS_DIRNAME, safe,
+                                       "attempt-%d" % n)
+            os.makedirs(attempt_dir, exist_ok=True)
+            with open(os.path.join(attempt_dir, "claim.json"), "w",
+                     encoding="utf-8") as fh:
+                json.dump({"unit_id": uid, "attempt": n, "state": state}, fh)
+        return run_dir
+
+    def test_retry_evidence_reads_every_attempt_in_order(self):
+        runs_root = os.path.join(self.tmp, "runs")
+        run_dir = self._seed_run(runs_root, "F1", ["failed", "done"], 2)
+        attempt_states, claim_attempt = ttc.retry_evidence(run_dir, "F1")
+        self.assertEqual(attempt_states, ["failed", "done"])
+        self.assertEqual(claim_attempt, 2)
+
+    def test_retry_evidence_is_empty_for_an_untraced_unit(self):
+        """The exact shape a SILENT retry would leave behind: a claim
+        store attempt counter with no attempt trace beside it."""
+        runs_root = os.path.join(self.tmp, "runs")
+        run_dir = self._seed_run(runs_root, "F1", [], 2)
+        attempt_states, claim_attempt = ttc.retry_evidence(run_dir, "F1")
+        self.assertEqual(attempt_states, [])
+        self.assertEqual(claim_attempt, 2)
+
+    def test_retry_record_for_finds_the_sole_unit_by_itself(self):
+        runs_root = os.path.join(self.tmp, "runs")
+        self._seed_run(runs_root, "C1", ["failed", "failed", "done"], 3)
+        retry = ttc.retry_record_for(runs_root)
+        self.assertEqual(retry, {"unit_id": "C1",
+                                 "attempt_states": ["failed", "failed",
+                                                    "done"],
+                                 "claim_attempt": 3})
+
+    def test_retry_record_for_is_none_with_no_run_directory(self):
+        self.assertIsNone(
+            ttc.retry_record_for(os.path.join(self.tmp, "no-such-runs")))
+
+    def test_report_names_the_retry_only_past_one_worker_session(self):
+        base = {"verdict": "PASS", "exit_code": 0, "wall_clock_seconds": 1.0,
+               "wall_clock_note": "", "user_steps": 1,
+               "files_written_in_repo": [], "files_written_in_runs_root": [],
+               "price_said_up_front": True, "price_line_number": 1,
+               "price_paragraph": "", "price_states_a_wait": NODATA,
+               "first_worker_log_line": 2, "planner_sessions": 0}
+        one_worker = dict(base, case="one-worker", worker_sessions=1)
+        text = ttc.report([one_worker])
+        self.assertNotIn("retry:", text)
+
+        two_workers = dict(base, case="two-workers", worker_sessions=2,
+                           retry_record={"unit_id": "F1",
+                                        "attempt_states": ["failed", "done"],
+                                        "claim_attempt": 2})
+        text = ttc.report([two_workers])
+        self.assertIn("retry: unit F1 attempted 2 time(s) on disk (claim "
+                     "store attempt counter 2)", text)
+        self.assertIn("['failed', 'done']", text)
+
+    def test_report_names_a_missing_trace_as_no_data_not_a_crash(self):
+        """A worker_sessions > 1 with retry_record still None (the run
+        never even reached run_door, say) must never crash report()."""
+        case = {"case": "silent", "verdict": "PASS", "exit_code": 0,
+               "wall_clock_seconds": 1.0, "wall_clock_note": "",
+               "user_steps": 1, "files_written_in_repo": [],
+               "files_written_in_runs_root": [], "price_said_up_front": True,
+               "price_line_number": 1, "price_paragraph": "",
+               "price_states_a_wait": NODATA, "first_worker_log_line": 2,
+               "planner_sessions": 0, "worker_sessions": 2,
+               "retry_record": None}
+        text = ttc.report([case])
+        self.assertIn(NODATA, text)
 
 
 if __name__ == "__main__":

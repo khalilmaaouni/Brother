@@ -7,6 +7,7 @@ since model_worker's contract is a whole subprocess, not a function.
 """
 import json
 import os
+import shlex
 import stat
 import subprocess
 import sys
@@ -15,6 +16,7 @@ import textwrap
 import threading
 import unittest
 from http.server import HTTPServer
+from unittest import mock
 
 # E100: one sandbox for every temp tree this process makes, removed at exit.
 import os as _e100_os, sys as _e100_sys  # noqa: E402
@@ -95,7 +97,7 @@ class ModelWorkerSuccess(unittest.TestCase):
         brief = json.dumps({"id": "U1", "objective": "make a file",
                             "writes": ["created.txt"]})
         proc = run_worker(brief, self.tmp,
-                          {"MODEL_WORKER_CMD": "%s %s" % (sys.executable, self.stub)})
+                          {"MODEL_WORKER_CMD": "%s %s" % (shlex.quote(sys.executable), shlex.quote(self.stub))})
         self.assertEqual(proc.returncode, 0, proc.stderr)
         out = json.loads(proc.stdout)
         self.assertIn("worker_claim", out)
@@ -114,7 +116,7 @@ class ModelWorkerNonzeroExit(unittest.TestCase):
         """)
         brief = json.dumps({"id": "U2", "objective": "fail"})
         proc = run_worker(brief, tmp,
-                          {"MODEL_WORKER_CMD": "%s %s" % (sys.executable, stub)})
+                          {"MODEL_WORKER_CMD": "%s %s" % (shlex.quote(sys.executable), shlex.quote(stub))})
         self.assertNotEqual(proc.returncode, 0)
         # stdout is not required to be JSON on the unavailable path; the
         # contract only promises one clean JSON object on success.
@@ -137,7 +139,7 @@ class ModelWorkerDoneCheck(unittest.TestCase):
             sys.stdin.read()
             print("ok")
         """)
-        self.env = {"MODEL_WORKER_CMD": "%s %s" % (sys.executable, self.stub)}
+        self.env = {"MODEL_WORKER_CMD": "%s %s" % (shlex.quote(sys.executable), shlex.quote(self.stub))}
 
     def test_passing_done_check_reports_exit_code_0(self):
         brief = json.dumps({"id": "U3", "objective": "x", "done_check": "true"})
@@ -182,12 +184,14 @@ class TestVendorAdapterSelection(unittest.TestCase):
     by the running client, and each is driven with a stub so neither the
     claude CLI nor codex needs to be installed for this to mean anything."""
 
-    def test_claude_argv_is_unchanged(self):
-        """The hard requirement of the whole row: the Claude invocation is
-        byte for byte what it was before the adapter existed."""
+    def test_claude_argv_is_unchanged_apart_from_the_sr1_fallback_flag(self):
+        """UPDATED for SR-1: the base Claude invocation is still byte for
+        byte what it was before the adapter existed, but the real argv now
+        also carries the native fallback chain by default."""
         self.assertEqual(_mw()._default_argv({"BROTHER_MODEL_CLIENT": "claude"}),
                          ["claude", "-p", "--output-format", "json",
-                          "--permission-mode", "acceptEdits"])
+                          "--permission-mode", "acceptEdits",
+                          "--fallback-model", "sonnet,haiku"])
 
     def test_codex_argv_uses_only_flags_quoted_from_its_own_help(self):
         self.assertEqual(_mw()._default_argv({"BROTHER_MODEL_CLIENT": "codex"}),
@@ -293,6 +297,358 @@ class TestCodexOutputParser(unittest.TestCase):
         not only of a fixture: codex's own field map names no cache-creation
         count, which is why a codex run cannot print a share."""
         self.assertNotIn("tokens_cache_write", _mw().CODEX_USAGE_FIELD_MAP)
+
+
+class _FakeCompleted(object):
+    """A stand-in for subprocess.CompletedProcess, for run_model tests that
+    inject their own runner rather than launch a real subprocess."""
+    def __init__(self, stdout="", stderr="", returncode=0):
+        self.stdout = stdout
+        self.stderr = stderr
+        self.returncode = returncode
+
+
+class TestFallbackModelArgv(unittest.TestCase):
+    """SR-1(b): the native fallback chain, --fallback-model, is on the real
+    Claude argv by default and can be turned off with the empty string."""
+
+    def test_default_env_appends_sonnet_haiku(self):
+        self.assertEqual(_mw()._claude_argv({}),
+                         _mw().CLAUDE_ARGV + ["--fallback-model",
+                                              "sonnet,haiku"])
+
+    def test_empty_env_value_omits_the_flag_entirely(self):
+        self.assertEqual(_mw()._claude_argv({"BROTHER_FALLBACK_MODELS": ""}),
+                         _mw().CLAUDE_ARGV)
+
+    def test_a_custom_env_value_is_used_verbatim(self):
+        self.assertEqual(
+            _mw()._claude_argv({"BROTHER_FALLBACK_MODELS": "opus"}),
+            _mw().CLAUDE_ARGV + ["--fallback-model", "opus"])
+
+    def test_the_main_model_is_dropped_from_the_chain(self):
+        """The binary refuses at startup: "Fallback model cannot be the same
+        as the main model". A sonnet main model keeps only haiku."""
+        for main in ("sonnet", "claude-sonnet-5"):
+            self.assertEqual(_mw()._claude_argv({"ANTHROPIC_MODEL": main}),
+                             _mw().CLAUDE_ARGV + ["--fallback-model", "haiku"],
+                             main)
+
+    def test_a_chain_left_empty_omits_the_flag(self):
+        self.assertEqual(
+            _mw()._claude_argv({"ANTHROPIC_MODEL": "sonnet",
+                                "BROTHER_FALLBACK_MODELS": "sonnet"}),
+            _mw().CLAUDE_ARGV)
+
+
+class TestFirstByteTimeout(unittest.TestCase):
+    """SR-1(c): the child gets CLAUDE_STREAM_FIRST_BYTE_TIMEOUT_MS=120000
+    unless the caller's own environment already names one."""
+
+    def test_default_value_set_when_the_caller_env_lacks_it(self):
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("CLAUDE_STREAM_FIRST_BYTE_TIMEOUT_MS", None)
+            seen = {}
+
+            def runner(_argv, **kwargs):
+                seen.update(kwargs)
+                return _FakeCompleted(stdout=json.dumps({"result": "hi"}))
+
+            ok, claim, _usage = _mw().run_model("prompt", runner=runner)
+            self.assertTrue(ok, claim)
+            self.assertEqual(
+                seen["env"]["CLAUDE_STREAM_FIRST_BYTE_TIMEOUT_MS"], "120000")
+
+    def test_a_preset_value_is_respected(self):
+        with mock.patch.dict(os.environ,
+                             {"CLAUDE_STREAM_FIRST_BYTE_TIMEOUT_MS": "5000"}):
+            seen = {}
+
+            def runner(_argv, **kwargs):
+                seen.update(kwargs)
+                return _FakeCompleted(stdout=json.dumps({"result": "hi"}))
+
+            ok, claim, _usage = _mw().run_model("prompt", runner=runner)
+            self.assertTrue(ok, claim)
+            self.assertEqual(
+                seen["env"]["CLAUDE_STREAM_FIRST_BYTE_TIMEOUT_MS"], "5000")
+
+
+class TheFallbackInheritsTheUnitDeadline(unittest.TestCase):
+    """BC1 (founder ruling 2026-09-11, a shared unit deadline that fallback
+    inherits): --fallback-model runs inside the ONE claude subprocess, so the
+    same timeout=_timeout_s() bounds the main model and every fallback. No
+    second process is started for the fallback."""
+
+    def test_one_call_carries_the_fallback_flag_and_the_unit_timeout(self):
+        env = {"BROTHER_MODEL_CLIENT": "claude", "MODEL_WORKER_TIMEOUT_S": "77"}
+        with mock.patch.dict(os.environ, env):
+            for name in ("MODEL_WORKER_CMD", "BROTHER_FALLBACK_MODELS",
+                         "ANTHROPIC_MODEL"):
+                os.environ.pop(name, None)
+            calls = []
+
+            def runner(argv, **kwargs):
+                calls.append((list(argv), kwargs))
+                return _FakeCompleted(stdout=json.dumps({"result": "did it"}))
+
+            def no_second_spawn(*_a, **_k):
+                raise AssertionError("a second process was started")
+
+            mw = _mw()
+            with mock.patch.object(mw.subprocess, "run", no_second_spawn), \
+                    mock.patch.object(mw.subprocess, "Popen", no_second_spawn):
+                ok, claim, _usage = mw.run_model("prompt", runner=runner)
+            self.assertTrue(ok, claim)
+            self.assertEqual(len(calls), 1, calls)
+            argv, kwargs = calls[0]
+            self.assertIn("--fallback-model", argv)
+            self.assertEqual(argv[argv.index("--fallback-model") + 1],
+                             "sonnet,haiku")
+            self.assertEqual(kwargs["timeout"], 77)
+            self.assertEqual(kwargs["timeout"], mw._timeout_s())
+
+
+class TestClassifyFailure(unittest.TestCase):
+    """SR-1(d): classify_failure() reads exactly one class from what the
+    call produced, never invents a class from nothing."""
+
+    def test_timed_out_is_timeout_even_with_no_text(self):
+        self.assertEqual(_mw().classify_failure(timed_out=True), "timeout")
+
+    def test_empty_is_empty(self):
+        self.assertEqual(_mw().classify_failure(empty=True), "empty")
+
+    def test_timeout_wins_over_empty(self):
+        self.assertEqual(
+            _mw().classify_failure(timed_out=True, empty=True), "timeout")
+
+    def test_the_real_session_limit_message_classes_rate_limit(self):
+        """Observed verbatim on 2026-09-11 in a dead subagent's error: "You've
+        hit your session limit · resets 12:50am (Asia/Tokyo) (error type
+        rate_limit, HTTP 429, ...)". The binary also carries "You've hit your
+        limit" and the vendor type rate_limit_error."""
+        for text in ("You've hit your session limit · resets 12:50am (Asia/Tokyo)"
+                     " (error type rate_limit, HTTP 429)",
+                     "You've hit your limit", "rate_limit_error"):
+            self.assertEqual(_mw().classify_failure(text=text), "rate_limit",
+                             text)
+
+    def test_every_limit_phrase_the_installed_cli_carries_classes_rate_limit(self):
+        """PASS3 backend review F1, 2026-09-11: `strings` over the installed
+        claude binary shows these three besides "You've hit your limit"; each
+        read as "other", so the breaker never paused on them."""
+        for text in ("You've hit your fast limit",
+                     "You've hit your monthly limit",
+                     "You've hit your monthly spend limit · resets Oct 1"):
+            self.assertEqual(_mw().classify_failure(text=text), "rate_limit",
+                             text)
+
+    def test_a_bare_number_in_an_answer_is_not_a_vendor_error(self):
+        """A count, a line number, a hash or a path must never read as a
+        rate limit or an overload: only an HTTP status or a vendor error
+        type does."""
+        for text in ("processed 429 files", "see line 529 of the log",
+                     "commit 3f429ab0e failed", "sha256 e529c4290d1f",
+                     "/tmp/run-4290/out.log"):
+            self.assertEqual(_mw().classify_failure(text=text), "other", text)
+
+    def test_429_text_classes_rate_limit(self):
+        self.assertEqual(
+            _mw().classify_failure(text="HTTP 429 too many requests"),
+            "rate_limit")
+
+    def test_usage_limit_text_classes_rate_limit(self):
+        self.assertEqual(
+            _mw().classify_failure(text="you have hit your usage limit"),
+            "rate_limit")
+
+    def test_overloaded_text_classes_overloaded(self):
+        self.assertEqual(
+            _mw().classify_failure(text="the model is overloaded right now"),
+            "overloaded")
+
+    def test_529_text_classes_overloaded(self):
+        for text in ("HTTP 529", "overloaded_error"):
+            self.assertEqual(_mw().classify_failure(text=text), "overloaded",
+                             text)
+
+    def test_unrecognised_text_classes_other(self):
+        self.assertEqual(_mw().classify_failure(text="a disk fell over"),
+                         "other")
+
+
+class TestRunModelEmptyIsFailure(unittest.TestCase):
+    """SR-1(a): a model that answered with nothing is a failure, never a
+    claim, for both vendors."""
+
+    def test_empty_claude_stdout_is_a_failure_classed_empty(self):
+        with mock.patch.dict(os.environ, {"BROTHER_MODEL_CLIENT": "claude"}):
+            ok, reason, usage = _mw().run_model(
+                "prompt", runner=lambda *_a, **_k: _FakeCompleted(stdout=""))
+        self.assertFalse(ok)
+        self.assertIn("failure_class=empty", reason)
+        self.assertIsNone(usage)
+
+    def test_is_error_true_is_a_failure(self):
+        with mock.patch.dict(os.environ, {"BROTHER_MODEL_CLIENT": "claude"}):
+            out = json.dumps({"is_error": True,
+                              "result": "You've hit your session limit"})
+            ok, reason, usage = _mw().run_model(
+                "prompt",
+                runner=lambda *_a, **_k: _FakeCompleted(stdout=out))
+        self.assertFalse(ok)
+        self.assertIn("failure_class=rate_limit", reason)
+        self.assertIsNone(usage)
+
+    def test_a_blank_result_is_a_failure(self):
+        with mock.patch.dict(os.environ, {"BROTHER_MODEL_CLIENT": "claude"}):
+            out = json.dumps({"result": "   "})
+            ok, reason, usage = _mw().run_model(
+                "prompt",
+                runner=lambda *_a, **_k: _FakeCompleted(stdout=out))
+        self.assertFalse(ok)
+        self.assertIn("failure_class=empty", reason)
+        self.assertIsNone(usage)
+
+    def test_empty_codex_stdout_is_a_failure_classed_empty(self):
+        with mock.patch.dict(os.environ, {"BROTHER_MODEL_CLIENT": "codex"}):
+            ok, reason, usage = _mw().run_model(
+                "prompt", runner=lambda *_a, **_k: _FakeCompleted(stdout=""))
+        self.assertFalse(ok)
+        self.assertIn("failure_class=empty", reason)
+        self.assertIsNone(usage)
+
+    def _real(self, out):
+        with mock.patch.dict(os.environ, {"BROTHER_MODEL_CLIENT": "claude"}):
+            os.environ.pop("MODEL_WORKER_CMD", None)
+            return _mw().run_model(
+                "prompt", runner=lambda *_a, **_k: _FakeCompleted(stdout=out))
+
+    def test_the_review_shapes_are_failures_from_the_real_client(self):
+        """The 2026-09-11 review's C1 and M2 inputs, each with its class:
+        no usable answer is empty, a foreign shape is other."""
+        cases = [(json.dumps({"ok": True, "reason": "x"}), "other"),
+                 (json.dumps({"is_error": False}), "empty"),
+                 (json.dumps({"result": None}), "empty"),
+                 ("plain text on stdout, exit 0", "other")]
+        for out, cls in cases:
+            ok, reason, usage = self._real(out)
+            self.assertFalse(ok, out)
+            self.assertIn("failure_class=%s" % cls, reason, out)
+            self.assertIsNone(usage)
+
+    def test_a_normal_non_empty_claude_answer_is_still_a_success(self):
+        """The regression check: none of the above turned a real answer
+        into a failure."""
+        with mock.patch.dict(os.environ, {"BROTHER_MODEL_CLIENT": "claude"}):
+            out = json.dumps({"result": "the real answer",
+                              "usage": {"input_tokens": 1,
+                                       "output_tokens": 2}})
+            ok, claim, usage = _mw().run_model(
+                "prompt",
+                runner=lambda *_a, **_k: _FakeCompleted(stdout=out))
+        self.assertTrue(ok, claim)
+        self.assertEqual(claim, "the real answer")
+        self.assertEqual(usage, {"tokens_in": 1, "tokens_out": 2})
+
+
+class TestRunModelForeignShapeIsFailure(unittest.TestCase):
+    """Measured live on 2026-09-11: a headless `claude -p` child answered in a
+    stop hook's shape, {"ok": true, "reason": ...}, instead of doing its work.
+    From the real claude client that is a failure classed "other", never a
+    claim. A MODEL_WORKER_CMD stub keeps the raw-text path every other suite
+    relies on."""
+
+    LIVE = {"ok": True, "reason": "Verdict quotes the actor's own transcript "
+                                  "line and self-report incidents as its evidence"}
+
+    def _run(self, out, stub=False):
+        env = {"BROTHER_MODEL_CLIENT": "claude"}
+        if stub:
+            env["MODEL_WORKER_CMD"] = "any-stub"
+        with mock.patch.dict(os.environ, env):
+            if not stub:
+                os.environ.pop("MODEL_WORKER_CMD", None)
+            return _mw().run_model(
+                "prompt", runner=lambda *_a, **_k: _FakeCompleted(stdout=out))
+
+    def test_the_live_hook_shape_as_the_whole_answer_is_a_failure(self):
+        ok, reason, usage = self._run(json.dumps(self.LIVE))
+        self.assertFalse(ok, reason)
+        self.assertIn("failure_class=other", reason)
+        self.assertIsNone(usage)
+
+    def test_the_live_hook_shape_inside_result_is_a_failure(self):
+        ok, reason, _usage = self._run(json.dumps({"result": json.dumps(self.LIVE)}))
+        self.assertFalse(ok, reason)
+        self.assertIn("failure_class=other", reason)
+
+    def test_a_json_answer_that_is_not_the_hook_shape_is_still_a_claim(self):
+        out = json.dumps({"result": json.dumps({"worker_claim": "did it",
+                                                "ok": True})})
+        ok, claim, _usage = self._run(out)
+        self.assertTrue(ok, claim)
+
+    def test_a_stub_command_keeps_the_raw_text_path(self):
+        ok, claim, _usage = self._run(json.dumps(self.LIVE), stub=True)
+        self.assertTrue(ok, claim)
+
+
+class TheBreakerSeesAnAccountLimit(unittest.TestCase):
+    """SR-1 D1 and D2, end to end through the real processes: claude exits 1
+    with a long is_error envelope, model_worker prints its reason, the real
+    bm_worker_spawn.SpawningWorker keeps stderr[:400], and
+    loop_bridge.failure_class_of must still read rate_limit. On 233e2c9b1
+    the token sat after the envelope's 400 bytes and was cut, and "hit your
+    limit" classed other, so SR-4's breaker never tripped."""
+
+    #: The live shape of a claude account limit (2026-09-11), padded the way
+    #: the real envelope is by its usage and session fields.
+    ENVELOPE = {
+        "type": "result", "subtype": "success", "is_error": True,
+        "duration_ms": 412, "duration_api_ms": 0, "num_turns": 1,
+        "result": "You've hit your limit · resets 3pm (Asia/Tokyo)",
+        "stop_reason": "stop_sequence",
+        "session_id": "0f9a4c2e-7b1d-4e8a-9c3f-5d6e7f8a9b0c",
+        "total_cost_usd": 0,
+        "usage": {"input_tokens": 0, "cache_creation_input_tokens": 0,
+                  "cache_read_input_tokens": 0, "output_tokens": 0,
+                  "server_tool_use": {"web_search_requests": 0,
+                                      "web_fetch_requests": 0},
+                  "service_tier": "standard"},
+        "permission_denials": [],
+        "uuid": "3c2b1a09-8f7e-4d6c-b5a4-938271605f4e",
+    }
+
+    def test_a_long_limit_envelope_reaches_the_breaker_as_rate_limit(self):
+        tools = os.path.join(os.path.dirname(HERE), "products", "brothermode",
+                             "tools")
+        import loop_bridge  # noqa: PLC0415
+        parts, problem = loop_bridge._import_parts(tools)
+        if parts is None:
+            self.skipTest("NO-DATA: the loop engine is not in this tree: %s"
+                          % problem)
+        envelope = json.dumps(self.ENVELOPE)
+        self.assertGreater(len(envelope), 400, "the envelope must be longer "
+                           "than the spawner's cut, or this proves nothing")
+        tmp = tempfile.mkdtemp(prefix="mw-")
+        stub = write_stub(tmp, """
+            import sys
+            sys.stdin.read()
+            sys.stdout.write(%r)
+            sys.exit(1)
+        """ % envelope)
+        env = dict(os.environ)
+        env.pop("MODEL_WORKER_TIMEOUT_S", None)
+        env["MODEL_WORKER_CMD"] = "%s %s" % (shlex.quote(sys.executable),
+                                             shlex.quote(stub))
+        worker = parts["spawn"].SpawningWorker([sys.executable, WORKER],
+                                               cwd=tmp, timeout=60,
+                                               environ=env)
+        result = worker.run({"id": "U-limit", "objective": "x"})
+        self.assertEqual(loop_bridge.failure_class_of(result), "rate_limit",
+                         result.get("note"))
 
 
 class TheCodexTurnsSandbox(unittest.TestCase):

@@ -459,17 +459,42 @@ def count_hook_commands(hooks_doc):
               for group in groups)
 
 
-def compute_hook_closure(product, products_dir=PRODUCTS_DIR):
+def _mirrored_tool_names(product, runtime_dir=RUNTIME_DIR):
+    """Basenames of every .py file currently present (top level) under
+    bundle/runtime/hooks/<product>/tools/, or [] when that directory does
+    not exist yet. These are bytes the plugin ALREADY SHIPS, however they
+    first got there: a hooks.json closure walk, or (bm_project.py and three
+    siblings, F-mirror-drift 2026-09-11) a one-time hand copy at the
+    Portability release commit that the hooks.json-only closure below never
+    accounted for again. bm_project.py drifted enough to lose cmd_adopt
+    entirely while brother_run.py's own ADOPT_COMMAND still told users to
+    run "bm_project.py adopt", exit 2, because nothing regenerated or even
+    LOOKED AT this file once it fell outside the closure. Folded into
+    compute_hook_closure's own entries so every file the mirror ships is
+    regenerated and checked against its product source, not only the
+    hooks.json subset."""
+    tools_dir = os.path.join(runtime_dir, "hooks", product, "tools")
+    if not os.path.isdir(tools_dir):
+        return []
+    return sorted(f for f in os.listdir(tools_dir) if f.endswith(".py"))
+
+
+def compute_hook_closure(product, products_dir=PRODUCTS_DIR,
+                         runtime_dir=RUNTIME_DIR):
     """(tools_dir, closure) for `product`: the tool files its own
-    hooks.json commands name, plus every local module or sibling script
-    each one reaches, via the same walk compute_closure uses for
-    brother_run.py. closure is [] when the product carries no hooks.json."""
+    hooks.json commands name, UNION every .py file the mirror already ships
+    (_mirrored_tool_names, see its docstring for why), plus every local
+    module or sibling script each one reaches, via the same walk
+    compute_closure uses for brother_run.py. closure is [] when the product
+    carries no hooks.json and the mirror ships nothing yet."""
     tools_dir = os.path.join(products_dir, product, "tools")
     hooks_doc = _load_hooks_json(product, products_dir)
-    if hooks_doc is None:
+    entries = _hook_tool_names(hooks_doc) if hooks_doc is not None else []
+    entries = list(dict.fromkeys(
+        entries + _mirrored_tool_names(product, runtime_dir)))
+    if not entries:
         return tools_dir, []
-    return tools_dir, _closure_from_entries(_hook_tool_names(hooks_doc),
-                                            tools_dir)
+    return tools_dir, _closure_from_entries(entries, tools_dir)
 
 
 def _package_join_targets(path):
@@ -586,10 +611,12 @@ def merged_hooks_doc(products=HOOK_PRODUCTS, products_dir=PRODUCTS_DIR):
     return {"hooks": merged}
 
 
-def _hooks_manifest_bytes(products=HOOK_PRODUCTS, products_dir=PRODUCTS_DIR):
+def _hooks_manifest_bytes(products=HOOK_PRODUCTS, products_dir=PRODUCTS_DIR,
+                          runtime_dir=RUNTIME_DIR):
     files = []
     for product in products:
-        tools_dir, closure = compute_hook_closure(product, products_dir)
+        tools_dir, closure = compute_hook_closure(product, products_dir,
+                                                  runtime_dir)
         for name in closure:
             data = _read_bytes(os.path.join(tools_dir, name))
             files.append({"path": "%s/tools/%s" % (product, name),
@@ -623,7 +650,8 @@ def generate_hooks(products=HOOK_PRODUCTS, products_dir=PRODUCTS_DIR,
     changed = []
     hook_counts = {}
     for product in products:
-        tools_dir, closure = compute_hook_closure(product, products_dir)
+        tools_dir, closure = compute_hook_closure(product, products_dir,
+                                                  runtime_dir)
         doc = _load_hooks_json(product, products_dir)
         hook_counts[product] = count_hook_commands(doc) if doc else 0
         for name in closure:
@@ -641,7 +669,8 @@ def generate_hooks(products=HOOK_PRODUCTS, products_dir=PRODUCTS_DIR,
                 changed.append("runtime/hooks/%s/%s" % (product, tail))
     manifest_path = os.path.join(runtime_dir, "hooks", HOOKS_MANIFEST_NAME)
     if _write_if_changed(manifest_path,
-                         _hooks_manifest_bytes(products, products_dir)):
+                         _hooks_manifest_bytes(products, products_dir,
+                                               runtime_dir)):
         changed.append("runtime/hooks/" + HOOKS_MANIFEST_NAME)
     bundle_dir = os.path.dirname(runtime_dir)
     hooks_json_path = os.path.join(bundle_dir, "hooks", HOOKS_JSON_NAME)
@@ -658,7 +687,8 @@ def check_hooks(products=HOOK_PRODUCTS, products_dir=PRODUCTS_DIR,
     writes anything."""
     problems = []
     for product in products:
-        tools_dir, closure = compute_hook_closure(product, products_dir)
+        tools_dir, closure = compute_hook_closure(product, products_dir,
+                                                  runtime_dir)
         for name in closure:
             hook_src = os.path.join(tools_dir, name)
             dst = os.path.join(runtime_dir, "hooks", product, "tools", name)
@@ -669,6 +699,18 @@ def check_hooks(products=HOOK_PRODUCTS, products_dir=PRODUCTS_DIR,
                 problems.append("runtime/hooks/%s/tools/%s: bundle/runtime "
                                 "copy does not match its products/ source"
                                 % (product, name))
+        # A file the mirror already ships but whose products/ source has
+        # since been deleted entirely (never in `closure`, because
+        # _closure_from_entries silently drops a name that is not among the
+        # real files it can walk): the ultimate drift, since it cannot be
+        # regenerated from any source at all. F-mirror-drift, 2026-09-11.
+        for name in _mirrored_tool_names(product, runtime_dir):
+            if name not in closure and not os.path.isfile(
+                    os.path.join(tools_dir, name)):
+                problems.append("runtime/hooks/%s/tools/%s: ships in "
+                                "bundle/runtime but products/%s/tools/%s no "
+                                "longer exists" % (product, name, product,
+                                                   name))
         for tail in compute_hook_package_files(product, tools_dir, closure,
                                                products_dir):
             pkg_src = os.path.join(os.path.dirname(tools_dir),
@@ -685,8 +727,8 @@ def check_hooks(products=HOOK_PRODUCTS, products_dir=PRODUCTS_DIR,
     manifest_path = os.path.join(runtime_dir, "hooks", HOOKS_MANIFEST_NAME)
     if not os.path.isfile(manifest_path):
         problems.append("runtime/hooks/%s: missing" % HOOKS_MANIFEST_NAME)
-    elif _read_bytes(manifest_path) != _hooks_manifest_bytes(products,
-                                                             products_dir):
+    elif _read_bytes(manifest_path) != _hooks_manifest_bytes(
+            products, products_dir, runtime_dir):
         problems.append("runtime/hooks/%s: stale, does not match a fresh "
                         "generation" % HOOKS_MANIFEST_NAME)
     bundle_dir = os.path.dirname(runtime_dir)

@@ -61,7 +61,7 @@ SCRIPT = os.path.join(HERE, "repeat_control.py")
 #: hook suite: scripts/real_logs.py.
 def setUpModule():
     global _REAL_LOGS_BEFORE
-    _REAL_LOGS_BEFORE = real_logs.snapshot()
+    _REAL_LOGS_BEFORE = real_logs.snapshot_for_tests()
 
 
 def tearDownModule():

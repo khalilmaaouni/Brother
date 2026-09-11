@@ -101,6 +101,7 @@ import glob
 import json
 import os
 import re
+import shlex
 import signal
 import subprocess
 import sys
@@ -234,10 +235,22 @@ def fresh_repo():
 
 
 def run_env(artifact, decomposer, worker, extra=None):
+    """`artifact` is None for a direct run of this checkout's own
+    scripts/brother_run.py (REPAIR C4: the seven-boundary scenario below
+    reuses this instead of carrying a second, near-identical env builder),
+    or an install_artifact() dict for every scenario that drives the
+    installed launcher, which is when BROTHER_RUNTIME_ROOT applies."""
     env = dict(os.environ)
-    env["BROTHER_RUNTIME_ROOT"] = artifact["runtime_root"]
-    env["DOOR_MODEL_CMD"] = "%s %s" % (sys.executable, decomposer)
-    env["MODEL_WORKER_CMD"] = "%s %s" % (sys.executable, worker)
+    if artifact:
+        env["BROTHER_RUNTIME_ROOT"] = artifact["runtime_root"]
+    env["DOOR_MODEL_CMD"] = "%s %s" % (shlex.quote(sys.executable),
+                                       shlex.quote(decomposer))
+    env["MODEL_WORKER_CMD"] = "%s %s" % (shlex.quote(sys.executable),
+                                         shlex.quote(worker))
+    # M-6: the dedicated marker fault_barrier.wait()'s gate 2 requires, set
+    # HERE, the one place this module builds every scenario's environment,
+    # so every fault-lab run carries it and no production path ever could.
+    env["BROTHER_FAULT_LAB"] = "1"
     if extra:
         env.update(extra)
     return env
@@ -864,6 +877,279 @@ SCENARIOS = {
     "ds-leakage": scenario_ds_leakage,
     "ds-seed": scenario_ds_seed,
 }
+
+
+# ---------------------------------------------------------------------------
+# CONT-0: SEVEN LIFECYCLE BOUNDARIES, DRIVEN DIRECTLY. Unlike the six
+# scenarios above, these never go through `claude plugin install`
+# (install_artifact()): that path needs a real launcher and the network,
+# neither available in this sandbox, and the seven-boundary brief names this
+# route instead. scripts/brother_run.py is driven directly as a subprocess,
+# exactly as scripts/test_brother_run.py and scripts/test_crash_resume.py
+# already do. This file's own law (test_fault_lab.py's AST check) still
+# holds: nothing below IMPORTS brother_run, claim_store, loop_bridge or
+# integrate. It only sets environment variables those modules read
+# (BROTHER_FAULT_BARRIER and its two sentinel paths, a product-code seam
+# gated exactly like the stub-worker barriers above: dormant unless a test
+# names it) and reads files and CLI output, same as every scenario above.
+# ---------------------------------------------------------------------------
+
+#: after_receipt_before_acceptance lives entirely inside
+#: scripts/brother_run.py's own main() (receipt_door.receipt_record,
+#: _write_receipt, the acceptance screen): a file this unit does not own and
+#: must not edit. No barrier seam exists there, so this boundary is NO-DATA
+#: by construction, honestly, never simulated and called PASS.
+BOUNDARIES = ("before_claim", "after_claim_before_edit",
+             "after_edit_before_check", "after_check_before_integration",
+             "during_integration", "after_integration_before_receipt",
+             "after_receipt_before_acceptance")
+
+UNREACHABLE_BOUNDARIES = {
+    "after_receipt_before_acceptance":
+        "lives entirely inside scripts/brother_run.py's own main(), which "
+        "this unit does not own and must not edit; no barrier seam exists "
+        "there",
+}
+
+_BOUNDARY_ROWS = ("lost_work_explainable", "settled_not_redone",
+                  "no_live_orphan_claim", "no_duplicated_receipt",
+                  "canonical_not_dirty", "one_next_action")
+
+_COUNTING_WORKER = """
+import os
+counter_path = os.environ["FAULT_LAB_COUNTER"]
+with open(counter_path, "a", encoding="utf-8") as fh:
+    fh.write(str(os.getpid()) + "\\n")
+with open("done.txt", "w", encoding="utf-8") as fh:
+    fh.write("done\\n")
+print("worker invocation wrote done.txt")
+"""
+
+
+#: REPAIR C4: this checkout's own scripts/brother_run.py, run directly
+#: rather than through an installed artifact. Wrapped as a fake "artifact"
+#: dict so the seven-boundary scenario below can reuse launcher_cmd() and
+#: run_env(artifact=None, ...) instead of carrying second, near-identical
+#: copies of both. Mirrors test_brother_run.py's own BROTHER_RUN constant.
+_DIRECT_ARTIFACT = {"launcher": os.path.join(ROOT, "scripts", "brother_run.py")}
+
+
+def _worker_invocations(counter_path):
+    if not os.path.isfile(counter_path):
+        return 0
+    with open(counter_path, encoding="utf-8") as fh:
+        return len([l for l in fh.read().splitlines() if l.strip()])
+
+
+def _merge_message_count(repo, unit_id):
+    """How many commits reachable from HEAD carry the exact integration
+    merge message integrate.py's own _merge_message() writes ("Brother
+    integrated <unit_id> from "), read from the commit MESSAGE (git log
+    --grep), never imported, per this file's law.
+
+    REPAIR C5 (2026-09-09 adversarial review of lane/continuity, round 2):
+    replaces _merge_commit_count, which resolved the lane branch first
+    (`git rev-parse lane_branch`) and returned 0 the moment that lookup
+    failed. integrate.cleanup_lane() deletes the lane branch right after a
+    round is decided, whatever the verdict, so on every run that actually
+    finished and cleaned up after itself the old function always answered
+    0 for merges_after, which is exactly the run this matrix exists to
+    check. The merge COMMIT itself survives branch deletion forever once
+    it is reachable from HEAD; only the branch pointer goes away, so
+    counting by the commit message instead of the branch tip is unaffected
+    by cleanup."""
+    out = _sh(["git", "log", "--grep",
+              "Brother integrated %s from" % unit_id, "--format=%H"],
+             cwd=repo)
+    if out.returncode != 0:
+        return 0
+    return len([l for l in (out.stdout or "").splitlines() if l.strip()])
+
+
+def _receipt_file_count(runs_root):
+    """Every receipt.json actually present on disk under any run directory
+    inside `runs_root` (brother_run.py's RECEIPT_DIRNAME/RECEIPT_FILENAME,
+    "receipt"/"receipt.json", mirrored here as literals and never imported,
+    the same way _ENGINE_JSON_FILES above already mirrors that module's
+    bookkeeping names): a direct count of the one artifact E81 says a run
+    leaves behind, never an inference from a branch cleanup_lane may since
+    have deleted (REPAIR C5: the old no_duplicated_receipt read merge
+    commits off the lane branch, which the same cleanup made vacuous; see
+    _merge_message_count's own docstring)."""
+    return len(glob.glob(os.path.join(runs_root, "docs", "plan", "runs",
+                                      "*", "receipt", "receipt.json")))
+
+
+#: The exact "continue this run" line brother_run.py prints (only when
+#: exit_code != 0, only once, only for the run it just ran), mirrored as a
+#: literal substring rather than imported, per this file's law.
+_NEXT_ACTION_MARKER = "this run is not finished. Continue it with:"
+
+#: The exact "brother_run: exit N: reason" verdict line brother_run.py's
+#: main() prints as its own last words on every path, mirrored here as a
+#: regex rather than imported.
+_VERDICT_LINE_RE = re.compile(r"^brother_run: exit \d+:.*$", re.M)
+
+
+def scenario_boundary(name, timeout=30):
+    """Real SIGKILL of the real scripts/brother_run.py process at boundary
+    `name`, then a bare second invocation (same outcome text, no --resume,
+    no --continue), asserting the six CONT-0 rows from files and CLI output
+    alone: lost work explainable, settled work not redone, no live orphan
+    claim, no duplicated receipt, canonical tree not silently dirty, exactly
+    one next action.
+
+    REPAIR C5 (2026-09-09 adversarial review of lane/continuity, round 2)
+    rewrote every predicate below after a second reviewer drove this matrix
+    by command and found it printing six PASS while the resumed process at
+    during_integration actually exited 2 and re-ran a unit whose own check
+    had already gone green before the kill. The old code never once read
+    the resumed process's own exit code. Now it does, and a boundary is RED
+    when ANY of: the resume exits nonzero; the stub worker's invocation
+    count for a unit already stamped done (claims.json state=="done" before
+    the resume) increases; or more than one receipt.json exists on disk for
+    the run. one_next_action now parses the actual "Continue it with:" line
+    the product prints (exactly one when the resume did not finish, exactly
+    zero when it did), rather than sharing lost_work_explainable's own
+    one_work_set boolean. settled_not_redone is never hardcoded True: before
+    any merge (read by commit message, not branch tip, so cleanup_lane
+    deleting the branch cannot zero it out) it counts worker invocations
+    across the kill and the resume together and requires exactly one for
+    the unit; a merge already on canonical before the kill instead requires
+    the message-counted merge total not to grow past what it already was."""
+    if name in UNREACHABLE_BOUNDARIES:
+        return _result("boundary:%s" % name, "the six CONT-0 rows", False,
+                       "%s: %s" % (NODATA, UNREACHABLE_BOUNDARIES[name]))
+
+    workdir = tempfile.mkdtemp(prefix="fault-lab-boundary-%s-" % name)
+    repo = fresh_repo()
+    runs_root = tempfile.mkdtemp(dir=workdir, prefix="runs-")
+    started = os.path.join(workdir, "started.marker")
+    release = os.path.join(workdir, "release.barrier")  # never created
+    counter = os.path.join(workdir, "worker_invocations.txt")
+
+    decomposer = _write(os.path.join(workdir, "decomposer.py"),
+                        _one_unit_decomposer("B1"))
+    worker = _write(os.path.join(workdir, "worker_count.py"), _COUNTING_WORKER)
+    outcome = "prove the %s lifecycle boundary" % name
+    env1 = run_env(None, decomposer, worker,
+                  extra={"BROTHER_FAULT_BARRIER": name,
+                         "BROTHER_FAULT_BARRIER_STARTED": started,
+                         "BROTHER_FAULT_BARRIER_RELEASE": release,
+                         "FAULT_LAB_COUNTER": counter})
+    p1 = subprocess.Popen(
+        launcher_cmd(_DIRECT_ARTIFACT, outcome, repo, runs_root),
+        env=env1, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, start_new_session=True)
+
+    if not _poll(lambda: os.path.exists(started), timeout=timeout):
+        _kill_group(p1)
+        out1 = ""
+        try:
+            out1, _ = p1.communicate(timeout=5)
+        except Exception:  # sbe: allow-silent best-effort drain of a process already being torn down
+            pass
+        return _result("boundary:%s" % name, "the six CONT-0 rows", False,
+                       "%s: the process never reached the %s barrier "
+                       "within %ss; this run's own output: %s"
+                       % (NODATA, name, timeout, (out1 or "")[-500:]))
+
+    invocations_before = _worker_invocations(counter)
+    merges_before = _merge_message_count(repo, "B1")
+    run_dirs_before = _run_dirs(runs_root)
+    claims_before = ({} if not run_dirs_before or not os.path.isfile(
+                     os.path.join(run_dirs_before[0], "claims.json"))
+                    else _read_json(os.path.join(run_dirs_before[0],
+                                                 "claims.json")))
+    already_done_before_resume = claims_before.get("B1", {}).get("state") == "done"
+
+    _kill_group(p1)
+
+    # THE BARE SECOND INVOCATION: same outcome text, no barrier this time.
+    env2 = run_env(None, decomposer, worker,
+                  extra={"FAULT_LAB_COUNTER": counter})
+    p2 = _sh(launcher_cmd(_DIRECT_ARTIFACT, outcome, repo, runs_root),
+            env=env2, timeout=90)
+    out2 = (p2.stdout or "") + (p2.stderr or "")
+    resume_exit_code = p2.returncode
+    verdict_match = _VERDICT_LINE_RE.search(out2)
+    verdict_line = verdict_match.group(0).strip() if verdict_match else ""
+
+    run_dirs_after = _run_dirs(runs_root)
+    one_work_set = len(run_dirs_after) == 1
+    claims_after = (_read_json(os.path.join(run_dirs_after[0], "claims.json"))
+                    if run_dirs_after and os.path.isfile(
+                        os.path.join(run_dirs_after[0], "claims.json"))
+                    else {})
+    dirty_after = _sh(["git", "status", "--porcelain"], cwd=repo).stdout.strip()
+    merges_after = _merge_message_count(repo, "B1")
+    invocations_after = _worker_invocations(counter)
+    receipt_files_after = _receipt_file_count(runs_root)
+    next_action_lines = [l for l in out2.splitlines()
+                         if _NEXT_ACTION_MARKER in l]
+
+    lost_work_explainable = one_work_set and "B1" in out2 and bool(out2.strip())
+    # A unit whose lane had already merged into canonical before the kill
+    # (merges_before >= 1, counted by commit MESSAGE now, not by resolving
+    # a branch tip cleanup_lane may since have deleted) must never merge a
+    # SECOND time on resume: that is exactly the "settled work redone"
+    # failure. A unit that had not yet merged is judged by whether the
+    # worker itself was redone: nothing has settled for it yet, so its
+    # done_check running twice (an ordinary retry after a plain crash) is
+    # fine, but running it MORE than once total, across the killed run and
+    # the resume combined, means work already captured before the kill
+    # (a written file, a green check) was thrown away and repeated.
+    settled_not_redone = (merges_after <= merges_before if merges_before >= 1
+                          else invocations_after == 1)
+    claim_final = claims_after.get("B1", {})
+    no_live_orphan_claim = claim_final.get("state") != "claimed"
+    # REPAIR C5: receipt.json files counted directly off disk, never merge
+    # commits resolved through a branch cleanup_lane may have deleted (see
+    # _receipt_file_count's own docstring for the vacuous case this closes).
+    no_duplicated_receipt = receipt_files_after <= 1
+    canonical_not_dirty = dirty_after == ""
+    # REPAIR C5: parses the product's own "Continue it with:" line instead
+    # of reusing one_work_set. A finished resume (exit 0) should print it
+    # zero times (nothing left to continue); an unfinished one should print
+    # it exactly once (never zero, and never more than one candidate).
+    one_next_action = (len(next_action_lines) == 0 if resume_exit_code == 0
+                       else len(next_action_lines) == 1)
+
+    rows = {"lost_work_explainable": lost_work_explainable,
+           "settled_not_redone": settled_not_redone,
+           "no_live_orphan_claim": no_live_orphan_claim,
+           "no_duplicated_receipt": no_duplicated_receipt,
+           "canonical_not_dirty": canonical_not_dirty,
+           "one_next_action": one_next_action}
+
+    # REPAIR C5: the three explicit RED gates the second review named, none
+    # of which the old code ever read at all (it never looked at the
+    # resumed process's own exit code).
+    worker_reran_already_done = (already_done_before_resume
+                                 and invocations_after > invocations_before)
+    red_reasons = []
+    if resume_exit_code != 0:
+        red_reasons.append("the resume exited %d (verdict: %s)"
+                           % (resume_exit_code, verdict_line or NODATA))
+    if worker_reran_already_done:
+        red_reasons.append("B1 was already stamped done (claim state=done) "
+                           "before the resume, yet the worker ran again "
+                           "(%d -> %d invocations)"
+                           % (invocations_before, invocations_after))
+    if receipt_files_after > 1:
+        red_reasons.append("%d receipt.json files on disk, expected at "
+                           "most 1" % receipt_files_after)
+
+    ok = all(rows.values()) and not red_reasons
+    detail = ("invocations %d->%d merges(by message) %d->%d receipts=%d "
+             "already_done_before_resume=%s resume_exit=%d verdict=%r "
+             "claim_state=%s dirty=%r rows=%s red=%s"
+             % (invocations_before, invocations_after, merges_before,
+                merges_after, receipt_files_after, already_done_before_resume,
+                resume_exit_code, verdict_line, claim_final.get("state"),
+                dirty_after, rows, red_reasons))
+    return _result("boundary:%s" % name, "the six CONT-0 rows", ok, detail,
+                   "final claims: %r\nrun2 cli:\n%s" % (claims_after, out2))
 
 
 # ---------------------------------------------------------------------------

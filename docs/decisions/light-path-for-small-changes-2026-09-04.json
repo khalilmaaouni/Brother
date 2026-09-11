@@ -1,0 +1,224 @@
+{
+  "eyebrow": "Brother, 2026-09-04, lane E90: the door costs 728 times the hand route on a one-line change",
+  "title": "A light path for small changes, or an honest price",
+  "stamp": "Written 2026-09-04 by lane E90 on branch wbs/e90-light-path-decision from hub/main d3f82368, after reading the t7 gauntlet report whole and measuring the engine's own cost on a throwaway git repository with the stub decomposer and stub worker (the DOOR_MODEL_CMD and MODEL_WORKER_CMD seam scripts/test_brother_run.py already uses), three runs per configuration. No engine file was changed by this lane. Ruled A, by the delegate under the founder's 2026-09-10 order; see the decided block below.",
+  "question": "An external evaluator asked the door for a one-line edit plus a one-line test. By hand it took 0.78 seconds. Through the door it took 568.03 seconds, about 728 times, of which 147 seconds was decomposition before any unit was claimed. The proof half of the bar held: the receipt re-ran the test with the dependency reverted and showed it fails without the change. Does the door get a light single-unit path when the outcome names one file and one check, does it keep its shape and say the price out loud before the wait, or does it change nothing and let the cost block carry the overhead after the fact?",
+  "plain_summary": "Measured here, on a toy repository with the model calls stubbed out, a whole two-unit run costs the engine 2.58 seconds and a one-unit run 1.69 seconds. So of the evaluator's 568 seconds, at most about 3 were Brother's own code and roughly 565 were two headless model sessions waiting to answer. That changes what the three options are really worth. Option A skips the decomposer call for a one-file one-check outcome, which removes the measured 147 second planning leg and leaves about 421 seconds, still 540 times the hand route, and it removes the one thing the evaluator said would bring him back, because a single unit has no dependency to revert. Option B changes no code path: it puts a plain line on the front page saying the door is not for a one-line edit, and it puts the size of the wait on the intent screen before the wait starts, at the seam that already prints what earlier runs really took. Option C leaves everything alone and relies on the cost block, which is honest but arrives after the person has already waited.",
+  "auto_choose": false,
+  "criteria": [
+    {
+      "key": "honest_expectation",
+      "label": "The person knows the price before the wait, not after it",
+      "weight": 0.25,
+      "why": "the t7 LEAVE moment is watching 568 seconds pass, 150 of them in silence, and the report's own complaint is that the README gives no way to ask for a lighter path"
+    },
+    {
+      "key": "real_time_saved",
+      "label": "Seconds actually removed from a small change, measured not estimated",
+      "weight": 0.25,
+      "why": "the row's own effect line: a small obvious change no longer pays full decomposition cost"
+    },
+    {
+      "key": "proof_survives",
+      "label": "The proof half of the bar still holds after the change",
+      "weight": 0.2,
+      "why": "t7 passed the proof half: the dependency-revert re-run is the report's LOVE moment and the reason it would come back at all"
+    },
+    {
+      "key": "one_visible_brother",
+      "label": "One visible Brother: no new mode, flag or vocabulary for the person to learn",
+      "weight": 0.15,
+      "why": "docs/plan/STEERING-DIRECTIVE-2026-09-03.md Rule 1 and Rule 2: no routing tiers or modes exposed, Brother infers"
+    },
+    {
+      "key": "lands_in_days",
+      "label": "Lands inside the freeze, in hours, not weeks",
+      "weight": 0.15,
+      "why": "the row is estimated at 3 hours and the steering directive's section 5 freeze refuses new engine architecture"
+    }
+  ],
+  "options": [
+    {
+      "id": "A",
+      "name": "A light single-unit path: no decomposer call when the outcome names one file and one check",
+      "one_liner": "door.main short-circuits before ask_decomposer when the outcome resolves to exactly one file and one check, building that single unit locally and handing it to work_record's same validation, so the run pays one worker session and no planning session while the receipt keeps its shape.",
+      "flow_mermaid": "flowchart TD\n  A[outcome] --> B{names one file and one check?}\n  B -->|no| C[ask_decomposer: a model session, 147s measured in t7]\n  B -->|yes, the light path| D[single unit built locally, no model call]\n  C --> E[work_record validation]\n  D --> E\n  E --> F[claim, work, verify, integrate]\n  F --> G[receipt]\n  G --> H{one unit only?}\n  H -->|yes| I[no dependency to revert: this check proves its own change only]\n  H -->|no| J[dependency-revert re-run, the t7 LOVE moment]",
+      "pros": [
+        "Removes the one leg this lane can price exactly: 147 seconds of the evaluator's 568, about 26 percent",
+        "The seam already exists and is already tested, so nothing new is invented to reach it",
+        "A run that never asks a model to plan cannot be given a wrong plan, which removes a failure class as well as a wait",
+        "The receipt, the claim store and the integration path are untouched"
+      ],
+      "cons": [
+        "The arithmetic does not reach the bar: 568 minus 147 is about 421 seconds, roughly 540 times the 0.78 second hand route, when the bar is 1.5 times",
+        "It takes away the LOVE moment: the dependency-revert re-run exists because two units declared a dependency, and a single unit's receipt already reads that no dependency was declared and the check proves its own change only",
+        "Its trigger would not have fired on the case that prompted it: the t7 outcome names two files, notes.txt and test_notes.py",
+        "The engine cost it removes is not the cost: a whole two-unit run measured 2.58 seconds of engine time here, so the saving is entirely one avoided model call, and the worker leg it does not touch was 418.5 seconds",
+        "A new branch in door.main under an architecture freeze, with a trigger nobody has specified and a wrong-trigger failure mode that silently under-plans a change that needed planning"
+      ],
+      "scores": {
+        "honest_expectation": 5,
+        "real_time_saved": 6,
+        "proof_survives": 4,
+        "one_visible_brother": 6,
+        "lands_in_days": 5
+      },
+      "score_basis": {
+        "honest_expectation": "the wait shrinks but is still unannounced: the person sits through about seven minutes with no figure in front of them",
+        "real_time_saved": "147 seconds removed of 568 measured (t7 report, 13:10:51 to 13:13:18), leaving about 540 times the hand route",
+        "proof_survives": "the shape survives but the discrimination does not: one unit has no declared dependency, so the re-run that earned the green cannot be performed",
+        "one_visible_brother": "no flag if the trigger is inferred, but two outcomes of similar size behave differently for reasons the person cannot see",
+        "lands_in_days": "a new branch in door.main plus a local plan builder, its own tests, and an unspecified trigger; the heaviest of the three under the freeze"
+      },
+      "sources": [
+        {
+          "what": "the decomposer call every run makes, and the exact place a light path would short-circuit before it",
+          "where": "resolve_cmd, missing_reason and ask_decomposer, called from main's retry loop",
+          "found_in": "scripts/door.py"
+        },
+        {
+          "what": "the door invoked as a subprocess with the target repository as its cwd, the caller a light path would leave unchanged",
+          "where": "run_door",
+          "found_in": "scripts/brother_run.py"
+        },
+        {
+          "what": "the stub seam this lane measured through, DOOR_MODEL_CMD and MODEL_WORKER_CMD, with no network and no real model",
+          "where": "the module docstring and TwoUnitsIntegrate.setUp",
+          "found_in": "scripts/test_brother_run.py"
+        },
+        {
+          "what": "the measured run: hand 0.78s, door 568.03s, decomposition 13:10:51 to 13:13:18, workers 418.5s, and the receipt line the light path would remove",
+          "where": "the verdict, defect 2, and the LOVE moment section",
+          "found_in": "~/.claude/evidence/evad-internal-2026-09-04/t7/REPORT.md",
+          "scope": "machine"
+        }
+      ]
+    },
+    {
+      "id": "B",
+      "name": "Say the price: a not-for-small-changes line on the front page and the size of the wait on the intent screen",
+      "one_liner": "One paragraph in the README's own limits section saying plainly that a one-line edit is faster by hand and what the door charges for it, plus one sentence on the intent screen beside the line that already reports what earlier runs against this target really took, so the figure arrives before the wait rather than in the receipt after it.",
+      "flow_mermaid": "flowchart TD\n  A[outcome] --> B[intent screen]\n  B --> C[previous_runs_line: what earlier runs really took]\n  B --> D[new: a run costs minutes, a one-line edit is faster by hand]\n  C --> E{proceed?}\n  D --> E\n  E -->|no| F[the person does it by hand, 0.78s]\n  E -->|yes| G[the door runs unchanged, receipt unchanged]",
+      "pros": [
+        "The seam exists and is already measured: previous_run_durations reads the wall clock of the last three runs against this target off disk and previous_runs_line puts it in a sentence",
+        "Nothing in the engine changes, so the proof half of the bar that t7 passed is untouched",
+        "It answers the report's actual complaint, that the README gives no way to ask for a lighter path, by telling the truth in the place the reader looks first",
+        "Under an hour of work, and the README honesty check that already refuses a front page whose claims and code disagree is the only gate it must satisfy",
+        "It is reversible: a paragraph can be rewritten the day a light path is worth building"
+      ],
+      "cons": [
+        "It removes zero seconds: the 728 times ratio stands exactly as measured",
+        "A limit written on the front page is a limit a competitor quotes",
+        "It relies on a person reading a screen they have learned to skip",
+        "It concedes the small-change case rather than winning it"
+      ],
+      "scores": {
+        "honest_expectation": 9,
+        "real_time_saved": 1,
+        "proof_survives": 10,
+        "one_visible_brother": 9,
+        "lands_in_days": 9
+      },
+      "score_basis": {
+        "honest_expectation": "the figure moves from the receipt, read after the wait, to the screen shown before it, at a seam that already carries measured durations",
+        "real_time_saved": "nothing is removed, and this record says so rather than counting the honesty as time",
+        "proof_survives": "no engine path is touched at all, so the dependency-revert re-run is exactly as it was",
+        "one_visible_brother": "prose in two places, no command, no flag, no mode",
+        "lands_in_days": "a README paragraph and one sentence at an existing function, both inside the freeze"
+      },
+      "sources": [
+        {
+          "what": "the intent screen already reports the measured wall clock of the last three runs against this target, which is where a size sentence attaches",
+          "where": "previous_run_durations and previous_runs_line",
+          "found_in": "scripts/brother_run.py"
+        },
+        {
+          "what": "the limits section the front page already carries, written in the same plain register a small-change limit would join",
+          "where": "Limits you should know first",
+          "found_in": "README.md"
+        },
+        {
+          "what": "the check that refuses a README whose executable claims and the code disagree, so a limit paragraph cannot drift from the tree",
+          "where": "the readme-honesty entry in the required-fast slice",
+          "found_in": "scripts/required_fast.sh"
+        },
+        {
+          "what": "the report's own words, that the README gives no way to ask for a lighter path, and its answer of NO for small changes",
+          "where": "the LEAVE moment and the second use answer",
+          "found_in": "~/.claude/evidence/evad-internal-2026-09-04/t7/REPORT.md",
+          "scope": "machine"
+        }
+      ]
+    },
+    {
+      "id": "C",
+      "name": "Change nothing: the cost block already carries the overhead honestly",
+      "one_liner": "The delivery record already prints wall_clock_seconds, tokens in, out and cached, the harness revision and a named NO-DATA where a cache rate cannot be computed, so the overhead is already on the record and the answer is to leave the door as it is.",
+      "flow_mermaid": "flowchart TD\n  A[outcome] --> B[door decomposes]\n  B --> C[workers run]\n  C --> D[receipt with the cost block]\n  D --> E[wall_clock_seconds 567.72]\n  D --> F[tokens_cached 1329026]\n  D --> G[cache_hit_rate NO-DATA, named]\n  E --> H[the person reads the price after paying it]",
+      "pros": [
+        "Nothing can regress, because nothing moves",
+        "The cost block is already honest, including naming its own gap rather than printing a number it cannot derive",
+        "Zero hours, zero risk, and it keeps every hour for the rows that change what a delivery proves",
+        "It is the correct answer if the small-change case is not a case Brother wants"
+      ],
+      "cons": [
+        "It answers the complaint after the wait, which is precisely the LEAVE moment the report names",
+        "A reader who never reaches the receipt never meets the honesty",
+        "It leaves a rival's 728 times advantage unanswered and unmentioned, which reads as not knowing rather than as choosing",
+        "The cost block's own cache rate is NO-DATA on exactly this run shape, so the most striking number, 1.33 million cached tokens against 30 uncached, is printed without being turned into anything"
+      ],
+      "scores": {
+        "honest_expectation": 5,
+        "real_time_saved": 1,
+        "proof_survives": 10,
+        "one_visible_brother": 10,
+        "lands_in_days": 10
+      },
+      "score_basis": {
+        "honest_expectation": "honest, but after the fact: the cost block is read once the 568 seconds are already spent",
+        "real_time_saved": "nothing is removed",
+        "proof_survives": "nothing is touched",
+        "one_visible_brother": "the door is exactly what it is today",
+        "lands_in_days": "no work at all"
+      },
+      "sources": [
+        {
+          "what": "the cost block every delivery record carries: tokens, wall clock, harness revision, and a named NO-DATA where a rate cannot be derived",
+          "where": "build_cost_block",
+          "found_in": "scripts/brother_run.py"
+        },
+        {
+          "what": "the receipt the cost block is printed into, and the per-file checks a reader reads beside it",
+          "where": "receipt_record and per_file_checks",
+          "found_in": "scripts/receipt_door.py"
+        },
+        {
+          "what": "the cost block as the evaluator actually read it, including the cache rate NO-DATA and its stated reason",
+          "where": "defect 4",
+          "found_in": "~/.claude/evidence/evad-internal-2026-09-04/t7/REPORT.md",
+          "scope": "machine"
+        }
+      ]
+    }
+  ],
+  "recommendation": "B",
+  "recommendation_why": "Because of what the measurement says the overhead actually is. On a throwaway repository with both model calls stubbed, a full two-unit run cost the engine a median 2.58 seconds and a one-unit run 1.69 seconds, both exit 0, three runs each. So of the evaluator's 568.03 seconds, at most about 3 were Brother's own code and roughly 565 were two headless model sessions. A light path therefore cannot buy engine time, because there is none to buy; it can only remove a model call. Removing the planning call buys the 147 seconds t7 measured and leaves about 421, roughly 540 times the hand route against a bar of 1.5 times, so option A shortens the wait without ever approaching the target, and it does so by deleting the dependency-revert re-run that was the single reason the evaluator said he would come back. The worker leg it cannot touch was 418.5 seconds for two units that ran concurrently, and the report gives no per-unit worker duration, so how much of that a single unit would still cost is NO-DATA. Given that, the useful move is the one that costs nothing and fixes the actual complaint: say before the wait what the wait is, on the front page and on the screen that already reports what earlier runs really took. B keeps the proof half that passed, concedes the half that cannot be won today, and leaves A buildable the moment the missing measurement makes it worth building.",
+  "flip": "Flip to A if a single headless worker session for one trivial unit is measured at under about 60 seconds, which nobody has measured (the t7 report gives 418.5 seconds for two concurrent sessions and nothing per unit). At that figure the 147 second planning leg becomes the majority of the wait, so removing it changes the experience rather than trimming it, and the LOVE moment can be kept by restricting the light path to outcomes that genuinely have no second unit to depend on. Flip to C if the founder decides the small-change case is not one Brother wants at all, in which case a limit on the front page is an apology for a case that was never in scope and the cost block is enough.",
+  "ruling": "A. Chosen by the delegate under the founder's order of 2026-09-10 (\"fable make the best decision instead of me and close this seamlessly for tomorrow's cut\"). The shipped tree already runs option A: FAST-0 (scripts/brother_run.py, fast_route_eligibility, called unconditionally at lines 5171 and 5179-5180 whenever no --plan is given and the run is not a resume) skips the decomposer session for an outcome that already names an existing file and an existing check in the narrow shape it recognizes, matching option A's own description. Option B's mechanism (the price paragraph, build_price_block) was also built and also ships, additively, but does not replace the engine change option A describes. See the decided block below for the full evidence and the flip condition.",
+  "decided": {
+    "choice": "A",
+    "choice_name": "A light single-unit path: no decomposer call when the outcome names one file and one check",
+    "by": "Fable session fable-cc2ea944, under the founder delegation of 2026-09-10",
+    "at": "2026-09-10 23:35 JST",
+    "words": "fable make the best decision instead of me and close this seamlessly for tomorrow's cut",
+    "his_words": "fable make the best decision instead of me and close this seamlessly for tomorrow's cut",
+    "note": "The shipped tree carries two disagreeing in-code claims about this record (see evidence): one comment says this record's ruling is still PENDING, a second says the founder ruled B. Neither was true until now. What is actually live and unconditional is FAST-0, which is option A's mechanism: no decomposer call when the outcome already names an existing file and an existing check in the narrow shape Brother recognizes. Option B's mechanism (the price paragraph, build_price_block) was also built and also ships, on the intent screen, but it is a second, additive feature and not what replaced the engine path -- FAST-0 is. This ruling records what the engine actually does today, decided under the founder's 2026-09-10 delegation because nobody had gone back and closed this record while the code moved ahead of it.",
+    "evidence": [
+      "scripts/brother_run.py:500-503 (comment on the FAST-0 route itself): \"FAST-0 (night run 2026-09-09, CONSOLIDATED): a deterministic, no-model-call route for an outcome that already names its own file(s) and its own check -- option A of docs/decisions/light-path-for-small-changes-2026-09-04.json, whose ruling is still PENDING.\"",
+      "scripts/brother_run.py:869-870 (a second, disagreeing comment on the price block built alongside FAST-0): \"The founder's ruling on docs/decisions/light-path-for-small-changes-2026-09-04.json was option B, 'say the price before the run': no engine path changes...\" -- this claim was unverified in the tree; no other decision record supersedes this one by name, and this record's own ruling field read PENDING until this edit.",
+      "scripts/brother_run.py:5171,5179-5180: fast_route_eligibility(args.outcome, cwd) is called whenever args.plan is None and the run is not a resume -- no flag and no environment variable gates it, so the route matching option A's own description is live by default.",
+      "a four-case driven run (docs, code, docs-eligible, code-eligible) read \"verdict\": \"PASS\" at exit 0 in all four, with \"planner_sessions\": 1 for the two ordinary cases (docs, code) and \"planner_sessions\": 0 for the two cases shaped to qualify (docs-eligible, code-eligible), which was direct, on-this-machine proof that option A's mechanism engaged automatically, with no flag, and skipped the planning model session entirely. CDX-6 (Codex review of f24b7bb3): the raw output this read from, U4-tiny-task-cost.txt, was never carried into this checkout, so a stranger cannot re-open those exact lines; this bullet records what one run showed and is not independently reproducible from the shipped tree alone."
+    ],
+    "flip": "a measured run where the route engages on an outcome outside its stated predicate, or fails to engage inside it"
+  }
+}

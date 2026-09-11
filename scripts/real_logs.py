@@ -63,7 +63,9 @@ Proving command: python3 scripts/test_real_logs.py
 import json
 import os
 import pathlib
+import shutil
 import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
@@ -119,7 +121,7 @@ def _dir_stat(path):
             fp = os.path.join(root, name)
             try:
                 st = os.stat(fp)
-            except OSError:
+            except OSError:  # sbe: allow-silent a log removed during this best-effort inventory cannot contribute a stable size or timestamp
                 continue
             total += st.st_size
             count += 1
@@ -148,8 +150,49 @@ def snapshot():
     return {name: _snapshot_one(resolver()) for name, resolver in REAL_LOGS.items()}
 
 
-#: Alias read more naturally from a test's setUpModule.
-snapshot_for_tests = snapshot
+#: The env var each decisive log's writer reads before its default path.
+SANDBOX_ENV = {"hook_outcomes": "BM_HOOK_OUTCOMES",
+               "attempt_ledger": "ATTEMPT_LEDGER"}
+
+
+def snapshot_for_tests():
+    """snapshot(), then point every SANDBOX_ENV var at a private temp dir
+    for the rest of the test module. Measured 2026-09-11: the INSTALLED
+    hooks of every live session append to hook-outcomes.jsonl and
+    attempts.jsonl on every tool call (+1834 bytes in 20 seconds with no
+    test running), so the real files' growth cannot say who wrote it. Every
+    writer resolves its env var first and every suite's subprocess env
+    copies os.environ, so a test that forgot its own redirect now writes
+    into the sandbox, which nothing else on the machine knows about, and
+    assert_unchanged() fails on the sandbox instead of the real file.
+    ponytail: a path bound BEFORE setUpModule (an in-process module
+    imported at the top of a test file, or a child given a scratch env
+    with the real HOME) bypasses the sandbox; move that import into the
+    test, or pass the child dict(os.environ)."""
+    before = snapshot()
+    box = tempfile.mkdtemp(prefix="real-logs-sandbox-")
+    saved = {var: os.environ.get(var) for var in SANDBOX_ENV.values()}
+    for name, var in SANDBOX_ENV.items():
+        os.environ[var] = os.path.join(box, name + ".jsonl")
+    before["_sandbox"] = {"dir": box, "saved_env": saved}
+    return before
+
+
+def _release_sandbox(box):
+    """Restore the env snapshot_for_tests() replaced; return [(name, path,
+    size)] for every sandbox log a writer created, then delete the sandbox."""
+    for var, value in box["saved_env"].items():
+        if value is None:
+            os.environ.pop(var, None)
+        else:
+            os.environ[var] = value
+    written = []
+    for name in SANDBOX_ENV:
+        path = os.path.join(box["dir"], name + ".jsonl")
+        if os.path.exists(path):
+            written.append((name, path, os.path.getsize(path)))
+    shutil.rmtree(box["dir"], ignore_errors=True)
+    return written
 
 
 def compare(before, after=None):
@@ -198,7 +241,23 @@ def assert_unchanged(before, context=""):
     growth confined to SHARED_BY_LIVE_SESSIONS (repeat_guard_state) is every
     live session's hook writing to a directory this test never touched, so
     it never fails a suite. Call from a test module's tearDownModule,
-    paired with snapshot_for_tests() in setUpModule."""
+    paired with snapshot_for_tests() in setUpModule.
+
+    A `before` from snapshot_for_tests() is judged on its sandbox instead:
+    any sandbox log that exists is a write the module made without
+    redirecting itself, and fails; the real files' growth is every live
+    session's hook and is not this module's verdict."""
+    box = before.get("_sandbox")
+    if box:
+        written = _release_sandbox(box)
+        if written:
+            lines = ["%s wrote a real machine log's default path (caught in "
+                     "the sandbox, not the real file):" % (context or "this test run")]
+            for name, path, size in written:
+                lines.append("  %s (%s): %d bytes; the test did not redirect %s"
+                             % (name, path, size, SANDBOX_ENV[name]))
+            raise AssertionError("\n".join(lines))
+        return
     verdict, detail = compare(before)
     if verdict != "FAIL":
         return

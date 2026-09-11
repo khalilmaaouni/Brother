@@ -349,11 +349,13 @@ the answer is REJECT MATCH.
 
 15. TM系(有効日の先後)における R1 か R2 か NO-DATA か。この判定は境界規則1
     から14のいずれにも属さず、TM系のみが用いる語彙(R1、R2、NO-DATA)に答える
-    三つの規則で行う。判定は入力の as_of(設問が問う時点)と
-    candidate_effective_date(後継レコードが効力を持つ日)の先後関係のみで
-    決まる。allowed_answers に "R1" が含まれる場合に限り作動し、track の値
-    では作動しない: U1からU4のTM風の設問は決定語彙(KEEP SEPARATE など)で
-    答えるため、この三規則の対象外のまま既存のはしごに届く。
+    四つの規則で行う。判定は入力の as_of(設問が問う時点)と
+    candidate_effective_date(後継レコードが効力を持つ日)の先後関係、および
+    (lifecycle が closed のとき)as_of と prior_valid_to(先行レコード自身
+    の閉鎖日)の先後関係で決まる。allowed_answers に "R1" が含まれる場合に
+    限り作動し、track の値では作動しない: U1からU4のTM風の設問は決定語彙
+    (KEEP SEPARATE など)で答えるため、この四規則の対象外のまま既存のはし
+    ごに届く。
     ・temporal_at_or_after_successor_is_r2: as_of が candidate_effective_date
       以後であれば R2(後継レコードが有効)。
     ・temporal_before_successor_is_r1: as_of が candidate_effective_date より
@@ -363,19 +365,30 @@ the answer is REJECT MATCH.
       自身の有効終了日)が無い場合は NO-DATA。閉鎖から後継開始までの休止
       期間(空白)が無いとは言い切れないため、推測せず正直に NO-DATA と
       答える。
+    ・temporal_before_closure_is_r1(第12回で追加): as_of が
+      candidate_effective_date より前で、lifecycle が closed であり、かつ
+      入力に prior_valid_to があってそれが as_of より後の場合は R1。
+      lifecycle=closed はレコードの現在の状態を述べるだけで、as_of 時点の
+      状態ではない。閉鎖日(prior_valid_to)が as_of より後ということは、
+      as_of の時点ではまだ閉鎖していなかったということなので、先行レコー
+      ドがなお有効。prior_valid_to が as_of 以前であれば(実際に as_of の
+      時点で既に閉鎖済み)、この規則は作動せず、rule_r 以下のはしごに委
+      ねる。
     月精度の日付が同一年月内で衝突する場合(いずれかの側に日が無く、年月
-    のみ一致する場合)、先後が確定できないためこの三規則のいずれも作動し
+    のみ一致する場合)、先後が確定できないためこの四規則のいずれも作動し
     ない。
     EN: TM-track (which record is in force as of a stated date): R1 versus
     R2 versus NO-DATA. This decision belongs to none of boundary rules 1
-    to 14; it is made by three rules that answer only the vocabulary the
-    TM track itself uses (R1, R2, NO-DATA), based solely on the order
-    between the input's as_of (the date the question asks about) and
+    to 14; it is made by four rules that answer only the vocabulary the
+    TM track itself uses (R1, R2, NO-DATA), based on the order between the
+    input's as_of (the date the question asks about) and
     candidate_effective_date (the date the later, successor record takes
-    effect). The three rules fire only when "R1" is a member of the
-    case's own allowed_answers, never on the track value: U1 to U4's
-    TM-flavored cases answer from the decision vocabulary (KEEP SEPARATE
-    and the like) instead, and reach the existing ladder untouched.
+    effect), and, when lifecycle is closed, on the order between as_of and
+    prior_valid_to (the earlier record's own closure date). The four rules
+    fire only when "R1" is a member of the case's own allowed_answers,
+    never on the track value: U1 to U4's TM-flavored cases answer from the
+    decision vocabulary (KEEP SEPARATE and the like) instead, and reach
+    the existing ladder untouched.
     - temporal_at_or_after_successor_is_r2: as_of is at or after
       candidate_effective_date: R2 (the successor record governs).
     - temporal_before_successor_is_r1: as_of is before
@@ -386,12 +399,22 @@ the answer is REJECT MATCH.
       earlier record's own valid-to date): NO-DATA. A dormancy gap
       between the closure and the successor's start cannot be ruled out,
       so the honest answer is NO-DATA rather than a guess.
+    - temporal_before_closure_is_r1 (added round 12): as_of is before
+      candidate_effective_date, lifecycle is closed, and the input
+      carries a prior_valid_to that is itself after as_of: R1.
+      lifecycle=closed only states the record's status today, not its
+      status at as_of; a closure date later than as_of means the record
+      had not yet closed as of as_of, so the earlier record was still in
+      force. When prior_valid_to is at or before as_of the record really
+      was already closed by then, this rule does not fire, and the case
+      is left to rule_r and the ladder below it, unchanged.
     A pair of dates that collide at month precision (either side missing
     a day, both falling in the same year and month) has an unknowable
-    order, so none of the three rules fires. (review-temporal-track-
-    2026-09-06.md; engine mutation ids
-    temporal_at_or_after_successor_is_r2, temporal_before_successor_is_r1
-    and temporal_gap_is_nodata.)
+    order, so none of the four rules fires. (review-temporal-track-
+    2026-09-06.md, temporal_before_closure_is_r1 added round 12,
+    2026-09-07; engine mutation ids temporal_at_or_after_successor_is_r2,
+    temporal_before_successor_is_r1, temporal_gap_is_nodata and
+    temporal_before_closure_is_r1.)
 ## Rule id map
 
 `scripts/jbeq_decide.py` has grown well past the eleven boundary rules named
@@ -662,3 +685,4 @@ has one engine id after all, narrower than the paragraph above claims.
 - `temporal_at_or_after_successor_is_r2`, addendum heading: Temporal track, the record in force at the asked date (2026-09-06 review, landed 2026-09-07). Gated on R1 being in the case's allowed answers: as_of at or after candidate_effective_date answers R2. Mutation id: `temporal_at_or_after_successor_is_r2`. Code: `scripts/jbeq_decide.py:1121`.
 - `temporal_before_successor_is_r1`, addendum heading: Temporal track, the record in force at the asked date. Gated on R1 in allowed: as_of before candidate_effective_date while the earlier record is not closed answers R1. Mutation id: `temporal_before_successor_is_r1`. Code: `scripts/jbeq_decide.py:1131`.
 - `temporal_gap_is_nodata`, addendum heading: Temporal track, a stated closure gap. Gated on R1 in allowed: as_of before candidate_effective_date with lifecycle closed and no prior_valid_to answers NO-DATA, because a dormancy gap cannot be ruled out. Mutation id: `temporal_gap_is_nodata`. Code: `scripts/jbeq_decide.py:1140`.
+- `temporal_before_closure_is_r1`, addendum heading: Temporal track, item 15 (round 12 repair, 2026-09-07). Gated on R1 in allowed: as_of before candidate_effective_date, lifecycle closed, and a stated prior_valid_to that is itself after as_of answers R1, because lifecycle=closed states the record's status today, not its status at as_of, and the record had not yet closed as of as_of. When prior_valid_to is at or before as_of this rule does not fire and the case reaches rule_r unchanged. Mutation id: `temporal_before_closure_is_r1`. Code: `scripts/jbeq_decide.py:1181-1192`.

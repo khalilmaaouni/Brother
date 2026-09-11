@@ -11,6 +11,12 @@ decision with a present founder is not absence either. See check_absence().
 THREE CLASSES, and only three, decide who rules once absence is real:
 
     GREEN   reversible and cheap. Fable decides and continues, no record.
+            classify() never returns this on its own: there is no
+            GREEN_SIGNALS list, so nothing currently earns GREEN except an
+            unmatched decision, and unmatched text defaults to AMBER (see
+            below), not GREEN. The label and its handling stay live in
+            decide()/record_amber()/main() for the day a real positive
+            signal list justifies it.
     AMBER   reversible but wide. Fable decides at maximum effort and the
             decision is RECORDED, status PROVISIONAL-FABLE, carrying the
             OVERRULE SENTENCE: the exact words the founder would say to
@@ -24,10 +30,13 @@ THREE CLASSES, and only three, decide who rules once absence is real:
             QUEUED for the founder, never acted on, whoever is absent.
 
 THE CLASSIFIER is a keyword heuristic, not a model call, so it is
-deterministic and testable. It will miss phrasings a person would catch.
+deterministic and testable. It will miss phrasings a person would catch;
+unmatched text now defaults AMBER, not GREEN (fixed 2026-09-10: GREEN's
+silence meant a RED-worthy decision whose phrasing missed both lists was
+misclassified as freely actionable with no record at all).
 # ponytail: keyword heuristic with a known ceiling; upgrade to a model
 # classifier (or a bigger signal list) if a real decision text misses both
-# lists and lands GREEN by default when it should not have.
+# lists and lands AMBER by default when it should have read RED.
 
 BOTH LOGS ARE APPEND ONLY, matching this estate's other write-time records
 (write_ledger.py, fence_expiry.py's registry is the one exception, mutated in
@@ -179,8 +188,17 @@ AMBER_SIGNALS = [
 
 def classify(decision):
     """(label, reason). Pure: no clock, no file, so both directions are
-    driven in tests without touching a log. Defaults GREEN: reversible and
-    cheap is the class that needs no signal to justify itself."""
+    driven in tests without touching a log. Defaults AMBER, not GREEN: no
+    signal matching either list is not evidence that a decision IS
+    reversible and cheap, only that the keyword heuristic missed it. GREEN
+    silently proceeds with no record at all, so a RED-worthy decision
+    whose phrasing missed both lists would be misclassified as freely
+    actionable; AMBER still lets an autonomous session act, but forces a
+    recorded, overrule-sentence-bearing PROVISIONAL-FABLE entry instead of
+    silent, unlogged action. This does not widen or narrow RED_SIGNALS or
+    AMBER_SIGNALS themselves; GREEN remains reachable only by adding an
+    actual positive signal for it, which this change deliberately does
+    not do."""
     text = (decision or '').lower()
     for kw, why in RED_SIGNALS:
         if kw in text:
@@ -188,7 +206,9 @@ def classify(decision):
     for kw, why in AMBER_SIGNALS:
         if kw in text:
             return AMBER, 'AMBER: %s (matched %r), reversible but wide' % (why, kw)
-    return GREEN, 'GREEN: no RED or AMBER signal matched, reversible and cheap'
+    return AMBER, ('AMBER: no RED or AMBER signal matched; unmatched text is '
+                    'no longer treated as reversible and cheap by default, '
+                    'it is recorded instead of silently proceeding')
 
 
 def check_absence(last_message_at, window_hours, blocked, now=None):
@@ -382,7 +402,7 @@ def delegation_for(repository, base, action, now=None, path=None):
                 continue
             try:
                 entry = json.loads(line)
-            except ValueError:
+            except ValueError:  # sbe: allow-silent one corrupt JSONL event cannot establish authority, so it is skipped while later events remain readable
                 continue
             if (entry.get('repository') == repository
                     and entry.get('base') == base
@@ -439,14 +459,20 @@ def selftest():
 
 
 def _selftest_in(d):
-    """The three drives themselves, against logs under the caller's dir."""
+    """The three drives themselves, against logs under the caller's dir.
+    GREEN is no longer one of them: classify() has no GREEN_SIGNALS list,
+    so nothing reaches GREEN through it any more (fixed 2026-09-10). The
+    first drive below is the fix itself: text matching neither RED nor
+    AMBER now classifies AMBER, not GREEN, and (with no overrule given)
+    is classified but not silently recorded either, exactly like any
+    other AMBER decision."""
     amber_path = os.path.join(d, 'amber.jsonl')
     red_path = os.path.join(d, 'red.jsonl')
 
-    g_label, g_entry, _ = decide('rename a local variable for clarity',
+    u_label, u_entry, _ = decide('rename a local variable for clarity',
                                   amber_path=amber_path, red_path=red_path)
-    print('GREEN check: %-45s -> %s (no record: %s)'
-          % ('rename a local variable for clarity', g_label, g_entry is None))
+    print('UNMATCHED check: %-40s -> %s (no record without an overrule: %s)'
+          % ('rename a local variable for clarity', u_label, u_entry is None))
 
     a_label, a_entry, _ = decide(
         'restructure the module layout across the repo',
@@ -462,12 +488,13 @@ def _selftest_in(d):
           % ('delete the remote branch', r_label,
              bool(r_entry and r_entry.get('status') == 'AWAITING FOUNDER')))
 
-    ok = (g_label == GREEN and g_entry is None
+    ok = (u_label == AMBER and u_entry is None
           and a_label == AMBER and a_entry is not None
           and r_label == RED and r_entry is not None)
-    print('SELFTEST %s: three classes driven, GREEN proceeds with no record, '
-          'AMBER records PROVISIONAL-FABLE carrying its overrule sentence, '
-          'RED is refused and queued' % ('OK' if ok else 'FAIL'))
+    print('SELFTEST %s: unmatched text now classifies AMBER (not GREEN) and stays '
+          'unrecorded without an overrule, a matched AMBER signal records '
+          'PROVISIONAL-FABLE carrying its overrule sentence, RED is refused '
+          'and queued' % ('OK' if ok else 'FAIL'))
     return 0 if ok else 1
 
 

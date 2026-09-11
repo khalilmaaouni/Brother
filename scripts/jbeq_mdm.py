@@ -87,7 +87,17 @@ EXIT_NODATA = 3
 # says. "2026-09-06.2" because ".1" was the engine-half derivation of this
 # same boundary (hub PR 408, the proposal gate itself); ".2" is the scorer
 # half.
-SCORER_VERSION = "2026-09-06.2"
+#
+# "2026-09-07.1" (audit-unseen-5-run-2026-09-07.md section 0): a human
+# override recorded in direct-answers.json replaces the engine's answer in
+# the merged answers.json, but rule_fired in decisions.jsonl stays whatever
+# the engine left it, so _engine_decided_ids alone kept crediting the
+# engine with answers a person wrote (U5: 5 temporal cases, all overridden
+# and all correct, inflated "engine-decided" from the honest 20 of 25 to a
+# reported 25 of 30). engine_ids now drops every id direct-answers.json
+# names, whichever rule_fired says; the direct-answered line is the same
+# set's complement, so it always foots against the same denominator.
+SCORER_VERSION = "2026-09-07.1"
 
 # The one equivalence class this scorer knows: a refuted identity, answered
 # either as "reject the proposed match" or "keep the records separate". Both
@@ -189,6 +199,33 @@ def _engine_decided_ids(decisions_path):
     except OSError:
         return None  # sbe: allow-silent decisions.jsonl is optional, a missing or unreadable file reads as no engine-decided ids
     return ids if found_any_row else None
+
+
+def _direct_answer_ids(answers_path):
+    """Return the set of case ids a direct-answers.json file beside
+    `answers_path` carries, or an empty set if no such file exists, it is
+    unreadable, or it is not an object.
+
+    Both merge.py scripts on record (U5 and blind-round12) write
+    engine-answers.json plus direct-answers.json and merge them into
+    answers.json, overriding the engine's answer for every id
+    direct-answers.json names. rule_fired in the sibling decisions.jsonl is
+    never touched by that override, so a case named here must be excluded
+    from _engine_decided_ids's result regardless of what rule_fired says
+    (audit-unseen-5-run-2026-09-07.md section 0: 5 human-overridden
+    temporal cases were still credited to the engine because rule_fired
+    still read "1" or "B")."""
+    path = os.path.join(
+        os.path.dirname(os.path.abspath(answers_path)), "direct-answers.json"
+    )
+    try:
+        with open(path, encoding="utf-8") as fh:
+            direct = json.load(fh)
+    except (OSError, ValueError):
+        return set()  # sbe: allow-silent direct-answers.json is optional beside answers.json, a missing or unreadable file overrides nothing
+    if not isinstance(direct, dict):
+        return set()
+    return {k for k in direct if not str(k).startswith("_")}
 
 
 VOCABULARY_HEADING = "決定語彙"
@@ -545,25 +582,32 @@ def cmd_score(args):
     # comment). Falls back to ENGINE_TRACKS only when no decisions.jsonl
     # sits beside the answers file at all (a hand-authored answer file with
     # no engine run behind it).
+    #
+    # audit-unseen-5-run-2026-09-07.md section 0 (SCORER_VERSION
+    # 2026-09-07.1): rule_fired alone is not enough. A human override
+    # recorded in direct-answers.json replaces the engine's answer without
+    # touching rule_fired, so any id that file names is dropped from the
+    # engine set here, in both branches, whatever rule_fired or track says.
+    seed_ids = {c["id"] for c in seed["cases"]}
+    direct_ids = _direct_answer_ids(args.answers) & seed_ids
     engine_ids = _engine_decided_ids(_decisions_path_beside(args.answers))
     if engine_ids is not None:
-        seed_ids = {c["id"] for c in seed["cases"]}
         engine_ids &= seed_ids
-        engine_total = len(engine_ids)
-        # 2026-09-06 (SCORER_VERSION 2026-09-06.2): must use the same
-        # answers_equivalent() test score() uses for `passed`, not a bare
-        # == . Using == here while `passed` counts equivalence hits made
-        # direct_passed = passed - engine_passed absorb every engine-side
-        # equivalence hit as a phantom direct-answered case (observed:
-        # "direct-answered ... 28 of 25", more answers than cases exist).
-        engine_passed = sum(
-            1 for c in seed["cases"]
-            if c["id"] in engine_ids
-            and answers_equivalent(c["expected"], answers.get(c["id"]))
-        )
     else:
-        engine_passed = sum(tracks[t]["passed"] for t in ENGINE_TRACKS if t in tracks)
-        engine_total = sum(tracks[t]["total"] for t in ENGINE_TRACKS if t in tracks)
+        engine_ids = {c["id"] for c in seed["cases"] if c["track"] in ENGINE_TRACKS}
+    engine_ids -= direct_ids
+    engine_total = len(engine_ids)
+    # 2026-09-06 (SCORER_VERSION 2026-09-06.2): must use the same
+    # answers_equivalent() test score() uses for `passed`, not a bare
+    # == . Using == here while `passed` counts equivalence hits made
+    # direct_passed = passed - engine_passed absorb every engine-side
+    # equivalence hit as a phantom direct-answered case (observed:
+    # "direct-answered ... 28 of 25", more answers than cases exist).
+    engine_passed = sum(
+        1 for c in seed["cases"]
+        if c["id"] in engine_ids
+        and answers_equivalent(c["expected"], answers.get(c["id"]))
+    )
     direct_passed = passed - engine_passed
     direct_total = total - engine_total
     if not _print_ratio("engine-decided", engine_passed, engine_total,

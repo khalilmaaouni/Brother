@@ -329,7 +329,16 @@ def check_landed_claims(doc, runner=None):
         low = text.lower()
         if not any(w in low for w in ("landed", "pushed", "on origin", "origin/main")):
             continue
+        throwaway = _ran_in_throwaway_clone(text)
         for sha in commit_shas(text)[:3]:
+            if throwaway and _commit_exists(sha, runner=runner) is False:
+                # A commit of a discarded temporary clone is on no remote BY
+                # DESIGN, and check_evidence_commits already reports it NO-DATA
+                # (its [:4] window covers this [:3] one). Calling it "local
+                # only" here contradicted that verdict on row X8, 2026-09-11:
+                # the commit is not local either, it went with the clone. A
+                # commit that DOES exist locally still has its remote asked.
+                continue
             reachable = _on_any_remote(sha, runner)
             if reachable is None:
                 out.append(("NO-DATA", n.get("id"),

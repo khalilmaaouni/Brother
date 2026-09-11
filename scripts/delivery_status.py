@@ -53,7 +53,7 @@ def _parse_iso(s):
         s = s[:-1] + "+00:00"
     try:
         dt = datetime.datetime.fromisoformat(s)
-    except ValueError:
+    except ValueError:  # sbe: allow-silent this display-only clock has no valid UTC value to render, so its caller receives the documented absence
         return None
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=datetime.timezone.utc)

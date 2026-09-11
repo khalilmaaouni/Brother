@@ -17,6 +17,10 @@
    "sha256": "c328ac0bffcb8726aacb059c120c74005d5b68ddb92edae2610b31aa2a843247"
   },
   {
+   "path": "brothermode/tools/bm_autonomy.py",
+   "sha256": "dcb6884746a6cc60fe2ed395f7537b5e5bfce0536d3ea5a9d2d97116027dcc44"
+  },
+  {
    "path": "brothermode/tools/bm_autosave.py",
    "sha256": "26355716835e66042367f3b2cef55d38cfd86808636085f6e2cd683891cabb81"
   },
@@ -25,12 +29,64 @@
    "sha256": "40565da632e254362fba6678029275c8d7533381fcf5fcc3161e2a97d9b08a3a"
   },
   {
+   "path": "brothermode/tools/bm_bbstatus.py",
+   "sha256": "efaae4a0a20340534cd54b88bfd608fa7b3b02fe9aa28fd2f54e920e2c8aaa3e"
+  },
+  {
+   "path": "brothermode/tools/bm_bench.py",
+   "sha256": "e70b6940a9228d9cd59383552d59023c94e217b2fca0f489e0ddf8039258d53e"
+  },
+  {
+   "path": "brothermode/tools/bm_connectors.py",
+   "sha256": "6dbcefe18b66f6fbae59537a1db8d647585eab7c7e42aaa102e818e4e21859df"
+  },
+  {
+   "path": "brothermode/tools/bm_consolidate.py",
+   "sha256": "e300487ae27db9c3c1e4b4403b76088603eee28f14276c99ee1eeca182c7f21f"
+  },
+  {
+   "path": "brothermode/tools/bm_continue.py",
+   "sha256": "a39f0d47502bb6703c5dc78d16a2441ed49feea5b6e8a3ac35df47a0f3d80f90"
+  },
+  {
+   "path": "brothermode/tools/bm_controller.py",
+   "sha256": "331299e03236a12cdb26bdf014162060e2c9d5f556e68d3c16f4971c0e235cfa"
+  },
+  {
+   "path": "brothermode/tools/bm_cursor.py",
+   "sha256": "80a0b8955d2f905f6df5e3ba8de40f850d818cdf60508ad639e4b58bd323c2a5"
+  },
+  {
+   "path": "brothermode/tools/bm_cursor_hook.py",
+   "sha256": "30693091b14e5e575863ec30743266a62750de400cc9b073b886344496b71315"
+  },
+  {
+   "path": "brothermode/tools/bm_docs.py",
+   "sha256": "64afb276a5141ab5cdf1f9dfd17d93190b152198933d7d18e5a0cde6a522a3d7"
+  },
+  {
+   "path": "brothermode/tools/bm_docs_export.py",
+   "sha256": "f8bcdec9ce0f93331e936f1c7e976b487343d814f8ba2e58477e417786973453"
+  },
+  {
+   "path": "brothermode/tools/bm_effects.py",
+   "sha256": "30e6243a42ff083d1422aba605476020e15b7580225b3eb6b2b8c57136efe5a2"
+  },
+  {
    "path": "brothermode/tools/bm_embed_bge.py",
    "sha256": "e1cc75b86048f7737c60ddc7dc7a597171a9f59838b67d8da3addea58de302c2"
   },
   {
    "path": "brothermode/tools/bm_embed_warm.py",
    "sha256": "8f213b243ac41d1ea04c7f0e7dfab58c604af15594aa803a344a1c85f1c350a3"
+  },
+  {
+   "path": "brothermode/tools/bm_escalate.py",
+   "sha256": "70501360ec6630fe0cfd439d11be17711764acb53d7e578e6703269bcfb1c35e"
+  },
+  {
+   "path": "brothermode/tools/bm_export_seam.py",
+   "sha256": "6cc5973ffcb13f2364101259a424c78be9f472b836b899100e94bccb5060017e"
   },
   {
    "path": "brothermode/tools/bm_fence_hook.py",
@@ -45,8 +101,16 @@
    "sha256": "34a9c69aa3c7644d19176a724b98d57380f571116e51f7e9a95b3d91a759976d"
   },
   {
+   "path": "brothermode/tools/bm_gate.py",
+   "sha256": "1bed74c285ac07ed889b1c4bfcec781ab57939ac97f353fafbc458899910e91e"
+  },
+  {
    "path": "brothermode/tools/bm_handover.py",
    "sha256": "5045e6802faf65c31bad0ff781447ac98824ba3837561938bd0afb18ea0ba7c1"
+  },
+  {
+   "path": "brothermode/tools/bm_hookbench.py",
+   "sha256": "52c81831c39632308d15cc55512ae1fea95aabdf60efbabe9bbcc0d57975a770"
   },
   {
    "path": "brothermode/tools/bm_hookchain.py",
@@ -58,7 +122,7 @@
   },
   {
    "path": "brothermode/tools/bm_lead.py",
-   "sha256": "1934df75f1e30f6d3233f94a157cd40bea2891860a46ead1ace934f6bfcea0bf"
+   "sha256": "d65e0a4f3fba1a81abe699909084e04ca458959c0ddf98d9781d95a1bd5818a2"
   },
   {
    "path": "brothermode/tools/bm_learn.py",
@@ -69,16 +133,112 @@
    "sha256": "d418a51c6f6a5b23024a46b35355d3cf3fb22019da2650664992248aa18611f9"
   },
   {
+   "path": "brothermode/tools/bm_ledger.py",
+   "sha256": "e391c8a34d793729a8313fd9202ce7fb7ab82cc930feabdf401b3352e2df3cb7"
+  },
+  {
+   "path": "brothermode/tools/bm_lint_walltime.py",
+   "sha256": "4144772ae0305bb1b8560719a591ee31760b5f8a38572aa411e970f0013ace6c"
+  },
+  {
+   "path": "brothermode/tools/bm_memory_budget.py",
+   "sha256": "218068ea12c96e6e29aa4065196b00b62c11750e89638d59ceb2012fb5075e91"
+  },
+  {
+   "path": "brothermode/tools/bm_messages.py",
+   "sha256": "775a4573a818fd93a6cb19a907785f9ad9c0e936de431ac51f6b9d8a2279ff4d"
+  },
+  {
+   "path": "brothermode/tools/bm_mock_mcp.py",
+   "sha256": "ab0a9b008fce3455fb3cf903cdd0ff704e0c298613db471e357ecba76d2c2fd7"
+  },
+  {
+   "path": "brothermode/tools/bm_packs.py",
+   "sha256": "044ba48017bc8f2033b1739d9bc4497682d6800ef547e2f0195e512468654d31"
+  },
+  {
+   "path": "brothermode/tools/bm_passport.py",
+   "sha256": "c944b2b8acc19d77ba81e7c6baaa15d86508591050689bc432c74f76c606123f"
+  },
+  {
+   "path": "brothermode/tools/bm_passport_validator.py",
+   "sha256": "a7580c6d209187ba5ecdba63e36ec7ce89a2fbb6e38af4a21240a07c6eb443ef"
+  },
+  {
+   "path": "brothermode/tools/bm_plan.py",
+   "sha256": "ac69b8b8aa26ffee8f9f1c82aa59d11acc95f9f5ea58f256c36fe5788a2e3cc6"
+  },
+  {
+   "path": "brothermode/tools/bm_playbook.py",
+   "sha256": "f2ee2c707ab6e6a7cfb10780ec2f428652327bdab776053303f5638194a1eeed"
+  },
+  {
+   "path": "brothermode/tools/bm_private_scan.py",
+   "sha256": "1da918e8538d7ab613d8ac83020fa7e8ac6ea07a451192a50ea3495f6b3cc219"
+  },
+  {
+   "path": "brothermode/tools/bm_profile.py",
+   "sha256": "1f6c0bd62b27985084c41263f82d3a1c7f1c719cd2cbed2fa7a3caa37969817a"
+  },
+  {
    "path": "brothermode/tools/bm_progress_check.py",
    "sha256": "011ca01cdb6a0e2e76a03c6bd36d3c2abfba6ad1df3e3b27d8f95728efa3c731"
+  },
+  {
+   "path": "brothermode/tools/bm_project.py",
+   "sha256": "4f2e77f94192c1598bb768e7813a18429916f8f094a5aadd2fbd0d729fb09e00"
+  },
+  {
+   "path": "brothermode/tools/bm_project_facts.py",
+   "sha256": "0c5e469dc8785ad97b051bc37aa6f879523b6e550be6ca7c892e98017d048a1a"
+  },
+  {
+   "path": "brothermode/tools/bm_queue_numbers.py",
+   "sha256": "171959ce538b2e7688b890c20361024cb95f33f60c1e804b0da0b4f16ce08dde"
+  },
+  {
+   "path": "brothermode/tools/bm_reality.py",
+   "sha256": "e353110d524c62dbf97011a4f28cd5668e584f34ccc2ab52c2eac5d9eedc4228"
   },
   {
    "path": "brothermode/tools/bm_reconcile.py",
    "sha256": "dbbe141c186eefbfb8606a6aee830691b5c9b2f8facbf2491c5473b8d48f2a4c"
   },
   {
+   "path": "brothermode/tools/bm_reconcile_worktrees.py",
+   "sha256": "af92eefa18b89ddb6566564dfad12d6f7c0a6466f2aab63656cfe3c2ace57719"
+  },
+  {
+   "path": "brothermode/tools/bm_recurrence.py",
+   "sha256": "955600ba3e60877b8386b7a5495ad15df09ff08d3a2ca4298be426c3018eccf8"
+  },
+  {
+   "path": "brothermode/tools/bm_release_invariant.py",
+   "sha256": "26feb8864face1c61cf5b4c12d90077729dadbd8230a9357919a9c1aceff09f9"
+  },
+  {
+   "path": "brothermode/tools/bm_repair.py",
+   "sha256": "d6bc9a060752ce44de015706f2e3d886dc817f109cbc83aa58ecffe93962fda5"
+  },
+  {
    "path": "brothermode/tools/bm_repo_scope.py",
    "sha256": "8eb35638d518d77a72efe04b07947cd44cb3f9ccc515112b6b527f5883a64856"
+  },
+  {
+   "path": "brothermode/tools/bm_repomap.py",
+   "sha256": "11315620b85d1ec4cc64c3cb3da076ea2c6ad6eb485ca062eb003417efeb43ff"
+  },
+  {
+   "path": "brothermode/tools/bm_runtimes.py",
+   "sha256": "6d4cd807b2aff7407c434536b8ac43e835bc7df909a949a63242ed923af45b56"
+  },
+  {
+   "path": "brothermode/tools/bm_score.py",
+   "sha256": "fe2099f78c4131d2e4d5faae0224fea2e40d0862d14c38b3238304e612076463"
+  },
+  {
+   "path": "brothermode/tools/bm_sentinel.py",
+   "sha256": "90a718a4f412f8284a13f6443e11053243ede07cad1b2ec9e8861308819be4dd"
   },
   {
    "path": "brothermode/tools/bm_session_cap.py",
@@ -93,16 +253,32 @@
    "sha256": "769652dd6cbb8496e6b9ef871013c1465b0dd4e9c8668d00bf7a1dd5e3245f8e"
   },
   {
+   "path": "brothermode/tools/bm_statusline.py",
+   "sha256": "39daa6f436c959d2c4fd71d596188785c921cea3481b4f2ffa0a530f710d7f44"
+  },
+  {
    "path": "brothermode/tools/bm_store.py",
    "sha256": "6a7837c58d96c3aec055dd96180a3e66ff60e3ef283472347bdbe4894e6fe093"
+  },
+  {
+   "path": "brothermode/tools/bm_summary.py",
+   "sha256": "9f764c60372dc355644b6f1e7984ff61c9f32505b072695e57ee1317601f696d"
   },
   {
    "path": "brothermode/tools/bm_telemetry.py",
    "sha256": "dbca11fe17c86a0256549597755dca2d026802ad3ad34da58ea4cf2bb2f1373a"
   },
   {
+   "path": "brothermode/tools/bm_threads.py",
+   "sha256": "99ed22210dd9f0410b59572277b1aea49e3e9f05353d6b0dcd412826595bcf63"
+  },
+  {
+   "path": "brothermode/tools/bm_toolkit.py",
+   "sha256": "c3fdf0387f63e809d426a6f784d14c60b315b73f678dd5ae307eb23802fdc07a"
+  },
+  {
    "path": "brothermode/tools/bm_vault.py",
-   "sha256": "e450fa7af8ac968c9e7b085dd9bd110a2f8dfcd06ee21d7c8b348ac935ae59f2"
+   "sha256": "58f367bebdfc150d933b3ba0d8201a3e9879bbcc2dcf6e6ac5bda3ba027613a7"
   },
   {
    "path": "brothermode/tools/bm_vault_analyzer.py",
@@ -113,6 +289,18 @@
    "sha256": "dac61634164dbd71cc232dc38a82f721f49b7210823b31a23f168310e36c7995"
   },
   {
+   "path": "brothermode/tools/bm_vault_assertions.py",
+   "sha256": "5331afcbe5d397c52b44d5e24dbb59add35db7a0965d42ee7aec53b0c0218ab6"
+  },
+  {
+   "path": "brothermode/tools/bm_vault_attribute_provenance.py",
+   "sha256": "e8cdf26a19cc923a63bd5aef679672a4bcc304142dd32c71bf8e1c907e1debcf"
+  },
+  {
+   "path": "brothermode/tools/bm_vault_attributes.py",
+   "sha256": "64da0dc00c6ae2a8b8d2d3d9197db4b83b5638f84c535b540a4ee26d773223a5"
+  },
+  {
    "path": "brothermode/tools/bm_vault_audit.py",
    "sha256": "4990f356b2ce9b44ae24ddf7bc4d411c48863eaffc679d34c90c6ece631f6012"
   },
@@ -121,24 +309,88 @@
    "sha256": "d27527503fd4eed18049351f2232abcaa74c0494f2864e625000cf44abcd32f2"
   },
   {
+   "path": "brothermode/tools/bm_vault_catalog.py",
+   "sha256": "ed7c56c71b5084e6811ea4c41c2256479086f18f527f47cc7ec3ba6ebdbb464a"
+  },
+  {
+   "path": "brothermode/tools/bm_vault_census_ext.py",
+   "sha256": "2b7f0d60fae58d1f3bdde5561754d3a209fc37900b729e11bd00a254d7400bb6"
+  },
+  {
+   "path": "brothermode/tools/bm_vault_cite.py",
+   "sha256": "a970a6834925a6c167812ced0c805bae2857fd7560dc2439384f9b3a6dc93e60"
+  },
+  {
+   "path": "brothermode/tools/bm_vault_cli.py",
+   "sha256": "20f422cfead8936e55f2e462539cfe518953ff2e036dd64fd02b43145a4008eb"
+  },
+  {
+   "path": "brothermode/tools/bm_vault_closure.py",
+   "sha256": "18d9adbad4d4e2f178439a23a987bf05f0cc680a79eed833143d2dad35209b4a"
+  },
+  {
+   "path": "brothermode/tools/bm_vault_compose.py",
+   "sha256": "79c2d1ac4bffb6c8f0f41b66eefadb0f4db1eb1f5c3f737697f355bf044b6616"
+  },
+  {
    "path": "brothermode/tools/bm_vault_context.py",
    "sha256": "2f833f4b6fcd80a83324a1bc122a2a132382b2eec6668d198cdbb7a8edb82db2"
+  },
+  {
+   "path": "brothermode/tools/bm_vault_contract.py",
+   "sha256": "74b3094dd053dedf6b878a02d22dd720ea033be6b9a63bd4790cee0b95abf7ce"
   },
   {
    "path": "brothermode/tools/bm_vault_contradiction.py",
    "sha256": "f9166d78a1007ccf350e9d071b991d367acf2aaecda0f167fe21d900e9cb8f4e"
   },
   {
+   "path": "brothermode/tools/bm_vault_crosswalk.py",
+   "sha256": "f7a43618bd5708594733bb62384cdf84634e1d496f655cb25aaf7b249de4e6de"
+  },
+  {
+   "path": "brothermode/tools/bm_vault_curate.py",
+   "sha256": "611183b8c8bb5370e9afcd27ea8f8b3719148254cfb7fa9146d03bb42fb08ac9"
+  },
+  {
    "path": "brothermode/tools/bm_vault_decay.py",
    "sha256": "160e028c38f3c73534ee6e1cdfdc79349e4f1c52fc53e8dfe12ceee9964df4f5"
+  },
+  {
+   "path": "brothermode/tools/bm_vault_digest.py",
+   "sha256": "351e6527aa252176b8ceb4a0d469499cbac4ac726f4686ec87d946fec4e4c0a0"
+  },
+  {
+   "path": "brothermode/tools/bm_vault_distill.py",
+   "sha256": "8103a81eda211d4b669e084c3a325074579a90ce94205aa5f1dbc6612b565a10"
   },
   {
    "path": "brothermode/tools/bm_vault_enrich.py",
    "sha256": "50d4b05d74b8d1d3f009f35b185e3dff5f34e24c015abc683c2bb5bf122593f7"
   },
   {
+   "path": "brothermode/tools/bm_vault_enrich_gate.py",
+   "sha256": "c9c041ca7c50cf039d049b9e25e060a3fc357968933d86a404c05c1a9cd9a53c"
+  },
+  {
    "path": "brothermode/tools/bm_vault_enrich_index.py",
    "sha256": "e0e1bd593137e4e0d4491c95741a90593bd27f02b2965139d5f13f4cf9348d96"
+  },
+  {
+   "path": "brothermode/tools/bm_vault_entity.py",
+   "sha256": "81308e5888907a054d119d983a9ebda00dc8503ae0545755fe9f60d85be282a8"
+  },
+  {
+   "path": "brothermode/tools/bm_vault_events.py",
+   "sha256": "12fbb170c0454e1bf326afe94df4dbc2952c9303490baba41875e9fa7b9afdfc"
+  },
+  {
+   "path": "brothermode/tools/bm_vault_exchange.py",
+   "sha256": "b833acef183474d64afa674c9b18264f19c8fc4a248c19ff04b07f50747a017d"
+  },
+  {
+   "path": "brothermode/tools/bm_vault_export.py",
+   "sha256": "44c3cd18d866130b469fed606cfd8daa1864e755a9f56ee1e2048868d5af039c"
   },
   {
    "path": "brothermode/tools/bm_vault_graph.py",
@@ -149,6 +401,14 @@
    "sha256": "571cf7aeaafce19827c280acb9bf687790b2942b804717bf7ca7b4ca785f2889"
   },
   {
+   "path": "brothermode/tools/bm_vault_hierarchy_req.py",
+   "sha256": "63335f22b52a72430b0dc662e863d732a280060303b7bfc22eb70e95c012ef5f"
+  },
+  {
+   "path": "brothermode/tools/bm_vault_identity.py",
+   "sha256": "66537d3575f2c4f7a44a41fd449a64c69f8b6266e05e4e7f70fd91b04fdc15b5"
+  },
+  {
    "path": "brothermode/tools/bm_vault_ids.py",
    "sha256": "a32dd1a03ad5d5566f281153b81c6534a989560effb163ce91d2e625bb755542"
   },
@@ -157,16 +417,60 @@
    "sha256": "6da3cb38ca28238826043df333a52be9ae04062bb01b0197cce560068a2317a5"
   },
   {
+   "path": "brothermode/tools/bm_vault_interchange.py",
+   "sha256": "3ce64bcf95cff70553ab0d3d160e3c19a789552e700d3080d0ef76934a51d144"
+  },
+  {
+   "path": "brothermode/tools/bm_vault_jbench.py",
+   "sha256": "d14df6dee7040d161ab93aeb334fe32aa8e29da3ffab63d881164063f9acc60d"
+  },
+  {
+   "path": "brothermode/tools/bm_vault_labels.py",
+   "sha256": "8eef84b4a28519bea1e2038d1366644aec43a4048ef6edb649e49b8afb89dee1"
+  },
+  {
+   "path": "brothermode/tools/bm_vault_ledger.py",
+   "sha256": "5fded99d6a27cb0f51c2dd55f9fe16f27eb79ef93f19d7ff31e92e08acc4a2f3"
+  },
+  {
    "path": "brothermode/tools/bm_vault_lifecycle.py",
    "sha256": "793dabb266e4699ff1727bdd80c49d88268a963d729ecd9a2de33f5fc6b9375e"
+  },
+  {
+   "path": "brothermode/tools/bm_vault_lineage.py",
+   "sha256": "bc73c6554676a86490183b64107c2c18141d1db15617ff40b97bdb31d957e616"
+  },
+  {
+   "path": "brothermode/tools/bm_vault_lint.py",
+   "sha256": "dd5eae490b3491845e5e3eb50813c9877f5426a3790ef8fe848150060dced85e"
+  },
+  {
+   "path": "brothermode/tools/bm_vault_lock.py",
+   "sha256": "23f3372a5600ef9bb20439a4c96de4904406bde7241a1453721146ebaec9b03c"
+  },
+  {
+   "path": "brothermode/tools/bm_vault_notify.py",
+   "sha256": "5b907c76710192580e8f2e366e9ffc9b54c2af6c9b96c6bb8d993c903616b773"
+  },
+  {
+   "path": "brothermode/tools/bm_vault_pane.py",
+   "sha256": "cb0841c77cb6c336e44416dec3d02bcaa7d10949eb8155ac131817314af5a92b"
   },
   {
    "path": "brothermode/tools/bm_vault_policy.py",
    "sha256": "331757884276485af6ecbefe0c401269ad0e80bc2ec1d6ae049397cae0d03708"
   },
   {
+   "path": "brothermode/tools/bm_vault_posture.py",
+   "sha256": "cd902290f915d6b3518d8b76fcca0936bd28bf1f858dde06dabb554ef0d78e72"
+  },
+  {
    "path": "brothermode/tools/bm_vault_principals.py",
    "sha256": "7343adcbbdab2f7a42599d0cadb82968475eb954af5e36203afc33370bc7d145"
+  },
+  {
+   "path": "brothermode/tools/bm_vault_promote.py",
+   "sha256": "0225e9e87cf5211c15ef16bfc5345de1f5f9ba23553efa42b7899ef45c89dfe3"
   },
   {
    "path": "brothermode/tools/bm_vault_promotions.py",
@@ -181,32 +485,76 @@
    "sha256": "0dfd526fa1feb02eb18e5b3944acb3d61c64a66f2daac315a555107bca0e164d"
   },
   {
+   "path": "brothermode/tools/bm_vault_realdata.py",
+   "sha256": "13a00687fe0e09e60448ff1e0009d4c59d59b84ab6ddbd5a0c3e2c114aadfad7"
+  },
+  {
+   "path": "brothermode/tools/bm_vault_retention.py",
+   "sha256": "b43e4460ebfe32159da674ea2c8d590cc93fcf7e9b71ca54f3764f9ca5ca5fc1"
+  },
+  {
+   "path": "brothermode/tools/bm_vault_retier.py",
+   "sha256": "0af639f1481698954d9f21e1349ea5a900b2626fd319ea2476f7682f7fd42757"
+  },
+  {
+   "path": "brothermode/tools/bm_vault_route.py",
+   "sha256": "8a1dc90a9d73829a7050114e89054090c8003ee8980c03a6be99ac964ba8c181"
+  },
+  {
    "path": "brothermode/tools/bm_vault_seams.py",
-   "sha256": "e7d7f79c8b5ebe8f069c9cbec7072b18a29bde9756ea54f1cd91e7705a378b65"
+   "sha256": "d2e844b7b5923790625d5559cc9149128d49b282793758658836b27aca5f22a9"
   },
   {
    "path": "brothermode/tools/bm_vault_serve.py",
    "sha256": "ef3bc0c5944fe2014f6c4d64732086a5a367b7802d08a5c6f0207f3a52a5721c"
   },
   {
+   "path": "brothermode/tools/bm_vault_shapes.py",
+   "sha256": "2e50a2d5e2000b9e07ba81b1ec3523db58207f45509d59e60e0a6c856bbbb6ad"
+  },
+  {
    "path": "brothermode/tools/bm_vault_staleness.py",
    "sha256": "33554959036187bcc977ba32513c2b796666ebc966ec647be6ebbabf79985df1"
+  },
+  {
+   "path": "brothermode/tools/bm_vault_survivorship.py",
+   "sha256": "aea8c6fd69cb8d52be8ecd1bea5a614f40d1c6b2aa4fd396efd0991c42828bc2"
   },
   {
    "path": "brothermode/tools/bm_vault_temporal.py",
    "sha256": "dc335fbd6ad7c8859453ff67e4f8de398e4b9fc78a41c958e1d846cdbad5879d"
   },
   {
+   "path": "brothermode/tools/bm_vault_tiers.py",
+   "sha256": "55e09d2af60bcd46c795fef967cee76fe098db31a3c44ffcc708e48c27c7f3e0"
+  },
+  {
    "path": "brothermode/tools/bm_vault_triage.py",
    "sha256": "d61e0c29f550926b87578f4d5383ba8d520908388174dac771783b1f245681de"
+  },
+  {
+   "path": "brothermode/tools/bm_verify.py",
+   "sha256": "b6020c93f1083b86f86f8c9cfdb2cccbb9c843b7a9403d6f000e6612d0a9e680"
   },
   {
    "path": "brothermode/tools/bm_view.py",
    "sha256": "664a1164b25dc63e8edf523cf375737f644d5d9da227363bfe8b7b6fdd151984"
   },
   {
+   "path": "brothermode/tools/bm_visual.py",
+   "sha256": "4145c0181c687a7e22918e306a4ea9fdd5f9318dbf43b2137912743846af6ebe"
+  },
+  {
+   "path": "brothermode/tools/bm_worker_spawn.py",
+   "sha256": "e55dfd3d6c35d004e52569e4b25c6bfcfef25f116e14ee2ae077b18b8423f76f"
+  },
+  {
    "path": "brothermode/tools/brother_paths.py",
    "sha256": "3815d9f651dc46a5e18d7c1bbb45a7369c8455dec9777fea73be1757375d2a22"
+  },
+  {
+   "path": "brothermode/tools/brothermode_cli.py",
+   "sha256": "c505d39db0f9ade8955d0cfa3da54fbffe131d2e365225af8d9471e2e3aab776"
   },
   {
    "path": "brothermode/tools/find_out.py",
@@ -218,11 +566,15 @@
   },
   {
    "path": "brothermode/tools/test_all.py",
-   "sha256": "e946c81d6d2f7c8a2cedae6b86bf79cae1a53068b047d0c8f44989ae791607a5"
+   "sha256": "8062a2779b7fff777078e82bea06d5714a0c22f7f77abad41d51a7d8d88d68d6"
+  },
+  {
+   "path": "brothermode/tools/vault_client.py",
+   "sha256": "f0d705d112eb6b261327a4191c91bee4efc6352a9acc642b0ce0c9b538bf6f2a"
   },
   {
    "path": "brothermode/tools/vault_recall_hook.py",
-   "sha256": "aac5a443895cc477e40c00d14c8977c9c506f3cdfaab8d8165210244986e6bf1"
+   "sha256": "14f9e16f1ad2e577986a770cabdb478cf1946aad0a120cfc95b3d7813894b12a"
   },
   {
    "path": "brothersbe/src/brothersbe/tasks.py",

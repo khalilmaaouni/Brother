@@ -128,7 +128,7 @@ def _version_tuple(s):
         return None
     try:
         return tuple(int(p) for p in parts)
-    except ValueError:
+    except ValueError:  # sbe: allow-silent an invalid declared version is intentionally returned as None for the caller's strict mismatch verdict
         return None
 
 

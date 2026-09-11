@@ -1,0 +1,19 @@
+scorer: 2026-09-06.2 (REJECT MATCH and KEEP SEPARATE score as one class for a refuted identity, founder ruling 2026-09-06)
+address              3 of 5
+entity-object        5 of 5
+hierarchy            5 of 5
+identifier           4 of 5
+match-or-no-merge    3 of 5
+requirements         5 of 5
+survivorship         5 of 5
+temporal             5 of 5
+engine-decided: 25 of 30
+direct-answered (not blind, not evidence about the engine): 10 of 10
+critical WRONG W5-01 [HISTORICAL REASSIGNMENT] expected SUGGEST MERGE, answered ESCALATE  CONSERVATIVE
+critical WRONG W5-17 [WRONG TAX IDENTITY] expected REJECT MATCH, answered ESCALATE  CONSERVATIVE
+critical WRONG W5-23 [CROSS-CUSTOMER CONTAMINATION] expected SUGGEST MERGE, answered REJECT MATCH  CONSERVATIVE
+critical WRONG W5-25 [FALSE-MERGE RISK, not merged] expected KEEP SEPARATE, answered NO-DATA  CONSERVATIVE
+critical false merges: 0 of 35
+critical wrong: 4 of 35 (W5-01, W5-17, W5-23, W5-25)
+conservative wrongs: 4 (W5-01, W5-17, W5-23, W5-25)
+JBEQ-MDM NOT READY

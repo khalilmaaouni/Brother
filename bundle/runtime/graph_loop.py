@@ -247,9 +247,17 @@ def machine_capacity():
     return slots, notes
 
 
-def plan(doc, slots=None):
+def plan(doc, slots=None, also_in_flight=None):
     """The dispatch plan: what is ready, what is blocked and by what, and the
-    largest batch that may run TOGETHER without two writers on one path."""
+    largest batch that may run TOGETHER without two writers on one path.
+
+    `also_in_flight`, row H3: work this caller itself knows is live but that
+    carries no IN-FLIGHT row in `doc` (rolling refill re-plans WHILE workers
+    hold paths, and nothing writes that status for them). These are folded
+    into the existing in_flight list, duplicate ids kept once, so the ONE
+    conflict check below (batch + in_flight) is what admits or defers a node.
+    No second conflict rule is added: a second opinion about the same
+    question is exactly what this must not become."""
     all_nodes = nodes(doc)
     # SUPERSEDED counts as satisfied for dependency edges (its work moved to
     # named successors and the row is kept only so the edges stay honest), and
@@ -259,6 +267,11 @@ def plan(doc, slots=None):
     done = set(n['id'] for n in all_nodes
                if n['status'] in ('DONE', 'SUPERSEDED', 'ADDRESSED'))
     in_flight = [n for n in all_nodes if n['status'] == 'IN-FLIGHT']
+    seen_in_flight = set(n['id'] for n in in_flight)
+    for n in (also_in_flight or []):
+        if n['id'] not in seen_in_flight:
+            in_flight.append(n)
+            seen_in_flight.add(n['id'])
     weight = downstream_weight(all_nodes)
 
     # status is needed for the founder gate, so carry it through

@@ -452,7 +452,7 @@ def _default_actor_name():
         name = (r.stdout or "").strip()
         if r.returncode == 0 and name:
             return name, "git config user.name"
-    except Exception:
+    except (ImportError, OSError, AttributeError):
         pass
     user = os.environ.get("USER") or os.environ.get("USERNAME")
     if user:
@@ -2161,7 +2161,14 @@ def _mark_contract_delivered(path, contract, answers):
         given = answers.get(entry.get("field"))
         if given is None:
             continue
-        entry["answer"] = (given.get("text") or "").strip()
+        # The answer text (usually model written) lands in a record inside
+        # the tree git commits: the same redact_text funnel as cmd_adopt.
+        try:
+            entry["answer"] = bs.redact_text((given.get("text") or "").strip())
+        except bs.RedactionUnavailable as exc:
+            _err("bm_project: refused to write %s unredacted: %s"
+                 % (path, exc))
+            return 1
         entry["receipt_id"] = (given.get("receipt_id") or "").strip()
     record["state"] = "delivered"
     actor, _actor_source = _default_actor_name()
@@ -2648,10 +2655,25 @@ def _git_remote(av, root):
     try:
         r = av._run_git(root, "remote", "get-url", "origin")
         if r.returncode == 0 and r.stdout.strip():
-            return r.stdout.strip()
-    except Exception:
+            return _strip_url_credentials(r.stdout.strip())
+    except (OSError, AttributeError):
         pass
     return ADOPT_NODATA
+
+
+def _strip_url_credentials(url):
+    """The remote URL without a user or password. adopt writes it into a
+    record under docs/decisions/, which git commits, so an https URL of the
+    form user:token@host must never reach it. The scp form (git@host:path)
+    carries no password and is returned unchanged. Plain string work, no
+    urllib: SECURITY.md's no-network claim is checked by import scan."""
+    scheme, sep, rest = url.partition("://")
+    if not sep:
+        return url
+    netloc, slash, path = rest.partition("/")
+    if "@" not in netloc:
+        return url
+    return scheme + "://" + netloc.rsplit("@", 1)[1] + slash + path
 
 
 def _project_name(repo_name, remote, root):
@@ -2727,7 +2749,7 @@ def _repo_success_checks(lead, root):
                 if fname.startswith("test_") and fname.endswith(".py"):
                     files.append(os.path.relpath(
                         os.path.join(dirpath, fname), root))
-    except OSError:
+    except OSError:  # sbe: allow-silent inaccessible test walk yields no generated check
         pass
     covered = set()
     for rel in sorted(files):
@@ -2768,7 +2790,7 @@ def _check_evidence_path(root, command):
                 if filenames:
                     return os.path.relpath(
                         os.path.join(dirpath, sorted(filenames)[0]), root)
-        except OSError:
+        except OSError:  # sbe: allow-silent inaccessible discovery directory has no representative file
             pass
         return None
     if command.startswith("python3 "):
@@ -2885,7 +2907,7 @@ def _contract_checker():
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         return mod
-    except Exception:
+    except (ImportError, OSError, AttributeError):
         return None
 
 
@@ -3009,6 +3031,18 @@ def cmd_adopt(argv):
                  % (ADOPT_QUESTION_FIELD, field.strip()))
             return 2
         answered = value.strip()
+
+    # The record lands under docs/decisions/inflight/, inside the tree git
+    # commits, so the person's own text passes through the same redact_text
+    # funnel every generated document here uses BEFORE it reaches the
+    # record, its file name (the slug of the ask), the store, or stdout.
+    try:
+        ask = bs.redact_text(ask)
+        if answered:
+            answered = bs.redact_text(answered)
+    except bs.RedactionUnavailable as exc:
+        _err("bm_project: refused to write the record unredacted: %s" % exc)
+        return 2
 
     root = _adopt_root()
     lead = _load("bm_lead")
@@ -3134,7 +3168,7 @@ def cmd_adopt(argv):
             _err("bm_project: contract_check: FAIL: %s" % problem)
         try:
             os.remove(out)
-        except OSError:
+        except OSError:  # sbe: allow-silent failed cleanup is reported by the refused delivery result
             pass
         _err("bm_project: refused to leave a record the contract checker "
              "rejects; nothing was left at %s" % out)

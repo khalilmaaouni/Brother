@@ -209,6 +209,51 @@ def _served_and_withheld_titles(out):
             served.append(block[0])
     return served, withheld
 
+
+def _cap_served(out, records, max_served):
+    """(out2, records2, dropped). D3 (2026-09-10, THE HARD TWO fix): bounds
+    how many SERVED note blocks (already ranked by bm_vault.py's own RRF ->
+    authority sort -> context rank, and already narrowed by lesson_states
+    above) actually reach the model, to RECALL_INJECT_MAX. A block bm_vault.py
+    itself withheld (_block_is_withheld) is always kept: it is already a small
+    tombstone, not the payload this cap exists to bound. Ordinary blocks are
+    kept in the order they already arrived in -- the tool's own rank order --
+    so whatever gets dropped is always the lowest-ranked served candidate,
+    never a second opinion about which note matters more. `records` is one
+    entry per ordinary block, in that same order (lesson_states' own
+    contract), so it is trimmed in lockstep: nothing downstream (the heat
+    counter, read-audit, the journal bridge) ever processes a note this
+    function just cut from `out`."""
+    lines = out.split("\n")
+    starts = [i for i, line in enumerate(lines) if _NOTE_START_RE.match(line)]
+    if not starts:
+        return out, records, 0
+    kept_lines = []
+    kept_records = []
+    prev = 0
+    served_kept = 0
+    dropped = 0
+    ri = 0
+    for k, idx in enumerate(starts):
+        end = _block_end(lines, idx, starts[k + 1] if k + 1 < len(starts) else None)
+        block = lines[idx:end]
+        if _block_is_withheld(block):
+            kept_lines.extend(lines[prev:end])
+            prev = end
+            continue
+        record = records[ri] if ri < len(records) else None
+        ri += 1
+        if served_kept < max_served:
+            kept_lines.extend(lines[prev:end])
+            if record is not None:
+                kept_records.append(record)
+            served_kept += 1
+        else:
+            dropped += 1
+        prev = end
+    kept_lines.extend(lines[prev:])
+    return "\n".join(kept_lines), kept_records, dropped
+
 #: Floor, not a filter: these catch the cheap, common shapes of "content
 #: pretending to be a directive to the agent reading it". The frame above is
 #: the real defense; this list documents what it additionally flags.
@@ -898,6 +943,31 @@ CHARS_PER_TOKEN_EST = 4
 #: is what this change closes.
 TIMEOUT_S = 12
 
+#: D3 (2026-09-10, THE HARD TWO): the subprocess call used to send bm_vault.py
+#: a hard-coded "--limit 2", so a file with three or more relevant lessons
+#: silently showed two, and bm_vault.py's own "N more matched" line was the
+#: only place that ever said so. bm_vault.py already ranks candidates
+#: (reciprocal rank fusion, then its authority sort, then its context rank)
+#: before cutting to --limit; raising the value this hook SENDS lets more of
+#: that already-computed ranking survive the cut, without this hook inventing
+#: any ranking of its own. Six: one above bm_vault.py's own default `check`
+#: limit (5, cmd_check's own args.get("limit", 5)), comfortably below its
+#: internal CONTEXT_OVERFETCH (12, the depth it already ranks to for the
+#: context tiebreak) -- asking for more than that would just re-request
+#: candidates the tool's own ranking never surfaces anyway.
+RECALL_FETCH_LIMIT = 6
+
+#: The separate, SMALLER bound on how many of those fetched notes actually
+#: reach the model's context. Kept below RECALL_FETCH_LIMIT on purpose: this
+#: hook's own revalidation (lesson_states, E74 anchor checks, P11
+#: human_approved checks) can downgrade or tombstone a fetched note AFTER
+#: bm_vault.py already ranked and returned it, so fetching more than this
+#: bound is what stops that attrition from silently starving the shown set
+#: back down toward the old hard two. Four: double the old hard cut, while
+#: still small enough that one file's history cannot flood a session's
+#: context the way an uncapped list could.
+RECALL_INJECT_MAX = 4
+
 
 #: VR3: how long `git rev-parse --show-toplevel` gets before the context path
 #: falls back to the last three path segments. One process, no network, on a
@@ -1486,6 +1556,25 @@ def _context_path(path):
     return "/".join(segments[-3:])
 
 
+def _recall_failure_reason(exc):
+    """A short, named reason for why the recall subprocess did not answer,
+    for the once-per-session NO-DATA line below: 'timeout' (the call ran
+    past TIMEOUT_S), 'tool missing' (nothing runnable at TOOL, or the
+    interpreter could not launch it -- an OSError), or 'index unreadable'
+    (anything else, including bm_vault.py exiting 2 or above: the caller
+    raises CalledProcessError on those so a genuinely broken tool cannot
+    leave `out` empty and fall silently through every check below,
+    indistinguishable from a real "no notes matched"). Exit 1 is NOT a
+    failure and never reaches here: it is bm_vault.py saying no note
+    matched, which is an ordinary answer. Never invents detail beyond what
+    the exception itself says."""
+    if isinstance(exc, subprocess.TimeoutExpired):
+        return "timeout after %ds" % TIMEOUT_S
+    if isinstance(exc, OSError):
+        return "tool missing: %s" % exc
+    return "index unreadable: %s" % exc
+
+
 def cmd_check():
     # The gate, before anything else: no consent means no read of the
     # vault and no write of the seen marker, so this returns before even
@@ -1550,11 +1639,49 @@ def cmd_check():
     if key in _seen():
         return 0
     try:
-        out = subprocess.run([sys.executable, TOOL, "check", "--paths", base,
-                              "--context", context, "--limit", "2"],
-                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                             timeout=TIMEOUT_S).stdout.decode("utf-8", "replace")
-    except Exception:
+        _proc = subprocess.run([sys.executable, TOOL, "check", "--paths", base,
+                                "--context", context, "--limit", str(RECALL_FETCH_LIMIT)],
+                               stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                               timeout=TIMEOUT_S)
+        # D3 CORRECTION (2026-09-10, orchestrator): the first cut of this fix
+        # passed check=True, which treats EVERY non-zero exit as a crash. But
+        # bm_vault.py's check exits 1 for the most ordinary outcome there is:
+        # no note matched this file (cmd_check returns _print_hits's rc, and
+        # _print_hits returns 1 when it printed no hits). So check=True made a
+        # healthy empty result announce "index unreadable" on stderr, which is
+        # the SAME defect this unit exists to remove, merely inverted: first a
+        # real failure wore the shape of an empty result, then an empty result
+        # wore the shape of a failure. Measured before this correction, a file
+        # with genuinely no notes printed:
+        #   NO-DATA vault recall: could not answer for zzz_nothing_matches.py
+        #   (index unreadable: Command ... returned non-zero exit status 1.)
+        # The contract, read from bm_vault.py rather than assumed: 0 means
+        # notes were found, 1 means none were, 2 means the call itself was
+        # wrong (cmd_check returns 2 on missing --paths). Only 2 and above is
+        # a failure worth telling a human about.
+        if _proc.returncode >= 2:
+            raise subprocess.CalledProcessError(_proc.returncode, TOOL)
+        out = _proc.stdout.decode("utf-8", "replace")
+    except Exception as e:
+        # D3 (2026-09-10, THE SILENT MISS fix): this used to return 0 here
+        # with zero output on stdout AND stderr -- byte-for-byte the same
+        # observable shape as _is_no_data's own honest "nothing matched"
+        # case just below. A timeout, a missing tool, or a crashed subprocess
+        # (check=True above turns a non-zero exit into a CalledProcessError,
+        # so it lands here rather than as an empty `out` that silently passed
+        # every check below) now says so, once per session so it can never
+        # become wallpaper -- the same _seen()/_mark_seen() gate the
+        # unconfigured-tool message above already uses. Still on stderr only
+        # (never additionalContext), the same channel every other
+        # human-audience line in this hook already uses; still never fatal
+        # and never slow: this IS the hook's own except clause, so the edit
+        # it guards is never blocked or delayed.
+        fail_key = session + ":__recall_failed__"
+        if fail_key not in _seen():
+            _mark_seen(fail_key)
+            sys.stderr.write(
+                "NO-DATA vault recall: could not answer for %s (%s)\n"
+                % (base, _recall_failure_reason(e)))
         return 0                      # a slow or broken index must never delay an edit
     if _is_no_data(out):
         # Nothing matched. The tool said so explicitly (its own NO-DATA law),
@@ -1586,10 +1713,10 @@ def cmd_check():
     # _tombstone_note_blocks already passed it through untouched) so it renders as
     # its own line before the untrusted frame rather than being buried inside it.
     more_line = ""
-    # VR3 (RR1 section 5.8): truncation was severe and INVISIBLE -- --limit 2 at
-    # this hook, and nothing anywhere said how many real matches the 2 cut. Both
-    # numbers come out of the one line above (its cut count plus its own stated
-    # limit), never from a second count that could disagree with it.
+    # VR3 (RR1 section 5.8): truncation was severe and INVISIBLE -- a hard-coded
+    # --limit at this hook, and nothing anywhere said how many real matches it cut.
+    # Both numbers come out of the one line above (its cut count plus its own
+    # stated limit), never from a second count that could disagree with it.
     showing_line = ""
     _more_match = _MORE_MATCHED_RE.search(out)
     if _more_match:
@@ -1600,6 +1727,19 @@ def cmd_check():
         except (TypeError, ValueError):  # sbe: allow-silent an unparseable count is no count, never a guessed one
             showing_line = ""
         out = out[:_more_match.start()] + out[_more_match.end():]
+    # D3 (2026-09-10, THE HARD TWO fix): bm_vault.py may now hand back up to
+    # RECALL_FETCH_LIMIT ranked notes; cap what actually reaches the model to
+    # RECALL_INJECT_MAX so the payload stays small and predictable regardless
+    # of how many survived the fetch. pre_served/pre_withheld are read BEFORE
+    # the cap so, if it drops anything, the line below can say so against the
+    # SAME total bm_vault.py (or the earlier "more matched" parse) already
+    # reported -- never a second, possibly disagreeing count.
+    pre_served, pre_withheld = _served_and_withheld_titles(out)
+    out, records, dropped_by_cap = _cap_served(out, records, RECALL_INJECT_MAX)
+    if dropped_by_cap:
+        total_matched = (_shown + _cut) if showing_line else (len(pre_served) + pre_withheld)
+        showing_line = "Vault: showing %d of %d matched\n" % (
+            len(pre_served) + pre_withheld - dropped_by_cap, total_matched)
     # S5 (2026-09-08 VN1 fix): titles is now SERVED notes only -- a tombstoned block
     # (WITHHELD by any of the paths above) no longer counts as "recalled"; the banner
     # names the excluded count instead of silently absorbing it into the total.

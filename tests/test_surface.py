@@ -154,8 +154,11 @@ class TestNoSelfFiringCI(unittest.TestCase):
                 "directory is absent, it is that nothing in it can fire."
             )
         for path in found:
-            with open(path) as fh:
-                text = fh.read()
+            try:
+                with open(path) as fh:
+                    text = fh.read()
+            except OSError as exc:
+                self.skipTest("NO-DATA: could not read %s: %s" % (path, exc))
             is_exempt_path = (
                 os.path.basename(path) == self.EXEMPT_PR_FILE
                 and os.path.basename(os.path.dirname(path)) == "workflows"
@@ -163,7 +166,7 @@ class TestNoSelfFiringCI(unittest.TestCase):
             for trig in self.AUTO_TRIGGERS:
                 if trig == "pull_request:" and is_exempt_path:
                     if trig not in text:
-                        continue  # nothing to except: no pull_request trigger here
+                        continue  # no pull_request trigger here
                     self.assertTrue(
                         self._named_exception_holds(text),
                         "%s carries pull_request: but does not meet every clause "

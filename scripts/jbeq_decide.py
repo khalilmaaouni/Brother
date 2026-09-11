@@ -878,6 +878,7 @@ KNOWN_RULE_IDS = frozenset({
     "stated_relation_gate",
     "temporal",
     "temporal_at_or_after_successor_is_r2",
+    "temporal_before_closure_is_r1",
     "temporal_before_successor_is_r1",
     "temporal_gap_is_nodata",
     "same_area_different_lot_keeps_separate",
@@ -1123,6 +1124,14 @@ def _temporal_rule(fact_sheet, disabled):
     between the closure and the successor's start cannot be ruled out, so
     the honest answer is NO-DATA naming that gap rather than guessing which
     record, if any, was in force.
+    temporal_before_closure_is_r1 (round 12 repair, TM-01): as_of is before
+    candidate_effective_date, the earlier record is stated closed, and the
+    sheet carries a prior_valid_to (the closure date) that is itself after
+    as_of. lifecycle="closed" describes the record's state today, not its
+    state at as_of: the record had not yet closed as of as_of, so it was
+    still the one in force: R1. When prior_valid_to is at or before as_of
+    the record really was already closed by as_of, and this rule does not
+    fire, leaving the case to rule_r below (TM-09 shape).
 
     A pair of dates that collide at month precision (either side missing a
     day, both in the same year and month) has an unknowable order, so no
@@ -1158,7 +1167,8 @@ def _temporal_rule(fact_sheet, disabled):
             "lifecycle=%r is not closed: the earlier record is still the "
             "one in force" % (as_of, candidate, lifecycle),
         )
-    if effective_dates.get("prior_valid_to") is None:
+    prior_valid_to = effective_dates.get("prior_valid_to")
+    if prior_valid_to is None:
         if "temporal_gap_is_nodata" in disabled:
             return None
         return (
@@ -1167,6 +1177,19 @@ def _temporal_rule(fact_sheet, disabled):
             "lifecycle=closed, but the sheet carries no prior_valid_to: a "
             "dormancy gap between the closure and the successor's start "
             "cannot be ruled out" % (as_of, candidate),
+        )
+    closure_order = _date_cmp(as_of, prior_valid_to)
+    if closure_order is not None and closure_order < 0:
+        if "temporal_before_closure_is_r1" in disabled:
+            return None
+        return (
+            "R1", "temporal_before_closure_is_r1",
+            "as_of %r is before candidate_effective_date %r and also "
+            "before the record's own prior_valid_to %r (its closure "
+            "date): lifecycle=closed states today's status, not the "
+            "status at as_of, and the record had not yet closed as of "
+            "as_of, so the earlier record was still the one in force"
+            % (as_of, candidate, prior_valid_to),
         )
     return None
 

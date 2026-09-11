@@ -153,7 +153,7 @@ def release_lock(lock_path, expected_pid):
     if held and held.get("pid") == expected_pid:
         try:
             os.remove(lock_path)
-        except FileNotFoundError:
+        except FileNotFoundError:  # sbe: allow-silent a lock already removed by its owner means this cleanup has no remaining action
             pass
 
 
@@ -992,7 +992,7 @@ def run(queue_path, log_path, gate_tpl, merge_tpl, concurrency=1, lock_path=None
         try:
             if os.path.exists(stop_path):
                 os.remove(stop_path)
-        except FileNotFoundError:
+        except FileNotFoundError:  # sbe: allow-silent a concurrent stop-file removal already satisfies this final cleanup
             pass
         release_lock(lock_path, os.getpid())
     return 0

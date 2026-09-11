@@ -252,5 +252,56 @@ class MissingPath(unittest.TestCase):
             self.assertIn("NO-DATA", out)
 
 
+class Sandboxed(unittest.TestCase):
+    """snapshot_for_tests() (2026-09-11): live sessions' installed hooks grow
+    the real logs during any suite run, so a suite is judged on a private
+    sandbox its own writers are redirected into. Driven both ways: ambient
+    growth of the real files passes, and the recall hook's own
+    _append_outcome plus a child's attempt_ledger.record, neither
+    redirected by the test, fail."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.env = _env(self.tmp)
+        _seed_all(self.tmp, self.env)
+        self.saved = dict(os.environ)
+        os.environ.update(self.env)
+
+    def tearDown(self):
+        os.environ.clear()
+        os.environ.update(self.saved)
+
+    def test_ambient_growth_of_the_real_files_does_not_fail(self):
+        before = RL.snapshot_for_tests()
+        # Another session's hook appends to the real paths by name, never
+        # through this process's env.
+        for path in (self.env["BM_HOOK_OUTCOMES"], self.env["ATTEMPT_LEDGER"]):
+            with open(path, "a", encoding="utf-8") as fh:
+                fh.write('{"row": "ambient"}\n')
+        RL.assert_unchanged(before, context="a fixture suite")
+        self.assertEqual(os.environ["BM_HOOK_OUTCOMES"], self.env["BM_HOOK_OUTCOMES"])
+        self.assertEqual(os.environ["ATTEMPT_LEDGER"], self.env["ATTEMPT_LEDGER"])
+
+    def test_unredirected_writes_fail_in_process_and_in_a_child(self):
+        import importlib.util
+        before = RL.snapshot_for_tests()
+        hook = os.path.join(os.path.dirname(HERE), "products", "brothermode",
+                            "tools", "vault_recall_hook.py")
+        spec = importlib.util.spec_from_file_location("_rl_recall_hook", hook)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        mod._append_outcome("sess-x", 1, 100)
+        p = subprocess.run(
+            [sys.executable, "-c", "import sys; sys.path.insert(0, %r); "
+             "import attempt_ledger as A; A.record('p', 'c', 'failed')" % HERE],
+            capture_output=True, text=True, env=dict(os.environ), timeout=30)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        with self.assertRaises(AssertionError) as ctx:
+            RL.assert_unchanged(before, context="a fixture suite")
+        self.assertIn("hook_outcomes", str(ctx.exception))
+        self.assertIn("attempt_ledger", str(ctx.exception))
+        self.assertEqual(os.environ["BM_HOOK_OUTCOMES"], self.env["BM_HOOK_OUTCOMES"])
+
+
 if __name__ == "__main__":
     unittest.main()

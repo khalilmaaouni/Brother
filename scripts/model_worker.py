@@ -12,9 +12,10 @@ as ONE JSON object on stdout with worker_claim and artifacts, and every log
 line goes to stderr because stdout is reserved for that one object. Exit 0
 with unreadable stdout reads as "malformed"; nonzero exit reads as
 "unavailable". Both are the caller's business, not this file's: this file
-just has to keep the two paths distinct, which is why the model-timeout and
-model-nonzero paths below exit 3 (unavailable) rather than ever emitting a
-half-formed result on stdout.
+just has to keep the two paths distinct, which is why the model-timeout,
+model-nonzero, and model-empty paths below (SR-1: an answer with nothing
+usable in it is a failure, never the claim "the model said nothing") exit 3
+(unavailable) rather than ever emitting a half-formed result on stdout.
 
 READING THE BRIEF DEFENSIVELY. The estate's own recorded lesson is that a
 translation above a stage silently drops fields (see the graph_loop /
@@ -68,6 +69,7 @@ invocation is a subprocess, not an import.
 """
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -191,6 +193,45 @@ def build_prompt(brief):
 CLAUDE_ARGV = ["claude", "-p", "--output-format", "json", "--permission-mode",
                "acceptEdits"]
 #:
+#: SR-1, THE NATIVE FALLBACK CHAIN. `claude --help` on this machine
+#: (2026-09-10) documents --fallback-model: "Enable automatic fallback to
+#: specified model(s) when the default model is overloaded or not available.
+#: Accepts a comma-separated list". BROTHER_FALLBACK_MODELS names the list,
+#: default "sonnet,haiku"; setting it to the empty string omits the flag
+#: entirely (a caller that wants no fallback at all can still get that).
+#: This is env-dependent, so it cannot live in the CLAUDE_ARGV constant
+#: itself (managed_safety.py reads that constant directly for diagnostics,
+#: and it stays the bare base command); the flag is appended by
+#: _claude_argv() below, at the moment the real invocation is built.
+FALLBACK_MODELS_ENV = "BROTHER_FALLBACK_MODELS"
+DEFAULT_FALLBACK_MODELS = "sonnet,haiku"
+
+
+def _claude_argv(env=None):
+    """CLAUDE_ARGV plus --fallback-model, unless BROTHER_FALLBACK_MODELS is
+    set to the empty string.
+
+    The binary refuses at startup when a fallback equals the main model
+    ("Fallback model cannot be the same as the main model"), so any element
+    matching ANTHROPIC_MODEL is dropped, and the flag is omitted when none
+    is left. A host whose settings file pins the main model instead must set
+    BROTHER_FALLBACK_MODELS itself: this worker does not read settings."""
+    env = os.environ if env is None else env
+    argv = list(CLAUDE_ARGV)
+    fallback = env.get(FALLBACK_MODELS_ENV)
+    if fallback is None:
+        fallback = DEFAULT_FALLBACK_MODELS
+    main = (env.get("ANTHROPIC_MODEL") or "").strip().lower()
+    chain = [m.strip() for m in fallback.split(",") if m.strip()]
+    if main:
+        chain = [m for m in chain
+                 if m.lower() not in main and main not in m.lower()]
+    if chain:
+        argv += ["--fallback-model", ",".join(chain)]
+    return argv
+
+
+#:
 #: NO writable-roots GRANT HERE, and that is a measurement rather than an
 #: oversight (2026-09-05, codex-cli 0.153.0-alpha.5, driven three ways in
 #: test_model_worker.TheCodexTurnsSandbox against a worktree sitting under
@@ -234,8 +275,9 @@ def model_client(env=None):
 
 
 def _default_argv(env=None):
-    return list(CODEX_ARGV if model_client(env) == brother_paths.CODEX
-                else CLAUDE_ARGV)
+    if model_client(env) == brother_paths.CODEX:
+        return list(CODEX_ARGV)
+    return _claude_argv(env)
 
 
 #: usage's own keys (Anthropic's CLI JSON result), renamed to what
@@ -418,36 +460,177 @@ def _timeout_s():
         return DEFAULT_TIMEOUT_S
 
 
+#: SR-1, THE FIRST BYTE DEADLINE. DEFAULT_TIMEOUT_S above stays the hard
+#: wall clock cap on the whole call; this is a separate, shorter cap on how
+#: long the model may go before its FIRST byte, so a hung stream is caught
+#: long before the 1200s ceiling. Never overridden if the caller's own
+#: environment already names it: a lane that set its own value knows better
+#: than this default.
+FIRST_BYTE_TIMEOUT_MS_ENV = "CLAUDE_STREAM_FIRST_BYTE_TIMEOUT_MS"
+DEFAULT_FIRST_BYTE_TIMEOUT_MS = "120000"
+
+
+def _child_env():
+    """This process's own environment, plus the first byte deadline default
+    when the caller has not already set one."""
+    env = dict(os.environ)
+    env.setdefault(FIRST_BYTE_TIMEOUT_MS_ENV, DEFAULT_FIRST_BYTE_TIMEOUT_MS)
+    return env
+
+
+def classify_failure(timed_out=False, empty=False, text=""):
+    """One failure class from what the call actually produced: "timeout"
+    when the call itself timed out, "empty" when there is nothing to read
+    at all, then a scan of the failure text for the two vendor shapes worth
+    routing on separately (a rate or usage limit, an overload), and "other"
+    for everything else. Order matters: a timeout with empty text still
+    classes as "timeout", not "empty"."""
+    if timed_out:
+        return "timeout"
+    if empty:
+        return "empty"
+    low = (text or "").lower()
+    # Only strings the CLI emits: the vendor error types, an HTTP status,
+    # and the literal limit phrases ("You've hit your session limit ...
+    # error type rate_limit, HTTP 429" was seen verbatim on 2026-09-11).
+    # Never a bare "429" or "529": a count or a line number is not a limit.
+    # The binary also carries "You've hit your fast limit", "... monthly
+    # limit" and "... monthly spend limit": any "hit your <words> limit".
+    if any(s in low for s in ("rate_limit", "rate limit", "usage limit",
+                              "session limit", "http 429",
+                              "too many requests")) \
+            or re.search(r"hit your (?:[a-z]+ ){0,3}limit", low):
+        return "rate_limit"
+    if "overloaded" in low or "http 529" in low:
+        return "overloaded"
+    return "other"
+
+
+def _claude_failure_text(parsed):
+    """None when parsed is not a claude failure shape; otherwise the text to
+    classify the failure from.
+
+    A failure is "is_error": true, or a "result" that is present but empty
+    or whitespace only. A missing or null "result" is left to
+    _foreign_shape, which fails it on the real claude client and lets a
+    MODEL_WORKER_CMD stub keep the raw-text path."""
+    if not isinstance(parsed, dict):
+        return None
+    is_error = bool(parsed.get("is_error"))
+    result_val = parsed.get("result")
+    result_blank = isinstance(result_val, str) and not result_val.strip()
+    if is_error or result_blank:
+        return result_val if isinstance(result_val, str) else ""
+    return None
+
+
+#: The measured live shape (2026-09-11): a headless child answered as this
+#: machine's stop hook does, {"ok": ..., "reason": ...}, instead of doing
+#: its work. Valid JSON, and not an answer.
+HOOK_ANSWER_KEYS = frozenset({"ok", "reason"})
+
+
+def _foreign_shape(parsed):
+    """None when parsed is the real claude envelope carrying a string
+    answer; otherwise (reason, failure_class): "empty" when the envelope
+    carries no usable answer (no result, or a null or non-string one),
+    "other" when the shape is foreign. Only applied to the real claude
+    client: a MODEL_WORKER_CMD stub keeps the raw-text path."""
+    if not isinstance(parsed, dict):
+        return "stdout is not a JSON object", "other"
+    if set(parsed) == HOOK_ANSWER_KEYS:
+        return "the answer is a hook's {ok, reason}, not the unit's work", "other"
+    result_val = parsed.get("result")
+    if not isinstance(result_val, str):
+        return ("no string result (keys %s)" % sorted(parsed)[:8]), "empty"
+    try:
+        inner = json.loads(result_val)
+    except ValueError:
+        inner = None
+    if isinstance(inner, dict) and set(inner) == HOOK_ANSWER_KEYS:
+        return "the result is a hook's {ok, reason}, not the unit's work", "other"
+    return None
+
+
 def run_model(prompt, cwd=None, runner=None):
     """Invokes the model command. Returns (ok, claim_text_or_reason, usage).
 
-    ok is False on nonzero exit or timeout; the caller's job is to turn that
-    into exit 3 without ever writing to stdout, since a nonzero/timeout
-    result carries nothing readable as a worker_claim. usage is None
+    ok is False on nonzero exit, timeout, or an answer with nothing usable
+    in it (SR-1: empty stdout for either vendor; for the real claude client
+    also "is_error": true, a blank, missing or null "result", non-JSON
+    stdout, or a hook's {ok, reason} shape); the caller's job is to turn that
+    into exit 3 without ever writing to stdout, since none of those results
+    carries anything readable as a worker_claim. Every failure's reason
+    string STARTS with "failure_class=<cls>;" (one of rate_limit,
+    overloaded, timeout, empty, other), because bm_worker_spawn keeps only
+    the first 400 characters of stderr and loop_bridge.failure_class_of
+    reads the token from what is left (SR-4's breaker). usage is None
     whenever the model's stdout could not be read as --output-format json's
     shape (see _parse_model_output); it is never a fabricated number."""
     runner = runner or subprocess.run
     argv = _model_argv(prompt)
     try:
         completed = runner(argv, cwd=cwd, capture_output=True, text=True,
-                            timeout=_timeout_s())
+                            timeout=_timeout_s(), env=_child_env())
     except subprocess.TimeoutExpired:
-        return False, ("model command timed out after %ss: %s"
-                        % (_timeout_s(), argv)), None
+        cls = classify_failure(timed_out=True)
+        return False, ("failure_class=%s; model command timed out after "
+                        "%ss: %s" % (cls, _timeout_s(), argv)), None
     except OSError as exc:
-        return False, "could not start model command %r: %s" % (argv, exc), None
+        cls = classify_failure(text=str(exc))
+        return False, ("failure_class=%s; could not start model command "
+                        "%r: %s" % (cls, argv, exc)), None
 
     if completed.returncode != 0:
-        return False, ("model command exited %s: %s"
-                        % (completed.returncode,
-                           (completed.stderr or completed.stdout or "").strip()[:400])), None
+        text = (completed.stderr or completed.stdout or "").strip()
+        # A claude account limit exits 1 with a JSON envelope on stdout
+        # whose "result" is the readable cause; classify that, not the
+        # envelope's own bytes.
+        try:
+            envelope_text = _claude_failure_text(json.loads(completed.stdout or ""))
+        except ValueError:
+            envelope_text = None
+        if envelope_text and envelope_text.strip():
+            text = envelope_text.strip()
+        cls = classify_failure(empty=not text, text=text)
+        return False, ("failure_class=%s; model command exited %s: %s"
+                        % (cls, completed.returncode, text[:400])), None
+
     # C3: each vendor's own stdout shape gets its own parser. A stub
     # driven through MODEL_WORKER_CMD falls back to the raw text with no
     # usage under both, which is the pre-C3 behaviour.
+    stdout_text = (completed.stdout or "").strip()
     if model_client() == brother_paths.CODEX:
+        # SR-1: empty is a failure for codex too, not the literal claim
+        # "(model produced no stdout)" the pure parser still returns for
+        # anyone reading it directly.
+        if not stdout_text:
+            cls = classify_failure(empty=True)
+            return False, ("failure_class=%s; codex produced no stdout"
+                            % cls), None
         claim, usage = _parse_codex_output(completed.stdout)
-    else:
-        claim, usage = _parse_model_output(completed.stdout)
+        return True, claim, usage
+
+    if not stdout_text:
+        cls = classify_failure(empty=True)
+        return False, ("failure_class=%s; claude produced no stdout"
+                        % cls), None
+    try:
+        parsed = json.loads(stdout_text)
+    except ValueError:
+        parsed = None
+    fail_text = _claude_failure_text(parsed)
+    if fail_text is not None:
+        cls = classify_failure(empty=not fail_text.strip(), text=fail_text)
+        return False, ("failure_class=%s; model returned no usable answer: %s"
+                        % (cls, fail_text.strip()[:400])), None
+    if not os.environ.get("MODEL_WORKER_CMD"):
+        foreign = _foreign_shape(parsed)
+        if foreign:
+            why, cls = foreign
+            return False, ("failure_class=%s; model answer is not the "
+                            "expected shape: %s" % (cls, why)), None
+    claim, usage = _parse_model_output(completed.stdout)
     return True, claim, usage
 
 

@@ -151,7 +151,7 @@ command prints: with failures present, this run also prints each one, by
 name, underneath it.
 
 ```
-38 checks discovered from 6 registries in 132 module(s), 4258 scenarios run, 2 waived by declared exemption, 58 failure(s).
+38 checks discovered from 6 registries in 134 module(s), 4258 scenarios run, 2 waived by declared exemption, 58 failure(s).
 ```
 
 Exit code 1: this run finds real gaps in the tools right now (twelve check functions

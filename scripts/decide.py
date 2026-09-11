@@ -182,7 +182,19 @@ def _pill(text, kind=""):
     return '<span class="pill %s">%s</span>' % (kind, E(text))
 
 
-def render(spec):
+def render(spec, fragment=False):
+    """The screen for one decision, or (fragment=True) that decision as a
+    SECTION of a larger round.
+
+    FRAGMENT MODE EXISTS BECAUSE STAPLING PAGES BREAKS THE TEMPLATE. A round of
+    four decisions rendered as four whole pages repeats the masthead and the
+    "In plain words" block four times and nests four h1 elements, which reads as
+    four documents shuffled together rather than one screen. The founder scored
+    exactly that 0 of 5 on 2026-09-10. So a decision inside a round omits the
+    document shell (title, viewport, stylesheet), carries an h2 rather than an
+    h1, and drops the repeated "In plain words" heading while keeping its own
+    plain-language paragraph, which is the part that must never be lost.
+    """
     criteria, weight_note, scored, close = rank(spec)
     # ANNOTATE TO REMEMBER, live at intake (docs/plan/PR-485-DISPOSITION-
     # 2026-09-08.md): a correction stored once by annotations_store.py is
@@ -195,23 +207,26 @@ def render(spec):
     parts = []
     A = parts.append
 
-    A('<title>%s</title>' % E(title))
-    # The one line that makes the screen legible on a phone: without it a
-    # mobile browser renders the desktop width and the founder reads 6px
-    # text. Found by the founder on his own phone, 2026-08-30.
-    A('<meta name="viewport" content="width=device-width, initial-scale=1">')
-    A(STYLE)
+    if not fragment:
+        A('<title>%s</title>' % E(title))
+        # The one line that makes the screen legible on a phone: without it a
+        # mobile browser renders the desktop width and the founder reads 6px
+        # text. Found by the founder on his own phone, 2026-08-30.
+        A('<meta name="viewport" content="width=device-width, initial-scale=1">')
+        A(STYLE)
 
-    A('<header class="top">')
+    A('<header class="%s">' % ("decision-head" if fragment else "top"))
     A('<p class="eyebrow">%s</p>' % E(spec.get("eyebrow", "Decision")))
-    A('<h1>%s</h1>' % E(title))
+    A('<%s>%s</%s>' % ("h2" if fragment else "h1", E(title),
+                       "h2" if fragment else "h1"))
     A('<p class="stamp">%s</p>' % E(spec.get("stamp", "")))
     A('</header>')
 
     # PLAIN LANGUAGE FIRST. The founder is not an engineer, and a page that
     # opens on a comparison table has already lost the reader it was built for.
     A('<section class="plain">')
-    A('<h2>In plain words</h2>')
+    if not fragment:
+        A('<h2>In plain words</h2>')
     A('<p class="lede">%s</p>' % E(spec.get("plain_summary", "")))
     if spec.get("question"):
         A('<p class="question"><strong>The question:</strong> %s</p>'
@@ -542,6 +557,9 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("spec", help="the decision, as JSON")
     ap.add_argument("-o", "--out", help="where to write the HTML")
+    ap.add_argument("--fragment", action="store_true",
+                    help="render as a section of a round, with no document "
+                         "shell and no repeated masthead")
     args = ap.parse_args(list(sys.argv[1:] if argv is None else argv))
 
     try:
@@ -552,7 +570,7 @@ def main(argv=None):
               file=sys.stderr)
         return 2
 
-    body = render(spec)
+    body = render(spec, fragment=args.fragment)
     out = args.out or os.path.splitext(args.spec)[0] + ".html"
     with open(out, "w", encoding="utf-8") as fh:
         fh.write(body)

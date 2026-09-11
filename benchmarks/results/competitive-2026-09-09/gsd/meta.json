@@ -1,0 +1,19 @@
+{
+ "arm": "gsd",
+ "route": "in-session subagent (route two), not a throwaway home",
+ "model_id": "claude-sonnet-5",
+ "plugin_version": "gsd-core 1.12.0",
+ "workflow_used": "none: gsd-quick refused with 'Quick mode requires an active project with ROADMAP.md. Run /gsd:new-project first.' (its own Step 2 validation, roadmap_exists false on a fresh repository); the arm then completed the task unaided by the same model with the GSD plugin loaded",
+ "declared_files": [
+  "pricing.py"
+ ],
+ "tokens_used": 153726,
+ "tokens_source": "orchestrator's subagent usage report (subagent_tokens)",
+ "interventions": 0,
+ "questions_asked_to_user": 0,
+ "wall_seconds": 129,
+ "wall_seconds_note": "from dispatch stamp to artifact write; the agent's own duration was 111 s",
+ "exit_code": 0,
+ "committed": "yes: Fix apply_discount to compute a percentage instead of a flat subtraction",
+ "deviation": "the GSD quick workflow itself never ran on this fixture; this arm measures GSD's refusal plus an unaided fix, not GSD's workflow. An earlier attempt on 2026-09-09 morning hung on a stale build lock in the plugin cache (see NOTE.txt); that lock was removed before this run."
+}

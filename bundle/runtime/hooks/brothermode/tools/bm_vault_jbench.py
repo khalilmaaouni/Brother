@@ -142,7 +142,7 @@ def run_case(bm, con, case, stem_to_id, limit):
     forbidden_note (a fixture bug: a stem not in stem_to_id) counts as a
     miss, never a silent pass."""
     query = case["query"]
-    fused, _why = bm._search(con, text=query, limit=limit, fast=True)
+    fused, _why, _total = bm._search(con, text=query, limit=limit, fast=True)
     top_ids = {nid for nid, _score in fused}
     if case["class"] == "negative":
         forbidden = stem_to_id.get(case.get("forbidden_note"))
