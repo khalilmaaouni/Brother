@@ -1,9 +1,9 @@
 {
   "schema": 1,
   "status": "OK",
-  "vault": "/Users/khalil.maaouni/brother-hub-worktrees/vr0-benchmark/benchmarks/fixtures/vault-retrieval/vault",
-  "corpus": "/Users/khalil.maaouni/brother-hub-worktrees/vr0-benchmark/benchmarks/retrieval/vault-retrieval-v1.json",
-  "tool": "/Users/khalil.maaouni/brother-hub-worktrees/vr0-benchmark/products/brothermode/tools/bm_vault.py",
+  "vault": "~/brother-hub-worktrees/vr0-benchmark/benchmarks/fixtures/vault-retrieval/vault",
+  "corpus": "~/brother-hub-worktrees/vr0-benchmark/benchmarks/retrieval/vault-retrieval-v1.json",
+  "tool": "~/brother-hub-worktrees/vr0-benchmark/products/brothermode/tools/bm_vault.py",
   "corpus_label": "tuning",
   "vault_fingerprint": {
     "notes": 71,

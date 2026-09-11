@@ -8,6 +8,7 @@ founder's real ~/.claude or ~/.codex, never a real repository.
 """
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -349,8 +350,8 @@ class DefaultRequestProceedsOnAMissingFloor(_IsolatedTestCase):
         os.chmod(model, 0o755)
         env = self.subprocess_env(
             BROTHER_MODEL_CLIENT="codex",
-            DOOR_MODEL_CMD="%s %s" % (sys.executable, decomposer),
-            MODEL_WORKER_CMD="%s %s" % (sys.executable, model))
+            DOOR_MODEL_CMD="%s %s" % (shlex.quote(sys.executable), shlex.quote(decomposer)),
+            MODEL_WORKER_CMD="%s %s" % (shlex.quote(sys.executable), shlex.quote(model)))
         self.assertNotIn("BROTHER_AUTONOMY_DIAL", env,
                          "this test proves the A1 DEFAULT, not a set dial")
         proc = _sh([sys.executable, BROTHER_RUN, "one file exists",

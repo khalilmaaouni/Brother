@@ -412,6 +412,165 @@ def e18_gap(row):
     return ""
 
 
+#: U5 (red-before-green witness, 2026-09-09): row["change_kind"] names
+#: what kind of change a unit made, in the row's own declared vocabulary,
+#: the same shape as check_author and evidence_family (a fact the model
+#: that decomposed the outcome writes onto the row, trusted here rather
+#: than re-derived from a path pattern). "behaviour" is the only value
+#: red_check_gap enforces against; "documentation" and "generated" let a
+#: unit that touched only prose or a generated artifact say so, because
+#: there is no behaviour there to have proven broken before it was proven
+#: fixed. A row that declares no change_kind at all (every row this
+#: estate wrote before this feature) is outside this gate entirely, the
+#: same way e18_gap below is outside evidence_family other than "E18": it
+#: never reads a pre-existing verified receipt back as NO-DATA.
+CHANGE_KIND_BEHAVIOUR = "behaviour"
+CHANGE_KIND_DOCUMENTATION = "documentation"
+CHANGE_KIND_GENERATED = "generated"
+
+#: The sentence a receipt prints in place of a witness a unit never
+#: needed. Keyed by change_kind so red_check_evidence and red_check_gap
+#: read the identical text from one place.
+_EXEMPT_CHANGE_KIND_REASON = {
+    CHANGE_KIND_DOCUMENTATION: ("documentation-only unit, exempt from the "
+                                "red check"),
+    CHANGE_KIND_GENERATED: ("generated-file-only unit, exempt from the "
+                            "red check"),
+}
+
+#: U5 review finding 4 (adversarial review of 3409fcec, 2026-09-09): the
+#: documentation/generated exemption above is self-declared, so a unit
+#: could mislabel a real behaviour change to dodge the red check. The
+#: smallest classifier that catches the lie without guessing about a
+#: path it has never seen: an extension this estate writes executable
+#: source in reads as code; an unrecognized extension is NOT treated as
+#: code, because the exemption is refused by naming an offending path,
+#: and refusing on a false positive (a data or config file) would be the
+#: same false-refusal class scope_audit._generated_noise's own docstring
+#: warns against.
+_CODE_EXTENSIONS = (
+    ".py", ".js", ".jsx", ".ts", ".tsx", ".go", ".rb", ".java", ".c",
+    ".cc", ".cpp", ".h", ".hpp", ".sh", ".swift", ".kt", ".rs", ".php",
+)
+
+
+def looks_like_code(path):
+    """True when `path`'s extension is one _CODE_EXTENSIONS names. Pure
+    string match, no filesystem read: the same posture as path_risk
+    above, so a row and a re-read of the same row always classify a path
+    the same way."""
+    return os.path.splitext(str(path))[1].lower() in _CODE_EXTENSIONS
+
+#: The row's own witness that its done_check was OBSERVED FAILING before
+#: the implementation existed (Superpowers' own TDD discipline; GSD's
+#: add-tests names it RED then GREEN; this estate's own
+#: products/brothermode/tools/toolkit_routes.json used to say plainly
+#: that no automated red-green enforcement existed here at all). Read
+#: straight off the row, never recomputed (this module runs no check and
+#: no git of its own for this fact): the command, its captured exit code,
+#: where its full output lives, the revision it ran at, and whether that
+#: revision predates the unit's first implementation commit.
+RED_CHECK_FIELD = "red_check"
+
+
+def red_check_evidence(row):
+    """The red_check block every receipt carries: {"change_kind",
+    "exempt", ...}. For a row that declared change_kind "documentation" or
+    "generated" AND whose files_changed_by_unit names nothing
+    looks_like_code reads as code, just {"change_kind", "exempt": True,
+    "reason"}, the sentence a reader sees in place of a witness that unit
+    never needed. For the same declaration when files_changed_by_unit DOES
+    name a code path (U5 review finding 4, 2026-09-09): {"change_kind",
+    "exempt": False, "exemption_refused"}, the offending path named in the
+    one sentence red_check_gap reads back verbatim, refusing the label
+    rather than trusting it. Otherwise (change_kind "behaviour", or a
+    refused exemption) {"change_kind", "exempt": False, "command",
+    "exit_code", "output_location", "revision", "pre_implementation"},
+    each field NO-DATA (or None for pre_implementation) when
+    row["red_check"] never recorded it, so an absent witness is a fact on
+    the receipt rather than a silently missing key. Pure reshaping of the
+    row; it runs nothing and reads no filesystem."""
+    kind = str(row.get("change_kind") or "") or NODATA
+    if kind in _EXEMPT_CHANGE_KIND_REASON:
+        offender = next(
+            (p for p in (row.get("files_changed_by_unit") or [])
+             if looks_like_code(p)), None)
+        if offender is None:
+            return {"change_kind": kind, "exempt": True,
+                    "reason": _EXEMPT_CHANGE_KIND_REASON[kind]}
+        return {"change_kind": kind, "exempt": False,
+                "exemption_refused": (
+                    "declared change_kind %r but changed %s, which this "
+                    "receipt reads as code, so the exemption is refused"
+                    % (kind, offender))}
+    red = row.get(RED_CHECK_FIELD)
+    red = red if isinstance(red, dict) else {}
+    exit_code = red.get("exit_code")
+    if isinstance(exit_code, bool) or not isinstance(exit_code, int):
+        exit_code = NODATA
+    pre_impl = red.get("pre_implementation")
+    if not isinstance(pre_impl, bool):
+        pre_impl = None
+    return {
+        "change_kind": kind,
+        "exempt": False,
+        "command": str(red.get("command") or "") or NODATA,
+        "exit_code": exit_code,
+        "output_location": red.get("output_location") or NODATA,
+        "revision": red.get("revision") or NODATA,
+        "pre_implementation": pre_impl,
+    }
+
+
+def red_check_gap(row):
+    """"" when this unit needs no red-before-green witness (row declares
+    no change_kind at all, or declares "documentation"/"generated" and
+    the exemption holds: the exempt reason already says why), or when
+    row["red_check"] names a captured, non-zero exit code, run with THIS
+    unit's own done_check, whose output is findable, and stamped
+    pre_implementation True; otherwise the reason a green receipt still
+    cannot be trusted to prove this check can tell the work from no work.
+
+    Scoped to change_kind == "behaviour" exactly the way e18_gap above is
+    scoped to evidence_family == "E18": a row that never declared a
+    change_kind is not this gate's business, so the entire pre-U5 corpus
+    (and every test fixture written before this row) reads exactly as it
+    did before. A refused documentation/generated exemption (finding 4)
+    is scoped in ahead of that check: a row that mislabeled a real code
+    change gets exactly the scrutiny a correctly labeled "behaviour" row
+    would, never a pass on the strength of the label alone. Called only
+    after every other reason a PASS could be hollow has already been
+    cleared (the same position e18_gap and numbers_gap hold in
+    receipts_for's own chain), so it only ever downgrades a PASS that
+    would otherwise be printed."""
+    evidence = red_check_evidence(row)
+    if evidence.get("exemption_refused"):
+        return evidence["exemption_refused"]
+    if evidence["exempt"] or evidence["change_kind"] != CHANGE_KIND_BEHAVIOUR:
+        return ""
+    if evidence["exit_code"] == NODATA:
+        return ("red check never observed: no red_check was recorded for "
+                "this unit, so nothing shows its done_check could ever "
+                "fail")
+    declared_command = str(row.get("done_check") or "").strip()
+    if evidence["command"] != declared_command:
+        return ("the recorded red check ran %r, not this unit's own "
+                "done_check %r, so it is not a witness that THIS check "
+                "could ever fail"
+                % (evidence["command"], declared_command))
+    if not evidence["output_location"] or evidence["output_location"] == NODATA:
+        return ("the recorded red check names no output location, so its "
+                "capture cannot be produced on demand")
+    if evidence["exit_code"] == 0:
+        return ("the recorded red check exited 0: the check passed before "
+                "the work, so nothing shows it could ever fail")
+    if evidence["pre_implementation"] is not True:
+        return ("the recorded red check never confirms it ran before the "
+                "implementation existed (pre_implementation was not "
+                "True), so nothing shows this failure preceded the fix")
+    return ""
+
+
 #: P7 (persona plan section 2, the verify stage; docs/plan/
 #: PERSONA-INTEGRATION-PLAN-2026-09-04.md, row P7): the two evidence
 #: families whose own claim is a decision figure a numbers-manifest.json
@@ -765,6 +924,10 @@ def receipts_for(record, claims, refused, log_path=None,
             "target_revision": target_revision or NODATA,
             "env_lock": env_lock or NODATA,
             "data_identity": (data_identity_by_id or {}).get(uid, NODATA),
+            # U5 (red-before-green witness, 2026-09-09): always present,
+            # exempt or not, so an absent witness is a fact on the
+            # receipt rather than a silently missing key.
+            "red_check": red_check_evidence(row),
         }
         if uid in refusals:
             receipt["state"] = "refused"
@@ -841,6 +1004,16 @@ def receipts_for(record, claims, refused, log_path=None,
             # in the gate's own words.
             receipt["state"] = "no-data"
             receipt["reason"] = numbers_gap
+        elif exit_code == 0 and command and red_check_gap(row):
+            # U5 (red-before-green witness, 2026-09-09): a green,
+            # dependency-proven, numbers-proven check on a unit that
+            # declared itself behaviour-changing is still not proof this
+            # check can tell the work from no work, without a record that
+            # it was ever seen to fail; refused here, last, only after
+            # every other reason a PASS could be hollow has already been
+            # cleared, in the gate's own words.
+            receipt["state"] = "no-data"
+            receipt["reason"] = red_check_gap(row)
         elif exit_code == 0 and command:
             receipt["state"] = "verified"
             if str(row.get("evidence_family") or "") == "E18":
@@ -1104,13 +1277,20 @@ REVIEW_FIRST = "REVIEW FIRST"
 LOW_RISK_MECHANICAL = "LOW-RISK MECHANICAL"
 NOT_PROVEN = "NOT PROVEN"
 NO_NEED_TO_RE_READ = "NO NEED TO RE-READ"
-READING_SECTIONS = (REVIEW_FIRST, LOW_RISK_MECHANICAL, NOT_PROVEN,
+# ACC-0: the two sections a reviewer must actually read (REVIEW FIRST, NOT
+# PROVEN) come first, so the screen renders them expanded at the top; the
+# two low-value sections (proven-safe, or never touched) come after, so
+# they render collapsed underneath. This is display order only, never
+# classification: which bucket a path lands in is still decided entirely
+# inside reading_order()'s own if/elif chain below, untouched by this
+# tuple's order.
+READING_SECTIONS = (REVIEW_FIRST, NOT_PROVEN, LOW_RISK_MECHANICAL,
                     NO_NEED_TO_RE_READ)
 
 #: What an empty section says. An empty section is still PRINTED (E75.2): a
 #: heading that disappears when it holds nothing reads, to the person in
 #: front of it, exactly like a heading nobody ever computed.
-EMPTY_SECTION = "No file in this run landed here."
+EMPTY_SECTION = "0 files: no file in this run landed here."
 
 
 def path_risk(path):
@@ -1433,16 +1613,273 @@ def cognitive_debt(record, receipts):
     return {"count": len(signals), "signals": signals}
 
 
-def _reading_sections(record, receipts):
-    """The four sections in decide.render's own `sections` shape: a heading,
-    the paths the classifier put under it (each with the reason it landed
-    there), and the sentence an empty one prints instead of vanishing."""
-    order = reading_order(record, receipts)
-    return [{"heading": name,
-             "items": ["%s (%s)" % (e["path"], e["why"])
-                       for e in order[name]],
-             "empty": EMPTY_SECTION}
-            for name in READING_SECTIONS]
+#: ACC-0: the two headings that print as one headline count line instead
+#: of one row per file, because every file inside either one is already
+#: either proven by its own check (LOW-RISK MECHANICAL) or was never owed
+#: one at all (NO NEED TO RE-READ: a declared path the unit never
+#: touched). REVIEW FIRST and NOT PROVEN are never in this set: those are
+#: exactly the files a reviewer must read, so they always print expanded.
+COLLAPSIBLE_SECTIONS = (LOW_RISK_MECHANICAL, NO_NEED_TO_RE_READ)
+
+def _check_lookup(record, receipts):
+    """(unit, path) -> the per_file_checks() entry that covers it, missing
+    for a path nothing ever ran a check against (NO NEED TO RE-READ's own
+    case). Built fresh from the same two inputs reading_order() already
+    reads, never from reading_order()'s own output, so a rendering
+    function can attach proof text to a row without reading_order() itself
+    carrying it.
+
+    A2: two entries can share one (unit, file) key (a unit that lists the
+    same file twice, or a malformed record); whichever of them is unproven
+    wins the slot, so a later verified entry can never quietly paper over
+    an earlier one that did not actually prove the file."""
+    lookup = {}
+    for entry in per_file_checks(record, receipts):
+        key = (entry["unit"], entry["file"])
+        prior = lookup.get(key)
+        if prior is None or (_is_unproven_entry(entry)
+                             and not _is_unproven_entry(prior)):
+            lookup[key] = entry
+    return lookup
+
+
+def _before_after_text(check_passed_before):
+    """The row's own before-and-after discrimination (P1/E40), worded for
+    a reader instead of left as True/False/None."""
+    if check_passed_before is True:
+        return "failed before this work and passed after"
+    if check_passed_before is False:
+        return "measured, and did not newly discriminate"
+    return NODATA
+
+
+def _proof_text(entry):
+    """What actually decided this file: the check, its exit code, and
+    whether it discriminated the work from no work. NO-DATA, plainly, for
+    a path nothing ever ran a check against."""
+    if entry is None:
+        return "%s: nothing changed under this path, so no check ran" % NODATA
+    return ("%s exited %s (before/after: %s)"
+            % (entry.get("check_command") or NODATA,
+               entry.get("exit_code") if entry.get("exit_code") is not None
+               else NODATA,
+               _before_after_text(entry.get("check_passed_before"))))
+
+
+def _uncertainty_text(entry):
+    """What is still not known about this file. A verified check with real
+    proof behind it leaves nothing open; anything else names its own
+    reason, or NO-DATA when even the reason was never recorded.
+
+    A7 (repair round 3, driven by command): a per-file entry can carry
+    state == "verified" while carrying no real check_command or exit_code
+    behind it -- the exact hollow shape _is_unproven_entry already exists
+    to catch. The old code read the bare state string and printed "none
+    recorded" for that row, the same false all-clear _is_unproven_entry
+    exists to refuse everywhere else on this screen. Checked against
+    _is_unproven_entry directly now, never against the state string
+    alone, so a hollow "verified" entry reads "no proof recorded"
+    instead."""
+    if entry is None:
+        return "declared but never touched, so nothing was ever checked"
+    if not _is_unproven_entry(entry):
+        return "none recorded"
+    if entry.get("state") == "verified":
+        return "no proof recorded"
+    return entry.get("reason") or NODATA
+
+
+def _is_unproven_entry(entry):
+    """True when a real per_file_checks() entry exists and either its own
+    state did not verify, or it claims "verified" with no real proof
+    behind it: an empty check_command or a None exit_code, i.e. nothing a
+    stranger could re-run actually decided it (A1). A missing entry (NO
+    NEED TO RE-READ's own case: nothing changed, so nothing was ever
+    checked) is NOT this: it is not a proof that failed, it is a proof
+    that was never owed."""
+    if entry is None:
+        return False
+    if entry.get("state") != "verified":
+        return True
+    return not entry.get("check_command") or entry.get("exit_code") is None
+
+
+def _expanded_lines(items, lookup):
+    """REVIEW FIRST and NOT PROVEN: one full line per file, naming why it
+    is here, what proved (or did not prove) it, and what is still
+    uncertain about it. Nothing in either section ever folds."""
+    lines = []
+    for item in items:
+        entry = lookup.get((item["unit"], item["path"]))
+        lines.append(
+            "%s: %s. Proof: %s. Uncertainty: %s"
+            % (item["path"], item["why"], _proof_text(entry),
+               _uncertainty_text(entry)))
+    return lines
+
+
+def _proof_hint(quiet_items, lookup, fallback):
+    """The one phrase a collapsed count line names as its proof: the check
+    every quiet file in it shares, when they all share exactly one. A3:
+    never name a single check when the quiet files behind it actually ran
+    different ones, that would tell a reader one proof covers files it
+    never touched; say the proofs differ instead. The passed-in fallback
+    is for the true zero-command case only (nothing to check at all,
+    e.g. NO NEED TO RE-READ)."""
+    commands = {(lookup.get((it["unit"], it["path"])) or {}).get(
+        "check_command") for it in quiet_items}
+    commands.discard(None)
+    commands.discard("")
+    if len(commands) == 1:
+        return next(iter(commands))
+    if len(commands) > 1:
+        return "proofs differ, see the receipt page"
+    return fallback
+
+
+def _collapsed_lines(heading, items, lookup, fallback_hint):
+    """LOW-RISK MECHANICAL and NO NEED TO RE-READ: one headline count line
+    for every file that is either proven or never owed a check, plus
+    (ACC-0's own carve-out) one full expanded line for any file in this
+    bucket whose own state did NOT verify. Nothing is ever silently folded
+    into a count line that would imply proof it does not have."""
+    flagged, quiet = [], []
+    for item in items:
+        entry = lookup.get((item["unit"], item["path"]))
+        (flagged if _is_unproven_entry(entry) else quiet).append(item)
+    lines = []
+    if quiet:
+        hint = _proof_hint(quiet, lookup, fallback_hint)
+        lines.append(
+            "%s: %d file%s, proof: %s, expand in the receipt page"
+            % (heading, len(quiet), "" if len(quiet) == 1 else "s", hint))
+    lines.extend(_expanded_lines(flagged, lookup))
+    return lines
+
+
+def _reading_sections(order, lookup):
+    """The four sections in decide.render's own `sections` shape: a
+    heading, the lines a reviewer actually reads, and the sentence an
+    empty one prints instead of vanishing (E75.2). ACC-0: REVIEW FIRST and
+    NOT PROVEN print one full line per file; LOW-RISK MECHANICAL and NO
+    NEED TO RE-READ print one headline count line instead, because every
+    file inside either one is already proven or was never owed a check at
+    all. Classification itself is untouched here: this only decides how
+    the rows reading_order() already sorted get printed.
+
+    A8 (repair round 3, smallest shape): `order` (reading_order()'s own
+    output) and `lookup` (_check_lookup()'s own output) are computed once
+    by the caller (acceptance_spec) and passed in, rather than this
+    function recomputing them itself; drawing one screen used to walk
+    reading_order()/per_file_checks() three times over between this
+    function and _suggested_decision_line, purely to redraw the same
+    facts each already had."""
+    sections = []
+    for name in READING_SECTIONS:
+        items = order[name]
+        if name in COLLAPSIBLE_SECTIONS:
+            fallback = ("declared and untouched, nothing to check"
+                        if name == NO_NEED_TO_RE_READ
+                        else "each file's own check, all verified")
+            lines = _collapsed_lines(name, items, lookup, fallback)
+        else:
+            lines = _expanded_lines(items, lookup)
+        sections.append({"heading": name, "items": lines,
+                         "empty": EMPTY_SECTION})
+    return sections
+
+
+def _suggested_decision_line(order, lookup):
+    """The one sentence that closes the screen: a machine suggestion,
+    never a decision (docs/CHARTER.md line 27 reserves acceptance for a
+    human). Folded into the existing footer rather than a section of its
+    own, so it costs the screen no extra structure.
+
+    A5 (repair round 2, adversarial review T1/T2/T3): REJECT whenever
+    REVIEW FIRST holds ANY file, for ANY of the reasons reading_order()
+    puts one there (out-of-scope write, a unit with no declared scope, a
+    confirmed reviewer finding, or a risk-class path), not only the ones
+    whose own check also failed to verify -- a REVIEW FIRST file with a
+    passing check still needs the human look REVIEW FIRST exists to
+    demand (T3). Likewise whenever NOT PROVEN holds any file. With zero
+    files on the whole screen this reads NO-DATA, never PROCEED (T1): an
+    empty screen was never checked, so it has nothing to suggest
+    accepting. And the PROCEED sentence claiming "every file ... has a
+    check that actually verified it" only prints when that is literally
+    true (every listed file sits in LOW-RISK MECHANICAL, i.e. carries a
+    real verifying check); a NO NEED TO RE-READ file has no check at all
+    (it was declared and never touched), so its presence switches PROCEED
+    to a sentence that says exactly that instead of the false claim
+    (T2).
+
+    A7 (repair round 3, driven by command): reading_order()'s own
+    `proven` gate is the cruder `entry.get("state") == "verified"` check,
+    so a per-file entry can land in LOW-RISK MECHANICAL (the section this
+    footer trusts as already-proven) while _is_unproven_entry -- which
+    also demands a real check_command and a captured exit_code -- still
+    calls it unproven. That combination must never read PROCEED, and
+    must never silently vanish from the REJECT count either: every item
+    in LOW-RISK MECHANICAL and NO NEED TO RE-READ (the two sections this
+    footer otherwise treats as settled) is re-checked here directly
+    against _is_unproven_entry, never trusted from the section it landed
+    in. REVIEW FIRST and NOT PROVEN are not rescanned: they already
+    reject regardless of proof (T3). With exactly one file on the whole
+    screen and that file the only reason to reject, this reads NO-DATA
+    rather than REJECT, for the same reason the zero-file case does:
+    nothing on the screen actually proved anything, so there is nothing
+    yet to weigh against it.
+
+    A8 (repair round 3, smallest shape): `order` (reading_order()'s own
+    output) and `lookup` (_check_lookup()'s own output) are computed once
+    by the caller (acceptance_spec) and passed in here, rather than this
+    function recomputing reading_order()/per_file_checks() a second and
+    third time over the same run to draw the same screen."""
+    review_first_count = len(order[REVIEW_FIRST])
+    not_proven_count = len(order[NOT_PROVEN])
+    low_risk_count = len(order[LOW_RISK_MECHANICAL])
+    no_need_count = len(order[NO_NEED_TO_RE_READ])
+    total = (review_first_count + not_proven_count + low_risk_count
+             + no_need_count)
+    hollow_elsewhere_count = sum(
+        1 for name in (LOW_RISK_MECHANICAL, NO_NEED_TO_RE_READ)
+        for item in order[name]
+        if _is_unproven_entry(lookup.get((item["unit"], item["path"]))))
+    if (total == 1 and hollow_elsewhere_count == 1
+            and not review_first_count and not not_proven_count):
+        line = ("Suggested decision: NO-DATA. The one file on this screen "
+                "was marked verified with no real check_command or "
+                "captured exit code behind it, so nothing here actually "
+                "proved it. Machine suggestion only, read from the checks "
+                "above; accepting or holding this delivery stays a human "
+                "decision.")
+    elif review_first_count or not_proven_count or hollow_elsewhere_count:
+        line = ("Suggested decision: REJECT. %d file(s) on this screen "
+                "still need a human look before acceptance (%d in REVIEW "
+                "FIRST, %d in NOT PROVEN, %d marked verified with no real "
+                "proof behind it). Machine suggestion only, read from the "
+                "checks above; accepting or holding this delivery stays a "
+                "human decision."
+                % (review_first_count + not_proven_count
+                   + hollow_elsewhere_count, review_first_count,
+                   not_proven_count, hollow_elsewhere_count))
+    elif total == 0:
+        line = ("Suggested decision: NO-DATA. Nothing on this screen was "
+                "checked, so there is nothing yet to accept or hold. "
+                "Machine suggestion only, read from the checks above; "
+                "accepting or holding this delivery stays a human "
+                "decision.")
+    elif no_need_count:
+        line = ("Suggested decision: PROCEED. Every file on this screen "
+                "was either verified by its own check or declared and "
+                "never touched, so none of them still needs one. Machine "
+                "suggestion only, read from the checks above; accepting "
+                "or holding this delivery stays a human decision.")
+    else:
+        line = ("Suggested decision: PROCEED. Every file on this screen "
+                "has a check that actually verified it. Machine "
+                "suggestion only, read from the checks above; accepting "
+                "or holding this delivery stays a human decision.")
+    return line
 
 
 def _data_identity_text(data_identity):
@@ -1583,7 +2020,14 @@ def _stamp(record, before, after):
 def acceptance_spec(record, receipts, before=None, after=None, log_path=None):
     """The fourth human moment of the charter (docs/CHARTER.md line 27), as a
     screen: only a human accepts that the delivered result is the one that was
-    wanted. Every number on it came out of MARK_TABLE."""
+    wanted. Every number on it came out of MARK_TABLE.
+
+    A8 (repair round 3, smallest shape): reading_order() and
+    _check_lookup() are each computed exactly once here and threaded
+    through to both _reading_sections() and _suggested_decision_line(),
+    which used to recompute them independently to draw one screen."""
+    _reading_order = reading_order(record, receipts)
+    _lookup = _check_lookup(record, receipts)
     return {
         "title": "Accept this delivery, or do not",
         "eyebrow": "Acceptance",
@@ -1602,7 +2046,7 @@ def acceptance_spec(record, receipts, before=None, after=None, log_path=None):
         # E75.2: the four sections that order a reviewer's attention, above
         # the ranking, because the first question a reader has is which of
         # these files to open first and the answer is computed, not written.
-        "sections": _reading_sections(record, receipts),
+        "sections": _reading_sections(_reading_order, _lookup),
         "criteria": _criteria(receipts),
         "options": [_option(
             receipts, "The delivery as it stands",
@@ -1619,7 +2063,9 @@ def acceptance_spec(record, receipts, before=None, after=None, log_path=None):
         ],
         "footer": ("Generated from this run's own receipts by "
                    "scripts/receipt_door.py. The full, untrimmed output of "
-                   "every check is in %s." % (log_path or NODATA)),
+                   "every check is in %s. %s"
+                   % (log_path or NODATA,
+                      _suggested_decision_line(_reading_order, _lookup))),
     }
 
 

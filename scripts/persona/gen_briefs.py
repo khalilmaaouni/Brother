@@ -38,11 +38,12 @@ def main(argv=None):
         for line in open(results_path):
             try:
                 r = json.loads(line)
-            except ValueError:
+            except ValueError:  # sbe: allow-silent a malformed prior result cannot name a scenario status, so later valid result lines still decide reruns
                 continue
             latest[r["scenario"]] = r.get("verdict")
     tpl = open(os.path.join(D, "ACTOR-BRIEF-TEMPLATE-v2.md")).read()
-    root = "/Users/khalil.maaouni/Documents/BrotherArchive/persona-fixtures-2026-09-07"
+    root = os.path.expanduser(
+        "~/Documents/BrotherArchive/persona-fixtures-2026-09-07")
     tdir = os.path.join(evidence_dir, "transcripts")
     made = []
     for p in d["personas"]:

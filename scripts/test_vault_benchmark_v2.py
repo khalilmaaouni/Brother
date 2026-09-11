@@ -289,7 +289,12 @@ class D15ReadsTheComparison(unittest.TestCase):
         # ctx["tools"] must hold a bm_vault.py that touches links, or the probe
         # exits on the earlier branch before reaching the results file.
         with open(os.path.join(self.dir, "bm_vault.py"), "w") as f:
-            f.write("# JOIN links stub for the probe's earlier branch\n")
+            f.write(
+                "        for r in con.execute(\n"
+                "                \"SELECT DISTINCT n.id, n.path FROM links l JOIN notes n "
+                "ON n.title = l.target \"\n"
+                "                \"WHERE l.note_id IN (%s) AND n.kind != 'log'\" % marks, "
+                "top).fetchall():\n")
 
     def tearDown(self):
         import shutil
@@ -374,6 +379,114 @@ class D15ReadsTheComparison(unittest.TestCase):
                           "MEASURED USE CASE DEMANDS THE GRAPH", calibration="")
         got, msg = vb.d15_graph_value_proven(ctx)
         self.assertEqual(got, vb.NODATA, msg)
+
+
+
+class D15RefusesADeleteAsAReadTraversal(unittest.TestCase):
+    """DEFECT 1, 2026-09-10: the old gate was
+    ``bool(re.search(r"links\\s+WHERE|JOIN\\s+links|multi.?hop", src))``, a
+    token-appearing-in-a-file match. Measured on the real bm_vault.py: its
+    ONLY two matches of "links WHERE" are ``DELETE FROM links WHERE
+    note_id=?`` (twice, both cleanup), so D15 was certified by a DELETE. The
+    real read-time traversal (``SELECT DISTINCT n.id, n.path FROM links l
+    JOIN notes n ON n.title = l.target WHERE l.note_id IN (%s) ...``) never
+    matched "JOIN links" at all, because the JOIN there is on notes.
+
+    These pin ``_reads_links_table`` directly: a source whose only links
+    usage is a DELETE must NOT satisfy it; a source carrying the real
+    traversal query MUST; and the real query still reads even sitting next
+    to the two DELETE statements, the exact shape of the real file."""
+
+    DELETE_ONLY = (
+        '        con.execute("DELETE FROM links WHERE note_id=?", (nid,))\n'
+        '        con.execute("DELETE FROM links WHERE note_id=?", (row["id"],))\n'
+    )
+
+    REAL_TRAVERSAL = (
+        '        for r in con.execute(\n'
+        '                "SELECT DISTINCT n.id, n.path FROM links l JOIN notes n '
+        'ON n.title = l.target "\n'
+        '                "WHERE l.note_id IN (%s) AND n.kind != \'log\'" % marks, '
+        'top).fetchall():\n'
+    )
+
+    def test_delete_only_usage_does_not_satisfy_the_gate(self):
+        self.assertFalse(vb._reads_links_table(self.DELETE_ONLY))
+
+    def test_the_real_traversal_query_satisfies_the_gate(self):
+        self.assertTrue(vb._reads_links_table(self.REAL_TRAVERSAL))
+
+    def test_the_real_query_still_reads_beside_the_two_deletes(self):
+        """The actual bm_vault.py shape: DELETE statements earlier in the
+        file, the real read hundreds of lines later. Both together must
+        still be treated as a read, not cancelled out by the deletes."""
+        self.assertTrue(vb._reads_links_table(self.DELETE_ONLY + self.REAL_TRAVERSAL))
+
+    def test_d15_end_to_end_fails_on_a_delete_only_tool(self):
+        """A bm_vault.py whose only links usage is a DELETE must FAIL D15,
+        never reach a PASS by matching cleanup text."""
+        import tempfile, shutil
+        d = tempfile.mkdtemp(prefix="d15-delete-only-")
+        try:
+            with open(os.path.join(d, "bm_vault.py"), "w") as f:
+                f.write(self.DELETE_ONLY)
+            got, msg = vb.d15_graph_value_proven(
+                {"tools": d, "vault": "/nonexistent", "notes": []})
+            self.assertEqual(got, vb.FAIL, msg)
+            self.assertIn("DELETE", msg)
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+
+class AdoptionDenominatorsReportCorpusSize(unittest.TestCase):
+    """DEFECT 2, 2026-09-10: D06, D09, D10, D12 and D14 each PASS on a floor
+    of one, and the verdict alone cannot tell a lonely adoption apart from a
+    wide one. This pins that each row's PASS message now carries both the
+    adoption count and the corpus size, without changing any verdict."""
+
+    @staticmethod
+    def note(front, path="n.md"):
+        return {"path": path, "front": front, "body": ""}
+
+    def test_d06_reports_entities_of_corpus(self):
+        notes = [self.note("entity: repository\nsource_ids: [github:o/r, path:~/x]\n"),
+                 self.note("", path="plain.md")]
+        got, msg = vb.d06_entity_crosswalk({"vault": "/nonexistent", "tools": "/nonexistent",
+                                            "notes": notes})
+        self.assertEqual(got, vb.PASS, msg)
+        self.assertIn("1 of 2 notes", msg)
+
+    def test_d09_reports_corpus_size(self):
+        n = self.note("valid_from: 2026-01-01\nvalid_to: 2026-02-01\n"
+                      "observed_at: 2026-01-01\ningested_at: 2026-01-01\n"
+                      "verified_at: 2026-01-02\n")
+        notes = [n, self.note("", path="plain.md")]
+        got, msg = vb.d09_bitemporal_facts({"vault": "/nonexistent", "tools": "/nonexistent",
+                                            "notes": notes})
+        self.assertEqual(got, vb.PASS, msg)
+        self.assertIn("of 2 notes", msg)
+
+    def test_d10_reports_contradicts_of_corpus(self):
+        notes = [self.note("contradicts: [[x]]\n"), self.note("", path="plain.md")]
+        got, msg = vb.d10_contradictions_preserved({"vault": "/nonexistent",
+                                                     "tools": "/nonexistent", "notes": notes})
+        self.assertEqual(got, vb.PASS, msg)
+        self.assertIn("1 of 2 note(s)", msg)
+
+    def test_d12_reports_recorded_promotions_of_corpus(self):
+        n = self.note('promotion: "validated"\npromoted_by: alice\npromoted_at: 2026-01-01\n')
+        notes = [n, self.note("", path="plain.md")]
+        got, msg = vb.d12_candidate_validated_canonical({"vault": "/nonexistent",
+                                                          "tools": "/nonexistent", "notes": notes})
+        self.assertEqual(got, vb.PASS, msg)
+        self.assertIn("1 of 2 notes", msg)
+
+    def test_d14_reports_entity_declarations_of_corpus(self):
+        notes = [self.note("entity: repository\n"), self.note("", path="plain.md")]
+        got, msg = vb.d14_typed_ontology({"vault": "/nonexistent", "tools": "/nonexistent",
+                                          "notes": notes})
+        self.assertEqual(got, vb.PASS, msg)
+        self.assertIn("1 of 2 notes", msg)
 
 
 if __name__ == "__main__":

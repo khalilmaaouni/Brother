@@ -13,10 +13,10 @@ to run the battery.
 
 | | |
 |---|---:|
-| Parts | 180 |
-| Parts with a purpose written in the file | 180 |
-| Parts with a suite wired into the battery | 162 |
-| Checks in the battery | 256 |
+| Parts | 189 |
+| Parts with a purpose written in the file | 189 |
+| Parts with a suite wired into the battery | 169 |
+| Checks in the battery | 269 |
 
 ## Every part, what it is for, and what proves it
 
@@ -66,9 +66,12 @@ to run the battery.
 | `continuity` | the resume screen. E73.1 of the productization directive. | `continuity-self` |
 | `contract_check` | does a record follow the outcome contract, the one project | `bundle-runtime-self`, `contract-check-self` |
 | `coverage_check` | Coverage checker for the unified WBS (docs/plan/UNIFIED-WBS.md), task 0. | `coverage`, `coverage-self` |
+| `cutover_pack` | The 1.0.13 cutover pack: one prompt and one zip a fresh session on another | `cutover-pack-self` |
 | `daybook` | The Daybook: the minimal board over the outcome contract (v2). | `daybook`, `daybook-self` |
 | `decide` | never hand a human a wall, hand them a screen. | `decide-self` |
+| `decide_round` | a ROUND of decisions is still a screen, never a wall of popups. | **NO-DATA**, nothing in the battery runs it |
 | `delivery_status` | the ONE goal for this session, as named steps with a | `delivery-status-self` |
+| `doc_assurance` | the public documentation corpus is checked against the tree it | `doc-assurance`, `doc-assurance-self` |
 | `door` | a plain English outcome becomes a canonical Work document. | `brother-run-self`, `bundle-runtime-self`, `door-self`, `mutation-gate`, `mutation-gate-self` |
 | `e53_lesson_ab` | does a lesson SHOWN at the moment of action change the action. | **NO-DATA**, nothing in the battery runs it |
 | `e80_release_reproduction_drive` | E80's done check, run end to end against a fixture release. | **NO-DATA**, nothing in the battery runs it |
@@ -78,6 +81,7 @@ to run the battery.
 | `export_public` | the single route from the private hub to the public | `edition-guard-self`, `export-public-self`, `release-closeout-self` |
 | `fable_authority` | W3 of the readiness board: who decides when the founder is away, and how. | `fable-authority`, `fable-authority-self` |
 | `fast_path` | FAST-0 eligibility and escalation contract (steering 8.3, 8.5, 8.6, 8.10). | `fast-path-self` |
+| `fault_barrier` | one blocking synchronization point, shared. | **NO-DATA**, nothing in the battery runs it |
 | `fault_lab` | R27.1, the installed-artifact lifecycle fault lab. | `fault-lab-self` |
 | `fence_enforced_drill` | Drive tools/bm_fence_hook.py in BOTH modes against real fixtures and prove | `fence-enforced` |
 | `fence_expiry` | W4 of the orchestration watchdog: no claim may outlive the session that made it. | `fence-expiry`, `fence-expiry-self` |
@@ -112,6 +116,7 @@ to run the battery.
 | `journal` | one append-only causal log per run, fed by the writers that | `journal-self` |
 | `journal_projection` | the delivery report, receipts-bound and a live | `journal-projection-self` |
 | `keep_current` | update a Codex install only after every link reads PASS. | `keep-current-self` |
+| `key_components` | the components this estate built on purpose cannot be lost, | `key-components`, `key-components-self` |
 | `land_queue` | the hub PR lander as a product script, not five loose shell files. | `land-queue-self` |
 | `lane_resume` | turn a dead lane's worktree into a patch a fresh lane can apply. | `lane-resume-self` |
 | `laws_audit` | R28.1, the law auditor (docs/plan/READINESS-ROADMAP-2026-08-29.json). | `laws-audit`, `laws-audit-self` |
@@ -139,13 +144,14 @@ to run the battery.
 | `pattern_note` | write down what WORKED, and make it findable by the problem. | `pattern-note-self` |
 | `portable_pack` | Portable pack: R25.2's weekly half (docs/plan/READINESS-ROADMAP-2026-08-29.json, | `portable-pack-self` |
 | `pre_push_gate` | catch it at the boundary, not after somebody asks. | `pre-push-gate`, `pre-push-gate-self` |
+| `preserve_wip` | Preserve uncommitted work in every git worktree by pushing it to an archive ref. | `preserve-wip-self` |
 | `prevented_word_gate` | the word "prevented" stays off every surface until a real | `prevented-word-gate`, `prevented-word-gate-self` |
 | `priority` | order the board by what a real person actually asked for. | `priority`, `priority-self` |
 | `private_terms_scan` | refuse a push that would publish a private term. | `export-public-self`, `private-terms-self` |
 | `probe_repeat_guard_classification` | Probe: does the repeat guard count a SUCCESSFUL tool call as a failure? | **NO-DATA**, nothing in the battery runs it |
 | `product_acceptance` | P0.4 of docs/plan/P0-COMPOSITION-WAVE-2026-08-30.md. | `product-acceptance-self` |
 | `progress_deadline` | alive is not advancing, and output is not progress. | `progress-deadline-self` |
-| `prove_guide_claude` | S23's real done_check: prove docs/how-to/USE-WITH-CLAUDE-CODE.md runs | `prove-guide-claude-self` |
+| `prove_guide_claude` | S23's real done_check: prove docs/how-to/install-claude-code.md runs | `prove-guide-claude-self` |
 | `provider_adapter` | ONE provider-neutral core, THIN adapters. | `provider-adapter-self` |
 | `readiness_gate` | the review's enterprise readiness gate as a checkable surface. | `export-public-self`, `readiness-gate`, `readiness-gate-self` |
 | `readme_receipt_sample` | the README's per-file receipt sample, rendered by | **NO-DATA**, nothing in the battery runs it |
@@ -153,8 +159,10 @@ to run the battery.
 | `recall_coverage` | R28.3, learnings at the point of need, measured | `recall-coverage-selftest` |
 | `receipt_check` | a source with no receipt is UNVERIFIED, and a source that | `receipt-check-self` |
 | `receipt_door` | the facts a delivery can prove, and the screens showing them. | `receipt-door-self` |
+| `reclaim_worktrees` | Release worktrees whose work is already safe on the remote. | `reclaim-worktrees-self` |
 | `record_drift` | does the record still match reality after the work landed? | `pre-push-gate`, `pre-push-gate-self`, `record-drift`, `record-drift-self` |
 | `refresh_cut` | Refresh a cut: rewrite the export manifest and the release note that | `refresh-cut-self` |
+| `refresh_cutover_state` | The receipt-time gate that keeps a cutover pack honest. | `cutover-pack-self` |
 | `release_closeout` | the post-cut closeout matrix, one gate per subcommand. | `release-closeout-self` |
 | `release_invariant` | one release identity, or say exactly which link broke. | `readiness-gate`, `readiness-gate-self`, `release-closeout-self`, `release-invariant`, `release-invariant-self` |
 | `release_note_from_tree` | .py: the release note's checkable claims, measured, never typed. | `refresh-cut-self`, `release-note-self`, `reproduce-export-self` |
@@ -198,6 +206,7 @@ to run the battery.
 | `version_source` | One version and manifest source for this repository's umbrella package. | `version-source-self` |
 | `virgin_unit_proof` | the gate the v1.0.6 defect proved was missing. | `virgin-unit-proof`, `virgin-unit-proof-self` |
 | `wbs` | The decomposition standard: no node may be dispatched that nobody broke down. | `wbs-granularity`, `wbs-self` |
+| `wiring_audit` | Find capability that exists in the tree but nothing reaches. | `wiring-audit-self` |
 | `wisdom_capture` | Turn a session's recorded lessons into vault notes the archive can search. | `wisdom-capture` |
 | `work_record` | an outcome somebody typed becomes units the scheduler can read. | `mutation-gate`, `mutation-gate-self`, `work-record-self` |
 | `worktree_lane` | one isolated tree per concurrent writer, or no concurrency at all. | `worktree-lane-self` |
@@ -209,6 +218,14 @@ to run the battery.
 - `contracts-root`: `python3 scripts/test_contracts_root.py -v`
 - `charter-paths`: `python3 scripts/charter_paths.py`
 - `charter-paths-self`: `python3 scripts/test_charter_paths.py -v`
+- `doc-assurance`: `python3 scripts/doc_assurance.py`
+- `doc-assurance-self`: `python3 scripts/doc_assurance.py --selftest`
+- `key-components`: `python3 scripts/key_components.py`
+- `key-components-self`: `python3 scripts/key_components.py --selftest`
+- `wiring-audit-self`: `python3 scripts/wiring_audit.py --selftest`
+- `cutover-pack-self`: `python3 scripts/test_cutover_pack.py -v`
+- `preserve-wip-self`: `python3 scripts/test_preserve_wip.py -v`
+- `reclaim-worktrees-self`: `python3 scripts/test_reclaim_worktrees.py -v`
 - `context-budget`: `/usr/bin/python3 -m unittest -v tests/test_context_budget.py`
 - `truth-claims`: `/usr/bin/python3 -m unittest -v tests/test_truth_claims.py`
 - `foreign-method`: `/usr/bin/python3 -m unittest -v tests/test_foreign_method_compat.py`
@@ -242,6 +259,7 @@ to run the battery.
 - `wbs-self`: `python3 scripts/test_wbs.py -v`
 - `private-terms-self`: `python3 scripts/test_private_terms_scan.py -v`
 - `loop-bridge-self`: `python3 scripts/test_loop_bridge.py -v`
+- `wave-diamond-self`: `python3 scripts/test_wave_diamond.py -v`
 - `managed-safety-self`: `python3 scripts/test_managed_safety.py -v`
 - `codex-hooks-self`: `python3 scripts/test_codex_hooks_install.py -v`
 - `installed-surface`: `python3 scripts/test_check_installed_surface.py -v`
@@ -362,6 +380,7 @@ to run the battery.
 - `readiness-gate`: `python3 scripts/readiness_gate.py`
 - `release-invariant-self`: `python3 scripts/test_release_invariant.py -v`
 - `release-invariant`: `python3 scripts/release_invariant.py`
+- `cut-invariant-step-self`: `python3 scripts/test_cut_invariant_step.py -v`
 - `release-note-perturb-self`: `python3 scripts/test_release_note_perturb.py -v`
 - `release-note-perturb`: `python3 scripts/release_note_perturb.py`
 - `reproduce-export-self`: `python3 scripts/test_reproduce_export.py -v`
@@ -402,6 +421,7 @@ to run the battery.
 - `journal-projection-self`: `python3 scripts/test_journal_projection.py -v`
 - `continuity-self`: `python3 scripts/test_continuity.py -v`
 - `continuity-matrix-self`: `python3 scripts/test_continuity_matrix.py -v`
+- `continuity-days-gap-self`: `python3 scripts/test_continuity_days_gap.py -v`
 - `capsule-items-self`: `python3 scripts/test_capsule_items.py -v`
 - `lhr-checkpoint-self`: `python3 scripts/test_lhr_checkpoint.py`
 - `lhr-resume-record-self`: `python3 scripts/test_lhr_resume_record.py`
@@ -460,5 +480,7 @@ to run the battery.
 - `land-queue-self`: `python3 scripts/test_land_queue.py -v`
 - `land-decision-self`: `python3 scripts/test_land_decision.py -v`
 - `fast-path-self`: `python3 scripts/test_fast_path.py -v`
+- `fast-route-self`: `python3 scripts/test_fast_route.py -v`
+- `brothermode-doctor-self`: `python3 products/brothermode/scripts/test_doctor.py -v`
 - `real-logs-unchanged`: `python3 scripts/real_logs.py compare "$REAL_LOGS_SNAPSHOT"`
 

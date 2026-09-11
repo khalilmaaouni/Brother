@@ -12,6 +12,7 @@ The forbidden trailer is assembled from parts everywhere in this file, because
 a scanner's own test must not carry what the scanner forbids.
 """
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -386,7 +387,8 @@ class ADetachedPushIsScannedFromTheRefsOnStdin(unittest.TestCase):
                 "         else 0)\n" % HERE)
         hook = os.path.join(hooks, "pre-push")
         with open(hook, "w", encoding="utf-8") as fh:
-            fh.write("#!/bin/sh\nexec %s %s\n" % (sys.executable, runner))
+            fh.write("#!/bin/sh\nexec %s %s\n"
+                     % (shlex.quote(sys.executable), shlex.quote(runner)))
         os.chmod(hook, 0o755)
         sh(["git", "config", "core.hooksPath", hooks], cwd=self.repo)
 

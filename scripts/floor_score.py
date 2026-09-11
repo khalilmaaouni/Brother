@@ -63,7 +63,7 @@ import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SOURCE = os.path.join(ROOT, "docs", "plan", "FLOOR-2026-09-05.json")
+SOURCE = os.path.join(ROOT, "docs", "plan", "FLOOR-2026-09-09.json")
 NODATA = "NO-DATA"
 
 #: Section 6's own number. A capability further than this below the best

@@ -307,7 +307,7 @@ def _check_hooks(env):
         try:
             with open(candidate, encoding="utf-8") as fh_:
                 text = fh_.read()
-        except OSError:
+        except OSError:  # sbe: allow-silent an unreadable optional hook config cannot prove registration, so the next configured source is checked
             continue
         if "bm_fence_hook.py" in text:
             return _detail(PRESENT, "%s registers bm_fence_hook.py" % candidate)

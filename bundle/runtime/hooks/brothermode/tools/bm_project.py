@@ -36,6 +36,17 @@ SUBCOMMANDS
                           unresolved alerts by severity, and, with
                           --history N, the last N attribution events (read
                           accessors only)
+  list                    every project id this folder holds, with its goal
+                          (read only; R-1 persona dogfood 2026-09-07, the
+                          id bm_lead.py points a founder at when a folder
+                          holds more than one project)
+  adopt                   the typed project record, inferred from what
+                          this repository already says (A-prime amendment
+                          1, docs/schema/outcome-contract-v1.json): reads
+                          the tree, writes ONE outcome contract record,
+                          asks AT MOST ONE question and only about a
+                          field the repository could not answer, and
+                          needs no store at all
   next                   the single recommended next task, with why
   task add                thin wrapper over create_task
   task start               convenience: transition a task to 'active'
@@ -99,7 +110,9 @@ WHY create=False EVERYWHERE
   Matching bm_store.py's own CLI convention (its cmd_claim and every other
   command besides init): "only init creates a store" only means something
   if every other path refuses instead of quietly creating one. Run
-  `python3 tools/bm_store.py init` first.
+  `python3 "${CLAUDE_PLUGIN_ROOT}/tools/bm_store.py" init` first (never a
+  bare tools/ path: the plugin installs these tools under the plugin root,
+  not the user's own repository).
 
 ONE PROJECT PER FOLDER (the beginner model; C5, release-closure loop2
 refuter fixes)
@@ -178,6 +191,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import sys
 import uuid
 
@@ -206,6 +220,10 @@ def _load(name):
 
 
 bs = _load("bm_store")
+# F-004 (persona dogfood 2026-09-07 round 2, release manager B4-S5):
+# deliver below reuses bm_lead.py's own _resolve_project_id rather than a
+# second copy of the exactly-one-project rule R-1 already wrote once.
+bl = _load("bm_lead")
 # SBE15 (2026-08-16): safe_display, the same control-character containment
 # tools/bm_packs.py runs store text through before it reaches a screen or a
 # generated page. render_canvas below reads raw=True always (see RAW LOCAL
@@ -294,6 +312,58 @@ def _store():
     # Every command here refuses 'no-store' instead, naming the fix.
     return bs.Store(_root(), create=False)
 
+def _store_for_start():
+    """The same open _store() performs, except a 'git-exposed-store'
+    refusal is healed once and retried instead of relayed straight to
+    the founder.
+
+    R-11 (persona dogfood 2026-09-07, release manager persona B4
+    scenario B4-S1): every writable open already tries to keep the raw
+    store out of git (bm_store.py's _ensure_git_excludes appends its
+    three lines to .git/info/exclude on every open), and that heal is
+    normally enough, which is why _store() above never needed this. But
+    git checks a repository's own .gitignore at the worktree top AFTER
+    info/exclude (higher precedence), so a rule already committed there
+    (from a template, or from someone re-including the directory by
+    hand) wins over the line info/exclude holds, and info/exclude being
+    unwritable produces the identical refusal. Either way the founder's
+    first `start` used to just relay bm_store.py's refusal. This adds
+    the same three lines to .gitignore itself (creating it if absent)
+    and opens the store again, once: a second refusal, for this reason
+    or any other, is reported exactly as it always was. Never touches
+    .gitignore for any OTHER refusal reason, and never for
+    'git-tracked-store', which names its own untracking command
+    instead (an ignore rule cannot untrack a file git already commits)."""
+    root = _root()
+    try:
+        return bs.Store(root, create=False)
+    except bs.OwnershipRefused as exc:
+        if exc.reason != "git-exposed-store":
+            raise
+        gitignore = os.path.join(root, ".gitignore")
+        wanted = ["%s/" % bs.STORE_DIRNAME, "threads/", "STATE.md"]
+        try:
+            existing = ""
+            if os.path.isfile(gitignore):
+                with io.open(gitignore, encoding="utf-8",
+                             errors="replace") as fh:
+                    existing = fh.read()
+            missing = [w for w in wanted if w not in existing.splitlines()]
+            if not missing:
+                raise exc
+            with io.open(gitignore, "a", encoding="utf-8") as fh:
+                if existing and not existing.endswith("\n"):
+                    fh.write("\n")
+                for w in missing:
+                    fh.write(w + "\n")
+        except OSError as e:
+            _err("bm_project: could not write %s (%s); reporting the "
+                 "original refusal." % (gitignore, e))
+            raise exc
+        _err("bm_project: R-11: added %s to %s so git ignores the "
+             "store; retrying." % (", ".join(missing), gitignore))
+        return bs.Store(root, create=False)
+
 
 def _read_store():
     """A read-only handle for `alert list`, the one command here that only
@@ -365,20 +435,55 @@ def _require(kv, name, usage):
     return val
 
 
+def _default_actor_name():
+    """(name, source): git config user.name, then the USER environment
+    variable, then a fixed fallback. Never raises: a git call that fails,
+    or a config with no user.name set, falls through to the next source.
+
+    R-10 (persona dogfood 2026-09-07 round 2): a junior's first ten
+    minutes hit a usage error on the very first mechanical step because
+    --actor-name had no default. Same fix as bm_lead.py's own
+    _default_actor_name, kept as a sibling copy rather than a cross-file
+    import: this file's own docstring already states it is a thin CLI
+    over bm_store.py and nothing else."""
+    try:
+        av = _load("bm_autosave")
+        r = av._run_git(_root(), "config", "user.name")
+        name = (r.stdout or "").strip()
+        if r.returncode == 0 and name:
+            return name, "git config user.name"
+    except (ImportError, OSError, AttributeError):
+        pass
+    user = os.environ.get("USER") or os.environ.get("USERNAME")
+    if user:
+        return user, "the USER environment variable"
+    return "unknown", "no name could be found"
+
+
 def _actor(kv, usage):
     """Build the actor dict every mutating subcommand passes to the store,
     so attribution is a real record of who or what acted, not a guess.
     actor_type is restricted to human|model on this CLI's own surface
     (schema.py's AttributionEvent also allows hook|automation, but this
     tool is invoked directly by a person or by a model runtime, never as a
-    hook); actor_name has no sensible default, so it is required."""
+    hook).
+
+    R-10 (persona dogfood 2026-09-07 round 2): actor_name now DEFAULTS
+    from _default_actor_name rather than being required, because
+    skills/start/SKILL.md's own documented first commands omit it. The
+    default is named on stderr; an explicit --actor-name still always
+    wins."""
     actor_type = kv.get("actor-type", "model")
     if actor_type not in ("human", "model"):
         _err(usage)
         _err("bm_project: --actor-type must be 'human' or 'model', got %r"
              % actor_type)
         sys.exit(2)
-    actor_name = _require(kv, "actor-name", usage)
+    actor_name = kv.get("actor-name")
+    if not actor_name:
+        actor_name, source = _default_actor_name()
+        _err("bm_project: --actor-name not given; using %r, from %s."
+             % (actor_name, source))
     # A fresh, unguessable id per process when --session-id is omitted,
     # matching bm_store.py's own _default_cli_session_id() (GATE 3: two
     # independent invocations that both omitted it must never collide on
@@ -393,7 +498,7 @@ _ACTOR_FLAGS = ("actor-type", "actor-name", "session-id")
 
 
 def _print_json(obj):
-    _out(json.dumps(obj, indent=2, sort_keys=True))
+    _out(json.dumps(obj, indent=2, sort_keys=True, ensure_ascii=False))
 
 
 # ---------------------------------------------------------------------------
@@ -634,7 +739,7 @@ def render_canvas(store, project_id):
     return "\n".join(lines)
 
 
-def render_delivery_packet(store, project_id, raw=False):
+def render_delivery_packet(store, project_id, raw=False, grounding=None):
     """The delivery packet as a GENERATED view: project, tasks with their
     evidence, forecasts, attribution summary, all from rows only. Unlike
     render_canvas above, this file IS an export: the README describes it as
@@ -647,7 +752,14 @@ def render_delivery_packet(store, project_id, raw=False):
     raw=True unconditionally because nothing invites handing it over; that
     is a DIFFERENT document and out of scope for this function's change.
     Either way this still passes through bs.write_generated_document's
-    redact_text funnel as the final guard before it touches disk."""
+    redact_text funnel as the final guard before it touches disk.
+
+    `grounding` is the one line U7's delivery grounding gate contributes
+    (see _grounding_gate below): the counts and the language it checked,
+    or the NO-DATA line when no contract was in play. It is passed in
+    rather than computed here because this function reads STORE rows and
+    the contract is a file on disk, which is a different source; a
+    renderer that went looking for it would be reading two truths."""
     project = store.get_project(project_id, raw=raw)
     lines = [DELIVERY_BEGIN, ""]
     if project is None:
@@ -658,6 +770,8 @@ def render_delivery_packet(store, project_id, raw=False):
     lines.append("# Delivery Packet: %s" % _prose(project.get("name")))
     lines.append("")
     lines.append("project_id: %s" % project.get("project_id"))
+    lines.append("")
+    lines.append(grounding or _GROUNDING_NODATA)
     lines.append("")
     lines.append("## Tasks")
     by_state = _tasks_by_state(store, project_id, raw=raw)
@@ -832,7 +946,7 @@ def cmd_start(argv):
             ("non-goals", "non_goals")):
         if kv.get(flag):
             project[field] = _csv(kv[flag])
-    store = _store()
+    store = _store_for_start()
     try:
         # C5 (release-closure loop2 refuter fixes): one project per root
         # is the beginner model (see this file's own module docstring).
@@ -1021,6 +1135,37 @@ def cmd_status(argv):
 
 
 # ---------------------------------------------------------------------------
+# list
+# ---------------------------------------------------------------------------
+
+def cmd_list(argv):
+    """R-1 (persona dogfood 2026-09-07): every reader in this product
+    demanded --project-id against a store nothing in the repository
+    derives an id from, and there was no command to ask the store what
+    ids it holds. This prints exactly that, read only, so
+    bm_lead.py's _resolve_project_id has something to point a founder at
+    when a folder holds more than one project."""
+    _pos, kv = _parse(argv, ("json",), wants_value=())
+    store = _read_store()
+    try:
+        projects = store.list_projects(raw=True)
+    finally:
+        store.close()
+    if kv.get("json"):
+        _print_json({"projects": projects})
+        return 0
+    if not projects:
+        _out("no project in this folder yet; start one with: "
+             "/brothermode:start (or, on a clone install: "
+             'python3 "${CLAUDE_PLUGIN_ROOT}/tools/bm_project.py start")')
+        return 0
+    for p in projects:
+        _out("%s: %s" % (p.get("project_id"),
+                         (p.get("goal") or "").strip() or "(no goal set)"))
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # next
 # ---------------------------------------------------------------------------
 
@@ -1028,7 +1173,6 @@ def cmd_next(argv):
     _pos, kv = _parse(argv, ("project-id", "json", "raw"),
                        wants_value=("project-id",))
     usage = "usage: next --project-id ID [--json] [--raw]"
-    project_id = _require(kv, "project-id", usage)
     # Same raw/json split cmd_status uses: text output is local display
     # (always raw=True); --json is the export surface and stays redacted
     # unless --raw is also given. See this file's module docstring.
@@ -1039,6 +1183,12 @@ def cmd_next(argv):
     # plain swap.
     store = _read_store()
     try:
+        # F-004b (persona dogfood 2026-09-08): deliver already
+        # infers the project through bm_lead.py's own _resolve_project_id
+        # rather than a second copy of the exactly-one-project rule; next
+        # demanded --project-id even in a folder holding exactly one, so
+        # it now routes through the same helper the same way.
+        project_id = bl._resolve_project_id(kv, store, usage)
         # 'ready' means, in the canonical protocol's own words (section 1,
         # state 2), "everything the task depends on is satisfied; it can be
         # picked up." Filtering on that state via the query parameter (not
@@ -1419,9 +1569,9 @@ def cmd_review(argv):
     pos, kv = _parse(argv, _REVIEW_FLAGS, wants_value=(
         "project-id", "kind", "ref", "note", "to", "reason",
         "criterion-id") + _ACTOR_FLAGS)
-    usage = ("usage: review <task_id> --project-id ID [--kind K] [--ref R] "
-             "[--note N] [--to STATE(default verified)] --reason R "
-             "[--criterion-id ID] "
+    usage = ("usage: review <task_id> [--project-id ID] [--kind K] "
+             "[--ref R] [--note N] [--to STATE(default verified)] "
+             "--reason R [--criterion-id ID] "
              "[--actor-type human|model] --actor-name NAME "
              "[--session-id SID] [--out-json]")
     if not pos:
@@ -1429,7 +1579,6 @@ def cmd_review(argv):
         _err("bm_project: review needs a task id")
         return 2
     task_id = pos[0]
-    project_id = _require(kv, "project-id", usage)
     reason = _require(kv, "reason", usage)
     actor = _actor(kv, usage)
     new_status = kv.get("to") or "verified"
@@ -1451,6 +1600,20 @@ def cmd_review(argv):
     }
     store = _store()
     try:
+        # R-1 (persona dogfood 2026-09-07): project id was a second key
+        # this command demanded on top of task id, which already names
+        # the task's own project (task id is a random hex uuid, unique
+        # store wide). The flag still wins when given, so nothing that
+        # already names one changes; a task id the store does not hold
+        # is refused here rather than passed to review_task, which would
+        # otherwise report the same fact in review_task's own words.
+        project_id = kv.get("project-id")
+        if not project_id:
+            task_row = store.get_task(task_id, raw=True)
+            if task_row is None:
+                _err("bm_project: no task %r in this folder" % task_id)
+                return 1
+            project_id = task_row.get("project_id")
         # ONE composite call (C1, release-closure loop2 refuter fixes):
         # review_task files the evidence AND runs the transition in a
         # SINGLE store transaction, so a transition schema.transition()
@@ -1765,18 +1928,329 @@ def _delivery_holes(store, project, tasks):
     return holes
 
 
+# ---------------------------------------------------------------------------
+# the delivery grounding gate (U7, A-prime amendment 3,
+# docs/plan/PLAN-THREE-ENGINES-2026-09-08.md step 7)
+# ---------------------------------------------------------------------------
+
+# THE SCENARIO THIS RETIRES, from the persona rounds: a handover pack that
+# told the next engineer nothing to run, and a finance owner who asked for
+# one sentence with a number and got none. Both delivered clean, because
+# nothing between the ask and the packet ever compared the two. The gate
+# compares them: the contract holds what was asked, in which language, and
+# with which receipts, and the answer file holds what is about to be said.
+
+#: The contract states a delivery may be made from. `draft` is excluded
+#: because a draft is the record adopt leaves when a blocking question is
+#: still open, and `superseded` because a record another one replaced is
+#: not the one being handed over.
+_DELIVERABLE_STATES = ("contracted", "planned", "in-flight", "delivered")
+
+#: THE RESEARCH CITATION, the one grounding no run can give, kept as small
+#: as it can be said: an answer whose receipt_id starts with this prefix is
+#: grounded by its own source line rather than by a verdict, because
+#: reading a document is not running a check. TWO things still hold. The
+#: cited receipt must exist in the contract's own receipts array, because
+#: contract_check's F1 rule refuses a delivered record whose receipt_id
+#: names nothing, so a citation that lived only in the answer file would
+#: make the rewritten record unwritable. And the answer text must carry a
+#: line naming the source, so the next reader can go and look. Nothing
+#: else is inferred: this is a marked absence of a run, not a second kind
+#: of evidence.
+_RESEARCH_PREFIX = "research:"
+_SOURCE_MARK = "source:"
+
+#: What the packet says when no contract was in play. NO-DATA, never a
+#: pass: "nobody checked" and "checked and found grounded" are different
+#: statements, and this file's other NO-DATA lines already say so.
+_GROUNDING_NODATA = "Grounding: NO-DATA (no contract)"
+
+
+def _default_contract(root):
+    """(path, problem) for the contract deliver should use when
+    --contract was not given.
+
+    (None, None) when docs/decisions/inflight/ does not exist or holds no
+    record: that is every store that never adopted, and it delivers
+    exactly as it did before this gate existed. More than one record is a
+    refusal naming the flag, never a guess at which one was meant."""
+    directory = os.path.join(root, "docs", "decisions", "inflight")
+    try:
+        names = sorted(n for n in os.listdir(directory)
+                       if n.endswith(".json"))
+    except (IOError, OSError):
+        return None, None
+    if not names:
+        return None, None
+    if len(names) > 1:
+        return None, ("%d contract records sit in %s; name the one you are "
+                      "delivering with --contract PATH"
+                      % (len(names), directory))
+    return os.path.join(directory, names[0]), None
+
+
+def _read_json_file(path, what):
+    """(obj, problem). Both reads this gate makes cross a trust boundary
+    (a file somebody else wrote), so each failure is named rather than
+    raised as a traceback the person has to decode."""
+    try:
+        with io.open(path, encoding="utf-8") as fh:
+            return json.load(fh), None
+    except (IOError, OSError) as exc:
+        return None, "could not read the %s at %s: %s" % (what, path, exc)
+    except ValueError as exc:
+        return None, "the %s at %s is not JSON: %s" % (what, path, exc)
+
+
+def _answer_index(answer):
+    """({field: entry}, problems) from an answer file, whose shape is
+    {"language": "xx", "answers": [{"field", "text", "receipt_id"}],
+    "summary": "..."}."""
+    if not isinstance(answer, dict):
+        return {}, ["the answer file must hold a JSON object"]
+    entries = answer.get("answers")
+    if not isinstance(entries, list):
+        return {}, ["the answer file has no 'answers' array"]
+    index, problems = {}, []
+    for entry in entries:
+        if not isinstance(entry, dict) or not entry.get("field"):
+            problems.append("every answers[] entry needs a 'field'")
+            continue
+        index[entry["field"]] = entry
+    return index, problems
+
+
+def _grounding_problems(contract, answer):
+    """(problems, cited) for one contract read against one answer file.
+
+    EVERY rule is checked before anything is reported, never one refusal
+    at a time: _delivery_holes above already made that choice for this
+    command, and a person fixing a delivery wants the whole list from one
+    run. `cited` counts the must-answer fields a PASS receipt grounds, the
+    number the packet's own Grounding line then quotes."""
+    problems = []
+    want = contract.get("language")
+    got = answer.get("language") if isinstance(answer, dict) else None
+    if want != got:
+        problems.append(
+            "language: the contract records the ask in %r and the answer "
+            "file is written in %r; answer in the language the person "
+            "asked in" % (want, got))
+    index, shape = _answer_index(answer)
+    problems.extend(shape)
+    receipts = {}
+    for receipt in (contract.get("receipts") or []):
+        if isinstance(receipt, dict) and isinstance(receipt.get("id"), str):
+            receipts[receipt["id"]] = receipt
+    cited = 0
+    for entry in (contract.get("must_answer") or []):
+        field = (entry or {}).get("field", "?")
+        given = index.get(field)
+        if given is None:
+            problems.append("must_answer.%s: the answer file carries no "
+                            "entry for this field" % field)
+            continue
+        text = (given.get("text") or "").strip()
+        if not text:
+            problems.append("must_answer.%s: the answer text is empty"
+                            % field)
+        receipt_id = (given.get("receipt_id") or "").strip()
+        if not receipt_id:
+            problems.append("must_answer.%s: no receipt_id, so nothing on "
+                            "record grounds this answer" % field)
+            continue
+        receipt = receipts.get(receipt_id)
+        if receipt is None:
+            problems.append("must_answer.%s: receipt_id %r names no entry "
+                            "in the contract's receipts" % (field, receipt_id))
+            continue
+        if receipt_id.startswith(_RESEARCH_PREFIX):
+            if _SOURCE_MARK not in text.lower():
+                problems.append(
+                    "must_answer.%s: a research citation needs a line "
+                    "naming where it came from ('%s ...') in the answer "
+                    "text" % (field, _SOURCE_MARK))
+            continue
+        verdict = receipt.get("verdict")
+        if verdict != "PASS":
+            problems.append(
+                "must_answer.%s: receipt %s is %s, and a must-answer field "
+                "is grounded only by a PASS receipt or a research citation"
+                % (field, receipt_id, verdict))
+            continue
+        cited += 1
+    return problems, cited
+
+
+def _grounding_gate(project_id, contract_path, answer_path):
+    """(contract, {field: answer entry}, the packet's Grounding line) when
+    every rule passes; None when any does not, each problem already
+    printed on its own line."""
+    contract, problem = _read_json_file(contract_path, "contract")
+    if problem:
+        _err("cannot deliver %s: %s" % (project_id, problem))
+        return None
+    cc = _contract_checker()
+    if cc is None:
+        _err("cannot deliver %s: NO-DATA: scripts/contract_check.py is not "
+             "on disk beside this tool, so the contract could not be "
+             "checked; a check that could not run is never a pass"
+             % project_id)
+        return None
+    try:
+        schema = cc.load_json(cc.DEFAULT_SCHEMA, "schema")
+        written = cc.load_json(contract_path, "record")
+    except cc.NoData as exc:
+        _err("cannot deliver %s: NO-DATA: %s" % (project_id, exc))
+        return None
+    problems = ["contract_check: %s" % p for p in cc.check(written, schema)]
+    state = contract.get("state")
+    if state not in _DELIVERABLE_STATES:
+        problems.append("state: the contract is %r, and only a contract in "
+                        "%s can be delivered"
+                        % (state, ", ".join(_DELIVERABLE_STATES)))
+    # F-005a: --answer-file (and the language/must-answer comparison it
+    # feeds) is demanded only when there is something to answer. A
+    # record with an empty must_answer asks nothing, so nothing is
+    # compared against nothing: the whole grounding check below is
+    # skipped rather than failing on an answer file nobody had a
+    # question to write.
+    must_answer = contract.get("must_answer") or []
+    answer, cited = {}, 0
+    if must_answer or answer_path:
+        if not answer_path:
+            problems.append(
+                "--answer-file is required once a contract is in play "
+                "(%s); it is the answer the gate compares against the ask"
+                % contract_path)
+        else:
+            answer, problem = _read_json_file(
+                os.path.abspath(answer_path), "answer file")
+            if problem:
+                problems.append(problem)
+                answer = {}
+        ground, cited = _grounding_problems(contract, answer)
+        problems.extend(ground)
+    if problems:
+        for one in problems:
+            _err("cannot deliver %s: %s" % (project_id, one))
+        return None
+    index, _shape = _answer_index(answer)
+    line = ("Grounding: %d must-answer field(s), %d cited from PASS "
+            "receipts, language %s matches the ask"
+            % (len(must_answer), cited, contract.get("language")))
+    return contract, index, line
+
+
+def _mark_contract_delivered(path, contract, answers):
+    """Rewrite `path` as a delivered record: each must_answer entry
+    carries its answer and the receipt that grounds it, plus one history
+    stamp. 0 when the rewritten record passes contract_check, 1 when it
+    does not, in which case the ORIGINAL bytes go back on disk. cmd_adopt
+    below makes the same call for the same reason: a record the estate's
+    own checker rejects is worse than no record, because the next reader
+    would treat it as the typed truth."""
+    try:
+        with io.open(path, encoding="utf-8") as fh:
+            original = fh.read()
+    except (IOError, OSError) as exc:
+        _err("bm_project: could not read %s: %s" % (path, exc))
+        return 1
+    record = json.loads(json.dumps(contract, ensure_ascii=False))
+    for entry in (record.get("must_answer") or []):
+        given = answers.get(entry.get("field"))
+        if given is None:
+            continue
+        # The answer text (usually model written) lands in a record inside
+        # the tree git commits: the same redact_text funnel as cmd_adopt.
+        try:
+            entry["answer"] = bs.redact_text((given.get("text") or "").strip())
+        except bs.RedactionUnavailable as exc:
+            _err("bm_project: refused to write %s unredacted: %s"
+                 % (path, exc))
+            return 1
+        entry["receipt_id"] = (given.get("receipt_id") or "").strip()
+    record["state"] = "delivered"
+    actor, _actor_source = _default_actor_name()
+    history = record.get("history")
+    if not isinstance(history, list):
+        history = []
+    history.append({"at": bs.now_iso(), "by": actor,
+                    "note": "delivered with grounded answers"})
+    record["history"] = history
+    try:
+        with io.open(path, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, indent=2, sort_keys=True,
+                             ensure_ascii=False) + "\n")
+    except (IOError, OSError) as exc:
+        _err("bm_project: could not write %s: %s" % (path, exc))
+        return 1
+    cc = _contract_checker()
+    if cc is None:
+        problems = ["NO-DATA: scripts/contract_check.py is not on disk"]
+    else:
+        try:
+            schema = cc.load_json(cc.DEFAULT_SCHEMA, "schema")
+            written = cc.load_json(path, "record")
+            problems = cc.check(written, schema)
+        except cc.NoData as exc:
+            problems = ["NO-DATA: %s" % exc]
+    if problems:
+        for problem in problems:
+            _err("bm_project: contract_check: FAIL: %s" % problem)
+        try:
+            with io.open(path, "w", encoding="utf-8") as fh:
+                fh.write(original)
+        except (IOError, OSError) as exc:
+            _err("bm_project: could not restore %s: %s" % (path, exc))
+        _err("bm_project: refused to leave a delivered record the contract "
+             "checker rejects; %s is unchanged" % path)
+        return 1
+    return 0
+
+
 def cmd_deliver(argv):
-    _pos, kv = _parse(argv, ("project-id", "partial", "raw", "out-json"),
-                       wants_value=("project-id",))
+    _pos, kv = _parse(argv, ("project-id", "partial", "raw", "out-json",
+                             "contract", "answer-file"),
+                       wants_value=("project-id", "contract", "answer-file"))
     usage = ("usage: deliver --project-id ID [--partial] [--raw] "
-             "[--out-json]")
-    project_id = _require(kv, "project-id", usage)
+             "[--out-json] [--contract PATH] [--answer-file PATH]")
     # Same contract cmd_export already uses: default withheld, --raw for
     # the project's own owner (DELIVERY-PACKET.md is an export, see this
     # file's module docstring and render_delivery_packet's own docstring).
     want_raw = bool(kv.get("raw"))
+    root = _root()
+    # F-005: a folder with no project yet used to hit deliver's own bare
+    # usage refusal. A READER in the same spot gets bm_lead.py's own tree
+    # read of what the repository already says (R-10); deliver is a
+    # WRITER and keeps its exit 2, but nothing stops it from handing back
+    # the same account instead of a sentence naming no next step.
+    if not os.path.isfile(bs.store_path(root)):
+        bl._print_no_project_tree_read(root, False)
+        return 2
     store = _store()
     try:
+        if not store.list_projects(raw=True):
+            bl._print_no_project_tree_read(root, False)
+            return 2
+        # F-004: the flag still wins when given; a folder holding exactly
+        # one project resolves to it, naming it on one stderr line
+        # (bm_lead.py's own _resolve_project_id, the same helper R-1
+        # already wired into review and every bm_lead.py reader). Two or
+        # more projects keep the same exit-2 refusal that helper already
+        # gives a writer (zero is handled above, with the tree read).
+        project_id = bl._resolve_project_id(kv, store, usage)
+        # U7 (delivery gate): resolved after project_id, not before, so a
+        # missing --contract that falls back to _default_contract can name
+        # the project in its own error line instead of a NameError.
+        contract_path = kv.get("contract")
+        if contract_path:
+            contract_path = os.path.abspath(contract_path)
+        else:
+            contract_path, problem = _default_contract(_root())
+            if problem:
+                _err("cannot deliver %s: %s" % (project_id, problem))
+                return 1
         project = store.get_project(project_id)
         if project is None:
             _err("bm_project: no project %r" % project_id)
@@ -1799,6 +2273,25 @@ def cmd_deliver(argv):
                  "terminal state (%r); pass --partial to deliver anyway, "
                  "or finish those tasks first."
                  % (non_terminal, total, TERMINAL_STATE))
+            # R-13: a bare headcount named no task, no receipt, and no
+            # cost. Every unfinished task now gets its own line: a short
+            # id, its title, its state, and its newest evidence reference
+            # (raw only under --raw, the same local-owner switch every
+            # other reader in this file already uses for free text).
+            # No per-task cost estimate exists anywhere in this file
+            # (checked: neither "forecast" nor "cost" computes one per
+            # task), so the honest answer is NO-DATA, never a guess.
+            display = store.list_tasks(project_id, raw=want_raw)
+            for t in display:
+                if t.get("status") == TERMINAL_STATE:
+                    continue
+                tid = t.get("task_id") or ""
+                evidence = store.list_evidence("task", tid, raw=want_raw)
+                newest_ref = evidence[-1].get("ref") if evidence else ""
+                _err("  %s: %s [%s] evidence: %s"
+                     % (tid[:8], t.get("title") or "(no title)",
+                        t.get("status"), newest_ref or "no evidence"))
+            _err("Cost to finish: NO-DATA (no estimate recorded)")
             return 1
         holes = _delivery_holes(store, project, tasks)
         # M2 (2026-08-20): a hollow project may never be certified as a
@@ -1811,11 +2304,26 @@ def cmd_deliver(argv):
         if holes:
             _err("delivering PARTIALLY with holes on record: %s"
                  % "; ".join(holes))
-        text = render_delivery_packet(store, project_id, raw=want_raw)
+        # THE GATE, run BEFORE the packet is written: a refused delivery
+        # must leave no packet behind, because a packet on disk is what
+        # the next reader takes as the delivery having happened.
+        grounding, contract, answers = None, None, None
+        if contract_path:
+            gate = _grounding_gate(project_id, contract_path,
+                                   kv.get("answer-file"))
+            if gate is None:
+                return 1
+            contract, answers, grounding = gate
+        text = render_delivery_packet(store, project_id, raw=want_raw,
+                                      grounding=grounding)
         _write_generated(_root(), _packet_filename(store, project_id), text,
                          DELIVERY_BEGIN, DELIVERY_END)
     finally:
         store.close()
+    if contract_path:
+        rc = _mark_contract_delivered(contract_path, contract, answers)
+        if rc:
+            return rc
     if kv.get("out-json"):
         _print_json({"project_id": project_id, "total_tasks": total,
                      "closed_tasks": closed, "partial": bool(non_terminal)})
@@ -1995,12 +2503,709 @@ def cmd_purge(argv):
 
 
 # ---------------------------------------------------------------------------
+# adopt: the typed project record, inferred from repository facts
+# (A-prime amendment 1, docs/plan/PLAN-THREE-ENGINES-2026-09-08.md step 3;
+# the 2026-09-08 debate judgment, unit U5; the record's own shape is
+# docs/schema/outcome-contract-v1.json and its checker is
+# scripts/contract_check.py)
+#
+# THE FINDING THIS CLOSES: the onboarding persona scenarios of both
+# estates failed because Brother asked a first time user for facts the
+# repository already holds. Amendment 1, verbatim: "the project record is
+# typed, every field carries provenance (which repository fact it came
+# from), at most one blocking question is asked and only for an
+# outcome-required field still unknown; no field is guessed."
+#
+# SO: this command reads the tree, writes ONE record, and asks AT MOST
+# ONE question. Every fact it could not read is the literal NO-DATA,
+# never an invention. NO-DATA here means "I looked and the repository
+# does not say", which is a different claim from a plausible default
+# nobody can trace, and it is the same literal bm_lead.py's own tree read
+# already uses for a git fact it could not get.
+#
+# PROVENANCE BINDS THE PROJECT OBJECT ONLY (F6, docs/schema/README.md):
+# language, question, persona and the rest come from the ask itself and
+# carry no provenance entry. That is the orchestrator's ruling, not a
+# convenience: a field that came from the person asking has a source
+# nobody needs a record for.
+#
+# IT NEEDS NO STORE, which is the whole point: a repository with no
+# project yet is the case this exists for, so _adopt_root falls back to
+# the working directory instead of refusing the way every store-backed
+# command in this file does.
+#
+# THE TREE READS ARE bm_lead.py's, NOT A SECOND SET: _av,
+# _repo_identity, _test_suites and _skip_tree_dirs are loaded from there
+# and called as they stand. That module is loaded lazily, inside the
+# command, and only its PURE tree readers are called: loading it by path
+# produces a second bm_store module object (see the L = _load(...) note
+# above for why that matters), and none of these helpers touch a store
+# class, so the two objects never meet.
+# ---------------------------------------------------------------------------
+
+CONTRACT_SCHEMA_VERSION = "outcome-contract-v1"
+
+#: The literal every unread fact lands on, matching bm_lead.py's own tree
+#: read rather than inventing a second spelling of "not known".
+ADOPT_NODATA = "NO-DATA"
+
+#: The ONE question adopt is ever allowed to ask, and the only field it
+#: is allowed to ask about. Amendment 1 caps this at one; the schema's
+#: own questions rule (the A-prime rule) refuses a record that carries
+#: more than one once the state is contracted or later.
+ADOPT_QUESTION_FIELD = "success_checks"
+ADOPT_QUESTION = ("How do you check this repository is healthy? "
+                  "Name one command.")
+
+ADOPT_PERSONAS = ("analyst", "lead", "developer")
+
+#: ponytail: at most this many success checks land in one record, ordered,
+#: so a monorepo with four hundred suite files does not write a four
+#: hundred line record. Group by directory if a real repository ever needs
+#: more proof than the cap carries.
+_SUITE_CAP = 10
+
+_ADOPT_FLAGS = ("ask", "language", "persona", "out", "answer", "json",
+               "ticket", "branch", "no-audit")
+_ADOPT_VALUE_FLAGS = ("ask", "language", "persona", "out", "answer",
+                      "ticket", "branch")
+
+#: A French ask, by the two cheapest signals that separate it from an
+#: English one: an accented character, or two of these words at once.
+_FRENCH_MARKS = "éèêàçùôîïû"
+_FRENCH_WORDS = frozenset((
+    "le", "la", "les", "des", "une", "un", "pour", "comment", "je",
+    "nous", "vous", "est", "dans", "avec", "que", "qui", "sur", "projet",
+    "faire", "cette", "sont", "pas", "plus", "mon", "notre",
+))
+
+
+def _adopt_usage():
+    return ("usage: bm_project.py adopt --ask \"<what you want>\" "
+            "[--language xx] [--persona analyst|lead|developer] "
+            "[--out PATH] [--answer field=value] [--json] "
+            "[--ticket SYSTEM:ID] [--branch NAME] [--no-audit]")
+
+
+def _contract_slug(text, limit=40):
+    """A filesystem and identifier safe fragment of `text`.
+
+    Copied from tools/bm_packs.py's own _slug (the sibling in this same
+    directory that already names decision files), rather than imported:
+    bm_packs.py is a store-backed CLI, not a library this file should
+    depend on for a five line string rule. The brief for this unit named
+    scripts/intake_inflight.py as the source; that module has no slug
+    rule of its own (its slug is an argument its caller supplies), so the
+    nearest real rule in the estate is the one used here."""
+    flat = re.sub(r"[^a-z0-9]+", "-", (text or "").lower()).strip("-")
+    if not flat:
+        flat = "decision"
+    return flat[:limit].rstrip("-")
+
+
+def _detect_language(ask):
+    """'ja', 'fr' or 'en' from the ask itself.
+
+    TWO RULES, NOT LANGUAGE IDENTIFICATION, and the docstring says so on
+    purpose: Japanese script present means ja (which also claims a
+    Chinese ask, a known and accepted limit), an accent or two French
+    words at once means fr, everything else is en. --language always
+    wins, so the person is never stuck with what these two rules
+    decided. Nothing about this is a guess at a FIELD: the language of
+    the ask is a property of the ask, and the ruling above is that the
+    ask's own fields carry no provenance."""
+    for ch in ask:
+        # Hiragana and katakana (U+3040 to U+30FF), then the CJK
+        # unified ideographs (U+4E00 to U+9FFF), written as escapes
+        # so the range is readable in a terminal that cannot render
+        # the characters themselves.
+        if ("\u3040" <= ch <= "\u30ff") or ("\u4e00" <= ch <= "\u9fff"):
+            return "ja"
+    low = ask.lower()
+    if any(mark in low for mark in _FRENCH_MARKS):
+        return "fr"
+    words = set(re.findall(r"[a-z]+", low))
+    if len(words & _FRENCH_WORDS) >= 2:
+        return "fr"
+    return "en"
+
+
+def _adopt_root():
+    """The repository adopt reads and writes into. Every other command in
+    this file goes through _root() and refuses when no BrotherMode root
+    exists; adopt is the one command whose entire point is a repository
+    with no project yet, so that refusal falls back to the working
+    directory rather than ending the command."""
+    try:
+        return _root()
+    except bs.BMStoreError:
+        return os.path.abspath(os.getcwd())
+
+
+def _git_remote(av, root):
+    """The origin remote's URL, or NO-DATA on any git failure.
+
+    bm_lead.py's _repo_identity reads the name and the branch through
+    bm_autosave.py's own reviewed _run_git helper and never reads a
+    remote, so this is the ONE repository fact that helper does not
+    already return; it goes through the same helper rather than starting
+    a git call of its own."""
+    if av is None:
+        return ADOPT_NODATA
+    try:
+        r = av._run_git(root, "remote", "get-url", "origin")
+        if r.returncode == 0 and r.stdout.strip():
+            return _strip_url_credentials(r.stdout.strip())
+    except (OSError, AttributeError):
+        pass
+    return ADOPT_NODATA
+
+
+def _strip_url_credentials(url):
+    """The remote URL without a user or password. adopt writes it into a
+    record under docs/decisions/, which git commits, so an https URL of the
+    form user:token@host must never reach it. The scp form (git@host:path)
+    carries no password and is returned unchanged. Plain string work, no
+    urllib: SECURITY.md's no-network claim is checked by import scan."""
+    scheme, sep, rest = url.partition("://")
+    if not sep:
+        return url
+    netloc, slash, path = rest.partition("/")
+    if "@" not in netloc:
+        return url
+    return scheme + "://" + netloc.rsplit("@", 1)[1] + slash + path
+
+
+def _project_name(repo_name, remote, root):
+    """(name, provenance) for this repository, in the order the estate
+    can actually trace: the remote's own last path segment when git gave
+    one (that is the repository's NAME, where a checkout directory is
+    only where this copy happens to sit), then the git toplevel's
+    directory name bm_lead.py's _repo_identity returns, and only then the
+    working directory's name, which no git fact backs and which therefore
+    lands on NO-DATA provenance."""
+    if remote != ADOPT_NODATA:
+        tail = remote.rstrip("/").rsplit("/", 1)[-1].rsplit(":", 1)[-1]
+        if tail.endswith(".git"):
+            tail = tail[:-len(".git")]
+        if tail:
+            return tail, "git"
+    if repo_name != ADOPT_NODATA:
+        return repo_name, "git"
+    return (os.path.basename(root.rstrip(os.sep)) or "project"), ADOPT_NODATA
+
+
+def _make_has_test_target(root):
+    """True when a Makefile in `root` declares a test target. False on
+    any read failure: an unreadable Makefile is not evidence of a check."""
+    try:
+        with io.open(os.path.join(root, "Makefile"), encoding="utf-8") as fh:
+            return re.search(r"(?m)^test:", fh.read()) is not None
+    except (IOError, OSError, ValueError):
+        return False
+
+
+def _npm_has_test_script(root):
+    """True when package.json in `root` carries a non-empty test script."""
+    try:
+        with io.open(os.path.join(root, "package.json"),
+                     encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (IOError, OSError, ValueError):
+        return False
+    scripts = data.get("scripts") if isinstance(data, dict) else None
+    if not isinstance(scripts, dict):
+        return False
+    return bool(str(scripts.get("test") or "").strip())
+
+
+def _repo_success_checks(lead, root):
+    """One runnable check per way this repository already documents its
+    own tests, each in the command shape that repository itself uses:
+    `make test` for a Makefile test target, `npm test` for a package.json
+    test script, `python3 <path>` for a test_*.py suite file (the shape
+    every suite in this estate is run with), and `python3 -m unittest
+    discover <dir>` for a tests/ directory bm_lead.py's own _test_suites
+    found that holds no test_*.py file already covered above.
+
+    NOTHING IS INVENTED. A repository that documents none of these
+    returns [], and that empty answer is exactly what makes the one
+    blocking question the honest thing to ask instead of writing a
+    plausible command nobody can run."""
+    checks = []
+    if _make_has_test_target(root):
+        checks.append({"id": "make-test", "command": "make test",
+                       "expect": "exit-0"})
+    if _npm_has_test_script(root):
+        checks.append({"id": "npm-test", "command": "npm test",
+                       "expect": "exit-0"})
+    skip = lead._skip_tree_dirs()
+    files = []
+    try:
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [d for d in dirnames
+                           if d not in skip and not d.startswith(".")]
+            for fname in filenames:
+                if fname.startswith("test_") and fname.endswith(".py"):
+                    files.append(os.path.relpath(
+                        os.path.join(dirpath, fname), root))
+    except OSError:  # sbe: allow-silent inaccessible test walk yields no generated check
+        pass
+    covered = set()
+    for rel in sorted(files):
+        checks.append({"id": _contract_slug(rel),
+                       "command": "python3 %s" % rel,
+                       "expect": "exit-0"})
+        covered.add(os.path.dirname(rel))
+    for rel, count in lead._test_suites(root):
+        if count and rel not in covered:
+            checks.append({"id": _contract_slug(rel),
+                           "command": "python3 -m unittest discover %s" % rel,
+                           "expect": "exit-0"})
+    return checks[:_SUITE_CAP]
+
+
+def _check_evidence_path(root, command):
+    """The repository relative file that backs `command`, one of the
+    four shapes _repo_success_checks builds -- or None when the command
+    names nothing this function can resolve to a single file (the
+    --answer path's user typed command, which is a claim from a person,
+    never an observation of a file on disk).
+
+    "make test" and "npm test" point at the manifest that carries the
+    target (Makefile, package.json); "python3 <path>" points at <path>
+    itself; "python3 -m unittest discover <dir>" has no single file of
+    its own, so it points at the first file _repo_success_checks' own
+    walk would have found inside <dir>, sorted for a stable pick."""
+    if command == "make test":
+        return "Makefile"
+    if command == "npm test":
+        return "package.json"
+    prefix = "python3 -m unittest discover "
+    if command.startswith(prefix):
+        directory = command[len(prefix):]
+        full_dir = os.path.join(root, directory)
+        try:
+            for dirpath, _dirnames, filenames in os.walk(full_dir):
+                if filenames:
+                    return os.path.relpath(
+                        os.path.join(dirpath, sorted(filenames)[0]), root)
+        except OSError:  # sbe: allow-silent inaccessible discovery directory has no representative file
+            pass
+        return None
+    if command.startswith("python3 "):
+        return command[len("python3 "):]
+    return None
+
+
+def _check_receipts(root, checks):
+    """[{id, path, ref, verdict}], one entry per `checks` entry whose
+    command resolves (through _check_evidence_path) to a real file on
+    disk right now.
+
+    THE CLAIM IS NARROW ON PURPOSE (the finding this closes, persona
+    dogfood follow up 2026-09-08/09): adopt observed the file that made
+    it write this success check in the first place, so the receipt says
+    exactly that ("this file exists, this many lines"), in the
+    file:<path>:<start>-<end> grammar scripts/receipt_check.py resolves.
+    It is never a claim that the check has RUN, let alone passed a real
+    execution -- verdict PASS here means the observation passed, not the
+    suite. A command _check_evidence_path cannot resolve to a file (the
+    --answer path's own typed command) gets no receipt at all, since
+    nothing was observed for it beyond the person's own word."""
+    out = []
+    for c in checks:
+        rel = _check_evidence_path(root, c["command"])
+        if not rel:
+            continue
+        full = os.path.join(root, rel)
+        try:
+            with io.open(full, encoding="utf-8", errors="replace") as fh:
+                nlines = sum(1 for _ in fh)
+        except (IOError, OSError):
+            continue
+        if nlines < 1:
+            # An empty file has no valid 1-based line range at all
+            # (receipt_check's own resolve_receipt would refuse any
+            # start it was given), so there is nothing true to claim.
+            continue
+        out.append({"id": c["id"], "path": rel,
+                    "ref": "file:%s:1-%d" % (rel, nlines),
+                    "verdict": "PASS"})
+    return out
+
+
+def _adopt_receipts(root, limit=_SUITE_CAP):
+    """Every .sbe/evidence/*.json file as one receipts[] entry: id and
+    path from the file name, ref in the resolver grammar
+    (evidence:<name>, one of the three prefixes scripts/receipt_check.py
+    understands), verdict from the file's own verdict field or NO-DATA
+    when it does not carry one.
+
+    bm_lead.py's _receipt_summary walks this same directory, but it
+    returns COUNTS by verdict plus the newest file name, never the per
+    file verdicts the contract's receipts[] needs, so this reads the
+    names that helper does not expose rather than recomputing what it
+    already gives."""
+    directory = os.path.join(root, ".sbe", "evidence")
+    found = []
+    if not os.path.isdir(directory):
+        return found
+    try:
+        names = sorted(os.listdir(directory))
+    except OSError:
+        return found
+    for name in names:
+        path = os.path.join(directory, name)
+        if not name.endswith(".json") or not os.path.isfile(path):
+            continue
+        verdict = ADOPT_NODATA
+        try:
+            with io.open(path, encoding="utf-8") as fh:
+                data = json.load(fh)
+            if isinstance(data, dict):
+                stated = str(data.get("verdict") or "").strip().upper()
+                if stated in ("PASS", "FAIL", ADOPT_NODATA):
+                    verdict = stated
+        except (IOError, OSError, ValueError):
+            pass
+        found.append({"id": name,
+                      "path": os.path.join(".sbe", "evidence", name),
+                      "ref": "evidence:%s" % name,
+                      "verdict": verdict})
+        if len(found) >= limit:
+            break
+    return found
+
+
+def _affected_products(root):
+    """Which of this estate's products the tree shows evidence of. The
+    umbrella is always true (the record belongs to it); the other two are
+    claimed only when their own directory is on disk. STORE_DIRNAME comes
+    from bm_store rather than being retyped, the same discipline
+    bm_lead.py's own skip list states."""
+    products = ["brother"]
+    if os.path.isdir(os.path.join(root, bs.STORE_DIRNAME)):
+        products.append("brothermode")
+    if os.path.isdir(os.path.join(root, ".sbe")):
+        products.append("brothersbe")
+    return products
+
+
+def _contract_checker():
+    """scripts/contract_check.py, loaded BY PATH exactly the way _load
+    above loads a sibling module, so adopt can refuse to leave a record
+    the estate's own checker rejects. None when it is not on disk (a
+    packaged install that ships the tools without the scripts
+    directory), which is a NO-DATA, never a pass."""
+    path = os.path.normpath(os.path.join(
+        HERE, "..", "..", "..", "scripts", "contract_check.py"))
+    if not os.path.isfile(path):
+        return None
+    try:
+        spec = importlib.util.spec_from_file_location("contract_check", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+    except (ImportError, OSError, AttributeError):
+        return None
+
+
+def _adopt_store_message(root, record, actor_name):
+    """The one line adopt prints about the store project it did or did
+    not create for `record`, and the side effect that backs it.
+
+    R-9 (persona dogfood 2026-09-08, the first defect this unit fixes):
+    adopt used to write only the contract file, so a founder who ran
+    `adopt` and then `list` or `status` was told no project existed at
+    all -- the contract and the store were two records of the same
+    decision that never met. This opens the SAME writable store cmd_start
+    opens (_store_for_start, R-11's healing included) and calls the same
+    store.upsert_project it calls, so a project adopt creates is a real
+    project every other command already knows how to read; nothing here
+    duplicates cmd_start's own field handling or its git-exposed-store
+    heal.
+
+    _store_for_start refuses 'no-store' when nothing has ever run
+    `bm_store.py init` here, which is the NORMAL case for adopt:
+    skills/start/SKILL.md's own init failsafe covers `start`'s guided
+    kickoff, never `adopt` ("adopt first, one command" runs on a
+    repository nothing has touched yet). So a genuine first open here
+    creates the store exactly as `init` would (bs.Store(root,
+    create=True), the same git-exclude heal that constructor already
+    performs), rather than refusing the one record adopt exists to leave
+    behind.
+
+    A draft record (an open question still on record) creates nothing:
+    the record itself is not yet the typed truth, and a store project
+    built from a placeholder command would be worse than none. Never
+    raises: a repository with nowhere to put a store (no git boundary, no
+    BROTHERMODE_ROOT) is reported on this one line, not fatal to the
+    command whose real deliverable is the contract file already written."""
+    if record["state"] != "contracted":
+        return "no project created in the store: the record is a draft"
+    project = record["project"]
+    project_id = project["project_id"]
+    try:
+        store = _store_for_start()
+    except bs.OwnershipRefused as exc:
+        if exc.reason != "no-store":
+            return "project %s NOT created in the store: %s" % (project_id, exc)
+        try:
+            store = bs.Store(root, create=True)
+        except bs.BMStoreError as exc2:
+            return ("project %s NOT created in the store: %s"
+                    % (project_id, exc2))
+    except bs.BMStoreError as exc:
+        return "project %s NOT created in the store: %s" % (project_id, exc)
+    try:
+        existed = any(p.get("project_id") == project_id
+                     for p in store.list_projects(raw=True))
+        now = bs.now_iso()
+        store.upsert_project(
+            {"project_id": project_id, "name": project["name"],
+             "goal": record["question"], "user_outcome": record["question"],
+             "status": "draft", "created_at": now, "updated_at": now},
+            {"actor_type": "model", "actor_name": actor_name,
+             "session_id": "cli-" + uuid.uuid4().hex})
+    finally:
+        store.close()
+    if existed:
+        return "project %s already in the store, record updated" % project_id
+    return "project %s created in the store" % project_id
+
+
+def cmd_adopt(argv):
+    """Write one outcome contract record from what this repository can
+    already say, and ask at most one question about what it cannot.
+
+    EXIT CODES, distinct on purpose so the door can tell the three cases
+    apart without parsing prose:
+      0  the record is contracted and no question is open
+      3  the record is a draft and ONE question is open
+      2  usage, a write that failed, or a record the contract checker
+         rejected (in which case nothing is left on disk)"""
+    _pos, kv = _parse(argv, _ADOPT_FLAGS, wants_value=_ADOPT_VALUE_FLAGS)
+    usage = _adopt_usage()
+    ask = _require(kv, "ask", usage).strip()
+    if not ask:
+        _err(usage)
+        _err("bm_project: --ask must not be empty")
+        return 2
+
+    persona = kv.get("persona") or ADOPT_NODATA
+    if persona not in ADOPT_PERSONAS + (ADOPT_NODATA,):
+        _err("bm_project: --persona must be one of %s (got %r)"
+             % (", ".join(ADOPT_PERSONAS), persona))
+        return 2
+
+    # D-002 (persona dogfood 2026-09-07, B1-S1/B2-S2): a team living in
+    # Jira needs the CR id bound to the record. SYSTEM:ID is the whole
+    # grammar; a change bound to a tracked ticket is audited by default,
+    # since --no-audit is the deliberate opt out rather than the default.
+    ticket = None
+    audit_required = False
+    raw_ticket = kv.get("ticket")
+    if raw_ticket:
+        system, sep, ticket_id = raw_ticket.partition(":")
+        system = system.strip()
+        ticket_id = ticket_id.strip()
+        if not sep or not system or not ticket_id:
+            _err("bm_project: --ticket takes SYSTEM:ID (got %r)"
+                 % raw_ticket)
+            return 2
+        ticket = {"system": system, "id": ticket_id}
+        audit_required = not kv.get("no-audit")
+
+    answered = None
+    raw_answer = kv.get("answer")
+    if raw_answer:
+        field, sep, value = raw_answer.partition("=")
+        if not sep or not value.strip():
+            _err("bm_project: --answer takes field=value (got %r)"
+                 % raw_answer)
+            return 2
+        if field.strip() != ADOPT_QUESTION_FIELD:
+            _err("bm_project: --answer only answers %s, the one question "
+                 "adopt asks (got %r)"
+                 % (ADOPT_QUESTION_FIELD, field.strip()))
+            return 2
+        answered = value.strip()
+
+    # The record lands under docs/decisions/inflight/, inside the tree git
+    # commits, so the person's own text passes through the same redact_text
+    # funnel every generated document here uses BEFORE it reaches the
+    # record, its file name (the slug of the ask), the store, or stdout.
+    try:
+        ask = bs.redact_text(ask)
+        if answered:
+            answered = bs.redact_text(answered)
+    except bs.RedactionUnavailable as exc:
+        _err("bm_project: refused to write the record unredacted: %s" % exc)
+        return 2
+
+    root = _adopt_root()
+    lead = _load("bm_lead")
+    av = lead._av()
+    repo_name, branch = lead._repo_identity(av, root)
+    remote = _git_remote(av, root)
+
+    # The one provenance decision: git either identified this repository
+    # or it did not. A directory name is a real fact but not a git one,
+    # so it lands under NO-DATA provenance rather than borrowing git's.
+    display_name, source = _project_name(repo_name, remote, root)
+
+    # D-002: --branch binds an existing (or about-to-exist) branch to the
+    # record. The schema carries one provenance value for the whole
+    # repository sub object (docs/schema/outcome-contract-v1.json,
+    # project.provenance), not one per field, so a bound branch's own
+    # provenance REPLACES the repository provenance rather than adding a
+    # new key the checker would reject as unknown (F7).
+    repo_provenance = source
+    branch_flag = kv.get("branch")
+    if branch_flag:
+        branch = branch_flag
+        found = (av._run_git(root, "show-ref", "--verify",
+                             "refs/heads/%s" % branch_flag)
+                if av is not None else None)
+        if found is not None and found.returncode == 0:
+            repo_provenance = "git"
+            _err("bm_project: branch %r found in the repository"
+                 % branch_flag)
+        else:
+            repo_provenance = "ask"
+            _err("bm_project: branch %r not found in the repository; it "
+                 "will be created by the plan" % branch_flag)
+
+    checks = _repo_success_checks(lead, root)
+    # Every receipt below observes a check BEFORE the --answer flag (a
+    # person's own typed command, never something adopt observed on
+    # disk) can replace or displace it; a check dropped by that
+    # replacement or by the cap loses its receipt along with it.
+    check_receipts = _check_receipts(root, checks)
+    if answered:
+        checks = ([{"id": _contract_slug(answered), "command": answered,
+                    "expect": "exit-0"}]
+                  + [c for c in checks if c["command"] != answered])
+        checks = checks[:_SUITE_CAP]
+        kept_ids = set(c["id"] for c in checks)
+        check_receipts = [r for r in check_receipts if r["id"] in kept_ids]
+
+    questions = []
+    if checks:
+        state = "contracted"
+    else:
+        # THE ONE QUESTION. The schema now allows success_checks to be
+        # empty while state is draft (a schema correction found by U5:
+        # the field the one open question is about needs no placeholder
+        # entry to stand in for the answer that has not arrived yet).
+        state = "draft"
+        questions = [{"field": ADOPT_QUESTION_FIELD,
+                      "question": ADOPT_QUESTION}]
+
+    actor, _actor_source = _default_actor_name()
+    record = {
+        "schema_version": CONTRACT_SCHEMA_VERSION,
+        "project": {
+            "project_id": _contract_slug(display_name),
+            "name": display_name,
+            "repository": {
+                "name": display_name if source == "git" else ADOPT_NODATA,
+                "branch": branch,
+                "remote": remote},
+            "provenance": {"project_id": source, "name": source,
+                           "repository": repo_provenance},
+        },
+        "language": kv.get("language") or _detect_language(ask),
+        "question": ask,
+        "success_checks": checks,
+        "must_answer": [],
+        "affected_products": _affected_products(root),
+        "ticket": ticket,
+        "audit": {"required": audit_required, "manifest": None},
+        "persona": persona,
+        "state": state,
+        "receipts": check_receipts + _adopt_receipts(root),
+        "questions": questions,
+        "history": [{"at": bs.now_iso(), "by": actor,
+                     "note": "adopted from repository facts"}],
+        "decision": None,
+    }
+
+    out = kv.get("out") or os.path.join(
+        root, "docs", "decisions", "inflight", "%s.json" % _contract_slug(ask))
+    out = os.path.abspath(out)
+    try:
+        directory = os.path.dirname(out)
+        if directory and not os.path.isdir(directory):
+            os.makedirs(directory)
+        with io.open(out, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, indent=2, sort_keys=True,
+                             ensure_ascii=False) + "\n")
+    except (IOError, OSError) as exc:
+        _err("bm_project: could not write %s: %s" % (out, exc))
+        return 2
+
+    cc = _contract_checker()
+    if cc is None:
+        _out(out)
+        _err("bm_project: NO-DATA: scripts/contract_check.py is not on disk "
+             "beside this tool, so the record was written but never "
+             "checked; run the checker yourself before relying on it")
+        return 2
+    try:
+        schema = cc.load_json(cc.DEFAULT_SCHEMA, "schema")
+        written = cc.load_json(out, "record")
+    except cc.NoData as exc:
+        _err("bm_project: NO-DATA: %s" % exc)
+        return 2
+    problems = cc.check(written, schema)
+    if problems:
+        # A record the estate's own checker rejects is worse than no
+        # record: the next reader would treat it as the typed truth. So
+        # it never survives this command.
+        for problem in problems:
+            _err("bm_project: contract_check: FAIL: %s" % problem)
+        try:
+            os.remove(out)
+        except OSError:  # sbe: allow-silent failed cleanup is reported by the refused delivery result
+            pass
+        _err("bm_project: refused to leave a record the contract checker "
+             "rejects; nothing was left at %s" % out)
+        return 2
+
+    store_message = _adopt_store_message(root, record, actor)
+    if kv.get("json"):
+        _print_json({"path": out, "record": record, "store": store_message})
+    else:
+        _out(out)
+        if ticket:
+            _out("ticket: %s:%s" % (ticket["system"], ticket["id"]))
+        if branch_flag:
+            _out("branch: %s" % branch)
+        _out(store_message)
+        if record["state"] == "contracted":
+            # scripts/intake_measure.py counts human turns up to this
+            # exact literal (its own ACCEPTANCE_MARKER) to score Intake
+            # V2's TURNS number; printed only here, the one place a
+            # record actually lands ready to act on with nothing left
+            # to answer, never for a draft still holding an open
+            # question.
+            _out("[INTAKE-ACCEPTED] %s" % out)
+        for question in questions:
+            _out("%s: %s" % (question["field"], question["question"]))
+    return 3 if questions else 0
+
+
+# ---------------------------------------------------------------------------
 # dispatch
 # ---------------------------------------------------------------------------
 
 COMMANDS = {
     "start": cmd_start,
     "status": cmd_status,
+    "list": cmd_list,
+    "adopt": cmd_adopt,
     "next": cmd_next,
     "task": cmd_task,
     "forecast": cmd_forecast,

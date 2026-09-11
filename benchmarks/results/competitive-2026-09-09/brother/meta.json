@@ -1,0 +1,19 @@
+{
+ "arm": "brother",
+ "route": "in-session subagent (route two), not a throwaway home; the session's own installed Brother hooks were active, which is the confound this arm hit",
+ "model_id": "claude-sonnet-5",
+ "plugin_version": "brother marketplace as installed on the developer machine (1.0.11 line)",
+ "workflow_used": "none: the door's engine was refused on its first Edit by the estate's own fence hook in enforced mode ('BrotherMode is in enforced mode and refused this write because a test gate may be running against this checkout and its state could not be established'); the arm then completed the task unaided by the same model",
+ "declared_files": [
+  "pricing.py"
+ ],
+ "tokens_used": 129336,
+ "tokens_source": "orchestrator's subagent usage report (subagent_tokens)",
+ "interventions": 0,
+ "questions_asked_to_user": 0,
+ "wall_seconds": 180,
+ "wall_seconds_note": "from dispatch stamp to artifact write; the agent's own duration was 99 s",
+ "exit_code": 0,
+ "committed": "yes: Fix apply_discount to compute a percentage off, not a flat subtraction",
+ "deviation": "this arm measures the fence refusal plus an unaided fix, not Brother's workflow; a fair Brother arm needs a virgin home with the public plugin installed and no developer-machine hooks (route three, the founder's terminal)."
+}

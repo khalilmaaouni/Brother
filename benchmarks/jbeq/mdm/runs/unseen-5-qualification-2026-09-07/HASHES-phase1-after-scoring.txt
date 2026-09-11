@@ -1,0 +1,2 @@
+0846224184cd2a3a5dfdd21e61beedbf059c14e1caa916e2f0e2428983fd7faa  fact-sheets.json
+64bec3bd4ffec5590c3cfffc01173f15e6121376dd18412112a8fc0d27136ce8  extractor-notes.md

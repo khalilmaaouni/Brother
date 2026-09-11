@@ -11,6 +11,7 @@ machinery (find_unfinished_runs) routed from a different entry point: a
 bare invocation instead of the explicit --continue flag.
 """
 import os
+import shlex
 import sys
 import tempfile
 import time
@@ -63,9 +64,9 @@ def _leave_unfinished(scratch, runs_root, cwd, outcome, unit_id, filename):
     """ % (unit_id, filename, filename)
     env = dict(os.environ)
     env["DOOR_MODEL_CMD"] = "%s %s" % (
-        sys.executable, tbr.write_stub(scratch, "decomposer.py", decomposer_body))
+        shlex.quote(sys.executable), shlex.quote(tbr.write_stub(scratch, "decomposer.py", decomposer_body)))
     env["MODEL_WORKER_CMD"] = "%s %s" % (
-        sys.executable, tbr.write_stub(scratch, "failing_model.py", tbr.FAILING_MODEL))
+        shlex.quote(sys.executable), shlex.quote(tbr.write_stub(scratch, "failing_model.py", tbr.FAILING_MODEL)))
     return tbr.sh([sys.executable, BROTHER_RUN, outcome,
                   "--cwd", cwd, "--runs-root", runs_root], env=env)
 
@@ -148,7 +149,7 @@ class BareInvocationWithADifferentOutcomeStartsFreshAndWarns(unittest.TestCase):
 
         env = dict(os.environ)
         env["MODEL_WORKER_CMD"] = "%s %s" % (
-            sys.executable, tbr.write_stub(scratch, "failing2.py", tbr.FAILING_MODEL))
+            shlex.quote(sys.executable), shlex.quote(tbr.write_stub(scratch, "failing2.py", tbr.FAILING_MODEL)))
         proc2 = _leave_unfinished(scratch, runs_root, repo,
                                   "a completely unrelated second outcome",
                                   "F2", "one-b.txt")

@@ -39,10 +39,45 @@ NOW = T('2026-08-30T12:00:00+00:00')
 
 
 class Classify(unittest.TestCase):
-    def test_a_plain_reversible_edit_is_green(self):
+    def test_unmatched_text_now_classifies_amber_not_green(self):
+        """Fixed 2026-09-10: classify()'s no-match fallback was GREEN, so a
+        decision matching neither list proceeded with no record at all. A
+        plain, genuinely low-stakes edit like this one is exactly the text
+        that used to slip through as GREEN; it must now read AMBER, the
+        recorded-but-still-actionable class, never GREEN, never RED."""
         label, reason = fa.classify('rename a local variable for clarity')
-        self.assertEqual(label, fa.GREEN)
-        self.assertIn('GREEN', reason)
+        self.assertEqual(label, fa.AMBER)
+        self.assertIn('AMBER', reason)
+        self.assertIn('no RED or AMBER signal matched', reason)
+
+    def test_a_red_worthy_decision_that_misses_every_keyword_is_now_amber_not_green(self):
+        """The actual gap this row exists to close: a decision that IS the
+        kind RED_SIGNALS is meant to catch (an irreversible, destructive
+        action on shared data) but whose phrasing happens to miss every
+        keyword in both RED_SIGNALS and AMBER_SIGNALS. Before this fix it
+        classified GREEN and proceeded with no record whatsoever. It must
+        now be recorded as AMBER rather than vanish silently; RED_SIGNALS
+        itself is deliberately left untouched by this fix, so closing this
+        gap for real (making this phrasing RED) is separate, future scope."""
+        text = 'wipe the customer records clean and start fresh'
+        # Sanity: prove this text really matches neither list, or the test
+        # would not be exercising the no-match fallback at all.
+        for kw, _ in fa.RED_SIGNALS + fa.AMBER_SIGNALS:
+            self.assertNotIn(kw, text.lower(), '%r unexpectedly matches %r' % (text, kw))
+        label, reason = fa.classify(text)
+        self.assertEqual(label, fa.AMBER)
+        self.assertIn('no RED or AMBER signal matched', reason)
+
+    def test_red_and_amber_signal_matches_are_unaffected_by_the_default_flip(self):
+        """Disproving case for the fix: only the no-match fallback moved.
+        Text that actually matches a RED or AMBER signal must classify
+        exactly as it did before, unaffected by the default change."""
+        red_label, red_reason = fa.classify('delete the remote branch')
+        self.assertEqual(red_label, fa.RED)
+        self.assertIn('deletes data', red_reason)
+        amber_label, amber_reason = fa.classify('restructure the module layout across the repo')
+        self.assertEqual(amber_label, fa.AMBER)
+        self.assertIn('restructures shared layout', amber_reason)
 
     def test_a_wide_but_reversible_change_is_amber(self):
         label, reason = fa.classify('restructure the module layout across the repo')
@@ -78,8 +113,10 @@ class Classify(unittest.TestCase):
         hub to the public repository on this estate, so that sentence describes the
         single most consequential act the classifier is meant to catch. Driven both
         ways here: the publication verbs must be RED, and an ordinary local export
-        must stay GREEN, or the fix would have bought safety with a false alarm on
-        every report anyone writes."""
+        must stay OUT OF RED, or the fix would have bought safety with a false
+        alarm on every report anyone writes. (2026-09-10: the no-match default
+        moved from GREEN to AMBER, so the local-export side now reads AMBER,
+        not GREEN; it must still never read RED.)"""
         for text in ['export to the public repository',
                      'run scripts/export_public.py --push',
                      'push this to the public repo']:
@@ -89,8 +126,9 @@ class Classify(unittest.TestCase):
         for text in ['export the csv report to a local file',
                      'refactor the parser']:
             label, _ = fa.classify(text)
-            self.assertEqual(label, fa.GREEN,
-                             '%r must stay GREEN: a local export is not a publication' % text)
+            self.assertEqual(label, fa.AMBER,
+                             '%r must not be RED: a local export is not a publication '
+                             '(and now defaults AMBER, not GREEN)' % text)
 
     def test_acceptance_is_never_delegable(self):
         """Row E49: the north star chain's HUMAN DECISION node is unconditional,
@@ -114,12 +152,15 @@ class Classify(unittest.TestCase):
         """Negative control: the matcher is substring (kw in text), so a bare
         'accept' was deliberately not added to RED_SIGNALS, because it is a
         substring of both these ordinary sentences and neither one is an
-        acceptance decision."""
+        acceptance decision. (2026-09-10: the no-match default moved from
+        GREEN to AMBER, so these now read AMBER; the property under test is
+        unchanged, that they must never read RED.)"""
         for text in ['that is an acceptable risk to take',
                      'accept the risk of a retry and move on']:
             label, _ = fa.classify(text)
-            self.assertEqual(label, fa.GREEN,
-                             '%r must stay GREEN: not an acceptance decision' % text)
+            self.assertEqual(label, fa.AMBER,
+                             '%r must not be RED: not an acceptance decision '
+                             '(and now defaults AMBER, not GREEN)' % text)
 
     def test_an_unrecognized_label_is_no_data_never_a_silent_green(self):
         """classify() itself only ever returns one of the three, but the CLI
@@ -193,9 +234,31 @@ class Decide(unittest.TestCase):
         self.red_path = os.path.join(d, 'red.jsonl')
 
     def test_green_proceeds_with_no_record(self):
+        """decide()'s GREEN branch is no longer reachable through classify()
+        for real text (2026-09-10: the no-match default moved to AMBER, and
+        there is still no GREEN_SIGNALS list), but the branch itself stays
+        live production code for the day a real positive GREEN signal is
+        added, so it is driven here with classify() forced to GREEN."""
+        saved = fa.classify
+        try:
+            fa.classify = lambda decision: (fa.GREEN, 'forced GREEN for this test')
+            label, entry, _ = fa.decide('rename a local variable', amber_path=self.amber_path,
+                                         red_path=self.red_path)
+        finally:
+            fa.classify = saved
+        self.assertEqual(label, fa.GREEN)
+        self.assertIsNone(entry)
+        self.assertFalse(os.path.exists(self.amber_path))
+        self.assertFalse(os.path.exists(self.red_path))
+
+    def test_unmatched_decision_now_classifies_amber_via_decide_too(self):
+        """The real path: 'rename a local variable' matches neither list,
+        so decide() (with the real classify(), not a forced one) now
+        returns AMBER for it, and still writes no record without an
+        overrule, exactly like any other AMBER decision."""
         label, entry, _ = fa.decide('rename a local variable', amber_path=self.amber_path,
                                      red_path=self.red_path)
-        self.assertEqual(label, fa.GREEN)
+        self.assertEqual(label, fa.AMBER)
         self.assertIsNone(entry)
         self.assertFalse(os.path.exists(self.amber_path))
         self.assertFalse(os.path.exists(self.red_path))
@@ -266,9 +329,19 @@ class CliExitCodes(unittest.TestCase):
         self.assertTrue(os.path.exists(self.amber_path))
 
     def test_record_amber_on_a_green_decision_is_refused(self):
-        code = fa.main(['--record-amber', 'rename a local variable',
-                         '--overrule', 'undo the rename',
-                         '--amber-log', self.amber_path])
+        """classify() itself no longer returns GREEN for anything (no
+        GREEN_SIGNALS list exists, and the no-match default moved to AMBER
+        2026-09-10), so this exercises --record-amber's own refusal of a
+        non-AMBER label the only way left to reach it: force GREEN out of
+        classify(), the same monkeypatch style as the NO-DATA test below."""
+        saved = fa.classify
+        try:
+            fa.classify = lambda decision: (fa.GREEN, 'forced GREEN for this test')
+            code = fa.main(['--record-amber', 'rename a local variable',
+                             '--overrule', 'undo the rename',
+                             '--amber-log', self.amber_path])
+        finally:
+            fa.classify = saved
         self.assertEqual(code, 1)
         self.assertFalse(os.path.exists(self.amber_path))
 

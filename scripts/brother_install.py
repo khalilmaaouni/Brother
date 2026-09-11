@@ -153,7 +153,7 @@ def atomic_write(path, data):
         try:
             if os.path.exists(tmp):
                 os.remove(tmp)
-        except OSError:
+        except OSError:  # sbe: allow-silent cleanup of an interrupted atomic-write temp file cannot change the reported original write failure
             pass
         return {"problem": "could not write %s: %s" % (path, exc)}
     return {"problem": None}
@@ -332,7 +332,7 @@ def find_brothermode_skill_dirs(codex_home):
         found.append(direct)
     try:
         names = sorted(os.listdir(skills_dir))
-    except OSError:
+    except OSError:  # sbe: allow-silent an unreadable skill directory contributes no discoverable standalone skill
         return found
     for name in names:
         if name.startswith("."):
@@ -346,7 +346,7 @@ def find_brothermode_skill_dirs(codex_home):
         try:
             with io.open(skill_md, encoding="utf-8", errors="replace") as handle:
                 head = handle.read(4096)
-        except OSError:
+        except OSError:  # sbe: allow-silent a temp-root canonicalization failure only omits that root from stale-target detection
             continue
         if _SKILL_NAME_RE.search(head):
             found.append(path)
@@ -387,7 +387,7 @@ def _tempdirs():
             continue
         try:
             dirs.add(os.path.realpath(candidate))
-        except OSError:
+        except OSError:  # sbe: allow-silent optional tempdir alias is not needed for installation safety
             pass
     return dirs
 

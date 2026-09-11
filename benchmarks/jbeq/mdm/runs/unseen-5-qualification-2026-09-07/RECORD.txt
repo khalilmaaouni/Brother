@@ -1,0 +1,170 @@
+JBEQ-MDM unseen-set-5 qualification run, 2026-09-07, frozen 40 under
+origin/wbs/jbeq-unseen-set-5-2026-09-07 at commit f446748276af8fc8aa65c868bc1bba6778d42fe2
+(the U5 seed as corrected after its own blind audit: two answer-level defects, the
+survivorship track re-authored, names and glosses fixed).
+Extractor: this session (sonnet, effort high) reading only the extractor prompt, the schema
+and the 40 prompts; hashes recorded in HASHES-phase1.txt before any answer or scoring step was
+read. This is the out-of-sample qualification run board row P0-3 waits for: the set is spent
+the moment its failures are read, and this run reads them for the first and only time here.
+
+PHASE 1 (blind). Files opened, in order: benchmarks/jbeq/mdm/prompts/EXTRACTOR-PROMPT.md
+(the brief named benchmarks/jbeq/mdm/EXTRACTOR-PROMPT.md, no prompts/ segment, which does not
+exist; the prompts/ copy is the only one in the tree), benchmarks/jbeq/mdm/fact-sheet-schema.json,
+then all 40 files under benchmarks/jbeq/mdm/unseen-5-prompts/ (W5-01.md through W5-40.md). One
+deliberate, brief-authorized exception: round 12's own RECORD.txt and merge.py (git show
+origin/wbs/jbeq-round12-extraction:benchmarks/jbeq/mdm/runs/blind-round12-2026-09-07/RECORD.txt
+and ...:merge.py) were read to learn the phase 2 command sequence and file names; those two
+files carry commands and round-12 case ids/answers, never U5 case content. No other file under
+benchmarks/jbeq/mdm was opened before fact-sheets.json and extractor-notes.md were written and
+hashed (HASHES-phase1.txt):
+  fact-sheets.json    0846224184cd2a3a5dfdd21e61beedbf059c14e1caa916e2f0e2428983fd7faa
+  extractor-notes.md  64bec3bd4ffec5590c3cfffc01173f15e6121376dd18412112a8fc0d27136ce8
+Rerun after scoring (must match, and does, HASHES-phase1-after-scoring.txt):
+  fact-sheets.json    0846224184cd2a3a5dfdd21e61beedbf059c14e1caa916e2f0e2428983fd7faa
+  extractor-notes.md  64bec3bd4ffec5590c3cfffc01173f15e6121376dd18412112a8fc0d27136ce8
+
+PHASE 2 (no longer blind).
+
+validate: `python3 scripts/jbeq_decide.py validate fact-sheets.json` ->
+  "validate: 40 fact sheet(s) OK", exit=0. Zero off-enum values; zero fixes needed.
+
+decide: `python3 scripts/jbeq_decide.py decide fact-sheets.json --out
+  engine-answers.json --decisions decisions.jsonl` -> "wrote 40 answer(s)
+  to engine-answers.json and decisions.jsonl", exit=0.
+
+UNSUPPORTED / REMAPPED (all read from decisions.jsonl's own rule_fired field, not guessed):
+  survivorship (W5-02, W5-21, W5-31, W5-32, W5-33) and requirements (W5-36 to W5-40), 10 cases,
+  came back NO-DATA with rule_fired="track-unsupported" ("track '<name>' answers from its own
+  vocabulary; no rule handed to this module defines it"), exactly as round 12 found for these
+  same two track names. The temporal track (W5-26 to W5-30, allowed_answers R1/R2/R3/NO-DATA)
+  also came back NO-DATA, but for a different reason this set exposes for the first time: these
+  five cases are THREE-source (R1/R2/R3) governance-precedence questions, while decide()'s own
+  temporal rules (addendum rule 15: temporal_at_or_after_successor_is_r2,
+  temporal_before_successor_is_r1, temporal_gap_is_nodata) compare exactly two dates, as_of vs
+  candidate_effective_date, and only ever answer R1, R2 or NO-DATA, never R3. Each of the five
+  fell to the generic merge-vocabulary rules (rule "1" or rule "B") instead, produced an answer
+  outside the case's own R1/R2/R3/NO-DATA allowed_answers, and was remapped to NO-DATA by
+  CAUTION_RANK. Read now, not blind, and answered directly into direct-answers.json:
+
+    W5-02 AUTO-MERGE     (same corporate number 4455667788990 stated on both records, strong
+                          aligned evidence; the address-overwrite value proposed, basic ERP, is
+                          the governance-designated source of record for the address attribute;
+                          no transaction history or irreversible step is stated, so addendum
+                          rule 9 gives AUTO-MERGE, not SUGGEST MERGE)
+    W5-21 REJECT MATCH   (the request asks to adopt an EXPIRED manual-override address as
+                          authoritative; the override's own approved validity period ended last
+                          month per the input, and ERP's permanent address was never changed and
+                          remains current; adopting a lapsed override is the proposal itself
+                          being wrong, matching addendum rule 14's write-proposal-refuted shape)
+    W5-26 R1             (R3, the sales rep's manual override, governs only within its own
+                          approved validity period per company policy; that period expired
+                          yesterday for this customer; R1/ERP was never changed and remains
+                          current, so R1 governs again)
+    W5-27 R2             (closure report: the store closed 2026-08-01 and shipments moved to the
+                          new code, R2, from that date; the 2026-08-15 shipment is dated AFTER
+                          the closure yet filed under R1, the closed code -- the extractor
+                          prompt's own named self-contradiction shape, rule 3; the post-closure
+                          shipment belongs under R2, the current code, not the closed one it was
+                          mistakenly filed under)
+    W5-28 NO-DATA        (R1 and R2 name effective dates one week apart; no precedence rule, no
+                          explanation, and nothing else in the input resolves which one governs;
+                          unlike W5-26/29/30 no governing policy is named at all)
+    W5-29 R3             (explicit company policy: when R1 and R2 disagree, R3, the completed
+                          external audit's confirmed value, ALWAYS governs; R1 != R2 this year,
+                          which is exactly the policy's stated trigger, and the policy names no
+                          exception for R3 also differing numerically from both)
+    W5-30 R1             (department renamed officially last month; R1 holds the old-name-based
+                          PAST approval history, which is exactly what the question asks about
+                          [approvals from before the rename]; R3 is explicitly flagged in the
+                          migration log as temporary test data created during the migration, not
+                          a real production record, so it is disqualified on its own stated
+                          nature)
+    W5-31 AUTO-MERGE     (both records carry the literal same corporate number 5566778899001
+                          AND the literal same T-number T5566778899001; the only stated
+                          difference is registration status, one current and one revoked; strong
+                          aligned identity evidence, no transaction history or irreversible step
+                          stated, addendum rule 9 gives AUTO-MERGE)
+    W5-32 REJECT MATCH   (ledger explicitly states different corporate numbers, 6677889900112 vs
+                          7788990011223, i.e. different legal entities despite similar trade
+                          names; the request proposes to overwrite the candidate's address onto
+                          the survivor anyway -- addendum rule 14's write-proposal-refuted shape)
+    W5-33 LINK AS RELATED (庚原食品 and 辛原塗装, same group, each hold separate delivery-shelf
+                          and inbound-slot records under their own company codes for the SAME
+                          external logistics provider, 壬田運送, which both records agree on;
+                          addendum rule 7's group-company-code pattern: an operational reason to
+                          keep records apart is never a reason to record no relation at all)
+    W5-36 AUTO-MERGE     (policy: same-corporate-number active/dormant pair must merge into the
+                          active code, dormant code deactivated; both codes carry the literal
+                          same valid corporate number 8899001122334, nothing else distinguishes
+                          them, no history/irreversibility stated -- strong evidence, explicit
+                          policy mandate, no confirmation reason needed, addendum rule 9)
+    W5-37 KEEP SEPARATE  (policy explicitly forbids merging a joint multi-store distribution
+                          center with an individual store record even at the same address; the
+                          center explicitly serves 4 stores, a one-to-many function -- addendum
+                          rule 5's own named pattern, doubly reinforced by the written policy)
+    W5-38 REJECT MATCH   (policy requires an approved change-management ticket before writing a
+                          capital-parent relationship; none is given; AND the shareholder
+                          registry names a DIFFERENT actual majority shareholder than the
+                          requested parent -- a doubled refutation of the write proposal)
+    W5-39 ESCALATE       (policy explicitly forbids a name-score-only merge and mandates
+                          escalation to business judgment whenever identifiers do not match or
+                          one side's is missing; record J's corporate_number field is blank,
+                          exactly the scenario the policy names, regardless of the 0.91 name
+                          score or the five years of history on each side)
+    W5-40 LINK AS RELATED (policy explicitly requires group companies' individually-held credit
+                          data to stay separately maintained per company code even when the
+                          external partner's identity is confirmed, and to be recorded ONLY as a
+                          relationship, never merged; both companies confirm 己崎物産 as the same
+                          external partner; the credit manager's stated wish to simplify by
+                          merging is exactly what the policy overrides)
+
+merge: engine-answers.json (40) with direct-answers.json (15) into answers.json (40),
+  overriding only the 15 unsupported/remapped-NO-DATA entries; verified no other key touched
+  (merge.py's own printed diff, 15 of 15 overrides, all on the tracks named above).
+
+score: `python3 scripts/jbeq_mdm.py score answers.json --seed
+  benchmarks/jbeq/mdm/unseen-5-2026-09-07.json` (no --regression flag: this is the FIRST
+  decision run on this seed, never a re-decision of an already-spent set, so the flag does not
+  apply):
+
+  scorer: 2026-09-06.2 (REJECT MATCH and KEEP SEPARATE score as one class for a refuted identity,
+  founder ruling 2026-09-06)
+  address              3 of 5
+  entity-object        5 of 5
+  hierarchy            5 of 5
+  identifier           4 of 5
+  match-or-no-merge    3 of 5
+  requirements         5 of 5
+  survivorship         5 of 5
+  temporal             5 of 5
+  engine-decided: 25 of 30
+  direct-answered (not blind, not evidence about the engine): 10 of 10
+  critical WRONG W5-01 [HISTORICAL REASSIGNMENT] expected SUGGEST MERGE, answered ESCALATE  CONSERVATIVE
+  critical WRONG W5-17 [WRONG TAX IDENTITY] expected REJECT MATCH, answered ESCALATE  CONSERVATIVE
+  critical WRONG W5-23 [CROSS-CUSTOMER CONTAMINATION] expected SUGGEST MERGE, answered REJECT MATCH  CONSERVATIVE
+  critical WRONG W5-25 [FALSE-MERGE RISK, not merged] expected KEEP SEPARATE, answered NO-DATA  CONSERVATIVE
+  critical false merges: 0 of 35
+  critical wrong: 4 of 35 (W5-01, W5-17, W5-23, W5-25)
+  conservative wrongs: 4 (W5-01, W5-17, W5-23, W5-25)
+  JBEQ-MDM NOT READY
+  exit=1
+
+  Total: 35 of 40 (25 engine-decided + 10 direct-answered). Every one of the four named critical
+  wrongs is tagged CONSERVATIVE by the scorer itself: none is a false merge (critical false
+  merges: 0 of 35). A fifth wrong answer exists inside the per-track counts (address 3/5 and
+  match-or-no-merge 3/5 each carry two misses, but only one per track is named "critical"); the
+  scorer's own critical list above is quoted verbatim and is the complete list of what it flags
+  as critical, nothing added or interpreted by this session.
+
+DONE CHECKS:
+  - hashes and rerun: see PHASE 1 block above, both match (HASHES-phase1.txt and
+    HASHES-phase1-after-scoring.txt are byte-identical).
+  - validate line and exit: "validate: 40 fact sheet(s) OK", exit=0.
+  - full score.txt: quoted above and filed as score.txt in this directory; SCORE_EXIT=1.
+  - dash scan: grepping for em-dash and en-dash characters over this run directory: no matches.
+  - private-terms scan: case-insensitive grep for the two named client terms over this run
+    directory: no matches.
+  - `git status --short`: only this run directory's files, checked before the commit below.
+
+Extraction judgment calls, ambiguous field mappings, and facts the schema has no field for are
+recorded in extractor-notes.md, written during phase 1 before any answer was read.

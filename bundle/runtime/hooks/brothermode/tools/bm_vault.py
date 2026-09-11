@@ -1449,9 +1449,26 @@ def _embed_texts_subprocess(pairs, query=False):
     lines = "\n".join(json.dumps({"id": i, "text": t, "query": query}) for i, t in pairs)
     try:
         out = subprocess.run([binpath], input=lines.encode("utf-8"),
-                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                              timeout=max(120, 2 * len(pairs)))
-    except Exception:  # sbe: allow-silent embed subprocess failure or timeout, caller falls back to non-vector recall
+    except Exception:  # sbe: allow-silent embed subprocess failure or timeout, caller reports NO-DATA
+        return None
+    # D2, 2026-09-10: the exit code was never read, and that is what made a dead
+    # embed machine invisible. The shipped shim execs ../.venv-embed/bin/python,
+    # which no install contains, so it dies with 126 and writes nothing to stdout.
+    # The loop below then produced an EMPTY DICT, and an empty dict is not None,
+    # so the caller took the success branch and printed "embedded 0 of N pending
+    # note(s)". A total failure wore the shape of a run with nothing to do, and
+    # every install has been silently lexical-only since. A non-zero exit is NOT
+    # an empty result: say so, name the code and the machine's own first line of
+    # stderr, and return None so the caller's existing NO-DATA branch fires.
+    if out.returncode != 0:
+        why = (out.stderr or b"").decode("utf-8", "replace").strip().splitlines()
+        sys.stderr.write(
+            "NO-DATA dense signal: the embed machine %s exited %d, so no note was "
+            "embedded and retrieval stays lexical only%s\n"
+            % (binpath, out.returncode,
+               ("; it said: " + why[0]) if why else " (it said nothing)"))
         return None
     vecs = {}
     for line in out.stdout.decode("utf-8", "replace").splitlines():
@@ -2467,6 +2484,45 @@ def _print_annotations(enrich, body):
     return note_id
 
 
+#: D4 (2026-09-10, competitive review row: "a note that is confidently wrong
+#: and still ranks first" was the single most FELT memory gap, ahead of
+#: semantic search). This is a LABEL, not a new subsystem: verified_at
+#: already sits in frontmatter (bm_vault_temporal.py's bi-temporal contract),
+#: bm_vault_staleness.py already classifies it against a per-type horizon for
+#: the authority demotion seam a few hundred lines above (_search's
+#: _authority_sort) -- this function only prints that SAME classification so
+#: a reader sees, at the moment of use, how long ago a fact was last
+#: checked, instead of only feeling its effect on rank order after the fact.
+#: THE THRESHOLD is bm_vault_staleness.DEFAULT_HORIZONS (unchanged, not
+#: reinvented here): 180 days for a decision, 365 for a failure or
+#: reference, 365 default, session-log exempt -- the same horizon that
+#: already demotes this note's authority, so the label can never disagree
+#: with what already happened to its rank.
+#: A note with NO verified_at is UNKNOWN, never silently fresh or stale --
+#: bm_vault_staleness.classify's own "unverified_no_clock" state, printed
+#: here as "unknown" so a reader is never told a fact is fresh when nobody
+#: ever checked it.
+def _verified_label(stale_mod, body):
+    """One line, "verified: ..." -- how long ago (if ever) this note's
+    verified_at was set, per bm_vault_staleness.classify. stale_mod=None
+    (module failed to load) prints "unavailable" rather than guessing."""
+    if stale_mod is None:
+        return "verified: unavailable (staleness module did not load)"
+    state, verified, age, problem = stale_mod.classify(body)
+    if state == "fresh":
+        return "verified: %s (%d days ago)" % (verified, age)
+    if state == "stale":
+        return "verified: %s (%d days ago, STALE)" % (verified, age)
+    if state == "exempt":
+        return "verified: exempt (session-log, immutable history)"
+    if state == "examined_no_date":
+        return "verified: unknown (examined, no derivable date)"
+    if state == "malformed":
+        return "verified: unknown (%s)" % problem
+    # "unverified_no_clock": no verified_at declared at all.
+    return "verified: unknown (no verified_at on record)"
+
+
 def _print_hits(con, fused, why, header, roots=None, ledger_hits=None, withheld_out=None):
     """ledger_hits: pass a list to have it appended, one dict per note actually SERVED
     below (never a withheld/superseded/candidate one -- those never reached the reader,
@@ -2520,6 +2576,18 @@ def _print_hits(con, fused, why, header, roots=None, ledger_hits=None, withheld_
         return 1
     print(header)
     freshness = _load_bm_freshness()
+    # D4 (2026-09-10): the verified-at label printed per served note below is a
+    # DISPLAY aid, not a safety gate -- the demotion seam in _search's
+    # _authority_sort already withholds/demotes off this exact module, so an
+    # absent bm_vault_staleness here degrades to "unavailable" on the label
+    # line, never to withholding the note itself (that would duplicate a
+    # withhold reason nothing else in this loop owns).
+    try:
+        stale_mod = _load_bm_vault_staleness()
+    except Exception as e:
+        stale_mod = None
+        print("NOTE: verified-at label unavailable (%s); notes below print "
+              "without it" % e, file=sys.stderr)
     # VN1 (2026-09-08): MISSING AUTHORITY FAILS CLOSED FOR APPLICATION. A module this
     # loop needs to tell a candidate or contradicted note apart from an ordinary one is
     # authority, not enrichment -- when it fails to load, the loop below no longer
@@ -2807,6 +2875,7 @@ def _print_hits(con, fused, why, header, roots=None, ledger_hits=None, withheld_
             if row["descr"]:
                 print("    %s" % row["descr"][:160])
             note_id = _print_annotations(enrich, row["body"] or "")
+            print("    " + _verified_label(stale_mod, row["body"] or ""))
             if ledger_hits is not None:
                 ledger_hits.append({
                     "id": note_id,

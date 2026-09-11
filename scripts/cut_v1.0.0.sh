@@ -176,7 +176,14 @@ claude plugin validate bundle
 claude plugin validate .
 
 echo "== 4. release invariant and export dry run (must read CLEAR) =="
-python3 scripts/release_invariant.py || echo "NOTE: release_invariant may FAIL until the tag exists; that is expected pre-tag"
+# No `|| echo NOTE` swallow here: `set -e` (line 15) is what must stop this
+# script on a real FAIL, and a command joined with `||` always exits 0 on
+# its own, which silently defeated `set -e` for exit 1 (a genuine identity
+# contradiction) exactly like it did for the honest pre-tag NO-DATA text on
+# stdout at exit 0 (release_invariant.py's own docstring: the tag link
+# reads NO-DATA, never a FAIL, between a cut and its tag). CDX-4,
+# scripts/test_cut_invariant_step.py drives both cases.
+python3 scripts/release_invariant.py
 # --tag-time-checks here too (row DEL-15): by now the note and manifest for
 # $VERSION exist (steps 2b/2t), so this CLEAR means the same thing the
 # real --push --tag will check, not just the ordinary export gates step 1c

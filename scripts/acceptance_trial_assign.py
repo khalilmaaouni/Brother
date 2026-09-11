@@ -15,8 +15,10 @@ Two verbs:
       two runs with the same arguments print the same table. When
       --out-csv is given, also writes the results template CSV a reviewer
       fills in: the columns scripts/acceptance_time.py score() already
-      expects (reviewer, change, condition, seconds, decision), with
-      seconds and decision left blank.
+      expects (reviewer, change, condition, seconds, decision) plus the
+      two narrative columns the protocol asks reviewers to fill in free
+      text (defects_found, lines_inspected), with every answer column
+      left blank.
 
   validate <results csv>
       Refuses a completed results CSV that is missing a time, carries an
@@ -41,7 +43,21 @@ sys.path.insert(0, HERE)
 import acceptance_time as AT  # noqa: E402
 
 NODATA = "NO-DATA"
-CSV_COLUMNS = ["reviewer", "change", "condition", "seconds", "decision"]
+#: The columns a reviewer is handed. The first five are what score() reads.
+#: The last two are NARRATIVE, and they are here because the protocol asks
+#: reviewers to record them in free text (benchmarks/ACCEPTANCE-TIME.md: "no
+#: instrument on this estate scores prose today, so those two columns are
+#: narrative only"). Without a column for them a reviewer following the
+#: protocol has nowhere to write them, and the trial collects five measures
+#: while the row promises four per arm. They are never scored; they are
+#: carried so a human can read them afterwards.
+NARRATIVE_COLUMNS = ["defects_found", "lines_inspected"]
+#: What a results CSV MUST carry to be validated or scored. The narrative
+#: columns are deliberately absent from this: they are written by hand, may be
+#: left empty, and a CSV that predates them is still a valid trial result.
+#: Requiring them would refuse every results file collected before today.
+REQUIRED_COLUMNS = ["reviewer", "change", "condition", "seconds", "decision"]
+CSV_COLUMNS = REQUIRED_COLUMNS + NARRATIVE_COLUMNS
 VALID_DECISIONS = set(["accept", "reject", "ask"])
 #: No single-change review of a diff, a summary, or a receipt plausibly
 #: takes longer than this. A recorded time past it means the reviewer's
@@ -82,7 +98,8 @@ def write_template_csv(path, rows):
         writer = csv.writer(fh)
         writer.writerow(CSV_COLUMNS)
         for reviewer_id, change_id, condition in rows:
-            writer.writerow([reviewer_id, change_id, condition, "", ""])
+            writer.writerow([reviewer_id, change_id, condition, "", ""]
+                            + [""] * len(NARRATIVE_COLUMNS))
 
 
 def validate(csv_path):
@@ -96,7 +113,7 @@ def validate(csv_path):
     try:
         with open(csv_path, newline="", encoding="utf-8") as fh:
             reader = csv.DictReader(fh)
-            missing_cols = set(CSV_COLUMNS) - set(reader.fieldnames or [])
+            missing_cols = set(REQUIRED_COLUMNS) - set(reader.fieldnames or [])
             if missing_cols:
                 print("%s: %s is missing column(s) %s" % (
                     NODATA, csv_path, ", ".join(sorted(missing_cols))))

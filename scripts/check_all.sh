@@ -161,6 +161,18 @@ run_check "contracts-root" python3 scripts/test_contracts_root.py -v
 # unregistered check is invisible to every check the project owns.
 run_check "charter-paths"  python3 scripts/charter_paths.py
 run_check "charter-paths-self" python3 scripts/test_charter_paths.py -v
+run_check "doc-assurance" python3 scripts/doc_assurance.py
+run_check "doc-assurance-self" python3 scripts/doc_assurance.py --selftest
+run_check "key-components" python3 scripts/key_components.py
+run_check "key-components-self" python3 scripts/key_components.py --selftest
+run_check "wiring-audit-self" python3 scripts/wiring_audit.py --selftest
+# QA review 2026-09-11 (cut-1.0.13/review/QA-REVIEWER.md): both scripts had
+# tests sitting unrun by any gate. The lane meant to register
+# test_preserve_wip.py never did (PASS3 QA and security, 2026-09-11), so it is
+# registered here.
+run_check "cutover-pack-self" python3 scripts/test_cutover_pack.py -v
+run_check "preserve-wip-self" python3 scripts/test_preserve_wip.py -v
+run_check "reclaim-worktrees-self" python3 scripts/test_reclaim_worktrees.py -v
 run_check "context-budget" /usr/bin/python3 -m unittest -v tests/test_context_budget.py
 run_check "truth-claims"   /usr/bin/python3 -m unittest -v tests/test_truth_claims.py
 run_check "foreign-method" /usr/bin/python3 -m unittest -v tests/test_foreign_method_compat.py
@@ -271,6 +283,7 @@ run_check "wbs-self"             python3 scripts/test_wbs.py -v
 # somebody to commit the list, which is the exact thing it prevents.
 run_check "private-terms-self"   python3 scripts/test_private_terms_scan.py -v
 run_check "loop-bridge-self"     python3 scripts/test_loop_bridge.py -v
+run_check "wave-diamond-self"    python3 scripts/test_wave_diamond.py -v
 run_check "managed-safety-self" python3 scripts/test_managed_safety.py -v
 # C3: the Codex hooks adapter. Registered the day it landed, because a gate
 # the battery never runs is red for as long as nobody runs it.
@@ -728,7 +741,7 @@ run_check "accept-delivery-self" python3 scripts/test_accept_delivery.py -v
 # tool is invisible to every check the project owns.
 run_check "readme-honesty" python3 scripts/test_readme_honesty.py -v
 
-# S23: docs/how-to/USE-WITH-CLAUDE-CODE.md's real done_check, the guide's
+# S23: docs/how-to/install-claude-code.md's real done_check, the guide's
 # commands run verbatim on a throwaway home against the published plugin,
 # each exit code quoted. Drives the parser and the NO-DATA path (the
 # guide's one interactive step, `/brother`) with a fake claude on PATH, no
@@ -958,6 +971,14 @@ run_check "readiness-gate"       python3 scripts/readiness_gate.py
 # is invisible to every check the project owns.
 run_check "release-invariant-self" python3 scripts/test_release_invariant.py -v
 run_check "release-invariant"      python3 scripts/release_invariant.py
+# CDX-4: cut_v1.0.0.sh's own release-invariant line (step "== 4.") used to
+# read `python3 scripts/release_invariant.py || echo "NOTE: ..."`, which
+# always exits 0 and so silently defeated the script's `set -e` on a real
+# FAIL (exit 1), not only on the honest pre-tag NO-DATA the comment names.
+# This extracts the live line from cut_v1.0.0.sh by grep and drives both
+# cases with a stub python3 on PATH, so a future edit to that line is
+# tested as it actually reads.
+run_check "cut-invariant-step-self" python3 scripts/test_cut_invariant_step.py -v
 # Row E95: the release note's "Files behind these claims" table, driven
 # rather than read. Every file the note names is broken in place (every
 # function it defines replaced by one that raises when called), its named
@@ -1205,6 +1226,12 @@ run_check "continuity-self"              python3 scripts/test_continuity.py -v
 # points, each asserting no duplicate integration, no lost unit, and a
 # refusal when state cannot be trusted. Registered the same way.
 run_check "continuity-matrix-self"       python3 scripts/test_continuity_matrix.py -v
+# continuity-days-gap-self: the "resume days later" case the matrix above
+# never drives (every one of its fourteen kill points resumes inside the
+# same session): the journal sits for days, the lease expires on the
+# clock alone, and the target repository can move underneath the run in
+# between. Registered the same way as its neighbours above.
+run_check "continuity-days-gap-self"     python3 scripts/test_continuity_days_gap.py -v
 # capsule-items-self: row S13, the fifteen zone-3 items
 # (docs/plan/SWITCHING-STRATEGY-2026-09-04.md) on the capsule, driven both
 # ways (a killed run names all fifteen; a copy missing one key fails
@@ -1508,6 +1535,20 @@ run_check "land-decision-self" python3 scripts/test_land_decision.py -v
 # P2 (night 2026-09-07): FAST-0 eligibility and escalation contract, not
 # wired into brother_run.py yet (see scripts/fast_path.py's own docstring).
 run_check "fast-path-self" python3 scripts/test_fast_path.py -v
+# C-1 (QA review, night 2026-09-09): the light path's own route decision,
+# beside the eligibility suite above. Was on disk, unregistered, so the
+# battery never ran the sole executable evidence for it.
+run_check "fast-route-self" python3 scripts/test_fast_route.py -v
+
+# C-1 (QA review, night 2026-09-09): DOC-0's six-row doctor status table.
+# No sibling products/brothermode/scripts/test_*.py suite exists to mirror
+# (test_doctor.py is the only one in that directory, and products/brothermode
+# suites elsewhere are registered through products/brothermode/tools/test_all.py's
+# SUITES tuple, whose own _discover() scans only tools/, not scripts/), so
+# this is registered here directly, the same run_check shape as every other
+# direct test_*.py -v check in this file. Was on disk, unregistered, so the
+# battery never ran the sole executable evidence for the doctor table.
+run_check "brothermode-doctor-self" python3 products/brothermode/scripts/test_doctor.py -v
 
 # LAST, on purpose: compares against the snapshot taken at the very top of
 # this file, so growth from ANY check this battery ran (not only the hook

@@ -56,6 +56,7 @@ import argparse
 import json
 import os
 import re
+import shlex
 import signal
 import subprocess
 import sys
@@ -265,8 +266,8 @@ def stub_env(tmp, decomposer_body, model_body):
     decomposer = tbr.write_stub(tmp, "decomposer.py", decomposer_body)
     model = tbr.write_stub(tmp, "model.py", model_body)
     env = dict(os.environ)
-    env["DOOR_MODEL_CMD"] = "%s %s" % (sys.executable, decomposer)
-    env["MODEL_WORKER_CMD"] = "%s %s" % (sys.executable, model)
+    env["DOOR_MODEL_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(decomposer))
+    env["MODEL_WORKER_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(model))
     return env
 
 

@@ -566,6 +566,11 @@ NOT_A_VERDICT = {
                                        "and exit code; registered in no gate or score registry, "
                                        "so no report line can carry it",
     ("sbe_intake.py", "read_answers"): "returns (answers read, answers refused), not a verdict",
+    ("sbe_intake.py", "load_answers_file"): "returns (the answers an --answers file supplies, "
+                                            "one problem line per value it refused), the same "
+                                            "shape as read_answers beside it, not a verdict",
+    ("sbe_bash_write_guard.py", "_repo_dirs"): "returns (gitdir, commondir), two paths read "
+                                               "from disk or (None, None), never a verdict",
     ("sbe_score.py", "_rel"): "returns a path",
     ("sbe_decide.py", "load_table"): "returns (parsed table, load error), not a verdict",
     ("sbe_telemetry.py", "redact"): "returns (masked text, how many masks), not a verdict",

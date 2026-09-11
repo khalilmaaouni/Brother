@@ -656,13 +656,20 @@ class TestFullChain(GoldenScenarioFixture):
         self.assertEqual(shown["state"], "ok", shown)
         self.assertFalse(shown["stale"], shown)
 
+        # Since R-2 acceptance over absent evidence is refused, and this chain
+        # records no approval (it has no approval step), so it takes the
+        # recorded escape; the forced record must name approval and nothing
+        # else, so any other evidence going absent still fails here.
         code, text, _err = self.sbe("handover", "acknowledge", self.dossier,
-                                    "--receiver", RECEIVER)
+                                    "--receiver", RECEIVER, "--force", "--why",
+                                    "the golden chain has no approval step")
         self.assertEqual(code, 0, text)
         with io.open(handover_path, encoding="utf-8") as fh:
             handover = json.load(fh)
         self.assertEqual(handover["status"], "acknowledged", handover)
         self.assertIsNotNone(handover["acknowledgment"], handover)
+        self.assertEqual(handover["acknowledgment"]["forced"]["absentEvidence"], ["approval"],
+                         handover)
         self.assertEqual(handover["acknowledgment"]["receiver"], RECEIVER, handover)
 
         # ---- no merge, push, or production apply occurred anywhere in

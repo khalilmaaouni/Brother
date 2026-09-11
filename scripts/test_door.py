@@ -7,6 +7,7 @@ import contextlib
 import io
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -167,7 +168,7 @@ class Valid(unittest.TestCase):
         store = os.path.join(tmp, "store")
 
         proc = sh([sys.executable, DOOR, "two files exist",
-                  "--model-cmd", "%s %s" % (sys.executable, stub),
+                  "--model-cmd", "%s %s" % (shlex.quote(sys.executable), shlex.quote(stub)),
                   "--store", store])
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         self.assertTrue(proc.stdout.strip())
@@ -221,7 +222,7 @@ class Retry(unittest.TestCase):
         store = os.path.join(tmp, "store")
 
         proc = sh([sys.executable, DOOR, "two files exist",
-                  "--model-cmd", "%s %s" % (sys.executable, stub),
+                  "--model-cmd", "%s %s" % (shlex.quote(sys.executable), shlex.quote(stub)),
                   "--store", store])
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         with open(counter, encoding="utf-8") as fh:
@@ -250,7 +251,7 @@ class Refused(unittest.TestCase):
         store = os.path.join(tmp, "store")
 
         proc = sh([sys.executable, DOOR, "a cycle nobody can schedule",
-                  "--model-cmd", "%s %s" % (sys.executable, stub),
+                  "--model-cmd", "%s %s" % (shlex.quote(sys.executable), shlex.quote(stub)),
                   "--store", store])
         self.assertNotEqual(proc.returncode, 0)
         self.assertFalse(os.path.exists(store))
@@ -290,7 +291,7 @@ class FailingDecomposer(unittest.TestCase):
 
         proc = sh([sys.executable, DOOR, "make a.txt uppercase",
                    "--max-retries", "0", "--store", store,
-                   "--model-cmd", "%s %s" % (sys.executable, stub)])
+                   "--model-cmd", "%s %s" % (shlex.quote(sys.executable), shlex.quote(stub))])
         out = proc.stdout + proc.stderr
         self.assertNotEqual(proc.returncode, 0, out)
         self.assertIn("exited 7", out)
@@ -307,7 +308,7 @@ class FailingDecomposer(unittest.TestCase):
 
         proc = sh([sys.executable, DOOR, "make a.txt uppercase",
                    "--max-retries", "0", "--store", store,
-                   "--model-cmd", "%s %s" % (sys.executable, stub)])
+                   "--model-cmd", "%s %s" % (shlex.quote(sys.executable), shlex.quote(stub))])
         out = proc.stdout + proc.stderr
         self.assertNotEqual(proc.returncode, 0, out)
         self.assertIn("could not be read as JSON", out)
@@ -776,7 +777,7 @@ class LensInferenceEndToEnd(unittest.TestCase):
         store = os.path.join(repo, "store")
         proc = subprocess.run(
             [sys.executable, DOOR, outcome,
-             "--model-cmd", "%s %s" % (sys.executable, stub),
+             "--model-cmd", "%s %s" % (shlex.quote(sys.executable), shlex.quote(stub)),
              "--store", store],
             capture_output=True, text=True, timeout=60, cwd=repo)
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)

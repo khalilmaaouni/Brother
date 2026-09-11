@@ -105,7 +105,7 @@ def parse_iso(value):
 
 
 def record(name, ref, accepted_by, accepted_at, recorded_by, delegation=None,
-           words=None, directory=None, checks=None, run=None):
+           words=None, directory=None, checks=None, run=None, review=None):
     """Write one acceptance. Returns (True, path) on success or
     (False, reason) on refusal. Pure enough to test without a subprocess.
 
@@ -122,8 +122,23 @@ def record(name, ref, accepted_by, accepted_at, recorded_by, delegation=None,
     check list (scripts/receipt_door.per_file_checks builds exactly this
     from a run's own receipts): an empty or malformed list is refused
     rather than silently written, because a record that CLAIMS per-file
-    evidence and carries none is worse than one that never claimed it."""
+    evidence and carries none is worse than one that never claimed it.
+
+    review closes the gap a peer plugin (Compound Engineering) already
+    closes: it refuses to call a unit done without a code-review receipt or
+    an explicit, recorded skip. A delivery cited by `run` (a completed run
+    directory) must carry one: `review` is either the review_skip shape
+    ({"skipped": True, "reason", "skipped_by"}, both non-empty) or
+    review.json's own shape (see _validate_review). `run` given with
+    `review` missing or malformed is refused here too, never only by the
+    caller that derived it from --run-dir, because a run cited with no
+    review value is exactly the record this seam exists to refuse."""
     directory = directory or DELIVERIES_DIR
+    if run is not None:
+        ok, reason = _validate_review(review)
+        if not ok:
+            return False, ("a delivery citing a run directory requires a "
+                           "review receipt or an explicit skip: %s" % reason)
     if recorded_by not in ("person", "agent"):
         return False, "recorded_by must be 'person' or 'agent', not %r" % recorded_by
     if recorded_by == "agent" and not (delegation and str(delegation).strip()):
@@ -165,6 +180,8 @@ def record(name, ref, accepted_by, accepted_at, recorded_by, delegation=None,
         entry["checks"] = checks
     if run:
         entry["run"] = run
+    if review is not None:
+        entry["review"] = review
 
     os.makedirs(directory, exist_ok=True)
     try:
@@ -373,6 +390,181 @@ def checks_from_run_dir(run_dir):
     return checks, ""
 
 
+#: The file a completed run directory carries its review receipt under,
+#: named to match the field it closes: a run cited with neither this file
+#: nor a review_skip in its own Work document is refused (see
+#: review_from_run_dir).
+REVIEW_FILE = "review.json"
+
+
+def _validate_review(review):
+    """(True, "") when `review` is a usable review value; (False, reason)
+    otherwise. Two shapes, and only two:
+
+    A SKIP: {"skipped": True, "reason": "...", "skipped_by": "..."}, both
+    reason and skipped_by non-empty. review_skip is never inferred from a
+    unit's own tier or an absent reviewer; a run that never asked the
+    question does not get to answer it as skipped.
+
+    A REVIEW: review.json's own shape, read off scripts/review_pass.py (the
+    S32 review pass) rather than invented here. `reviewer` (who read the
+    diff), `reviewed_revision` (the revision the diff was read at),
+    `scope` (a non-empty list of the paths it read) and `findings` (a
+    list; empty is a correct and useful answer per review_pass's own
+    prompt). Every finding that IS present must carry `check_command` and
+    `check_exit_code`, review_unit's own two fields for the command this
+    run re-executed and the real exit code it got back: a finding with no
+    check attached is exactly the unverified blocking this estate already
+    refuses elsewhere."""
+    if not isinstance(review, dict):
+        return False, "no review value was given (neither review.json nor a review_skip)"
+    if review.get("skipped") is True:
+        reason = str(review.get("reason") or "").strip()
+        skipped_by = str(review.get("skipped_by") or "").strip()
+        if not reason:
+            return False, "review_skip names no reason"
+        if not skipped_by:
+            return False, "review_skip names no skipped_by"
+        return True, ""
+    if not str(review.get("reviewer") or "").strip():
+        return False, "review.json names no reviewer"
+    if not str(review.get("reviewed_revision") or "").strip():
+        return False, "review.json names no reviewed_revision"
+    scope = review.get("scope")
+    if not isinstance(scope, list) or not scope:
+        return False, "review.json names no scope (the paths it read)"
+    for i, path_entry in enumerate(scope):
+        if not str(path_entry or "").strip():
+            return False, "review.json scope entry %d is blank" % i
+    findings = review.get("findings")
+    if not isinstance(findings, list):
+        return False, "review.json's findings must be a list"
+    for i, finding in enumerate(findings):
+        if not isinstance(finding, dict):
+            return False, "review.json finding %d is not an object" % i
+        if "check_command" not in finding or "check_exit_code" not in finding:
+            return False, ("review.json finding %d carries no "
+                           "check_command/check_exit_code, the shape "
+                           "review_pass.review_unit already writes" % i)
+        check_command = str(finding.get("check_command") or "").strip()
+        if not check_command:
+            return False, ("review.json finding %d's check_command is "
+                           "blank" % i)
+        if check_command == NODATA:
+            return False, ("review.json finding %d's check_command is %s: "
+                           "an unverified finding does not close the "
+                           "review it appears in" % (i, NODATA))
+        exit_code = finding.get("check_exit_code")
+        if not isinstance(exit_code, int) or isinstance(exit_code, bool):
+            return False, ("review.json finding %d's check_exit_code is "
+                           "not an integer" % i)
+    return True, ""
+
+
+def _claims_delivered_revision(claims):
+    """(revision, conflicting) for this run's own claims.json:
+    `revision` is the single canonical_rev every claim's evidence agrees
+    on, or "" when no claim names one. `conflicting` is None when there is
+    no disagreement, or the sorted list of every distinct canonical_rev
+    the claims carry when there are two or more: a run whose claims cannot
+    agree on what tree they delivered has no single revision, and that is
+    refused rather than read as "no revision to check", which is what an
+    empty-string return used to mean regardless of which case produced it.
+    The same field review_pass.canonical_rev reads off each claim's
+    evidence; read here across every claim because a delivery record
+    speaks for the whole run, not one unit."""
+    revs = set()
+    for claim in (claims or {}).values():
+        evidence = (claim or {}).get("evidence")
+        if isinstance(evidence, dict):
+            rev = str(evidence.get("canonical_rev") or "").strip()
+            if rev:
+                revs.add(rev)
+    if len(revs) == 1:
+        return next(iter(revs)), None
+    if len(revs) > 1:
+        return "", sorted(revs)
+    return "", None
+
+
+def review_from_run_dir(run_dir):
+    """(review, "") for the review receipt a completed run directory
+    carries, or (None, reason) when it carries neither a usable
+    review.json nor an explicit review_skip in its own record.
+
+    A peer plugin (Compound Engineering) refuses to close a unit without a
+    code-review receipt or an explicit, recorded skip; this is the same
+    seam for accept_delivery. review.json is read from the run directory
+    itself and validated by _validate_review; review_skip is read from the
+    run's own Work document (the same W-*.json checks_from_run_dir reads),
+    never from a flag or an inference, because a skip is a claim a run
+    makes about itself, not one this reader is allowed to make for it.
+
+    A review.json whose reviewed_revision does not match the revision this
+    run's own claims.json recorded as canonical is refused too, naming
+    both: a review of an older tree is not a review of this one."""
+    if not os.path.isdir(run_dir):
+        return None, "--run-dir %r is not a directory" % run_dir
+
+    review_path = os.path.join(run_dir, REVIEW_FILE)
+    if os.path.isfile(review_path):
+        try:
+            with open(review_path, encoding="utf-8") as fh:
+                review = json.load(fh)
+        except (OSError, ValueError) as exc:
+            return None, ("%s could not be read as JSON (%s)"
+                          % (review_path, exc))
+        ok, reason = _validate_review(review)
+        if not ok:
+            return None, "%s: %s" % (review_path, reason)
+        claims_path = os.path.join(run_dir, "claims.json")
+        delivered = ""
+        conflicting = None
+        if os.path.isfile(claims_path):
+            try:
+                with open(claims_path, encoding="utf-8") as fh:
+                    claims = json.load(fh)
+            except (OSError, ValueError):
+                claims = None
+            if isinstance(claims, dict):
+                delivered, conflicting = _claims_delivered_revision(claims)
+        if conflicting:
+            return None, ("%s: this run's claims.json disagrees on "
+                          "canonical_rev (%s), so there is no single "
+                          "delivered revision for the review to match"
+                          % (claims_path, ", ".join(conflicting)))
+        reviewed = str(review.get("reviewed_revision") or "").strip()
+        if delivered and reviewed != delivered:
+            return None, ("%s reviewed revision %r does not match this "
+                          "run's delivered revision %r: a review of an "
+                          "older tree is not a review of this one"
+                          % (review_path, reviewed, delivered))
+        return review, ""
+
+    work = sorted(n for n in os.listdir(run_dir)
+                 if n.startswith("W-") and n.endswith(".json"))
+    if len(work) == 1:
+        try:
+            with open(os.path.join(run_dir, work[0]), encoding="utf-8") as fh:
+                record_doc = json.load(fh)
+        except (OSError, ValueError):
+            record_doc = None
+        skip = (record_doc.get("review_skip")
+               if isinstance(record_doc, dict) else None)
+        if isinstance(skip, dict):
+            entry = {"skipped": True,
+                    "reason": str(skip.get("reason") or "").strip(),
+                    "skipped_by": str(skip.get("skipped_by") or "").strip()}
+            ok, reason = _validate_review(entry)
+            if not ok:
+                return None, "%s review_skip: %s" % (work[0], reason)
+            return entry, ""
+
+    return None, ("--run-dir %r carries neither %s nor an explicit "
+                 "review_skip (a reason and the name of who skipped it) "
+                 "in its own record" % (run_dir, REVIEW_FILE))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -460,6 +652,7 @@ def main(argv=None):
         ap.error("--checks-file and --run-dir both name where the per-file "
                  "checks come from; pass one, never both")
     run = None
+    review = None
     if args.run_dir:
         checks, reason = checks_from_run_dir(args.run_dir)
         if checks is None:
@@ -467,6 +660,10 @@ def main(argv=None):
             return 2
         run, reason = run_identity(args.run_dir)
         if run is None:
+            print("accept-delivery: refused: %s" % reason, file=sys.stderr)
+            return 2
+        review, reason = review_from_run_dir(args.run_dir)
+        if review is None:
             print("accept-delivery: refused: %s" % reason, file=sys.stderr)
             return 2
     if args.checks_file:
@@ -480,7 +677,7 @@ def main(argv=None):
 
     ok, result = record(args.name, args.ref, args.accepted_by, args.accepted_at,
                         args.recorded_by, args.delegation, args.words, args.dir,
-                        checks, run)
+                        checks, run, review)
     if not ok:
         print("accept-delivery: refused: %s" % result, file=sys.stderr)
         return 2

@@ -10,6 +10,7 @@ import html
 import io
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -121,8 +122,8 @@ class ARealRunEndsWithItsOwnProof(unittest.TestCase):
         """)
         model = write_stub(cls.tmp, "writer_model.py", WRITER_MODEL)
         env = dict(os.environ)
-        env["DOOR_MODEL_CMD"] = "%s %s" % (sys.executable, decomposer)
-        env["MODEL_WORKER_CMD"] = "%s %s" % (sys.executable, model)
+        env["DOOR_MODEL_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(decomposer))
+        env["MODEL_WORKER_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(model))
         cls.proc = sh([sys.executable, BROTHER_RUN, "one file exists",
                        "--cwd", cls.repo, "--runs-root", cls.tmp], env=env)
         cls.out = cls.proc.stdout + cls.proc.stderr
@@ -708,6 +709,174 @@ class CheckDiscriminationRefusesACheckThatAlreadyPassed(unittest.TestCase):
         self.assertIn("not recorded for this unit", receipts[0]["reason"])
 
 
+class TheRedBeforeGreenWitness(unittest.TestCase):
+    """U5, 2026-09-09: receipt_door could already tell that a check passed
+    before the change or survives its dependency's reversal, but nothing
+    recorded that the unit's OWN done_check was ever observed failing
+    before the implementation existed (Superpowers' TDD discipline, GSD's
+    add-tests naming RED then GREEN). row["change_kind"] == "behaviour"
+    is the opt-in this gate reads, the same shape e18_gap reads
+    evidence_family == "E18": a row that declares no change_kind at all
+    (every row this estate has ever written before this feature) is not
+    this gate's business and stays verified exactly as before."""
+
+    def _record(self, extra_row_fields):
+        row = {"id": "U1", "done_check": "true", "status": "DONE",
+               "check_passed_before": False,
+               "files_changed_by_unit": ["mathlib.py"]}
+        row.update(extra_row_fields)
+        return {"outcome": "o", "work_id": "w", "rows": [row]}
+
+    def _claims(self):
+        return {"U1": {"state": "done", "evidence": {
+            "check_command": "true", "exit_code": 0, "output": "",
+            "canonical_rev": "abc"}}}
+
+    def test_a_behaviour_changing_unit_with_no_red_check_is_no_data(self):
+        receipts = RD.receipts_for(
+            self._record({"change_kind": "behaviour"}), self._claims(), [])
+        self.assertEqual(receipts[0]["state"], "no-data")
+        self.assertIn("red check never observed", receipts[0]["reason"])
+
+    def test_a_red_check_that_exited_0_is_no_data(self):
+        receipts = RD.receipts_for(
+            self._record({"change_kind": "behaviour",
+                          "red_check": {"command": "true",
+                                       "exit_code": 0,
+                                       "output_location": "/tmp/red.log",
+                                       "revision": "deadbeef",
+                                       "pre_implementation": True}}),
+            self._claims(), [])
+        self.assertEqual(receipts[0]["state"], "no-data")
+        self.assertIn("check passed before the work", receipts[0]["reason"])
+
+    def test_a_recorded_non_zero_red_check_stays_verified(self):
+        receipts = RD.receipts_for(
+            self._record({"change_kind": "behaviour",
+                          "red_check": {"command": "true",
+                                       "exit_code": 1,
+                                       "output_location": "/tmp/red.log",
+                                       "revision": "deadbeef",
+                                       "pre_implementation": True}}),
+            self._claims(), [])
+        self.assertEqual(receipts[0]["state"], "verified")
+        red = receipts[0]["red_check"]
+        self.assertEqual(red["exit_code"], 1)
+        self.assertEqual(red["revision"], "deadbeef")
+        self.assertTrue(red["pre_implementation"])
+
+    def test_a_documentation_only_unit_is_exempt_and_says_so(self):
+        receipts = RD.receipts_for(
+            self._record({"change_kind": "documentation",
+                          "files_changed_by_unit": ["README.md"]}),
+            self._claims(), [])
+        self.assertEqual(receipts[0]["state"], "verified")
+        self.assertTrue(receipts[0]["red_check"]["exempt"])
+        self.assertIn("documentation-only",
+                     receipts[0]["red_check"]["reason"])
+
+    def test_a_generated_file_only_unit_is_exempt_and_says_so(self):
+        receipts = RD.receipts_for(
+            self._record({"change_kind": "generated",
+                          "files_changed_by_unit": ["docs/plan/manifest.json"]}),
+            self._claims(), [])
+        self.assertEqual(receipts[0]["state"], "verified")
+        self.assertTrue(receipts[0]["red_check"]["exempt"])
+        self.assertIn("generated-file-only",
+                     receipts[0]["red_check"]["reason"])
+
+    def test_a_documentation_claim_over_a_code_file_is_refused(self):
+        """U5 review finding 4, 2026-09-09: a unit can declare
+        change_kind "documentation" while its own files_changed_by_unit
+        names a .py file. The exemption is refused rather than trusted,
+        naming the offending path, and the row is then held to the same
+        red-before-green standard a "behaviour" row would be (no-data,
+        for want of a red_check, exactly like the first test above)."""
+        receipts = RD.receipts_for(
+            self._record({"change_kind": "documentation"}),  # mathlib.py
+            self._claims(), [])
+        self.assertEqual(receipts[0]["state"], "no-data")
+        self.assertFalse(receipts[0]["red_check"]["exempt"])
+        self.assertIn("mathlib.py", receipts[0]["red_check"]["exemption_refused"])
+        self.assertIn("mathlib.py", receipts[0]["reason"])
+
+    def test_a_generated_claim_over_a_code_file_is_refused(self):
+        receipts = RD.receipts_for(
+            self._record({"change_kind": "generated"}),  # mathlib.py
+            self._claims(), [])
+        self.assertEqual(receipts[0]["state"], "no-data")
+        self.assertFalse(receipts[0]["red_check"]["exempt"])
+        self.assertIn("mathlib.py", receipts[0]["red_check"]["exemption_refused"])
+
+    def test_a_row_with_no_change_kind_at_all_is_unaffected(self):
+        """Backward compatibility, driven directly: the entire pre-U5
+        corpus never wrote change_kind, and none of it must read
+        differently now."""
+        receipts = RD.receipts_for(self._record({}), self._claims(), [])
+        self.assertEqual(receipts[0]["state"], "verified")
+        self.assertFalse(receipts[0]["red_check"]["exempt"])
+
+    def test_a_red_check_run_on_a_different_command_is_no_data(self):
+        """U5 review finding 2, 2026-09-09: red_check_gap read only
+        exit_code, so a red_check copied from a DIFFERENT unit's check
+        (or simply mistyped) satisfied the witness as long as its exit
+        code was non-zero. The command must be THIS row's own
+        done_check."""
+        receipts = RD.receipts_for(
+            self._record({"change_kind": "behaviour",
+                          "red_check": {"command": "pytest -k unrelated",
+                                       "exit_code": 1,
+                                       "output_location": "/tmp/red.log",
+                                       "revision": "deadbeef",
+                                       "pre_implementation": True}}),
+            self._claims(), [])
+        self.assertEqual(receipts[0]["state"], "no-data")
+        self.assertIn("not this unit's own done_check", receipts[0]["reason"])
+
+    def test_a_red_check_with_no_output_location_is_no_data(self):
+        """U5 review finding 2: exit_code and command alone are not a
+        witness a reader can go verify; the capture has to be findable."""
+        receipts = RD.receipts_for(
+            self._record({"change_kind": "behaviour",
+                          "red_check": {"command": "true",
+                                       "exit_code": 1,
+                                       "revision": "deadbeef",
+                                       "pre_implementation": True}}),
+            self._claims(), [])
+        self.assertEqual(receipts[0]["state"], "no-data")
+        self.assertIn("no output location", receipts[0]["reason"])
+
+    def test_a_red_check_not_marked_pre_implementation_is_no_data(self):
+        """U5 review finding 3, 2026-09-09: pre_implementation was stored
+        and never consulted, so a red_check recorded AFTER the fix (or
+        never confirmed to precede it) still satisfied the witness."""
+        receipts = RD.receipts_for(
+            self._record({"change_kind": "behaviour",
+                          "red_check": {"command": "true",
+                                       "exit_code": 1,
+                                       "output_location": "/tmp/red.log",
+                                       "revision": "deadbeef",
+                                       "pre_implementation": False}}),
+            self._claims(), [])
+        self.assertEqual(receipts[0]["state"], "no-data")
+        self.assertIn("pre_implementation was not True", receipts[0]["reason"])
+
+    def test_a_red_check_with_pre_implementation_unrecorded_is_no_data(self):
+        """The other shape of the same gap: a revision recorded with no
+        pre_implementation flag at all reads None, not True, and a
+        red_check whose revision could just as easily be one taken AFTER
+        the work must not be trusted by default."""
+        receipts = RD.receipts_for(
+            self._record({"change_kind": "behaviour",
+                          "red_check": {"command": "true",
+                                       "exit_code": 1,
+                                       "output_location": "/tmp/red.log",
+                                       "revision": "afterrev"}}),
+            self._claims(), [])
+        self.assertEqual(receipts[0]["state"], "no-data")
+        self.assertIn("pre_implementation was not True", receipts[0]["reason"])
+
+
 class ANoDataPrecheckNeverLaundersIntoVerified(unittest.TestCase):
     """Defect 1, the zero-context critic, 2026-09-03: `receipts_for` read
     check_passed_before None (the engine's own NO-DATA, when
@@ -1155,8 +1324,8 @@ class ARunWithOneVerifiedAndOneRefusedUnit(unittest.TestCase):
         """)
         model = write_stub(cls.tmp, "mixed_model.py", MIXED_MODEL)
         env = dict(os.environ)
-        env["DOOR_MODEL_CMD"] = "%s %s" % (sys.executable, decomposer)
-        env["MODEL_WORKER_CMD"] = "%s %s" % (sys.executable, model)
+        env["DOOR_MODEL_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(decomposer))
+        env["MODEL_WORKER_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(model))
         cls.proc = sh([sys.executable, BROTHER_RUN,
                        "one file exists and one never will",
                        "--cwd", cls.repo, "--runs-root", cls.tmp], env=env)
@@ -2474,19 +2643,29 @@ class TheFourSectionsAreOnTheReceipt(unittest.TestCase):
     a person actually opens."""
 
     def test_the_screen_carries_all_four_headings_with_their_own_paths(self):
+        # ACC-0: the screen now also carries a fifth, closing section (the
+        # suggested decision), so this checks READING_SECTIONS is a
+        # SUBSET of what is on the screen rather than the whole of it.
         record, receipts = _seeded_diff()
         spec = RD.acceptance_spec(record, receipts)
         by_heading = {s["heading"]: s["items"] for s in spec["sections"]}
-        self.assertEqual(sorted(by_heading), sorted(RD.READING_SECTIONS))
+        for heading in RD.READING_SECTIONS:
+            self.assertIn(heading, by_heading)
         joined = " ".join(by_heading[RD.REVIEW_FIRST])
         self.assertIn("src/middleware/rate_limit.py", joined)
         self.assertIn("requirements.txt", joined)
         self.assertNotIn("docs/generated/api-index.html", joined)
-        self.assertTrue(all("docs/generated/api-index.html" in i
-                            for i in by_heading[RD.LOW_RISK_MECHANICAL]))
+        # ACC-0: LOW-RISK MECHANICAL now collapses to one count line rather
+        # than one line per file, so the path itself no longer has to
+        # appear on the first screen for a proven, risk-free file.
+        self.assertEqual(len(by_heading[RD.LOW_RISK_MECHANICAL]), 1)
+        self.assertIn("1 file", by_heading[RD.LOW_RISK_MECHANICAL][0])
+        self.assertIn("expand in the receipt page",
+                      by_heading[RD.LOW_RISK_MECHANICAL][0])
         html = __import__("decide").render(spec)
         for heading in RD.READING_SECTIONS:
             self.assertIn(heading, html)
+        self.assertIn("Suggested decision:", html)
         self.assertIn("src/middleware/rate_limit.py", html)
 
     def test_an_empty_section_is_shown_as_empty_not_dropped(self):
@@ -2496,6 +2675,656 @@ class TheFourSectionsAreOnTheReceipt(unittest.TestCase):
             self.assertIn(heading, html)
         self.assertEqual(html.count(RD.EMPTY_SECTION),
                          len(RD.READING_SECTIONS))
+
+
+
+#: ACC-0's own multi-file fixture (docs/plan/NIGHT-RUN-2026-09-09-
+#: ACCEPTANCE-PROOF.md, contract test (a)): one review-first file, one
+#: not-proven file, three low-risk files, two no-need-to-re-read files, so
+#: all four buckets AND the collapsing rule have something real to say.
+def _acc0_fixture():
+    rows = [
+        {"id": "R", "objective": "harden the auth check",
+         "done_check": "true", "status": "DONE",
+         "check_passed_before": False, "owns": ["src/auth/"],
+         "files_changed_by_unit": ["src/auth/login.py"]},
+        {"id": "L", "objective": "regenerate the docs",
+         "done_check": "black --check docs/gen", "status": "DONE",
+         "check_passed_before": False, "owns": ["docs/gen/"],
+         "files_changed_by_unit": ["docs/gen/a.html", "docs/gen/b.html",
+                                   "docs/gen/c.html"]},
+        {"id": "P", "objective": "a check that proves nothing",
+         "done_check": "true", "status": "DONE",
+         "check_passed_before": True, "owns": ["src/copy.py"],
+         "files_changed_by_unit": ["src/copy.py"]},
+        {"id": "U", "objective": "declared but never touched",
+         "done_check": "true", "status": "DONE",
+         "check_passed_before": False,
+         "owns": ["src/unused1.py", "src/unused2.py"],
+         "files_changed_by_unit": []},
+    ]
+    claims = {rid: {"state": "done",
+                    "evidence": {"exit_code": 0, "output": ""}}
+             for rid in ("R", "L", "P", "U")}
+    record = {"outcome": "acceptance fixture", "work_id": "w", "rows": rows}
+    return record, RD.receipts_for(record, claims, [], "run.log")
+
+
+#: Recorded before ACC-0's rendering change, from this exact fixture
+#: through the unmodified acceptance_spec()/decide.render() (git stash of
+#: the ACC-0 commit reproduces it): the first screen ran to this many
+#: lines with one row per LOW-RISK MECHANICAL and NO NEED TO RE-READ file.
+#: Test (f) below asserts the new screen is shorter than this measured
+#: number, never eyeballed.
+ACC0_BEFORE_LINE_COUNT = 173
+
+
+class TheFirstScreenIsDecisiveWithoutHidingAnything(unittest.TestCase):
+    """ACC-0 (docs/plan/NIGHT-RUN-2026-09-09-ACCEPTANCE-PROOF.md): REVIEW
+    FIRST and NOT PROVEN stay expanded with their reason, proof and
+    uncertainty; LOW-RISK MECHANICAL and NO NEED TO RE-READ collapse to a
+    count line; a NO-DATA row is never folded into that count; a suggested
+    decision closes the screen as a labelled machine suggestion; empty
+    sections still print "0 files"; the screen is shorter than before, by
+    a number, not a guess."""
+
+    def test_a_review_first_and_a_not_proven_file_render_expanded(self):
+        record, receipts = _acc0_fixture()
+        spec = RD.acceptance_spec(record, receipts)
+        by_heading = {s["heading"]: s["items"] for s in spec["sections"]}
+        review_first = by_heading[RD.REVIEW_FIRST]
+        self.assertEqual(len(review_first), 1)
+        line = review_first[0]
+        self.assertIn("src/auth/login.py", line)
+        self.assertIn("the path names auth", line)
+        self.assertIn("Proof:", line)
+        self.assertIn("Uncertainty:", line)
+        not_proven = by_heading[RD.NOT_PROVEN]
+        self.assertEqual(len(not_proven), 1)
+        line = not_proven[0]
+        self.assertIn("src/copy.py", line)
+        self.assertIn("Proof:", line)
+        self.assertIn("Uncertainty:", line)
+        self.assertIn("the check already passed before the work began",
+                      line)
+
+    def test_the_two_low_value_sections_collapse_to_one_count_line_each(
+            self):
+        record, receipts = _acc0_fixture()
+        spec = RD.acceptance_spec(record, receipts)
+        by_heading = {s["heading"]: s["items"] for s in spec["sections"]}
+        low_risk = by_heading[RD.LOW_RISK_MECHANICAL]
+        self.assertEqual(len(low_risk), 1)
+        self.assertIn(RD.LOW_RISK_MECHANICAL, low_risk[0])
+        self.assertIn("3 files", low_risk[0])
+        self.assertIn("proof:", low_risk[0])
+        self.assertIn("expand in the receipt page", low_risk[0])
+        no_need = by_heading[RD.NO_NEED_TO_RE_READ]
+        self.assertEqual(len(no_need), 1)
+        self.assertIn(RD.NO_NEED_TO_RE_READ, no_need[0])
+        self.assertIn("2 files", no_need[0])
+        self.assertIn("expand in the receipt page", no_need[0])
+        # Every path that collapsed is still real evidence, just not on
+        # the first screen: the receipt page (JSON sibling) still carries
+        # every one of them, in the classifier's own order (untouched).
+        order = RD.reading_order(record, receipts)
+        self.assertEqual(
+            {e["path"] for e in order[RD.LOW_RISK_MECHANICAL]},
+            {"docs/gen/a.html", "docs/gen/b.html", "docs/gen/c.html"})
+        self.assertEqual(
+            {e["path"] for e in order[RD.NO_NEED_TO_RE_READ]},
+            {"src/unused1.py", "src/unused2.py"})
+
+    def test_a_no_data_row_inside_a_collapsed_section_still_prints_alone(
+            self):
+        # This exact combination (a per-file check that did not verify,
+        # sitting inside a section built to collapse) cannot come out of
+        # reading_order() today: LOW-RISK MECHANICAL only ever holds a
+        # verified entry (E75.1's own `proven` gate). That is exactly why
+        # this is tested directly against the collapsing helper itself,
+        # as the defensive invariant the contract names: a collapsed
+        # section must NEVER quietly fold an unproven row into its count,
+        # whatever reading_order() does or ever comes to do.
+        items = [{"path": "src/ok_one.py", "unit": "X", "why": "fine"},
+                {"path": "src/ok_two.py", "unit": "X", "why": "fine"},
+                {"path": "src/no_data_row.py", "unit": "X",
+                 "why": "no risk class in the path"}]
+        lookup = {
+            ("X", "src/ok_one.py"): {"check_command": "true",
+                                     "exit_code": 0, "state": "verified",
+                                     "check_passed_before": False},
+            ("X", "src/ok_two.py"): {"check_command": "true",
+                                     "exit_code": 0, "state": "verified",
+                                     "check_passed_before": False},
+            ("X", "src/no_data_row.py"): {"check_command": "true",
+                                          "exit_code": None,
+                                          "state": "no-data",
+                                          "reason": "nothing ran"},
+        }
+        lines = RD._collapsed_lines(RD.LOW_RISK_MECHANICAL, items, lookup,
+                                    "each file's own check, all verified")
+        self.assertEqual(len(lines), 2)
+        self.assertIn("2 files", lines[0])
+        self.assertNotIn("src/no_data_row.py", lines[0])
+        self.assertIn("src/no_data_row.py", lines[1])
+        self.assertIn("nothing ran", lines[1])
+
+    def test_the_suggested_decision_reads_reject_with_a_not_proven_file(
+            self):
+        # ACC-0: folded into the existing footer (one more sentence,
+        # zero new HTML structure) rather than a fifth section, so the
+        # collapsing above actually shrinks the screen instead of only
+        # relocating its length. It still closes the screen: the footer
+        # is the last thing decide.render() prints.
+        record, receipts = _acc0_fixture()
+        spec = RD.acceptance_spec(record, receipts)
+        self.assertIn("Suggested decision: REJECT", spec["footer"])
+        self.assertIn("machine suggestion", spec["footer"].lower())
+        self.assertNotIn("accepted", spec["footer"].lower())
+        html = __import__("decide").render(spec)
+        self.assertIn("Suggested decision: REJECT", html)
+        # The footer really is the last section decide.render() writes.
+        self.assertGreater(html.rindex("Suggested decision:"),
+                           html.rindex(RD.NO_NEED_TO_RE_READ))
+
+    def test_the_suggested_decision_reads_proceed_with_nothing_unproven(
+            self):
+        rows = [{"id": "L", "objective": "regenerate the docs",
+                "done_check": "true", "status": "DONE",
+                "check_passed_before": False, "owns": ["docs/gen/"],
+                "files_changed_by_unit": ["docs/gen/a.html"]}]
+        claims = {"L": {"state": "done",
+                       "evidence": {"exit_code": 0, "output": ""}}}
+        record = {"outcome": "all clean", "rows": rows}
+        receipts = RD.receipts_for(record, claims, [], "run.log")
+        spec = RD.acceptance_spec(record, receipts)
+        self.assertIn("Suggested decision: PROCEED", spec["footer"])
+        self.assertIn("machine suggestion", spec["footer"].lower())
+
+    def test_empty_sections_still_print_their_heading_with_0_files(self):
+        spec = RD.acceptance_spec({"outcome": "o", "rows": []}, [])
+        by_heading = {s["heading"]: s for s in spec["sections"]}
+        for heading in RD.READING_SECTIONS:
+            self.assertEqual(by_heading[heading]["items"], [])
+            self.assertIn("0 files", by_heading[heading]["empty"])
+        html = __import__("decide").render(spec)
+        self.assertEqual(html.count("0 files"), len(RD.READING_SECTIONS))
+
+    def test_the_receipt_screens_own_json_is_untouched_by_this_change(self):
+        # E72.2's delivery receipt (the eight-answer terminal screen) is a
+        # wholly separate rendering path (receipt_record/receipt_spec)
+        # from the acceptance screen's reading-order sections: ACC-0
+        # touches the acceptance side only, so the receipt's own JSON
+        # shape (its keys, and none of ACC-0's new vocabulary) must read
+        # exactly as it did before this change.
+        record, receipts = _seeded_diff()
+        with mock.patch.dict(os.environ,
+                             {journal.RUN_DIR_ENV_VAR: ""}, clear=False):
+            view = RD.receipt_record(record, receipts)
+        spec = RD.receipt_spec(view, record)
+        self.assertEqual(sorted(spec), sorted([
+            "title", "eyebrow", "stamp", "plain_summary", "question",
+            "criteria", "options", "would_change", "footer"]))
+        self.assertNotIn("sections", spec)
+        dumped = json.dumps(spec, sort_keys=True, default=str)
+        self.assertNotIn("Suggested decision", dumped)
+        self.assertNotIn("expand in the receipt page", dumped)
+
+    def test_the_first_screen_is_shorter_than_it_was_before_acc0(self):
+        record, receipts = _acc0_fixture()
+        spec = RD.acceptance_spec(record, receipts)
+        html = __import__("decide").render(spec)
+        after = len(html.splitlines())
+        self.assertLess(after, ACC0_BEFORE_LINE_COUNT,
+                        "first screen grew: %d lines, was %d"
+                        % (after, ACC0_BEFORE_LINE_COUNT))
+
+
+class RepairA1AVerifiedStateWithNoRealProofIsStillUnproven(
+        unittest.TestCase):
+    """A1 (adversarial review of fd04e557/068c53c1): a per-file entry can
+    carry state == "verified" while its own check_command is empty or its
+    exit_code is None, i.e. nothing a stranger could re-run actually
+    decided it. _is_unproven_entry must catch that, and a collapsed
+    section must render it as its own expanded line rather than folding
+    it into the count."""
+
+    def test_verified_with_empty_check_command_is_unproven(self):
+        entry = {"check_command": "", "exit_code": 0, "state": "verified"}
+        self.assertTrue(RD._is_unproven_entry(entry))
+
+    def test_verified_with_none_exit_code_is_unproven(self):
+        entry = {"check_command": "true", "exit_code": None,
+                 "state": "verified"}
+        self.assertTrue(RD._is_unproven_entry(entry))
+
+    def test_verified_with_a_real_command_and_exit_code_stays_proven(self):
+        entry = {"check_command": "true", "exit_code": 0,
+                 "state": "verified"}
+        self.assertFalse(RD._is_unproven_entry(entry))
+
+    def test_such_a_row_prints_expanded_not_folded_into_the_count(self):
+        items = [{"path": "src/ok.py", "unit": "X", "why": "fine"},
+                {"path": "src/hollow.py", "unit": "X",
+                 "why": "no risk class in the path"}]
+        lookup = {
+            ("X", "src/ok.py"): {"check_command": "true", "exit_code": 0,
+                                 "state": "verified",
+                                 "check_passed_before": False},
+            ("X", "src/hollow.py"): {"check_command": "", "exit_code": None,
+                                     "state": "verified",
+                                     "check_passed_before": False},
+        }
+        lines = RD._collapsed_lines(RD.LOW_RISK_MECHANICAL, items, lookup,
+                                    "each file's own check, all verified")
+        self.assertEqual(len(lines), 2)
+        self.assertIn("1 file", lines[0])
+        self.assertNotIn("src/hollow.py", lines[0])
+        self.assertIn("src/hollow.py", lines[1])
+
+
+class RepairA2ADuplicateKeyNeverHidesAnUnprovenEntry(unittest.TestCase):
+    """A2: _check_lookup is keyed by (unit, file); when per_file_checks()
+    yields two entries for the same key (a unit that lists the same file
+    twice, or a malformed record), a later verified entry must never
+    silently overwrite an earlier unproven one, and an unproven entry
+    arriving after a verified one must still win. Driven both ways by
+    reversing the order of the two duplicate entries."""
+
+    def test_a_later_verified_entry_never_overwrites_an_earlier_unproven(
+            self):
+        unproven = {"file": "src/x.py", "unit": "X", "check_command": "",
+                   "exit_code": None, "state": "no-data", "reason": "flaky"}
+        proven = {"file": "src/x.py", "unit": "X", "check_command": "true",
+                 "exit_code": 0, "state": "verified"}
+        with mock.patch.object(RD, "per_file_checks",
+                               return_value=[unproven, proven]):
+            lookup = RD._check_lookup({}, [])
+        self.assertTrue(RD._is_unproven_entry(lookup[("X", "src/x.py")]))
+
+    def test_an_unproven_entry_arriving_second_still_wins(self):
+        unproven = {"file": "src/x.py", "unit": "X", "check_command": "",
+                   "exit_code": None, "state": "no-data", "reason": "flaky"}
+        proven = {"file": "src/x.py", "unit": "X", "check_command": "true",
+                 "exit_code": 0, "state": "verified"}
+        with mock.patch.object(RD, "per_file_checks",
+                               return_value=[proven, unproven]):
+            lookup = RD._check_lookup({}, [])
+        self.assertTrue(RD._is_unproven_entry(lookup[("X", "src/x.py")]))
+
+    def test_two_proven_entries_at_the_same_key_stay_proven(self):
+        proven_a = {"file": "src/x.py", "unit": "X", "check_command": "true",
+                   "exit_code": 0, "state": "verified"}
+        proven_b = {"file": "src/x.py", "unit": "X", "check_command": "true",
+                   "exit_code": 0, "state": "verified"}
+        with mock.patch.object(RD, "per_file_checks",
+                               return_value=[proven_a, proven_b]):
+            lookup = RD._check_lookup({}, [])
+        self.assertFalse(RD._is_unproven_entry(lookup[("X", "src/x.py")]))
+
+
+class RepairA3ACollapsedHintNeverNamesOneCheckForDifferingProofs(
+        unittest.TestCase):
+    """A3: _proof_hint must not name a single check_command for a
+    collapsed section unless every quiet entry in it shares that exact
+    command; when two or more entries carry different commands, the line
+    says the proofs differ instead of picking one and implying it covers
+    the rest."""
+
+    def test_a_single_shared_command_is_still_named(self):
+        items = [{"path": "a", "unit": "X"}, {"path": "b", "unit": "X"}]
+        lookup = {("X", "a"): {"check_command": "true"},
+                 ("X", "b"): {"check_command": "true"}}
+        hint = RD._proof_hint(items, lookup, "fallback")
+        self.assertEqual(hint, "true")
+
+    def test_two_distinct_commands_never_pick_one_and_say_proofs_differ(
+            self):
+        items = [{"path": "a", "unit": "X"}, {"path": "b", "unit": "X"}]
+        lookup = {("X", "a"): {"check_command": "true"},
+                 ("X", "b"): {"check_command": "pytest -q"}}
+        hint = RD._proof_hint(items, lookup, "fallback")
+        self.assertNotIn("true", hint)
+        self.assertNotIn("pytest", hint)
+        self.assertEqual(hint, "proofs differ, see the receipt page")
+
+    def test_no_command_at_all_falls_back_to_the_passed_in_sentence(self):
+        items = [{"path": "a", "unit": "X"}]
+        lookup = {("X", "a"): {"check_command": ""}}
+        hint = RD._proof_hint(items, lookup, "fallback")
+        self.assertEqual(hint, "fallback")
+
+
+class RepairA5SuggestedDecisionCountsEveryReviewFirstReason(
+        unittest.TestCase):
+    """A5 (repair round 2, second adversarial review of the rendered
+    screen): _suggested_decision_line only ever counted REVIEW FIRST
+    files whose own check also failed to verify, so any other reason a
+    file lands in REVIEW FIRST (out-of-scope write, no declared scope, a
+    confirmed reviewer finding, a risk-class path) was invisible to it
+    and the footer could print PROCEED, or the false "every file ... has
+    a check that actually verified it" claim, over a screen that plainly
+    needed a human look. Three cases from the review, each driven test
+    first."""
+
+    def test_t3_an_out_of_scope_but_proven_file_still_rejects(self):
+        # A file the unit wrote OUTSIDE its own declared scope, with a
+        # check that genuinely passed (a real command, exit 0, measured
+        # against a False precheck): the old code's
+        # `_is_unproven_entry(...)` filter saw a proven entry and never
+        # counted it, so REVIEW FIRST held one file (the scope-drift
+        # reason) while the footer still read PROCEED.
+        rows = [{"id": "S", "objective": "touch a file outside scope",
+                "done_check": "true", "status": "DONE",
+                "check_passed_before": False, "owns": ["src/scope_ok/"],
+                "files_changed_by_unit": ["src/elsewhere/thing.py"]}]
+        claims = {"S": {"state": "done",
+                       "evidence": {"exit_code": 0, "output": ""}}}
+        record = {"outcome": "scope drift fixture", "rows": rows}
+        receipts = RD.receipts_for(record, claims, [], "run.log")
+        order = RD.reading_order(record, receipts)
+        self.assertEqual(len(order[RD.REVIEW_FIRST]), 1)
+        self.assertEqual(len(order[RD.NOT_PROVEN]), 0)
+        lookup = RD._check_lookup(record, receipts)
+        entry = lookup.get(("S", "src/elsewhere/thing.py"))
+        self.assertFalse(RD._is_unproven_entry(entry),
+                         "fixture must be a genuinely proven file, or "
+                         "this case proves nothing new over A1")
+        spec = RD.acceptance_spec(record, receipts)
+        self.assertIn("Suggested decision: REJECT", spec["footer"])
+        self.assertNotIn("Suggested decision: PROCEED", spec["footer"])
+
+    def test_t1_zero_files_reads_no_data_never_proceed(self):
+        record = {"outcome": "empty run", "rows": []}
+        receipts = RD.receipts_for(record, {}, [], "run.log")
+        order = RD.reading_order(record, receipts)
+        self.assertEqual(sum(len(v) for v in order.values()), 0)
+        spec = RD.acceptance_spec(record, receipts)
+        self.assertIn("Suggested decision: NO-DATA", spec["footer"])
+        self.assertNotIn("Suggested decision: PROCEED", spec["footer"])
+        self.assertNotIn("Suggested decision: REJECT", spec["footer"])
+        self.assertIn("nothing on this screen was checked",
+                      spec["footer"].lower())
+
+    def test_t2_only_no_need_to_re_read_files_never_claims_a_check_ran(
+            self):
+        # A unit that declared a path and never touched it: the only
+        # section with anything in it is NO NEED TO RE-READ, whose files
+        # carry no check at all (declared_untouched() never runs one).
+        # The old PROCEED sentence ("every file ... has a check that
+        # actually verified it") was false for this screen.
+        rows = [{"id": "U", "objective": "declared but never touched",
+                "done_check": "true", "status": "DONE",
+                "check_passed_before": False,
+                "owns": ["src/never_touched.py"],
+                "files_changed_by_unit": []}]
+        claims = {"U": {"state": "done",
+                       "evidence": {"exit_code": 0, "output": ""}}}
+        record = {"outcome": "untouched-only fixture", "rows": rows}
+        receipts = RD.receipts_for(record, claims, [], "run.log")
+        order = RD.reading_order(record, receipts)
+        self.assertEqual(len(order[RD.NO_NEED_TO_RE_READ]), 1)
+        self.assertEqual(len(order[RD.REVIEW_FIRST]), 0)
+        self.assertEqual(len(order[RD.NOT_PROVEN]), 0)
+        self.assertEqual(len(order[RD.LOW_RISK_MECHANICAL]), 0)
+        spec = RD.acceptance_spec(record, receipts)
+        self.assertIn("Suggested decision: PROCEED", spec["footer"])
+        self.assertNotIn("has a check that actually verified it",
+                         spec["footer"])
+        self.assertIn("declared and never touched", spec["footer"])
+
+    def test_review_first_and_not_proven_still_reject_as_before(self):
+        # Guard: the existing REJECT case (a NOT PROVEN file, from the
+        # ACC-0 fixture) must still reject after this round's rewrite.
+        record, receipts = _acc0_fixture()
+        spec = RD.acceptance_spec(record, receipts)
+        self.assertIn("Suggested decision: REJECT", spec["footer"])
+
+    def test_all_low_risk_mechanical_still_proceeds_with_the_check_claim(
+            self):
+        # Guard: the pre-existing PROCEED case (every file verified by
+        # its own check, nothing declared-and-untouched on the screen)
+        # must keep the original sentence, since it is literally true
+        # there.
+        rows = [{"id": "L", "objective": "regenerate the docs",
+                "done_check": "true", "status": "DONE",
+                "check_passed_before": False, "owns": ["docs/gen/"],
+                "files_changed_by_unit": ["docs/gen/a.html"]}]
+        claims = {"L": {"state": "done",
+                       "evidence": {"exit_code": 0, "output": ""}}}
+        record = {"outcome": "all clean", "rows": rows}
+        receipts = RD.receipts_for(record, claims, [], "run.log")
+        spec = RD.acceptance_spec(record, receipts)
+        self.assertIn("Suggested decision: PROCEED", spec["footer"])
+        self.assertIn("has a check that actually verified it",
+                      spec["footer"])
+
+
+class RepairA6TheCollapsedFlagQuietSplitStaysHelperOnly(unittest.TestCase):
+    """A6 (repair round 2, evaluated against the same item's own
+    condition A4 used: keep only what a real record can actually
+    produce). `_collapsed_lines`' flagged/quiet split (a file inside a
+    COLLAPSIBLE section whose own entry is still `_is_unproven_entry`)
+    was checked in round 1 directly against the helper
+    (`test_a_no_data_row_inside_a_collapsed_section_still_prints_alone`,
+    `RepairA1...test_such_a_row_prints_expanded_not_folded_into_the_count`)
+    because `reading_order()` itself was believed to never produce that
+    combination. This class pins down WHY, against `receipts_for()`
+    itself rather than a belief about it, so the claim stays true if
+    `receipts_for` ever changes: the one line that sets
+    `state = "verified"` (`receipt_door.py`, inside `receipts_for`) sits
+    behind `exit_code == 0 and command`, so every receipt this function
+    ever hands out is either not "verified", or carries a non-empty
+    command and a real 0 exit code -- exactly the two facts
+    `_is_unproven_entry` checks. No record built by `receipts_for` can
+    ever put an unproven entry in a bucket `_is_unproven_entry` calls
+    proven, so the flagged branch stays reachable through the helper's
+    own direct tests only, never through `render`."""
+
+    def test_no_real_receipt_is_verified_with_no_real_proof(self):
+        rows = [
+            {"id": "A", "objective": "a normal proven change",
+             "done_check": "true", "status": "DONE",
+             "check_passed_before": False, "owns": ["src/a.py"],
+             "files_changed_by_unit": ["src/a.py"]},
+            {"id": "B", "objective": "a check that fails",
+             "done_check": "false", "status": "DONE",
+             "check_passed_before": False, "owns": ["src/b.py"],
+             "files_changed_by_unit": ["src/b.py"]},
+            {"id": "C", "objective": "no check ever recorded",
+             "status": "DONE", "check_passed_before": False,
+             "owns": ["src/c.py"], "files_changed_by_unit": ["src/c.py"]},
+        ]
+        claims = {
+            "A": {"state": "done",
+                 "evidence": {"exit_code": 0, "output": ""}},
+            "B": {"state": "done",
+                 "evidence": {"exit_code": 1, "output": ""}},
+            "C": {"state": "done", "evidence": {"output": ""}},
+        }
+        record = {"outcome": "invariant sweep", "rows": rows}
+        receipts = RD.receipts_for(record, claims, [], "run.log")
+        checked_any_verified = False
+        for entry in RD.per_file_checks(record, receipts):
+            if entry.get("state") == "verified":
+                checked_any_verified = True
+                self.assertTrue(entry.get("check_command"))
+                self.assertEqual(entry.get("exit_code"), 0)
+                self.assertFalse(RD._is_unproven_entry(entry))
+        self.assertTrue(checked_any_verified,
+                        "fixture must produce at least one verified "
+                        "entry, or this proves nothing")
+
+    def test_a_never_touched_declared_path_has_no_lookup_entry_either(
+            self):
+        # NO NEED TO RE-READ's own case: declared_untouched() never runs
+        # a check, so the lookup entry is always None there, which
+        # _is_unproven_entry also reads as "not flagged" (a proof never
+        # owed is not a proof that failed).
+        rows = [{"id": "U", "objective": "declared, never touched",
+                "done_check": "true", "status": "DONE",
+                "check_passed_before": False, "owns": ["src/never.py"],
+                "files_changed_by_unit": []}]
+        claims = {"U": {"state": "done",
+                       "evidence": {"exit_code": 0, "output": ""}}}
+        record = {"outcome": "untouched", "rows": rows}
+        receipts = RD.receipts_for(record, claims, [], "run.log")
+        lookup = RD._check_lookup(record, receipts)
+        self.assertIsNone(lookup.get(("U", "src/never.py")))
+        self.assertFalse(RD._is_unproven_entry(
+            lookup.get(("U", "src/never.py"))))
+
+
+
+def _hollow_verified_receipt(uid, objective):
+    """A receipt shaped like receipts_for()'s own output, except for the
+    one field receipts_for() can never actually produce (RepairA6, the
+    round 2 invariant): state == "verified" with an empty command, so
+    _is_unproven_entry still calls it unproven even though
+    reading_order()'s own cruder `state == "verified"` gate does not.
+    exit_code is a real 0, never None: receipt_sentence()'s "verified"
+    sentence formats exit_code with %d, so a None there would crash
+    acceptance_spec() itself (building the options list) rather than
+    exercise the bug this repair fixes."""
+    return {"id": uid, "objective": objective, "command": "",
+           "exit_code": 0, "state": "verified", "output_location": "run.log",
+           "reason": "", "author": "the planning model",
+           "harness_revision": RD.NODATA, "dependency_note": RD.NODATA,
+           "evidence_family": RD.NODATA, "oracle_source": RD.NODATA,
+           "independence": RD.NODATA, "target_revision": RD.NODATA,
+           "env_lock": RD.NODATA, "data_identity": RD.NODATA}
+
+
+class RepairA7AHollowVerifiedEntryNeverReadsProceed(unittest.TestCase):
+    """A7 (repair round 3, driven by command): a per-file entry can carry
+    state == "verified" while its own check_command is empty (or its
+    exit_code is None), the exact hollow shape A1 already named
+    _is_unproven_entry to catch. RepairA6 proved receipts_for() itself
+    can never produce that combination, so every test here drives it
+    through the real render pipeline (acceptance_spec()/decide.render())
+    with a hand-built receipt -- the render-level counterpart to A1's
+    helper-level test (test_such_a_row_prints_expanded_not_folded_
+    into_the_count, which calls _collapsed_lines directly). Before this
+    repair: the row printed honestly (Proof named the missing command,
+    Uncertainty said "none recorded"), landed inside LOW-RISK MECHANICAL
+    because reading_order()'s own `proven` gate only checks the bare
+    state string, and the closing line still read "Suggested decision:
+    PROCEED ... every file ... has a check that actually verified it" --
+    a claim this exact file makes false. _suggested_decision_line and
+    _uncertainty_text decided by section membership and by the bare
+    state string, never through _is_unproven_entry."""
+
+    def test_the_hollow_entry_lands_in_low_risk_mechanical(self):
+        # Confirms the bug's own premise still holds after this repair:
+        # reading_order()'s classification is untouched (this repair
+        # fixes the rendering that reads the classified sections, not
+        # the classifier itself), so the hollow entry still sits in
+        # LOW-RISK MECHANICAL rather than moving to REVIEW FIRST or NOT
+        # PROVEN.
+        rows = [{"id": "L", "objective": "regenerate the docs",
+                "done_check": "true", "status": "DONE",
+                "check_passed_before": False, "owns": ["docs/gen/"],
+                "files_changed_by_unit": ["docs/gen/a.html"]}]
+        record = {"outcome": "hollow verified fixture", "rows": rows}
+        receipts = [_hollow_verified_receipt("L", "regenerate the docs")]
+        order = RD.reading_order(record, receipts)
+        self.assertEqual(len(order[RD.LOW_RISK_MECHANICAL]), 1)
+        self.assertEqual(order[RD.LOW_RISK_MECHANICAL][0]["path"],
+                         "docs/gen/a.html")
+        lookup = RD._check_lookup(record, receipts)
+        entry = lookup.get(("L", "docs/gen/a.html"))
+        self.assertTrue(RD._is_unproven_entry(entry),
+                        "fixture must be unproven, or this test proves "
+                        "nothing new over A1")
+
+    def test_the_only_file_on_the_screen_reads_no_data_not_proceed(self):
+        rows = [{"id": "L", "objective": "regenerate the docs",
+                "done_check": "true", "status": "DONE",
+                "check_passed_before": False, "owns": ["docs/gen/"],
+                "files_changed_by_unit": ["docs/gen/a.html"]}]
+        record = {"outcome": "hollow verified fixture", "rows": rows}
+        receipts = [_hollow_verified_receipt("L", "regenerate the docs")]
+        spec = RD.acceptance_spec(record, receipts)
+        self.assertIn("Suggested decision: NO-DATA", spec["footer"])
+        self.assertNotIn("Suggested decision: PROCEED", spec["footer"])
+        self.assertNotIn("has a check that actually verified it",
+                         spec["footer"])
+        html = decide.render(spec)
+        self.assertIn("Suggested decision: NO-DATA", html)
+        self.assertNotIn("Suggested decision: PROCEED", html)
+
+    def test_the_row_itself_names_no_proof_recorded_not_none_recorded(
+            self):
+        rows = [{"id": "L", "objective": "regenerate the docs",
+                "done_check": "true", "status": "DONE",
+                "check_passed_before": False, "owns": ["docs/gen/"],
+                "files_changed_by_unit": ["docs/gen/a.html"]}]
+        record = {"outcome": "hollow verified fixture", "rows": rows}
+        receipts = [_hollow_verified_receipt("L", "regenerate the docs")]
+        spec = RD.acceptance_spec(record, receipts)
+        by_heading = {s["heading"]: s["items"] for s in spec["sections"]}
+        low_risk = by_heading[RD.LOW_RISK_MECHANICAL]
+        self.assertEqual(len(low_risk), 1)
+        line = low_risk[0]
+        self.assertIn("docs/gen/a.html", line)
+        self.assertIn("Uncertainty: no proof recorded", line)
+        self.assertNotIn("none recorded", line)
+        html = decide.render(spec)
+        self.assertIn("no proof recorded", html)
+
+    def test_a_second_genuinely_proven_file_makes_the_screen_reject(self):
+        # Mixed screen: one real, proven file plus the hollow one. total
+        # is now 2, so the NO-DATA-only-file carve-out does not apply --
+        # the screen has something else to weigh the hollow file
+        # against, and a human still needs to look at it, so this
+        # rejects rather than proceeding or reading NO-DATA.
+        rows = [
+            {"id": "L", "objective": "regenerate the docs",
+             "done_check": "true", "status": "DONE",
+             "check_passed_before": False, "owns": ["docs/gen/"],
+             "files_changed_by_unit": ["docs/gen/a.html"]},
+            {"id": "M", "objective": "a real, proven change",
+             "done_check": "true", "status": "DONE",
+             "check_passed_before": False, "owns": ["src/real.py"],
+             "files_changed_by_unit": ["src/real.py"]},
+        ]
+        claims = {"M": {"state": "done",
+                       "evidence": {"exit_code": 0, "output": ""}}}
+        record = {"outcome": "mixed fixture", "rows": rows}
+        # receipts_for() only ever produces a real receipt for row "M"
+        # here (row "L" carries no claim); RepairA6 already proved
+        # receipts_for() can never itself hand out a hollow "verified"
+        # receipt, so "L"'s receipt is spliced in by hand instead of
+        # asking receipts_for() to produce what it cannot.
+        real_receipts = RD.receipts_for(record, claims, [], "run.log")
+        receipts = ([_hollow_verified_receipt("L", "regenerate the docs")]
+                    + [r for r in real_receipts if r["id"] == "M"])
+        order = RD.reading_order(record, receipts)
+        self.assertEqual(len(order[RD.LOW_RISK_MECHANICAL]), 2)
+        spec = RD.acceptance_spec(record, receipts)
+        self.assertIn("Suggested decision: REJECT", spec["footer"])
+        self.assertNotIn("Suggested decision: PROCEED", spec["footer"])
+        self.assertNotIn("Suggested decision: NO-DATA", spec["footer"])
+        self.assertIn("marked verified with no real proof", spec["footer"])
+
+    def test_the_verified_proceed_sentence_still_needs_every_file_real(
+            self):
+        # Guard: unchanged behaviour when nothing is hollow -- the exact
+        # pre-existing PROCEED case (round 2's own guard test) still
+        # reads PROCEED with the "has a check that actually verified it"
+        # claim.
+        rows = [{"id": "L", "objective": "regenerate the docs",
+                "done_check": "true", "status": "DONE",
+                "check_passed_before": False, "owns": ["docs/gen/"],
+                "files_changed_by_unit": ["docs/gen/a.html"]}]
+        claims = {"L": {"state": "done",
+                       "evidence": {"exit_code": 0, "output": ""}}}
+        record = {"outcome": "all clean", "rows": rows}
+        receipts = RD.receipts_for(record, claims, [], "run.log")
+        spec = RD.acceptance_spec(record, receipts)
+        self.assertIn("Suggested decision: PROCEED", spec["footer"])
+        self.assertIn("has a check that actually verified it",
+                      spec["footer"])
 
 
 if __name__ == "__main__":

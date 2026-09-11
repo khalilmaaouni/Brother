@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Muse judges each persona transcript AS the persona. Reads results.jsonl and
+"""The headless Claude CLI judges each persona transcript AS the persona (it
+replaced the OpenRouter Muse bridge, row SR-2). Reads results.jsonl and
 transcripts/, writes judgments.jsonl (one per scenario not yet judged).
 Archetype content only; the transcripts are of fixture repositories. The
 private-term scrub list lives outside this repository and is never a literal
@@ -19,7 +20,8 @@ DEFAULT_EVIDENCE_DIR = os.environ.get(
     "PERSONA_EVIDENCE_DIR",
     os.path.expanduser("~/.claude/evidence/persona-dogfood-2026-09-07"),
 )
-BRIDGE = os.path.expanduser("~/.claude/bin/or_ask.py")
+JUDGE_MODEL = "claude-cli:sonnet"
+JUDGE_ARGV = ["claude", "-p", "--output-format", "json", "--model", "sonnet", "--fallback-model", "haiku"]
 
 
 def private_terms(path=None):
@@ -81,13 +83,13 @@ def main(argv=None):
             try:
                 j = json.loads(line)
                 done.add((j["scenario"], j.get("round", 1)))
-            except Exception:
-                pass
+            except (OSError, ValueError, TypeError):  # sbe: allow-silent an unreadable or malformed past judgment cannot prove completion, so it is not added to done
+                continue
     todo = []
     for line in open(res_path):
         try:
             r = json.loads(line)
-        except Exception:
+        except (OSError, ValueError, TypeError):  # sbe: allow-silent a malformed result line has no scenario to judge, so the remaining transcript is still processed
             continue
         if (r.get("scenario"), r.get("round", 1)) not in done:
             todo.append(r)
@@ -107,18 +109,44 @@ def main(argv=None):
                  "\"what_i_wanted\":\"one sentence\",\"what_i_got\":\"one sentence\",\"worst_moment\":\"quote the exact line from the transcript that hurt most, or none\","
                  "\"root_cause_guess\":\"one sentence, name the surface if you can\",\"one_fix\":\"the single change that would have made me trust it\",\"rubric_agreement\":\"agree|disagree with the actor's verdict and why, one sentence\"}. No prose outside the JSON."
                  % (json.dumps(personas.get(pid, {}), ensure_ascii=False), json.dumps(scen.get(sid, {}), ensure_ascii=False), json.dumps(r, ensure_ascii=False), transcript, sid))
-        p = subprocess.run([sys.executable, BRIDGE, "--model", "meta/muse-spark-1.2", "--effort", "low", "--max", "1500"], input=brief, capture_output=True, text=True, timeout=300)
-        txt = p.stdout
-        s, e = txt.find("{"), txt.rfind("}")
         try:
-            j = json.loads(txt[s:e + 1])
+            p = subprocess.run(JUDGE_ARGV, input=brief, capture_output=True, text=True, timeout=300)
+            if p.returncode != 0:
+                # An account limit exits 1 with the reason in the envelope's
+                # result; anything else leaves it on stderr.
+                try:
+                    why = str(json.loads(p.stdout).get("result") or "")
+                except (ValueError, TypeError, AttributeError):
+                    why = ""
+                raise ValueError("claude CLI exited %s: %r"
+                                 % (p.returncode, (why or p.stderr or "").strip()[:200]))
+            envelope = json.loads(p.stdout)
+            if envelope.get("is_error"):
+                raise ValueError("claude CLI is_error true: %r" % str(envelope.get("result", ""))[:200])
+            result_text = envelope.get("result") or ""
+            if not result_text:
+                raise ValueError("claude CLI returned an empty result field")
+            s, e = result_text.find("{"), result_text.rfind("}")
+            j = json.loads(result_text[s:e + 1])
+            # A headless child that loads this machine's hooks once answered
+            # {"ok": true, "reason": ...} here: JSON, but no judgment.
+            if not isinstance(j, dict) or j.get("verdict") not in ("PASS", "FAIL", "NO-DATA"):
+                shape = sorted(j)[:8] if isinstance(j, dict) else type(j).__name__
+                raise ValueError("the judge's answer carried no PASS, FAIL or NO-DATA "
+                                 "verdict (got %s), so it is not a judgment" % (shape,))
             j["scenario"] = sid
             j["persona"] = pid
             j["round"] = rnd
-            j["judge_model"] = "meta/muse-spark-1.2"
+            j["judge_model"] = JUDGE_MODEL
+        except subprocess.TimeoutExpired:
+            fails += 1
+            j = {"scenario": sid, "persona": pid, "round": rnd, "verdict": "NO-DATA", "judge_error": "claude CLI timed out after 300s", "judge_model": JUDGE_MODEL}
+        except OSError as ex:
+            fails += 1
+            j = {"scenario": sid, "persona": pid, "round": rnd, "verdict": "NO-DATA", "judge_error": "claude CLI not runnable: %s" % ex, "judge_model": JUDGE_MODEL}
         except Exception as ex:
             fails += 1
-            j = {"scenario": sid, "persona": pid, "round": rnd, "verdict": "NO-DATA", "judge_error": "%s: %r" % (ex, txt[-200:]), "judge_model": "meta/muse-spark-1.2"}
+            j = {"scenario": sid, "persona": pid, "round": rnd, "verdict": "NO-DATA", "judge_error": "%s" % ex, "judge_model": JUDGE_MODEL}
         with open(out_path, "a") as f:
             f.write(json.dumps(j, ensure_ascii=False) + "\n")
         print(sid, j.get("verdict"), "trust", j.get("trust_after"), "|", str(j.get("one_fix", ""))[:90])

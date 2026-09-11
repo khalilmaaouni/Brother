@@ -23,6 +23,16 @@ WHAT COUNTS AS A HIT, and why each one:
 A hit is a FAIL naming the file and line. The maintainer half of the cut block
 lives in docs/how-to/MAINTAINER-CLOSING-CEREMONY.md, which is outside the
 shipped surface and is therefore not scanned.
+
+A SEPARATE CHECK, scoped to bundle/skills/using-brother/references/*.md only
+(not the whole bundle: router-details.md names scripts/gen_door_table.py as
+how it was GENERATED, a provenance note a maintainer reads, never an
+instruction the installed session is told to run, and that file does not
+ship): every `scripts/<name>.py` an instruction in that directory names must
+resolve to `bundle/runtime/<name>.py`, the actual shipped mirror. This is
+the gap that let bundle/skills/using-brother/references/intake.md tell a
+session to run scripts/intake_inflight.py and scripts/receipt_check.py,
+neither of which bundle_runtime.py ever mirrors.
 """
 import io
 import os
@@ -39,6 +49,14 @@ FORBIDDEN = (
     ("founder-order block", re.compile(r"founder\s+order", re.IGNORECASE)),
 )
 
+RUNTIME_DIR = os.path.join(BUNDLE_DIR, "runtime")
+# Only an actual invocation, never a provenance mention like
+# "GENERATED... by `scripts/gen_door_table.py`" (router-details.md),
+# which describes how a file was built, not an instruction to run it.
+SCRIPTS_PY_REF = re.compile(r"\bpython3?\s+scripts/([A-Za-z0-9_]+\.py)\b")
+USING_BROTHER_REFS_DIR = os.path.join(
+    BUNDLE_DIR, "skills", "using-brother", "references")
+
 
 def shipped_prose_files():
     """Every .md under bundle/, plus bundle/MANIFEST.json, sorted.
@@ -54,6 +72,16 @@ def shipped_prose_files():
             if name.endswith(".md") or name == "MANIFEST.json":
                 found.append(os.path.join(root, name))
     return sorted(found)
+
+
+def using_brother_reference_files():
+    """Every .md under bundle/skills/using-brother/references/, sorted."""
+    if not os.path.isdir(USING_BROTHER_REFS_DIR):
+        return []
+    return sorted(
+        os.path.join(USING_BROTHER_REFS_DIR, name)
+        for name in os.listdir(USING_BROTHER_REFS_DIR)
+        if name.endswith(".md"))
 
 
 class ShippedSurfaceIsPortable(unittest.TestCase):
@@ -80,9 +108,40 @@ class ShippedSurfaceIsPortable(unittest.TestCase):
         self.assertEqual([], hits, "shipped surface carries machine-specific "
                          "or founder-only instruction:\n  " + "\n  ".join(hits))
 
+    def test_using_brother_reference_scripts_resolve_in_the_shipped_tree(self):
+        """A path an installed session is told to run must exist once shipped."""
+        files = using_brother_reference_files()
+        self.assertTrue(files, "no references/*.md found under %s"
+                        % USING_BROTHER_REFS_DIR)
+        hits = []
+        for path in files:
+            try:
+                with io.open(path, encoding="utf-8") as fh:
+                    lines = fh.read().splitlines()
+            except (OSError, UnicodeDecodeError) as exc:
+                self.fail("cannot read shipped file %s: %s" % (path, exc))
+            for number, line in enumerate(lines, 1):
+                for name in SCRIPTS_PY_REF.findall(line):
+                    if not os.path.isfile(os.path.join(RUNTIME_DIR, name)):
+                        hits.append("%s:%d: scripts/%s does not ship (no "
+                                   "bundle/runtime/%s)" % (
+                                       os.path.relpath(path, REPO_ROOT),
+                                       number, name, name))
+        self.assertEqual([], hits, "using-brother references a script that "
+                         "does not ship:\n  " + "\n  ".join(hits))
+
     def test_the_maintainer_document_holds_the_cut_block(self):
         """The block was MOVED, not deleted: losing it is its own defect."""
-        doc = os.path.join(REPO_ROOT, "docs", "how-to",
+        # MOVED 2026-09-10, and the move is the point. The 2026-09-10
+        # documentation replacement made docs/how-to the PUBLIC how-to
+        # corpus and gave it a directory entry in the export allowlist, so
+        # a maintainer-only page left there would have been published on
+        # the next export. This page says of itself that it is "NOT a
+        # shipped instruction" and "names tools and paths that exist on
+        # this estate and on no installed machine", so it now lives beside
+        # the other maintainer document, under docs/maintainer, which no
+        # allowlist entry carries.
+        doc = os.path.join(REPO_ROOT, "docs", "maintainer",
                            "MAINTAINER-CLOSING-CEREMONY.md")
         self.assertTrue(os.path.exists(doc), "maintainer document missing: " + doc)
         try:

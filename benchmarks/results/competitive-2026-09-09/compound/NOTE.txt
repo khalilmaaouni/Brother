@@ -1,0 +1,3 @@
+NO-DATA: this arm did not run.
+
+Not attempted separately. GSD (this rounds first arm) was stopped after two blocked attempts to launch a nested, unattended Claude Code CLI session (see benchmarks/results/competitive-2026-09-09/gsd/NOTE.txt for the full reason and the two attempts). This arm needs the identical mechanism (a nested print-mode CLI session with the Compound plugin loaded via a directory flag, pointed at its own throwaway fixture clone), so re-running the same blocked mechanism a third time would not have produced a different result and would have spent budget the round-level instruction says to conserve once a block is confirmed structural rather than flaky.

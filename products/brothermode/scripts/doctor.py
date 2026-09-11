@@ -80,6 +80,7 @@ No em or en dashes anywhere in this file, its comments, or its output.
 
 import argparse
 import collections
+import datetime
 import hashlib
 import importlib.util
 import io
@@ -93,10 +94,33 @@ import subprocess
 import sys
 import tempfile
 
+try:
+    import tomllib  # Python 3.11+ standard library; D3 prefers this parser
+except ImportError:  # pragma: no cover - Python 3.9/3.10 fall back to a line scan
+    tomllib = None
+
 EXIT_OK = 0
 EXIT_PROBLEMS = 1
 EXIT_USAGE = 2
 EXIT_UNSUPPORTED = 3
+# D5 (repair, adversarial review 2026-09-09): the DOC-0 --status table's
+# own third outcome, a table where no row FAILs but none reaches PASS
+# either (every row landed on NO-DATA, N/A, NEEDS TRUST or NOT
+# CONFIGURED) -- the "population of all NO-DATA composed into a PASS"
+# failure the reviewer drove by forcing all six rows.
+#
+# D11 (repair, adversarial review round 3, 2026-09-10): this used to
+# share its integer with EXIT_UNSUPPORTED on the theory that the two
+# meanings never collide within one invocation (main() returns
+# EXIT_UNSUPPORTED before --status ever runs). That theory is true and
+# beside the point: a caller who reads only the exit code, the whole
+# reason an exit code exists, cannot tell "no row passed" from "wrong
+# Python" from the integer alone, and has to go read stdout to find out
+# which one actually happened -- exactly the failure this file's own
+# design note above ("a guard can express its verdict in stdout, not the
+# exit code") already names. EXIT_NO_PASS now has its own integer,
+# unused by any other EXIT_ constant here.
+EXIT_NO_PASS = 4
 
 FENCE_BASENAME = "bm_fence_hook.py"
 WRITE_TOOL_NAMES = ("Edit", "Write", "MultiEdit", "NotebookEdit")
@@ -164,6 +188,26 @@ def _mask_home(path):
     return path
 
 
+def _mask_home_text(text):
+    """Like _mask_home, but for a block of captured text (subprocess
+    stdout, an exception str(), a probed detail message) rather than a
+    single path argument: the home directory can appear ANYWHERE in
+    such text, and more than once, so this replaces every occurrence
+    rather than checking only a leading prefix. Finding 6 (security
+    review, 2026-09-10): _mask_home alone left the account name
+    reaching printed rows through bundle_runtime --check output,
+    gits own exception text, codex hooks detail, and capability_probe
+    vault detail and tried list, because none of those strings is a
+    bare path argument. Never raises; a non-string input passes
+    through unchanged."""
+    if not isinstance(text, str) or not text:
+        return text
+    home = os.path.expanduser("~")
+    if not home:
+        return text
+    return text.replace(home, "/Users/...")
+
+
 def read_settings(path):
     """Returns (settings_dict, error_string). Never raises on bad input: an
     unreadable settings file is a finding to report, not a traceback."""
@@ -198,6 +242,38 @@ def _hooks_json_names_the_fence(directory):
     except OSError:  # sbe: allow-silent no hooks.json means this copy wires nothing, not a problem
         return False
     return FENCE_BASENAME in text
+
+
+def _loader_fence_path(directory):
+    """The fence script `directory`/hooks/hooks.json actually runs, with
+    ${CLAUDE_PLUGIN_ROOT} read as `directory` the way the loader expands it.
+    The product's own layout puts it at tools/, but the umbrella bundle
+    installs it under runtime/hooks/brothermode/tools/ (found 2026-09-11 on
+    the 1.0.12 plugin cache, where check 1 called a live fence dead because
+    it only ever looked at tools/). Falls back to tools/ when the command
+    cannot be read, so a missing file is still reported as missing."""
+    default = os.path.join(directory, "tools", FENCE_BASENAME)
+    hooks = os.path.join(directory, "hooks", "hooks.json")
+    try:
+        with io.open(hooks, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):  # sbe: allow-silent unreadable hooks.json falls back to the tools/ layout, whose absence is then reported
+        return default
+    for group in ((data.get("hooks") or {}).get("PreToolUse") or []
+                  if isinstance(data, dict) else []):
+        for hook in (group.get("hooks") or [] if isinstance(group, dict) else []):
+            command = hook.get("command") if isinstance(hook, dict) else None
+            if not isinstance(command, str) or FENCE_BASENAME not in command:
+                continue
+            try:
+                words = shlex.split(
+                    command.replace("${CLAUDE_PLUGIN_ROOT}", directory))
+            except ValueError:  # sbe: allow-silent an unparseable command falls back to the tools/ layout
+                continue
+            path = fence_path_in(words)
+            if path:
+                return path
+    return default
 
 
 def _loader_recorded_plugin_paths():
@@ -700,7 +776,7 @@ def doctor(settings_path):
         loader_copies = loader_managed_fence_copies()
         if loader_copies:
             copy = loader_copies[0]
-            fence = os.path.join(copy, "tools", FENCE_BASENAME)
+            fence = _loader_fence_path(copy)
             notes.append("no settings.json fence block, and none is "
                          "needed: %s is auto-loaded by Claude Code as a "
                          "plugin and registers its own hooks/hooks.json, "
@@ -709,10 +785,10 @@ def doctor(settings_path):
             if not os.path.isfile(fence):
                 return (problems + [
                     "the loader-managed copy at %s wires a fence in its "
-                    "hooks/hooks.json but carries no tools/%s file, so the "
+                    "hooks/hooks.json but carries no %s file, so the "
                     "registered hook is dead: Claude Code will report a "
                     "hook error and continue, and writes proceed unfenced."
-                    % (_mask_home(copy), FENCE_BASENAME)], notes)
+                    % (_mask_home(copy), os.path.relpath(fence, copy))], notes)
             words = ["python3", fence]
             loader_command = "python3 %s" % shlex.quote(fence)
             loader_tools_dir = os.path.dirname(fence)
@@ -786,6 +862,12 @@ CheckResult = collections.namedtuple("CheckResult", "key title status message")
 
 STATUS_PASS = "PASS"
 STATUS_FAIL = "FAIL"
+# C-3 (repair, backend review 2026-09-10): a distinct status for a DOC-0
+# row whose function raised, so _status_exit_code can tell "this row
+# crashed" apart from an ordinary NO-DATA reading instead of both
+# collapsing into the same exit-0-eligible bucket a crash must never
+# share.
+STATUS_CRASHED = "CRASHED"
 STATUS_SKIP = "SKIP"
 
 CHECK_TITLES = collections.OrderedDict((
@@ -1665,6 +1747,890 @@ def run_all_checks(settings_path):
     ]
 
 
+# ---------------------------------------------------------------------------
+# DOC-0: the six-row status table. Separate from the fifteen-check surface
+# above (a different question: not "is every part of this install healthy"
+# but "can I trust the safety mechanisms and the recovery state right now,
+# in six lines"). Reuses that surface's own helpers (_mask_home, check_fence,
+# _git_tree_state, STATUS_* constants) rather than duplicating them.
+#
+# DECISION (non_goals asked for one, with its reason, here): this table
+# lives in doctor.py rather than becoming a new top-level command, because
+# rows 3 and 6 already need check_fence and _git_tree_state, which are
+# private to this file, and doctor.py is already "one command, plain
+# status" by charter (see the module docstring). --status is a new flag on
+# the existing parser, not a new script.
+#
+# WHY CODEX TRUST IS NEVER CONFIRMED BY ASKING CODEX (measured 2026-09-09,
+# read again below the row-4 function): this file's own module docstring
+# and the founder's own instructions for this run both say the status path
+# must never mutate the real ~/.codex. scripts/codex_hooks_install.py's
+# `hooks/list` read-back (the only way to ask Codex whether a hook is
+# TRUSTED rather than merely WIRED) runs Codex's own app-server as a
+# subprocess, and a live measurement on this machine (a throwaway
+# CODEX_HOME, snapshotted by file hash before and after one single
+# hooks/list call) showed several sqlite databases and a lock file changed
+# even though the call itself requests no write. So row 4 never invokes it;
+# see _status_codex_hooks for the safe, file-only signal it uses instead
+# and the honest limit that leaves it stating instead of asserting PASS.
+
+
+def _brother_repo_root():
+    """The checkout this doctor.py file lives in, four directories up
+    (products/brothermode/scripts/doctor.py -> repo root): the same
+    distance scripts/brother_run.py's own REPO_ROOT sits from itself (one
+    directory up), just deeper because this file sits one product further
+    in. Deterministic from __file__, no cwd or git dependency, so a status
+    row never depends on where the caller happened to cd from."""
+    here = os.path.abspath(__file__)
+    for _ in range(4):
+        here = os.path.dirname(here)
+    return here
+
+
+def _git_ls_files_tracked(repo_root, path):
+    """True if `git ls-files` inside repo_root reports `path` as tracked;
+    False on any git failure, a missing git, or a genuine "not tracked"
+    answer -- never raises, matching every other check in this file. Used
+    only by _load_top_level_module's D2 pin below. Both repo_root and path
+    are realpath'd before the relative path is computed: `path` arrives
+    already realpath'd from the caller, and repo_root must be too, or a
+    machine where the temp/home root itself is a symlink (macOS /var ->
+    /private/var) computes a bogus relative path and reports a genuinely
+    tracked file as untracked."""
+    if shutil.which("git") is None:
+        return False
+    repo_root = os.path.realpath(repo_root)
+    rel = os.path.relpath(path, repo_root)
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    try:
+        r = subprocess.run(
+            ["git", "-C", repo_root, "ls-files", "--error-unmatch", "--", rel],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            universal_newlines=True, timeout=30, env=env)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return r.returncode == 0
+
+
+def _runtime_root():
+    """(root, basis) for locating this file's sibling top-level scripts
+    (codex_hooks_install.py, capability_probe.py, brother_paths.py).
+
+    D13 (repair, adversarial review round 3, 2026-09-10): _brother_repo_root
+    walks a fixed four directories up from __file__ and is right about
+    WHERE that lands in a dev checkout, but says nothing about whether a
+    checkout is actually there. On an installed plugin (a copy, never a
+    checkout: no .git anywhere near it) that four-up root has no
+    repository to ask, so basis "checkout" below never held there. This
+    function is the seam that now tells the difference: basis is
+    "checkout" when the four-up root itself sits inside a real git
+    checkout (.git present there, file or directory, so a linked
+    worktree's own gitdir pointer still counts); otherwise the root comes
+    from the SAME seam the product already uses to find its own installed
+    location -- brother_paths.plugin_root()'s own rung order
+    (BROTHER_PLUGIN_ROOT, CLAUDE_PLUGIN_ROOT, PLUGIN_ROOT, read directly
+    here rather than through _load_top_level_module, which needs a root
+    to work from in the first place) -- with this file's own package root
+    (brother_paths.package_root()'s contract: a script under a "tools",
+    "runtime" or "scripts" directory answers that directory's own parent)
+    as the last rung when none of the three variables is set."""
+    checkout_root = _brother_repo_root()
+    if os.path.exists(os.path.join(checkout_root, ".git")):
+        return checkout_root, "checkout"
+    for var in ("BROTHER_PLUGIN_ROOT", "CLAUDE_PLUGIN_ROOT", "PLUGIN_ROOT"):
+        named = os.environ.get(var, "").strip()
+        if named:
+            return os.path.abspath(os.path.expanduser(named)), "plugin_root"
+    here = os.path.dirname(os.path.abspath(__file__))
+    if os.path.basename(here) in ("tools", "runtime", "scripts"):
+        return os.path.dirname(here), "package_root"
+    return here, "package_root"
+
+
+def _exec_module(name, path):
+    """(module, None) or (None, error-string) from exec'ing `path` as a
+    module named `name`; the last step both _load_top_level_module
+    branches below share, factored out so neither repeats it. Never
+    raises."""
+    try:
+        spec = importlib.util.spec_from_file_location(name, path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module, None
+    except Exception as exc:  # noqa: BLE001 - a check must never crash doctor
+        return None, "%s could not be loaded (%s: %s)" % (
+            _mask_home(path), type(exc).__name__, exc)
+
+
+def _manifest_digest_ok(directory, filename, path):
+    """(True, None) only when `directory` carries a checksum manifest
+    (RUNTIME-MANIFEST.json, then HOOKS-MANIFEST.json, the two shapes
+    scripts/bundle_runtime.py writes) that NAMES `filename` with a
+    sha256 matching the bytes stored at `path`. (False, reason) for
+    every other case, including the two this function used to treat
+    as a silent pass-through: no manifest present at all, and a
+    manifest present that simply does not list `filename`. Finding 5
+    (security review, 2026-09-10): the non-checkout branch of
+    _load_top_level_module is a plugin root realpath containment
+    plus this function as its only pin, so a pass-through here meant
+    a directory with no manifest, or a manifest that happened not to
+    mention the file, gave _exec_module (arbitrary code as the user)
+    the moment doctor.py --status ran there. An unreadable manifest,
+    an unhashable file, and a real digest mismatch are also (False,
+    reason): the tamper case this already caught. Never raises."""
+    found_manifest = False
+    for manifest_name in ("RUNTIME-MANIFEST.json", "HOOKS-MANIFEST.json"):
+        manifest_path = os.path.join(directory, manifest_name)
+        if not os.path.isfile(manifest_path):
+            continue
+        found_manifest = True
+        try:
+            with io.open(manifest_path, encoding="utf-8") as fh:
+                manifest = json.load(fh)
+        except (IOError, OSError, ValueError) as exc:
+            return False, ("%s could not be read: %s"
+                           % (_mask_home(manifest_path), exc))
+        entries = {e.get("path"): e.get("sha256")
+                  for e in manifest.get("files", [])
+                  if isinstance(e, dict)}
+        if filename not in entries:
+            continue
+        expected = entries[filename]
+        try:
+            with io.open(path, "rb") as fh:
+                actual = hashlib.sha256(fh.read()).hexdigest()
+        except (IOError, OSError) as exc:
+            return False, ("%s could not be hashed: %s"
+                           % (_mask_home(path), exc))
+        if actual != expected:
+            return False, ("%s digest for %s does not match: "
+                    "expected %s, got %s"
+                    % (_mask_home(manifest_path), filename,
+                       expected, actual))
+        return True, None
+    if found_manifest:
+        return False, ("%s carries a checksum manifest that does not "
+                "list %s: refused without a matching digest, never "
+                "exec-ed on an installed plugin with no git checkout "
+                "to confirm tracking instead"
+                % (_mask_home(directory), filename))
+    return False, ("%s has no RUNTIME-MANIFEST.json or "
+            "HOOKS-MANIFEST.json: refused without a signed digest, "
+            "never exec-ed on an installed plugin with no git "
+            "checkout to confirm tracking instead"
+            % _mask_home(directory))
+
+
+def _load_top_level_module(name, filename):
+    """Load a sibling top-level script (codex_hooks_install.py,
+    capability_probe.py, brother_paths.py) as a module named `name`, the
+    same way check_stranded_install above loads tools/bm_project_facts.py:
+    by file path, via importlib.util, never by adding a directory to
+    sys.path. None of the three import each other, so a spec-loaded copy
+    behaves exactly like a normal import. Returns (module, None) or
+    (None, error-string); never raises, the same never-crash promise
+    every check in this file keeps.
+
+    D2 (repair, adversarial review 2026-09-09): exec_module runs the
+    loaded file's top-level code, so this seam is pinned even though every
+    caller today passes a hardcoded filename.
+
+    D13 (repair, adversarial review round 3, 2026-09-10): D2's pin was
+    git-tracked-or-refuse, which only ever held inside a real checkout;
+    on an installed plugin (_runtime_root's basis "plugin_root" or
+    "package_root") there is no checkout to ask, so every row that loads
+    a sibling script through this seam degraded to NO-DATA on the exact
+    install the doctor exists to examine. Inside a checkout, behavior is
+    UNCHANGED: `filename` must resolve (after realpath) inside the
+    checkout's own scripts/ directory and be reported tracked by `git
+    ls-files`. Outside a checkout, `filename` is looked for under the
+    runtime root's own "runtime" directory (an installed plugin's mirrored
+    copy, per scripts/bundle_runtime.py) and then its "scripts" directory
+    (a layout that ships sources directly); pinned by realpath containment
+    inside whichever directory answers, and, when that directory ships its
+    own RUNTIME-MANIFEST.json or HOOKS-MANIFEST.json, additionally by the
+    file's own listed sha256 (_manifest_digest_ok) -- a tampered or stale
+    file sitting next to a real manifest is still refused. NO-DATA only
+    when none of these holds."""
+    root, basis = _runtime_root()
+    if basis == "checkout":
+        scripts_dir = os.path.realpath(os.path.join(root, "scripts"))
+        path = os.path.realpath(os.path.join(scripts_dir, filename))
+        if path != scripts_dir and not path.startswith(scripts_dir + os.sep):
+            return None, ("%s resolves outside the repository's own scripts "
+                          "directory (%s)" % (_mask_home(path), _mask_home(scripts_dir)))
+        if not os.path.isfile(path):
+            return None, "%s is not there" % _mask_home(path)
+        if not _git_ls_files_tracked(root, path):
+            return None, "%s is not tracked by git" % _mask_home(path)
+        return _exec_module(name, path)
+    for subdir in ("runtime", "scripts"):
+        candidate_dir = os.path.realpath(os.path.join(root, subdir))
+        path = os.path.realpath(os.path.join(candidate_dir, filename))
+        if path != candidate_dir and not path.startswith(candidate_dir + os.sep):
+            continue
+        if not os.path.isfile(path):
+            continue
+        matched, digest_err = _manifest_digest_ok(candidate_dir, filename,
+                                                  path)
+        if not matched:
+            return None, digest_err
+        return _exec_module(name, path)
+    return None, ("%s: no %s found under this install's own runtime or "
+                  "scripts directory (%s, no git checkout here to confirm "
+                  "tracking instead)" % (_mask_home(root), filename, basis))
+
+
+def _status_brother_runtime(_settings_path):
+    """Row 1: scripts/bundle_runtime.py --check, exit code AND printed
+    verdict must agree (a guard can express its true verdict in stdout
+    rather than its exit code, so reading only one of the two is how a
+    drifted bundle gets reported healthy)."""
+    script = os.path.join(_brother_repo_root(), "scripts", "bundle_runtime.py")
+    if not os.path.isfile(script):
+        return ("NO-DATA", "no scripts/bundle_runtime.py under %s: not a "
+                "dev checkout of this project" % _mask_home(_brother_repo_root()),
+                None)
+    try:
+        r = subprocess.run(["python3", script, "--check"],
+                           cwd=_brother_repo_root(),
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                           universal_newlines=True, timeout=120)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return ("NO-DATA", "could not run scripts/bundle_runtime.py --check: "
+                "%s" % _mask_home_text(str(exc)), None)
+    out = _mask_home_text((r.stdout or "").strip())
+    says_ok = "matches scripts/" in out
+    says_drift = "DRIFT:" in out
+    if r.returncode == 0 and says_ok and not says_drift:
+        return ("PASS", out.splitlines()[-1] if out else "matches", None)
+    if r.returncode != 0 and says_drift:
+        return ("FAIL", out, "python3 scripts/bundle_runtime.py")
+    return ("NO-DATA", "exit code (%d) and the printed verdict disagree: %s"
+            % (r.returncode, out[:500]), "python3 scripts/bundle_runtime.py --check")
+
+
+def _canonical_worktree_root(cwd):
+    """The first entry of `git worktree list --porcelain` run from cwd:
+    git's own contract lists the canonical (main) worktree first, whatever
+    linked worktree cwd itself sits in. Returns (path, None) or (None,
+    error-string); never raises."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    try:
+        r = subprocess.run(["git", "-C", cwd, "worktree", "list", "--porcelain"],
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                           universal_newlines=True, timeout=30, env=env)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return None, _mask_home_text(str(exc))
+    if r.returncode != 0:
+        return None, _mask_home_text((r.stderr or "").strip()) or "git worktree list failed"
+    for line in r.stdout.splitlines():
+        if line.startswith("worktree "):
+            return line[len("worktree "):].strip(), None
+    return None, "git worktree list printed no worktree entry"
+
+
+def _status_git_isolation(_settings_path):
+    """Row 2: PASS in a linked lane worktree (.git is a FILE there, a
+    directory in the canonical checkout) when the canonical checkout is
+    ALSO clean; FAIL when the canonical checkout is dirty, whether this
+    row is running from that checkout directly or from a linked worktree
+    beside it; NO-DATA outside git.
+
+    D4 (repair, adversarial review 2026-09-09): a linked worktree's own
+    PASS used to say nothing about the canonical (main) worktree it was
+    created from, so a dirty canonical tree sat silently behind an
+    isolated, clean lane. This row now always resolves the canonical
+    worktree via `git worktree list --porcelain` (its first entry, by
+    git's own contract) when it is running in a linked worktree, and names
+    the canonical checkout's own state in the message, never leaving it
+    unmentioned.
+
+    D9 (repair, adversarial review round 3, 2026-09-10): D4 put the
+    canonical checkout's dirty state into the MESSAGE but left the VALUE
+    at PASS regardless, so this row printed PASS with "DIRTY" sitting
+    inside its own text -- a verdict in the message and not in the value,
+    the estate's own recorded failure shape. The driven case: the SAME
+    repository state (main dirty) read PASS one directory over (run from
+    the linked worktree) from where it read FAIL (run from the canonical
+    checkout itself, the "else" branch below, unchanged by this repair).
+    A dirty canonical checkout is now FAIL from any worktree; the
+    linked-worktree fact stays in the message exactly as D4 put it
+    there."""
+    if shutil.which("git") is None:
+        return ("NO-DATA", "git is not on PATH", None)
+    cwd = os.getcwd()
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    try:
+        r = subprocess.run(["git", "-C", cwd, "rev-parse", "--show-toplevel"],
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                           universal_newlines=True, timeout=30, env=env)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return ("NO-DATA", "git could not be run: %s" % _mask_home_text(str(exc)), None)
+    if r.returncode != 0:
+        return ("NO-DATA", "not inside a git repository (ran from %s)"
+                % _mask_home(cwd), None)
+    top = r.stdout.strip()
+    if os.path.isfile(os.path.join(top, ".git")):
+        canon, canon_err = _canonical_worktree_root(top)
+        note = ""
+        canon_dirty = False
+        if canon_err:
+            note = ("; the canonical worktree could not be resolved: %s"
+                    % canon_err)
+        elif canon and os.path.realpath(canon) != os.path.realpath(top):
+            canon_state = _git_tree_state(canon)
+            if canon_state == "dirty":
+                canon_dirty = True
+                note = ("; the canonical checkout at %s is DIRTY"
+                        % _mask_home(canon))
+            elif canon_state == "clean":
+                note = ("; the canonical checkout at %s is clean"
+                        % _mask_home(canon))
+            else:
+                note = ("; the canonical checkout at %s could not be read"
+                        % _mask_home(canon))
+        message = ("running in a linked worktree at %s, isolated from "
+                  "the canonical checkout%s" % (_mask_home(top), note))
+        if canon_dirty:
+            return ("FAIL", message, "git status")
+        return ("PASS", message, None)
+    state = _git_tree_state(top)
+    if state is None:
+        return ("NO-DATA", "git status could not be read for %s"
+                % _mask_home(top), None)
+    if state == "clean":
+        return ("PASS", "the canonical checkout at %s is clean"
+                % _mask_home(top), None)
+    try:
+        r2 = subprocess.run(["git", "-C", top, "status", "--porcelain"],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            universal_newlines=True, timeout=30, env=env)
+        paths = [ln[3:] for ln in r2.stdout.splitlines() if ln.strip()]
+    except (OSError, subprocess.SubprocessError):
+        paths = []
+    return ("FAIL", "the canonical checkout at %s is dirty: %s"
+            % (_mask_home(top), ", ".join(paths[:10]) or "uncommitted changes"),
+            "git status")
+
+
+def _status_settings_path(explicit):
+    """The Claude Code settings.json this row checks: an explicit --settings
+    wins; otherwise scripts/brother_paths.py's own config_dir() (honors
+    CLAUDE_CONFIG_DIR, unlike this file's own default_settings_path, which
+    only ever looked under HOME); falling back to that HOME-only default
+    only when brother_paths itself cannot be loaded."""
+    if explicit:
+        return os.path.abspath(explicit)
+    bp, _err = _load_top_level_module("brother_paths", "brother_paths.py")
+    if bp is not None:
+        return bp.config_path("settings.json")
+    return default_settings_path()
+
+
+def _first_problem_line(message):
+    """The first "  - <problem>" line inside a check_fence FAIL message
+    (its own format: notes, then "PROBLEMS (N):", then one such line per
+    problem, then a footer), with the "  - " prefix stripped; the full
+    first line of `message` when none is found (defensive: some other
+    message shape).
+
+    Hostile case 5 (steering, 2026-09-09/10): check_fence's FAIL message
+    always starts with the NOTES collected before the failure was found
+    (a loader-plugin note, a "fence command: ..." note, or nothing at
+    all), never with the problem itself. Reading only
+    message.splitlines()[0], as this row's caller did before this fix,
+    showed a FAIL row's own explanatory note (once even just the bare
+    "PROBLEMS (N):" header, when there were no notes) and never the
+    actual problem text, so a real FAIL (a partial install, a dead
+    fence path, a missing file) printed no evidence of what was wrong."""
+    for line in message.splitlines():
+        if line.startswith("  - "):
+            return line[len("  - "):]
+    return message.splitlines()[0] if message else ""
+
+
+def _status_claude_hooks(settings_path):
+    """Row 3: reuses check_fence (the existing, already-audited fence
+    simulation, which never touches anything outside its own mkdtemp) as
+    is. N/A when the whole Claude config directory is absent (nothing here
+    applies to this machine at all), never inferred from settings.json
+    alone: a config directory that exists but has no settings.json yet is
+    a real, examined FAIL from check_fence, not an N/A."""
+    # config_dir is derived from settings_path itself (not re-resolved via
+    # brother_paths here), so this row always checks the SAME directory the
+    # settings_path it is about to hand check_fence actually lives in;
+    # brother_paths is only the picker of settings_path in the first place
+    # (_status_settings_path above), and re-deriving it independently here
+    # would let a caller-supplied settings_path (an explicit --settings, or
+    # a test fixture) disagree with an ambient CLAUDE_CONFIG_DIR/HOME.
+    config_dir = os.path.dirname(settings_path)
+    if not os.path.isdir(config_dir):
+        return ("N/A", "no Claude config directory at %s: nothing to check "
+                "here." % _mask_home(config_dir), None)
+    result = check_fence(settings_path)
+    if result.status == STATUS_FAIL:
+        # Hostile case 5 repair: the actual problem, not the leading note.
+        first_line = _first_problem_line(result.message)
+        return ("FAIL", first_line, "python3 scripts/install.py --upgrade")
+    first_line = result.message.splitlines()[0] if result.message else result.status
+    if result.status == STATUS_PASS:
+        return ("PASS", first_line, None)
+    return ("NO-DATA", first_line, None)
+
+
+def _count_trust_entries_by_line(block):
+    """The line scan used when tomllib is unavailable (Python 3.9, 3.10)
+    or does not parse the block cleanly. Pairs every [hooks.state."..."]
+    table header with the next "enabled = true" line, mirroring
+    write_trust's own format (trust_block in codex_hooks_install.py); the
+    smaller of the two tallies is used, exactly as before D3, so a block
+    hand-edited since Brother wrote it never over-counts.
+
+    D3 (repair, adversarial review 2026-09-09): a line whose first
+    non-space character is "#" is a TOML comment and is skipped before
+    either tally, so a commented-out block left behind by a hand edit can
+    no longer inflate the count."""
+    tables = 0
+    enabled = 0
+    for line in block.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped[0] == "#":
+            continue
+        if stripped.startswith('[hooks.state."'):
+            tables += 1
+        elif stripped == "enabled = true":
+            enabled += 1
+    return min(tables, enabled)
+
+
+def _count_trust_entries_by_toml(block):
+    """(count) or None. D3: when tomllib is present (Python 3.11+), parse
+    the trust block as a standalone TOML document -- TRUST_BEGIN and
+    TRUST_END are themselves "#" comment lines, so the block between them
+    is valid TOML on its own, and tomllib's own comment handling replaces
+    the "#" guess in _count_trust_entries_by_line entirely for this path.
+    Returns None on any parse failure, so the caller uses the line scan
+    above instead of trusting a partial parse."""
+    try:
+        doc = tomllib.loads(block)
+    except tomllib.TOMLDecodeError:  # sbe: allow-silent pure reader, never rewrites; None tells the caller to fall back to _count_trust_entries_by_line, which computes the same count without tomllib, so no finding is dropped
+        return None
+    state = doc.get("hooks", {}).get("state", {})
+    if not isinstance(state, dict):
+        return 0
+    return sum(1 for entry in state.values()
+              if isinstance(entry, dict) and entry.get("enabled") is True)
+
+
+def _codex_trust_entry_count(chi, config_path):
+    """(count, error). Counts Brother's own trust entries in config.toml,
+    purely as text, never by asking Codex. Uses tomllib
+    (_count_trust_entries_by_toml) when it is present and parses cleanly;
+    otherwise uses _count_trust_entries_by_line. Both ignore a
+    commented-out entry (D3, adversarial review 2026-09-09)."""
+    if not os.path.isfile(config_path):
+        return 0, None
+    try:
+        with io.open(config_path, encoding="utf-8") as fh:
+            text = fh.read()
+    except (IOError, OSError) as exc:
+        return 0, str(exc)
+    start = text.find(chi.TRUST_BEGIN)
+    if start < 0:
+        return 0, None
+    end = text.find(chi.TRUST_END, start)
+    block = text[start:end + len(chi.TRUST_END)] if end >= 0 else text[start:]
+    if tomllib is not None:
+        count = _count_trust_entries_by_toml(block)
+        if count is not None:
+            return count, None
+    return _count_trust_entries_by_line(block), None
+
+
+def _status_codex_hooks(_settings_path):
+    """Row 4: see the WHY CODEX TRUST IS NEVER CONFIRMED BY ASKING CODEX
+    note above this section. hooks.json content match (a pure read, via
+    codex_hooks_install.check) can reach FAIL/NO-DATA honestly; the trust
+    half is answered from config.toml text alone, which can prove NEEDS
+    TRUST for certain (no trust block at all) but can only ever prove NO-
+    DATA, never PASS, for "a trust block is recorded": recording once does
+    not guarantee the hook file has not changed since, and confirming that
+    would mean asking Codex, which this row will not do."""
+    chi, err = _load_top_level_module("codex_hooks_install", "codex_hooks_install.py")
+    if chi is None:
+        return ("NO-DATA", "could not load scripts/codex_hooks_install.py: %s"
+                % err, None)
+    home = os.path.abspath(os.path.expanduser(
+        os.environ.get("CODEX_HOME") or "~/.codex"))
+    default_home = os.path.realpath(os.path.expanduser("~/.codex"))
+    flag = " --allow-default-home" if os.path.realpath(home) == default_home else ""
+    try:
+        products = [os.path.join(chi.repo_root(), rel) for rel in chi.DEFAULT_PRODUCTS]
+        built = chi.build(products)
+    except Exception as exc:  # noqa: BLE001 - a check must never crash doctor
+        return ("NO-DATA", "could not compute the expected hooks document: "
+                "%s" % exc, None)
+    if built["problems"]:
+        return ("NO-DATA", "the shipped hooks could not be built: %s"
+                % "; ".join(built["problems"]), None)
+    install_repair = "python3 scripts/codex_hooks_install.py" + flag
+    trust_repair = "python3 scripts/codex_hooks_install.py --trust" + flag
+    verdict, detail = chi.check(home, built["document"])
+    if verdict != "PASS":
+        return ("NO-DATA", _mask_home_text(detail), install_repair)
+    expected = sum(len(b["hooks"]) for blocks in built["document"]["hooks"].values()
+                  for b in blocks)
+    if expected == 0:
+        return ("NO-DATA", "the shipped hooks document carries no hook "
+                "command to check trust for", None)
+    config_path = os.path.join(home, "config.toml")
+    trust_count, trust_err = _codex_trust_entry_count(chi, config_path)
+    if trust_err:
+        return ("NO-DATA", "hooks.json matches, but %s could not be read: %s"
+                % (_mask_home(config_path), trust_err), trust_repair)
+    if trust_count >= expected:
+        return ("NO-DATA",
+                "hooks.json matches and %s records %d trusted hook(s) "
+                "matching the %d wired here; this status path never asks "
+                "Codex itself to reconfirm the hash is current, because "
+                "that call writes to your Codex home even though it makes "
+                "no write request of its own (measured 2026-09-09: one "
+                "hooks/list read-back rewrote several sqlite databases and "
+                "created a new lock file under a throwaway CODEX_HOME). "
+                "Run the repair command yourself for Codex's own "
+                "confirmation." % (_mask_home(config_path), trust_count, expected),
+                trust_repair)
+    return ("NEEDS TRUST",
+            "hooks.json matches but %s records only %d of %d hook(s) as "
+            "trusted." % (_mask_home(config_path), trust_count, expected),
+            trust_repair)
+
+
+def _status_vault(_settings_path):
+    """Row 5: capability_probe's own vault-recall capability (every
+    alternative it names tried before MISSING, never one path checked and
+    stopped)."""
+    cp, err = _load_top_level_module("capability_probe", "capability_probe.py")
+    if cp is None:
+        return ("NO-DATA", "could not load scripts/capability_probe.py: %s"
+                % err, None)
+    vault_cap = next((c for c in cp.CAPABILITIES if c.get("name") == "vault-recall"),
+                     None)
+    if vault_cap is None:
+        return ("NO-DATA", "capability_probe.py no longer names a "
+                "vault-recall capability", None)
+    state, detail, tried = cp.probe(vault_cap)
+    detail = _mask_home_text(detail)
+    if state == cp.PRESENT:
+        return ("PASS", "vault-recall: %s" % detail, None)
+    if state == cp.MISSING:
+        tried_str = "; ".join(
+            "%s (%s)" % (_mask_home_text(p), _mask_home_text(d))
+            for p, _s, d in tried)
+        return ("NOT CONFIGURED", "vault-recall: %s" % tried_str,
+                "python3 scripts/setup.py --reconfigure")
+    return ("NO-DATA", "vault-recall could not be probed: %s" % detail, None)
+
+
+def _journal_last_line_record(path):
+    """(record, None) from journal.jsonl's last non-blank line, parsed as a
+    JSON object, or (None, reason) when the file has zero lines or that
+    last line is not a valid JSON object. Never raises.
+
+    D6 (repair, adversarial review 2026-09-09): only the LAST line has to
+    parse. A torn line earlier in the file (an append caught mid-write) is
+    journal.py's own documented, non-fatal case and is not this function's
+    concern; a zero-byte or bad-last-line file used to read as readable
+    here, which is what let an empty run directory's journal show PASS."""
+    try:
+        with io.open(path, encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
+    except (IOError, OSError) as exc:
+        return None, str(exc)
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    if not lines:
+        return None, "%s has zero lines" % os.path.basename(path)
+    try:
+        record = json.loads(lines[-1])
+    except ValueError as exc:
+        return None, "%s: last line is not valid JSON (%s)" % (
+            os.path.basename(path), exc)
+    if not isinstance(record, dict):
+        return None, "%s: last line is not a JSON object" % os.path.basename(path)
+    return record, None
+
+
+def _run_journal_timestamp(path):
+    """The UTC-aware datetime parsed from journal.jsonl's last valid line's
+    "at" field (journal.append's own field, ISO 8601 with offset), or None
+    when the file is missing, its last line does not parse, or "at" is
+    missing or unparseable. Never raises."""
+    if not os.path.isfile(path):
+        return None
+    record, _reason = _journal_last_line_record(path)
+    if record is None:
+        return None
+    at = record.get("at")
+    if not isinstance(at, str):
+        return None
+    try:
+        return datetime.datetime.fromisoformat(at)
+    except ValueError:  # sbe: allow-silent pure reader, never rewrites; None tells _newest_run_dir this run has no usable timestamp, and it falls back to directory mtime and names that fallback in its own note, so nothing is dropped
+        return None
+
+
+def _newest_run_dir(runs_dir, names):
+    """Which of these run directory names (immediate children of runs_dir)
+    is newest: (name, note). Every name in `names` is a candidate; its
+    comparison key is its own journal timestamp when
+    _run_journal_timestamp finds one, else the run directory's own
+    modification time -- both converted to an aware UTC datetime so the
+    two bases compare on one axis. The candidate with the largest key
+    wins. note names which basis decided the winner, and is None only
+    when a real journal timestamp decided it with nothing to explain;
+    names must be non-empty.
+
+    D7 (repair, adversarial review 2026-09-09): mtime alone picked the
+    wrong run when an older directory's journal.jsonl was appended to in
+    place (an append never moves an existing file's own mtime) while a
+    newer directory sat untouched since creation.
+
+    D10 (repair, adversarial review round 3, 2026-09-10): D7's own fix
+    still only ever considered directories whose journal carried a
+    parseable timestamp; a run directory with NO journal at all was
+    dropped before comparison, invisible rather than ranked, so the row
+    reported PASS about a run measured four days older than the newest
+    directory actually on disk. Every directory is now a candidate: a
+    journal-less run compares by its own directory mtime right alongside
+    the journal-timestamped ones, so a newer journal-less run wins (and
+    is then examined on its own merits by the caller) instead of being
+    silently passed over for a stale journaled one.
+
+    D12 (repair, adversarial review round 3, 2026-09-10): a journal
+    timestamp with no UTC offset ("naive") compared directly against one
+    that carries an offset ("aware") raises TypeError, which used to
+    crash this whole row. A naive timestamp is now treated as UTC (and
+    the note says so, when it decided the winner) before anything is
+    compared."""
+    candidates = []  # (comparable aware-UTC datetime, basis, name, was_naive)
+    for name in names:
+        raw_ts = _run_journal_timestamp(os.path.join(runs_dir, name, "journal.jsonl"))
+        if raw_ts is not None:
+            was_naive = raw_ts.tzinfo is None
+            ts = (raw_ts.replace(tzinfo=datetime.timezone.utc) if was_naive
+                 else raw_ts.astimezone(datetime.timezone.utc))
+            candidates.append((ts, "journal", name, was_naive))
+        else:
+            mtime = os.path.getmtime(os.path.join(runs_dir, name))
+            mdt = datetime.datetime.fromtimestamp(mtime, tz=datetime.timezone.utc)
+            candidates.append((mdt, "mtime", name, False))
+    candidates.sort(key=lambda c: c[0])
+    _winner_dt, winner_basis, winner_name, winner_naive = candidates[-1]
+    if winner_basis == "mtime":
+        journaled = sorted(n for _dt, basis, n, _naive in candidates
+                           if basis == "journal")
+        if journaled:
+            note = ("%s has no usable journal.jsonl timestamp; picked by "
+                    "directory modification time, newer than the "
+                    "journaled run(s) here: %s"
+                    % (winner_name, ", ".join(journaled)))
+        else:
+            note = ("no candidate run's journal.jsonl carried a usable "
+                    "timestamp; picked by directory modification "
+                    "time instead")
+    elif winner_naive:
+        note = ("%s's own journal timestamp carries no UTC offset; "
+                "treated as UTC" % winner_name)
+    else:
+        note = None
+    return winner_name, note
+
+
+def _readable_recovery_file(path):
+    """(True, None) or (False, reason). journal.jsonl defers to
+    _journal_last_line_record (D6: zero lines or an invalid last line is
+    unreadable, never PASS); capsule.json and claims.json are each one
+    JSON object, checked whole."""
+    if os.path.basename(path) == "journal.jsonl":
+        record, reason = _journal_last_line_record(path)
+        return (True, None) if record is not None else (False, reason)
+    try:
+        with io.open(path, encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
+    except (IOError, OSError) as exc:
+        return False, str(exc)
+    try:
+        json.loads(text)
+    except ValueError as exc:
+        return False, str(exc)
+    return True, None
+
+
+def _status_recovery_store(_settings_path):
+    """Row 6: the newest run directory's journal.jsonl, capsule.json and
+    claims.json (whichever of the three it actually carries; a run
+    predating one of them is not a failure, continuity.py's own docstring
+    says the same about a missing journal). No runs root at all is NO-DATA,
+    not FAIL: a fresh install has none.
+
+    D6/D7 (repair, adversarial review 2026-09-09): a zero-byte or
+    bad-last-line journal.jsonl is this row's own NO-DATA, named by file,
+    never PASS; capsule.json or claims.json corruption still FAILs the row
+    outright, since those are single JSON objects with no torn-append case
+    to excuse a bad read. The newest run is picked by _newest_run_dir
+    (journal timestamp first, directory mtime only as a named fallback)."""
+    runs_dir = os.path.join(_brother_repo_root(), "docs", "plan", "runs")
+    if not os.path.isdir(runs_dir):
+        return ("NO-DATA", "no runs root yet at %s: a fresh install has "
+                "none, that is not a failure" % _mask_home(runs_dir), None)
+    try:
+        names = [n for n in os.listdir(runs_dir)
+                if os.path.isdir(os.path.join(runs_dir, n))]
+    except OSError as exc:
+        return ("NO-DATA", "%s could not be listed: %s"
+                % (_mask_home(runs_dir), exc), None)
+    if not names:
+        return ("NO-DATA", "%s exists but holds no runs yet"
+                % _mask_home(runs_dir), None)
+    latest_name, pick_note = _newest_run_dir(runs_dir, names)
+    latest_dir = os.path.join(runs_dir, latest_name)
+    suffix = (" (%s)" % pick_note) if pick_note else ""
+    checked = []
+    for name in ("journal.jsonl", "capsule.json", "claims.json"):
+        path = os.path.join(latest_dir, name)
+        if os.path.isfile(path):
+            ok, reason = _readable_recovery_file(path)
+            checked.append((name, ok, reason))
+    if not checked:
+        # D10: pick_note is carried here too, never only into the three
+        # branches below it -- a journal-less run picked over an older
+        # journaled one is exactly the shape most likely to land here
+        # (nothing of the three files to check at all), and that is the
+        # one case where staying silent about the basis would put the
+        # newer, empty run back in the position D10 fixed: visible only
+        # as an unexplained NO-DATA, its relationship to the journaled
+        # run it outranked left unsaid.
+        return ("NO-DATA", "the most recent run at %s holds none of "
+                "journal.jsonl, capsule.json or claims.json to check%s"
+                % (_mask_home(latest_dir), suffix), None)
+    broken = [(n, r) for n, ok, r in checked if not ok]
+    journal_broken = [(n, r) for n, r in broken if n == "journal.jsonl"]
+    other_broken = [(n, r) for n, r in broken if n != "journal.jsonl"]
+    if other_broken:
+        return ("FAIL", "%s: %s%s" % (_mask_home(latest_dir),
+                "; ".join("%s unreadable (%s)" % (n, r) for n, r in other_broken),
+                suffix), None)
+    if journal_broken:
+        n, r = journal_broken[0]
+        return ("NO-DATA", "%s: %s unreadable (%s)%s" % (
+                _mask_home(latest_dir), n, r, suffix), None)
+    return ("PASS", "%s: %s readable%s" % (_mask_home(latest_dir),
+            ", ".join(n for n, _ok, _r in checked), suffix), None)
+
+
+_STATUS_ROWS = (
+    ("Brother runtime", _status_brother_runtime),
+    ("Git isolation", _status_git_isolation),
+    ("Claude safety hooks", _status_claude_hooks),
+    ("Codex safety hooks", _status_codex_hooks),
+    ("Vault", _status_vault),
+    ("Recovery store", _status_recovery_store),
+)
+# D8 (repair, adversarial review 2026-09-09): one tuple of (label, callable)
+# pairs, replacing the earlier STATUS_ROW_LABELS tuple plus the
+# _STATUS_ROW_FUNCS dict it was joined to by a string key -- two parallel
+# structures kept in step by hand, with five lambdas that only existed to
+# discard the settings_path argument the row function did not want. Every
+# row function now takes settings_path (four of them as the deliberately
+# unused _settings_path), so this list can hold the plain callables.
+
+
+def run_status_rows(settings_path):
+    """The DOC-0 six-row table: [(label, status, message, repair), ...] in
+    _STATUS_ROWS order. A row function that raises becomes its own row
+    rather than aborting the other five (the same never-crash promise
+    _run_check keeps for the fifteen-check surface above) -- but it is
+    marked STATUS_CRASHED, never plain NO-DATA (C-3, repair, backend
+    review 2026-09-10): a check that could not run is not a clean
+    NO-DATA reading, and _status_exit_code must be able to tell the two
+    apart so a crashed safety-fence or git-isolation row can never exit
+    0 alongside five real PASSes."""
+    rows = []
+    for label, func in _STATUS_ROWS:
+        try:
+            status, message, repair = func(settings_path)
+        except Exception as exc:  # noqa: BLE001 - one row must never crash the table
+            status, message, repair = (
+                STATUS_CRASHED, "this row crashed (%s: %s)" % (type(exc).__name__, exc),
+                None)
+        rows.append((label, status, message, repair))
+    return rows
+
+
+def print_status_table(rows):
+    width = max(len(label) for label, _s, _m, _r in rows)
+    for label, status, message, repair in rows:
+        _out("%s  %s" % (label.ljust(width), status))
+        for line in (message or "").splitlines():
+            _out("  %s" % line)
+        if repair:
+            _out("  repair: %s" % repair)
+
+
+def _status_exit_code(rows):
+    """The DOC-0 status table's own exit code, computed purely from each
+    row's status (rows are (label, status, message, repair) 4-tuples):
+    EXIT_PROBLEMS when any row is FAIL or STATUS_CRASHED; EXIT_OK when no
+    row FAILs or crashes and at least one row is PASS; EXIT_NO_PASS when
+    no row FAILs or crashes and none reaches PASS either.
+
+    D5 (repair, adversarial review 2026-09-09): a table where every row
+    landed on NO-DATA, N/A, NEEDS TRUST or NOT CONFIGURED used to exit 0,
+    the "population of all NO-DATA composed into a PASS" failure the
+    reviewer drove by forcing all six rows. Pure and side-effect free, so a
+    test can hand it fabricated rows directly rather than faking six real
+    environments to reach all three exit codes.
+
+    C-3 (repair, backend review 2026-09-10): a row whose function raised
+    used to land on plain NO-DATA, so a crashed safety-fence or git
+    isolation row exited 0 as long as the other five rows read PASS or
+    better -- a check that never ran read to a script as a healthy
+    install. STATUS_CRASHED now forces EXIT_PROBLEMS the same as a FAIL,
+    before the PASS count is even looked at."""
+    statuses = [s for _l, s, _m, _r in rows]
+    if any(s in (STATUS_FAIL, STATUS_CRASHED) for s in statuses):
+        return EXIT_PROBLEMS
+    if any(s == STATUS_PASS for s in statuses):
+        return EXIT_OK
+    return EXIT_NO_PASS
+
+
+def main_status(explicit_settings):
+    settings_path = _status_settings_path(explicit_settings)
+    rows = run_status_rows(settings_path)
+    print_status_table(rows)
+    _out("")
+    # C-3: a crashed row is also a problem row for this summary line, not
+    # only a literal FAIL -- otherwise "0 of 6 row(s) FAIL" would print
+    # beside an EXIT_PROBLEMS exit code caused by a row that crashed.
+    fail_count = sum(1 for _l, s, _m, _r in rows
+                     if s in (STATUS_FAIL, STATUS_CRASHED))
+    code = _status_exit_code(rows)
+    if code == EXIT_PROBLEMS:
+        _out("%d of %d row(s) FAIL or crashed." % (fail_count, len(rows)))
+        return code
+    if code == EXIT_NO_PASS:
+        _out("no row FAILs, but no row reached PASS either: this table "
+             "measured nothing that passed. Run the repair command named "
+             "above for each row, then re-run --status.")
+        return code
+    _out("no row FAILs. A row that is not PASS still names its own repair "
+         "command above; run it by hand.")
+    return code
+
+
 def build_parser():
     p = argparse.ArgumentParser(
         prog="doctor.py",
@@ -1679,6 +2645,13 @@ def build_parser():
                    help="treat any SKIP as a failure too: exit nonzero and "
                         "list each skipped check and why (default: a SKIP "
                         "can be legitimate and still exits 0)")
+    p.add_argument("--status", action="store_true",
+                   help="print the six-row DOC-0 status table (Brother "
+                        "runtime, Git isolation, Claude/Codex safety hooks, "
+                        "Vault, Recovery store) instead of the fifteen-check "
+                        "report, and write nothing; refused (exit 2) when "
+                        "combined with --json or --strict (D1, adversarial "
+                        "review 2026-09-09)")
     return p
 
 
@@ -1688,6 +2661,14 @@ def main(argv):
         _err("doctor.py: needs Python 3.9 or newer; this interpreter is %s"
              % platform.python_version())
         return EXIT_UNSUPPORTED
+    if args.status:
+        if args.json or args.strict:
+            _err("doctor.py: --status cannot be combined with --json or "
+                 "--strict (D1, adversarial review 2026-09-09); run "
+                 "--status alone, or drop --status to use --json/--strict "
+                 "with the fifteen-check report.")
+            return EXIT_USAGE
+        return main_status(args.settings)
     settings_path = os.path.abspath(args.settings or default_settings_path())
 
     checks = run_all_checks(settings_path)

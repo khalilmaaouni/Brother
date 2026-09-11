@@ -161,6 +161,28 @@ class AThrowawayCloneCommitIsNoDataNotDrift(unittest.TestCase):
         self.assertEqual([f[0] for f in found], ["DRIFT"])
         self.assertIn("fc588dcf712", found[0][2])
 
+    THROWAWAY_LANDED = ("a fresh clone under /tmp/x8-toy, then landed: "
+                        "decisive=toy committed: a9826e4 toy")
+
+    def test_a_throwaway_clone_commit_is_not_called_local_only(self):
+        """Row X8, 2026-09-11: check_evidence_commits read a9826e4 NO-DATA
+        (discarded clone) while check_landed_claims read the same commit
+        DRIFT 'local only'. It is in no repository at all."""
+        doc = board([{"id": "X8", "status": "DONE",
+                      "evidence": self.THROWAWAY_LANDED}])
+        found = D.check_landed_claims(doc, runner=self._missing_everywhere)
+        self.assertEqual([f for f in found if f[0] == "DRIFT"], [])
+
+    def test_a_throwaway_context_commit_that_EXISTS_locally_still_drifts(self):
+        """Backwards: the same text, but the commit resolves locally and no
+        remote branch holds it, so it IS local only and must still drift."""
+        doc = board([{"id": "X8", "status": "DONE",
+                      "evidence": self.THROWAWAY_LANDED}])
+        found = D.check_landed_claims(
+            doc, runner=lambda cmd, **kw: type("P", (), {"returncode": 0,
+                                                         "stdout": ""})())
+        self.assertEqual([f[0] for f in found], ["DRIFT"])
+
 
 class ASubPartsOwnStatusIsNotTheRows(unittest.TestCase):
     """The seventh false-positive class: row H5's evidence reads 'P1.1

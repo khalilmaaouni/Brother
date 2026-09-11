@@ -256,8 +256,15 @@ def review_unit(row, rev, files, cwd, cmd, ask=None, runner=None,
     diff_text, problem = unit_diff(cwd, rev, files, runner=diff_runner)
     classes = receipt_door.unit_classes(row, files, diff_text)
     tier, risk_class, reviewer = receipt_door.unit_tier(row, files, diff_text)
+    # accept_delivery.review_from_run_dir's own acceptance gate
+    # (_validate_review) requires reviewed_revision and scope on any
+    # review.json shape it accepts; both are already known here (`rev`
+    # is the revision this diff was read at, `files` is the unit's own
+    # scope), so the stamp carries them from the start rather than
+    # leaving accept_delivery to invent them.
     stamp = {"tier": tier, "class": risk_class, "reviewer": reviewer,
-             "unmeasured_classes": classes[1:], "state": "", "findings": []}
+             "unmeasured_classes": classes[1:], "state": "", "findings": [],
+             "reviewed_revision": rev, "scope": list(files or [])}
     if tier != "high":
         stamp["state"] = ("%s: this unit crossed no risk boundary, so no "
                           "reviewer was dispatched" % NODATA)

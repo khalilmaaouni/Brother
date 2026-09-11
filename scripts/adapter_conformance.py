@@ -255,7 +255,7 @@ def _under_temp(path):
     for base in (tempfile.gettempdir(), "/tmp", "/private/tmp"):
         try:
             base_real = os.path.realpath(base)
-        except OSError:
+        except OSError:  # sbe: allow-silent an unavailable temp root cannot make this path temporary, so the next configured root is tried
             continue
         if real == base_real or real.startswith(base_real + os.sep):
             return True
@@ -303,7 +303,7 @@ def _previous_tag(current, root=REPO):
         proc = subprocess.run(["git", "tag", "--list", "v[0-9]*"],
                               capture_output=True, text=True, timeout=30,
                               cwd=root)
-    except (OSError, subprocess.TimeoutExpired):
+    except (OSError, subprocess.TimeoutExpired):  # sbe: allow-silent an unavailable git tag listing leaves lifecycle history unknown rather than inventing a previous tag
         return None
     if proc.returncode != 0:
         return None
@@ -312,7 +312,7 @@ def _previous_tag(current, root=REPO):
         try:
             return tuple(int(x) for x in tag[1:].split("."))
         except ValueError:
-            return None
+            return None  # sbe: allow-silent malformed tag is excluded from version comparison
     cur = key(current)
     older = [t for t in proc.stdout.split() if key(t) and cur and key(t) < cur]
     return max(older, key=key) if older else None

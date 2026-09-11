@@ -210,12 +210,21 @@ class VaultRecallHookWithholdsUnderAnUnknownSeam(_EnvSavingCase):
 
     def test_every_block_is_withheld_and_names_the_unknown_seam(self):
         os.environ["BM_VAULT_DISABLE_LIFECYLE_GATE"] = "1"
-        out = "\n  widget fact  [lesson, harvest]\n    /tmp/widget-fact.md\n"
+        out = ("\n  widget fact  [lesson, harvest]\n"
+               "    widget does a thing, apply it\n"
+               "    /tmp/widget-fact.md\n")
         records, out2 = self.hook.lesson_states(out, "/tmp")
         self.assertEqual(records, [])
         self.assertIn("WITHHELD", out2)
         self.assertIn("BM_VAULT_DISABLE_LIFECYLE_GATE", out2)
-        self.assertNotIn("widget fact", out2)
+        # N8(b) (2026-09-08) routes this branch through
+        # _tombstone_note_blocks: the title stays, labelled WITHHELD, the
+        # way every other withheld block is shown, and the body is dropped.
+        # So no line serves the note unlabelled and its text never appears.
+        for line in out2.split("\n"):
+            if "widget fact" in line:
+                self.assertTrue(line.startswith("  WITHHELD ("), line)
+        self.assertNotIn("widget does a thing", out2)
 
 
 class BmVaultCheckIsLoud(_EnvSavingCase):
@@ -324,7 +333,11 @@ class VaultRecallHookRecordsCarryTheMarker(_EnvSavingCase):
         # no record at all, seam active or not (lesson_states' own,
         # pre-existing contract).
         self._set("BM_VAULT_DISABLE_ANCHOR_CHECK", "1")
-        withheld_out = "\n  WITHHELD (stale)  widget fact  [lesson, harvest]\n    reason: gone\n"
+        # A block reads as withheld only when it carries bm_vault.py's own
+        # marker line (vault_recall_hook._block_is_withheld, never the
+        # title's text), so the fixture prints it the way bm_vault.py does.
+        withheld_out = ("\n  WITHHELD (stale)  widget fact  [lesson, harvest]\n"
+                        "    reason: gone\n%s\n" % self.hook._WITHHELD_MARKER_LINE)
         records, _out2 = self.hook.lesson_states(withheld_out, self.tmp)
         self.assertEqual(records, [])
 

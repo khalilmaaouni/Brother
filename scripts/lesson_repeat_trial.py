@@ -69,6 +69,20 @@ import repeat_guard  # noqa: E402
 CAPTURE_EXIT = re.compile(r"^\[exit (-?\d+) after [\d.]+s\]")
 
 DEFAULT_STORE = os.path.expanduser("~/.claude/evidence")
+
+
+def portable(path):
+    """The caller's home collapsed back to ~, so the record names a location
+    rather than one account's spelling of it; the public export refuses a
+    file that only resolves on the machine that wrote it. Anything outside
+    home is returned as its absolute path."""
+    home = os.path.expanduser("~")
+    path = os.path.abspath(path)
+    if path == home or path.startswith(home + os.sep):
+        return "~" + path[len(home):]
+    return path
+
+
 DEFAULT_RESULTS_DIR = os.path.join(ROOT, "benchmarks", "results")
 
 
@@ -302,8 +316,8 @@ def cmd_trial(args):
 
     record = {
         "generated": datetime.date.today().isoformat(),
-        "log": os.path.abspath(args.log),
-        "lessons": os.path.abspath(args.lessons),
+        "log": portable(args.log),
+        "lessons": portable(args.lessons),
         "commands": len(rows),
         "failures": sum(1 for r in rows if failed(r)),
         "described_failures": n,

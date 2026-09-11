@@ -111,6 +111,7 @@ import statistics
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -122,6 +123,7 @@ import claim_store  # noqa: E402
 import contract_check  # noqa: E402
 import decide  # noqa: E402
 import door  # noqa: E402
+import fast_path  # noqa: E402
 import integrate  # noqa: E402
 import journal  # noqa: E402
 import loom  # noqa: E402
@@ -130,6 +132,7 @@ import managed_safety  # noqa: E402
 import receipt_door  # noqa: E402
 import run_heartbeat  # noqa: E402
 import work_record  # noqa: E402
+import worktree_lane  # noqa: E402
 
 NODATA = "NO-DATA"
 DOOR = os.path.join(HERE, "door.py")
@@ -492,6 +495,200 @@ def unmet_contract_checks(contract, units):
         if not any(dc.startswith(command) for dc in done_checks):
             missing.append((check.get("id", "?"), command))
     return missing
+
+
+#: FAST-0 (night run 2026-09-09, CONSOLIDATED): a deterministic, no-model-
+#: call route for an outcome that already names its own file(s) and its own
+#: check -- option A of docs/decisions/light-path-for-small-changes-2026-09-
+#: 04.json, whose ruling is still PENDING. This is evaluated once, before
+#: any session opens, and never itself decides what a normal outcome's plan
+#: looks like: it only recognizes the narrow case where a plan needs no
+#: deciding at all. Every reason it refuses is recorded on the same line the
+#: decomposed route already prints (see the intent screen's plan-source
+#: line, below).
+#:
+#: ONE PREDICATE, NOT TWO. The functions below turn a free-text outcome
+#: sentence into a CANDIDATE unit -- which existing files and which
+#: existing check the sentence names -- and that is ALL they decide. Every
+#: judgment about whether that candidate is SAFE to run without a planning
+#: session (no risk wording, no manifest or generated-surface write, a
+#: clean base, an at-most-2-path write scope, the check does not already
+#: pass) is asked of fast_path.eligible(), the one owner scripts/fast_path.py
+#: already was for that decision (design-P2.md, steering 8.3/8.5/8.6/8.10).
+#: A predicate that also owned its own deny list would be the exact
+#: "two predicates for one decision" this consolidation exists to remove.
+_FAST_ROUTE_TOKEN_RE = re.compile(r"\S+")
+#: Punctuation an outcome sentence wraps a path or check in, stripped from
+#: each whitespace-split token before it is judged. Never a dot: a dot is
+#: part of the extension a real path needs, and the fixtures below never
+#: end a sentence immediately after one.
+_FAST_ROUTE_STRIP_CHARS = "\"'`,;:()[]{}!?"
+_FAST_ROUTE_TEST_MODULE_RE = re.compile(r"^scripts/test_[A-Za-z0-9_]+\.py$")
+
+
+def _fast_route_tokens(text):
+    out = []
+    for tok in _FAST_ROUTE_TOKEN_RE.findall(text):
+        stripped = tok.strip(_FAST_ROUTE_STRIP_CHARS)
+        if stripped:
+            out.append(stripped)
+    return out
+
+
+def _fast_route_check_all_registry(cwd):
+    """[(name, command), ...] read from <cwd>/scripts/check_all.sh's own
+    `run_check "<name>" <command>` lines (this repository's own convention,
+    reused rather than reinvented). [] when that file is absent or holds no
+    such line: a target repository need not carry one for the OTHER check
+    kind (an existing scripts/test_*.py module) to still work."""
+    path = os.path.join(cwd, "scripts", "check_all.sh")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+    except OSError:
+        return []
+    out = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line.startswith("run_check "):
+            continue
+        m = re.match(r'^run_check\s+"([^"]+)"\s+(.+)$', line)
+        if m:
+            out.append((m.group(1), m.group(2).strip()))
+    return out
+
+
+def _fast_route_test_module_check(token, cwd):
+    """"python3 -m unittest <dotted module>" when `token` is an existing,
+    non-symlink scripts/test_*.py path under `cwd`; None otherwise (not a
+    refusal by itself: the token may simply be prose, or one of the 1-3
+    files)."""
+    if not _FAST_ROUTE_TEST_MODULE_RE.match(token):
+        return None
+    full = os.path.join(cwd, token)
+    if not os.path.isfile(full) or os.path.islink(full):
+        return None
+    return "python3 -m unittest %s" % token[:-3].replace("/", ".")
+
+
+def _fast_route_file_candidate(token, cwd):
+    """The token itself, normalized, when it denotes something real on the
+    filesystem -- absolute exactly as written, relative against `cwd` --
+    or None when it is simply not a path at all (ordinary prose in the
+    outcome sentence). This is candidate DETECTION only: "does the
+    sentence name a real path", never a safety judgment. Whether that path
+    is SAFE to touch (not absolute, not escaping the repository, not a
+    symlink, not a directory, not a manifest) is fast_path.eligible's call
+    alone (steering 8.3) -- an unsafe-shaped token is still returned here
+    and refused downstream, by the one owner of that decision, with one
+    reason."""
+    if token.startswith("~"):
+        return None
+    full = token if os.path.isabs(token) else os.path.join(cwd, token)
+    if not os.path.exists(full):
+        return None
+    if os.path.isabs(token):
+        return token
+    return os.path.normpath(token).replace(os.sep, "/")
+
+
+def fast_route_eligibility(outcome, cwd):
+    """(eligible, reason, files, check): builds the candidate from the
+    outcome text (which existing files, which existing check), then asks
+    fast_path.eligible() -- the single owner of every safety condition --
+    whether the light path applies. Never raises: any exception anywhere
+    below, including inside fast_path.eligible() itself, is caught here
+    and reported as an ineligibility reason, so a predicate bug can only
+    ever cost the fast route, never crash the normal one it guards."""
+    try:
+        return _fast_route_eligibility(outcome, cwd)
+    except Exception as exc:  # sbe: allow-broad predicate-boundary: any failure building or judging the candidate demands the normal route, not a crash
+        return (False,
+                "the eligibility predicate raised %s: %s"
+                % (type(exc).__name__, exc), [], None)
+
+
+def _fast_route_eligibility(outcome, cwd):
+    text = str(outcome or "")
+    tokens = _fast_route_tokens(text)
+    registry = _fast_route_check_all_registry(cwd)
+
+    checks_found = []
+    files_found = []
+    for tok in tokens:
+        check = _fast_route_test_module_check(tok, cwd)
+        if check:
+            if check not in checks_found:
+                checks_found.append(check)
+            continue
+        path = _fast_route_file_candidate(tok, cwd)
+        if path and path not in files_found:
+            files_found.append(path)
+    for _name, command in registry:
+        if command and command in text and command not in checks_found:
+            checks_found.append(command)
+
+    if not files_found:
+        return False, "the outcome text names no existing file", [], None
+    if not checks_found:
+        return False, "the outcome text names no check", [], None
+    if len(checks_found) > 1:
+        return (False, "the outcome text names more than one check", [],
+                None)
+    check = checks_found[0]
+
+    # THE SEAM: everything from here down is fast_path.eligible()'s
+    # decision, not this function's. `objective` carries the real outcome
+    # sentence (not a boilerplate string) so receipt_door.risk_triggers,
+    # which fast_path.eligible calls, still sees risk wording that sits in
+    # surrounding prose rather than in a file or check name -- exactly the
+    # coverage the old inline deny list gave by scanning the whole
+    # sentence.
+    candidate_unit = {
+        "id": "F1",
+        "objective": text,
+        "done_check": check,
+        "owns": files_found,
+        "depends_on": [],
+    }
+    ok, reason = fast_path.eligible(outcome, candidate_unit, cwd)
+    if not ok:
+        return False, reason, [], None
+    return True, reason, files_found, check
+
+
+def fast_route_plan(files, check):
+    """The one-unit plan FAST-0 builds locally when the predicate above
+    passes: the same objective/writes/deps shape a session's own --plan
+    already uses (see the --plan argument's own help text, above), so
+    door.normalize_unit (scripts/door.py) bridges it to work_record's
+    title/owns/depends_on the same way either way -- nothing downstream can
+    tell this plan was never asked of a model. Deliberately its own
+    presentational objective, not the raw outcome sentence
+    fast_path.eligible was asked about above: this is what a person reading
+    the intent screen or a later receipt sees, and it should read the same
+    whether or not the outcome happened to carry a risk word that got the
+    unit refused before this function is ever reached."""
+    return [{
+        "id": "F1",
+        "objective": "make the named check pass for the named file(s)",
+        "done_check": check,
+        "writes": list(files),
+        "deps": [],
+    }]
+
+
+def write_fast_route_plan(files, check):
+    """`fast_route_plan`'s one unit, written to a throwaway file so door.py's
+    existing --model-cmd seam (plan_model_cmd, "cat %s") can read it exactly
+    as it already reads a coding session's own --plan file. Never placed
+    inside the run directory itself: run_door's own success check counts the
+    *.json files left in `store` and expects exactly one, the Work document
+    door.py writes."""
+    fd, path = tempfile.mkstemp(prefix="fast-route-plan-", suffix=".json")
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        json.dump(fast_route_plan(files, check), fh)
+    return path
 
 
 def run_door(outcome, store, dry_run=False, cwd=None, plan_path=None):
@@ -1012,7 +1209,19 @@ def _print_resume_screen(run_dir, outcome):
     what a person sees is exactly what the engine last checkpointed, never
     a fresh snapshot that could disagree with it); NO-DATA naming the
     outcome when it did not (a run from before E73.1/E73.2 landed, or one
-    whose only capsule write ever attempted failed)."""
+    whose only capsule write ever attempted failed).
+
+    The capsule's own "day(s) since the last recorded activity" line (zone3
+    WHERE WE WERE, continuity.capsule()) is computed at WRITE time, against
+    whatever the journal held then -- a capsule checkpointed seconds before
+    the run died reads a gap of 0, and reading it back unchanged days later
+    still says 0. This is the one number this door recomputes at PRINT
+    time rather than trusting the file verbatim: the capsule's own mtime is
+    the checkpoint's timestamp (write_capsule's os.replace is the last
+    write this file ever gets), so "now minus that mtime" is the true age
+    of the ground being resumed onto, in the same "day(s) since the last
+    recorded activity" wording capsule() itself uses so the two never read
+    as two different claims."""
     path = os.path.join(run_dir, CAPSULE_FILENAME)
     if not os.path.isfile(path):
         print("brother_run: %s: %r recorded no continuity capsule; "
@@ -1029,6 +1238,15 @@ def _print_resume_screen(run_dir, outcome):
         return
     import continuity
     continuity._print_screen(cap)
+    try:
+        checkpoint_age_days = (time.time() - os.path.getmtime(path)) / 86400.0
+    except OSError:
+        checkpoint_age_days = None
+    if checkpoint_age_days is not None and checkpoint_age_days >= 1:
+        print("brother_run: %.1f day(s) since the last recorded activity "
+              "-- this capsule was checkpointed that long ago; the screen "
+              "above is exactly what was on disk then, not a fresh read"
+              % checkpoint_age_days)
 
 
 def run_loop(plan_path, claims_path, cwd, slots):
@@ -1312,19 +1530,30 @@ def _checkpoint_canonical_revision(run_dir):
     the checkpoint and this resume. None when the file is missing,
     unreadable, or carries no canonical_revision (a run from before
     E73.1, or one whose only capsule write ever attempted failed)."""
-    doc = _read_claims(os.path.join(run_dir, CAPSULE_FILENAME))
+    # M-7: `or {}` because this function's own contract already collapses
+    # "missing" and "unreadable" into one None result below, same as
+    # _read_claims did before it started telling them apart.
+    doc = _read_claims(os.path.join(run_dir, CAPSULE_FILENAME)) or {}
     revision = doc.get("canonical_revision")
     return revision if isinstance(revision, str) and revision else None
 
 
 def _read_claims(path):
+    """The store as a dict, {} when the file is simply absent (nothing
+    claimed yet), or None when it exists but could not be read (M-7: an
+    unreadable claims.json used to read back as {} too, indistinguishable
+    from "nothing claimed", so an unreadable store made every already-
+    delivered unit look eligible for a fresh, silent redispatch). A caller
+    must tell the two apart; every caller in this file does, either by its
+    own explicit None check or because it already reads through the
+    `(claims or {})` idiom, which treats None the same as {} on purpose."""
     if not os.path.isfile(path):
         return {}
     try:
         with open(path, encoding="utf-8") as fh:
             return json.load(fh)
     except (OSError, ValueError):
-        return {}
+        return None
 
 
 def _git_status(cwd):
@@ -1458,7 +1687,11 @@ def _merge_usage_sidecar(claims, claims_path):
     sidecar = loop_bridge.read_usage_sidecar(
         loop_bridge.usage_sidecar_path(claims_path))
     for uid, usage in (sidecar or {}).items():
-        claim = claims.get(uid)
+        # M-7: `claims` is None when the caller's own _read_claims found the
+        # store unreadable; guarded the same way every other reader in this
+        # file treats that case, so a torn claims.json does not crash the
+        # cost block over a usage merge.
+        claim = (claims or {}).get(uid)
         if isinstance(claim, dict) and isinstance(usage, dict) and usage \
                 and "usage" not in claim:
             claim["usage"] = usage
@@ -2759,6 +2992,94 @@ def _check_passes_now(command, cwd, runner=None, capture=None):
     return passed, proc.returncode, looks_broken, None
 
 
+def _files_changed_by_merge(cwd, branch, runner=None):
+    """The files a --no-ff merge of `branch` changed on canonical, found by
+    walking the SAME signal integrate._already_integrated already reads to
+    answer "was this lane merged" (the branch tip appears as the SECOND
+    parent of a commit reachable from HEAD): a real, --no-ff merge commit's
+    second parent is always the lane tip it merged. Walked again here,
+    independently, because that function only answers yes/no and this one
+    needs the actual merge commit to diff. None when the branch does not
+    resolve, no such commit can be found, or git cannot read the diff --
+    never a guess, and never this unit's own files invented from nothing;
+    receipt_door.receipts_for reads an absent files_changed_by_unit as
+    "not recorded", never as "nothing changed", so this is the one honest
+    way to give a RESUME-FIX F2 recovery its own evidence the same shape
+    integrate_one would have produced had it not been killed first."""
+    runner = runner or (lambda cmd, **kw: subprocess.run(
+        cmd, capture_output=True, text=True, cwd=cwd, timeout=60))
+    tip = runner(["git", "rev-parse", branch])
+    if tip.returncode != 0:
+        return None
+    lane_sha = (tip.stdout or "").strip()
+    if not lane_sha:
+        return None
+    walk = runner(["git", "rev-list", "--parents", "HEAD"])
+    if walk.returncode != 0:
+        return None
+    for line in (walk.stdout or "").splitlines():
+        parts = line.split()
+        if len(parts) >= 3 and lane_sha in parts[2:]:
+            merge_commit, first_parent = parts[0], parts[1]
+            diff = runner(["git", "diff", "--name-only", first_parent,
+                          merge_commit])
+            if diff.returncode != 0:
+                return None
+            return [p for p in (diff.stdout or "").splitlines() if p.strip()]
+    return None
+
+
+def _recovery_check_evidence(command, cwd, rev, runner=None):
+    """(evidence_or_None, note). RESUME-FIX F2: a unit whose earlier attempt
+    merged its lane onto canonical and was killed before integrate.py ever
+    ran its own revalidation check (the "during_integration" fault
+    boundary, strictly between the merge and _run_check) leaves no evidence
+    behind at all: evidence is only ever attached to a claim at release()
+    time, which this attempt never reached. Citing "the earlier attempt's
+    own evidence" is therefore not possible by re-reading anything on
+    disk; the only honest way to know whether the already-landed merge
+    still holds is to run the unit's OWN done_check against canonical RIGHT
+    NOW, at the revision integrate._already_integrated already proved
+    carries this unit's merge, and read that run's real exit code. This
+    never claims the check passed "before the work" (receipt_door's own
+    refusal for that shape): the work (the merge) genuinely already
+    happened, in the killed attempt, and this only asks whether it still
+    holds.
+
+    Shaped exactly like integrate.py's own evidence dict (check_command,
+    exit_code, output, output_truncated, canonical_rev) so a claim built
+    from it verifies through the SAME _verify_evidence path every other
+    claim's evidence does; no new field, no new shape. `files_changed` is
+    not filled in here (the caller adds it, from _files_changed_by_merge,
+    reading the merge commit git itself already made rather than the
+    killed attempt's own before/after tips, which this process never
+    saw)."""
+    command = str(command or "").strip()
+    if not command:
+        return None, ("the unit carries no done_check, so whether its "
+                      "already-merged work still holds cannot be proven")
+    runner = runner or (lambda cmd, **kw: subprocess.run(
+        cmd, capture_output=True, text=True, cwd=cwd, shell=True,
+        timeout=CHECK_RUN_TIMEOUT_SECONDS))
+    try:
+        proc = runner(command)
+    except Exception as exc:  # noqa: BLE001
+        return None, ("the recovered unit's done_check could not be run "
+                      "just now: %s" % exc)
+    output = ((proc.stdout or "") + (proc.stderr or "")).strip()
+    lines = output.splitlines()
+    truncated = len(lines) > 50
+    if truncated:
+        output = "\n".join(lines[-50:])
+    if proc.returncode != 0:
+        return None, ("the recovered unit's merge is already on canonical, "
+                      "but its own done_check was just re-run there and "
+                      "exited %d, not 0, so it is not marked delivered"
+                      % proc.returncode)
+    return {"check_command": command, "exit_code": 0, "output": output,
+           "output_truncated": truncated, "canonical_rev": rev}, ""
+
+
 #: P6 (doc E18/12.6): the five fields an evidence_family E18 unit's own
 #: check must write to <run_dir>/evidence/<unit_id>.json before
 #: _verify_evidence re-executes it. What was measured, its value, what it
@@ -2932,6 +3253,237 @@ def _mark_integrated(record_path, done_ids, claims, cwd):
     return changed, refusals
 
 
+def _settle_units_already_delivered(record, claims_path, cwd, log):
+    """RESUME-FIX F1/F2 (2026-09-09): settle every unit this same run's own
+    claims.json already proves finished, BEFORE round 1 ever calls
+    run_loop(). claim_store.acquire() (scripts/claim_store.py, not owned
+    here) decides purely by lease liveness, never by state: release()
+    stamps a done claim's expires_at to 0, which dead_reason() then reads
+    as "the lease expired 0s ago", so a unit already finished looks exactly
+    as reclaimable as one that never started. graph_loop.plan() (via
+    loop_bridge, also not owned) is the one thing downstream that DOES
+    read status off the Work document's own rows and excludes DONE from
+    the ready set, so settling here, before that file is read for round
+    1, is what keeps loop_bridge from ever making a fresh claim for a
+    unit that does not need one.
+
+    Two shapes, matching the two RED boundaries this closes:
+
+    F1 (after_integration_before_receipt): the claim is ALREADY
+    state=="done" in claims.json, with real evidence integrate.py itself
+    attached at release() time in the killed attempt. Nothing is
+    re-claimed or re-released; the unit is simply added to the batch
+    _mark_integrated verifies below, which re-executes THAT SAME evidence
+    (never a fresh one) the ordinary way every other claim's evidence is
+    verified.
+
+    F2 (during_integration): the claim is still state=="claimed" and dead
+    (the owning pid is gone, or its lease is expired), but its lane's
+    merge already landed on canonical before the kill
+    (integrate._already_integrated, asked rather than re-derived, per this
+    unit's own scope). No evidence was ever attached (release() never
+    ran), so one is built now by re-running the unit's own done_check
+    against canonical right now (_recovery_check_evidence); a claim is
+    taken over and immediately released state=done with it, never left
+    claimed forever and never handed to a worker.
+
+    A unit this cannot settle (a live claim, a dead claim whose lane never
+    merged, a done_check that fails when re-run) is left exactly as it
+    was, for the ordinary round loop below to retry the normal way.
+    Returns nothing; never raises, because a resume must reach the round
+    loop whether or not anything here could be settled.
+
+    C-2 (backend review, 2026-09-09): the settle path is a read-modify-
+    write of the Work document (inside _mark_integrated, below) and of a
+    claims.json snapshot, across TWO reads (this call's own and the one
+    right before _mark_integrated) that used to run with no lock at all.
+    Two concurrent resumes of the same run could each read, decide, and
+    write, the second one clobbering the first's DONE rows. The whole of
+    this function's body now runs under ONE run-level lock of its own
+    (resume.lock, inside the run directory, a path nothing else in this
+    codebase locks), so a second concurrent resume either waits its turn
+    or, on timeout, settles nothing and says so, rather than racing this
+    one. That lock is never claims.json's own or the Work document's own:
+    both of those are taken INSIDE this function (claim_store.acquire and
+    release take claims.json's; work_record.write_record, called from
+    _mark_integrated, takes the Work document's), and claim_store.Lock is
+    not reentrant, so wrapping either of THOSE paths here would deadlock
+    this same process against itself."""
+    run_dir = os.path.dirname(os.path.abspath(claims_path))
+    # claim_store.Lock/._Lock appends its own ".lock" suffix to whatever
+    # path it is given (the same way claims.json's own lock file is
+    # claims.json.lock and the Work document's is <name>.lock), so the
+    # base name here, not "resume.lock" itself, is what makes the real
+    # lock file on disk read resume.lock.
+    resume_lock_path = os.path.join(run_dir, "resume")
+    try:
+        with claim_store.Lock(resume_lock_path):
+            _settle_units_already_delivered_locked(record, claims_path, cwd,
+                                                    log, run_dir)
+    except TimeoutError as exc:
+        log.note("%s: could not take this run's own resume lock at %s (%s); "
+                 "another resume appears to be settling this run's claims "
+                 "right now, so nothing was settled by this attempt, left "
+                 "for the normal round loop" % (NODATA, resume_lock_path, exc))
+
+
+def _settle_units_already_delivered_locked(record, claims_path, cwd, log,
+                                           run_dir):
+    """The body of _settle_units_already_delivered, above, run under that
+    function's own resume-level lock. Split out only so the lock wrapper
+    above stays a single small try/with; not meant to be called on its
+    own."""
+    claims = _read_claims(claims_path)
+    if claims is None:
+        log.note("%s: %s could not be read, so nothing already delivered "
+                 "could be settled this attempt; every not-yet-DONE unit "
+                 "is left for the normal round loop" % (NODATA, claims_path))
+        return
+    if not claims:
+        return
+    rows = record.get("rows") or record.get("units") or []
+    by_id = {r.get("id"): r for r in rows if r.get("id") is not None}
+    now = time.time()
+    owner = "brother-run-settle-%d" % os.getpid()
+    settled_ids = set()
+    for uid, claim in claims.items():
+        row = by_id.get(uid)
+        if row is None or row.get("status") == "DONE":
+            continue
+        if not isinstance(claim, dict):
+            continue
+        # REPAIR ROUND 3, R2: every read below this line can raise on a
+        # malformed claims.json record, claim_store.live() alone does
+        # float(claim.get("expires_at", 0)), which throws ValueError on a
+        # non-numeric expires_at rather than reporting one, and this
+        # function's own docstring promises "never raises" with nothing
+        # here to make that true. This function runs BEFORE the intent
+        # screen, so an uncaught exception here used to abort the whole
+        # run before a person ever saw it. One malformed claim must cost
+        # only that one unit, reported by name and field, left for the
+        # normal round loop to retry the ordinary way, never the run.
+        try:
+            state = claim.get("state")
+            if state in ("done", "integrated"):
+                # F1: released before this process made any new claim. The
+                # evidence already on the claim is what _mark_integrated
+                # below verifies; nothing here adds or changes it.
+                settled_ids.add(uid)
+                continue
+            if state != "claimed":
+                continue
+            # Named explicitly rather than left to whatever text
+            # claim_store.live()'s own float() conversion happens to
+            # raise: the NO-DATA note this function's except clause below
+            # writes must say WHICH field was malformed, not just that
+            # something was.
+            try:
+                float(claim.get("expires_at", 0))
+            except (TypeError, ValueError) as exc:
+                raise ValueError("expires_at=%r is not numeric (%s)"
+                                 % (claim.get("expires_at"), exc)) from exc
+            if claim_store.live(claim, now):
+                continue  # somebody else's live claim; not this run's to touch
+            # RESUME-FIX F3's own signal, recorded HERE because nowhere else
+            # can be: the round loop below is about to hand this unit to
+            # loop_bridge, whose own claim_store.acquire() (not owned here)
+            # OVERWRITES this exact claim with a fresh one for the new
+            # attempt before worktree_lane.acquire() (owned here) ever
+            # runs. The fact that THIS claim was still "claimed" and dead,
+            # proof its lane was orphaned by a real kill, never released
+            # the ordinary way, would be gone by the time worktree_lane.py
+            # needs to ask it, unless it is written to the journal now,
+            # while still true.
+            journal.append(run_dir, "claim.orphaned_by_kill",
+                           parent_ids=journal.previous(run_dir), unit_id=uid)
+            branch = worktree_lane.branch_for(uid)
+            if not integrate._already_integrated(cwd, branch):
+                continue  # never merged before the kill; the ordinary retry applies
+            evidence, note = _recovery_check_evidence(
+                row.get("done_check"), cwd, _head(cwd))
+            if evidence is None:
+                log.note("brother_run: %s's lane already merged onto "
+                         "canonical before an earlier kill in this run, "
+                         "but %s; leaving its claim for the ordinary "
+                         "retry path" % (uid, note))
+                continue
+            # E41/RESUME-FIX F2: the same file list integrate_one itself
+            # would have measured at its own merge, read here instead
+            # because that attempt was killed before it ever recorded one.
+            # Left absent (never a guessed []) when the merge commit
+            # cannot be found or the diff cannot be read, exactly like
+            # every other evidence field this function refuses to invent.
+            files_changed = _files_changed_by_merge(cwd, branch)
+            if files_changed is not None:
+                evidence["files_changed"] = files_changed
+            reclaimed, problem = claim_store.acquire(claims_path, uid, owner)
+            if reclaimed is None:
+                log.note("brother_run: could not take over %s's dead "
+                         "claim to settle it as already delivered (%s); "
+                         "leaving it for the ordinary retry path"
+                         % (uid, problem))
+                continue
+            # C-1 (backend review, 2026-09-09): release()'s own return was
+            # discarded here. On a lock timeout or OSError it returns
+            # (None, problem) having written NOTHING: the claim this
+            # process just took over with acquire() (above) stays state
+            # "claimed", owned by THIS process, with a fresh full lease
+            # (claim_store.DEFAULT_TTL_SECONDS, 20 minutes). Adding uid to
+            # settled_ids anyway used to claim victory over a release that
+            # never happened: the unit was never marked DONE (settled_ids
+            # is only ever consumed by _mark_integrated below), and
+            # loop_bridge also refuses to hand it to a worker for as long
+            # as that fresh lease reads live, so it was neither settled
+            # nor redispatched for up to 20 minutes.
+            held, problem = claim_store.release(claims_path, uid, owner,
+                                                state="done", evidence=evidence)
+            if held is None:
+                print("%s: could not release %s's settled claim (%s); "
+                      "leaving it for the ordinary retry path"
+                      % (NODATA, uid, problem), file=sys.stderr)
+                continue
+            settled_ids.add(uid)
+            # M-1 (backend review, 2026-09-09): a unit settled through THIS
+            # branch never went through integrate()'s own normal flow (the
+            # process that merged its lane was killed before it got there),
+            # so integrate()'s own cleanup_lane call, the one loop_bridge
+            # relies on to retire every lane it ever creates, never ran
+            # for it either. Left uncalled, the worktree, its branch and
+            # its temp base leak on disk forever. Safe unconditionally, by
+            # cleanup_lane's own rule (scripts/integrate.py): a contained,
+            # clean branch is removed; a dirty tree is retained and
+            # reported, never discarded.
+            integrate.cleanup_lane(cwd, branch, uid)
+        except (ValueError, TypeError, KeyError, OSError) as exc:
+            log.note("%s: %s's claim in %s carries a malformed field (%s); "
+                     "left for the normal round loop rather than aborting "
+                     "the run" % (NODATA, uid, claims_path, exc))
+            continue
+    if not settled_ids:
+        return
+    # M-7: same None-vs-{} distinction as the read at this function's
+    # own entry, above: a re-read that fails here must not silently feed
+    # _mark_integrated an empty claims dict, which would read every one of
+    # settled_ids as carrying no evidence at all and refuse every one of
+    # them with a false "no evidence was recorded" reason, when the real
+    # reason is that this re-read simply failed.
+    claims = _read_claims(claims_path)
+    if claims is None:
+        log.note("%s: %s could not be re-read after settling %d unit(s); "
+                 "nothing was marked DONE on the Work document this "
+                 "attempt, left for the normal round loop"
+                 % (NODATA, claims_path, len(settled_ids)))
+        return
+    _changed, refusals = _mark_integrated(record["path"], settled_ids, claims,
+                                          cwd)
+    for uid in sorted(settled_ids - set(refusals)):
+        log.say("brother_run: %s was already delivered by an earlier "
+                "attempt within this run; not redispatched." % uid)
+    for uid, reason in refusals.items():
+        log.note("brother_run: REFUSED to settle %s as already delivered: "
+                 "%s" % (uid, reason))
+
+
 def _clear_lens_inferred(record_path):
     """P3 (persona integration): a person chose "otherwise" at the intent
     screen, so the Work document's own lens_inferred field is rewritten to
@@ -3057,6 +3609,14 @@ def _stamp_prechecks(record_path, cwd, runner=None):
     with open(record_path, "r", encoding="utf-8") as fh:
         doc = json.load(fh)
     rows = doc.get("rows") or doc.get("units") or []
+    # U5 (red-before-green witness, 2026-09-09, review of 3409fcec finding
+    # 1): this precheck pass is already the ONE moment every not-yet-DONE
+    # unit's own done_check runs against the untouched tree, so it is also
+    # the cheapest and only honest place to record that the check was
+    # OBSERVED capable of failing before any implementation existed. The
+    # capture goes beside the rest of this run's own bookkeeping.
+    run_dir = os.path.dirname(os.path.abspath(record_path))
+    red_dir = os.path.join(run_dir, "red_check")
     for row in rows:
         if row.get("status") == "DONE":
             continue
@@ -3082,12 +3642,37 @@ def _stamp_prechecks(record_path, cwd, runner=None):
             # paraphrase of it. Stored only for a broken check; an ordinary
             # failing or passing check has no use for it.
             row["check_stderr_before"] = capture.get("stderr") or ""
+        # U5: red_check, only when a real exit code was captured (the same
+        # condition check_exit_before already gates on: a check that could
+        # not even be attempted has no output to point to either).
+        if exit_before is not None:
+            os.makedirs(red_dir, exist_ok=True)
+            out_path = os.path.join(red_dir, "%s.log" % row.get("id"))
+            with open(out_path, "w", encoding="utf-8") as fh:
+                fh.write(capture.get("stderr") or "")
+            row["red_check"] = {
+                "command": row.get("done_check"),
+                "exit_code": exit_before,
+                "output_location": out_path,
+                "revision": _head(cwd),
+                "pre_implementation": True,
+            }
+        # U5: change_kind, only when the unit never declared one of its
+        # own (a unit that said "documentation" or "generated" keeps its
+        # own word here; receipt_door.red_check_evidence is what checks
+        # that word against what the unit actually changed, once it has
+        # actually changed something). A unit whose declared write scope
+        # names at least one path receipt_door.looks_like_code reads as
+        # code is a behaviour change by default.
+        if not row.get("change_kind") and any(
+                receipt_door.looks_like_code(p)
+                for p in (row.get("owns") or [])):
+            row["change_kind"] = receipt_door.CHANGE_KIND_BEHAVIOUR
     work_record.write_record(record_path, doc)
     # E59: one event for the whole pass, carrying the two counts a reader of
     # the chain needs (how many checks were probed, how many already passed
     # before any work), never the checks themselves, which the document and
     # the intent screen already hold.
-    run_dir = os.path.dirname(os.path.abspath(record_path))
     journal.append(run_dir, "precheck.stamped",
                    parent_ids=journal.previous(run_dir),
                    payload={"probed": sum(1 for r in rows
@@ -4404,6 +4989,12 @@ def main(argv=None):
     # cannot give the record one sha and the report another.
     harness_revision = _harness_revision()
     resumed = False
+    # FAST-0: computed only on the fresh, plain-outcome path below (never
+    # for --resume, --continue, or a session's own --plan), and read again
+    # much further down by the price block and the intent screen's own
+    # plan-source line, so both describe the same decision.
+    fast_route_used = False
+    fast_reason = None
 
     # P1, night-hardening-2026-09-07: BROTHER-MANAGED EXECUTION SAFE BY
     # CONSTRUCTION. Measured here, before ANY of --resume, --continue or a
@@ -4578,6 +5169,20 @@ def main(argv=None):
                       "differ" % (prior_outcome, args.outcome))
 
         if resume_match is None:
+            # FAST-0: the deterministic predicate, evaluated once, before
+            # the coding-session refusal below (which must see a fast plan,
+            # when there is one, as a plan already in hand -- exactly like a
+            # session's own --plan). Never runs when the caller already gave
+            # a plan: that route is a session's own and this one only ever
+            # replaces the decomposer, never a plan somebody already wrote.
+            fast_plan_path = None
+            if args.plan is None:
+                (fast_route_used, fast_reason,
+                 fast_files, fast_check) = fast_route_eligibility(
+                    args.outcome, cwd)
+                if fast_route_used:
+                    fast_plan_path = write_fast_route_plan(fast_files,
+                                                            fast_check)
             # D-001, THE NESTED CALL THAT NEVER WORKS (persona dogfood
             # 2026-09-07, personas A1 and A3, scenarios A1-S1, A1-S4 and
             # A3-S1: the largest block of the 28 failing scenarios). Asked
@@ -4597,7 +5202,8 @@ def main(argv=None):
             # Outside a session the default is untouched, which is what
             # keeps the documented headless path a capability rather than a
             # casualty.
-            if (args.plan is None and in_claude_code_session()
+            if (args.plan is None and fast_plan_path is None
+                    and in_claude_code_session()
                     and not os.environ.get("DOOR_MODEL_CMD")):
                 print("%s: this is a coding session, and a model command "
                       "spawned from inside one cannot reach a model: it "
@@ -4641,12 +5247,28 @@ def main(argv=None):
             if args.plan:
                 print("brother_run: running the plan you wrote (%s)"
                       % args.plan)
+            elif fast_route_used:
+                print("brother_run: %r names its own file(s) and its own "
+                      "check: planner skipped (%s)"
+                      % (args.outcome, fast_reason))
             else:
-                print("brother_run: working out what %r breaks down into"
-                      % args.outcome)
-            ok, record, door_text = run_door(args.outcome, run_dir,
-                                             dry_run=args.dry_run, cwd=cwd,
-                                             plan_path=args.plan)
+                suffix = (" (fast route not taken: %s)" % fast_reason
+                          if fast_reason else "")
+                print("brother_run: working out what %r breaks down into%s"
+                      % (args.outcome, suffix))
+            ok, record, door_text = run_door(
+                args.outcome, run_dir, dry_run=args.dry_run, cwd=cwd,
+                plan_path=(args.plan or fast_plan_path))
+            if fast_plan_path and os.path.isfile(fast_plan_path):
+                # FAST-0's own plan file is throwaway bookkeeping, not the
+                # Work document: door.py has already read it (or refused),
+                # and leaving it behind would be a leftover with nothing
+                # left to clean it up, since it lives outside run_dir on
+                # purpose (see write_fast_route_plan's own docstring).
+                try:
+                    os.remove(fast_plan_path)
+                except OSError:  # sbe: allow-silent reader-only: best-effort cleanup of a throwaway temp file; its absence changes nothing this run still needs
+                    pass
             if os.path.isdir(run_dir):
                 log.to(run_dir)
             # A REFUSAL IS THE USER'S BUSINESS, in the door's own words: it
@@ -4828,6 +5450,25 @@ def main(argv=None):
     if uncovered:
         log.say(uncovered)
         return 1
+    # RESUME-FIX F1/F2: settle every unit this run's own claims.json
+    # already proves finished, BEFORE _stamp_prechecks below ever probes
+    # its done_check against the untouched-by-a-fresh-worker repository.
+    # _stamp_prechecks already skips a row whose status is DONE ("a
+    # resumed run's finished work... re-running it here would prove
+    # nothing new"), which is exactly the treatment a unit settled here
+    # needs: without this call running FIRST, a unit whose earlier
+    # attempt's own merge already landed on canonical gets probed as
+    # though nothing has happened yet, its trivially-passing check reads
+    # check_passed_before=True, and receipt_door.receipts_for refuses it
+    # ("the check already passed before the work began") for a unit that
+    # is, in every sense this codebase already tracks, actually finished.
+    # See _settle_units_already_delivered's own docstring for the two
+    # shapes (F1: already released done; F2: merged but killed before
+    # release) and why claim_store.acquire() (not owned here) cannot be
+    # trusted to leave a finished unit alone on its own: it decides purely
+    # by lease liveness, never by state.
+    _settle_units_already_delivered(record, claims_path, cwd, log)
+
     # I3, THE FIRST HUMAN MOMENT: intent. The outcome is settled now (fresh,
     # resumed by --continue, resumed by --resume, or resumed by the plain-
     # outcome match above); nothing has been claimed or run yet. `already`
@@ -4942,10 +5583,23 @@ def main(argv=None):
         summary_blocks.append("\n".join(assumption_lines))
     if risk_line:
         summary_blocks.append(risk_line)
+    # FAST-0: this is the "intent screen ... line that already says how
+    # the plan was made" the contract names. Eligible reads "planner
+    # skipped: <reason>"; ineligible keeps the normal wording and appends
+    # the first reason the fast route was not taken, when one was computed
+    # at all (never for --resume, --continue, or a session's own --plan,
+    # none of which evaluate the predicate above).
+    if fast_route_used:
+        plan_source = "planner skipped: %s" % fast_reason
+    elif fast_reason:
+        plan_source = ("exactly as the planning model wrote it (fast route "
+                       "not taken: %s)" % fast_reason)
+    else:
+        plan_source = "exactly as the planning model wrote it"
     summary_blocks.append(
         "This is what this run is about to act on before anything is "
-        "claimed or run, one line per piece of work, exactly as the "
-        "planning model wrote it:\n\n" + "\n".join(unit_lines))
+        "claimed or run, one line per piece of work, %s:\n\n%s"
+        % (plan_source, "\n".join(unit_lines)))
     summary_blocks.append(bounds_line)
     # E90, THE PRICE, SAID BEFORE THE WAIT rather than after it. The founder
     # ruled option B on docs/decisions/light-path-for-small-changes-
@@ -4955,7 +5609,11 @@ def main(argv=None):
     # well, so the two sentences can never disagree about what earlier runs
     # took, and so this costs one directory walk rather than two.
     price_durations = previous_run_durations(runs_root, cwd)
-    price_block = build_price_block(1 + total_units, price_durations)
+    # FAST-0: a fast run opens no planning session, so its true count is the
+    # worker sessions alone; a decomposed run keeps counting the planner
+    # (the door's own decomposer call) plus one worker per unit, unchanged.
+    price_block = build_price_block(
+        (0 if fast_route_used else 1) + total_units, price_durations)
     summary_blocks.append(price_paragraph(price_block))
     summary_blocks.append(rollback_line)
     # P1-2 fix 1 (2026-09-06 resume defects): a resume (--resume,
@@ -5151,6 +5809,7 @@ def main(argv=None):
                 "after %d seconds.%s" % (total_units, MAX_UNIT_ATTEMPTS,
                                          limit_seconds,
                                          (" " + earlier) if earlier else ""))
+
 
     # The graph DRAINS across batches: one loop_bridge run claims only the
     # units dispatchable at its start, so a unit whose dependency integrates

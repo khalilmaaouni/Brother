@@ -602,6 +602,10 @@ jobs:
         run: python3 tools/test_sbe_vault_scope.py
       - name: verify converge
         run: python3 tools/test_sbe_verify_converge.py
+      - name: verify fence report
+        run: python3 tools/test_sbe_verify_fence_report.py
+      - name: verify path
+        run: python3 tools/test_sbe_verify_path.py
       - name: windows sim
         run: python3 tools/test_sbe_windows_sim.py
       - name: Impact fixtures (a declared tier cannot contradict the diff silently)

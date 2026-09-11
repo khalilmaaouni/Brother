@@ -34,6 +34,7 @@ measures with.
 """
 import json
 import os
+import shlex
 import subprocess
 import sys
 import unittest
@@ -330,7 +331,7 @@ class TheHeadlessWorkerIsUnchanged(SessionWorkerBase):
         """The opt-in half: a session that names its own worker is taken at
         its word, exactly as DOOR_MODEL_CMD is on the decomposer side."""
         env = dict(self.env)
-        env["MODEL_WORKER_CMD"] = "%s %s" % (sys.executable, self.model)
+        env["MODEL_WORKER_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(self.model))
         plan = write_plan(self.tmp, two_units())
         proc = sh([sys.executable, BROTHER_RUN, "two files exist",
                    "--cwd", self.repo, "--runs-root", self.tmp,

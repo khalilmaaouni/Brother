@@ -554,6 +554,10 @@ python3 tools/sbe_score.py --strict .   # gate severity, by ratified decision
         run: python3 tools/test_sbe_vault_scope.py
       - name: verify converge
         run: python3 tools/test_sbe_verify_converge.py
+      - name: verify fence report
+        run: python3 tools/test_sbe_verify_fence_report.py
+      - name: verify path
+        run: python3 tools/test_sbe_verify_path.py
       - name: windows sim
         run: python3 tools/test_sbe_windows_sim.py
       # Row E33 (2026-09-03): these two suites existed on disk and ran in

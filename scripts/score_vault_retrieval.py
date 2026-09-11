@@ -120,8 +120,8 @@ def tool_options(tool):
         try:
             proc = subprocess.run([sys.executable, tool] + argv, stdout=subprocess.PIPE,
                                   stderr=subprocess.PIPE, timeout=TIMEOUT_S)
-        except Exception:                       # a tool that cannot even print help gets
-            continue                            # the minimum call, which is still a call
+        except (OSError, subprocess.TimeoutExpired):  # sbe: allow-silent a failed help probe is tolerated because the mandatory check invocation still follows
+            continue
         text += proc.stdout.decode("utf-8", "replace")
         text += proc.stderr.decode("utf-8", "replace")
     return tuple(flag for flag in OPTIONAL_FLAGS if flag in text)

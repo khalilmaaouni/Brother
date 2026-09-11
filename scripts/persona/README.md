@@ -11,8 +11,10 @@ promotion run is reproducible from a pinned checkout, not a hand-run loop.
 - `gen_briefs.py ROUND TREE [--all]`: one actor brief per persona.
   Default: only scenarios whose latest verdict is not PASS. `--all`: every
   scenario, so a promotion run reruns the passing ones too, no regression.
-- `judge.py`: Muse (`meta/muse-spark-1.2`) judges each new transcript as
-  the persona, scrubbing the two client terms out first.
+- `judge.py`: the headless Claude CLI (`claude -p`, sonnet with haiku as
+  fallback) judges each new transcript as the persona, scrubbing the two
+  client terms out first. An answer without a PASS, FAIL or NO-DATA
+  verdict is recorded as NO-DATA and counted as a failed call.
 - `tally.py [--installed]`: pass rate from the latest result per scenario,
   exit 0 at 36 of 40. `--installed` also prints the pinned tree
   (`PINNED-TREE` in the evidence dir) and flags a REGRESSION when a

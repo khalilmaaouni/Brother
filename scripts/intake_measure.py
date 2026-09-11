@@ -411,7 +411,7 @@ def _iter_transcript(transcript_path):
                 continue
             try:
                 yield json.loads(raw_line)
-            except ValueError:
+            except ValueError:  # sbe: allow-silent a non-JSON transcript line has no message record to measure, so iteration resumes at the next line
                 continue
 
 

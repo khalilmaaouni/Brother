@@ -517,6 +517,92 @@ class EngineDecidedDerivation(unittest.TestCase):
         )
 
 
+class DirectOverrideExcludedFromEngineDecided(unittest.TestCase):
+    """audit-unseen-5-run-2026-09-07.md section 0: a human override recorded
+    in direct-answers.json replaces the engine's answer in the merged
+    answers.json, but decisions.jsonl's rule_fired is never touched by that
+    override, so it still reads whatever the engine decided before being
+    overridden. A case direct-answers.json names must never count as
+    engine-decided, whatever its rule_fired says.
+
+    Fixture: 4 cases, 2 the engine decided and nobody touched (T-01, T-02),
+    2 the engine decided and a human then overrode via direct-answers.json
+    (T-03, T-04), with rule_fired on all four still reading an ordinary
+    rule id, never "track-unsupported". Before the fix engine-decided
+    read 4 of 4 and direct-answered read 0 of 0, crediting the engine with
+    two answers a person wrote (this is the U5 defect: engine-decided
+    reported 25 of 30 instead of the honest 20 of 25). After the fix
+    engine-decided must read 2 of 2 and direct-answered 2 of 2."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="jbeq-direct-override-")
+        self.seed = {
+            "cases": [
+                {"id": "T-01", "track": "address",
+                 "expected": "KEEP SEPARATE", "critical": False},
+                {"id": "T-02", "track": "address",
+                 "expected": "ESCALATE", "critical": False},
+                {"id": "T-03", "track": "address",
+                 "expected": "SUGGEST MERGE", "critical": False},
+                {"id": "T-04", "track": "address",
+                 "expected": "AUTO-MERGE", "critical": False},
+            ],
+            "scoring": {"merge_answers": ["AUTO-MERGE", "SUGGEST MERGE"]},
+        }
+        self.seed_path = os.path.join(self.dir, "seed.json")
+        with open(self.seed_path, "w", encoding="utf-8") as fh:
+            json.dump(self.seed, fh, ensure_ascii=False)
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def test_overridden_cases_move_from_engine_decided_to_direct_answered(self):
+        # The merged answers.json: all four correct, T-03 and T-04 correct
+        # only because a human overrode the engine's original (wrong) call.
+        answers = {
+            "T-01": "KEEP SEPARATE",
+            "T-02": "ESCALATE",
+            "T-03": "SUGGEST MERGE",
+            "T-04": "AUTO-MERGE",
+        }
+        answers_path = os.path.join(self.dir, "answers.json")
+        with open(answers_path, "w", encoding="utf-8") as fh:
+            json.dump(answers, fh, ensure_ascii=False)
+
+        # decisions.jsonl: rule_fired is an ordinary rule id for all four,
+        # including T-03/T-04, whose "answer" field is what the engine
+        # said BEFORE the override (both wrong) and is never corrected.
+        decisions_rows = [
+            {"case_id": "T-01", "answer": "KEEP SEPARATE",
+             "rule_fired": "1", "why": "x"},
+            {"case_id": "T-02", "answer": "ESCALATE",
+             "rule_fired": "1", "why": "x"},
+            {"case_id": "T-03", "answer": "ESCALATE",
+             "rule_fired": "1", "why": "x"},
+            {"case_id": "T-04", "answer": "KEEP SEPARATE",
+             "rule_fired": "B", "why": "x"},
+        ]
+        with open(os.path.join(self.dir, "decisions.jsonl"), "w",
+                  encoding="utf-8") as fh:
+            for row in decisions_rows:
+                fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+        # direct-answers.json: the human override record, exactly what the
+        # two merge.py scripts on record write beside answers.json.
+        direct = {"T-03": "SUGGEST MERGE", "T-04": "AUTO-MERGE"}
+        with open(os.path.join(self.dir, "direct-answers.json"), "w",
+                  encoding="utf-8") as fh:
+            json.dump(direct, fh, ensure_ascii=False)
+
+        code, out = run("score", "--seed", self.seed_path, answers_path)
+        self.assertEqual(code, 0, out)
+        self.assertIn("engine-decided: 2 of 2", out)
+        self.assertIn(
+            "direct-answered (not blind, not evidence about the engine): "
+            "2 of 2", out,
+        )
+
+
 class CanonicalTrackNames(unittest.TestCase):
     """A seed with an unknown track name is refused at load, not scored.
 

@@ -109,7 +109,7 @@ def load_hook(env=None, consented=True):
 #: reintroduces the same gap fails here rather than shipping silently again.
 def setUpModule():
     global _REAL_LOGS_BEFORE
-    _REAL_LOGS_BEFORE = real_logs.snapshot()
+    _REAL_LOGS_BEFORE = real_logs.snapshot_for_tests()
 
 
 def tearDownModule():
@@ -1861,6 +1861,213 @@ class VR3TheQueryIsTheSituation(unittest.TestCase):
             self.assertIn("Recalled", first, first)
             self.assertEqual(again, "", "a second edit of the same file recalled twice")
             self.assertIsNone(argv2, "the tool was queried a second time for one file")
+
+
+class D3TheRecallFailureIsNamedNotSilent(unittest.TestCase):
+    """D3 (2026-09-10, THE SILENT MISS). Before this fix, the subprocess call's
+    `except Exception: return 0` made a timeout, a missing tool, or a crashed
+    bm_vault.py process (a broken/unreadable index) produce EXACTLY the same
+    observable result as _is_no_data's own honest "nothing matched": silence
+    on both stdout and stderr. These tests drive the REAL cmd_check() (never
+    a hand-built assertion about source text) through a fake tool that
+    actually times out or actually exits non-zero, and check the one channel
+    this hook's own human-audience lines already use (stderr; see the
+    unconfigured-tool and index-age lines above): a named NO-DATA line,
+    still at exit 0, still with an untouched (never blocked, never delayed)
+    edit."""
+
+    def _drive(self, tmp, fake_tool_src, timeout_s=None):
+        fake_tool = os.path.join(tmp, "bm_vault.py")
+        with open(fake_tool, "w", encoding="utf-8") as f:
+            f.write(fake_tool_src)
+        mod = load_hook({"BM_TOOLS": tmp,
+                         "BM_HOOK_OUTCOMES": os.path.join(tmp, "hook-outcomes.jsonl")})
+        mod.TOOL = fake_tool
+        mod.SEEN = os.path.join(tmp, "seen")
+        if timeout_s is not None:
+            mod.TIMEOUT_S = timeout_s
+        saved_in, saved_out, saved_err = sys.stdin, sys.stdout, sys.stderr
+        saved_env = {k: os.environ.pop(k) for k in
+                     ("CLAUDE_SESSION_ID", "CODEX_SESSION_ID") if k in os.environ}
+        sys.stdin = io.StringIO(json.dumps({"tool_input": {"file_path": "/tmp/x.py"}}))
+        sys.stdout = io.StringIO()
+        sys.stderr = io.StringIO()
+        try:
+            rc = mod.main()
+            out, err = sys.stdout.getvalue(), sys.stderr.getvalue()
+        finally:
+            sys.stdin, sys.stdout, sys.stderr = saved_in, saved_out, saved_err
+            os.environ.update(saved_env)
+        return rc, out, err
+
+    # (a)
+    def test_a_timeout_emits_a_named_no_data_line_and_never_blocks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, err = self._drive(
+                tmp, "import time\ntime.sleep(999)\n", timeout_s=0.2)
+            self.assertEqual(rc, 0, "a timed-out recall must never block the edit")
+            self.assertEqual(out, "", "no additionalContext for a failed recall")
+            self.assertIn("NO-DATA", err, err)
+            self.assertIn("timeout", err.lower(), err)
+
+    # (b)
+    def test_b_a_crashed_tool_emits_a_named_no_data_line_rather_than_nothing(self):
+        """A tool that FAILS used to leave `out` empty with no exception
+        raised at all (subprocess.run does not raise on a bad returncode),
+        so an empty `out` sailed straight through _is_no_data (False on a
+        wholly blank string) and every check after it, reaching cmd_check's
+        own return 0 with nothing printed anywhere.
+
+        CORRECTED 2026-09-10 by the orchestrator: this test used to drive
+        sys.exit(1), and the fix it guarded used check=True. Exit 1 is NOT a
+        failure. bm_vault.py's cmd_check returns _print_hits's rc, and
+        _print_hits returns 1 when it printed no hits, so 1 is the most
+        ordinary answer there is: no note matched this file. Driving 1 here
+        and raising on it made every healthy empty recall announce
+        'index unreadable', which is this same defect inverted. 2 is the
+        first code that means the call itself went wrong (cmd_check returns
+        2 on missing --paths), so 2 is what a failing tool must exit."""
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, err = self._drive(
+                tmp, "import sys\nsys.exit(2)\n")
+            self.assertEqual(rc, 0, "a crashed recall must never block the edit")
+            self.assertEqual(out, "")
+            self.assertIn("NO-DATA", err, err)
+
+    def test_b2_exit_one_is_an_answer_and_must_stay_silent(self):
+        """The other half of the contract, and the regression that shipped
+        for a few minutes on 2026-09-10. bm_vault.py exits 1 to say no note
+        matched. That is an ordinary, healthy, extremely common outcome and
+        it must produce NO alarm at all: a hook that cries 'index
+        unreadable' every time a file simply has no lessons is noise, and
+        noise is how a real NO-DATA line becomes wallpaper."""
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, err = self._drive(
+                tmp, "import sys\nsys.exit(1)\n")
+            self.assertEqual(rc, 0)
+            self.assertNotIn("could not answer", err,
+                             "exit 1 means no note matched, not a broken index: %s" % err)
+            self.assertNotIn("index unreadable", err, err)
+
+    def test_reason_naming_covers_the_three_named_shapes(self):
+        """Unit level on the classifier itself: the three reasons the brief
+        names (timeout, tool missing, index unreadable), read off the
+        exception TYPE, never guessed beyond what the exception says."""
+        mod = load_hook()
+        self.assertIn("timeout", mod._recall_failure_reason(
+            subprocess.TimeoutExpired(cmd="x", timeout=12)).lower())
+        self.assertIn("tool missing", mod._recall_failure_reason(
+            FileNotFoundError("no such file")))
+        self.assertIn("index unreadable", mod._recall_failure_reason(
+            subprocess.CalledProcessError(1, "x")))
+
+
+#: Five distinct, well-formed note blocks, argv-driven fake tool below prints
+#: whichever prefix of these its own --limit argument allows, the same
+#: shape bm_vault.py's real cmd_check cuts to --limit. Mirrors the fixture
+#: shape VN3ThePointOfNeedLines.TWO_TITLE_OUT already uses (title line,
+#: one body line, "matched on:", then a path), just five of them instead
+#: of two.
+_D3_FIVE_NOTES = [
+    ("\n  Lesson number %d about this file  [lesson, session]\n"
+     "    Body sentence for lesson %d.\n"
+     "    matched on: wording\n"
+     "    /Users/x/vault/40-Failures/lesson-%d.md\n") % (n, n, n)
+    for n in range(1, 6)
+]
+
+
+def _d3_fake_ranked_tool(tmp):
+    """An argv-aware stand-in for bm_vault.py: reads the --limit this hook
+    actually sent (never a canned string the hook's own argv is ignored by,
+    the way the plain fixtures elsewhere in this suite work), and prints
+    exactly the prefix of _D3_FIVE_NOTES a real --limit-K cut would keep,
+    plus bm_vault.py's own "N more matched (limit K)" line when the pool of
+    5 is bigger than K. This is what lets the tests below tell the OLD
+    hard-coded "--limit 2" apart from the fetch-then-cap fix: the fake tool
+    genuinely serves fewer notes when sent a smaller limit, exactly as the
+    real tool would."""
+    path = os.path.join(tmp, "bm_vault.py")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(
+            "import sys\n"
+            "notes = %r\n"
+            "limit = 5\n"
+            "argv = sys.argv[1:]\n"
+            "if '--limit' in argv:\n"
+            "    limit = int(argv[argv.index('--limit') + 1])\n"
+            "print('RECORDED FAILURES in the files you are about to touch:')\n"
+            "shown = notes[:limit]\n"
+            "for n in shown:\n"
+            "    print(n, end='')\n"
+            "if len(notes) > limit:\n"
+            "    print('Vault: %%d more lesson(s) matched x.py and were not "
+            "shown (limit %%d)' %% (len(notes) - limit, limit))\n"
+            % _D3_FIVE_NOTES)
+    return path
+
+
+class D3TheHardTwoIsReplacedWithARankedBound(unittest.TestCase):
+    """D3 (2026-09-10, THE HARD TWO). Before this fix the hook sent bm_vault.py
+    a hard-coded "--limit 2", so a file with five relevant lessons showed
+    exactly two no matter how many actually ranked. Against
+    _d3_fake_ranked_tool (which genuinely serves fewer notes for a smaller
+    --limit, unlike this suite's other fixed-text fixtures), the OLD hook
+    shows exactly 2 of the 5; this fix raises what the hook SENDS
+    (RECALL_FETCH_LIMIT) so bm_vault.py's own ranking can surface more than
+    two, and then bounds what actually reaches the model
+    (RECALL_INJECT_MAX) so an uncapped fetch cannot flood a session's
+    context either."""
+
+    def _served_titles(self, tmp):
+        fake_tool = _d3_fake_ranked_tool(tmp)
+        mod = load_hook({"BM_TOOLS": tmp,
+                         "BM_HOOK_OUTCOMES": os.path.join(tmp, "hook-outcomes.jsonl")})
+        mod.TOOL = fake_tool
+        mod.SEEN = os.path.join(tmp, "seen")
+        saved_in, saved_out = sys.stdin, sys.stdout
+        saved_env = {k: os.environ.pop(k) for k in
+                     ("CLAUDE_SESSION_ID", "CODEX_SESSION_ID") if k in os.environ}
+        sys.stdin = io.StringIO(json.dumps(
+            {"tool_input": {"file_path": "/tmp/x.py"}}))
+        sys.stdout = io.StringIO()
+        try:
+            mod.main()
+            raw = sys.stdout.getvalue()
+        finally:
+            sys.stdin, sys.stdout = saved_in, saved_out
+            os.environ.update(saved_env)
+        context = (json.loads(raw)["hookSpecificOutput"]["additionalContext"]
+                   if raw.strip() else "")
+        titles = [n for n in range(1, 6)
+                  if ("Lesson number %d about this file" % n) in context]
+        return titles, context
+
+    # (c)
+    def test_c_more_than_two_notes_can_be_injected_when_more_than_two_rank(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            titles, context = self._served_titles(tmp)
+            self.assertGreater(
+                len(titles), 2,
+                "five notes ranked for this file and only %d reached the "
+                "model; the old hard-coded --limit 2 is still in effect:\n%s"
+                % (len(titles), context))
+
+    # (d)
+    def test_d_the_injected_payload_stays_within_the_chosen_bound(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mod = load_hook()
+            titles, context = self._served_titles(tmp)
+            self.assertLessEqual(
+                len(titles), mod.RECALL_INJECT_MAX,
+                "more notes reached the model than RECALL_INJECT_MAX allows, "
+                "even though bm_vault.py ranked 5:\n%s" % context)
+            # And the bound is not vacuous: this fixture's whole point is a
+            # pool bigger than the bound, so the cap must actually have fired.
+            self.assertEqual(len(titles), mod.RECALL_INJECT_MAX, context)
+            self.assertIn("Vault: showing %d of 5 matched" % mod.RECALL_INJECT_MAX,
+                          context, context)
+
 
 if __name__ == "__main__":
     unittest.main()

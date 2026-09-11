@@ -8,6 +8,7 @@ Tempfile only: no fixture here is written under the repository tree.
 import csv
 import hashlib
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -101,15 +102,27 @@ class AssignmentIsBalancedAndReproducible(unittest.TestCase):
             self.assertTrue(os.path.isfile(csv_path), csv_path)
             with open(csv_path, newline="", encoding="utf-8") as fh:
                 reader = csv.DictReader(fh)
+                # The scorer's five required columns come FIRST and in order,
+                # so a CSV written before the narrative columns existed still
+                # reads correctly. The two narrative columns follow: the
+                # protocol asks reviewers to record defects found and
+                # unnecessary lines inspected in free text, and before this
+                # they had nowhere to write them.
                 self.assertEqual(
-                    reader.fieldnames,
+                    reader.fieldnames[:5],
                     ["reviewer", "change", "condition", "seconds",
                      "decision"])
+                self.assertEqual(reader.fieldnames[5:],
+                                 ["defects_found", "lines_inspected"])
                 rows = list(reader)
             self.assertEqual(len(rows), 15)
             for row in rows:
+                # Every answer column blank, narrative ones included: the
+                # template asks, it never pre-fills.
                 self.assertEqual(row["seconds"], "")
                 self.assertEqual(row["decision"], "")
+                self.assertEqual(row["defects_found"], "")
+                self.assertEqual(row["lines_inspected"], "")
         finally:
             import shutil
             shutil.rmtree(tmp, ignore_errors=True)
@@ -200,3 +213,59 @@ class ValidatorRefusesBadResults(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheTemplateGivesReviewersSomewhereToWriteTheNarrativeMeasures(
+        unittest.TestCase):
+    """benchmarks/ACCEPTANCE-TIME.md names four measures per arm. Two of them,
+    defects found and unnecessary lines inspected, are narrative on purpose:
+    "recorded by the reviewer in free text and are read by hand; no instrument
+    on this estate scores prose today". The scorer therefore does not score
+    them, which is correct.
+
+    But the template a reviewer is actually handed carried only reviewer,
+    change, condition, seconds and decision. A reviewer following the protocol
+    had nowhere to write the two narrative measures, so running the trial would
+    have collected five columns and silently lost the other two. Found before
+    the trial ran rather than after, which is the only time it is cheap.
+    """
+
+    def test_the_template_carries_the_two_narrative_columns(self):
+        tmp = tempfile.mkdtemp(prefix="assign-template-test-")
+        try:
+            path = os.path.join(tmp, "template.csv")
+            result = subprocess.run(
+                [sys.executable, SCRIPT, "assign", "5", "--out-csv", path],
+                capture_output=True, text=True, timeout=60)
+            self.assertEqual(result.returncode, 0,
+                             result.stdout + result.stderr)
+            with open(path, newline="", encoding="utf-8") as fh:
+                header = next(csv.reader(fh))
+            self.assertIn("defects_found", header)
+            self.assertIn("lines_inspected", header)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_the_scorer_still_accepts_a_csv_carrying_them(self):
+        """Narrative columns must not break scoring: they are extra, not
+        required, and the scorer reads a named subset."""
+        tmp = tempfile.mkdtemp(prefix="assign-template-test-")
+        try:
+            path = os.path.join(tmp, "results.csv")
+            with open(path, "w", newline="", encoding="utf-8") as fh:
+                w = csv.writer(fh)
+                w.writerow(["reviewer", "change", "condition", "seconds",
+                            "decision", "defects_found", "lines_inspected"])
+                for i in range(1, 6):
+                    for cond in ("raw_diff", "ordinary_summary",
+                                 "brother_receipt"):
+                        w.writerow(["r%d" % i, "c1", cond, 100 + i, "reject",
+                                    "found the seeded one", "about 40"])
+            scorer = os.path.join(os.path.dirname(SCRIPT), "acceptance_time.py")
+            result = subprocess.run(
+                [sys.executable, scorer, "score", path],
+                capture_output=True, text=True, timeout=60)
+            self.assertEqual(result.returncode, 0,
+                             result.stdout + result.stderr)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)

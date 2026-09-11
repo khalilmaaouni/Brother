@@ -11,6 +11,7 @@ model, no --live path exercised here.
 """
 import json
 import os
+import shlex
 import subprocess
 import sys
 import unittest
@@ -95,7 +96,7 @@ class Area1RealTest(unittest.TestCase):
             ]))
         """)
         env = dict(os.environ)
-        env["DOOR_MODEL_CMD"] = "%s %s" % (sys.executable, decomposer)
+        env["DOOR_MODEL_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(decomposer))
         proc = pa._sh([sys.executable, pa.BROTHER_RUN, "an outcome nobody can schedule",
                       "--cwd", repo, "--runs-root", tmp], env=env, timeout=60)
         self.assertNotEqual(proc.returncode, 0)

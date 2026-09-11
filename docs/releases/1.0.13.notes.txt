@@ -1,0 +1,25 @@
+Drafted by Codex exec on 2026-09-11 (release-orchestrator pass 5, log codex-notes-pass-5.out under the cut evidence; the export gate sentence by pass 6, log codex-note/codex.out under the cut owner evidence), verified against the tree by the cutting session.
+
+Brother 1.0.13 automatically skips planning for small requests that name existing files and a recognized check and meet the safety conditions (fast_route_eligibility in scripts/brother_run.py; docs/decisions/light-path-for-small-changes-2026-09-04.json, decided block; python3 scripts/test_fast_route.py).
+
+The small-change route keeps the same checks on undeclared file changes and the same per-file receipt fields (python3 scripts/test_fast_route.py).
+
+Acceptance of a cited run requires a review receipt or a recorded review skip naming the reason and decision maker (scripts/accept_delivery.py; python3 scripts/test_accept_delivery.py).
+
+Recovery tests cover a three-day gap with changed files and require a recommendation to check the work again (python3 scripts/test_continuity_days_gap.py).
+
+Crash recovery tests kill the running controller and check that restarting neither loses nor duplicates work (python3 scripts/test_crash_resume.py).
+
+Experimental swarm resilience unit SR-1 treats an empty answer or an account-limit answer from a model worker as a failure (scripts/model_worker.py; python3 scripts/test_model_worker.py).
+
+Experimental swarm resilience unit SR-4 pauses new dispatch after consecutive account-limit failures (scripts/loop_bridge.py; python3 scripts/test_loop_bridge.py).
+
+The runtime bundle check compares every shipped runtime file against its source, including mirrored files outside the hooks list (python3 scripts/bundle_runtime.py --check; python3 scripts/test_bundle_runtime.py).
+
+The export readiness gate checks its six-item assessment rather than the consolidated battery before accepting a tag (scripts/export_public.py; python3 scripts/test_export_public.py).
+
+The file-ownership gate refuses work naming file paths when its ownership records cannot be read (products/brothermode/tools/bm_gate.py; python3 products/brothermode/tools/test_bm_gate.py).
+
+The release cut script stops when the release-invariant command fails (scripts/cut_v1.0.0.sh; python3 scripts/test_cut_invariant_step.py).
+
+The README first-run transcript is generated from stored run facts (scripts/readme_receipt_sample.py; readme-honesty check in scripts/check_all.sh).
