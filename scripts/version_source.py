@@ -20,19 +20,22 @@ loaded, only the version-shaped fields are mutated, and it is dumped back
 with the same indent width and the same trailing newline it already had.
 
 Product versions (products/brothermode, products/brothersbe: their own
-.claude-plugin/plugin.json, .codex-plugin/plugin.json, and VERSION files)
-are NOT part of the umbrella version and are never bumped by --write. They
-are only re-verified here: each is compared against ITS OWN marketplace
-entry version (not the umbrella figure), the same population
-scripts/test_version_truth.py's subtree_mismatches already covers, printed
-as its own carrier lines so a drift in either place is visible in one run.
-A product carrier file that does not exist (this repository ships no
+.claude-plugin/plugin.json, .codex-plugin/plugin.json, VERSION files, and
+their entries in .cursor-plugin/marketplace.json) are NOT part of the
+umbrella version and are never bumped by --write. They are only re-verified
+here: each is compared against ITS OWN marketplace entry version (not the
+umbrella figure), the same population scripts/test_version_truth.py's
+subtree_mismatches already covers, printed as its own carrier lines so a
+drift in either place is visible in one run. A product carrier file that
+does not exist (this repository ships no
 products/brothersbe/.codex-plugin/plugin.json today) is reported NO-DATA,
 never PASS or DRIFT: an absent file makes no promise to check. That
 allowance is for OPTIONAL product carriers only. Every umbrella carrier
-(the two bundle manifests, docs/VERSIONING.md's "Current version" line,
+(the three bundle manifests, docs/VERSIONING.md's "Current version" line,
 every marketplace source.ref, metadata.version and the brother entry's
-version) is REQUIRED: one that is missing, or whose field is missing, is
+version, plus the Cursor marketplace's metadata.version and brother entry
+version, the latter two reported NO-DATA rather than DRIFT if that file is
+absent) is REQUIRED: one that is missing, or whose field is missing, is
 reported DRIFT with "missing" in place of a value, and exits 1, because a
 required carrier that vanished is exactly the drift this check exists to
 catch, not an absence of evidence.
@@ -60,6 +63,7 @@ def repo_root():
 
 
 MARKETPLACE_REL = ".claude-plugin/marketplace.json"
+CURSOR_MARKETPLACE_REL = ".cursor-plugin/marketplace.json"
 
 #: Every file --write may touch apart from the source itself, named once so
 #: the transactional snapshot in run_write and umbrella_carriers cannot
@@ -67,7 +71,9 @@ MARKETPLACE_REL = ".claude-plugin/marketplace.json"
 CARRIER_FILES_REL = (
     "bundle/.claude-plugin/plugin.json",
     "bundle/.codex-plugin/plugin.json",
+    "bundle/.cursor-plugin/plugin.json",
     "docs/VERSIONING.md",
+    CURSOR_MARKETPLACE_REL,
 )
 
 
@@ -148,6 +154,7 @@ def umbrella_carriers(root):
 
     bundle_json_carrier("bundle/.claude-plugin/plugin.json")
     bundle_json_carrier("bundle/.codex-plugin/plugin.json")
+    bundle_json_carrier("bundle/.cursor-plugin/plugin.json")
 
     versioning_path = root / "docs" / "VERSIONING.md"
     pattern = re.compile(r"Current version: ([0-9]+\.[0-9]+\.[0-9]+)\.")
@@ -270,6 +277,65 @@ def marketplace_brother_version_carrier(root):
     return Carrier("marketplace:brother.version", get, set_)
 
 
+def cursor_marketplace_umbrella_carriers(root):
+    """Umbrella carriers in .cursor-plugin/marketplace.json: metadata.version
+    and the brother entry's version. If the file is absent, get() returns
+    (None, False) and run_check reports NO-DATA for these labels instead of
+    calling them. If the file exists but the brother entry is missing,
+    set_() refuses to bump silently."""
+    path = root / CURSOR_MARKETPLACE_REL
+    carriers = []
+
+    def metadata_get():
+        if not path.is_file():
+            return None, False
+        try:
+            doc, _, _ = load_json_preserving(path)
+        except (OSError, ValueError):
+            return None, False
+        meta = doc.get("metadata") or {}
+        if "version" not in meta:
+            return None, False
+        return meta["version"], True
+
+    def metadata_set(version):
+        if not path.is_file():
+            return
+        doc, indent, had_nl = load_json_preserving(path)
+        doc.setdefault("metadata", {})["version"] = version
+        dump_json_preserving(path, doc, indent, had_nl)
+
+    carriers.append(Carrier("cursor-marketplace:metadata.version", metadata_get, metadata_set))
+
+    def brother_get():
+        if not path.is_file():
+            return None, False
+        try:
+            doc, _, _ = load_json_preserving(path)
+        except (OSError, ValueError):
+            return None, False
+        plugin = next((p for p in doc.get("plugins", []) if p.get("name") == "brother"), None)
+        if plugin is None or "version" not in plugin:
+            return None, False
+        return plugin["version"], True
+
+    def brother_set(version):
+        if not path.is_file():
+            return
+        doc, indent, had_nl = load_json_preserving(path)
+        plugin = next((p for p in doc.get("plugins", []) if p.get("name") == "brother"), None)
+        if plugin is None:
+            raise SystemExit(
+                "%s: brother plugin entry not found, refusing to bump silently" % CURSOR_MARKETPLACE_REL
+            )
+        plugin["version"] = version
+        dump_json_preserving(path, doc, indent, had_nl)
+
+    carriers.append(Carrier("cursor-marketplace:brother.version", brother_get, brother_set))
+
+    return carriers
+
+
 def product_carriers(root):
     """Re-verify-only carriers: each product file's own version, compared
     against ITS OWN marketplace entry (never the umbrella figure). Never
@@ -291,6 +357,7 @@ def product_carriers(root):
         for rel in (
             "products/%s/.claude-plugin/plugin.json" % product,
             "products/%s/.codex-plugin/plugin.json" % product,
+            "products/%s/.cursor-plugin/plugin.json" % product,
         ):
             path = root / rel
 
@@ -314,6 +381,22 @@ def product_carriers(root):
 
         carriers.append((Carrier("products/%s/VERSION (vs %s entry)" % (product, product), get_version_file), want))
 
+        cursor_path = root / CURSOR_MARKETPLACE_REL
+
+        def get_cursor(path=cursor_path, product=product):
+            if not path.is_file():
+                return None, False
+            try:
+                doc2, _, _ = load_json_preserving(path)
+            except (OSError, ValueError):
+                return None, False
+            plugin = next((p for p in doc2.get("plugins", []) if p.get("name") == product), None)
+            if plugin is None or "version" not in plugin:
+                return None, True
+            return plugin["version"], True
+
+        carriers.append((Carrier("cursor-marketplace:%s.version" % product, get_cursor), want))
+
     return carriers
 
 
@@ -323,11 +406,19 @@ def run_check(root):
         print("NO-DATA: %s is missing or unreadable, cannot check drift" % MARKETPLACE_REL)
         return 2
 
-    failed = False
-    for carrier in umbrella_carriers(root) + marketplace_ref_carriers(root) + [
+    umbrella = umbrella_carriers(root) + marketplace_ref_carriers(root) + [
         marketplace_metadata_carrier(root),
         marketplace_brother_version_carrier(root),
-    ]:
+    ]
+    cursor_path = root / CURSOR_MARKETPLACE_REL
+    if cursor_path.is_file():
+        umbrella += cursor_marketplace_umbrella_carriers(root)
+    else:
+        for label in ("cursor-marketplace:metadata.version", "cursor-marketplace:brother.version"):
+            print("NO-DATA: %s" % label)
+
+    failed = False
+    for carrier in umbrella:
         want = ("v" + version) if carrier.label.endswith(".source.ref") else version
         got, exists = carrier.get()
         if not exists:
@@ -395,7 +486,11 @@ def run_write(root, version):
         for carrier in marketplace_ref_carriers(root):
             carrier.set_(version)
 
-        # 2. every other umbrella carrier, regenerated from the now-updated source.
+        # 2. the Cursor marketplace's umbrella fields, if that file exists.
+        for carrier in cursor_marketplace_umbrella_carriers(root):
+            carrier.set_(version)
+
+        # 3. every other umbrella carrier, regenerated from the now-updated source.
         for carrier in umbrella_carriers(root):
             carrier.set_(version)
     except (SystemExit, OSError, ValueError) as exc:

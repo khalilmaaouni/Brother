@@ -439,10 +439,9 @@ def build_cases(base):
         p["tool_name"] = 1234
         return (p, root, {"BROTHERMODE_ROOT": root}, None)
     add(Case("tool-name-not-a-string", "classified as a non-write tool",
-             ALLOW, ALLOW, tool_name_not_string,
-             "OBSERVED GAP: a malformed payload whose tool_name is not a "
-             "string leaves decide() before any mode check, so enforced mode "
-             "cannot refuse it"))
+             ALLOW, DENY, tool_name_not_string,
+             "FIXED: malformed tool_name now raises _FailOpen, triggering "
+             "enforced_mode() check at line 1171, which denies in enforced mode"))
 
     return cases
 

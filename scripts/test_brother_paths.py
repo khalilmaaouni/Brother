@@ -93,7 +93,11 @@ class ClientIdentification(unittest.TestCase):
         self.assertEqual(brother_paths.client(env), "codex")
 
     def test_unrecognised_override_is_ignored_not_trusted(self):
-        self.assertEqual(brother_paths.client({"BROTHER_CLIENT": "cursor"}), "")
+        self.assertEqual(brother_paths.client({"BROTHER_CLIENT": "notepad"}), "")
+
+    def test_explicit_cursor_override(self):
+        self.assertEqual(brother_paths.client({"BROTHER_CLIENT": "cursor"}),
+                         "cursor")
 
     def test_claude_marker_identifies_claude(self):
         self.assertEqual(brother_paths.client({"CLAUDECODE": "1"}), "claude")
@@ -192,6 +196,23 @@ class ConfigDir(unittest.TestCase):
         self.assertEqual(
             brother_paths.config_dir({"BROTHER_CLIENT": "codex"}),
             os.path.join(os.path.expanduser("~"), ".codex"))
+
+    def test_cursor_client_uses_dot_cursor_and_ignores_codex_home(self):
+        self.assertEqual(
+            brother_paths.config_dir({"BROTHER_CLIENT": "cursor"}),
+            os.path.join(os.path.expanduser("~"), ".cursor"))
+        self.assertEqual(
+            brother_paths.config_dir({"BROTHER_CLIENT": "cursor",
+                                      "CODEX_HOME": "/tmp/codexhome"}),
+            os.path.join(os.path.expanduser("~"), ".cursor"))
+
+    def test_unknown_client_still_honours_codex_home(self):
+        """An unknown client kept honouring CODEX_HOME before Cursor support,
+        and must keep doing so; only Claude and Cursor ignore it."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as root:
+            env = {"BROTHER_PLUGIN_ROOT": root, "CODEX_HOME": "/tmp/codexhome"}
+            self.assertEqual(brother_paths.config_dir(env), "/tmp/codexhome")
 
     def test_brother_override_wins_everywhere(self):
         env = {"BROTHER_CONFIG_DIR": "/tmp/brother", "CLAUDE_CONFIG_DIR": "/x",

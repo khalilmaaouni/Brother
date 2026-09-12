@@ -359,6 +359,7 @@ run_check "pattern-note-self"      python3 scripts/test_pattern_note.py -v
 # Driven backwards 2026-08-29 by relabelling an untouched feature DONE, which
 # fails the suite and makes the tool exit 1 naming the claim.
 run_check "board-status-self"      python3 scripts/test_board_status.py -v
+run_check "unit-trace-self"        python3 scripts/test_unit_trace.py -v
 
 # The ruling ledger, row M7 of the 2026-09-07 reflection: a founder ruling was
 # recorded and never applied for three days while a roadmap row read
@@ -477,6 +478,19 @@ run_check "model-worker"           python3 scripts/test_model_worker.py -v
 # the event that matters, which was the gap all along.
 run_check "pre-push-gate"        python3 scripts/pre_push_gate.py
 run_check "pre-push-gate-self"   python3 scripts/test_pre_push_gate.py -v
+run_check "git-worktree-guard-self" python3 scripts/test_git_worktree_guard.py -v
+# The 2026-09-12 night lessons as tools: run a batch only after one item
+# succeeds, and regenerate generated files last over a committed tree.
+run_check "smoke-first-self"      python3 scripts/test_smoke_first.py -v
+run_check "regen-generated-self"  python3 scripts/test_regen_generated.py -v
+run_check "outgoing-scan-self"    python3 scripts/test_outgoing_scan.py -v
+run_check "red-before-self"       python3 scripts/test_red_before.py -v
+# The 1.0.14 enterprise lane (docs/decisions/enterprise-lane-1014-2026-09-12.json):
+# the obligation map (also in required_fast.sh), the read-only doctor, and the
+# signed claim-level receipt. Registered in the same change that lands them.
+run_check "evidence-obligation-self" python3 scripts/test_evidence_obligation.py -v
+run_check "enterprise-doctor-self"   python3 scripts/test_enterprise_doctor.py -v
+run_check "receipt-attest-self"      python3 scripts/test_receipt_attest.py -v
 # The handback guard: a sub-session finishing work never pushes the default
 # branch, it pushes its feature branch and hands back for review. Registered
 # the same change that lands it, per this estate's own recorded lesson that
@@ -547,6 +561,14 @@ run_check "acceptance"      python3 scripts/acceptance.py
 # lands it, per this estate's own recorded lesson that an unregistered tool
 # is invisible to every check the project owns.
 run_check "brother-run-self" python3 scripts/test_brother_run.py -v
+
+# SR-3: the durable park sidecar (scripts/park_sidecar.py) is its own
+# standard-library module with its own unit tests, wired into brother_run
+# so a crash mid-park does not lose the only copy of a withheld row.
+# Registered here the same change that lands it, per this estate's own
+# lesson that an unregistered tool is invisible to every check the
+# project owns.
+run_check "park-sidecar-self" python3 scripts/test_park_sidecar.py -v
 
 # D-001 (persona dogfood 2026-09-07, personas A1 and A3): the door used to
 # spawn a headless model command to decompose an outcome, which inside a
@@ -1376,6 +1398,34 @@ run_check "codex-smoke" python3 scripts/codex_smoke.py
 # the state the C7 lane actually hit, and reading it as a pass is the failure
 # this test exists to stop.
 run_check "codex-smoke-self" python3 scripts/test_codex_smoke.py -v
+# The Cursor package: the manifest, the Cursor marketplace, the hooks file
+# routed through the Cursor adapter, the rules, and a local install into a
+# temp dir. No binary is needed, so there is no NO-DATA arm; the package is
+# either readable and conformant or the check fails.
+run_check "cursor-plugin-self" python3 scripts/test_cursor_plugin.py
+# The Cursor payload translation seam, driven from BOTH sides. A Cursor
+# shell payload handed straight to a Claude-shaped guard is ALLOWED, which
+# is the defect this check pins, and the same payload through
+# bm_cursor_hook.py --run is denied. No binary is needed.
+run_check "cursor-hook-run-self" python3 scripts/test_cursor_hook_run.py -v
+# The clean-install Cursor smoke. It installs into a throwaway HOME, proves
+# that HOME is signed out, and drives a print turn until it stops at the
+# auth boundary. It hashes the founder's own ~/.cursor plugin, rules,
+# skills and hooks files before and after and fails if that witness moved,
+# so the isolation is measured rather than asserted. NO-DATA (exit 2) on a
+# machine with no cursor-agent binary, never a pass. The signed-in half is
+# deliberately NOT here: it needs a signed-in Cursor, and
+# docs/cursor/SMOKE-RUNBOOK.md is the runbook that closes it.
+run_check "cursor-smoke" python3 scripts/cursor_smoke.py
+# The smoke's own decision points, driven BOTH ways with stub binaries and
+# a temp witness root: the NO-DATA guard, the isolation and auth-boundary
+# refusals, the happy path, and the witness comparison. A NO-DATA verdict
+# read as a pass is the failure this test exists to stop.
+run_check "cursor-smoke-self" python3 scripts/test_cursor_smoke.py -v
+# Cursor at parity with Codex at every release (founder order 2026-09-12):
+# a Codex surface or codex- check with no Cursor twin, exemption or dated
+# debt fails, and so does a debt past its release. Also in required_fast.sh.
+run_check "client-parity" python3 scripts/test_client_parity.py -v
 # P4 (night-2026-09-07, docs/plan/runs/night-2026-09-07/design-P4.md): 17
 # class A surfaces (a passing test file, or a --check/--selftest flag, that
 # the battery had simply forgotten to register). Ten of these sit on the

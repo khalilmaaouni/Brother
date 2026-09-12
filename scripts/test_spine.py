@@ -258,5 +258,57 @@ class RollingRunStartsADependentWhileASiblingIsStillLive(unittest.TestCase):
         self.assertEqual(log.count("Brother integrated "), 3, log)
 
 
+class EveryDispatchedUnitLeavesOneTraceLine(unittest.TestCase):
+    """FL-1.4: integrate_fn() inside rolling_run() must call unit_trace.record()
+    once per unit, keyed by the same claim id claim_store minted, before the
+    claim is released. isolate=False here on purpose: it skips worktree_lane
+    and real git entirely, because the property under test is the trace call
+    itself, which fires for every unit regardless of whether it goes on to
+    integrate, not a second copy of the spine's own integration proof above."""
+
+    def setUp(self):
+        self.cwd = tempfile.mkdtemp(prefix="trace-cwd-")
+        self.claims = os.path.join(tempfile.mkdtemp(), "claims.json")
+        self.trace = os.path.join(tempfile.mkdtemp(prefix="unit-trace-"),
+                                  "trace.jsonl")
+        self.doc = {"rows": [
+            {"id": "T1", "depends_on": [], "owns": ["t1.txt"],
+             "done_check": "exit 0", "in_ship_v1": True}]}
+
+    def test_one_line_keyed_by_the_unit_id_with_the_records_verdict(self):
+        import loop_bridge as B  # noqa: E402  (local: avoid a module-level cycle with sys.path setup above)
+        import unit_trace as U  # noqa: E402
+
+        parts, problem = B.load_parts()
+        self.assertEqual(problem, "", problem)
+
+        class Worker(object):
+            def run(self, unit, cwd=None):
+                return {"worker_claim": "ok", "artifacts": [],
+                        "status": "returned"}
+
+        old = os.environ.get("BROTHER_UNIT_TRACE")
+        os.environ["BROTHER_UNIT_TRACE"] = self.trace
+        try:
+            B.rolling_run(self.doc, parts, Worker(), cwd=self.cwd, cap=1,
+                          store=self.claims, owner="trace-test",
+                          isolate=False)
+        finally:
+            if old is None:
+                os.environ.pop("BROTHER_UNIT_TRACE", None)
+            else:
+                os.environ["BROTHER_UNIT_TRACE"] = old
+
+        rows, err = U.read_all(self.trace)
+        self.assertEqual(err, "")
+        self.assertEqual(len(rows), 1, rows)
+        self.assertEqual(rows[0]["claim_id"], "T1")
+        self.assertEqual(rows[0]["verdict"], "PASS")
+        for field in ("tokens_in", "tokens_out", "cache_read"):
+            val = rows[0][field]
+            self.assertTrue(val == U.NODATA or isinstance(val, int),
+                            (field, val))
+
+
 if __name__ == "__main__":
     unittest.main()

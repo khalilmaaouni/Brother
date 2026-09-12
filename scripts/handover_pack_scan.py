@@ -30,7 +30,21 @@ five characters matches as a plain substring, case insensitively.
 
 The term list itself lives OUTSIDE every repository, at
 ~/.brothersbe-private-names by default (one term per line, # comments), and
-is never printed. NEVER print a term anywhere: every hit line and every
+is never printed.
+
+SCOPE DIRECTIVE (founder rule 2026-09-12: the first target app is never
+named inside Brother's OWN tree, hub, export, bundle, docs, screens; a
+handover pack is a different, private tree and may name it). A comment line
+`# scope: brother-tree` starts a block of terms that bind ONLY Brother's own
+tree; `# scope: all` ends it. THIS scanner (and cutover_pack.py, which loads
+terms through the same function) SKIPS every term inside such a block,
+because a pack is not Brother's tree. Every OTHER reader of the list treats
+a `#` line as a plain comment and so keeps enforcing those terms globally,
+which for the hub-tree scanners (private_terms_scan.py, export_public.py,
+doc_assurance.py) is exactly the rule. The directive is a comment on purpose:
+a suffix on the term line would make those readers match a string that
+never occurs and silently disable the term. The SCAN SUMMARY line prints
+how many terms were scoped out, never which. NEVER print a term anywhere: every hit line and every
 printed path names only the character COUNT of the term that matched, and a
 path that itself carries a term has that term masked to <N> before it is
 ever printed, the same way a hit found because of its name is printed.
@@ -68,21 +82,58 @@ EXIT_FOUND = 1
 EXIT_NO_DATA = 2
 
 
-def load_terms(path):
-    """Returns (terms, reason). terms is None (never []) on any failure, so
-    a caller cannot mistake "could not read the list" for "the list is
-    empty, therefore clean": an empty list would make every scan pass."""
+SCOPE_DIRECTIVE = re.compile(r"^#\s*scope\s*:\s*([a-z-]+)\s*$", re.IGNORECASE)
+SCOPE_BROTHER_TREE = "brother-tree"
+
+
+def parse_terms(lines):
+    """(terms, scoped_out). terms are the entries this PACK scanner enforces;
+    scoped_out is the count of entries skipped because they sat inside a
+    `# scope: brother-tree` block (ended by `# scope: all`). Any other
+    `#` line is a comment. The count is the only thing about a skipped
+    term that ever leaves this function."""
+    terms, scoped_out = [], 0
+    scope = "all"
+    for ln in lines:
+        line = ln.strip()
+        if not line:
+            continue
+        if line.startswith("#"):
+            m = SCOPE_DIRECTIVE.match(line)
+            if m:
+                scope = m.group(1).lower()
+            continue
+        if scope == SCOPE_BROTHER_TREE:
+            scoped_out += 1
+            continue
+        terms.append(line)
+    return terms, scoped_out
+
+
+def _read_terms(path):
+    """(terms, scoped_out, reason). terms is None (never []) on any failure,
+    so a caller cannot mistake "could not read the list" for "the list is
+    empty, therefore clean": an empty list would make every scan pass. A
+    list whose every entry is scoped out is the same NO-DATA: nothing for
+    this scanner to enforce is not evidence that a pack is clean."""
     if not os.path.isfile(path):
-        return None, "terms file not found: %s" % path
+        return None, 0, "terms file not found: %s" % path
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as fh:
             lines = fh.readlines()
     except OSError as exc:
-        return None, "terms file unreadable: %s (%s)" % (path, exc)
-    terms = [ln.strip() for ln in lines if ln.strip() and not ln.strip().startswith("#")]
+        return None, 0, "terms file unreadable: %s (%s)" % (path, exc)
+    terms, scoped_out = parse_terms(lines)
     if not terms:
-        return None, "terms file has no usable entries: %s" % path
-    return terms, None
+        return None, scoped_out, "terms file has no usable entries: %s" % path
+    return terms, scoped_out, None
+
+
+def load_terms(path):
+    """Returns (terms, reason); see _read_terms. Kept as the two-tuple that
+    cutover_pack.py and the tests call."""
+    terms, _scoped_out, reason = _read_terms(path)
+    return terms, reason
 
 
 def build_patterns(terms):
@@ -242,11 +293,12 @@ def run_scan(root, terms_path=None):
     could not be loaded, so a caller (this module's own CLI, or
     close_ceremony_check.py importing this function) never mistakes "the
     list was unreadable" for "nothing was found"."""
-    terms, reason = load_terms(terms_path or TERMS_FILE)
+    terms, scoped_out, reason = _read_terms(terms_path or TERMS_FILE)
     if terms is None:
         return None, [], [], {}, reason
     short_patterns, long_patterns = build_patterns(terms)
     hits, stats = scan_root(root, short_patterns, long_patterns)
+    stats["scoped_out"] = scoped_out
     return hits, short_patterns, long_patterns, stats, None
 
 
@@ -290,10 +342,11 @@ def main(argv=None):
         print("unreadable %s (could not be opened or decoded)" % masked)
 
     print("SCAN SUMMARY: root=%s dirs=%d files=%d zips=%d zip-members=%d "
-          "hits=%d (name=%d content=%d zip-member=%d) unreadable=%d"
+          "hits=%d (name=%d content=%d zip-member=%d) unreadable=%d "
+          "terms-scoped-out=%d"
           % (args.root, stats["dirs"], stats["files"], stats["zips"],
              stats["zip_members"], len(hits), by_kind["name"], by_kind["content"],
-             by_kind["zip-member"], len(unreadable)))
+             by_kind["zip-member"], len(unreadable), stats.get("scoped_out", 0)))
 
     if hits:
         return EXIT_FOUND

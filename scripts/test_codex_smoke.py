@@ -72,6 +72,51 @@ except ImportError:
         % _e100_os.path.basename(__file__))
 
 
+class StubWaitsForRunningCommand(unittest.TestCase):
+    """The local provider must finish the tool, not just its first yield."""
+
+    def setUp(self):
+        import threading
+        from http.server import HTTPServer
+        codex_smoke._Handler.turn = [0]
+        codex_smoke._Handler.brother_command = "test-command"
+        self.server = HTTPServer(("127.0.0.1", 0), codex_smoke._Handler)
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.addCleanup(self.server.server_close)
+        self.addCleanup(self.server.shutdown)
+
+    def post(self, items):
+        import json
+        from urllib.request import Request, urlopen
+        body = {"tools": [{"type": "function", "name": "exec_command"},
+                          {"type": "function", "name": "write_stdin"}],
+                "input": items}
+        request = Request("http://127.0.0.1:%d/v1/responses" % self.server.server_port,
+                          data=json.dumps(body).encode(),
+                          headers={"Content-Type": "application/json"})
+        with urlopen(request) as response:
+            events = [json.loads(line[6:]) for line in response.read().decode().splitlines()
+                      if line.startswith("data: ")]
+        return next(event["item"] for event in events
+                    if event["type"] == "response.output_item.done")
+
+    def test_running_result_is_polled_instead_of_finalized(self):
+        import json
+        first = self.post([])
+        running = {"type": "function_call_output", "call_id": first["call_id"],
+                   "output": "Chunk ID: abc\nProcess running with session ID 42\nOutput:\n"}
+        poll = self.post([first, running])
+        self.assertEqual(poll["type"], "function_call")
+        self.assertEqual(poll["name"], "write_stdin")
+        self.assertEqual(json.loads(poll["arguments"])["session_id"], 42)
+        self.assertNotEqual(poll["call_id"], first["call_id"])
+        completed = {"type": "function_call_output", "call_id": poll["call_id"],
+                     "output": "Process exited with code 0\nOutput:\ncommitted"}
+        final = self.post([first, running, poll, completed])
+        self.assertEqual(final["type"], "message")
+
+
 class TheNoDataGuard(unittest.TestCase):
     def test_an_absent_binary_is_no_data_and_never_a_pass(self):
         self.assertEqual(codex_smoke.main(["--codex-bin",

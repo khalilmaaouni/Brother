@@ -1,0 +1,29 @@
+{
+  "schema": "brother.gate-obligations/v1",
+  "default": "REQUIRED_FOR_MERGE",
+  "checks": {
+    "plugin-manifest": {
+      "obligation": "REQUIRED_FOR_MERGE",
+      "reason": "required-fast CI installs the pinned validation CLI; a missing validator is incomplete required evidence."
+    },
+    "virgin-unit-proof": {
+      "obligation": "REQUIRED_FOR_RELEASE",
+      "reason": "needs a Codex binary, which public CI does not have; the release closeout runs it."
+    },
+    "key-components": {
+      "obligation": "REQUIRED_FOR_MERGE",
+      "expected_absent_input": "docs/plan/KEY-COMPONENTS.json",
+      "reason": "the component registry is not shipped in the public edition."
+    },
+    "readiness-board": {
+      "obligation": "REQUIRED_FOR_MERGE",
+      "expected_absent_input": "docs/plan/READINESS-ROADMAP-2026-08-29.json",
+      "reason": "the roadmap file is not shipped in the public edition."
+    },
+    "board-status": {
+      "obligation": "REQUIRED_FOR_MERGE",
+      "expected_absent_input": "docs/plan/READINESS-ROADMAP-2026-08-29.json",
+      "reason": "the roadmap file is not shipped in the public edition."
+    }
+  }
+}

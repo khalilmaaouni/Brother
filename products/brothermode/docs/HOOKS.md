@@ -131,9 +131,11 @@ scope). Use the absolute path to your checkout.
 }
 ```
 
-The `matcher` is a belt-and-braces duplicate of the check the hook does itself: the hook
-re-reads `tool_name` and passes through anything that is not a file-writing tool, so a
-looser matcher is safe, just slightly more wasteful.
+The hook re-reads `tool_name`. A valid tool name outside the write tools and Bash
+passes through. A missing or non-string name enters the failure policy: enforced mode
+denies it, and advisory mode permits it with a diagnostic. Keep the matcher wide enough
+to deliver every write tool event to the hook; the hook cannot inspect an event the host
+does not send.
 
 Verify the installation without touching your real project:
 
@@ -305,16 +307,22 @@ freely, and a genuine cross-fence write is refused with the same message as befo
 opt-in and stays that way, because a hook that starts refusing edits on a machine whose
 owner never asked for it is a worse failure than an unenforced fence.
 
-What it still cannot do is gate Bash. A shell command that writes across a fence is
-detected afterwards by the `Bash` audit pair, never refused, in either mode.
+Bash coverage is narrower than direct file-tool coverage. An `apply_patch` heredoc
+with recognized file targets goes through the fence. The Bash audit also refuses known
+destructive forms against its own store in enforced mode. Other shell writes are
+observed after execution; indirect or arbitrary shell effects are not a complete
+pre-execution boundary. `CodexApplyPatchRefuteRound2` in `tools/test_bm_fence_hook.py`
+and `EnforcedModeRefusesStoreDestruction` in `tools/test_bm_bash_audit.py` define
+those specific checks. This does not create operating-system isolation.
 
-## Fail open, loudly
+## Advisory failure policy
 
-This hook sits in front of every edit the founder makes. A hook that failed closed on its
-own bug would brick editing entirely. So a refusal must always come from a real ownership
-conflict, and never from the hook being broken.
+In the default advisory mode, an inspection failure allows the write and prints a
+diagnostic. With `BM_FENCE_MODE=enforced`, the same unverified ownership conditions
+refuse the write as described above. Do not treat an advisory diagnostic as a checked
+ownership decision.
 
-Every one of these allows the write and prints the reason to stderr:
+In advisory mode, each of these allows the write and prints the reason to stderr:
 
 - no BrotherMode project root found,
 - no store file,

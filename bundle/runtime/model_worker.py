@@ -569,13 +569,23 @@ def run_model(prompt, cwd=None, runner=None):
     shape (see _parse_model_output); it is never a fabricated number."""
     runner = runner or subprocess.run
     argv = _model_argv(prompt)
+    timeout = _timeout_s()
+    remaining = os.environ.get("BROTHER_UNIT_TIME_LEFT_S")
+    if remaining is not None:
+        try:
+            remaining = float(remaining)
+            if not 0 < remaining < float("inf"):
+                raise ValueError("invalid remaining allowance")
+        except ValueError:
+            return False, "failure_class=timeout; unit time allowance exhausted", None
+        timeout = min(timeout, remaining)
     try:
         completed = runner(argv, cwd=cwd, capture_output=True, text=True,
-                            timeout=_timeout_s(), env=_child_env())
+                            timeout=timeout, env=_child_env())
     except subprocess.TimeoutExpired:
         cls = classify_failure(timed_out=True)
         return False, ("failure_class=%s; model command timed out after "
-                        "%ss: %s" % (cls, _timeout_s(), argv)), None
+                        "%ss: %s" % (cls, timeout, argv)), None
     except OSError as exc:
         cls = classify_failure(text=str(exc))
         return False, ("failure_class=%s; could not start model command "

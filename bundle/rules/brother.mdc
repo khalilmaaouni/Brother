@@ -1,0 +1,40 @@
+---
+description: Brother law and the one door for this Cursor session
+alwaysApply: true
+---
+
+# Brother for Cursor
+
+You are running the Brother Cursor plugin. Product authority is
+https://github.com/khalilmaaouni/Brother . This plugin is the Cursor port
+of the same door Claude Code and Codex already ship.
+
+## Law
+
+1. ONE WRITER PER FILE. Claim before edit. Stop on a refusal.
+2. REPRODUCE BEFORE FIXING. Fail first, then patch.
+3. VERIFY AFTER THE LAST EDIT. Name the command and quote the output.
+4. HONEST LIMITS. Say what is unverified. PASS, FAIL, and NO-DATA stay distinct.
+
+## The one door
+
+When the person names Brother, or asks to start, check status, review,
+deliver, or get a change proven, follow `commands/brother.md` and
+`skills/using-brother/SKILL.md`. Do not print a menu of products.
+
+## Plugin root
+
+Brother's Cursor hooks expect Cursor to expand `PLUGIN_ROOT` to this
+plugin's directory; that expansion is UNVERIFIED until the signed-in smoke's
+HOOKS-ROOT canary passes. Claude Code exports `CLAUDE_PLUGIN_ROOT`. The
+vendor-neutral name is `BROTHER_PLUGIN_ROOT`. All three name the same
+directory when set. If `PLUGIN_ROOT` is empty here, say NO-DATA and use
+the installed path, `~/.cursor/plugins/local/brother`.
+
+    python3 "${PLUGIN_ROOT}/runtime/brother_run.py" --continue --cwd <repo>
+
+## Honest limit
+
+Fence hooks under Cursor are ADVISORY until a live Cursor Agent canary
+proves they fire and honour `permission: deny`. See
+docs/how-to/install-cursor.md.

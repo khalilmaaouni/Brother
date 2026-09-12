@@ -12,6 +12,8 @@ This is the same "drive it backwards, never trust a single green" method the
 rest of this estate's self-tests use (see scripts/test_battery_verdict.py).
 """
 import os
+import json
+import shutil
 import re
 import stat
 import subprocess
@@ -41,11 +43,29 @@ assert HEADER.strip(), "could not locate the header before the first real check"
 assert FOOTER.strip(), "could not locate the summary footer"
 
 
-def build_stub_script(stub_lines):
+_FIXTURES = tempfile.TemporaryDirectory(prefix="required-fast-fixtures-")
+
+
+def install_obligation_fixture(scripts_dir, optional=()):
+    shutil.copyfile(os.path.join(HERE, "evidence_obligation.py"),
+                    os.path.join(scripts_dir, "evidence_obligation.py"))
+    data = {"schema": "brother.gate-obligations/v1",
+            "default": "REQUIRED_FOR_MERGE", "checks": {
+                name: {"obligation": "OPTIONAL", "reason": "test optional evidence"}
+                for name in optional}}
+    with open(os.path.join(scripts_dir, "gate_obligations.json"), "w") as handle:
+        json.dump(data, handle)
+
+
+def build_stub_script(stub_lines, optional=()):
     """stub_lines: list of 'run_check "name" <stub command>' strings."""
     body = HEADER + "\n".join(stub_lines) + "\n" + FOOTER
-    fd, path = tempfile.mkstemp(prefix="required-fast-stub-", suffix=".sh")
-    with os.fdopen(fd, "w") as f:
+    root = tempfile.mkdtemp(dir=_FIXTURES.name)
+    scripts_dir = os.path.join(root, "scripts")
+    os.makedirs(scripts_dir)
+    install_obligation_fixture(scripts_dir, optional)
+    path = os.path.join(scripts_dir, "required_fast.sh")
+    with open(path, "w") as f:
         f.write(body)
     os.chmod(path, os.stat(path).st_mode | stat.S_IEXEC)
     return path
@@ -152,7 +172,7 @@ class RequiredFastScript(unittest.TestCase):
         self.assertIsNotNone(m, out)
         os.remove(m.group(1))
 
-    def test_no_data_is_reported_and_never_fails_the_run(self):
+    def test_required_no_data_blocks_without_rewriting_the_verdict(self):
         path = build_stub_script([
             'run_check "stub-a" true',
             'run_check "stub-nodata" sh -c "exit 2"',
@@ -162,11 +182,21 @@ class RequiredFastScript(unittest.TestCase):
             code, out = run(path)
         finally:
             os.remove(path)
-        self.assertEqual(code, 0, out)
+        self.assertEqual(code, 1, out)
         self.assertIn("pass 2   fail 0   no-data 1", out)
         self.assertIn("NO-DATA:", out)
         self.assertIn("stub-nodata", out)
         self.assertNotIn("FAILED:", out)
+        self.assertIn("stub-nodata\tNO-DATA\tREQUIRED_FOR_MERGE\tBLOCKED", out)
+
+    def test_optional_no_data_allows_without_rewriting_the_verdict(self):
+        path = build_stub_script([
+            'run_check "stub-nodata" sh -c "exit 2"',
+        ], optional=("stub-nodata",))
+        code, out = run(path)
+        self.assertEqual(code, 0, out)
+        self.assertIn("pass 0   fail 0   no-data 1", out)
+        self.assertIn("stub-nodata\tNO-DATA\tOPTIONAL\tALLOWED", out)
 
     def test_fail_and_no_data_together_still_fails_on_the_fail(self):
         path = build_stub_script([
@@ -195,6 +225,7 @@ class TwoWorktreesShareOneTempDirectory(unittest.TestCase):
         root = tempfile.mkdtemp(prefix="two-worktrees-")
         scripts_dir = os.path.join(root, lane, "scripts")
         os.makedirs(scripts_dir)
+        install_obligation_fixture(scripts_dir)
         path = os.path.join(scripts_dir, "required_fast.sh")
         with open(path, "w") as fh:
             fh.write(HEADER + "\n".join(stub_lines) + "\n" + FOOTER)

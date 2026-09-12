@@ -43,6 +43,13 @@
 # public repository, ubuntu-latest only, 20 minute timeout, no matrix, no
 # other trigger; every other workflow file keeps the full refusal.
 .github/workflows/required-fast.yml
+# Added 2026-09-12 under the founder's ruling on the enterprise lane screen
+# (docs/decisions/enterprise-lane-1014-2026-09-12.json, option A): the
+# security policy and the code owners of the guard, gate, signing and export
+# paths belong on the public repository, which is where reporters and
+# reviewers read them. Both are leaf files with no private content.
+.github/CODEOWNERS
+SECURITY.md
 .gitignore
 # Named as leaf paths, not the bare .sbe directory (security finding,
 # 2026-09-04): a bare directory entry sweeps in whatever the hub happens to
@@ -200,6 +207,7 @@ products/brothermode/.claude-plugin
 # this manifest under the marketplace-listed path; missing here, the export
 # tree cannot serve as a working local marketplace for it.
 products/brothermode/.codex-plugin
+products/brothermode/.cursor-plugin
 products/brothermode/CHANGELOG.md
 products/brothermode/CHECKSUMS.sha256
 products/brothermode/CLAUDE.md
@@ -263,6 +271,8 @@ products/brothermode/docs/WHITEPAPER.md
 products/brothermode/docs/WHY-THE-CORE-IS-SMALL.md
 products/brothermode/docs/WINDOWS-CHECK.md
 products/brothermode/docs/WORKING-WITH-BROTHERSBE.md
+products/brothermode/docs/runtimes/codex.AGENTS.md
+products/brothermode/docs/runtimes/cursor.AGENTS.md
 # Added 2026-09-04, row E111. A Codex pass read the published v1.0.2 tag as a
 # newcomer and found the product's own gates naming pages the export does not
 # carry: `python3 tools/test_bm_docs.py` exited 1 with 7 failures and 26
@@ -293,6 +303,7 @@ products/brothermode/docs/CORRECTION-LEARNING.md
 # against the public v1.0.2 tag).
 products/brothersbe/.gitattributes
 products/brothersbe/.claude-plugin
+products/brothersbe/.cursor-plugin
 products/brothersbe/CHANGELOG.md
 products/brothersbe/CHECKSUMS.sha256
 products/brothersbe/CITATION.cff
@@ -525,3 +536,7 @@ docs/decisions/README.md
 # go-live night: the public CI refused the release PR without it).
 docs/decisions/light-path-for-small-changes-2026-09-04.json
 docs/onboarding/README.md
+
+# The official Cursor adapter needs its discovery file and signed-in runbook.
+.cursor-plugin/marketplace.json
+docs/cursor/SMOKE-RUNBOOK.md

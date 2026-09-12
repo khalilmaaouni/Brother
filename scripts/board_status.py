@@ -44,6 +44,183 @@ FLIGHT_WORDS = ("IN-FLIGHT", "IN FLIGHT", "STARTED", "FIRST HALF DONE")
 NODATA = "NO-DATA"
 
 # ---------------------------------------------------------------------------
+# THE UNIT TRACE JOIN (FL-2.1/FL-2.2): "tokens per accepted delivery" per
+# section, joining DONE-with-evidence rows to the trace lines FL-1's writer
+# appends, by claim id. THE TRACE FILE CONTRACT IS FIXED BY FL-1 AND NOT
+# CHANGED HERE: JSON lines, one object per unit, at DEFAULT_TRACE_PATH unless
+# overridden by --trace or BROTHER_UNIT_TRACE (argument beats env beats
+# default). Each line carries claim_id, tier, effort, tokens_in, tokens_out,
+# cache_read, wall_ms, verdict, and optionally host and recorded_at. A field
+# the host could not supply is the STRING "NO-DATA", never 0, so it must be
+# read as unknown, never summed as zero cost.
+#
+# scripts/unit_trace.py (FL-1's writer) lives on another branch and is
+# deliberately not imported here: this is a small, independent reader, not a
+# dependency on code this branch does not carry.
+#
+# THE ROW CONTRACT: a row may carry an optional unit_ids list of claim id
+# strings. No real row carries one today (READINESS-ROADMAP-2026-08-29.json
+# predates FL-1), so every section on the real board reports NO-DATA until a
+# row delivered after FL-1 is annotated. That is the join not existing yet,
+# never a bug in the join.
+# ---------------------------------------------------------------------------
+
+#: FL-1's writer default, copied verbatim so this reader can never drift from it.
+DEFAULT_TRACE_PATH = os.path.expanduser("~/.claude/unit-trace.jsonl")
+
+
+def resolve_trace_path(explicit=None):
+    """Argument beats BROTHER_UNIT_TRACE beats the default path. explicit
+    is whatever --trace was given on the command line (or None)."""
+    if explicit:
+        return explicit
+    return os.environ.get("BROTHER_UNIT_TRACE") or DEFAULT_TRACE_PATH
+
+
+def load_unit_trace(path=None):
+    """(lines_or_None, error_or_None). path=None resolves via
+    resolve_trace_path() AT CALL TIME (never bound into the default), same
+    pattern as every other loader in this file. Unlike those loaders, a
+    malformed line here does NOT degrade silently: one json.loads per
+    non-empty line, and the first parse failure, or an unreadable file,
+    returns (None, problem), because a wrong join would misreport a real
+    cost, and this is a number, not a count of recent notes."""
+    if path is None:
+        path = resolve_trace_path()
+    if not os.path.isfile(path):
+        return None, "no such file: %s" % path
+    lines = []
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for lineno, raw in enumerate(fh, 1):
+                raw = raw.strip()
+                if not raw:
+                    continue
+                try:
+                    lines.append(json.loads(raw))
+                except ValueError as exc:
+                    return None, ("malformed line %d in %s: %s"
+                                  % (lineno, path, exc))
+    except OSError as exc:
+        return None, str(exc)
+    return lines, None
+
+
+def _token_field(value):
+    """int, or None when the host could not supply it (the contract's
+    NO-DATA string, or anything else that is not a plain number)."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return int(value)
+    return None
+
+
+#: Sections whose items are plain rows (id/status/evidence/unit_ids) the join
+#: can classify(). team_complaints and learning_loop are rollups built from
+#: other shapes, not rows a founder could annotate with unit_ids; for those
+#: the join simply does not exist yet, which is itself a NO-DATA reason.
+_ROW_SECTION_KEYS = ("features", "rows", "gates")
+
+
+def tokens_per_accepted_delivery_for_section(items, trace_lines, trace_error):
+    """The pure join, testable without a file on disk.
+
+    items: the section's raw row list (doc[key]), or None when this section
+    has no row-shaped items to join at all.
+    trace_lines: the list load_unit_trace() returned, or None (only read
+    when a match is actually attempted).
+    trace_error: the error load_unit_trace() returned, or None.
+
+    Returns a dict with keys value (a dict with total/denominator/ratio, or
+    None) and reason (a string, set exactly when value is None).
+    """
+    if items is None:
+        return dict(value=None,
+                    reason="no unit id join defined for this section")
+
+    done_rows_with_unit_ids = []
+    no_unit_id_rows = 0
+    for it in items:
+        if classify(it) != "done":
+            continue
+        uids = it.get("unit_ids") or []
+        if uids:
+            done_rows_with_unit_ids.append(uids)
+        else:
+            no_unit_id_rows += 1
+
+    if not done_rows_with_unit_ids:
+        if no_unit_id_rows:
+            return dict(value=None,
+                        reason="%d row(s) carry no unit id" % no_unit_id_rows)
+        return dict(value=None, reason="no done row carries a unit id")
+
+    if trace_error is not None:
+        return dict(value=None, reason="trace file: %s" % trace_error)
+
+    trace_by_claim = {}
+    for rec in trace_lines or []:
+        cid = rec.get("claim_id")
+        if cid is not None:
+            trace_by_claim.setdefault(cid, []).append(rec)
+
+    total = 0
+    matched = False
+    for uids in done_rows_with_unit_ids:
+        for cid in uids:
+            for rec in trace_by_claim.get(cid, []):
+                matched = True
+                total += (_token_field(rec.get("tokens_in")) or 0)
+                total += (_token_field(rec.get("tokens_out")) or 0)
+
+    if not matched:
+        reason = ("no trace line matched any unit id among the %d done row(s)"
+                  % len(done_rows_with_unit_ids))
+        if no_unit_id_rows:
+            reason += "; %d row(s) carry no unit id" % no_unit_id_rows
+        return dict(value=None, reason=reason)
+
+    denominator = len(done_rows_with_unit_ids)
+    ratio = total / float(denominator)
+    return dict(value=dict(total=total, denominator=denominator, ratio=ratio),
+                reason=None)
+
+
+def attach_tokens_per_accepted_delivery(secs, doc, trace_path=None):
+    """Mutates each dict in secs (as returned by sections()) in place,
+    adding the --json contract key tokens_per_accepted_delivery (a number
+    or the string NO-DATA) plus the internal keys
+    tokens_per_accepted_delivery_line() reads to print the same figure
+    without recomputing it. The trace file is loaded ONCE and shared across
+    every section, so ten sections never open the file ten times."""
+    trace_lines, trace_error = load_unit_trace(trace_path)
+    for s in secs:
+        items = doc.get(s["key"]) if s["key"] in _ROW_SECTION_KEYS else None
+        result = tokens_per_accepted_delivery_for_section(
+            items, trace_lines, trace_error)
+        if result["value"] is None:
+            s["tokens_per_accepted_delivery"] = NODATA
+            s["tpad_reason"] = result["reason"]
+        else:
+            v = result["value"]
+            s["tokens_per_accepted_delivery"] = round(v["ratio"], 1)
+            s["tpad_reason"] = None
+            s["tpad_total"] = v["total"]
+            s["tpad_denominator"] = v["denominator"]
+    return secs
+
+
+def tokens_per_accepted_delivery_line(s):
+    """The line printed directly under a section's percentage bar."""
+    if s.get("tpad_reason") is not None:
+        return "tokens per accepted delivery: %s (%s)" % (NODATA, s["tpad_reason"])
+    return ("tokens per accepted delivery: %d / %d = %.1f"
+            % (s["tpad_total"], s["tpad_denominator"],
+               s["tokens_per_accepted_delivery"]))
+
+
+# ---------------------------------------------------------------------------
 # THE VAULT COUNTER (WBS V12): "lessons recalled this week, receipts bound,
 # notes written", read from the store and the vault, never typed. Three
 # small readers, each over a real file this estate already writes, each
@@ -487,6 +664,9 @@ def main(argv=None):
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--vault-counters", action="store_true",
                     help="print only the three vault-counter lines (WBS V12)")
+    ap.add_argument("--trace", default=None,
+                    help="unit trace jsonl path (else BROTHER_UNIT_TRACE, "
+                         "else ~/.claude/unit-trace.jsonl)")
     args = ap.parse_args(list(sys.argv[1:] if argv is None else argv))
 
     if args.vault_counters:
@@ -523,6 +703,7 @@ def main(argv=None):
     # every JSON reader: the flag still exited 0, so the break was invisible
     # until a parser tried to read it.
     secs = sections(doc)
+    attach_tokens_per_accepted_delivery(secs, doc, trace_path=args.trace)
     if args.json:
         print(json.dumps(secs, indent=2, sort_keys=True))
         return 0
@@ -546,6 +727,7 @@ def main(argv=None):
         c = s["counts"]
         print("%-20s %s   %d done, %d in flight, %d open"
               % (s["label"], bar(s["percent"]), c["done"], c["in_flight"], c["open"]))
+        print("  %s" % tokens_per_accepted_delivery_line(s))
         claims += c["claimed"]
     print("")
     rc = 0

@@ -25,6 +25,8 @@ A long task can outlive the chat that started it. Two workers can reach for the 
 
 BrotherMode keeps the work record on disk. It can resume open work, keep one supported writer per claimed file, record decisions, report real cost fields when returned, and produce a delivery packet from the checks that actually ran.
 
+When work names file paths, the ownership gate refuses it if it cannot read its ownership records.
+
 ## Prove the benefits
 
 From this product directory, run:
@@ -146,7 +148,7 @@ claude plugin install brothermode@brother
 The pinned clone, for anyone who wants the bytes of one release on disk and a checksum they can run themselves:
 
 ```bash
-git clone --branch v1.0.13 --depth 1 https://github.com/khalilmaaouni/Brother.git ~/.claude/skills/brothermode-src
+git clone --branch v1.0.14 --depth 1 https://github.com/khalilmaaouni/Brother.git ~/.claude/skills/brothermode-src
 cd ~/.claude/skills/brothermode-src/products/brothermode
 python3 scripts/install.py
 ```

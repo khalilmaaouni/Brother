@@ -529,21 +529,56 @@ def _command_word(prefix):
     return ""
 
 
-def _find_heredoc_ops(line):
+def _find_heredoc_ops(line, quote_state=None):
     """Every heredoc operator on one physical line, in order, as
     (command_word, strips_tabs, delimiter).
 
     Recognizes '<<DELIM', '<< DELIM', '<<-DELIM', "<<'DELIM'", '<<"DELIM"'
     and the tab-stripping '<<-' variants. Skips the '<<<' here-string
     operator, which is not a heredoc. Hand-written rather than via re, to keep
-    this file's imports unchanged; the grammar is small and fixed."""
+    this file's imports unchanged; the grammar is small and fixed.
+    Callers scanning a whole command share quote_state across physical
+    command lines, but never scan heredoc body data into that state."""
     ops = []
     n = len(line)
     idx = 0
-    while True:
-        pos = line.find("<<", idx)
-        if pos == -1:
+    shell_quote = quote_state.get("quote", "") if quote_state is not None else ""
+    word_start = True
+    while idx < n:
+        ch = line[idx]
+        if shell_quote:
+            if ch == "\\" and shell_quote != "'":
+                idx += 2
+                continue
+            if ch == shell_quote[-1]:
+                shell_quote = ""
+            idx += 1
+            continue
+        if ch == "\\":
+            idx += 2
+            word_start = False
+            continue
+        if line.startswith("$'", idx):
+            shell_quote = "$'"
+            word_start = False
+            idx += 2
+            continue
+        if ch in "'\"":
+            shell_quote = ch
+            word_start = False
+            idx += 1
+            continue
+        if ch == "#" and word_start:
             break
+        if not line.startswith("<<", idx):
+            word_start = ch in " \t;|&()<>"
+            idx += 1
+            continue
+        # Only an unquoted, unescaped operator can start a heredoc. A
+        # literal operator in an argument or comment must not consume
+        # later commands as if they were its body.
+        pos = idx
+        word_start = True
         # '<<<' is a here-string, not a heredoc: skip the whole run of '<'.
         if pos > 0 and line[pos - 1] == "<":
             idx = pos + 1
@@ -588,6 +623,8 @@ def _find_heredoc_ops(line):
         if delim:
             ops.append((_command_word(line[:pos]), strips_tabs, delim))
         idx = j if j > pos else pos + 2
+    if quote_state is not None:
+        quote_state["quote"] = shell_quote
     return ops
 
 
@@ -606,9 +643,10 @@ def apply_patch_bodies(command):
     lines = command.split("\n")
     n = len(lines)
     bodies = []
+    quote_state = {}
     i = 0
     while i < n:
-        ops = _find_heredoc_ops(lines[i])
+        ops = _find_heredoc_ops(lines[i], quote_state)
         i += 1
         for cmdword, strips_tabs, delim in ops:
             collected = []
@@ -1023,8 +1061,12 @@ def decide(payload):
         if not isinstance(payload, dict):
             raise _FailOpen("hook payload was not a JSON object", "bad-payload")
         tool_name = payload.get("tool_name")
-        if not isinstance(tool_name, str) or (
-                tool_name not in WRITE_TOOLS and tool_name != "Bash"):
+        if not isinstance(tool_name, str):
+            # Malformed tool_name (not a string): enforced mode denies,
+            # advisory mode warns. Raise _FailOpen to trigger the enforced
+            # check at line 1171, which handles both modes correctly.
+            raise _FailOpen("tool_name was not a string", "bad-payload")
+        if tool_name not in WRITE_TOOLS and tool_name != "Bash":
             # Not a file-writing tool. Silent, not loud: this is the common
             # case, and a stderr line per Read or Grep would be noise.
             return None, []

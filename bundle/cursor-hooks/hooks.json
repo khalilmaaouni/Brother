@@ -1,0 +1,89 @@
+{
+  "hooks": {
+    "sessionStart": [
+      {
+        "command": "python3 \"${PLUGIN_ROOT}/runtime/hooks/brothermode/tools/bm_cursor_hook.py\" sessionStart --run \"${PLUGIN_ROOT}/runtime/hooks/brothermode/tools/bm_sessionstart.py\"",
+        "timeout": 30
+      },
+      {
+        "command": "python3 \"${PLUGIN_ROOT}/runtime/hooks/brothermode/tools/bm_cursor_hook.py\" sessionStart --run \"${PLUGIN_ROOT}/runtime/hooks/brothermode/tools/bm_vault.py\" refresh",
+        "timeout": 30
+      },
+      {
+        "command": "python3 \"${PLUGIN_ROOT}/runtime/hooks/brothermode/tools/bm_cursor_hook.py\" sessionStart --run \"${PLUGIN_ROOT}/runtime/hooks/brothersbe/tools/sbe_sessionstart.py\"",
+        "timeout": 30
+      }
+    ],
+    "sessionEnd": [
+      {
+        "command": "python3 \"${PLUGIN_ROOT}/runtime/hooks/brothermode/tools/bm_cursor_hook.py\" sessionEnd --run \"${PLUGIN_ROOT}/runtime/hooks/brothermode/tools/bm_telemetry.py\" outcomes-append",
+        "timeout": 30
+      },
+      {
+        "command": "python3 \"${PLUGIN_ROOT}/runtime/hooks/brothermode/tools/bm_cursor_hook.py\" sessionEnd --run \"${PLUGIN_ROOT}/runtime/hooks/brothersbe/tools/sbe_telemetry.py\" outcomes-append",
+        "timeout": 30
+      }
+    ],
+    "stop": [
+      {
+        "command": "python3 \"${PLUGIN_ROOT}/runtime/hooks/brothermode/tools/bm_cursor_hook.py\" stop --run \"${PLUGIN_ROOT}/runtime/hooks/brothermode/tools/bm_hookchain.py\" stop",
+        "timeout": 30
+      },
+      {
+        "command": "python3 \"${PLUGIN_ROOT}/runtime/hooks/brothermode/tools/bm_cursor_hook.py\" stop --run \"${PLUGIN_ROOT}/runtime/hooks/brothersbe/tools/sbe_session_reconcile.py\"",
+        "timeout": 30
+      }
+    ],
+    "preCompact": [
+      {
+        "command": "python3 \"${PLUGIN_ROOT}/runtime/hooks/brothermode/tools/bm_cursor_hook.py\" preCompact --run \"${PLUGIN_ROOT}/runtime/hooks/brothermode/tools/bm_hookchain.py\" precompact",
+        "timeout": 60
+      },
+      {
+        "command": "python3 \"${PLUGIN_ROOT}/runtime/hooks/brothermode/tools/bm_cursor_hook.py\" preCompact --run \"${PLUGIN_ROOT}/runtime/hooks/brothersbe/tools/sbe_autosave.py\" precompact",
+        "timeout": 120
+      }
+    ],
+    "preToolUse": [
+      {
+        "command": "python3 \"${PLUGIN_ROOT}/runtime/hooks/brothermode/tools/bm_cursor_hook.py\" preToolUse --run \"${PLUGIN_ROOT}/runtime/hooks/brothermode/tools/bm_fence_hook.py\"",
+        "matcher": "Write|Edit|Delete|Shell",
+        "timeout": 10
+      },
+      {
+        "command": "python3 \"${PLUGIN_ROOT}/runtime/hooks/brothermode/tools/bm_cursor_hook.py\" preToolUse --run \"${PLUGIN_ROOT}/runtime/hooks/brothersbe/tools/sbe_fence_hook.py\"",
+        "matcher": "Write|Edit|Delete",
+        "timeout": 10
+      }
+    ],
+    "beforeShellExecution": [
+      {
+        "command": "python3 \"${PLUGIN_ROOT}/runtime/hooks/brothermode/tools/bm_cursor_hook.py\" beforeShellExecution --run \"${PLUGIN_ROOT}/runtime/hooks/brothermode/tools/bm_session_cap.py\"",
+        "timeout": 10
+      },
+      {
+        "command": "python3 \"${PLUGIN_ROOT}/runtime/hooks/brothermode/tools/bm_cursor_hook.py\" beforeShellExecution --run \"${PLUGIN_ROOT}/runtime/hooks/brothersbe/tools/sbe_bash_write_guard.py\"",
+        "timeout": 10
+      }
+    ],
+    "postToolUse": [
+      {
+        "command": "python3 \"${PLUGIN_ROOT}/runtime/hooks/brothermode/tools/bm_cursor_hook.py\" postToolUse --run \"${PLUGIN_ROOT}/runtime/hooks/brothermode/tools/bm_bash_audit.py\" post",
+        "matcher": "Shell",
+        "timeout": 15
+      }
+    ],
+    "afterShellExecution": [
+      {
+        "command": "python3 \"${PLUGIN_ROOT}/runtime/hooks/brothermode/tools/bm_cursor_hook.py\" afterShellExecution --run \"${PLUGIN_ROOT}/runtime/hooks/brothermode/tools/bm_bash_audit.py\" post",
+        "timeout": 15
+      }
+    ],
+    "afterFileEdit": [
+      {
+        "command": "python3 \"${PLUGIN_ROOT}/runtime/hooks/brothermode/tools/bm_cursor_hook.py\" afterFileEdit --run \"${PLUGIN_ROOT}/runtime/hooks/brothermode/tools/vault_recall_hook.py\" check",
+        "timeout": 10
+      }
+    ]
+  }
+}

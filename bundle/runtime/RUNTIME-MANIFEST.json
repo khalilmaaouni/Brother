@@ -15,11 +15,11 @@
   },
   {
    "path": "brother_paths.py",
-   "sha256": "3815d9f651dc46a5e18d7c1bbb45a7369c8455dec9777fea73be1757375d2a22"
+   "sha256": "197a3d5830a92b681872f1cddeb20c9d8bc3cf404e3ccb560c031334a0c6d5f8"
   },
   {
    "path": "brother_run.py",
-   "sha256": "098f46a6f5766910fc77f331f5b2ba511746182fa27adf33cd209d33a58e267f"
+   "sha256": "7d5e5bd3880b68f7197451e5aa7067a64e819fdbb276ffc920527d827102b06d"
   },
   {
    "path": "claim_store.py",
@@ -39,7 +39,7 @@
   },
   {
    "path": "decide.py",
-   "sha256": "e3318223cb6f24cfca967079479f6c43468d6f83fdd9f72ad3c675495a9db1a1"
+   "sha256": "6a83914b483ca766d344437c6d4a283224f2ed9c979646fcf32d04e332c99ec8"
   },
   {
    "path": "door.py",
@@ -75,7 +75,7 @@
   },
   {
    "path": "loop_bridge.py",
-   "sha256": "a778d2c20d3b0504a0fa2c6d83d82ad949090c61868de26c22eccb2ac316bf84"
+   "sha256": "5f780637e53caabe53c505e21a52cfe8aae4cf5296bbfbd25e4424200bd436dc"
   },
   {
    "path": "managed_safety.py",
@@ -83,7 +83,7 @@
   },
   {
    "path": "model_worker.py",
-   "sha256": "16438b95b8755db6e955875652340feec21023968bb64c016a4ddcd1b6977fe3"
+   "sha256": "fd24ec7256e83d0cf3b1a916f740d3e6f772ac711d3341310ef2a11ad216c5b9"
   },
   {
    "path": "outcome-contract-v1.json",
@@ -142,6 +142,10 @@
    "sha256": "58baac9bc39a52944ce7efabf99b3777ec18c2567a305c4dc3e26627050880c8"
   },
   {
+   "path": "park_sidecar.py",
+   "sha256": "76772f5b883d52be552f47486e5cce47b9df998ad1238f299d2c0b7969da91d7"
+  },
+  {
    "path": "receipt_door.py",
    "sha256": "9b99a622d47e22df3d0f187707f7582cb5c9370eb120f980341affc82356c7eb"
   },
@@ -158,6 +162,10 @@
    "sha256": "6fcc04cda788a2a6eea232b96734368c61d0f8e8a639af74158015822aab7239"
   },
   {
+   "path": "unit_trace.py",
+   "sha256": "7596c7b5087401694adadeb38f573e396e74a2ce34d74f57fd9479173155a5f1"
+  },
+  {
    "path": "verify_runtime.py",
    "sha256": "66ef423585b3e1d0242acf8c68834cc7857388e3ddef7e6c6d87e8e1608e41e4"
   },
@@ -171,6 +179,6 @@
   }
  ],
  "generated_by": "scripts/bundle_runtime.py",
- "source_describe": "v0.9.6-5376-g9a1d35a80-dirty",
- "source_revision": "9a1d35a807085182dd7f3937aa0e9f3a176f9b55"
+ "source_describe": "v0.9.6-5412-gbf0cf8b1f-dirty",
+ "source_revision": "bf0cf8b1fe87214b3b054f48b91d6ab5d890ea50"
 }

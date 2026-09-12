@@ -7,6 +7,10 @@ Brother's: no brothermode@brother plugin, no standalone brothermode skill
 under `<CODEX_HOME>/skills/`, no stale user-scope Brother hooks in
 `<CODEX_HOME>/hooks.json`.
 
+With explicit --product-skills, two isolated companion packages expose the
+existing product skills. The umbrella remains the sole hook owner. Companion
+packages come from the pinned public checkout or an explicitly named export.
+
 WHY THIS EXISTS. scripts/codex_hooks_install.py wires ONE thing (hooks.json)
 into an already-installed Codex home. This tool drives the plugin lifecycle
 itself, end to end, against the app-bundled binary
@@ -67,6 +71,7 @@ import tempfile
 import time
 
 import brother_paths
+import codex_product_skills
 
 CODEX_BIN_DEFAULT = "/Applications/ChatGPT.app/Contents/Resources/codex"
 MARKETPLACE_URL_DEFAULT = "https://github.com/khalilmaaouni/Brother"
@@ -246,8 +251,11 @@ def ensure_marketplace(codex_bin, home, source, ref):
     at `ref`; if it is already present from a DIFFERENT source (Codex's own
     wording, measured live), removes it first and re-adds, since Codex
     refuses to re-point one in place."""
-    result = run_codex(codex_bin, ["plugin", "marketplace", "add", source,
-                                    "--ref", ref, "--json"], home)
+    args = ["plugin", "marketplace", "add", source]
+    if ref is not None:
+        args += ["--ref", ref]
+    args += ["--json"]
+    result = run_codex(codex_bin, args, home)
     if result["problem"]:
         return {"status": "FAIL", "detail": result["problem"]}
     body = (result["stdout"] or "") + (result["stderr"] or "")
@@ -258,7 +266,8 @@ def ensure_marketplace(codex_bin, home, source, ref):
             data = {}
         changed = not data.get("alreadyAdded", False)
         return {"status": "PASS" if changed else "NO-CHANGE",
-                "detail": "ref %s (%s)" % (ref, "added" if changed else "already present")}
+                "detail": "ref %s (%s)" % (ref, "added" if changed else "already present"),
+                "installed_root": data.get("installedRoot")}
     if "already added from a different source" in body:
         name = marketplace_name_from_source(source)
         rm = run_codex(codex_bin, ["plugin", "marketplace", "remove", name, "--json"], home)
@@ -266,13 +275,17 @@ def ensure_marketplace(codex_bin, home, source, ref):
             return {"status": "FAIL", "detail":
                     "could not remove marketplace %s to re-point: %s"
                     % (name, rm["problem"] or (rm["stderr"] or rm["stdout"]).strip())}
-        add2 = run_codex(codex_bin, ["plugin", "marketplace", "add", source,
-                                      "--ref", ref, "--json"], home)
+        add2 = run_codex(codex_bin, args, home)
         if add2["problem"] or add2["returncode"] != 0:
             return {"status": "FAIL", "detail":
                     "could not re-add marketplace at %s: %s"
                     % (ref, add2["problem"] or (add2["stderr"] or add2["stdout"]).strip())}
-        return {"status": "PASS", "detail": "re-pointed from a different source to %s" % ref}
+        try:
+            data = json.loads(add2["stdout"])
+        except ValueError:
+            data = {}
+        return {"status": "PASS", "detail": "re-pointed from a different source to %s" % ref,
+                "installed_root": data.get("installedRoot")}
     return {"status": "FAIL", "detail": body.strip() or "marketplace add failed"}
 
 
@@ -297,7 +310,8 @@ def ensure_plugin_added(codex_bin, home, plugin_id):
                 "version": None}
     version = data.get("version")
     status = "NO-CHANGE" if version and version == before_version else "PASS"
-    return {"status": status, "detail": "version %s" % version, "version": version}
+    return {"status": status, "detail": "version %s" % version, "version": version,
+            "installed_path": data.get("installedPath")}
 
 
 def ensure_plugin_removed(codex_bin, home, plugin_id):
@@ -491,7 +505,7 @@ def diff_user_state(before, after):
 # The four verbs.
 
 
-def do_install(codex_bin, home, marketplace, ref):
+def do_install(codex_bin, home, marketplace, ref, product_skills=False, product_skills_export=None):
     steps = []
     plugin_id = "%s@%s" % (PLUGIN_NAME, marketplace_name_from_source(marketplace))
     bm_id = "%s@%s" % (STANDALONE_PLUGIN_NAME, marketplace_name_from_source(marketplace))
@@ -574,9 +588,87 @@ def do_install(codex_bin, home, marketplace, ref):
                   % (PROG, plugin_id, version, bm_id, has_bm))
             steps.append("FAIL")
 
+    if product_skills and "FAIL" not in steps:
+        companions = install_product_skills(codex_bin, home, marketplace, ref, mres, product_skills_export)
+        steps.append(companions["status"])
+        print("%s: %s: product skills (%s)" % (PROG, companions["status"], companions["detail"]))
     verdict = "FAIL" if "FAIL" in steps else "PASS"
     print("%s: %s: install at %s complete" % (PROG, verdict, ref))
     return {"verdict": verdict, "steps": steps, "plugin_id": plugin_id, "version": version}
+
+
+
+def product_skills_state_path(home):
+    return os.path.join(home, "brother", "product-skills.json")
+
+
+def product_skills_status(home, listing):
+    loaded = read_json_file(product_skills_state_path(home))
+    if loaded["missing"]:
+        return {"status": "NO-DATA", "detail": "no product skills installation record"}
+    state = loaded["data"]
+    if loaded["problem"] or not isinstance(state, dict) or listing.get("problem"):
+        return {"status": "FAIL", "detail": "product skills installation state is unreadable"}
+    try:
+        problems = codex_product_skills.verify(state["marketplace_root"])
+        versions = {entry.get("pluginId"): entry.get("version") for entry in listing["installed"]}
+        with open(os.path.join(state["marketplace_root"], codex_product_skills.RECORD), encoding="utf-8") as handle:
+            record = json.load(handle)
+        for name in codex_product_skills.PRODUCTS:
+            plugin_id = name + "@" + codex_product_skills.MARKETPLACE
+            plugin = state["plugins"][plugin_id]
+            if versions.get(plugin_id) != plugin["version"]:
+                problems.append("installed product version mismatch: " + name)
+            prefix = "plugins/" + name + "/"
+            for rel, digest in record["files"].items():
+                if rel.startswith(prefix):
+                    got = sha256_file(os.path.join(plugin["installed_path"], rel[len(prefix):]))
+                    if got["digest"] != digest:
+                        problems.append("installed product content mismatch: " + name)
+                        break
+        return {"status": "FAIL" if problems else "PASS",
+                "detail": "; ".join(problems) if problems else "all recorded product skills and support files present",
+                "skills": state["skills"]}
+    except (OSError, ValueError, KeyError, TypeError):
+        return {"status": "FAIL", "detail": "product skills installation record is malformed"}
+
+
+def install_product_skills(codex_bin, home, source, ref, marketplace_result, export_root=None):
+    """Only the pinned public checkout is inferred. Local exports are explicit."""
+    official = source.rstrip("/").removesuffix(".git") == MARKETPLACE_URL_DEFAULT
+    if export_root is None and not official:
+        return {"status": "FAIL", "detail": "local marketplace requires explicit --product-skills-export"}
+    exported = export_root or marketplace_result.get("installed_root")
+    if not exported:
+        return {"status": "FAIL", "detail": "Codex returned no pinned marketplace installedRoot"}
+    try:
+        built = codex_product_skills.build(exported, os.path.join(home, "brother", "product-skills"))
+    except (OSError, ValueError, KeyError) as exc:
+        return {"status": "FAIL", "detail": "could not build product skill packages: " + str(exc)}
+    return activate_product_skills(codex_bin, home, dict(built, source_ref=ref, source_marketplace=source))
+
+
+def activate_product_skills(codex_bin, home, built):
+    problems = codex_product_skills.verify(built["marketplace_root"])
+    if problems:
+        return {"status": "FAIL", "detail": "; ".join(problems)}
+    mres = ensure_marketplace(codex_bin, home, built["marketplace_root"], None)
+    if mres["status"] == "FAIL":
+        return mres
+    previous_plugins = built.get("plugins", {})
+    state = dict(built, plugins={})
+    for name in codex_product_skills.PRODUCTS:
+        plugin_id = name + "@" + codex_product_skills.MARKETPLACE
+        result = ensure_plugin_added(codex_bin, home, plugin_id)
+        if result["status"] == "FAIL" or not result.get("installed_path"):
+            return {"status": "FAIL", "detail": "product installation did not return a verified path: " + plugin_id}
+        if plugin_id in previous_plugins and result["version"] != previous_plugins[plugin_id]["version"]:
+            return {"status": "FAIL", "detail": "product rollback version mismatch: " + plugin_id}
+        state["plugins"][plugin_id] = {"version": result["version"], "installed_path": result["installed_path"]}
+    written = atomic_write(product_skills_state_path(home), json.dumps(state, indent=2, sort_keys=True) + "\n")
+    if written["problem"]:
+        return {"status": "FAIL", "detail": written["problem"]}
+    return product_skills_status(home, plugin_list(codex_bin, home))
 
 
 def snapshot_root(home):
@@ -618,6 +710,10 @@ def make_snapshot(codex_bin, home, marketplace, ref):
     state = {"ref": ref, "marketplace_source": marketplace,
              "plugin_versions": versions, "cache_listing": listing,
              "created": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+    product_state = read_json_file(product_skills_state_path(home))
+    if product_state["problem"]:
+        return {"problem": product_state["problem"], "dir": snap, "state": None}
+    state["product_skills"] = product_state["data"]
     written = atomic_write(os.path.join(snap, "state.json"),
                             json.dumps(state, indent=2, sort_keys=True) + "\n")
     if written["problem"]:
@@ -625,7 +721,7 @@ def make_snapshot(codex_bin, home, marketplace, ref):
     return {"problem": None, "dir": snap, "state": state}
 
 
-def do_upgrade(codex_bin, home, marketplace, from_ref, ref):
+def do_upgrade(codex_bin, home, marketplace, from_ref, ref, product_skills=False, product_skills_export=None):
     before = user_state_snapshot(home)
     snap = make_snapshot(codex_bin, home, marketplace, from_ref)
     if snap["problem"]:
@@ -637,7 +733,7 @@ def do_upgrade(codex_bin, home, marketplace, from_ref, ref):
     plugin_id = "%s@%s" % (PLUGIN_NAME, marketplace_name_from_source(marketplace))
     version_before = snap["state"]["plugin_versions"].get(plugin_id)
 
-    result = do_install(codex_bin, home, marketplace, ref)
+    result = do_install(codex_bin, home, marketplace, ref, product_skills, product_skills_export)
 
     after = user_state_snapshot(home)
     changed = diff_user_state(before, after)
@@ -692,6 +788,30 @@ def do_rollback(codex_bin, home, to=None):
     pres = ensure_plugin_added(codex_bin, home, plugin_id)
     print("%s: %s: %s reinstalled (%s)" % (PROG, pres["status"], plugin_id, pres["detail"]))
 
+    wanted_products = state.get("product_skills")
+    if wanted_products:
+        try:
+            restored = activate_product_skills(codex_bin, home, wanted_products)
+        except (KeyError, TypeError, ValueError, OSError):
+            restored = {"status": "FAIL", "detail": "malformed product skills snapshot"}
+        if restored["status"] == "FAIL":
+            print("%s: FAIL: product skills rollback (%s)" % (PROG, restored["detail"]))
+            return {"verdict": "FAIL"}
+    else:
+        current = plugin_list(codex_bin, home)
+        if current["problem"]:
+            return {"verdict": "FAIL"}
+        present_ids = {p.get("pluginId") for p in current["installed"]}
+        for product in codex_product_skills.PRODUCTS:
+            product_id = product + "@" + codex_product_skills.MARKETPLACE
+            if product_id in present_ids and ensure_plugin_removed(codex_bin, home, product_id)["status"] == "FAIL":
+                return {"verdict": "FAIL"}
+        try:
+            if os.path.exists(product_skills_state_path(home)):
+                os.remove(product_skills_state_path(home))
+        except OSError:
+            return {"verdict": "FAIL"}
+
     for name in ("config.toml", "hooks.json"):
         src = os.path.join(snap, name)
         if not os.path.exists(src):
@@ -737,11 +857,14 @@ def do_uninstall(codex_bin, home, marketplace):
     installed_ids = set(e.get("pluginId") for e in listing["installed"]) \
         if listing["problem"] is None else set()
     marketplace_name = marketplace_name_from_source(marketplace)
-    for name in (STANDALONE_PLUGIN_NAME, PLUGIN_NAME):
-        plugin_id = "%s@%s" % (name, marketplace_name)
+    owned_ids = ["%s@%s" % (name, marketplace_name) for name in (STANDALONE_PLUGIN_NAME, PLUGIN_NAME)]
+    owned_ids += [name + "@" + codex_product_skills.MARKETPLACE for name in codex_product_skills.PRODUCTS]
+    for plugin_id in owned_ids:
         if plugin_id in installed_ids:
             res = ensure_plugin_removed(codex_bin, home, plugin_id)
             print("%s: %s: removed %s (%s)" % (PROG, res["status"], plugin_id, res["detail"]))
+            if res["status"] == "FAIL":
+                return {"verdict": "FAIL"}
             did_something = did_something or res["status"] == "PASS"
         else:
             print("%s: NO-CHANGE: %s not installed" % (PROG, plugin_id))
@@ -754,6 +877,17 @@ def do_uninstall(codex_bin, home, marketplace):
             present = any(m.get("name") == marketplace_name for m in data.get("marketplaces", []))
         except ValueError:
             present = False
+    if mlist["problem"] is None and mlist["returncode"] == 0:
+        try:
+            companion_present = any(m.get("name") == codex_product_skills.MARKETPLACE
+                                    for m in json.loads(mlist["stdout"]).get("marketplaces", []))
+        except ValueError:
+            companion_present = False
+        if companion_present:
+            removed = run_codex(codex_bin, ["plugin", "marketplace", "remove", codex_product_skills.MARKETPLACE, "--json"], home)
+            if removed["problem"] or removed["returncode"] != 0:
+                return {"verdict": "FAIL"}
+            did_something = True
     if present:
         rm = run_codex(codex_bin, ["plugin", "marketplace", "remove", marketplace_name, "--json"],
                         home)
@@ -801,7 +935,7 @@ def do_uninstall(codex_bin, home, marketplace):
     if os.path.isdir(brother_dir):
         kept = []
         for entry in sorted(os.listdir(brother_dir)):
-            if entry in ("rollback", "runs"):
+            if entry in ("rollback", "runs", "product-skills"):
                 kept.append(entry)
                 continue
             path = os.path.join(brother_dir, entry)
@@ -815,7 +949,7 @@ def do_uninstall(codex_bin, home, marketplace):
                 print("%s: FAIL: could not remove %s: %s" % (PROG, path, exc))
                 return {"verdict": "FAIL"}
         if kept:
-            print("%s: kept %s under %s: user data, never removed by uninstall"
+            print("%s: kept %s under %s: rollback sources or user data, retained by uninstall"
                   % (PROG, ", ".join(kept), brother_dir))
 
     if not did_something:
@@ -825,7 +959,7 @@ def do_uninstall(codex_bin, home, marketplace):
     return {"verdict": "PASS"}
 
 
-def do_status(codex_bin, home, marketplace):
+def do_status(codex_bin, home, marketplace, product_skills=False):
     marketplace_name = marketplace_name_from_source(marketplace)
     plugin_id = "%s@%s" % (PLUGIN_NAME, marketplace_name)
     bm_id = "%s@%s" % (STANDALONE_PLUGIN_NAME, marketplace_name)
@@ -866,6 +1000,12 @@ def do_status(codex_bin, home, marketplace):
                  and not report["stale_hooks"])
     partial = (report["brother_version"] is not None or report["brothermode_present"]
                or report["standalone_skill_dirs"] or report["stale_hooks"])
+    if product_skills:
+        companion = product_skills_status(home, listing)
+        report["product_skills"] = companion
+        end_state = end_state and companion["status"] == "PASS"
+        partial = partial or companion["status"] != "NO-DATA"
+        print("%s: %s: product skills (%s)" % (PROG, companion["status"], companion["detail"]))
     verdict = "END-STATE" if end_state else ("PARTIAL" if partial else "ABSENT")
 
     print("%s: %s at %s" % (PROG, PLUGIN_NAME, home))
@@ -895,6 +1035,10 @@ def build_argparser():
                         help="marketplace URL or local path (default the public Brother repo)")
         p.add_argument("--allow-default-home", action="store_true",
                         help="permit writing the real ~/.codex")
+        p.add_argument("--product-skills", action="store_true",
+                       help="include the existing BrotherMode and BrotherSBE skills")
+        p.add_argument("--product-skills-export", default=None,
+                       help="explicit allowlisted export root for a local marketplace")
         p.add_argument("--json", action="store_true",
                         help="print a machine-readable result as the last line")
 
@@ -931,15 +1075,15 @@ def main(argv):
     home = resolved["path"]
 
     if args.verb == "install":
-        result = do_install(args.codex_bin, home, args.marketplace, args.ref)
+        result = do_install(args.codex_bin, home, args.marketplace, args.ref, args.product_skills, args.product_skills_export)
     elif args.verb == "upgrade":
-        result = do_upgrade(args.codex_bin, home, args.marketplace, args.from_ref, args.ref)
+        result = do_upgrade(args.codex_bin, home, args.marketplace, args.from_ref, args.ref, args.product_skills, args.product_skills_export)
     elif args.verb == "rollback":
         result = do_rollback(args.codex_bin, home, args.to)
     elif args.verb == "uninstall":
         result = do_uninstall(args.codex_bin, home, args.marketplace)
     elif args.verb == "status":
-        result = do_status(args.codex_bin, home, args.marketplace)
+        result = do_status(args.codex_bin, home, args.marketplace, args.product_skills)
     else:
         print("%s: FAIL: unknown verb %s" % (PROG, args.verb))
         return 1
