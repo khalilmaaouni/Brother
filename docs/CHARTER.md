@@ -1,5 +1,10 @@
 # The Brother Charter
 
+Public-tree note (2026-09-12): references below to `COORDINATION.md` and the product-local deciding ADR describe earlier coordination records that are not shipped in this checkout. They are not available setup instructions or current public authority. Use [the shipped architecture record](plan/ADR-2026-08-23-one-brother-repository.md) and the [generated system map](../SYSTEM.md) to inspect current structure.
+
+<!-- doc-assurance: allow-missing COORDINATION.md Earlier coordination record not shipped in this public tree; absence disclosed above. -->
+<!-- doc-assurance: allow-missing products/brothermode/docs/plan/ADR-2026-08-23-one-brother-repository.md Earlier deciding record not shipped here; public architecture record linked above. -->
+
 This is the constitution the three products in Brother share. It does not change per product and it does not change per stage. What changes across Stage 0, Stage 1, and Stage 2 is how much of it runs as one system versus three; what is written here is true at every stage.
 
 Read this charter for the vocabulary and the rules that bind all three products at once. Read `docs/MERGE-PLAN.md` for the staged plan, the decisions behind it, and how those two documents were reached.

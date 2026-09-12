@@ -21,4 +21,13 @@ This register stops public Brother docs from drifting into incompatible current-
 
 ## Update rule
 
+The 2026-09-12 adoption-path revision adds the following explicit claims. Source inspection supports the behavioral descriptions; user benefit remains a separate empirical question.
+
+| ID | Current claim | Authority | Test/evidence | Public repeaters |
+| --- | --- | --- | --- | --- |
+| DOC-015 | Explicit A0 is refused when the capability floor cannot support it; other modes can proceed marked not enforced. | `scripts/brother_run.py`, `scripts/managed_safety.py` | managed-safety and brother-run tests | README, safety boundaries, delegation guide |
+| DOC-016 | Vault retrieval can combine lexical, anchor, and link signals; fast mode skips dense retrieval. | `products/brothermode/tools/bm_vault.py` | Vault retrieval tests; reduced repeat errors remain NO-DATA | README, Vault how-to/reference |
+| DOC-017 | Resume preserves integrated units and continuation can directly resume a single match. | `scripts/brother_run.py` | brother-run tests | recovery guide |
+| DOC-018 | Auditable records do not establish independent certification or reduced human review time. | measurement protocols | Acceptance Time human trial: NO-DATA | README, comparison |
+
 When behavior changes, update authority/test and every public repeater in the same change. Never leave a stale start page for later cleanup.

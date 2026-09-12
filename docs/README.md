@@ -1,6 +1,16 @@
 # Brother documentation
 
-Brother is for the point where AI-generated work stops being a draft and becomes something another person may have to trust. This documentation is organized by the reader's question, not Brother's internal products.
+Brother helps you delegate work without treating full auto as a leap of faith: define boundaries, inspect evidence, retain useful lessons, and keep consequential decisions yours. This documentation is organized by the reader's question, not Brother's internal products.
+
+## Your first useful delegation
+
+1. **Install:** [Claude Code](how-to/install-claude-code.md) or [Codex](how-to/install-codex.md), then verify the host setup.
+2. **Try it:** [First verified change](tutorials/first-verified-change.md), on a task whose expected answer you understand.
+3. **Know the limits:** [Safe delegation](how-to/delegate-safely.md) and [enforcement boundaries](reference/safety-boundaries.md).
+4. **Return to the work:** [Read the receipt](how-to/review-a-receipt.md), [resume or recover](how-to/recover-from-failure.md).
+5. **Make the next run better informed:** [Use the Vault](how-to/use-the-vault.md), without mistaking memory for proof.
+
+Evaluating rather than installing? Read [Brother alongside GSD, BMAD, and Superpowers](explanation/choosing-a-workflow.md). Evaluate bounded delegation with reviewable evidence and useful memory, not a promise to eliminate human judgment.
 
 ## Learn by doing
 

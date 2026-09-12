@@ -10,7 +10,9 @@ You want to give an AI agent a task and get on with your day. But full auto asks
 
 The goal is to let you step away for more useful work as the system earns confidence through a track record you can inspect. Current protection depends on the installed controls, the task, and the quality of its checks; Brother is not a blanket guarantee that any job is safe to leave unattended.
 
-[The problem](#why-brother) · [Who it is for](#who-brother-is-for) · [How it works](#how-it-works) · [Get started](#start-in-sixty-seconds) · [Documentation](docs/README.md)
+[The problem](#why-brother) · [Who it is for](#who-brother-is-for) · [Why this approach](#what-makes-brother-different) · [The Vault](#the-vault-remember-the-lesson-not-just-the-conversation) · [Get started](#start-in-sixty-seconds) · [Documentation](docs/README.md)
+
+**Start small:** [install for your host](docs/reference/install-matrix.md), [try a verified change](docs/tutorials/first-verified-change.md), then use the [delegation checklist](docs/how-to/delegate-safely.md) before increasing autonomy. Already using another workflow? Read [Brother alongside GSD, BMAD, and Superpowers](docs/explanation/choosing-a-workflow.md).
 
 ## Why Brother?
 
@@ -84,6 +86,23 @@ You do not need to learn the internal product names to begin. Describe the work 
 ### When to use something simpler
 
 If you are exploring an idea, asking a question, or making an obvious reversible edit, the full execution process may add more work than it saves. Brother is designed to scale the checking to the task, and to stay out of trivial work. It also needs access to the relevant code, data, or test environment to substantiate a claim; missing access cannot be repaired by better wording.
+
+## What makes Brother different
+
+**Not another promise that agents can code. A way to decide which work deserves your trust.**
+
+Brother's distinctive emphasis is the connection between these mechanisms, not a claim that nobody else has tests, memory, or isolated workers:
+
+| Differentiator | What you get | The limit that matters |
+| --- | --- | --- |
+| **Evidence tied to the change** | A durable receipt naming files, exact checks, results, and unresolved claims | A receipt cannot make a weak test sufficient |
+| **Checks that must distinguish the behavior** | Already-green and revert-insensitive checks can be marked `NO-DATA`, rather than sold as proof | This tests relevance, not complete specification coverage |
+| **Bounded execution, then serial integration** | Declared write scopes and dependencies, isolated work where available, checked results brought together in order | Host controls and effective safety mode determine enforcement |
+| **The Vault at the point of work** | Retrieve a past failure by its symptom, file, or linked lesson before repeating it | Recall is fallible context, never permission or current proof |
+| **Continuity beyond the chat** | Resume an unfinished outcome and inspect a saved delivery record | State must remain available; not every failure is automatically repairable |
+| **Authority separate from evidence** | A visible distinction between checked work, human acceptance, and release | You still own requirements, consequential decisions, and shipping |
+
+The intended loop is simple: **delegate within a boundary, inspect what happened, remember what mattered, and earn the next increment of autonomy.** Start with [what is enforced and what is not](docs/reference/safety-boundaries.md). For source-level detail, see the generated [system map](SYSTEM.md).
 
 ## How it works
 
@@ -343,9 +362,43 @@ The profession pages in this repository are **professional lenses**, not current
 
 Brother can gather evidence and organize review. Evidence can inform authority; evidence is not authority. When acceptance cites a run, it requires a review receipt or an explicit recorded review skip with its reason and decision maker. Human acceptance and release remain explicit decisions.
 
-## Vault memory is context
+## The Vault: remember the lesson, not just the conversation
 
-The Vault can retain useful lessons, constraints, failed approaches, decisions, semantic definitions, incident symptoms, and test oracles. Recalled memory cannot overrule current code, current evidence, or an explicit human decision.
+An agent repeating last week's mistake is not autonomous in a useful sense. You are still its memory, reminding it which approach failed, why the migration is unusual, or what the business means by an active customer.
+
+**The Vault is Brother's durable local knowledge layer.** Keep decisions, constraints, incident symptoms, failed approaches, semantic definitions, and useful test oracles. Retrieve the relevant lesson when a task or file needs it, rather than relying on a long opening prompt to stay in context.
+
+For example, a previous change taught you that retrying a timed-out payment can charge twice. A useful lesson records the observable symptom, the idempotency constraint, the failed approach, the deciding test, and when the lesson no longer applies. On a later retry change, recall that lesson, inspect whether it still fits, and rerun the current check. This is an illustration, not a claim that Brother has verified your payment system.
+
+```mermaid
+flowchart LR
+    A[Previous work: failure or decision] --> B[Vault: focused lesson with evidence]
+    B --> C[New task: recall by symptom or file]
+    C --> D[Check against current code and intent]
+    D --> E[Use, correct, or reject the lesson]
+    E --> F[New checks and delivery receipt]
+    F -. Retain what remains useful .-> B
+```
+
+The local retrieval tool combines lexical search, exact file/symbol anchors, and linked notes. Retrieval quality still needs checking: stale or irrelevant memory must not become a new source of confident mistakes. **The Vault remembers; the checks prove; you decide.**
+
+It is not an automatic source of truth, a secrets store, or proof that repeat errors have decreased. Do not store credentials or raw customer data. Local storage also does not mean recalled content stays off the network: your coding host may send context to its model provider.
+
+[Set up and exercise the Vault](docs/how-to/use-the-vault.md) · [Memory precedence and limits](docs/reference/vault.md)
+
+## Questions a skeptical adopter should ask
+
+**Is this just a bigger prompt?** It includes skills, but the execution path also has runtime checks, run state, scope handling, and receipt validation. Instructions and enforced controls are different things. The [boundary table](docs/reference/safety-boundaries.md) names that difference.
+
+**Why not use tests and Git myself?** You should keep both. Brother connects them to a delegated outcome and a reviewable record. If that coordination saves less effort than it adds on your tasks, use the simpler workflow.
+
+**Can the same agent write code and tests that agree on the wrong answer?** Yes. Recorded authorship is not independence. Bring expected results from requirements, existing regression cases, domain experts, or an independently written check. Read [evidence and independence](docs/reference/evidence.md).
+
+**Can I leave it running overnight?** Not on the strength of this README. First verify the effective controls, use a narrow disposable task, inspect failure behavior, and keep consequential operations outside the delegation. Follow the [safe delegation guide](docs/how-to/delegate-safely.md).
+
+**Is the reliability proven?** The repository includes executable checks and measurement protocols. That is not an independent audit, production certification, or proof that you can stop reviewing. The [track-record section](#trust-is-earned-across-runs) states the missing measurements.
+
+**What if it fails while I am away?** Keep the run directory and worktrees, identify the failure, then resume the recorded outcome. Do not erase the evidence or loosen scope to get green. The [recovery guide](docs/how-to/recover-from-failure.md) gives the commands and decision points.
 
 ## Choose the shortest path
 

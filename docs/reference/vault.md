@@ -1,5 +1,7 @@
 # Vault reference
 
+<!-- doc-assurance: allow-missing bm_vault.json Runtime client configuration, not a repository file. -->
+
 The Vault is durable local memory for knowledge worth recalling at the point of work.
 
 Useful categories include decisions, observable failure symptoms, invariants, exceptions, operational lessons, data semantics, test oracles, architecture constraints, tooling notes, safe domain knowledge, and deprecations.
@@ -16,6 +18,14 @@ A remembered lesson can warn; it cannot prove.
 ## Root selection
 
 Current routing guidance recognizes configured Vault roots including `BM_VAULT_ROOT`, `BROTHERMODE_VAULT`, and Brother-recorded configuration. With none configured, report unconfigured/NO-DATA rather than inventing a path.
+
+For the index command, explicit `--vault` takes precedence, followed by `BM_VAULT_ROOT`, `BROTHERMODE_VAULT`, then the `vault` key in client configuration `bm_vault.json`. The local SQLite index is `bm_vault_index.sqlite3` under the selected client configuration directory. See the [executable workflow](../how-to/use-the-vault.md) before indexing a directory.
+
+## Retrieval and data boundary
+
+The tool supports lexical BM25 retrieval, exact file/symbol anchors, and linked-note expansion. Optional dense retrieval depends on local tooling; `--fast` skips it. Use `status` and `recall --explain` to inspect what is available rather than assuming semantic recall works on every host or language.
+
+Indexing writes derived local state and may include configured project-memory sources. `status` can initialize the database if absent. Local storage does not mean model-provider isolation: recalled text may be supplied to the coding host as context. Apply your host's data policy and exclude material you are not permitted to send through that workflow.
 
 ## Do not store
 
