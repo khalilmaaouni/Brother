@@ -1,5 +1,9 @@
 # The Brother Merge Plan
 
+Historical plan: the stage labels below record the 2026-08-22 decision, not today's installation state. `COORDINATION.md` is an earlier coordination record not shipped in this public tree. For current layout and adoption, use [SYSTEM.md](../SYSTEM.md) and the [documentation home](README.md).
+
+<!-- doc-assurance: allow-missing COORDINATION.md Historical coordination record, absence explicitly disclosed above. -->
+
 This is the plan behind the umbrella, the record of every decision the founder made on 2026-08-22 to reach it, the council positions that shaped those decisions, and an honest account of what this stage did and did not do. `docs/CHARTER.md` holds the vocabulary this plan assumes; read that first if a term here is unfamiliar.
 
 ## The staged plan
