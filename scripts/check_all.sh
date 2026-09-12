@@ -163,6 +163,8 @@ run_check "charter-paths"  python3 scripts/charter_paths.py
 run_check "charter-paths-self" python3 scripts/test_charter_paths.py -v
 run_check "doc-assurance" python3 scripts/doc_assurance.py
 run_check "doc-assurance-self" python3 scripts/doc_assurance.py --selftest
+run_check "public-host-truth" python3 scripts/public_host_truth.py
+run_check "public-host-truth-self" python3 scripts/test_public_host_truth.py -v
 run_check "key-components" python3 scripts/key_components.py
 run_check "key-components-self" python3 scripts/key_components.py --selftest
 run_check "wiring-audit-self" python3 scripts/wiring_audit.py --selftest

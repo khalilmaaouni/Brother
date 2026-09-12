@@ -13,10 +13,10 @@ to run the battery.
 
 | | |
 |---|---:|
-| Parts | 209 |
-| Parts with a purpose written in the file | 207 |
-| Parts with a suite wired into the battery | 186 |
-| Checks in the battery | 289 |
+| Parts | 210 |
+| Parts with a purpose written in the file | 208 |
+| Parts with a suite wired into the battery | 187 |
+| Checks in the battery | 291 |
 
 2 part(s) carry no purpose line and are listed as NO-DATA below. They are
 shown rather than omitted, because a system record that hides its
@@ -172,6 +172,7 @@ undocumented corners looks complete and is not.
 | `progress_deadline` | alive is not advancing, and output is not progress. | `progress-deadline-self` |
 | `prove_guide_claude` | S23's real done_check: prove docs/how-to/install-claude-code.md runs | `prove-guide-claude-self` |
 | `provider_adapter` | ONE provider-neutral core, THIN adapters. | `provider-adapter-self` |
+| `public_host_truth` | Check that public host documentation matches shipped host manifests. | `public-host-truth`, `public-host-truth-self` |
 | `readiness_gate` | the review's enterprise readiness gate as a checkable surface. | `export-public-self`, `readiness-gate`, `readiness-gate-self` |
 | `readme_receipt_sample` | the README's per-file receipt sample, rendered by | **NO-DATA**, nothing in the battery runs it |
 | `real_logs` | .py: nothing that runs as a test or a battery may grow a real | `real-logs-unchanged` |
@@ -244,6 +245,8 @@ undocumented corners looks complete and is not.
 - `charter-paths-self`: `python3 scripts/test_charter_paths.py -v`
 - `doc-assurance`: `python3 scripts/doc_assurance.py`
 - `doc-assurance-self`: `python3 scripts/doc_assurance.py --selftest`
+- `public-host-truth`: `python3 scripts/public_host_truth.py`
+- `public-host-truth-self`: `python3 scripts/test_public_host_truth.py -v`
 - `key-components`: `python3 scripts/key_components.py`
 - `key-components-self`: `python3 scripts/key_components.py --selftest`
 - `wiring-audit-self`: `python3 scripts/wiring_audit.py --selftest`
