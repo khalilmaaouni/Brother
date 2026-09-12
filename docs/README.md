@@ -10,7 +10,7 @@ Brother helps you delegate work without treating full auto as a leap of faith: d
 4. **Return to the work:** [Read the receipt](how-to/review-a-receipt.md), [resume or recover](how-to/recover-from-failure.md).
 5. **Make the next run better informed:** [Use the Vault](how-to/use-the-vault.md), without mistaking memory for proof.
 
-Evaluating rather than installing? Read [Brother alongside GSD, BMAD, and Superpowers](explanation/choosing-a-workflow.md). Evaluate bounded delegation with reviewable evidence and useful memory, not a promise to eliminate human judgment.
+Evaluating rather than installing? Read [Where Brother fits](explanation/choosing-a-workflow.md). Evaluate bounded delegation with reviewable evidence and useful memory, not a promise to eliminate human judgment.
 
 ## Learn by doing
 
