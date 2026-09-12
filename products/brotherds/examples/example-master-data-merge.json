@@ -1,0 +1,64 @@
+{
+  "id": "MASTER-DATA-001",
+  "claim_type": "MASTER_DATA",
+  "statement": "We safely resolved 12,000 duplicate customer records using deterministic matching and manual review of candidates exceeding 0.6 confidence.",
+  "value": 12000,
+  "unit": "records merged",
+  "origin": "SYSTEM",
+  "question": "How many duplicate customer records can we merge with acceptable error rates?",
+  "decision": "If merge precision > 98 percent and review queue catches 99 percent of false-positive candidates, we can safely deploy this to production.",
+  "grain": "One organization's complete customer database as of 2026-09-01; merge was deterministic (exact match on email + phone) plus ML candidates at threshold 0.6, with all above-0.6 candidates manually reviewed by stewards.",
+
+  "_note": "This example demonstrates master data gates M1-M6 for entity resolution and merge claims. It illustrates: threshold band partitioning (M1), survivorship rules (M2), false-merge cost asymmetry (M3), review sample evidence (M4/M5), and twin metrics match_rate + sampled_accuracy (M6).",
+
+  "master_data": {
+    "merge_threshold": 0.8,
+    "review_threshold": 0.6,
+    "survivorship": {
+      "email": "recency",
+      "phone": "recency",
+      "name": "manual",
+      "address": "completeness",
+      "last_purchase_date": "recency"
+    },
+    "false_merge_cost_class": "catastrophic",
+    "review_queue": true,
+    "review_sample_n": 500,
+    "ground_truth_n": 500,
+    "known_residual_error_rate": 0.001,
+    "match_method": "deterministic_exact + ml_candidate_at_0.6",
+    "match_rate": 0.89,
+    "sampled_accuracy": 0.975,
+    "sampled_accuracy_n": 200
+  },
+
+  "match": {
+    "precision": 0.975,
+    "recall": 0.89,
+    "threshold": 0.6,
+    "false_positive_cost": "catastrophic",
+    "false_negative_cost": "low",
+    "kind": "merge",
+    "survivorship": "per-attribute rules in master_data",
+    "reversible": false,
+    "labelled_sample": {
+      "n": 500,
+      "frame": "stratified_sample",
+      "labelled_by": "customer stewards",
+      "labelled_on": "2026-09-01"
+    }
+  },
+
+  "uncertainty": {
+    "kind": "interval",
+    "interval": "0.975 +/- 0.025",
+    "method": "Wilson score interval at 95 percent confidence, using observed accuracy from 200 human-labeled sampled pairs"
+  },
+
+  "not_established": [
+    "Drift in match quality over time: the ML model was trained on 2024 customer data; data distributions may have changed since then.",
+    "Merge reversibility: the claim states a merge is irreversible in the current system (no time-travel to customer ID history), so a false merge must be caught before commit.",
+    "Seasonal effects: the sample was drawn from Q3 2026; Q1 seasonal customer records may have different match properties.",
+    "Cross-organization entity alignment: this is a single organization's internal deduplication, not a B2B entity resolution across vendors."
+  ]
+}

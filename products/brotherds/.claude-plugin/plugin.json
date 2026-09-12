@@ -1,0 +1,9 @@
+{
+  "name": "brotherds",
+  "version": "0.1.0",
+  "description": "EXPERIMENTAL. Turns a figure that is about to reach a decision into a checkable claim carrying its query, its grain, its uncertainty and what it does not establish, then runs refusals against it and returns PASS, FAIL or NO-DATA. Its own north star, the verified claim rate, currently reports NO-DATA: no claim has yet been scored against a real outcome, so nothing here is proven end to end.",
+  "author": { "name": "Khalil Maaouni" },
+  "license": "MIT",
+  "keywords": ["claims", "evidence", "verification", "data-quality", "forecast-accuracy", "experimental"],
+  "repository": "https://github.com/khalilmaaouni/Brother"
+}

@@ -1,0 +1,15 @@
+{
+  "id": "HERO-FCAST-HELD",
+  "statement": "Weekly order volume for a synthetic pilot region lands at 500 units in week 12.",
+  "value": 500,
+  "unit": "units",
+  "origin": "SYSTEM",
+  "uncertainty": {
+    "kind": "interval",
+    "interval": [450, 550],
+    "method": "synthetic demo interval, not a real model"
+  },
+  "not_established": [
+    "This is a synthetic demo fixture; no real forecast pipeline stands behind it."
+  ]
+}

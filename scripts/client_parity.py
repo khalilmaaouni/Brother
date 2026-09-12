@@ -48,6 +48,8 @@ import sys
 import tempfile
 
 PAIRS = {
+    "scripts/codex_battery.py": "scripts/cursor_battery.py",
+    "scripts/test_codex_battery.py": "scripts/test_cursor_battery.py",
     "bundle/.codex-plugin/plugin.json": "bundle/.cursor-plugin/plugin.json",
     "products/brothermode/.codex-plugin/plugin.json": "products/brothermode/.cursor-plugin/plugin.json",
     "docs/how-to/install-codex.md": "docs/how-to/install-cursor.md",
@@ -63,17 +65,18 @@ PAIRS = {
 }
 
 EXEMPT = {
+    "products/brotherds/.codex-plugin/plugin.json": "BrotherDS is published as an experimental standalone Python CLI; its optional Codex manifest is not a shipped Cursor adapter",
+    "scripts/codex_surface.py": "generates shared bundle/skills consumed directly by Cursor and an adapted Codex mirror",
+    "scripts/test_codex_surface.py": "tests the shared skill generator used by both clients",
     "bundle/codex-skills/": "Codex needs a stripped skill copy; Cursor reads bundle/skills directly through its manifest",
     "scripts/codex_skills.py": "generator for bundle/codex-skills, which Cursor does not need",
     "bundle/runtime/codex_hooks_install.py": "bundled mirror of the Codex hook installer; Cursor plugins carry hooks in the manifest",
 }
 
-DEBT = {
-    "scripts/codex_battery.py": ("release-tag battery that installs the public tag and runs signed-in legs; no Cursor twin yet", "1.0.15"),
-    "scripts/test_codex_battery.py": ("self test of the Codex release-tag battery; no Cursor twin yet", "1.0.15"),
-}
+DEBT = {}
 
 BATTERY_PAIRS = {
+    "codex-battery-self": "cursor-battery-self",
     "codex-smoke": "cursor-smoke",
     "codex-smoke-self": "cursor-smoke-self",
     "codex-package-self": "cursor-plugin-self",
@@ -81,12 +84,11 @@ BATTERY_PAIRS = {
 }
 
 BATTERY_EXEMPT = {
+    "codex-surface-current": "checks generated bundle skills consumed by both clients",
     "codex-skills-current": "Codex needs a stripped skill copy; Cursor reads bundle/skills directly through its manifest",
 }
 
-BATTERY_DEBT = {
-    "codex-battery-self": ("self test of the Codex release-tag battery; no Cursor twin yet", "1.0.15"),
-}
+BATTERY_DEBT = {}
 
 
 def _version_tuple(value):
@@ -403,7 +405,10 @@ def selftest():
 
     with tempfile.TemporaryDirectory() as tmp:
         _base_repo(tmp, marketplace_ver="1.0.15", include_debt=True)
-        code, lines = run_check(tmp)
+        from unittest.mock import patch
+        with patch.dict(DEBT, {"scripts/codex_battery.py": ("synthetic expired obligation", "1.0.15")}), patch.dict(PAIRS):
+            PAIRS.pop("scripts/codex_battery.py", None)
+            code, lines = run_check(tmp)
         _assert_case("case 6 debt due", code == 1 and any("parity debt scripts/codex_battery.py" in line for line in lines), "code=%s lines=%s" % (code, lines))
 
     with tempfile.TemporaryDirectory() as tmp:

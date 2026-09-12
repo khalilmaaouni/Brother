@@ -242,3 +242,5 @@ This is v0.1 and is experimental. Field names, the enum vocabularies,
 the keyid convention and the exact set of checks performed by
 `verify` may all change before v1. Until v1 is declared, do not build
 long lived automation that assumes these bytes are frozen.
+
+<!-- doc-assurance: allow-missing sig.txt (signature output created by the documented signing example) -->

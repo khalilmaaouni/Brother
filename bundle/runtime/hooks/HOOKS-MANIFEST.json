@@ -278,7 +278,7 @@
   },
   {
    "path": "brothermode/tools/bm_vault.py",
-   "sha256": "58f367bebdfc150d933b3ba0d8201a3e9879bbcc2dcf6e6ac5bda3ba027613a7"
+   "sha256": "cc82f1383682646c97dff5dfe1971d53d4e7433e5ee053f2b4c66c3fea89141b"
   },
   {
    "path": "brothermode/tools/bm_vault_analyzer.py",

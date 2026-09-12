@@ -82,8 +82,20 @@
    "sha256": "0d2e84e295ef520b191052239ec28952065b2cf8d05aaa4f0cc65c14f7ddc208"
   },
   {
+   "path": "mobile_design.py",
+   "sha256": "63f2de354985ef1e54e491a09fec62a53697bc16b1b399cae6ec1e18a599173d"
+  },
+  {
+   "path": "mobile_workflow.py",
+   "sha256": "623fbf8d7b343ec4ac77c22dcd7d54d77a113d60b86fd3d5a2fa2716e7694bff"
+  },
+  {
    "path": "model_worker.py",
    "sha256": "fd24ec7256e83d0cf3b1a916f740d3e6f772ac711d3341310ef2a11ad216c5b9"
+  },
+  {
+   "path": "native_evidence.py",
+   "sha256": "526beb651e08c4c6bc6f2221026fcb6eac1f6e8ba909924a05a0d0f40dc94f34"
   },
   {
    "path": "outcome-contract-v1.json",
@@ -179,6 +191,6 @@
   }
  ],
  "generated_by": "scripts/bundle_runtime.py",
- "source_describe": "v0.9.6-5412-gbf0cf8b1f-dirty",
- "source_revision": "bf0cf8b1fe87214b3b054f48b91d6ab5d890ea50"
+ "source_describe": "v0.9.6-5465-gf9db516e8-dirty",
+ "source_revision": "f9db516e801c4c52219b15a9cd6d085035a0ef84"
 }

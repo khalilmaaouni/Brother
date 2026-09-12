@@ -1,0 +1,28 @@
+{
+  "id": "EXAMPLE-003",
+  "statement": "The spring campaign drove an 8.4 percent increase in weekly sales.",
+  "value": 8.4,
+  "unit": "percent",
+  "origin": "ASSUMPTION",
+  "question": "Did the spring campaign work, and should the same spend be renewed next quarter?",
+  "decision": "Whether next quarter's campaign budget is renewed at the same level.",
+  "grain": "one row per week, whole retail network",
+
+  "_note": "This example exists to FAIL by construction, on purpose. The word drove is a CAUSAL_TOKENS hit, the claim names no design block at all, so gate G4.causal refuses it: causal wording asserted with no design that could license the assertion. Nothing here is missing by accident. Run bds.py check on this file and read the G4.causal line; then run bds.py receipt and read the compact card's Safe wording line, which rewrites the same statement into an honest association instead of a causal claim.",
+
+  "protocol": {
+    "stated_by": "marketing lead",
+    "sensitivity_range": "5 to 12 percent, depending on how much of the gap is attributed to a concurrent price promotion",
+    "sensitivity_result": "still a positive gap across the whole range, but the size of the gap is not stable enough to size next quarter's budget from"
+  },
+
+  "uncertainty": {
+    "kind": "NOT_ESTABLISHED",
+    "why": "no control period or holdout exists to separate the campaign's effect from ordinary week to week variation and a concurrent price promotion"
+  },
+
+  "not_established": [
+    "Seasonality: the same weeks last year also ran higher without any campaign, and that baseline was not subtracted out.",
+    "No control period or holdout group exists, so the 8.4 percent cannot be separated from a concurrent price promotion running the same weeks."
+  ]
+}

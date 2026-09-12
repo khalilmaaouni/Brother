@@ -38,18 +38,15 @@ no fence file): any such file dirties the tree and the engine refuses the run
 before the first claim. Full detail: the Codex smoke runbook in the Brother repository.
 
 1. **Make each unit's done check fail right now, before any work happens.**
-   Run it yourself and confirm it exits nonzero; a check that already exits
-   0 must fail BEFORE any work happens, or the engine marks the unit NO-DATA
-   while a worker that changed nothing still reads integrated.
+   Confirm it exits nonzero. An already-passing check proves no change.
    Never write a bare-path check: a done check is judged on its RESULT,
    never on a missing file, because a check for a file that does not exist
    yet fails by way of "No such file or directory" and leaves no planner to
    hand back a replacement. Use `python3 -m unittest` plus one import-based
    line.
 2. **Write the units yourself, then run the engine.** No model call can be
-   made from inside a session or a Codex turn (a nested `codex exec` cannot
-   start, and any other model CLI has every socket blocked), so the plan is
-   yours: a JSON list, each unit with `id`, `objective`, `done_check`,
+   assumed available inside a session. Supply a JSON list with `id`,
+   `objective`, `done_check`,
    `writes`, `deps`. `writes` must name EVERY file the unit touches, or the
    file changed outside it fails the scope audit and the unit reads
    QUARANTINE, never integrated. MODEL_WORKER_CMD is a script that edits
@@ -99,6 +96,12 @@ reaching a decision. Absent evidence is NO-DATA, never a pass.
 **Claim verification, BrotherDS.** A decision-grade number is about to be
 stated; the claim registers BEFORE the outcome is known, then scores against
 reality. Experimental, not in the bundle.
+
+## Native mobile and creative work
+
+For an iPhone, iPad or SwiftUI outcome, load references/native-mobile.md.
+It supplies reference, research, design, motion, build and handoff steps
+within the existing execution route and product verdicts.
 
 ## More detail: verbs, boundaries, handback, closing
 

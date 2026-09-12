@@ -1,0 +1,2 @@
+# Format: patch-manifest-v1
+Adds mobile workflow planning, design briefs and native evidence verification, with generated skill routes for supported clients. Publishes the experimental BrotherDS command-line product, including reproducible audits, input validation and scored claim evidence. BrotherDS remains experimental; synthetic and local regression results do not establish real-world claim accuracy.

@@ -1,0 +1,29 @@
+{
+  "id": "HERO-NUMBER",
+  "statement": "Total order quantity for the synthetic pilot store over the demo window came to 1,200 units.",
+  "value": 1200,
+  "unit": "units",
+  "origin": "SYSTEM",
+  "question": "What is the order-quantity base a pilot rollout decision is measured against?",
+  "decision": "Whether the synthetic pilot store graduates to the next rollout wave.",
+  "grain": "one number for the pilot store over the demo window; aggregates every synthetic order row",
+
+  "_note": "hero_demo.py builds a tiny throwaway DuckDB and rewrites evidence.source to point at it before running this claim through bds.py check. The path below is a placeholder, the same convention examples/example-descriptive.json uses.",
+
+  "evidence": {
+    "source": "~/hero-demo-placeholder.duckdb",
+    "derivations": [
+      {"name": "order line rollup", "sql": "select sum(qty) from orders"},
+      {"name": "weekly mart, built separately", "sql": "select sum(qty) from orders_weekly"}
+    ]
+  },
+
+  "uncertainty": {
+    "kind": "NOT_ESTABLISHED",
+    "why": "This is a census of the synthetic order table, not a sample, so there is no sampling error to state."
+  },
+
+  "not_established": [
+    "This is a synthetic demo fixture; no real warehouse or pipeline stands behind it."
+  ]
+}

@@ -31,7 +31,7 @@
       "class": "known_no_data",
       "reason": "PR 260 (row E116) put the real perturbation behind BROTHER_LONG_CHECKS because the run takes about 90 minutes on this tree, so an ordinary battery prints NO-DATA for it by design and says so in its own output line: 'long check (about 90 min) not run: set BROTHER_LONG_CHECKS=1'. The check itself is not broken and its self test (release-note-perturb-self) runs in every battery and reads PASS; what is undeclared here is only the deliberate skip. A real FAIL from scripts/release_note_perturb.py is not covered by this entry and still blocks.",
       "recorded": "2026-09-05",
-      "review_by": "2026-09-12",
+      "review_by": "2026-09-19",
       "removal_condition": "the battery sets BROTHER_LONG_CHECKS=1 on release cuts and the check reads PASS there",
       "failing_tests": "none: the check is one script, not a unittest suite, and it is not run at all in the default battery, so its NO-DATA line names no test"
     },

@@ -1,0 +1,42 @@
+{
+  "id": "EXAMPLE-001",
+  "statement": "Total revenue for the twelve months to 2026-03-31 was 4,182,000 units of currency.",
+  "value": 4182000,
+  "unit": "currency units",
+  "origin": "SYSTEM",
+  "question": "What is the revenue base that every growth target is a percentage of?",
+  "decision": "Sets the denominator for the annual plan and for any claim of the form 'this initiative moves revenue by X percent'.",
+  "grain": "one number for the whole business over twelve months; the claim aggregates every row of the orders table, so no join key is involved",
+
+  "_note": "This example ships with no database attached, so the derivations below cannot run and the engine will report the source as missing. That is the correct behaviour and it is what a claim looks like before anyone has pointed it at real data. Replace evidence.source with a path to your own DuckDB file and the two derivations with two genuinely independent routes to the same number.",
+
+  "evidence": {
+    "source": "~/your-warehouse.duckdb",
+    "derivations": [
+      {
+        "name": "fact table rollup",
+        "sql": "select sum(revenue) from fact_order_line"
+      },
+      {
+        "name": "monthly mart, built by a separate job",
+        "sql": "select sum(revenue) from mart_monthly"
+      },
+      {
+        "name": "months covered, for context only",
+        "sql": "select count(distinct month) from mart_monthly",
+        "computes_value": false
+      }
+    ]
+  },
+
+  "uncertainty": {
+    "kind": "NOT_ESTABLISHED",
+    "why": "This is a census of recorded orders, not a sample, so there is no sampling error to state. The real uncertainty is completeness of the order feed, and that was not measured. Reporting a confidence interval here would describe the wrong risk."
+  },
+
+  "not_established": [
+    "Completeness: no reconciliation was run against any source system's own ledger, so orders missing from the feed are invisible to this figure.",
+    "Cancellations and returns: whether revenue is gross or net of them was not verified against the pipeline that builds the fact table.",
+    "Period edges: the first and last months are assumed complete; no check was made that the feed starts and ends on a month boundary."
+  ]
+}

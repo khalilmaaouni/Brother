@@ -1,79 +1,14 @@
 #!/usr/bin/env python3
-"""ROW R10: a ceiling on the estate's whole user-invocable surface.
+"""Measure the user-invocable surface and generate bundle/MANIFEST.json.
 
-WHAT "USER-INVOCABLE SURFACE" MEANS HERE, and only this: something a person
-can type. Two shapes count:
+The architecture of record withdrew numeric caps on 2026-08-22. The default
+command inventories the current repository and its product trees. Explicit
+ceiling calibration remains available through verdict() for callers that
+supply a boundary. Missing trees are NO-DATA, never counted as zero.
 
-  1. A command file, `<any dir named commands>/*.md`. Always typeable, no
-     frontmatter check, per the counting rule this row was briefed against.
-  2. A skill, `<any dir named skills>/<name>/SKILL.md`, UNLESS its frontmatter
-     carries `user-invocable: false`. A skill carrying
-     `disable-model-invocation: true` is still counted: that flag only stops
-     the skill firing itself, a person can still type it.
-
-WHY A CEILING, NOT A COUNT PUBLISHED IN PROSE. This estate has been burned
-repeatedly by counts that were never re-derivable and drifted the moment
-nobody looked: 51 was published once, and it double counted 4 BrotherModeUp
-skills marked `user-invocable: false` (nobody can type them) plus read
-BrotherSBE from a checkout six commits stale where the count was already 14
-rather than 16. A number that only a prose sentence carries cannot be
-re-checked; a script that recomputes it from the files on disk, every run,
-can.
-
-THE CEILING ITSELF IS A RATCHET, not a target. It is set to TODAY'S measured
-total so this check is GREEN on arrival and turns RED only if the surface
-grows past what it is right now. Lowering it is a different, deliberate row.
-
-MEASURED 2026-08-29, four repositories, each counted the way this file
-counts (commands dirs found at any depth, skills dirs found at any depth,
-both excluding dot-directories so a `.git` object store or a
-`.claude/worktrees` full checkout is never walked into and double counted):
-
-    Brother          2   (1 command + 1 skill: bundle/commands/brother.md,
-                           bundle/skills/using-brother/SKILL.md)
-    BrotherModeUp   30   (15 commands + 15 typeable skills, 4 of 19 skills
-                           excluded for user-invocable: false, 7 of the 15
-                           counted skills carry disable-model-invocation:
-                           true and are still counted)
-    BrotherSBE      14   (0 commands + 14 typeable skills, none excluded)
-    BrotherDS        1   (0 commands + 1 typeable skill, not excluded)
-    TOTAL           47
-
-NOTE ON THE BRIEF THAT ASKED FOR THIS CHECK: it stated the headline total as
-46, but its own per-repository breakdown (1 door + 1 skill, 30, 14, 1) sums
-to 47, not 46, and this script's independent walk of the actual files on
-this machine also lands on 47. The brief itself said to verify rather than
-trust it, so the ceiling below is set to the number this script can prove,
-47, and this paragraph records the mismatch rather than silently absorbing
-it into a number nobody could re-derive. THE CEILING IS 47.
-
-Where a repository is absent on this machine, that repository is reported as
-NO-DATA by name. NO-DATA is never folded in as zero and never counted as a
-pass: a run that cannot see every repository cannot certify the total is
-under the ceiling, so it exits 2, not 0.
-
-Exit 0  every repository was measured and the total is at or under the
-        ceiling.
-Exit 1  every repository was measured and the total exceeds the ceiling.
-Exit 2  NO-DATA: at least one repository could not be found on this machine.
-
-Python 3.9 floor, standard library only, no network.
-
-origin: a human, or a session acting for one, running this script's own CLI
-directly with both `--manifest` and `--write`. The plain check (as
-scripts/check_all.sh:306 runs it, `python3 scripts/surface_budget.py` with no
-flags) only prints the ceiling verdict and never writes; the write branch at
-main()'s `if '--write' in args:` guard (below) only fires under that explicit
-flag combination. Confirmed by grep: no file in scripts or bundle/runtime
-invokes `surface_budget.py --manifest` or passes `--write` to it (searched
-for both strings; only scripts/test_surface_budget.py imports this module,
-and it does so to call build_manifest() directly in a test, never through
-main() with --write).
-
-PRODUCER: this module is the sole producer of bundle/MANIFEST.json. The write
-happens inside main(), a few lines below build_manifest(), at the `with
-open(MANIFEST_PATH, 'w', encoding='utf-8') as fh: json.dump(manifest, fh,
-...)` call (lines 292-294 of this file).
+Only --manifest --write writes the generated manifest. Default inspection
+is read-only. Commands and user-invocable skills count; dot directories and
+nested product trees are excluded to prevent double counting.
 """
 import json
 import os
@@ -81,8 +16,7 @@ import sys
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# The ceiling: today's measured total, held flat. See the docstring above for
-# the per-repository breakdown and why this is 47, not the 46 once published.
+# Historical calibration boundary, not the default inventory policy.
 CEILING = 47
 
 SKIP_DIRS = {
@@ -98,14 +32,12 @@ SKIP_DIRS = {
     'products',
 }
 
-# name -> path. Brother is this checkout; the other three are sibling
-# checkouts at their documented canonical paths (see each project's
-# PROJECT.md / CLAUDE.md for the path this estate treats as canonical).
+# All products are measured from this repository.
 REPOS = [
     ('Brother', REPO_ROOT),
-    ('BrotherModeUp', os.path.expanduser('~/Documents/BrotherModeUp')),
-    ('BrotherSBE', os.path.expanduser('~/Documents/BrotherSBE')),
-    ('BrotherDS', os.path.expanduser('~/Documents/BrotherDS')),
+    ('BrotherModeUp', os.path.join(REPO_ROOT, 'products', 'brothermode')),
+    ('BrotherSBE', os.path.join(REPO_ROOT, 'products', 'brothersbe')),
+    ('BrotherDS', os.path.join(REPO_ROOT, 'products', 'brotherds')),
 ]
 
 
@@ -302,6 +234,12 @@ def verdict(total, missing, ceiling):
     return 0, 'PASS: surface is %d, ceiling is %d' % (total, ceiling)
 
 
+def inventory_verdict(total, missing):
+    if missing:
+        return 2, 'NO-DATA: could not measure %s' % ', '.join(missing)
+    return 0, 'PASS: measured %d user-invocable entries' % total
+
+
 MANIFEST_PATH = os.path.join(REPO_ROOT, 'bundle', 'MANIFEST.json')
 
 
@@ -319,25 +257,13 @@ def main(argv=None):
             print('wrote %s' % MANIFEST_PATH)
         print(json.dumps({'shipped_plugins': manifest['shipped_plugins'],
                           'total': manifest['total']}, sort_keys=True))
-        # THE CEILING AND THE MANIFEST ANSWER DIFFERENT QUESTIONS, and saying so
-        # here is the whole reason this flag prints them side by side. The
-        # ceiling is how much surface EXISTS across every tree; the manifest is
-        # how much ONE INSTALL DELIVERS. They differed by exactly one on the day
-        # this was written, and that one is a tree the umbrella has never
-        # shipped. Reading either number as the other is how a row closes on a
-        # count that was never about it.
-        if manifest['total'] != CEILING:
-            print('NOTE: one install delivers %d, the ceiling counts %d across '
-                  'every tree. The difference is surface that exists but is not '
-                  'shipped by the umbrella, which is a fact and not a failure.'
-                  % (manifest['total'], CEILING))
         return 0
 
     total, missing, lines = compute_total(REPOS)
     for line in lines:
         print(line)
-    print('TOTAL: %d   CEILING: %d' % (total, CEILING))
-    code, message = verdict(total, missing, CEILING)
+    print('TOTAL: %d (numeric surface cap retired)' % total)
+    code, message = inventory_verdict(total, missing)
     print(message)
     return code
 

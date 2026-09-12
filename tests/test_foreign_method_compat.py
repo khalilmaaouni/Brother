@@ -49,8 +49,9 @@ except ImportError:
 REPO = pathlib.Path(__file__).resolve().parent.parent
 FIXTURE = REPO / "tests" / "fixtures" / "foreign-method"
 
-# Every check this repository ships that a session would plausibly run over a
-# working tree. Read-only by intent; this test is what holds them to it.
+# Every check listed here is read-only by intent. Tools with a fixture-root
+# interface are directed at the fixture; the others run their documented
+# defaults as smoke checks while the foreign artifacts remain monitored.
 READ_ONLY_TOOLS = [
     ["python3", "scripts/coverage_check.py"],
     ["python3", "scripts/leaf_pin_check.py"],
@@ -75,6 +76,12 @@ class TestForeignMethodArtifactsAreNotTouched(unittest.TestCase):
         self.tmp = pathlib.Path(tempfile.mkdtemp())
         self.work = self.tmp / "tree"
         shutil.copytree(FIXTURE, self.work)
+        # cleanse.sh anchors itself to its own location, not a CLI argument.
+        # Provision it before the snapshot so the actual fixture is scanned
+        # and every scanner-created change remains visible to the assertion.
+        (self.work / "scripts").mkdir()
+        shutil.copyfile(REPO / "scripts/cleanse.sh",
+                        self.work / "scripts/cleanse.sh")
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
@@ -96,8 +103,13 @@ class TestForeignMethodArtifactsAreNotTouched(unittest.TestCase):
             if not script.exists():
                 skipped.append(tool[1])
                 continue
+            command = list(tool)
+            if tool[1] == "scripts/cleanse.sh":
+                command[1] = str(self.work / "scripts/cleanse.sh")
+            elif tool[1] == "scripts/coverage_check.py":
+                command += ["--root", str(self.work)]
             result = subprocess.run(
-                tool + [str(self.work)],
+                command,
                 cwd=str(REPO), capture_output=True, text=True, timeout=120,
             )
             # The exit code is not asserted here: these tools report PASS,
@@ -113,6 +125,13 @@ class TestForeignMethodArtifactsAreNotTouched(unittest.TestCase):
                 "leaves the fixture untouched for the wrong reason:\n%s"
                 % (tool[1], result.returncode, result.stderr),
             )
+            self.assertNotIn("unrecognized arguments:", result.stderr)
+            if tool[1] == "scripts/cleanse.sh":
+                self.assertIn(
+                    "scope: %d file(s), 0 commit(s)" % (len(before) - 1),
+                    result.stdout,
+                    "the scanner did not inspect the isolated fixture",
+                )
             ran.append(tool[1])
         self.assertTrue(
             ran,

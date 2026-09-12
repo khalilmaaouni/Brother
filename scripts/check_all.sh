@@ -388,6 +388,7 @@ run_check "system-doc-current"     python3 scripts/system_doc.py --check
 # bundle/codex-skills still matches bundle/skills byte for byte; a drift
 # here ships Codex a stale copy of the skills Claude Code actually has.
 run_check "codex-skills-current"      python3 scripts/codex_skills.py --check
+run_check "codex-surface-current"    python3 scripts/codex_surface.py --check
 
 # The parity gate's own tests only. The GATE ITSELF is deliberately NOT a
 # battery check: it exits 1 while parity is unreached, and that is a true state
@@ -657,6 +658,9 @@ run_check "acceptance-time" python3 scripts/test_acceptance_time.py -v
 # the closure is computed from the real files (not a hand-typed list), the
 # packaged copy is byte-identical, and the installed launcher actually runs.
 run_check "bundle-runtime-self" python3 scripts/test_bundle_runtime.py -v
+run_check "native-evidence-self" python3 scripts/test_native_evidence.py -v
+run_check "mobile-workflow" python3 scripts/test_mobile_workflow.py -v
+run_check "mobile-design" python3 scripts/test_mobile_design.py -v
 # P0.4, the same wave: the eleven capability areas re-proven THROUGH the
 # public entry point (a plain outcome sentence into brother_run.py), never
 # through a hand-built Work document or a named internal worker command.
@@ -1450,6 +1454,7 @@ run_check "adapter-conformance-self"  python3 scripts/test_adapter_conformance.p
 # regression here is invisible to every check that only exercises Claude
 # Code's side of the provider-neutral seam.
 run_check "codex-battery-self"        python3 scripts/test_codex_battery.py -v
+run_check "cursor-battery-self"        python3 scripts/test_cursor_battery.py -v
 # GATE E critical: delivery_status. The founder-facing answer to "is this
 # ready to ship"; a broken status reads as calm when it should read as
 # blocked, which is the failure class this closes.

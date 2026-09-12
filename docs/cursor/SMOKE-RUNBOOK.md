@@ -40,3 +40,5 @@ The signed-in run passes when all three verdicts pass and the witness is unchang
 RECEIPT is reported separately: a `brother_run` receipt path appeared in the output and the file exists, or NO-DATA.
 
 A measured deny is not part of this smoke. Until one is, fence enforcement under Cursor stays ADVISORY.
+
+<!-- doc-assurance: allow-missing mathlib.py (created in the temporary toy repository by the commands above) -->

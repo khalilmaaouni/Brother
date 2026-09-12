@@ -184,6 +184,14 @@ class ManifestMatchesTheClosure(unittest.TestCase):
                     "integrate.py", "scope_audit.py", "worktree_lane.py"):
             self.assertIn(name, self.closure)
 
+    def test_native_evidence_support_tool_is_in_the_closure(self):
+        for name in ("native_evidence.py", "mobile_workflow.py", "mobile_design.py"):
+            self.assertIn(name, self.closure)
+
+    def test_custom_closure_entry_does_not_gain_runtime_support_roots(self):
+        self.assertEqual(BR.compute_closure(entry="door.py", scripts_dir=HERE),
+                         BR._closure_from_entries(["door.py"], HERE))
+
 
 class DriftDetectedOnSourceEditWithoutRegen(unittest.TestCase):
     def setUp(self):
