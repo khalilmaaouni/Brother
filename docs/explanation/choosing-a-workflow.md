@@ -1,13 +1,13 @@
-# Brother alongside GSD, BMAD, and Superpowers
+# Where Brother fits
 
-Choose for the problem you have, not the number of agents a project advertises. These projects overlap. This comparison describes their public documentation emphasis as reviewed on 2026-09-12, not a controlled product benchmark or a claim that a competitor lacks a feature.
+Choose for the problem you have, not the number of agents a workflow advertises. Other workflows can help you plan, manage context, write tests, and review code. Brother focuses on connecting that work to bounded delegation, inspectable evidence, and useful memory. These capabilities can overlap; this is a guide to choosing an approach, not a comparative benchmark.
 
-| Project | Public emphasis | Why a reader might choose it |
+| Your need | What to look for | Where Brother fits |
 | --- | --- | --- |
-| [GSD](https://github.com/open-gsd/gsd-core) | Context management and a discuss, plan, execute, verify, ship workflow | You need structure and continuity from an idea through implementation |
-| [BMAD](https://github.com/bmad-code-org/BMAD-METHOD) | An adaptive development method with planning and explicit human judgment | You need a guided method that scales from a small change to a larger project |
-| [Superpowers](https://github.com/obra/superpowers) | Composable development skills, design before implementation, TDD, and review | You want disciplined development behavior embedded in the coding workflow |
-| **Brother** | Bounded delegation, discriminating evidence, durable receipts, and recalled lessons | You can generate work, but need a stronger basis for leaving it to run and accepting what returns |
+| Turn an idea into a plan | Clear requirements and a manageable implementation sequence | Make the delegated outcome, allowed changes, and deciding checks explicit |
+| Keep development disciplined | Tests, review, and continuity across tasks | Connect the checks to the actual change and preserve the delivery record |
+| Step away with a basis for trust | Observable boundaries, recoverable work, and evidence on return | Bounded execution, resumable outcomes, and receipts you can inspect |
+| Avoid repeating known mistakes | Relevant lessons recalled when needed | The Vault carries useful context forward, subject to current evidence |
 
 ## Brother's positioning
 
@@ -22,9 +22,9 @@ Brother connects an outcome to allowed changes, checks, a saved delivery record,
 5. Recall relevant Vault lessons, then test them against current reality.
 6. Leave acceptance and release authority explicit.
 
-This is a proposition you can test, not a demonstrated claim of better reliability, fewer tokens, or faster delivery than the other projects.
+This is a proposition you can test, not a demonstrated claim of better reliability, fewer tokens, or faster delivery than other workflows.
 
-## Can I use them together?
+## Can I keep my existing workflow?
 
 Potentially, but coexistence is not a certified integration. Start with one workflow owning execution. If another method produces a design or plan, translate the relevant outcome, scope, and checks into Brother's contract rather than running two competing orchestration loops. Test hook interactions in a disposable repository. No interoperability matrix is claimed here.
 

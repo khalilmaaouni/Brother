@@ -12,7 +12,7 @@ The goal is to let you step away for more useful work as the system earns confid
 
 [The problem](#why-brother) · [Who it is for](#who-brother-is-for) · [Why this approach](#what-makes-brother-different) · [The Vault](#the-vault-remember-the-lesson-not-just-the-conversation) · [Get started](#start-in-sixty-seconds) · [Documentation](docs/README.md)
 
-**Start small:** [install for your host](docs/reference/install-matrix.md), [try a verified change](docs/tutorials/first-verified-change.md), then use the [delegation checklist](docs/how-to/delegate-safely.md) before increasing autonomy. Already using another workflow? Read [Brother alongside GSD, BMAD, and Superpowers](docs/explanation/choosing-a-workflow.md).
+**Start small:** [install for your host](docs/reference/install-matrix.md), [try a verified change](docs/tutorials/first-verified-change.md), then use the [delegation checklist](docs/how-to/delegate-safely.md) before increasing autonomy. Already using another workflow? Read [Where Brother fits](docs/explanation/choosing-a-workflow.md).
 
 ## Why Brother?
 
