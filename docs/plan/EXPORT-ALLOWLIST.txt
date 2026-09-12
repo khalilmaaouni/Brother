@@ -584,5 +584,10 @@ products/brotherds/docs/PERSONA-JOURNEYS.md
 products/brotherds/docs/MDM-SCIENCE.md
 products/brotherds/docs/MDM-AUDIT.md
 products/brotherds/docs/VALIDATION.md
+products/brotherds/docs/NORTH-STAR-CHAIN.md
+products/brotherds/docs/TRIUMVIRATE-INTEGRATION.md
+products/brotherds/docs/plan/QUEUE.json
+products/brotherds/research/C1-mdm-data-science-best-practice-2026-09-12.md
+products/brotherds/research/C2-harness-and-market-practice-2026-09-12.md
 products/brotherds/docs/PLAYBOOK-LOCATION-ANCHORED-MASTER.md
 products/brotherds/.claude-plugin

@@ -1,0 +1,96 @@
+[
+  {
+    "id": "path-selection",
+    "title": "Founder selects one of the three paths in OPTIONS.md",
+    "state": "blocked",
+    "blocked_on": "founder",
+    "stage": "human-decision",
+    "check": "OPTIONS.md records the selection with a date and a reason"
+  },
+  {
+    "id": "boundary-question",
+    "title": "Founder answers the open boundary question, directive section 3",
+    "state": "blocked",
+    "blocked_on": "founder",
+    "stage": "human-decision",
+    "check": "docs/SCOPE-2026-08-12-founder-directive.md section 3 marked resolved in the file itself, naming A, B, C or the split the study recommends"
+  },
+  {
+    "id": "verified-reality-owner",
+    "title": "Assign the chain's last stage, which the shared chain records as owned by nobody",
+    "state": "done",
+    "blocked_on": "founder",
+    "stage": "verified-reality",
+    "check": "docs/NORTH-STAR-CHAIN.md's verified-reality entry names a ratified owner instead of RECOMMENDED, FOUNDER-GATED",
+    "note": "decision_2026_08_22: \"Split by unit, ledger owned by BrotherDS (Recommended)\""
+  },
+  {
+    "id": "passport-consumer-authorised",
+    "title": "The siblings permit a second read-only consumer of the change passport",
+    "state": "queued",
+    "blocked_on": "BrotherSBE, which owns the seam specification",
+    "stage": "receipt",
+    "check": "the change-passport seam spec names a second read-only consumer; until then bds.py passport is built and unauthorised",
+    "note": "decision_2026_08_22: \"GRANTED. The siblings permit a second, read-only consumer of the change passport. This reader drops its UNAUTHORISED cap once the sentence lands in both seam contracts (phase 2 item P3 of the roadmap).\""
+  },
+  {
+    "id": "handoff-wire-format",
+    "title": "BrotherSBE ratifies a wire format for the five-item handoff package",
+    "state": "queued",
+    "blocked_on": "BrotherSBE",
+    "stage": "provenance",
+    "check": "bds.py handoff returns PASS against a real package, which it cannot do while nothing carries a ratified marker",
+    "note": "decision_2026_08_22: \"GRANTED, written by the assurance product as `contracts/handoff-package.v1.json` with a fixture and a test; this reader consumes the `ratified` marker (phase 2 item P4).\""
+  },
+  {
+    "id": "authoring-cost",
+    "title": "Measure minutes to author one claim, the disproving test named before building",
+    "state": "queued",
+    "stage": "receipt",
+    "check": "minutes-per-claim recorded over at least 5 claims authored through the plugin surface; over thirty minutes means fall back to the Auditor path"
+  },
+  {
+    "id": "plugin-surface",
+    "title": "Authoring a claim becomes a side effect of doing the analysis",
+    "state": "queued",
+    "stage": "receipt",
+    "check": "skills/brotherds installed, and one claim authored end to end through it without hand-editing JSON"
+  },
+  {
+    "id": "first-scored-claim",
+    "title": "Register claims BEFORE the next pilot month loads, so an outcome arrives in weeks",
+    "state": "queued",
+    "stage": "outcome",
+    "check": "bds.py ledger claims/ reports a rate with a denominator above zero, with timestamps proving claims preceded the load"
+  },
+  {
+    "id": "survivors-reconciled",
+    "title": "The two remaining WHAT-SURVIVES items from the prior red team, incorporated or explicitly superseded",
+    "state": "done",
+    "stage": "design",
+    "check": "each of the four items is either cited in SPEC.md or recorded as deliberately dropped with a reason: all four now carry a named disposition in the reconciliation section"
+  },
+  {
+    "id": "north-star-numbers-manifest",
+    "title": "Submit the Verified Claim Rate to BrotherSBE's numbers gate once it is a real figure",
+    "state": "blocked",
+    "blocked_on": "first-scored-claim",
+    "stage": "verified-reality",
+    "check": "sbe gate numbers returns PASS rather than NO-DATA, against a manifest carrying a second independent derivation of the rate"
+  },
+  {
+    "id": "validation-policy",
+    "title": "Record which controls actually validate this project and which return NO-DATA correctly",
+    "state": "done",
+    "stage": "refusals",
+    "check": "docs/VALIDATION.md exists and names, per control, what it examines and what it does not"
+  },
+  {
+    "id": "g5-cross-class-comparison",
+    "title": "Widen G5 so a dual run can be expressed: a SYSTEM derivation paired with a THIRD_PARTY or ELICITED comparison against the incumbent artifact",
+    "state": "queued",
+    "stage": "refusals",
+    "check": "bds.py check on a claim carrying a SYSTEM derivation and a non-SQL incumbent comparison reaches a verdict on the pairing instead of refusing the non-SQL path",
+    "why": "survivor 1 of the 2026-07-31 red team, rated the highest item in that scope with no competing vendor. Until this lands the product cannot answer 'does this agree with what the reader believes today', only 'is this internally reproducible'."
+  }
+]
