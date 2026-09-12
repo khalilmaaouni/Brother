@@ -1,0 +1,14 @@
+{
+  "id": "HERO-FCAST-UNSCOREABLE",
+  "statement": "Weekly order volume for a third synthetic pilot region is expected near 500 units in week 12.",
+  "value": 500,
+  "unit": "units",
+  "origin": "ELICITED",
+  "uncertainty": {
+    "kind": "NOT_ESTABLISHED",
+    "why": "no model or expert protocol produced an interval for this synthetic fixture, so reality cannot fall inside or outside anything stated"
+  },
+  "not_established": [
+    "This is a synthetic demo fixture; no real forecast pipeline stands behind it."
+  ]
+}

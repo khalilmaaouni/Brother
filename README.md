@@ -440,3 +440,9 @@ Current behavioral claims are registered in [DOC-CLAIMS.md](docs/assurance/DOC-C
 **Tutorials teach. How-to guides solve tasks. Reference states the contract. Explanation gives reasoning. Persona pages apply the same evidence model to professional work.**
 
 Start at [docs/README.md](docs/README.md).
+
+## Mobile development and claim verification
+
+Plan native mobile work with the [mobile workflow](docs/how-to/native-mobile-workflow.md), prepare design briefs, and verify native build and test evidence with the [native evidence guide](docs/how-to/native-evidence.md). Evidence integrity does not establish application quality or human acceptance.
+
+[BrotherDS](products/brotherds/README.md) is available as an experimental Python command-line product. It checks claim evidence, supports reproducible master-data audits, and keeps PASS, FAIL and NO-DATA distinct. Run its local checks with `sh products/brotherds/tests/run_all.sh`.

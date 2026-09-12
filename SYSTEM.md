@@ -13,10 +13,10 @@ to run the battery.
 
 | | |
 |---|---:|
-| Parts | 204 |
-| Parts with a purpose written in the file | 202 |
-| Parts with a suite wired into the battery | 181 |
-| Checks in the battery | 284 |
+| Parts | 209 |
+| Parts with a purpose written in the file | 207 |
+| Parts with a suite wired into the battery | 186 |
+| Checks in the battery | 289 |
 
 2 part(s) carry no purpose line and are listed as NO-DATA below. They are
 shown rather than omitted, because a system record that hides its
@@ -69,9 +69,11 @@ undocumented corners looks complete and is not.
 | `codex_product_skills` | Build opt-in Codex product packages outside a verified public export. | **NO-DATA**, nothing in the battery runs it |
 | `codex_skills` | generate bundle/codex-skills/ from bundle/skills/, with the | `codex-skills-current` |
 | `codex_smoke` | the clean-install Codex smoke test, run in an isolated home. | `codex-smoke`, `codex-smoke-self` |
+| `codex_surface` | Generate Codex-visible aliases for Brother's product skills and commands. | `codex-surface-current` |
 | `continuity` | the resume screen. E73.1 of the productization directive. | `continuity-self` |
 | `contract_check` | does a record follow the outcome contract, the one project | `bundle-runtime-self`, `contract-check-self` |
 | `coverage_check` | Coverage checker for the unified WBS (docs/plan/UNIFIED-WBS.md), task 0. | `coverage`, `coverage-self` |
+| `cursor_battery` | Verify a released Cursor adapter in a detached clone and retain its evidence. | `cursor-battery-self` |
 | `cursor_plugin_install` | Install the Brother Cursor plugin to ~/.cursor/plugins/local/brother. | **NO-DATA**, nothing in the battery runs it |
 | `cursor_smoke` | the clean-install Cursor smoke test, run in an isolated home. | `cursor-smoke`, `cursor-smoke-self` |
 | `cutover_pack` | The 1.0.13 cutover pack: one prompt and one zip a fresh session on another | `cutover-pack-self` |
@@ -146,9 +148,12 @@ undocumented corners looks complete and is not.
 | `memory_ab_runner` | Runner for scripts/memory_ab.py (VB-11, D04 part B), 2026-08-30 run. | **NO-DATA**, nothing in the battery runs it |
 | `memory_lift` | did the memory fix actually change anything, measured on real work. | `memory-lift-self` |
 | `merge_queue` | conflict-aware batching for the one-integrator merge queue (W8). | `merge-queue`, `merge-queue-self` |
+| `mobile_design` | Search a user-curated mobile reference board and inspect creative media. | `bundle-runtime-self`, `mobile-design` |
+| `mobile_workflow` | Native mobile workflow support for Brother's existing execution engine. | `bundle-runtime-self`, `mobile-workflow` |
 | `model_worker` | NIGHT-01: the real coding-model worker for the graph loop. | `bundle-runtime-self`, `loop-bridge-self`, `model-worker` |
 | `morning_pack` | .py: fills docs/plan/MORNING-STEERING-2026-09-05.md section | `morning-pack-self` |
 | `mutation_gate` | R27.3, the assurance mutation gate. | `mutation-gate`, `mutation-gate-self` |
+| `native_evidence` | record and validate a native build or test evidence bundle. | `bundle-runtime-self`, `native-evidence-self` |
 | `negative_space_audit` | R27.2, the generated negative-space contract audit. | `negative-space-audit`, `negative-space-audit-self` |
 | `next_cut` | Print the next release cut: the date, the version it would be, and the | `next-cut-self` |
 | `night_tick` | The durable half of the night watch. | `night-tick-selftest` |
@@ -203,7 +208,7 @@ undocumented corners looks complete and is not.
 | `score_vault_retrieval` | retrieval quality for the Brother Vault, measured through | **NO-DATA**, nothing in the battery runs it |
 | `smoke_first` | Run a command over many items only after it succeeds on ONE item first. | `smoke-first-self` |
 | `split_check` | Does a train/test split leak: the same entity in both sides, or a row | `evad-score`, `evad-score-personas`, `evad-score-self`, `fault-lab-self`, `split-check-self` |
-| `surface_budget` | ROW R10: a ceiling on the estate's whole user-invocable surface. | `surface-budget`, `surface-budget-self` |
+| `surface_budget` | Measure the user-invocable surface and generate bundle/MANIFEST.json. | `surface-budget`, `surface-budget-self` |
 | `system_doc` | a description of this system that cannot drift, because it is generated. | `regen-generated-self`, `system-doc-current`, `system-doc-self` |
 | `task_watchdog` | Task watchdog: per-task drift and block detection with the unlock printed. | `night-tick-selftest`, `task-watchdog-self` |
 | `temp_residue` | Report, and optionally prune, this estate's leftover temp trees. | `temp-residue-self` |
@@ -306,6 +311,7 @@ undocumented corners looks complete and is not.
 - `refresh-cut-self`: `python3 scripts/test_refresh_cut.py -v`
 - `system-doc-current`: `python3 scripts/system_doc.py --check`
 - `codex-skills-current`: `python3 scripts/codex_skills.py --check`
+- `codex-surface-current`: `python3 scripts/codex_surface.py --check`
 - `parity-gate-self`: `python3 scripts/test_parity_gate.py -v`
 - `worktree-lane-self`: `python3 scripts/test_worktree_lane.py -v`
 - `claim-store-self`: `python3 scripts/test_claim_store.py -v`
@@ -359,6 +365,9 @@ undocumented corners looks complete and is not.
 - `acceptance-compression`: `python3 scripts/test_acceptance_compression.py -v`
 - `acceptance-time`: `python3 scripts/test_acceptance_time.py -v`
 - `bundle-runtime-self`: `python3 scripts/test_bundle_runtime.py -v`
+- `native-evidence-self`: `python3 scripts/test_native_evidence.py -v`
+- `mobile-workflow`: `python3 scripts/test_mobile_workflow.py -v`
+- `mobile-design`: `python3 scripts/test_mobile_design.py -v`
 - `product-acceptance-self`: `python3 scripts/test_product_acceptance.py -v`
 - `clean-install-e2e-self`: `python3 scripts/test_clean_install_e2e.py -v`
 - `fault-lab-self`: `python3 scripts/test_fault_lab.py -v`
@@ -486,6 +495,7 @@ undocumented corners looks complete and is not.
 - `brother-paths-self`: `python3 scripts/test_brother_paths.py -v`
 - `adapter-conformance-self`: `python3 scripts/test_adapter_conformance.py -v`
 - `codex-battery-self`: `python3 scripts/test_codex_battery.py -v`
+- `cursor-battery-self`: `python3 scripts/test_cursor_battery.py -v`
 - `delivery-status-self`: `python3 scripts/test_delivery_status.py -v`
 - `keep-current-self`: `python3 scripts/test_keep_current.py -v`
 - `memoryagentbench-self`: `python3 scripts/test_gauntlet_memoryagentbench_conflict.py -v`

@@ -689,6 +689,41 @@ def previous_release_line(target_version="1.0.0", releases_dir=None):
     return "Previous release `%s` was cut from hub commit `%s`." % (rel, m.group(1))
 
 
+PATCH_NOTE_MARKER = "# Format: patch-manifest-v1"
+
+
+def build_patch_note(version, changelog):
+    """Measure artifact identity without making behavioral or test claims."""
+    revision = head_rev()
+    if not revision:
+        return None, ["NO-DATA: source revision unavailable"]
+    if manifest_version() != version:
+        return None, ["NO-DATA: requested version differs from bundle version"]
+    _, digest, count, problem = export_manifest()
+    if problem:
+        return None, [problem]
+    if not changelog.strip():
+        return None, ["NO-DATA: patch changelog is empty"]
+    text = ("# Brother %s\n\n## Source revision\n\n"
+            "Cut from hub commit `%s`.\n\n"
+            "Export manifest digest `%s` over %s exported file(s), named one per line "
+            "with its own sha256 in `docs/releases/%s.export-manifest.txt`. "
+            "The manifest excludes the release-note directory.\n\n"
+            "Reproduce the published tree:\n\n"
+            "    python3 scripts/reproduce_export.py --verify-tree --tag v%s\n\n"
+            "## Changes\n\n%s\n" %
+            (version, revision, digest, count, version, version, changelog.strip()))
+    return text, []
+
+
+def build_for_release(version):
+    """The CLI honors committed format selection; build() retains its legacy contract."""
+    patch_input = extra_notes(version)
+    if patch_input and patch_input.startswith(PATCH_NOTE_MARKER + "\n"):
+        return build_patch_note(version, patch_input.split("\n", 1)[1])
+    return build(version)
+
+
 def build(version=None):
     """Runs every cited suite and confirms every cited test name, for the
     release note named `version` (default: default_version(), the tree's
@@ -921,7 +956,7 @@ def main(argv=None):
               % (path, len(file_rows)))
         return 0
 
-    body, problems = build(version)
+    body, problems = build_for_release(version)
     if body is None:
         print("%s: could not generate the release note; not printing a note "
               "with an unmeasured claim in it." % NODATA, file=sys.stderr)

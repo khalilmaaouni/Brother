@@ -123,6 +123,11 @@ SCRIPTS_DIR = HERE
 PRODUCTS_DIR = os.path.join(REPO_ROOT, "products")
 RUNTIME_DIR = os.path.join(REPO_ROOT, "bundle", "runtime")
 ENTRY = "brother_run.py"
+#: A reusable done_check support tool ships beside the runner. It is a second
+#: closure root, not a pretend import from brother_run.py: evidence units call
+#: it directly, and an installed runtime must carry the same guard a checkout
+#: can name in its done_check.
+SUPPORT_ENTRIES = ("native_evidence.py", "mobile_workflow.py", "mobile_design.py")
 MANIFEST_NAME = "RUNTIME-MANIFEST.json"
 LAUNCHER_NAME = "brother-run"
 VERIFIER_NAME = "verify_runtime.py"
@@ -416,10 +421,13 @@ def _closure_from_entries(entries, files_dir):
 
 
 def compute_closure(entry=ENTRY, scripts_dir=SCRIPTS_DIR):
-    """BFS from `entry` over local imports and local script-path string
-    literals, both read from the same AST walk of each file as it is
-    visited. Returns a sorted list of scripts/ basenames (with .py)."""
-    return _closure_from_entries([entry], scripts_dir)
+    """BFS from the runner and shipped done_check support roots over local
+    imports and local script-path string literals. Returns sorted script
+    basenames (with .py)."""
+    entries = [entry]
+    if entry == ENTRY:
+        entries += SUPPORT_ENTRIES
+    return _closure_from_entries(entries, scripts_dir)
 
 
 def _load_hooks_json(product, products_dir=PRODUCTS_DIR):

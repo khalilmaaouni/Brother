@@ -52,32 +52,21 @@ Confirm plugin presence, hook trust, durable receipt creation, target-repository
 
 ## Uninstall
 
-To remove separately installed managed hook wiring before plugin removal, or leave the plugin installed without that wiring, use the hook installer's supported route:
+Use the hook installer's supported `--uninstall` path before plugin removal so only Brother-owned hook registrations are removed from a shared host config.
 
-```bash
-python3 scripts/codex_hooks_install.py --uninstall --codex-home "$HOME/.codex" --allow-default-home
-```
+## BrotherMode and BrotherSBE on Codex
 
-Use the supported lifecycle rather than deleting shared configuration:
+Codex has skills, not Claude-style slash commands. The Brother umbrella package
+now exposes namespaced routes in its `skills/` directory so the product
+surfaces are visible in one install:
 
-```bash
-python3 scripts/brother_install.py uninstall --codex-home "$HOME/.codex" --allow-default-home
-```
+- `brothermode-*` exposes BrotherMode execution, delivery, recovery and native
+  workflow capabilities.
+- `brothersbe-*` exposes assurance, review, design, verification and handoff
+  capabilities.
+- `brotherme-*` exposes the existing compatibility command names as Codex
+  skills, while routing to the canonical BrotherMode skill.
 
-Recheck status and restart the host. Preserve run records and Vault knowledge you still need.
-
-## Upgrade and rollback
-
-Inspect status first. Set `FROM_REF` to the actual installed tag and `TO_REF` to the selected release:
-
-```bash
-python3 scripts/brother_install.py upgrade --from-ref "$FROM_REF" --ref "$TO_REF" --codex-home "$HOME/.codex" --allow-default-home
-```
-
-Upgrade creates a snapshot. Restore the newest snapshot with:
-
-```bash
-python3 scripts/brother_install.py rollback --codex-home "$HOME/.codex" --allow-default-home
-```
-
-Rollback restores saved configuration. Review intervening host configuration changes before using it. Recheck plugin status and hook trust after any lifecycle change. For interrupted work rather than install failures, use [recovery](recover-from-failure.md).
+The aliases are generated from the product skills and command inventory. They
+use the same Brother engine and receipt contract; the Claude source skills keep
+their client-specific invocation controls.

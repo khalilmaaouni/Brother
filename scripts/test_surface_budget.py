@@ -265,5 +265,16 @@ class WhatOneInstallMustProduce(unittest.TestCase):
         self.assertEqual(on_disk["entries"], computed["entries"])
 
 
+class CurrentArchitecture(unittest.TestCase):
+    def test_inventory_accepts_complete_surface_above_retired_cap(self):
+        from unittest.mock import patch
+        with patch.object(sb, 'compute_total', return_value=(95, [], [])):
+            self.assertEqual(sb.main([]), 0)
+        self.assertEqual(sb.verdict(95, [], 47)[0], 1)
+
+    def test_inventory_missing_tree_remains_no_data(self):
+        self.assertEqual(sb.inventory_verdict(95, ['missing'])[0], 2)
+
+
 if __name__ == '__main__':
     unittest.main()

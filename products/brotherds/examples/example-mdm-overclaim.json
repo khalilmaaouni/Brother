@@ -1,0 +1,102 @@
+{
+  "id": "EXAMPLE-MDM-OVERCLAIM-001",
+  "claim_type": "MASTER_DATA",
+  "statement": "We merged 18400 duplicate customer records with 99.5 percent precision and 99 percent recall at the 0.8 threshold, ready for production.",
+  "value": 18400,
+  "unit": "records merged",
+  "origin": "SYSTEM",
+  "question": "Did the customer-master deduplication merge the right records at the 0.8 merge threshold?",
+  "decision": "Ship the 0.8 merge threshold to production as-is.",
+  "grain": "One row per candidate customer record pair scored by the Fellegi-Sunter matcher.",
+  "not_established": [
+    "Some pairs may still need review."
+  ],
+  "uncertainty": {
+    "kind": "interval",
+    "interval": "0.962 +/- 0.022",
+    "method": "Stratified estimator (Cochran 1977) over the clerivcal review strata at or above the 0.8 merge threshold."
+  },
+  "match": {
+    "precision": 0.995,
+    "recall": 0.99,
+    "threshold": 0.8,
+    "false_positive_cost": "catastrophic",
+    "false_negative_cost": "low",
+    "kind": "merge",
+    "survivorship": "per-attribute rules in master_data",
+    "reversible": false,
+    "labelled_sample": {
+      "n": 400,
+      "frame": "stratified_sample",
+      "labelled_by": "data stewards",
+      "labelled_on": "2026-09-10"
+    }
+  },
+  "master_data": {
+    "merge_threshold": 0.8,
+    "review_threshold": 0.6,
+    "survivorship": {
+      "email": "recency",
+      "phone": "recency",
+      "name": "manual",
+      "address": "completeness"
+    },
+    "false_merge_cost_class": "catastrophic",
+    "review_queue": true,
+    "review_sample_n": 400,
+    "ground_truth_n": 400,
+    "known_residual_error_rate": 0.01,
+    "match_method": "blocked on postcode and name initial, Fellegi-Sunter scored",
+    "match_rate": 0.9,
+    "sampled_accuracy": 0.995,
+    "sampled_accuracy_n": 250,
+    "evaluation": {
+      "review_strata": [
+        {"score_lo": 0.8, "score_hi": 0.9, "population": 2500, "sampled": 100, "positive": 92},
+        {"score_lo": 0.9, "score_hi": 1.0, "population": 6000, "sampled": 150, "positive": 147}
+      ],
+      "claimed_precision": 0.995,
+      "claimed_recall": 0.99,
+      "metric_basis": "pairwise",
+      "headline_metric": "f1",
+      "required_margin": 0.03,
+      "blocking": {
+        "n_records": 120000,
+        "n_candidate_pairs": 3500000,
+        "n_true_pairs": 16000,
+        "n_true_pairs_in_candidates": 15500
+      },
+      "gold_clusters": {
+        "pred": [["a1", "a2"], ["b1", "b2"], ["c1", "c2"], ["d1", "d2"], ["e1", "e2"], ["f1", "f2"]],
+        "true": [["a1", "a2"], ["b1", "b2"], ["c1", "c2"], ["d1", "d2"], ["e1", "e2"], ["f1", "f2"]]
+      },
+      "gold_sample": {"frame": "benchmark", "weighted": false},
+      "labeller": {"kind": "llm", "overlap_n": 20, "agreement_kappa": 0.72},
+      "cluster_sizes": [480, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 6],
+      "giant_clusters_reviewed": false,
+      "fs_parameters": [
+        {"field": "email", "m": 0.95, "u": 0.02},
+        {"field": "phone", "m": 0.92, "u": 0.05},
+        {"field": "surname", "m": 0.88, "u": 0.15},
+        {"field": "postcode", "m": 0.80, "u": 0.12}
+      ],
+      "score_drift": {
+        "reference": [0.20, 0.20, 0.20, 0.20, 0.20],
+        "current": [0.40, 0.30, 0.10, 0.10, 0.10],
+        "acknowledged": false
+      },
+      "quality": {
+        "completeness": {"value": 0.97, "threshold": 0.95},
+        "validity": {"value": 0.99, "threshold": 0.98},
+        "uniqueness": {"value": 0.995, "threshold": 0.99},
+        "accuracy": {"value": 0.96, "threshold": 0.95, "method": "sampled against the billing system of record"}
+      },
+      "golden_record": [
+        {"attribute": "email", "rule": "most recent non-null value", "source_system": "crm", "conflict_rate": 0.04},
+        {"attribute": "phone", "rule": "most recent non-null value", "source_system": "crm", "conflict_rate": 0.06},
+        {"attribute": "name", "rule": "steward adjudicated", "source_system": "mdm_console", "conflict_rate": 0.08},
+        {"attribute": "address", "rule": "most complete value", "source_system": "erp", "conflict_rate": 0.05}
+      ]
+    }
+  }
+}

@@ -302,6 +302,7 @@ PROJECT_BOOST = 1.5
 
 
 def _connect():
+    os.makedirs(os.path.dirname(os.path.abspath(INDEX_PATH)), mode=0o700, exist_ok=True)
     con = sqlite3.connect(INDEX_PATH)
     con.row_factory = sqlite3.Row
     return con

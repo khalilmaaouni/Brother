@@ -1,0 +1,58 @@
+{
+  "id": "SYNTHETIC-PIPELINE-001",
+  "claim_type": "PIPELINE",
+  "statement": "The synthetic pipeline succeeded and loaded 100 records; its total reconciles to the synthetic ledger within 10 currency units.",
+  "value": 100,
+  "unit": "records",
+  "origin": "SYSTEM",
+  "question": "Does the synthetic daily load carry the checks needed for review?",
+  "decision": "Use this fixture to demonstrate pipeline evidence review.",
+  "grain": "one row per synthetic transaction",
+  "uncertainty": {
+    "kind": "NOT_ESTABLISHED",
+    "why": "This fixture demonstrates declared pipeline evidence; no real data or sampling study is attached."
+  },
+  "not_established": [
+    "All contract identifiers, check results, amounts, and receipts are synthetic declarations.",
+    "No warehouse derivation or independent ledger comparison is executed by this fixture."
+  ],
+  "pipeline": {
+    "contract": {
+      "version": "1.0",
+      "owner": "Synthetic data steward",
+      "schema_hash": "synthetic-schema-v1"
+    },
+    "check_suite_id": "synthetic-daily-quality-v1",
+    "run_id": "synthetic-run-001",
+    "upstream_check_id": "synthetic-source-admission-001",
+    "checks": [
+      {"id": "C1", "name": "transaction keys are unique", "severity": "strong", "result": "pass"},
+      {"id": "C2", "name": "record count reconciles", "severity": "strong", "result": "pass"},
+      {"id": "C3", "name": "optional descriptions are populated", "severity": "weak", "result": "fail"}
+    ],
+    "reconciliation": {
+      "system_of_record": "Synthetic ledger",
+      "window_start": "2026-09-10T00:00:00Z",
+      "window_end": "2026-09-11T00:00:00Z",
+      "variance": 4,
+      "variance_tolerance": 10,
+      "resolution_path": "explained"
+    },
+    "freshness": {
+      "expected_by": "2026-09-11T08:00:00Z",
+      "arrived_at": "2026-09-11T07:55:00Z"
+    },
+    "disclosure": {
+      "rights_restriction": "Synthetic fixture only",
+      "source": "Invented transaction records",
+      "cost_basis": "No acquisition cost for synthetic records",
+      "owner": "Synthetic data steward",
+      "retention": "Retained as a synthetic example"
+    },
+    "node_receipts": [
+      {"node_id": "extract", "run_id": "synthetic-extract-001"},
+      {"node_id": "load", "hash": "synthetic-load-output-v1"}
+    ],
+    "contamination_rate": 0.01
+  }
+}

@@ -1,0 +1,17 @@
+Number: NO-DATA (duckdb not installed)
+Causality: FAIL
+Safe wording: The spring campaign coincided with an 8.4 percent increase in weekly sales. (observed difference, not a proven effect)
+Score HELD: HERO-FCAST-HELD
+Score MISSED: HERO-FCAST-MISSED
+Score UNSCOREABLE: HERO-FCAST-UNSCOREABLE
+CLAIM        OUTCOME      STATEMENT
+HERO-FCAST-HELD HELD         Weekly order volume for a synthetic pilot region lands at 500 un
+HERO-FCAST-MISSED MISSED       Weekly order volume for a second synthetic pilot region lands at
+HERO-FCAST-UNSCOREABLE UNSCOREABLE  Weekly order volume for a third synthetic pilot region is expect
+
+RECURRING GATE FAILURES  NO-DATA: recomputation not requested; use --recheck
+open 0, unscoreable 1, resolved 2
+
+VERIFIED CLAIM RATE  50%  (1 held of 2 resolved)
+        sample too small for any performance conclusion (n=2)
+Ledger on empty dir: NO-DATA

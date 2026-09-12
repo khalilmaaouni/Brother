@@ -1,0 +1,18 @@
+{
+  "schema": "brother-mobile-architecture-v1",
+  "chain": ["intent", "reference", "research", "design", "implementation", "native-proof", "assurance", "human-acceptance", "release-observation", "verified-reality", "memory"],
+  "router": "bundle/skills/using-brother",
+  "passport": "contracts/change-passport.v1.json",
+  "receipt": "receipt/receipt.json",
+  "capabilities": [
+    {"id":"execution","product":"BrotherMode","role":"provenance","entry":"existing six verbs","evidence":"engine unit and receipt"},
+    {"id":"assurance","product":"BrotherSBE","role":"hard gates","entry":"existing assurance route","evidence":"SBE gate outputs"},
+    {"id":"native","product":"mobile-workflow","role":"reference-bound SwiftUI execution","entry":"existing mobile guidance","tool":"scripts/mobile_workflow.py","guard":"scripts/test_mobile_workflow.py"},
+    {"id":"design","product":"mobile-design","role":"curated research and creative metadata","entry":"existing mobile guidance","tool":"scripts/mobile_design.py","guard":"scripts/test_mobile_design.py","fallback":"docs/architecture/MOBILE-FREE-RESEARCH-CATALOG.md"},
+    {"id":"free-research","product":"mobile-design","role":"account-free market and screen evidence","entry":"public-local source adapter","tool":"docs/architecture/MOBILE-FREE-RESEARCH-CATALOG.md","guard":"passport source_mode and NO-DATA fields"},
+    {"id":"claims","product":"BrotherDS","role":"verified product and market claims","entry":"existing claims route","evidence":"claim and outcome records"},
+    {"id":"memory","product":"vault","role":"append-only lessons and findings","entry":"existing handover ceremony","evidence":"vault note and context pack"}
+  ],
+  "adapter_policy": {"hosted_services":"optional and separately verified", "third_party_code":"retain license notices or implement original behavior", "missing_access":"NO-DATA", "release_authority":"human"},
+  "invariants": ["one outcome", "one passport", "one receipt", "one native lease", "exact tests", "fresh evidence", "NO-DATA is not PASS", "no new public command without founder decision"]
+}

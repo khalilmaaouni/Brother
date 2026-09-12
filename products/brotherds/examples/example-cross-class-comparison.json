@@ -1,0 +1,44 @@
+{
+  "id": "EXAMPLE-002",
+  "statement": "Weekly case volume for the wholesale channel was 41,200 cases.",
+  "value": 41200,
+  "unit": "cases",
+  "origin": "SYSTEM",
+  "question": "Does the warehouse figure agree with the number the regional sales lead has been reading off her own spreadsheet for years?",
+  "decision": "Whether the warehouse system replaces that spreadsheet as the number the weekly ops review trusts.",
+  "grain": "one number per calendar week, whole wholesale channel",
+
+  "_note": "This is the dual run: a SYSTEM derivation (recomputed from the warehouse) held side by side with a THIRD_PARTY comparison against the incumbent artifact somebody already trusts, rather than a second SQL path against the same source. It ships with no database attached, so the derivation cannot run and G5.rederivation reports the source as missing, same as example-descriptive.json. G5.comparison still reaches a verdict: with nothing recomputed on the system side it is honestly NO-DATA, not a refusal of the non-SQL path. Point evidence.source at a real warehouse and G5.comparison compares the recomputed number against the incumbent's own value.",
+
+  "evidence": {
+    "source": "~/your-warehouse.duckdb",
+    "derivations": [
+      {
+        "name": "warehouse rollup",
+        "sql": "select sum(cases) from fact_shipment where channel = 'wholesale' and week = '2026-W33'"
+      }
+    ],
+    "comparison": {
+      "class": "THIRD_PARTY",
+      "incumbent": "the regional sales lead's own weekly tracking spreadsheet",
+      "incumbent_value": 41000,
+      "tolerance": 500,
+      "protocol": {
+        "provider": "regional sales lead, wholesale channel",
+        "collection_method": "manual weekly entry from delivery notes, not reconciled to the warehouse feed",
+        "coverage": "wholesale channel only; does not include direct-to-consumer",
+        "known_biases": "delivery notes lag the warehouse by up to two days near week boundaries, so the edge weeks run low"
+      }
+    }
+  },
+
+  "uncertainty": {
+    "kind": "NOT_ESTABLISHED",
+    "why": "This is a census of recorded shipments, not a sample, so there is no sampling error to state. The open question is agreement with the incumbent spreadsheet, which G5.comparison answers directly."
+  },
+
+  "not_established": [
+    "Whether the two-day lag named in known_biases fully explains any drift between the warehouse figure and the spreadsheet was not separately tested.",
+    "Completeness of the warehouse feed itself against the wholesale channel's own shipment records was not reconciled."
+  ]
+}

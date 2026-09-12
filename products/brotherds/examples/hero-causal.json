@@ -1,0 +1,28 @@
+{
+  "id": "HERO-CAUSAL",
+  "statement": "The spring campaign drove an 8.4 percent increase in weekly sales.",
+  "value": 8.4,
+  "unit": "percent",
+  "origin": "SYSTEM",
+  "question": "Did the spring campaign work, and should the same spend be renewed next quarter?",
+  "decision": "Whether next quarter's campaign budget is renewed at the same level.",
+  "grain": "one row per week, whole synthetic retail network",
+
+  "_note": "Reuses the wording of examples/example-causal-overclaim.json, but as a SYSTEM claim carrying derivations, to show G4.causal refuses the statement on its wording alone, independent of origin and independent of how well the number reproduces. hero_demo.py points evidence.source at its own throwaway DuckDB.",
+
+  "evidence": {
+    "source": "~/hero-demo-placeholder.duckdb",
+    "derivations": [
+      {"name": "weekly delta, synthetic", "sql": "select pct from campaign_delta"}
+    ]
+  },
+
+  "uncertainty": {
+    "kind": "NOT_ESTABLISHED",
+    "why": "no control period or holdout exists to separate the campaign's effect from ordinary week to week variation"
+  },
+
+  "not_established": [
+    "No control period or holdout group exists, so the 8.4 percent cannot be separated from other causes."
+  ]
+}

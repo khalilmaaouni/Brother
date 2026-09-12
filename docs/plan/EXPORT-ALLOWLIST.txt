@@ -117,6 +117,14 @@ docs/deliveries
 # linked from README.md and were dropped by the 2026-09-01 narrowing above,
 # which left three of its six relative links dead in the tag.
 docs/plan/RESTORE-DRILL-ENTERPRISE-RESULT.json
+scripts/restore_drill_enterprise.py
+products/brothermode/tools/bm_vault_assertions.py
+products/brothermode/tools/bm_vault_compose.py
+products/brothermode/tools/bm_vault_export.py
+products/brothermode/tools/bm_vault_identity.py
+products/brothermode/tools/bm_vault_ids.py
+products/brothermode/tools/bm_vault_provenance.py
+products/brothermode/tools/bm_vault_retention.py
 docs/plan/BATTERY-EXPECTATIONS.json
 # The acceptance areas scripts/product_acceptance.py loads at import; the
 # README proof suite test_brother_run_continue.py imports it, and the 1.0.3
@@ -540,3 +548,41 @@ docs/onboarding/README.md
 # The official Cursor adapter needs its discovery file and signed-in runbook.
 .cursor-plugin/marketplace.json
 docs/cursor/SMOKE-RUNBOOK.md
+
+# Public mobile workflow guides and the implemented claim verification product.
+docs/how-to/native-mobile-workflow.md
+docs/how-to/native-evidence.md
+products/brotherds/README.md
+products/brotherds/LICENSE
+products/brotherds/SPEC.md
+products/brotherds/mdm_validate.py
+products/brotherds/audit_provenance.py
+products/brotherds/mdm_derive.py
+products/brotherds/mdm_normalize.py
+products/brotherds/lessons.py
+products/brotherds/pack_experiment.py
+products/brotherds/pack_pipeline.py
+products/brotherds/pack_mdm_locale.py
+products/brotherds/pack_mdm_decision.py
+products/brotherds/pack_mdm_coverage.py
+products/brotherds/mdm_audit.py
+products/brotherds/pack_detection.py
+products/brotherds/pack_mdm_calibration.py
+products/brotherds/pack_mdm.py
+products/brotherds/pack_mdm_science.py
+products/brotherds/forecast_score.py
+products/brotherds/bds.py
+products/brotherds/vault_bridge.py
+products/brotherds/mdm_eval.py
+products/brotherds/packs.py
+products/brotherds/pack_mdm_audit.py
+products/brotherds/pack_mdm_identity.py
+products/brotherds/tests
+products/brotherds/examples
+products/brotherds/skills
+products/brotherds/docs/PERSONA-JOURNEYS.md
+products/brotherds/docs/MDM-SCIENCE.md
+products/brotherds/docs/MDM-AUDIT.md
+products/brotherds/docs/VALIDATION.md
+products/brotherds/docs/PLAYBOOK-LOCATION-ANCHORED-MASTER.md
+products/brotherds/.claude-plugin

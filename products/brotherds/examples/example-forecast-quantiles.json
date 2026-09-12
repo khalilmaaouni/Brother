@@ -1,0 +1,20 @@
+{
+  "id": "EXAMPLE-FORECAST-QUANTILES-001",
+  "claim_type": "FORECAST",
+  "statement": "Weekly order volume for a synthetic pilot region in week 12 is forecast at 500 units.",
+  "value": 500,
+  "unit": "units",
+  "origin": "SYSTEM",
+  "question": "What volume should the pilot region staff for in week 12?",
+  "decision": "Sets the staffing plan for week 12 of the pilot region.",
+  "grain": "one row per week, one synthetic pilot region",
+  "uncertainty": {
+    "kind": "quantiles",
+    "quantiles": {"0.1": 450, "0.5": 500, "0.9": 560},
+    "method": "synthetic demo quantile forecast, not a real model"
+  },
+  "not_established": [
+    "This is a synthetic demo fixture; no real forecast pipeline stands behind it.",
+    "The quantile band was not calibrated against held-out history."
+  ]
+}

@@ -80,6 +80,9 @@ echo
 
 run_check "version-truth"       python3 scripts/test_version_truth.py
 run_check "bundle-runtime"      python3 scripts/test_bundle_runtime.py -v
+run_check "native-evidence"     python3 scripts/test_native_evidence.py -v
+run_check "mobile-workflow" python3 scripts/test_mobile_workflow.py -v
+run_check "mobile-design" python3 scripts/test_mobile_design.py -v
 run_check "surface"             /usr/bin/python3 -m unittest tests/test_surface.py
 run_check "brother-run"         python3 scripts/test_brother_run.py -v
 run_check "integrate"           python3 scripts/test_integrate.py -v

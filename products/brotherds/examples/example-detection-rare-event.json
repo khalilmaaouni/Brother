@@ -1,0 +1,74 @@
+{
+  "id": "DETECTION-001",
+  "claim_type": "DETECTION",
+  "statement": "The alert detector is 99 percent accurate at catching infrastructure outages at least 10 minutes before impact.",
+  "value": 0.99,
+  "unit": "fraction correct",
+  "origin": "SYSTEM",
+  "question": "Does our alerting system catch real outages early enough to prevent user impact?",
+  "decision": "If the detector operates at 95 percent precision and can reliably detect 80 percent of outages within the lead time, we can rely on it for automated response.",
+  "grain": "One precision and recall pair aggregated over 1000 test cases from the past six months; the claim names a single detector's performance on a held-out set.",
+
+  "_note": "This example demonstrates gates D1-D7 for detection claims. It illustrates: confusion matrix counts (D1), base rate and PPV (D2), lead_time evidence (D3), judge metadata (D4), wording correction (D5), trajectory reward (D6), and first-broken-step indexing (D7).",
+
+  "evidence": {
+    "source": "~/alerting-metrics.duckdb",
+    "derivations": [
+      {
+        "name": "true positives: real outages caught within 10 minutes",
+        "sql": "select count(*) from alert_tests where predicted_outage=1 and actual_outage=1 and lead_time_minutes >= 10"
+      },
+      {
+        "name": "false positives: alerts triggered with no real outage",
+        "sql": "select count(*) from alert_tests where predicted_outage=1 and actual_outage=0"
+      },
+      {
+        "name": "false negatives: missed outages",
+        "sql": "select count(*) from alert_tests where predicted_outage=0 and actual_outage=1"
+      },
+      {
+        "name": "sample size",
+        "sql": "select count(*) from alert_tests",
+        "computes_value": false
+      }
+    ]
+  },
+
+  "detection": {
+    "tp": 800,
+    "fp": 50,
+    "fn": 200,
+    "tn": 4950,
+    "precision": 0.941,
+    "recall": 0.80,
+    "base_rate": 0.002,
+    "specificity": 0.990,
+    "lead_time": {
+      "value": 12,
+      "unit": "minutes"
+    },
+    "precision_at_k": {
+      "k": 5,
+      "value": 0.85
+    },
+    "judge": {
+      "kind": "llm",
+      "gate_id": "G25.alert_detector_calibration",
+      "kappa": 0.72,
+      "calibrated_on": "2026-09-10"
+    }
+  },
+
+  "uncertainty": {
+    "kind": "interval",
+    "interval": "0.94 +/- 0.03",
+    "method": "Wilson score interval at 95 percent confidence, using observed precision from 1000 alert test cases"
+  },
+
+  "not_established": [
+    "Live deployment drift: this precision and recall are measured on a held-out test set from six months of historical logs, not on the live alert stream in production, so they do not account for data drift or concept drift since the training data was collected.",
+    "Seasonality and time-of-day effects: the test set was not stratified by time of day or day of week, so peak-hour alert performance may differ from the aggregate figure.",
+    "Negative class definition: what counts as 'no outage' was defined by the absence of any customer-facing incident report within 60 minutes of the alert; some real issues may be too minor to report.",
+    "Alert suppression: the true-positive count includes only alerts that were not suppressed by noisy-neighbor rules; if a real outage is masked by alerts on other services, it is counted as a false negative."
+  ]
+}
