@@ -66,6 +66,7 @@ import sys
 
 CLAUDE = "claude"
 CODEX = "codex"
+CURSOR = "cursor"
 
 #: The explicit override, read first everywhere. Set it and nothing below is
 #: consulted; it is how a test drives this module backwards, and how a founder
@@ -87,13 +88,17 @@ CLAUDE_MARKER_VARS = ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT")
 CODEX_MARKER_VARS = ("CODEX_SESSION_ID", "CODEX_THREAD_ID", "CODEX_SANDBOX")
 
 #: The per-client config directory, used only when no variable named one.
-CLIENT_CONFIG_DIRNAME = {CLAUDE: ".claude", CODEX: ".codex"}
+CLIENT_CONFIG_DIRNAME = {CLAUDE: ".claude", CODEX: ".codex",
+                         CURSOR: ".cursor"}
 
 #: A plugin package's manifest, by client. Used as the last identification
 #: rung: a hook running out of a directory carrying .codex-plugin/plugin.json
 #: is running out of a Codex package whatever the environment forgot to say.
+#: Cursor's .cursor-plugin/plugin.json is the same idea. More than one
+#: manifest in one directory is still ambiguous and reads as "".
 CLIENT_MANIFEST = {CLAUDE: os.path.join(".claude-plugin", "plugin.json"),
-                   CODEX: os.path.join(".codex-plugin", "plugin.json")}
+                   CODEX: os.path.join(".codex-plugin", "plugin.json"),
+                   CURSOR: os.path.join(".cursor-plugin", "plugin.json")}
 
 #: Directory names this module may live in inside a package, whose PARENT is
 #: the package root: <root>/tools/ in a product, <root>/runtime/ in the
@@ -160,13 +165,18 @@ def _manifest_client(root):
 
 
 def client(env=None):
-    """Which coding client is running this process: "claude", "codex", or ""
-    for NO-DATA.
+    """Which coding client is running this process: "claude", "codex",
+    "cursor", or "" for NO-DATA.
 
     BROTHER_CLIENT (validated, an unrecognised value is ignored rather than
     trusted), then the host's own marker variables, then the plugin manifest
     beside the resolved plugin root. "" means unknown, and unknown is never a
     pass in any checker that reads it.
+
+    Cursor marker variables are NO-DATA in this tree: no live Cursor Agent
+    hook process has been string-tabled the way Codex was. Identification
+    is BROTHER_CLIENT=cursor, or a directory that carries only
+    .cursor-plugin/plugin.json. Do not invent a CURSOR_* marker.
 
     THE NEAREST HOST WINS, and that ordering is measured rather than
     preferred (2026-09-05, codex-cli 0.153.0-alpha.5, evidence
@@ -185,7 +195,7 @@ def client(env=None):
     CODEX_HOME is deliberately not one of them, for the reason in the module
     docstring: it is a variable people leave in a shell profile."""
     named = _get(env, CLIENT_ENV).lower()
-    if named in (CLAUDE, CODEX):
+    if named in (CLAUDE, CODEX, CURSOR):
         return named
     for var in CODEX_MARKER_VARS:
         if _get(env, var):
@@ -205,14 +215,14 @@ def config_dir(env=None):
     """The directory Brother's own stores live under.
 
     BROTHER_CONFIG_DIR, then CLAUDE_CONFIG_DIR, then (only when the client is
-    not Claude) CODEX_HOME, then ~/.claude for Claude and an unknown client,
+    Codex or unknown, never Claude or Cursor) CODEX_HOME, then ~/.claude for Claude and an unknown client,
     ~/.codex for Codex. See the module docstring for why CODEX_HOME is gated
     on the client rather than read unconditionally."""
     named = _get(env, CONFIG_DIR_ENV) or _get(env, "CLAUDE_CONFIG_DIR")
     if named:
         return os.path.abspath(os.path.expanduser(named))
     which = client(env)
-    if which != CLAUDE:
+    if which in (CODEX, ""):
         codex_home = _get(env, "CODEX_HOME")
         if codex_home:
             return os.path.abspath(os.path.expanduser(codex_home))

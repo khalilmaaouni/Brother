@@ -45,7 +45,9 @@ Workers/lanes hand work back; review/merge are separate authority steps.
 
 Distinguish a policy allow/deny from inability to inspect. Some hooks may fail open on their own parser/internal failure to avoid bricking unrelated work. That is not evidence that the requested action was safe.
 
-A concrete residual limit documented in `managed_safety.py`: a PreToolUse payload with a non-string `tool_name` can bypass the fence's mode check. This guide does not claim that gap is closed. Check the current implementation and tests before relying on hook enforcement for sensitive work.
+The fence routes a malformed or missing `tool_name` through its failure policy. With `BM_FENCE_MODE=enforced`, that condition is refused; advisory mode permits it with a diagnostic. This closes the earlier non-string bypass. See [the fence hook](../../products/brothermode/tools/bm_fence_hook.py) and [its checks](../../products/brothermode/tools/test_bm_fence_hook.py) for the tested payloads. A valid read-only tool event still passes through. This application boundary does not establish complete shell, network, or credential isolation.
+
+Cursor fence enforcement remains ADVISORY until a signed-in Cursor Agent canary demonstrates the deny response in the live host.
 
 Keep host permissions and credentials restrictive. Use an appropriate sandbox where risk requires one. Never test an escape scenario against production data. Missing capabilities should narrow delegation, not encourage broader permissions.
 

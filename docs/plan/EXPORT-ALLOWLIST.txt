@@ -43,6 +43,13 @@
 # public repository, ubuntu-latest only, 20 minute timeout, no matrix, no
 # other trigger; every other workflow file keeps the full refusal.
 .github/workflows/required-fast.yml
+# Added 2026-09-12 under the founder's ruling on the enterprise lane screen
+# (docs/decisions/enterprise-lane-1014-2026-09-12.json, option A): the
+# security policy and the code owners of the guard, gate, signing and export
+# paths belong on the public repository, which is where reporters and
+# reviewers read them. Both are leaf files with no private content.
+.github/CODEOWNERS
+SECURITY.md
 .gitignore
 # Named as leaf paths, not the bare .sbe directory (security finding,
 # 2026-09-04): a bare directory entry sweeps in whatever the hub happens to
@@ -525,3 +532,7 @@ docs/decisions/README.md
 # go-live night: the public CI refused the release PR without it).
 docs/decisions/light-path-for-small-changes-2026-09-04.json
 docs/onboarding/README.md
+
+# The official Cursor adapter needs its discovery file and signed-in runbook.
+.cursor-plugin/marketplace.json
+docs/cursor/SMOKE-RUNBOOK.md

@@ -881,6 +881,39 @@ class EnforcedModeRefusesStoreDestruction(BashAuditBase):
                          "must stay opt-in")
         self.assertNotIn("REFUSING", r2.stderr)
 
+    def test_literal_heredoc_operator_cannot_hide_store_destruction(self):
+        for prefix in ("printf '<<x'", 'printf "<<x"', r"printf \<\<x",
+                       "printf ok # <<x", r"printf $'a\'<<x'",
+                       r'printf "a\"<<x"'):
+            with self.subTest(prefix=prefix):
+                code, _labels, _names = ba.refusal_for(
+                    prefix + "\nrm -f .brothermode/store.sqlite3", bs, fh)
+                self.assertEqual(code, "store-destruction")
+
+    def test_multiline_quoted_operator_cannot_hide_store_destruction(self):
+        for prefix in ("printf 'ignored\n<<x\n'", 'printf "ignored\n<<x\n"',
+                       "printf $'ignored\n<<x\n'"):
+            with self.subTest(prefix=prefix):
+                code, _labels, _names = ba.refusal_for(
+                    prefix + "\nrm -f .brothermode/store.sqlite3", bs, fh)
+                self.assertEqual(code, "store-destruction")
+
+    def test_multiline_literal_preserves_real_heredoc_and_next_command(self):
+        command = ("printf 'ignored\n<<x\n'; cat <<'DATA'\n"
+                   "rm -f .brothermode/store.sqlite3\nDATA\nprintf finished")
+        scanned = ba._strip_heredoc_bodies(command, fh)
+        self.assertNotIn("rm -f", scanned)
+        self.assertIn("printf finished", scanned)
+
+    def test_literal_operator_keeps_real_heredoc_body_as_data(self):
+        command = ("printf '<<x'; cat <<'DATA'\n"
+                   "rm -f .brothermode/store.sqlite3\nDATA\nprintf finished")
+        code, _labels, _names = ba.refusal_for(command, bs, fh)
+        self.assertIsNone(code)
+        scanned = ba._strip_heredoc_bodies(command, fh)
+        self.assertIn("printf finished", scanned)
+        self.assertNotIn("rm -f", scanned)
+
     def test_rm_of_the_store_is_refused_when_enforced(self):
         """The closure register's own reproduction command, verbatim."""
         self._both_ways("rm -f .brothermode/store.sqlite3", "rm")

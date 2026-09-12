@@ -310,5 +310,151 @@ class TheVaultCounter(unittest.TestCase):
         self.assertIn(code, (0, 1))
 
 
+
+class TokensPerAcceptedDelivery(unittest.TestCase):
+    """FL-2.1/FL-2.2: tokens per accepted delivery, joined to the unit trace
+    by claim id. Every trace path here is an explicit temp path, never the
+    real ~/.claude/unit-trace.jsonl."""
+
+    def _write_trace(self, tmpdir, records):
+        path = os.path.join(tmpdir, "trace.jsonl")
+        with open(path, "w", encoding="utf-8") as fh:
+            for rec in records:
+                fh.write(json.dumps(rec) + "\n")
+        return path
+
+    def test_two_done_rows_with_unit_ids_join_to_the_exact_ratio(self):
+        with tempfile.TemporaryDirectory() as d:
+            trace_path = self._write_trace(d, [
+                dict(claim_id="c1", tier="sonnet", effort="high",
+                     tokens_in=100, tokens_out=50, cache_read=0,
+                     wall_ms=1000, verdict="PASS"),
+                dict(claim_id="c2", tier="sonnet", effort="high",
+                     tokens_in=200, tokens_out=25, cache_read=0,
+                     wall_ms=1000, verdict="PASS"),
+                dict(claim_id="c3-unmatched-by-any-row", tier="sonnet",
+                     effort="high", tokens_in=999, tokens_out=999,
+                     cache_read=0, wall_ms=1000, verdict="PASS"),
+            ])
+            trace_lines, err = B.load_unit_trace(trace_path)
+            self.assertIsNone(err)
+            items = [item("DONE", "x", unit_ids=["c1"]),
+                     item("DONE", "x", unit_ids=["c2"])]
+            result = B.tokens_per_accepted_delivery_for_section(
+                items, trace_lines, err)
+            self.assertIsNotNone(result["value"])
+            self.assertEqual(result["value"]["total"], 375)
+            self.assertEqual(result["value"]["denominator"], 2)
+            self.assertEqual(result["value"]["ratio"], 187.5)
+
+    def test_the_printed_line_shows_the_exact_quotient(self):
+        with tempfile.TemporaryDirectory() as d:
+            trace_path = self._write_trace(d, [
+                dict(claim_id="c1", tier="sonnet", effort="high",
+                     tokens_in=100, tokens_out=50, cache_read=0,
+                     wall_ms=1000, verdict="PASS"),
+                dict(claim_id="c2", tier="sonnet", effort="high",
+                     tokens_in=200, tokens_out=25, cache_read=0,
+                     wall_ms=1000, verdict="PASS"),
+            ])
+            doc = dict(rows=[item("DONE", "x", unit_ids=["c1"]),
+                             item("DONE", "x", unit_ids=["c2"])])
+            secs = B.sections(doc)
+            B.attach_tokens_per_accepted_delivery(secs, doc, trace_path=trace_path)
+            row_sec = [s for s in secs if s["key"] == "rows"][0]
+            self.assertEqual(row_sec["tokens_per_accepted_delivery"], 187.5)
+            self.assertEqual(B.tokens_per_accepted_delivery_line(row_sec),
+                              "tokens per accepted delivery: 375 / 2 = 187.5")
+
+    def test_a_done_row_with_no_unit_ids_is_NO_DATA_never_zero(self):
+        doc = dict(rows=[item("DONE", "the command and its output")])
+        secs = B.sections(doc)
+        with tempfile.TemporaryDirectory() as d:
+            trace_path = os.path.join(d, "unused-trace.jsonl")
+            B.attach_tokens_per_accepted_delivery(secs, doc, trace_path=trace_path)
+        row_sec = [s for s in secs if s["key"] == "rows"][0]
+        self.assertEqual(row_sec["tokens_per_accepted_delivery"], B.NODATA)
+        self.assertNotEqual(row_sec["tokens_per_accepted_delivery"], 0)
+        line = B.tokens_per_accepted_delivery_line(row_sec)
+        self.assertIn(B.NODATA, line)
+        self.assertIn("carry no unit id", line)
+
+    def test_unit_ids_present_but_trace_file_absent_is_NO_DATA_naming_it(self):
+        doc = dict(rows=[item("DONE", "x", unit_ids=["c1"])])
+        secs = B.sections(doc)
+        missing = "/no/such/unit-trace-fl2.jsonl"
+        B.attach_tokens_per_accepted_delivery(secs, doc, trace_path=missing)
+        row_sec = [s for s in secs if s["key"] == "rows"][0]
+        self.assertEqual(row_sec["tokens_per_accepted_delivery"], B.NODATA)
+        line = B.tokens_per_accepted_delivery_line(row_sec)
+        self.assertIn(missing, line)
+
+    def test_the_real_board_is_NO_DATA_everywhere_today(self):
+        """No row on the live board carries unit_ids yet (FL-1 predates this
+        board), so every section must say NO-DATA, never 0."""
+        with open(B.SOURCE, encoding="utf-8") as fh:
+            doc = json.load(fh)
+        secs = B.sections(doc)
+        with tempfile.TemporaryDirectory() as d:
+            trace_path = os.path.join(d, "unused-trace.jsonl")
+            B.attach_tokens_per_accepted_delivery(secs, doc, trace_path=trace_path)
+        for s in secs:
+            self.assertEqual(s["tokens_per_accepted_delivery"], B.NODATA, s["label"])
+
+    def test_load_unit_trace_missing_file_is_NO_DATA(self):
+        lines, err = B.load_unit_trace("/no/such/unit-trace-fl2.jsonl")
+        self.assertIsNone(lines)
+        self.assertIsNotNone(err)
+
+    def test_load_unit_trace_malformed_line_fails_closed(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "trace.jsonl")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps(dict(claim_id="c1", tokens_in=1,
+                                          tokens_out=1)) + "\n")
+                fh.write("not json\n")
+            lines, err = B.load_unit_trace(path)
+            self.assertIsNone(lines)
+            self.assertIsNotNone(err)
+
+    def test_load_unit_trace_reads_every_non_empty_line(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "trace.jsonl")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps(dict(claim_id="c1", tokens_in=1,
+                                          tokens_out=2)) + "\n")
+                fh.write("\n")
+                fh.write(json.dumps(dict(claim_id="c2", tokens_in=3,
+                                          tokens_out=4)) + "\n")
+            lines, err = B.load_unit_trace(path)
+            self.assertIsNone(err)
+            self.assertEqual(len(lines), 2)
+
+    def test_a_NO_DATA_token_field_contributes_nothing_never_zero_cost(self):
+        with tempfile.TemporaryDirectory() as d:
+            trace_path = self._write_trace(d, [
+                dict(claim_id="c1", tokens_in="NO-DATA", tokens_out=50),
+            ])
+            trace_lines, err = B.load_unit_trace(trace_path)
+            items = [item("DONE", "x", unit_ids=["c1"])]
+            result = B.tokens_per_accepted_delivery_for_section(
+                items, trace_lines, err)
+            self.assertEqual(result["value"]["total"], 50)
+
+    def test_resolve_trace_path_argument_beats_env_beats_default(self):
+        self.assertEqual(B.resolve_trace_path("explicit-path"), "explicit-path")
+        old = os.environ.get("BROTHER_UNIT_TRACE")
+        try:
+            os.environ["BROTHER_UNIT_TRACE"] = "/env/unit-trace.jsonl"
+            self.assertEqual(B.resolve_trace_path(None), "/env/unit-trace.jsonl")
+            del os.environ["BROTHER_UNIT_TRACE"]
+            self.assertEqual(B.resolve_trace_path(None), B.DEFAULT_TRACE_PATH)
+        finally:
+            if old is None:
+                os.environ.pop("BROTHER_UNIT_TRACE", None)
+            else:
+                os.environ["BROTHER_UNIT_TRACE"] = old
+
+
 if __name__ == "__main__":
     unittest.main()

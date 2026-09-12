@@ -1223,6 +1223,34 @@ class CodexApplyPatchRefuteRound2(FenceHookBase):
 
     # -- the floor from section 3: real apply_patch heredocs still DENY ---
 
+    def test_literal_heredoc_operator_cannot_hide_a_later_fenced_patch(self):
+        self.claim("api", ["src/app.py"], self.label(self.VICTIM))
+        patch = apply_patch_command("*** Update File: src/app.py", "@@", "-a", "+b")
+        for prefix in ("printf '<<x'", 'printf "<<x"', r"printf \<\<x",
+                       "printf ok # <<x", r"printf $'a\'<<x'",
+                       r'printf "a\"<<x"'):
+            with self.subTest(prefix=prefix):
+                decision, _notes = self.decide(
+                    self.bash(self.OTHER, prefix + "\n" + patch))
+                self.assertIn("src/app.py", self.assertDenied(decision))
+
+    def test_multiline_quoted_operator_cannot_hide_a_later_fenced_patch(self):
+        self.claim("api", ["src/app.py"], self.label(self.VICTIM))
+        patch = apply_patch_command("*** Update File: src/app.py", "@@", "-a", "+b")
+        for prefix in ("printf 'ignored\n<<x\n'", 'printf "ignored\n<<x\n"',
+                       "printf $'ignored\n<<x\n'"):
+            with self.subTest(prefix=prefix):
+                decision, _notes = self.decide(
+                    self.bash(self.OTHER, prefix + "\n" + patch))
+                self.assertIn("src/app.py", self.assertDenied(decision))
+
+    def test_literal_operator_before_a_real_heredoc_on_the_same_line(self):
+        self.claim("api", ["src/app.py"], self.label(self.VICTIM))
+        patch = apply_patch_command("*** Update File: src/app.py", "@@", "-a", "+b")
+        decision, _notes = self.decide(
+            self.bash(self.OTHER, "printf '<<x'; " + patch))
+        self.assertIn("src/app.py", self.assertDenied(decision))
+
     def test_apply_patch_heredoc_still_denies_the_fenced_write(self):
         self.claim("api", ["src/app.py"], self.label(self.VICTIM))
         cmd = apply_patch_command("*** Update File: src/app.py", "@@", "-a", "+b")

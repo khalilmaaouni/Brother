@@ -146,6 +146,13 @@ class InsideASessionTheUnitsAreClaimedAndNoWorkerIsSpawned(SessionWorkerBase):
         self.assertFalse(os.path.exists(os.path.join(self.repo, "one.txt")), out)
 
 
+class CodexSessionUsesTheSameWorkerHandoff(InsideASessionTheUnitsAreClaimedAndNoWorkerIsSpawned):
+    def setUp(self):
+        super(CodexSessionUsesTheSameWorkerHandoff, self).setUp()
+        self.env.pop("CLAUDECODE", None)
+        self.env["CODEX_THREAD_ID"] = "session-handoff-regression"
+
+
 class ContinuingAfterTheSessionDidTheWorkIntegratesIt(SessionWorkerBase):
 
     def test_continue_commits_each_lane_runs_its_check_and_writes_the_receipt(self):

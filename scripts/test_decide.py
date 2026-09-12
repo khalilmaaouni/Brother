@@ -273,10 +273,46 @@ class TheRealDecisionStillResolves(unittest.TestCase):
                   "not checked: %s" % (D.NODATA, len(machine), ", ".join(machine)))
         self.assertEqual(missing, [], "sources cite missing files: %s" % missing)
 
+    def assert_unscored_record(self, name, spec):
+        """A prose decision records costs and evidence without inventing
+        numeric marks. Missing criteria alone must never exempt a broken
+        scored screen from its coverage checks."""
+        for key in ("id", "created", "scope", "title", "status", "description",
+                    "evidence", "flip_condition", "owned_by", "recommendation"):
+            self.assertTrue(spec.get(key), "%s: record lacks %s" % (name, key))
+        self.assertIsInstance(spec["evidence"], dict, name)
+        self.assertNotIn("criteria", spec, name)
+        self.assertTrue(spec.get("options"), name)
+        for opt in spec["options"]:
+            for key in ("id", "label", "pros", "cons", "cost_of_doing",
+                        "cost_of_not_doing"):
+                self.assertTrue(opt.get(key), "%s: option lacks %s" % (name, key))
+            self.assertNotIn("scores", opt, name)
+            self.assertNotIn("score_basis", opt, name)
+
+    def test_missing_criteria_cannot_exempt_a_scored_screen(self):
+        broken = clone()
+        del broken["criteria"]
+        with self.assertRaises(AssertionError):
+            self.assert_unscored_record("broken-screen", broken)
+
+    def test_unscored_record_cannot_hide_numeric_marks(self):
+        for name, spec in self.specs():
+            if "criteria" in spec:
+                continue
+            self.assert_unscored_record(name, spec)
+            mixed = json.loads(json.dumps(spec))
+            mixed["options"][0]["scores"] = {"unsupported": 10}
+            with self.assertRaises(AssertionError):
+                self.assert_unscored_record(name, mixed)
+
     def test_every_option_is_marked_on_every_criterion(self):
         """Not required by the module, required of a SHIPPED decision: an
         unmarked criterion would mean a real option was quietly under scored."""
         for name, spec in self.specs():
+            if "criteria" not in spec:
+                self.assert_unscored_record(name, spec)
+                continue
             keys = {c["key"] for c in spec["criteria"]}
             for opt in spec["options"]:
                 self.assertEqual(set(opt.get("scores") or {}), keys,
@@ -309,12 +345,15 @@ class TheRealDecisionStillResolves(unittest.TestCase):
 
     def test_every_option_carries_pros_cons_a_diagram_and_a_source(self):
         for name, spec in self.specs():
-          for opt in spec["options"]:
-            self.assertTrue(opt.get("pros"), opt["name"])
-            self.assertTrue(opt.get("cons"), opt["name"])
-            self.assertTrue(opt.get("flow_mermaid"), opt["name"])
-            self.assertTrue(opt.get("sources"), opt["name"])
-            self.assertTrue(opt.get("score_basis"), opt["name"])
+            if "criteria" not in spec:
+                self.assert_unscored_record(name, spec)
+                continue
+            for opt in spec["options"]:
+                self.assertTrue(opt.get("pros"), opt["name"])
+                self.assertTrue(opt.get("cons"), opt["name"])
+                self.assertTrue(opt.get("flow_mermaid"), opt["name"])
+                self.assertTrue(opt.get("sources"), opt["name"])
+                self.assertTrue(opt.get("score_basis"), opt["name"])
 
 
 if __name__ == "__main__":

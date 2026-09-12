@@ -14,10 +14,10 @@ BrotherMode (execution provenance), BrotherSBE (change assurance), BrotherDS
 `products/`, alongside the umbrella bundle in `bundle/`. Full detail:
 `docs/CHARTER.md`.
 
-This repository supports two clients. Claude Code is the one it grew up on
-and the one every release is proven against. Codex reads the same repository
-through this file and the same `SKILL.md` files, and the section below says
-where the two differ.
+This repository ships client adapters. Claude Code is the one it grew up on
+and the one every release is proven against. Codex reads the repository
+through this file and the shipped `SKILL.md` files. The section below names
+the package checks and host boundaries, including Cursor's advisory status.
 
 ## The six verb router
 
@@ -157,28 +157,29 @@ without one.
   `learn`, `handover`, `prove-this-change`, `spec-and-data-prep`.
 - `products/brotherds/skills/brotherds/` is claim verification, experimental.
 
-## Codex: what works, and the one gap
+## Codex: package validation and host boundaries
 
-Codex reads this file and reads the same `SKILL.md` files, so the
-instructions above are the instructions for a Codex session too. Two
-differences are real and neither is cosmetic.
+Codex reads this file and the shipped `SKILL.md` instructions. Claude Code
+exports `${CLAUDE_PLUGIN_ROOT}`; a Codex install exports
+`${BROTHER_PLUGIN_ROOT}`. Both name the installed plugin directory. On a
+clone install neither is required: run commands from the checkout root.
 
-The plugin root arrives under a different name. Claude Code exports
-`${CLAUDE_PLUGIN_ROOT}`; a Codex install exports `${BROTHER_PLUGIN_ROOT}`.
-Both name the same directory, every shipped skill now says so in its own
-text, and on a clone install neither is set, which means running the same
-commands from the checkout root.
+The installed bundle passes the canonical package validator. Verify with
+`python3 scripts/test_codex_package.py -v`: on the source hub on 2026-09-12,
+that command returned `Ran 8 tests`, `OK`, exit 0. The suite checks the
+actual bundle, generated skill freshness, and a fixture that is refused
+before incompatible frontmatter is stripped and accepted afterwards.
 
-The gap, open and named rather than papered over: seven BrotherMode skills
-(`auto`, `deliver`, `handback`, `handover-pack`, `start`, `stop`, `update`)
-carry `disable-model-invocation: true` in their frontmatter, which is how
-Claude Code is told not to fire them on its own. The canonical Codex package
-validator refuses a plugin carrying that value, one error per skill: "skill
-`auto` frontmatter field `disable-model-invocation` must be false". Deleting
-the key would make Codex validation pass and would silently change Claude
-behaviour, so nobody has deleted it. Until a vendor adapter resolves it, a
-Codex package built from those skills does not validate, and that is a
-release blocker, not a NO-DATA.
+Seven BrotherMode product skills retain `disable-model-invocation: true`
+for Claude Code. Keep those protections intact. They are not the bundle's
+Codex skill surface; package validation does not require deleting them.
+`scripts/codex_skills.py` generates the companion mirror from
+`bundle/skills/`. Regenerate it through the normal runtime generator.
+
+Package validation establishes the package shape, not a signed-in run or
+live hook enforcement. Check the active host and its installed controls
+before making an enforcement claim. Cursor remains advisory until its
+signed-in canary demonstrates a deny.
 
 ## Before you claim done
 
@@ -196,8 +197,8 @@ release blocker, not a NO-DATA.
 - `docs/CHARTER.md`: the chain, the unit, the verdict tuple, the evidence law.
 - `docs/VERSIONING.md`: the release contract, the three products' current
   versions, the Stage 0/1/2 gates.
-- `docs/codex/PACKAGE-SHAPE.md`: the Codex plugin package this repository
-  ships beside the Claude one, and the validator that decides it.
+- `docs/how-to/install-codex.md`: the Codex install path and its verification
+  commands. `scripts/test_codex_package.py` checks the package shape.
 - `docs/for-engineers/CHEATSHEET.md`: what to type, and which answer deserves
   trust.
 - The prose rules are short enough to carry here rather than cite: no em or

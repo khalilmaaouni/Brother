@@ -156,7 +156,8 @@ def excerpt(spec):
         return None, ("%s: %s has %d lines, so line %d does not exist. The file "
                       "moved under this page" % (NODATA, path, len(body), a))
     got = body[a - 1:min(b, len(body))]
-    numbered = "\n".join("%5d  %s" % (a + i, t) for i, t in enumerate(got))
+    numbered = "\n".join(("%5d  %s" % (a + i, t)).rstrip()
+                         for i, t in enumerate(got))
     return numbered, ""
 
 

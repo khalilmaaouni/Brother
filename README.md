@@ -230,6 +230,8 @@ Start with a task whose expected result you understand. Inspect its receipt and 
 <details>
 <summary>See a complete first-run example, including an unproven check</summary>
 
+Start with a logged-in Claude Code session. The transcript needs that login and cannot run headless.
+
 ```text reference
 mkdir mathlib-toy && cd mathlib-toy
 git init -q
@@ -281,6 +283,16 @@ Open a repository and invoke Brother. With no unfinished work, the bare door ask
 ```
 
 If unfinished Brother work exists in that repository, the door should discover it and offer/resume the plain-language outcome instead of exposing a run id as the user experience.
+
+### Cursor
+
+Cursor loads a local plugin from `~/.cursor/plugins/local/brother`. From a Brother checkout:
+
+```bash
+python3 scripts/cursor_plugin_install.py
+```
+
+Then reload the window and invoke `/brother`. See [Install on Cursor](docs/how-to/install-cursor.md). Fence enforcement remains ADVISORY until a signed-in Cursor Agent turn demonstrates a deny. Installation and offline checks alone do not establish that boundary.
 
 ### Codex
 

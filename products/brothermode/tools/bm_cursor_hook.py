@@ -26,7 +26,8 @@ FAIL OPEN, LOUDLY
   action and prints the reason to stderr. A broken adapter must never
   brick editing.
 
-Python 3.9, standard library only. No network, no subprocess.
+Python 3.9, standard library only. No network, no subprocess: the --run
+mode runs the named hook inside this process.
 No em or en dashes anywhere in this file, its comments, or its output.
 """
 
@@ -359,6 +360,135 @@ def handle(payload, event):
     return 0, allow_payload()
 
 
+def run_wrapped(payload, event, script, script_args):
+    """--run mode: hand a Claude-shaped copy of the Cursor payload to one
+    Claude Code hook and map its decision back to Cursor's contract.
+
+    The Claude hooks read tool_name "Bash" and tool_input.command; Cursor
+    sends "Shell" or a bare top-level command. Called directly they see
+    nothing to refuse, so every shipped Cursor hook goes through here.
+
+    The hook runs IN THIS PROCESS with stdin, stdout and stderr swapped,
+    the same pattern run_bash_audit uses, so the adapter itself starts no
+    subprocess, as SECURITY.md promises; the hook it runs is Brother's own
+    and keeps its own promises. Captured output is read, never
+    relayed.
+    """
+    import runpy
+    import signal
+    import threading
+
+    gate = event in ("preToolUse", "beforeShellExecution")
+    saved_in = sys.stdin
+    saved_out = sys.stdout
+    saved_err = sys.stderr
+    saved_argv = sys.argv
+    saved_path = list(sys.path)
+    saved_client = os.environ.get("BROTHER_CLIENT")
+    client_was_set = "BROTHER_CLIENT" in os.environ
+
+    out_buf = None
+    err_buf = None
+    captured_stdout = ""
+    captured_stderr = ""
+    exit_code = 0
+    error = None
+    timer_installed = False
+    old_handler = None
+
+    try:
+        if not os.path.isfile(script):
+            raise OSError("not a file")
+        claude = cursor_to_claude_payload(payload, event)
+        timeout = float(os.environ.get("BM_CURSOR_HOOK_TIMEOUT", "25"))
+
+        out_buf = io.StringIO()
+        err_buf = io.StringIO()
+        sys.stdin = io.StringIO(json.dumps(claude))
+        sys.stdout = out_buf
+        sys.stderr = err_buf
+        sys.argv = [script] + list(script_args)
+        sys.path.insert(0, os.path.dirname(os.path.abspath(script)))
+        os.environ["BROTHER_CLIENT"] = "cursor"
+
+        if hasattr(signal, "setitimer") and threading.main_thread() is threading.current_thread():
+            class _Timeout(Exception):
+                pass
+
+            def _on_timeout(signum, frame):
+                raise _Timeout("timeout after %s seconds" % timeout)
+
+            old_handler = signal.getsignal(signal.SIGALRM)
+            signal.signal(signal.SIGALRM, _on_timeout)
+            timer_installed = True
+            signal.setitimer(signal.ITIMER_REAL, timeout)
+        # Without setitimer, run with no timeout here. Cursor's own per-hook
+        # timeout still applies.
+
+        try:
+            runpy.run_path(script, run_name="__main__")
+            exit_code = 0
+        except SystemExit as exc:
+            code = exc.code
+            if code is None:
+                exit_code = 0
+            elif isinstance(code, int):
+                exit_code = code
+            else:
+                exit_code = 1
+    except Exception as exc:
+        error = exc
+    finally:
+        if out_buf is not None:
+            captured_stdout = out_buf.getvalue()
+        if err_buf is not None:
+            captured_stderr = err_buf.getvalue()
+        if timer_installed:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, old_handler)
+        if client_was_set:
+            os.environ["BROTHER_CLIENT"] = saved_client
+        else:
+            os.environ.pop("BROTHER_CLIENT", None)
+        sys.stdin = saved_in
+        sys.stdout = saved_out
+        sys.stderr = saved_err
+        sys.argv = saved_argv
+        sys.path[:] = saved_path
+
+    if error is not None:
+        _warn("bm_cursor_hook: %s: %s; fail-open" % (script, error))
+        return (0, allow_payload()) if gate else (0, {})
+
+    if exit_code == 2 and gate:
+        reason = ""
+        for line in reversed(captured_stderr.splitlines()):
+            if line.strip():
+                reason = line.strip()
+                break
+        if not reason:
+            reason = "denied by " + os.path.basename(script)
+        return 2, {
+            "permission": "deny",
+            "user_message": reason,
+            "agent_message": reason,
+            "continue": True,
+        }
+
+    if captured_stdout.strip():
+        try:
+            obj = json.loads(captured_stdout)
+        except ValueError as exc:
+            _warn("bm_cursor_hook: %s: %s; fail-open" % (script, exc))
+            return (0, allow_payload()) if gate else (0, {})
+        if isinstance(obj, dict) and gate:
+            deny = claude_deny_to_cursor(obj)
+            if deny is not None:
+                return 2, deny
+
+    return (0, allow_payload()) if gate else (0, {})
+
+
 def main(argv=None):
     argv = list(argv if argv is not None else sys.argv[1:])
     payload, err = read_payload()
@@ -373,6 +503,22 @@ def main(argv=None):
         return 0
     # Drop the event token so nested tools see a clean argv if needed.
     rest = argv[1:] if argv and argv[0] == event else argv
+    if "--run" in rest:
+        at = rest.index("--run")
+        gate = event in ("preToolUse", "beforeShellExecution")
+        if at + 1 >= len(rest):
+            _warn("bm_cursor_hook: --run names no script; fail-open")
+            _out(json.dumps(allow_payload() if gate else {}) + "\n")
+            return 0
+        try:
+            code, body = run_wrapped(payload or {}, event, rest[at + 1],
+                                     rest[at + 2:])
+        except Exception as exc:
+            _warn("bm_cursor_hook: unexpected %s: %s; fail-open"
+                  % (type(exc).__name__, exc))
+            code, body = 0, (allow_payload() if gate else {})
+        _out(json.dumps(body) + "\n")
+        return code
     try:
         code, body = handle(payload or {}, event)
     except Exception as exc:

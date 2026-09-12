@@ -10,8 +10,8 @@
 # saved to a file the summary names; (3) NO-DATA (exit 2) is reported and
 # never counted as a pass.
 #
-# Exit 0 when every check passes or reports NO-DATA. Exit 1 if any check
-# FAILS. Target: well under 5 minutes wall clock (measured ~90s on this
+# Exit 0 when no check fails and every missing result is allowed by its
+# evidence obligation. Required missing evidence blocks without changing its verdict. Target: well under 5 minutes wall clock (measured ~90s on this
 # machine, 2026-09-03).
 
 cd "$(dirname "$0")/.." || exit 1
@@ -27,6 +27,10 @@ pass=0; fail=0; nodata=0
 failed_names=""
 nodata_names=""
 summary_printed=0
+# Every check's name and exit code, for the evidence obligation step at the end
+# (scripts/gate_obligations.json): a NO-DATA the map does not explain blocks.
+codes_file="${TMPDIR:-/tmp}/required-fast-codes-$worktree_key.txt"
+: > "$codes_file"
 
 # A gate that dies before its own summary (a killed lane, a full disk, a
 # peer's pkill) used to print nothing at all, which reads exactly like a
@@ -44,6 +48,7 @@ run_check() {
   start="$(date +%s)"
   out="$("$@" 2>&1)"
   code=$?                      # the COMMAND's code, captured before anything else
+  printf '%s\t%s\n' "$name" "$code" >> "$codes_file"
   elapsed="$(($(date +%s) - start))"
   last="$(printf '%s\n' "$out" | tail -1 | cut -c1-72)"
   keep=""
@@ -104,6 +109,25 @@ run_check "readme-honesty"      python3 scripts/test_readme_honesty.py
 # charter names. 0.09s on this machine, so it belongs in the fast slice.
 run_check "charter-paths"       python3 scripts/charter_paths.py
 run_check "export-public"       python3 scripts/test_export_public.py -v
+# The Cursor package: the manifest, the Cursor marketplace, the hooks file
+# routed through the Cursor adapter, the rules, and a local install into a
+# temp dir. No binary is needed, so it earns the fast slice.
+run_check "cursor-plugin-self"  python3 scripts/test_cursor_plugin.py
+# The Cursor payload translation seam driven from both sides: a Cursor
+# shell payload handed straight to a Claude-shaped guard is allowed, which
+# is the defect, and the same payload through bm_cursor_hook.py --run is
+# denied. No binary is needed, so it also earns the fast slice.
+run_check "cursor-hook-run-self" python3 scripts/test_cursor_hook_run.py -v
+# Founder order 2026-09-12: Cursor stays at parity with Codex at every
+# release. Every tracked Codex surface and every codex- battery check needs
+# a Cursor twin, an exemption or a dated debt, and a debt past its release
+# fails. Here, not only in the full battery, so a pull request that adds a
+# Codex surface alone is refused before merge.
+run_check "client-parity"       python3 scripts/test_client_parity.py -v
+# cursor-smoke is deliberately NOT in this gate. It needs the cursor-agent
+# binary, which CI does not have, so on every CI run it would only ever
+# read NO-DATA (exit 2) and prove nothing. The full battery owns it, and
+# docs/cursor/SMOKE-RUNBOOK.md closes the signed-in half by hand.
 # The gate the 2026-09-05 v1.0.6 defect proved was missing: every other
 # check in this file (and codex_smoke.py, in the full battery) ran from a
 # tree where loop_bridge.py's own development fallback was reachable, so a
@@ -145,6 +169,7 @@ run_check "handover-ceremony"   python3 scripts/test_handover_ceremony.py
 run_check "closing-ceremony"    python3 scripts/test_close_ceremony_check.py
 run_check "doc-assurance"       python3 scripts/doc_assurance.py --selftest
 run_check "system-inventory"    python3 scripts/test_system_doc.py
+run_check "evidence-obligation" python3 scripts/test_evidence_obligation.py
 if command -v claude >/dev/null 2>&1; then
   run_check "plugin-manifest"   claude plugin validate .
 else
@@ -156,5 +181,14 @@ echo "pass $pass   fail $fail   no-data $nodata"
 [ -n "$failed_names" ] && echo "FAILED:$failed_names"
 [ -n "$nodata_names" ] && echo "NO-DATA:$nodata_names  (not a pass, and not a failure)"
 summary_printed=1
+# The obligation step never rewrites a verdict: it decides whether this
+# transition (a merge) may proceed. A NO-DATA the map explains is allowed
+# with its reason printed; an unexplained one blocks. An obligation step that
+# read nothing (exit 2) blocks too.
+echo
+python3 scripts/evidence_obligation.py transition --stage merge --repo . < "$codes_file"
+obligation=$?
+rm -f "$codes_file"
 [ "$fail" -eq 0 ] || exit 1
+[ "$obligation" -eq 0 ] || exit 1
 exit 0

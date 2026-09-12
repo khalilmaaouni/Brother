@@ -1,0 +1,43 @@
+# This file defines code owners for review
+
+* @khalilmaaouni
+
+# GitHub configuration
+/.github/ @khalilmaaouni
+
+# Required fast checks
+/scripts/required_fast.sh @khalilmaaouni
+
+# Readiness gate
+/scripts/readiness_gate.py @khalilmaaouni
+
+# Public export
+/scripts/export_public.py @khalilmaaouni
+
+# Export reproduction
+/scripts/reproduce_export.py @khalilmaaouni
+
+# Release scripts
+/scripts/release_*.py @khalilmaaouni
+
+# Private terms scan
+/scripts/private_terms_scan.py @khalilmaaouni
+
+# Runtime hooks
+/bundle/runtime/hooks/ @khalilmaaouni
+
+# BrotherMode allowed signers
+/products/brothermode/scripts/allowed_signers @khalilmaaouni
+
+# BrotherSBE allowed signers
+/products/brothersbe/scripts/allowed_signers @khalilmaaouni
+
+# Security policy
+/SECURITY.md @khalilmaaouni
+
+# The evidence obligation map decides which missing evidence blocks a merge; weakening it is a policy change
+/scripts/gate_obligations.json @khalilmaaouni
+/scripts/evidence_obligation.py @khalilmaaouni
+
+# The signed claim-level receipt and its verifier
+/scripts/receipt_attest.py @khalilmaaouni

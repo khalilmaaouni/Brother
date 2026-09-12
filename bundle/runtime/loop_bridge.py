@@ -55,6 +55,9 @@ SLICE_WORKER string constant.
 """
 import argparse
 import glob
+import hashlib
+import math
+import tempfile
 import json
 import re
 import subprocess
@@ -468,6 +471,14 @@ def run_node(node, parts, worker, cwd=None, max_attempts=3):
     except TypeError:
         worker_result = worker.run(unit)
 
+    if worker_result.get("retry_safe") is False:
+        reason = worker_result.get("note", "worker replay requires review")
+        beat.done(node["id"], reason)
+        return {"id": node["id"], "worker_status": worker_result.get("status"),
+                "verdict": "NO-DATA", "reason": reason, "repair": None,
+                "scope": None, "integrable": False, "integration_block": reason,
+                "failure_class": failure_class_of(worker_result)}
+
     # WHAT ACTUALLY CHANGED, from git, not from what the worker says it changed.
     # A worker reporting "I only touched X" is a claim; the diff is evidence.
     beat.phase(node["id"], "reading what actually changed")
@@ -518,6 +529,15 @@ def run_node(node, parts, worker, cwd=None, max_attempts=3):
     record["repair"] = {"outcome": fixed["outcome"],
                         "attempts": len(fixed["attempts"]),
                         "reason": fixed["reason"]}
+    refusal_reader = getattr(worker, "replay_refusal", lambda uid: None)
+    refused = refusal_reader(node["id"])
+    if refused:
+        reason = refused.get("note", "worker replay requires review")
+        record.update(verdict="NO-DATA", reason=reason, integrable=False,
+                      integration_block=reason,
+                      failure_class=failure_class_of(refused))
+        beat.done(node["id"], reason)
+        return record
     record["verdict"] = fixed["final_verdict"].get("verdict")
     beat.done(node["id"], "done after repair: %s" % (record["verdict"] or "?"))
     return record
@@ -687,7 +707,36 @@ try:
 except Exception:  # noqa: BLE001
     worktree_lane = None
 
+try:
+    import unit_trace
+except Exception:  # noqa: BLE001
+    unit_trace = None
+
 MAX_IN_FLIGHT = 3
+
+
+def worker_budget_path(root, unit_id):
+    key = hashlib.sha256(str(unit_id).encode("utf-8")).hexdigest()
+    return os.path.join(root, "worker-budgets", key + ".json")
+
+
+def worker_budget_refusal(root, unit_id):
+    """A resume must not settle ambiguous writes before worker admission."""
+    if not root:
+        return None
+    path = worker_budget_path(root, unit_id)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            state = json.load(fh)
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError):
+        return "worker budget is unreadable; inspect the lane before resuming"
+    if not isinstance(state, dict) or not isinstance(state.get("in_flight"), bool):
+        return "worker budget is malformed; inspect the lane before resuming"
+    if state["in_flight"]:
+        return "earlier worker may have written; inspect the lane before resuming"
+    return None
 
 
 class LaneWorker(object):
@@ -713,8 +762,94 @@ class LaneWorker(object):
 
     def __init__(self, spawn_module, argv, environ=None):
         self._spawn, self._argv, self._environ = spawn_module, list(argv), environ
+        self._budgets = {}
+        self._refusals = {}
+
+    def replay_refusal(self, unit_id):
+        return self._refusals.get(unit_id)
 
     def run(self, unit, cwd=None):
+        """One shared time/attempt allowance, including repair and fallback.
+
+        Save the in-flight marker before dispatch. A restart cannot prove an
+        interrupted process did not write, so it must not replay that unit.
+        Rate-limit parking spends no attempt; only worker execution consumes
+        the time allowance, not time parked waiting for a provider reset.
+        """
+        uid = str(unit.get("unit_id") or "")
+        root = journal.run_dir_from_env()
+        path = None
+        if root:
+            path = worker_budget_path(root, uid)
+        def held(why, failure="other"):
+            result = {"status": "held", "worker_claim": "", "artifacts": [],
+                      "retry_safe": False,
+                      "note": "failure_class=%s; %s" % (failure, why)}
+            self._refusals[uid] = result
+            return result
+        def save(state):
+            if path:
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path))
+                try:
+                    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                        json.dump(state, fh)
+                        fh.flush()
+                        os.fsync(fh.fileno())
+                    os.replace(tmp, path)
+                finally:
+                    if os.path.exists(tmp):
+                        os.unlink(tmp)
+            self._budgets[uid] = state
+        try:
+            state = self._budgets.get(uid)
+            if path and os.path.exists(path):
+                with open(path, encoding="utf-8") as fh:
+                    state = json.load(fh)
+            if state is None:
+                state = {"remaining": float(getattr(self._spawn,
+                             "DEFAULT_TIMEOUT_SECONDS", 900)),
+                         "attempts": 0, "in_flight": False}
+            remaining = state["remaining"]
+            attempts = state["attempts"]
+            if (not isinstance(remaining, (int, float))
+                    or isinstance(remaining, bool) or not math.isfinite(remaining)
+                    or not isinstance(attempts, int) or isinstance(attempts, bool)
+                    or attempts < 0 or not isinstance(state["in_flight"], bool)):
+                raise ValueError("invalid worker budget")
+            if state["in_flight"]:
+                return held("earlier worker may have written; inspect the lane "
+                            "before any replay", "timeout")
+            if remaining <= 0 or attempts >= 3:
+                return held("whole-unit time or attempt allowance exhausted")
+            state.update(attempts=attempts + 1, in_flight=True)
+            save(state)
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            return held("worker budget could not be read or recorded: %s" % exc)
+        self._refusals.pop(uid, None)
+        started = time.monotonic()
+        result = self._run(unit, cwd=cwd, timeout=remaining)
+        elapsed = max(0.0, time.monotonic() - started)
+        note = result.get("note") or ""
+        timed_out = (failure_class_of(result) == "timeout"
+                     or "no answer within" in note or "timed out" in note
+                     or elapsed >= remaining)
+        state["remaining"] = max(0.0, remaining - elapsed)
+        state["in_flight"] = timed_out
+        if failure_class_of(result) == "rate_limit" and not timed_out:
+            state["attempts"] -= 1
+        try:
+            save(state)
+        except OSError as exc:
+            return held("worker ended but its budget could not be recorded: %s" % exc)
+        if timed_out:
+            return held("worker timed out; writes are unknown, so automatic "
+                        "repair and replay are refused", "timeout")
+        if result.get("status") == "held":
+            return held(result.get("note") or "worker was held before dispatch")
+        return result
+
+    def _run(self, unit, cwd=None, timeout=900):
         # VN3b, THE UNIT ATTRIBUTION: this method is the ONLY place in this
         # estate that starts a process for exactly one unit, so it is the
         # only place a unit id is honestly known to a child. Everything
@@ -731,7 +866,17 @@ class LaneWorker(object):
         # behaviour-neutral, not a widening: bm_controller._sanitised_env
         # already reads os.environ when it is handed None, so a copy of
         # os.environ is the same environment that branch always passed.
+        deadline = time.monotonic() + timeout
         environ = dict(self._environ or os.environ)
+        def launch():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return {"status": "held", "note": "failure_class=timeout; "
+                        "unit allowance expired before worker launch"}
+            environ["BROTHER_UNIT_TIME_LEFT_S"] = str(remaining)
+            inner = self._spawn.SpawningWorker(self._argv, cwd=cwd,
+                                               environ=environ, timeout=remaining)
+            return inner.run(unit)
         unit_id = str(unit.get("unit_id") or "").strip()
         if unit_id:
             environ[journal.UNIT_ID_ENV_VAR] = unit_id
@@ -740,9 +885,7 @@ class LaneWorker(object):
             # theoretical but not impossible): nothing to materialize a
             # store against, so this falls back to the pre-P1 behaviour
             # rather than crashing on Store(None).
-            inner = self._spawn.SpawningWorker(self._argv, cwd=cwd,
-                                               environ=environ)
-            return inner.run(unit)
+            return launch()
         import managed_safety  # local: see the class docstring for why
         session_id, why = managed_safety.materialize(cwd, unit)
         run_dir = journal.run_dir_from_env()
@@ -773,9 +916,7 @@ class LaneWorker(object):
         environ = dict(environ, BM_FENCE_MODE="enforced",
                       BM_FENCE_STRICT="1", BROTHERMODE_ROOT=cwd,
                       BM_FENCE_SESSION_ID=session_id)
-        inner = self._spawn.SpawningWorker(self._argv, cwd=cwd,
-                                           environ=environ)
-        return inner.run(unit)
+        return launch()
 
 
 
@@ -1344,6 +1485,30 @@ def rolling_run(doc, parts, worker, cwd, cap, store, owner=None, work_id="",
         node = by_id[uid]
         claim = result.get("claim")
         record = result.get("record") or {}
+        # FL-1.4: every dispatched unit leaves exactly one trace line, written
+        # here (before claim_store.release() below) rather than in run_node(),
+        # because this is the one place both the claim id and the final
+        # verdict (post repair) are bound in scope for EVERY unit, not only
+        # ones that go on to integrate. tier, effort and wall_ms are NO-DATA:
+        # the 2026-09-11 spike (docs/... FL-1-SPIKE-2026-09.md) found nothing
+        # in the dispatch path supplies them today. This must never raise and
+        # never change the integration outcome, so both a reported problem
+        # and a raised exception are printed to stderr and swallowed.
+        if unit_trace is not None:
+            try:
+                usage = record.get("usage") or {}
+                _trace_row, _trace_problem = unit_trace.record(
+                    uid,
+                    tokens_in=usage.get("tokens_in"),
+                    tokens_out=usage.get("tokens_out"),
+                    cache_read=usage.get("tokens_cached"),
+                    verdict=record.get("verdict"))
+                if _trace_problem:
+                    sys.stderr.write("unit-trace: NO-DATA: %s\n"
+                                     % _trace_problem)
+            except Exception as exc:  # noqa: BLE001
+                # sbe: allow-silent the trace must never block integration; the problem is printed above
+                sys.stderr.write("unit-trace: NO-DATA: %s\n" % exc)
         branch = lane_branches.get(uid)
         merged, int_verdict = False, {}
         # QUARANTINE (or NO-DATA scope) never integrates even on a PASS
