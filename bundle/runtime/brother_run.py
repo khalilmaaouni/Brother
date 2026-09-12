@@ -104,6 +104,7 @@ import hashlib
 import io
 import json
 import os
+import random
 import re
 import shlex
 import shutil
@@ -129,6 +130,7 @@ import journal  # noqa: E402
 import loom  # noqa: E402
 import loop_bridge  # noqa: E402
 import managed_safety  # noqa: E402
+import park_sidecar  # noqa: E402
 import receipt_door  # noqa: E402
 import run_heartbeat  # noqa: E402
 import work_record  # noqa: E402
@@ -205,6 +207,35 @@ EXIT_UNITS_ARE_YOURS = loop_bridge.EXIT_UNITS_ARE_YOURS
 # ponytail: a flat per-unit count, not a backoff schedule; revisit if a real
 # unit ever needs more than three outer attempts to prove that is not enough.
 MAX_UNIT_ATTEMPTS = 3
+
+#: W2 (SR-3, docs/plan/SWARM-RESILIENCE-1.0.14.md, pulled into 1.0.13): the
+#: worker writes this token into its own failure reason text when the
+#: failure has a known shape (SR-1, another branch, is the writer; this file
+#: only ever reads it). No token found means class "other", which is
+#: today's behaviour exactly: unchanged, no park, no extra pause.
+FAILURE_CLASS_RE = re.compile(
+    r"failure_class=(rate_limit|overloaded|timeout|empty|other)")
+
+#: A relative reset time beside the marker, e.g. "resets 120s" or "resets in
+#: 120 seconds": stdlib regex only, no clock/timezone parsing, because
+#: nothing on this branch writes or reads a wall-clock reset time, only a
+#: relative second count. Absent or unparseable falls back to
+#: RATE_LIMIT_PARK_SECONDS below.
+RESETS_IN_SECONDS_RE = re.compile(
+    r"resets\s*(?:in\s*)?(\d+)\s*s(?:ec(?:ond)?s?)?\b", re.IGNORECASE)
+
+#: rate_limit park default, in seconds, when the failure text names no
+#: parseable reset time. Matches the file's other named worker-timeout
+#: constant, WORKER_TIME_LIMIT_SECONDS, so this is one shared round number
+#: rather than a second invented one.
+RATE_LIMIT_PARK_SECONDS = 900
+
+#: overloaded/timeout/empty backoff: base seconds, doubling per consecutive
+#: failure of the SAME unit this run, capped, then jittered upward by up to
+#: this fraction so many units failing together do not all wake in lockstep.
+RETRY_BACKOFF_BASE_SECONDS = 30
+RETRY_BACKOFF_CAP_SECONDS = 300
+RETRY_BACKOFF_JITTER_FRACTION = 0.20
 
 #: THE PER-ATTEMPT TIME LIMIT, in seconds, kept beside the attempt cap above
 #: because the two together are the whole bound on one piece of work: at
@@ -375,19 +406,21 @@ def _resolve_runs_root(requested, default=None, probe=None):
 
 
 def in_claude_code_session(env=None):
-    """True when this process is running inside a Claude Code session.
+    """True when explicit markers identify a coding session.
 
     D-001 (persona dogfood 2026-09-07, scenarios A1-S1, A1-S4 and A3-S1).
-    The marker variables are brother_paths' own, not a second spelling of
-    them: CLAUDECODE and CLAUDE_CODE_ENTRYPOINT, which the client exports to
-    everything a session starts. brother_paths.client() is deliberately NOT
+    The marker variables are brother_paths' own, including the Claude and
+    Codex session markers inherited by their child processes. An explicit
+    worker command still opts into the headless path. brother_paths.client() is deliberately NOT
     used here, because its last rung identifies a host from a plugin manifest
     on disk, which answers "claude" in a plain terminal on a machine with the
     bundle installed. That would refuse the documented headless path on the
     strength of an install, and the headless path is exactly what this rule
     must leave alone."""
     env = os.environ if env is None else env
-    return any(env.get(var) for var in brother_paths.CLAUDE_MARKER_VARS)
+    markers = (tuple(brother_paths.CLAUDE_MARKER_VARS)
+               + tuple(brother_paths.CODEX_MARKER_VARS))
+    return any(env.get(var) for var in markers)
 
 
 def plan_model_cmd(plan_path):
@@ -3224,6 +3257,7 @@ def _mark_integrated(record_path, done_ids, claims, cwd):
             (claims or {}).get(uid), row, cwd)
         touched = True
         if ok:
+            row.pop("integration_refused", None)
             row["status"] = "DONE"
             row["evidence"] = detail
             evidence = ((claims or {}).get(uid) or {}).get("evidence") or {}
@@ -3351,6 +3385,10 @@ def _settle_units_already_delivered_locked(record, claims_path, cwd, log,
         if row is None or row.get("status") == "DONE":
             continue
         if not isinstance(claim, dict):
+            continue
+        budget_hold = loop_bridge.worker_budget_refusal(run_dir, uid)
+        if budget_hold:
+            log.note("%s: %s was not settled: %s" % (NODATA, uid, budget_hold))
             continue
         # REPAIR ROUND 3, R2: every read below this line can raise on a
         # malformed claims.json record, claim_store.live() alone does
@@ -4409,6 +4447,267 @@ def _restore_refused_precheck_units(record_path, refused, order):
         by_id[uid] = row
     doc[key] = [by_id[uid] for uid in order if uid in by_id]
     work_record.write_record(record_path, doc)
+
+
+def _sleep(seconds):
+    """The one blocking sleep W2's retry backoff calls. Swapped BY NAME in
+    tests (this file's own `_br.run_loop = fake` convention: a global looked
+    up at call time, never a default argument, which would bind the real
+    time.sleep once at import and ignore any later reassignment)."""
+    time.sleep(seconds)
+
+
+def _now():
+    """The one wall-clock read W2's rate_limit park compares a reset time
+    against. Swapped by name the same way _sleep is, so a park test can
+    move time forward without a real wait."""
+    return time.time()
+
+
+def _park_sidecar_path(record_path):
+    """The durable park sidecar's path: next to the run's Work document,
+    named so it is obviously the park sidecar (SR-3 restart fix)."""
+    run_dir = os.path.dirname(os.path.abspath(record_path))
+    return os.path.join(run_dir, "park_sidecar.json")
+
+
+def _save_park_sidecar(record_path, withheld, parked_until):
+    """Persists W2's in-memory park state (`withheld`: {uid: (row, reason)},
+    `parked_until`: {uid: epoch}) to the durable sidecar, so a crash during
+    a long park does not lose the only copy of a withheld row (the defect
+    that held SR-3 out of 1.0.13). Only the row is durable, matching
+    park_sidecar's own contract; the reason is transient and already
+    unused by the restore path it feeds (_restore_refused_precheck_units
+    discards it too)."""
+    rows_only = {uid: row for uid, (row, _reason) in withheld.items()}
+    park_sidecar.save(_park_sidecar_path(record_path),
+                      {"withheld": rows_only, "parked_until": parked_until})
+
+
+def _reconcile_park_sidecar(record_path, log):
+    """SR-3 RESTART FIX, called once at run start, before unit_ids and the
+    run's own (empty) w2_state are built from the Work document: a unit a
+    now-dead run had parked lived only in that process's own
+    w2_state["withheld"], never on disk, so a crash mid-park lost it for
+    good (the reason SR-3 was held out of 1.0.13). The durable sidecar
+    (park_sidecar.py) is the only other place it lives; this folds it back
+    into the Work document so the unit is dispatchable again.
+
+    A load problem is logged and never drops a row: the sidecar file is
+    left exactly as load() found it, and the Work document is not
+    touched. On a clean load, rows missing from the Work document are
+    restored (never duplicated, park_sidecar.restore_into's own
+    contract), and the sidecar is then cleared: the rows are back in the
+    plan and this run's own w2_state starts empty, so nothing here owns
+    the old parked/withheld state anymore."""
+    sidecar_path = _park_sidecar_path(record_path)
+    sidecar_state, problem = park_sidecar.load(sidecar_path)
+    if problem:
+        log.say("brother_run: %s (leaving it in place; nothing was "
+                "restored from it)" % problem)
+        return []
+    with open(record_path, "r", encoding="utf-8") as fh:
+        doc = json.load(fh)
+    key = "rows" if "rows" in doc else "units"
+    new_rows, restored_ids = park_sidecar.restore_into(
+        doc.get(key) or [], sidecar_state)
+    if restored_ids:
+        doc[key] = new_rows
+        work_record.write_record(record_path, doc)
+        log.say("brother_run: restored %d unit(s) a previous run parked "
+                "and never got to re-admit: %s"
+                % (len(restored_ids), ", ".join(sorted(restored_ids))))
+    park_sidecar.save(sidecar_path, {"withheld": {}, "parked_until": {}})
+    return restored_ids
+
+
+def _withhold_units(record_path, uid_reasons, before_write=None):
+    """Pull specific not-DONE rows (named in uid_reasons: {uid: reason})
+    out of the Work document ON DISK. Same load/filter/write shape as
+    _refuse_broken_precheck_units, but for a caller-chosen id set rather
+    than a fixed predicate: W2's rate_limit park needs to pull exactly the
+    units THIS ROUND classified that way, not every row matching one
+    condition. Returns {uid: (row, reason)} for
+    _restore_refused_precheck_units to fold back later (same shape, so one
+    restore function serves both this and the precheck refusal). A row
+    already DONE, or an id not found, is left alone; note this never marks
+    `integration_refused` or `refused_before_work`, since a park is
+    temporary and expected back, not a terminal refusal.
+
+    `before_write`, when given, is called with the {uid: (row, reason)}
+    about to be pulled BEFORE the Work document is rewritten (SR-3): the
+    caller uses it to save the durable park sidecar first, so a crash
+    between the sidecar write and this function's own write never loses a
+    row that already left the Work document."""
+    if not uid_reasons:
+        return {}
+    with open(record_path, "r", encoding="utf-8") as fh:
+        doc = json.load(fh)
+    key = "rows" if "rows" in doc else "units"
+    kept, withheld = [], {}
+    for row in doc.get(key) or []:
+        reason = uid_reasons.get(row.get("id"))
+        if row.get("status") != "DONE" and reason:
+            withheld[row.get("id")] = (row, reason)
+        else:
+            kept.append(row)
+    if withheld:
+        if before_write is not None:
+            before_write(withheld)
+        doc[key] = kept
+        work_record.write_record(record_path, doc)
+    return withheld
+
+
+def _attempt_failure_text(claim, loop_text):
+    """The text W2's classification reads for one unit: a claim's own
+    evidence dict may carry the worker's failure reason (once SR-1, on
+    another branch, starts writing one there); until it does, or for a
+    claim whose evidence carries none, this round's own loop_bridge output
+    is the only other place the worker's words reach this file. The two are
+    concatenated so a marker in either place is found. Never raises on a
+    claim shaped any other way."""
+    parts = []
+    evidence = claim.get("evidence") if isinstance(claim, dict) else None
+    if isinstance(evidence, dict):
+        for value in evidence.values():
+            if isinstance(value, str):
+                parts.append(value)
+    parts.append(loop_text or "")
+    return "\n".join(parts)
+
+
+def _classify_attempt_failure(text):
+    """One of "rate_limit", "overloaded", "timeout", "empty", "other": the
+    worker's own `failure_class=` marker (FAILURE_CLASS_RE) read out of
+    `text`, or "other" when the marker is absent or unrecognised. This is
+    the ONLY signal read; no heuristic guesses a class from prose."""
+    match = FAILURE_CLASS_RE.search(text or "")
+    return match.group(1) if match else "other"
+
+
+def _parse_reset_seconds(text):
+    """A parseable "resets <N>s" (or "resets in <N> seconds") near the
+    failure_class marker, as a positive int, or None when nothing parses
+    (the caller then falls back to RATE_LIMIT_PARK_SECONDS)."""
+    match = RESETS_IN_SECONDS_RE.search(text or "")
+    if not match:
+        return None
+    try:
+        seconds = int(match.group(1))
+    except ValueError:
+        return None
+    return seconds if seconds > 0 else None
+
+
+def _retry_backoff_seconds(consecutive_failures):
+    """Growing, capped, jittered pause for a unit's Nth (1-based)
+    consecutive overloaded/timeout/empty failure this run: base *
+    2**(n-1), capped at RETRY_BACKOFF_CAP_SECONDS, then up to
+    RETRY_BACKOFF_JITTER_FRACTION more added on top (never less than the
+    capped base), so many units failing together do not all wake in
+    lockstep. random.uniform is looked up at call time here (a bare module
+    call, not a default argument value), so a test can swap
+    `_br.random.uniform` and get a deterministic jitter."""
+    n = max(1, int(consecutive_failures))
+    base = min(RETRY_BACKOFF_BASE_SECONDS * (2 ** (n - 1)),
+              RETRY_BACKOFF_CAP_SECONDS)
+    jitter = base * RETRY_BACKOFF_JITTER_FRACTION
+    return base + random.uniform(0, jitter)
+
+
+def _apply_w2_retry(record_path, claims_path, claims, loop_text, done_now,
+                    unit_ids, state, log):
+    """W2 (SR-3): one round's worth of per-failure-class retry handling,
+    called from the drain right after a round's claims are read. Returns
+    {uid: attempts to refund} for the caller to subtract from its own
+    attempts_now BEFORE the MAX_UNIT_ATTEMPTS bookkeeping below reads it,
+    which is what keeps a rate-limited unit's retry budget unchanged
+    without claim_store.py itself ever being touched: the real claim still
+    shows the spent attempt, only this file's own comparison against the
+    cap is adjusted.
+
+    THE THREE STEPS, IN ORDER. (1) Any unit this run previously parked
+    whose reset time has now passed is restored to the plan document FIRST,
+    so it is eligible for next round's claim. (2) A unit that just finished
+    has its consecutive-failure count cleared (the count is scoped to
+    CONSECUTIVE failures, not a unit's whole history). (3) Every other not-
+    yet-done claim this round is classified from its own evidence text (or
+    this round's loop_text) and handled per class: rate_limit is withheld
+    from the plan and its just-spent attempt refunded; overloaded/timeout/
+    empty waits a jittered growing backoff (blocking here, before the next
+    round's claim, is what makes the pause land between attempts); other
+    and marker-absent are left exactly as before this file existed.
+
+    `state` is the caller's own {"parked_until": {}, "withheld": {},
+    "consecutive": {}}, carried across rounds by reference; this function
+    never persists it beyond the one drain that owns it."""
+    now = _now()
+    ready = [uid for uid, until in list(state["parked_until"].items())
+            if now >= until]
+    if ready:
+        restore = {uid: state["withheld"].pop(uid) for uid in ready
+                  if uid in state["withheld"]}
+        for uid in ready:
+            state["parked_until"].pop(uid, None)
+        if restore:
+            _restore_refused_precheck_units(record_path, restore, unit_ids)
+            # SR-3: the sidecar is the only other place these rows are
+            # durable, so it is re-saved with them already popped from
+            # state["withheld"] above, the moment they leave the park.
+            _save_park_sidecar(record_path, state["withheld"],
+                              state["parked_until"])
+            for uid in restore:
+                log.say("brother_run: %s's rate limit park is over; "
+                        "re-admitting it" % uid)
+    for uid in done_now:
+        state["consecutive"].pop(uid, None)
+    refund = {}
+    to_withhold = {}
+    for uid, claim in (claims or {}).items():
+        if uid in done_now or not isinstance(claim, dict):
+            continue
+        if str(claim.get("state", "")) not in ("failed", "claimed"):
+            continue
+        text = _attempt_failure_text(claim, loop_text)
+        cls = _classify_attempt_failure(text)
+        if cls == "rate_limit":
+            attempt = claim.get("attempt")
+            attempt = attempt if isinstance(attempt, int) else 0
+            wait = _parse_reset_seconds(text)
+            if wait is None:
+                wait = RATE_LIMIT_PARK_SECONDS
+            wake = now + wait
+            wake_text = datetime.datetime.fromtimestamp(wake).strftime(
+                "%Y-%m-%d %H:%M:%S")
+            state["parked_until"][uid] = wake
+            refund[uid] = attempt
+            to_withhold[uid] = ("rate limited; parked without spending its "
+                                "retry budget, due back %s" % wake_text)
+            log.say("brother_run: %s hit a rate limit; parking it until "
+                    "%s without spending an attempt" % (uid, wake_text))
+        elif cls in ("overloaded", "timeout", "empty"):
+            state["consecutive"][uid] = state["consecutive"].get(uid, 0) + 1
+            pause = _retry_backoff_seconds(state["consecutive"][uid])
+            log.say("brother_run: %s failed (%s); waiting %.1fs before its "
+                    "next attempt" % (uid, cls, pause))
+            _sleep(pause)
+        # "other" and no marker: unchanged, today's behaviour exactly.
+    if to_withhold:
+        # SR-3: the sidecar is saved from inside _withhold_units's own
+        # before_write hook, BEFORE it rewrites the Work document, so a
+        # crash between the two writes never leaves a row with no durable
+        # copy anywhere (state["parked_until"] above already carries this
+        # round's new wake times, so it is accurate at this point).
+        def _save_before_withhold(newly_withheld):
+            combined = dict(state["withheld"])
+            combined.update(newly_withheld)
+            _save_park_sidecar(record_path, combined, state["parked_until"])
+
+        state["withheld"].update(
+            _withhold_units(record_path, to_withhold,
+                            before_write=_save_before_withhold))
+    return refund
 
 
 def _is_test_path(path):
@@ -5828,6 +6127,14 @@ def main(argv=None):
     # the drain right there, so the repair the classification implies was
     # never actually dispatched: a unit that would have gone green on a
     # second claim was never given one.
+    # SR-3 RESTART FIX: reconcile the durable park sidecar into the Work
+    # document before unit_ids and this run's own (empty) w2_state are
+    # built from it below. See _reconcile_park_sidecar's own docstring.
+    _restored_ids = _reconcile_park_sidecar(record["path"], log)
+    if _restored_ids:
+        with open(record["path"], "r", encoding="utf-8") as fh:
+            record.update(json.load(fh))
+
     loop_texts = []
     done_before = set()
     attempts_before = {}
@@ -5837,6 +6144,9 @@ def main(argv=None):
     # progress (below) but never repeat this line.
     unit_ids = [u.get("id") for u in
                (record.get("rows") or record.get("units") or [])]
+    # W2 (SR-3): per-unit retry state, carried across every round of THIS
+    # drain by reference; _apply_w2_retry below reads and updates it.
+    w2_state = {"parked_until": {}, "withheld": {}, "consecutive": {}}
     wait_start = None if skip_drain else _governor_wait_line(
         log, ", ".join(unit_ids) if unit_ids else "nothing")
     # E46, THE WAIT ITSELF, NARRATED. Started here rather than inside
@@ -5885,6 +6195,17 @@ def main(argv=None):
                     if str(c.get("state", "")) in ("done", "integrated")}
         attempts_now = {uid: int(c.get("attempt") or 0)
                         for uid, c in (claims or {}).items()}
+        # W2 (SR-3): classify this round's failures by the worker's own
+        # failure_class marker and handle rate_limit/overloaded/timeout/
+        # empty before the MAX_UNIT_ATTEMPTS bookkeeping below reads
+        # attempts_now. A claim with no marker (today's every existing
+        # caller) classifies "other" and changes nothing: the refund dict
+        # comes back empty and this is a no-op.
+        w2_refund = _apply_w2_retry(record["path"], claims_path, claims,
+                                    loop_text, done_now, unit_ids, w2_state,
+                                    log)
+        for uid, delta in w2_refund.items():
+            attempts_now[uid] = max(0, attempts_now.get(uid, 0) - delta)
         # T2: EVERY ATTEMPT LEAVES ITS OWN TRACE, beside any earlier one for
         # the same unit, never over it. claims.json holds only the LATEST
         # attempt per unit (claim_store.release documents this: "never
@@ -6198,8 +6519,11 @@ def main(argv=None):
     # second build_report call already does): 0 only when this run proved
     # something and refused nothing, 1 when anything refused, 2 when
     # nothing refused but nothing proved either.
-    final_receipts = receipt_door.receipts_for(record, claims, refused,
-                                               log_path)
+    final_receipts = receipt_door.receipts_for(
+        record, claims, refused, log_path,
+        target_revision=after or NODATA, env_lock=_env_lock(cwd),
+        data_identity_by_id={row.get("id"): _data_identity_for_row(row, cwd)
+                             for row in (record.get("rows") or [])})
     exit_code, exit_reason = _exit_code_for(final_receipts, refused)
     # E73.2, THE LAST CHECKPOINT: run finished. run_dir is settled and the
     # document on disk already carries every DONE and refusal this run is

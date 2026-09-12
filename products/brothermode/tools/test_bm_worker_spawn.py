@@ -295,5 +295,45 @@ class TheExecPrimitiveIsPinnedHereToo(unittest.TestCase):
                          % unsanitised)
 
 
+@unittest.skipUnless(os.name == "posix", "POSIX process groups")
+class TimeoutStopsDescendants(unittest.TestCase):
+    def test_inner_model_timeout_also_cancels_its_descendants(self):
+        import pathlib
+        import tempfile
+        import time
+        with tempfile.TemporaryDirectory() as root:
+            target = pathlib.Path(root) / "late-write"
+            child = "import time,pathlib; time.sleep(1); pathlib.Path(%r).write_text('late')" % str(target)
+            parent = ("import subprocess,sys; "
+                      "subprocess.Popen([sys.executable,'-c',%r], "
+                      "stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL); "
+                      "print('failure_class=timeout; model interrupted',file=sys.stderr); "
+                      "sys.exit(3)" % child)
+            worker = S.SpawningWorker([sys.executable, "-c", parent], timeout=5)
+            got = worker.run({"unit_id": "inner-timeout"})
+            self.assertEqual(got["status"], "unavailable")
+            time.sleep(1.2)
+            self.assertFalse(target.exists(), "descendant survived inner model timeout")
+
+    def test_grandchild_cannot_write_after_parent_timeout(self):
+        import pathlib
+        import tempfile
+        import time
+        with tempfile.TemporaryDirectory() as root:
+            target = pathlib.Path(root) / "late-write"
+            child = "import time,pathlib; time.sleep(2); pathlib.Path(%r).write_text('late')" % str(target)
+            parent = ("import subprocess,sys,time; "
+                      "subprocess.Popen([sys.executable,'-c',%r]); "
+                      "time.sleep(10)" % child)
+            worker = S.SpawningWorker([sys.executable, "-c", parent], timeout=.4)
+            started = time.monotonic()
+            got = worker.run({"unit_id": "descendants"})
+            elapsed = time.monotonic() - started
+            self.assertEqual(got["status"], "unavailable")
+            self.assertLess(elapsed, 1.5, "descendant held the output pipes open")
+            time.sleep(2)
+            self.assertFalse(target.exists(), "descendant wrote after timeout")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -33,6 +33,7 @@ import door  # noqa: E402
 import integrate  # noqa: E402
 import journal  # noqa: E402
 import loop_bridge  # noqa: E402
+import park_sidecar  # noqa: E402
 import receipt_door as RD  # noqa: E402
 import run_heartbeat  # noqa: E402
 import work_record as WR  # noqa: E402
@@ -463,6 +464,25 @@ class TheResumeSettleStepClosesTwoRedBoundaries(unittest.TestCase):
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="settle-")
+
+    def test_interrupted_worker_budget_blocks_resume_settlement(self):
+        from unittest.mock import patch
+        import hashlib
+        directory = os.path.join(self.tmp, "worker-budgets")
+        os.makedirs(directory)
+        name = hashlib.sha256(b"U1").hexdigest() + ".json"
+        with open(os.path.join(directory, name), "w", encoding="utf-8") as fh:
+            json.dump({"remaining": 10, "attempts": 1, "in_flight": True}, fh)
+        record = {"path": os.path.join(self.tmp, "work.json"),
+                  "rows": [{"id": "U1", "status": "SCHEDULED"}]}
+        claims = {"U1": {"state": "claimed", "expires_at": 0}}
+        with patch.object(_br, "_read_claims", return_value=claims), \
+                patch.object(_br.claim_store, "live", return_value=False), \
+                patch.object(_br.worktree_lane, "branch_for", return_value="lane/U1") as branch, \
+                patch.object(_br.integrate, "_already_integrated", return_value=False):
+            _br._settle_units_already_delivered_locked(
+                record, "unused", self.tmp, _br.RunLog(), self.tmp)
+        branch.assert_not_called()
 
     def test_f1_a_claim_already_released_done_is_settled_without_a_fresh_check(self):
         """The claim was already released state=="done", with real
@@ -7017,6 +7037,341 @@ class ADriftedRepositoryIsNamedOnResume(unittest.TestCase):
                                     "a drift event was journaled against an "
                                     "unchanged repository (still at %s)"
                                     % unchanged_rev)
+
+
+class W2RetryClassification(unittest.TestCase):
+    """W2 (SR-3): the pure pieces, no tempdir needed. The marker is the
+    ONLY signal read; absent or unrecognised text is always "other"."""
+
+    def test_marker_present_classifies_each_named_class(self):
+        for cls in ("rate_limit", "overloaded", "timeout", "empty", "other"):
+            text = "worker failed: failure_class=%s\nresets 120s" % cls
+            self.assertEqual(_br._classify_attempt_failure(text), cls)
+
+    def test_marker_absent_classifies_other(self):
+        self.assertEqual(
+            _br._classify_attempt_failure("some ordinary stack trace"), "other")
+        self.assertEqual(_br._classify_attempt_failure(""), "other")
+        self.assertEqual(_br._classify_attempt_failure(None), "other")
+
+    def test_reset_seconds_parses_both_spellings(self):
+        self.assertEqual(_br._parse_reset_seconds(
+            "failure_class=rate_limit resets 120s"), 120)
+        self.assertEqual(_br._parse_reset_seconds(
+            "failure_class=rate_limit, resets in 45 seconds"), 45)
+
+    def test_reset_seconds_none_when_unparseable(self):
+        self.assertIsNone(_br._parse_reset_seconds("failure_class=rate_limit"))
+        self.assertIsNone(_br._parse_reset_seconds(""))
+        self.assertIsNone(_br._parse_reset_seconds(None))
+
+    def test_backoff_grows_and_caps_and_jitters(self):
+        # Deterministic jitter: random.uniform(0, jitter) -> jitter (the max).
+        orig_uniform = _br.random.uniform
+        _br.random.uniform = lambda a, b: b
+        try:
+            first = _br._retry_backoff_seconds(1)
+            second = _br._retry_backoff_seconds(2)
+            third = _br._retry_backoff_seconds(3)
+            capped = _br._retry_backoff_seconds(20)
+        finally:
+            _br.random.uniform = orig_uniform
+        # base*1.2, base*2*1.2, base*4*1.2: growing.
+        self.assertLess(first, second)
+        self.assertLess(second, third)
+        # never below the (uncapped) base for that attempt.
+        self.assertGreaterEqual(first, _br.RETRY_BACKOFF_BASE_SECONDS)
+        self.assertGreaterEqual(
+            second, _br.RETRY_BACKOFF_BASE_SECONDS * 2)
+        # capped: attempt 20 would be base*2**19 uncapped, but the cap wins.
+        self.assertLessEqual(
+            capped, _br.RETRY_BACKOFF_CAP_SECONDS
+            * (1 + _br.RETRY_BACKOFF_JITTER_FRACTION))
+        self.assertGreaterEqual(capped, _br.RETRY_BACKOFF_CAP_SECONDS)
+
+
+class W2RetryRoundHandling(unittest.TestCase):
+    """W2 (SR-3): _apply_w2_retry against a real record.json on disk, one
+    round at a time, mirroring this file's own load/mutate/write shape
+    rather than driving the whole CLI (that already has E100's own
+    sandboxed tempdir; this reuses it for one record file, no repo)."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="w2-retry-test-")
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.record_path = os.path.join(self.tmp, "record.json")
+        self.log = _br.RunLog()
+
+    def _write_record(self, ids):
+        WR.write_record(self.record_path,
+                        {"outcome": "w2 test", "work_id": "w2",
+                         "rows": [{"id": uid, "done_check": "true"}
+                                  for uid in ids]})
+
+    def _row_ids(self):
+        with open(self.record_path, encoding="utf-8") as fh:
+            return [r["id"] for r in json.load(fh)["rows"]]
+
+    def test_rate_limit_parks_without_spending_the_attempt_then_readmits(self):
+        self._write_record(["A"])
+        claims = {"A": {"state": "failed", "attempt": 1,
+                        "evidence": {"reason": "failure_class=rate_limit "
+                                                "resets 10s"}}}
+        state = {"parked_until": {}, "withheld": {}, "consecutive": {}}
+        fake_now = [1000.0]
+        orig_now = _br._now
+        _br._now = lambda: fake_now[0]
+        try:
+            refund = _br._apply_w2_retry(self.record_path, "unused-claims",
+                                         claims, "", set(), ["A"], state,
+                                         self.log)
+            # The whole spent attempt is refunded: a caller subtracting this
+            # from attempts_now leaves the unit's effective budget at 0,
+            # exactly where it stood before this attempt was ever claimed.
+            self.assertEqual(refund, {"A": 1})
+            # Parked: pulled off the plan document on disk so nothing can
+            # reclaim it before its reset.
+            self.assertEqual(self._row_ids(), [])
+            self.assertIn("A", state["parked_until"])
+            # Reset not yet due: a second call at the same moment changes
+            # nothing further.
+            refund2 = _br._apply_w2_retry(self.record_path, "unused-claims",
+                                          {}, "", set(), ["A"], state,
+                                          self.log)
+            self.assertEqual(refund2, {})
+            self.assertEqual(self._row_ids(), [])
+            # Past the reset: the next call re-admits it, attempt count
+            # untouched by anything this function did (nothing here ever
+            # writes claims.json).
+            fake_now[0] = 1000.0 + 11
+            refund3 = _br._apply_w2_retry(self.record_path, "unused-claims",
+                                          {}, "", set(), ["A"], state,
+                                          self.log)
+            self.assertEqual(refund3, {})
+            self.assertEqual(self._row_ids(), ["A"])
+            self.assertNotIn("A", state["parked_until"])
+        finally:
+            _br._now = orig_now
+
+    def test_rate_limit_falls_back_to_default_park_seconds(self):
+        self._write_record(["B"])
+        claims = {"B": {"state": "failed", "attempt": 1,
+                        "evidence": {"reason": "failure_class=rate_limit"}}}
+        state = {"parked_until": {}, "withheld": {}, "consecutive": {}}
+        before = _br._now()
+        _br._apply_w2_retry(self.record_path, "unused-claims", claims, "",
+                            set(), ["B"], state, self.log)
+        wake = state["parked_until"]["B"]
+        self.assertAlmostEqual(wake - before, _br.RATE_LIMIT_PARK_SECONDS,
+                               delta=5)
+
+    def test_overloaded_timeout_empty_sleep_growing_capped_jittered(self):
+        self._write_record(["C"])
+        state = {"parked_until": {}, "withheld": {}, "consecutive": {}}
+        orig_sleep = _br._sleep
+        orig_uniform = _br.random.uniform
+        seen = []
+        _br._sleep = lambda seconds: seen.append(seconds)
+        _br.random.uniform = lambda a, b: b
+        try:
+            for cls in ("overloaded", "timeout", "empty"):
+                claims = {"C": {"state": "failed", "attempt": 1,
+                               "evidence": {"reason":
+                                            "failure_class=%s" % cls}}}
+                _br._apply_w2_retry(self.record_path, "unused-claims",
+                                    claims, "", set(), ["C"], state, self.log)
+            # C failed three times in a row: growing.
+            self.assertEqual(len(seen), 3)
+            self.assertLess(seen[0], seen[1])
+            self.assertLess(seen[1], seen[2])
+            # never took the withhold/park path: still on the plan.
+            self.assertEqual(self._row_ids(), ["C"])
+            # a run of many more failures caps out.
+            for _ in range(10):
+                claims = {"C": {"state": "failed", "attempt": 1,
+                               "evidence": {"reason":
+                                            "failure_class=timeout"}}}
+                _br._apply_w2_retry(self.record_path, "unused-claims",
+                                    claims, "", set(), ["C"], state, self.log)
+            self.assertLessEqual(
+                seen[-1], _br.RETRY_BACKOFF_CAP_SECONDS
+                * (1 + _br.RETRY_BACKOFF_JITTER_FRACTION))
+        finally:
+            _br._sleep = orig_sleep
+            _br.random.uniform = orig_uniform
+
+    def test_other_class_unchanged(self):
+        self._write_record(["D"])
+        claims = {"D": {"state": "failed", "attempt": 1,
+                        "evidence": {"reason": "failure_class=other"}}}
+        state = {"parked_until": {}, "withheld": {}, "consecutive": {}}
+        orig_sleep = _br._sleep
+        seen = []
+        _br._sleep = lambda seconds: seen.append(seconds)
+        try:
+            refund = _br._apply_w2_retry(self.record_path, "unused-claims",
+                                         claims, "", set(), ["D"], state,
+                                         self.log)
+        finally:
+            _br._sleep = orig_sleep
+        self.assertEqual(refund, {})
+        self.assertEqual(seen, [])
+        self.assertEqual(self._row_ids(), ["D"])
+        self.assertEqual(state["parked_until"], {})
+        self.assertEqual(state["withheld"], {})
+
+    def test_marker_absent_classifies_other_and_is_unchanged(self):
+        self._write_record(["E"])
+        claims = {"E": {"state": "failed", "attempt": 1,
+                        "evidence": {"reason": "Traceback: boom"}}}
+        state = {"parked_until": {}, "withheld": {}, "consecutive": {}}
+        orig_sleep = _br._sleep
+        seen = []
+        _br._sleep = lambda seconds: seen.append(seconds)
+        try:
+            refund = _br._apply_w2_retry(self.record_path, "unused-claims",
+                                         claims, "", set(), ["E"], state,
+                                         self.log)
+        finally:
+            _br._sleep = orig_sleep
+        self.assertEqual(refund, {})
+        self.assertEqual(seen, [])
+        self.assertEqual(self._row_ids(), ["E"])
+
+    def test_marker_read_from_loop_text_when_evidence_has_none(self):
+        self._write_record(["F"])
+        claims = {"F": {"state": "claimed", "attempt": 1}}
+        state = {"parked_until": {}, "withheld": {}, "consecutive": {}}
+        refund = _br._apply_w2_retry(
+            self.record_path, "unused-claims", claims,
+            "worker stderr: failure_class=rate_limit resets 5s", set(),
+            ["F"], state, self.log)
+        self.assertEqual(refund, {"F": 1})
+        self.assertEqual(self._row_ids(), [])
+
+
+class ParkSidecarSurvivesRestart(unittest.TestCase):
+    """SR-3 RESTART FIX: before this, a unit parked by _apply_w2_retry was
+    pulled off the Work document on disk and lived ONLY in that process's
+    own w2_state["withheld"], so a crash mid-park lost it for good. Now
+    every withhold and every unpark is mirrored to a durable sidecar
+    (scripts/park_sidecar.py) next to the Work document, and a fresh run
+    reconciles it back in at start (_reconcile_park_sidecar)."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="w2-sidecar-test-")
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.record_path = os.path.join(self.tmp, "record.json")
+        self.sidecar_path = _br._park_sidecar_path(self.record_path)
+        self.log = _br.RunLog()
+
+    def _write_record(self, ids):
+        WR.write_record(self.record_path,
+                        {"outcome": "sidecar test", "work_id": "sc",
+                         "rows": [{"id": uid, "done_check": "true"}
+                                  for uid in ids]})
+
+    def _row_ids(self):
+        with open(self.record_path, encoding="utf-8") as fh:
+            return [r["id"] for r in json.load(fh)["rows"]]
+
+    def test_kill_and_restart_restores_both_parked_rows(self):
+        self._write_record(["A", "B"])
+        claims = {
+            "A": {"state": "failed", "attempt": 1,
+                 "evidence": {"reason": "failure_class=rate_limit "
+                                        "resets 999s"}},
+            "B": {"state": "failed", "attempt": 1,
+                 "evidence": {"reason": "failure_class=rate_limit "
+                                        "resets 999s"}},
+        }
+        state = {"parked_until": {}, "withheld": {}, "consecutive": {}}
+        _br._apply_w2_retry(self.record_path, "unused-claims", claims, "",
+                            set(), ["A", "B"], state, self.log)
+        # Both units left the Work document (the park), and the sidecar
+        # now carries the only durable copy of them.
+        self.assertEqual(self._row_ids(), [])
+        self.assertTrue(os.path.exists(self.sidecar_path))
+        sidecar_state, problem = park_sidecar.load(self.sidecar_path)
+        self.assertIsNone(problem)
+        self.assertEqual(sorted(sidecar_state["withheld"].keys()),
+                         ["A", "B"])
+
+        # THE CRASH: a fresh process holds none of `state`; a new run
+        # against the same record only has the sidecar to go on.
+        del state
+        restored_ids = _br._reconcile_park_sidecar(self.record_path,
+                                                    self.log)
+
+        self.assertEqual(sorted(restored_ids), ["A", "B"])
+        self.assertEqual(self._row_ids(), ["A", "B"])
+        # The sidecar's job is done: the rows are back in the plan and a
+        # fresh w2_state starts empty, so it is cleared rather than kept
+        # stale.
+        self.assertFalse(os.path.exists(self.sidecar_path))
+
+    def test_restore_after_park_time_passes_never_duplicates(self):
+        self._write_record(["C"])
+        claims = {"C": {"state": "failed", "attempt": 1,
+                        "evidence": {"reason": "failure_class=rate_limit "
+                                                "resets 10s"}}}
+        state = {"parked_until": {}, "withheld": {}, "consecutive": {}}
+        fake_now = [1000.0]
+        orig_now = _br._now
+        _br._now = lambda: fake_now[0]
+        try:
+            _br._apply_w2_retry(self.record_path, "unused-claims", claims,
+                                "", set(), ["C"], state, self.log)
+            self.assertEqual(self._row_ids(), [])
+            sidecar_state, _ = park_sidecar.load(self.sidecar_path)
+            self.assertIn("C", sidecar_state["withheld"])
+
+            # Past the reset: the same-process unpark path readmits it AND
+            # mirrors the removal to the sidecar.
+            fake_now[0] = 1000.0 + 11
+            _br._apply_w2_retry(self.record_path, "unused-claims", {}, "",
+                                set(), ["C"], state, self.log)
+            self.assertEqual(self._row_ids(), ["C"])
+            sidecar_state, _ = park_sidecar.load(self.sidecar_path)
+            self.assertNotIn("C", sidecar_state.get("withheld", {}))
+
+            # A restart's own reconciliation, run against what is left,
+            # never re-adds a row already present: no duplicate.
+            restored_ids = _br._reconcile_park_sidecar(self.record_path,
+                                                        self.log)
+            self.assertEqual(restored_ids, [])
+            self.assertEqual(self._row_ids(), ["C"])
+        finally:
+            _br._now = orig_now
+
+    def test_rate_limit_still_spends_no_attempt_with_sidecar_wired(self):
+        self._write_record(["D"])
+        claims = {"D": {"state": "failed", "attempt": 3,
+                        "evidence": {"reason": "failure_class=rate_limit "
+                                                "resets 30s"}}}
+        state = {"parked_until": {}, "withheld": {}, "consecutive": {}}
+        refund = _br._apply_w2_retry(self.record_path, "unused-claims",
+                                     claims, "", set(), ["D"], state,
+                                     self.log)
+        # The caller subtracts this refund from attempts_now; a full
+        # refund of the just-spent attempt is what "no attempt spent"
+        # means here, unchanged by the sidecar now also being written.
+        self.assertEqual(refund, {"D": 3})
+
+    def test_corrupt_sidecar_leaves_the_plan_untouched_and_file_in_place(self):
+        self._write_record(["E"])
+        os.makedirs(os.path.dirname(self.sidecar_path), exist_ok=True)
+        with open(self.sidecar_path, "w", encoding="utf-8") as fh:
+            fh.write("{not json")
+
+        restored_ids = _br._reconcile_park_sidecar(self.record_path,
+                                                    self.log)
+
+        self.assertEqual(restored_ids, [])
+        self.assertEqual(self._row_ids(), ["E"])
+        self.assertTrue(os.path.exists(self.sidecar_path))
+        with open(self.sidecar_path, encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), "{not json")
 
 
 if __name__ == "__main__":

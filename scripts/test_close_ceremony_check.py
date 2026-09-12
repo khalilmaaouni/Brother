@@ -288,5 +288,101 @@ class AnUnreadablePathIsNeverSilentlyTreatedAsClean(unittest.TestCase):
         self.assertNotIn(LONG_TERM, out)
 
 
+APP_LIKE_TERM = "BRAPPX"  # six characters, like the first target app's name
+
+
+class ABrotherTreeScopedTermIsNotEnforcedOnHandoverPacks(unittest.TestCase):
+    """Founder rule 2026-09-12: the first target app is never named inside
+    Brother's OWN tree, but a handover pack is a different, private tree
+    and may name it (one real pack is even NAMED with it). The day the rule
+    was written the name went into ~/.brothersbe-private-names as a plain
+    line and every pack in the estate failed the closing ceremony within
+    the hour. The `# scope: brother-tree` directive is the fix: the pack
+    scanner (and close_ceremony_check.py through it) skips the block, every
+    other term stays enforced everywhere, and the block is invisible to
+    every other reader of the list because it is a comment."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="ceremony-root-")
+        self.terms_path = _make_terms_file([
+            SHORT_TERM, LONG_TERM,
+            "# scope: brother-tree", APP_LIKE_TERM, "# scope: all",
+        ])
+
+    def tearDown(self):
+        shutil.rmtree(self.root, ignore_errors=True)
+        shutil.rmtree(os.path.dirname(self.terms_path), ignore_errors=True)
+
+    def _ceremony(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = C.main(["--root", self.root, "--terms", self.terms_path])
+        return code, buf.getvalue()
+
+    def _scanner(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = hps.main(["--root", self.root, "--terms", self.terms_path])
+        return code, buf.getvalue()
+
+    def test_a_pack_carrying_only_the_scoped_term_passes_both_gates(self):
+        # In the pack's own NAME, in a file name, in content, and in a zip
+        # member: every place the sweep looks.
+        pack = _make_valid_pack(self.root, "2026-09-12-%s-lanes" % APP_LIKE_TERM.lower())
+        _write(os.path.join(pack, "%s-notes.md" % APP_LIKE_TERM),
+               "the %s screens fold\n" % APP_LIKE_TERM)
+        with zipfile.ZipFile(pack + ".zip", "a") as zf:
+            zf.writestr("%s-notes.md" % APP_LIKE_TERM,
+                        "the %s screens fold\n" % APP_LIKE_TERM)
+        code, out = self._scanner()
+        self.assertEqual(code, hps.EXIT_CLEAN, msg=out)
+        self.assertIn("hits=0", out)
+        self.assertIn("terms-scoped-out=1", out)
+        code, out = self._ceremony()
+        self.assertEqual(code, 0, msg=out)
+        self.assertTrue(out.startswith("PASS:"), out)
+
+    def test_the_global_terms_still_fail_a_pack_with_the_directive_present(self):
+        _make_valid_pack(self.root, "2026-09-12-clean-pack")
+        _write(os.path.join(self.root, "2026-09-01-old-pack", "notes.md"),
+               "mentions %s once\n" % LONG_TERM)
+        code, out = self._ceremony()
+        self.assertEqual(code, 1, msg=out)
+        self.assertIn("2026-09-01-old-pack carries 1 private-term hit", out)
+        self.assertNotIn(LONG_TERM, out)
+
+    def test_a_short_global_term_still_fails_by_whole_word(self):
+        _make_valid_pack(self.root, "2026-09-12-clean-pack")
+        _write(os.path.join(self.root, "2026-09-01-old-pack", "notes.md"),
+               "client %s figures\n" % SHORT_TERM)
+        code, out = self._scanner()
+        self.assertEqual(code, hps.EXIT_FOUND, msg=out)
+        self.assertIn("(a term of %d characters)" % len(SHORT_TERM), out)
+        self.assertNotIn(SHORT_TERM, out)
+
+    def test_the_scoped_term_is_enforced_again_after_scope_all(self):
+        # A term listed AFTER `# scope: all` is global, whatever came before.
+        terms_path = _make_terms_file([
+            "# scope: brother-tree", APP_LIKE_TERM, "# scope: all", LONG_TERM])
+        try:
+            terms, reason = hps.load_terms(terms_path)
+            self.assertIsNone(reason)
+            self.assertEqual(terms, [LONG_TERM])
+        finally:
+            shutil.rmtree(os.path.dirname(terms_path), ignore_errors=True)
+
+    def test_a_list_whose_every_term_is_scoped_out_is_no_data_not_a_pass(self):
+        terms_path = _make_terms_file(["# scope: brother-tree", APP_LIKE_TERM])
+        try:
+            _make_valid_pack(self.root, "2026-09-12-clean-pack")
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                code = hps.main(["--root", self.root, "--terms", terms_path])
+            self.assertEqual(code, hps.EXIT_NO_DATA, msg=buf.getvalue())
+            self.assertIn("NO-DATA", buf.getvalue())
+        finally:
+            shutil.rmtree(os.path.dirname(terms_path), ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main()

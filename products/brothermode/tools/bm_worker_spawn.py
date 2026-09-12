@@ -62,6 +62,7 @@ Python 3.9, standard library only. No network.
 """
 import json
 import os
+import signal
 import subprocess
 import sys
 
@@ -127,6 +128,41 @@ def _result(status, claim="", artifacts=None, cost=None, note="", usage=None):
     return out
 
 
+def _run_process(argv, input=None, cwd=None, env=None, capture_output=True,
+                 text=True, timeout=None):
+    """Reap the worker's process group on timeout, including its model CLI.
+
+    The injected runner seam is unchanged. POSIX children share a fresh group
+    owned by this invocation, so cancelling it never targets another worker.
+    Other platforms retain subprocess.run's direct-child cancellation.
+    """
+    proc = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, cwd=cwd,
+                            env=bm_controller._sanitised_env(env), text=text,
+                            start_new_session=(os.name == "posix"))
+    try:
+        stdout, stderr = proc.communicate(input=input, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            if os.name == "posix":
+                os.killpg(proc.pid, signal.SIGKILL)
+            else:
+                proc.kill()
+        except ProcessLookupError:
+            pass  # sbe: allow-silent the owned group already exited
+        stdout, stderr = proc.communicate()
+        raise subprocess.TimeoutExpired(argv, timeout, output=stdout, stderr=stderr)
+    if (os.name == "posix" and proc.returncode != 0
+            and "failure_class=timeout" in (stderr or "")):
+        # The model's own shorter timeout can fire before the outer bound.
+        # Its direct CLI may be dead while tool descendants are still alive.
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass  # sbe: allow-silent the owned group already exited
+    return subprocess.CompletedProcess(argv, proc.returncode, stdout, stderr)
+
+
 class SpawningWorker(bm_controller.WorkerAdapter):
     """Starts a real process for one unit and waits for its answer.
 
@@ -148,7 +184,7 @@ class SpawningWorker(bm_controller.WorkerAdapter):
         self._argv = list(argv)
         self._cwd = cwd
         self._timeout = timeout
-        self._runner = runner or subprocess.run
+        self._runner = runner or _run_process
         self._environ = environ
 
     def run(self, brief):
@@ -165,7 +201,7 @@ class SpawningWorker(bm_controller.WorkerAdapter):
             )
         except subprocess.TimeoutExpired:
             return _result("unavailable",
-                           note="no answer within %ss; the process was stopped, "
+                           note="failure_class=timeout; no answer within %ss; the process was stopped, "
                                 "so nothing is known about the work"
                                 % self._timeout)
         except (OSError, ValueError) as exc:

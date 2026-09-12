@@ -1455,5 +1455,159 @@ class TheBreakerAlsoGatesRollingDispatch(unittest.TestCase):
         self.assertIn("breaker", records[0]["record"]["reason"])
 
 
+class WholeUnitWorkerSafety(unittest.TestCase):
+    """Exercise the production LaneWorker and run_node entry points."""
+
+    def setUp(self):
+        from unittest.mock import patch
+        self.root = tempfile.TemporaryDirectory()
+        self.addCleanup(self.root.cleanup)
+        self.clock = [100.0]
+        self.patches = [patch.object(B.time, "monotonic", lambda: self.clock[0]),
+                        patch.object(B.journal, "run_dir_from_env",
+                                     lambda: self.root.name)]
+        for item in self.patches:
+            item.start()
+            self.addCleanup(item.stop)
+
+    def spawn(self, result=None):
+        case = self
+        class Spawn:
+            DEFAULT_TIMEOUT_SECONDS = 10
+            calls = []
+            def SpawningWorker(self, argv, cwd=None, environ=None, timeout=None):
+                self.calls.append(timeout)
+                class Child:
+                    def run(self, unit):
+                        case.clock[0] += 4
+                        return result or {"status": "returned", "artifacts": []}
+                return Child()
+        return Spawn()
+
+    def test_remaining_time_survives_new_worker_instance(self):
+        spawn = self.spawn()
+        unit = {"unit_id": "A", "write_scope": ["out"]}
+        B.LaneWorker(spawn, ["stub"]).run(unit)
+        B.LaneWorker(spawn, ["stub"]).run(unit)
+        self.assertEqual(spawn.calls, [10, 6])
+
+    def test_allowance_is_shared_by_repairs_and_new_rounds(self):
+        spawn = self.spawn()
+        spawn.DEFAULT_TIMEOUT_SECONDS = 100
+        unit = {"unit_id": "A", "write_scope": ["out"]}
+        for _ in range(5):
+            B.LaneWorker(spawn, ["stub"]).run(unit)
+        self.assertEqual(len(spawn.calls), 3)
+
+    def test_timeout_without_mutation_metadata_never_replays(self):
+        spawn = self.spawn({"status": "unavailable",
+                            "note": "no answer within 10s; the process was stopped"})
+        unit = {"unit_id": "A", "write_scope": ["out"]}
+        first = B.LaneWorker(spawn, ["stub"]).run(unit)
+        second = B.LaneWorker(spawn, ["stub"]).run(unit)
+        self.assertEqual(len(spawn.calls), 1)
+        self.assertEqual(B.failure_class_of(first), "timeout")
+        self.assertFalse(second.get("retry_safe", True))
+
+    def test_timeout_is_not_integrable_even_when_partial_output_passes(self):
+        spawn = self.spawn({"status": "unavailable",
+                            "note": "failure_class=timeout; model timed out"})
+        p = parts("PASS")
+        got = B.run_node(node("A", owns=["out"]), p,
+                         B.LaneWorker(spawn, ["stub"]))
+        self.assertFalse(got["integrable"])
+        self.assertEqual(got["verdict"], "NO-DATA")
+        self.assertEqual(p["repair"].called, [])
+
+    def test_timeout_during_repair_cannot_be_overruled_by_green_check(self):
+        spawn = self.spawn()
+        original = spawn.SpawningWorker
+        def make(*args, **kwargs):
+            child = original(*args, **kwargs)
+            if len(spawn.calls) == 2:
+                child.run = lambda unit: {"status": "unavailable",
+                    "note": "failure_class=timeout; interrupted mutation"}
+            return child
+        spawn.SpawningWorker = make
+        p = parts("FAIL")
+        def repair(unit, verdict, worker, **kwargs):
+            worker.run(unit)
+            return {"outcome": "REPAIRED", "attempts": [1],
+                    "final_verdict": {"verdict": "PASS"}, "reason": "green"}
+        p["repair"].repair = repair
+        got = B.run_node(node("A", owns=["out"]), p,
+                         B.LaneWorker(spawn, ["stub"]))
+        self.assertEqual(got["verdict"], "NO-DATA")
+        self.assertFalse(got["integrable"])
+
+    def test_real_timed_out_mutation_is_not_dispatched_twice(self):
+        from unittest.mock import patch
+        import pathlib
+        sys.path.insert(0, TOOLS_DIR)
+        import bm_worker_spawn
+        target = pathlib.Path(self.root.name) / "mutation.txt"
+        command = [sys.executable, "-c",
+                   "import pathlib,time; p=pathlib.Path(%r); "
+                   "p.write_text(p.read_text()+'x' if p.exists() else 'x'); "
+                   "time.sleep(10)" % str(target)]
+        unit = {"unit_id": "real", "write_scope": [str(target)]}
+        with patch.object(bm_worker_spawn, "DEFAULT_TIMEOUT_SECONDS", 1):
+            first = B.LaneWorker(bm_worker_spawn, command).run(unit)
+            second = B.LaneWorker(bm_worker_spawn, command).run(unit)
+        self.assertEqual(target.read_text(), "x")
+        self.assertFalse(first["retry_safe"])
+        self.assertFalse(second["retry_safe"])
+        self.assertEqual(B.failure_class_of(first), "timeout")
+
+    def test_interrupted_dispatch_marker_prevents_resume(self):
+        spawn = self.spawn()
+        unit = {"unit_id": "A", "write_scope": ["out"]}
+        original = spawn.SpawningWorker
+        def crash(*args, **kwargs):
+            child = original(*args, **kwargs)
+            def run(_unit):
+                raise RuntimeError("process ended before recording its result")
+            child.run = run
+            return child
+        spawn.SpawningWorker = crash
+        with self.assertRaises(RuntimeError):
+            B.LaneWorker(spawn, ["stub"]).run(unit)
+        resumed = B.LaneWorker(spawn, ["stub"]).run(unit)
+        self.assertEqual(len(spawn.calls), 1)
+        self.assertFalse(resumed["retry_safe"])
+
+    def test_slow_claim_setup_cannot_start_a_fresh_full_timeout(self):
+        from unittest.mock import patch
+        import managed_safety
+        spawn = self.spawn()
+        def slow_claim(*args):
+            self.clock[0] += 11
+            return "session", ""
+        with patch.object(managed_safety, "materialize", side_effect=slow_claim):
+            got = B.run_node(node("A", owns=["out"]), parts("PASS"),
+                             B.LaneWorker(spawn, ["stub"]), cwd=self.root.name)
+        self.assertEqual(got["verdict"], "NO-DATA")
+        self.assertEqual(spawn.calls, [])
+
+    def test_safety_claim_hold_cannot_pass_on_existing_output(self):
+        from unittest.mock import patch
+        import managed_safety
+        spawn = self.spawn()
+        with patch.object(managed_safety, "materialize", return_value=(None, "held")):
+            got = B.run_node(node("A", owns=["out"]), parts("PASS"),
+                             B.LaneWorker(spawn, ["stub"]), cwd=self.root.name)
+        self.assertEqual(got["verdict"], "NO-DATA")
+        self.assertFalse(got["integrable"])
+        self.assertEqual(spawn.calls, [])
+
+    def test_timeout_does_not_enter_repair_when_check_is_red(self):
+        spawn = self.spawn({"status": "unavailable",
+                            "note": "failure_class=timeout; model timed out"})
+        p = parts("FAIL")
+        B.run_node(node("A", owns=["out"]), p,
+                   B.LaneWorker(spawn, ["stub"]))
+        self.assertEqual(p["repair"].called, [])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -26,7 +26,7 @@
   },
   {
    "path": "brothermode/tools/bm_bash_audit.py",
-   "sha256": "40565da632e254362fba6678029275c8d7533381fcf5fcc3161e2a97d9b08a3a"
+   "sha256": "ea574050e70a9b043ef0b3edaff0ef1c8ef3871e5715f1748a48988c3b18eac8"
   },
   {
    "path": "brothermode/tools/bm_bbstatus.py",
@@ -58,7 +58,7 @@
   },
   {
    "path": "brothermode/tools/bm_cursor_hook.py",
-   "sha256": "30693091b14e5e575863ec30743266a62750de400cc9b073b886344496b71315"
+   "sha256": "76ce251c37a8a9d96b3ea61d653a7c9f7079f4ed349a61b9f67f39bcd2bf0a7c"
   },
   {
    "path": "brothermode/tools/bm_docs.py",
@@ -90,7 +90,7 @@
   },
   {
    "path": "brothermode/tools/bm_fence_hook.py",
-   "sha256": "c2c6d37d5a98962678e6ec4cb6e552f5dc16d58ea95697b043feaa92bc2f9e9a"
+   "sha256": "c81f7b5b96aba5833a2abb4afa34de9e74ce0883a2060b581b53d280538fe6b8"
   },
   {
    "path": "brothermode/tools/bm_forecast.py",
@@ -190,7 +190,7 @@
   },
   {
    "path": "brothermode/tools/bm_project_facts.py",
-   "sha256": "0c5e469dc8785ad97b051bc37aa6f879523b6e550be6ca7c892e98017d048a1a"
+   "sha256": "bb0ffe8f11cdefd8a6aee896b897e8066b1f90e2cc7ad81f4c902bd6df95421c"
   },
   {
    "path": "brothermode/tools/bm_queue_numbers.py",
@@ -546,11 +546,11 @@
   },
   {
    "path": "brothermode/tools/bm_worker_spawn.py",
-   "sha256": "e55dfd3d6c35d004e52569e4b25c6bfcfef25f116e14ee2ae077b18b8423f76f"
+   "sha256": "685c234360efefc1098435a80386b5fd6ac8db384ede90dc9baa67d361de584f"
   },
   {
    "path": "brothermode/tools/brother_paths.py",
-   "sha256": "3815d9f651dc46a5e18d7c1bbb45a7369c8455dec9777fea73be1757375d2a22"
+   "sha256": "197a3d5830a92b681872f1cddeb20c9d8bc3cf404e3ccb560c031334a0c6d5f8"
   },
   {
    "path": "brothermode/tools/brothermode_cli.py",
@@ -582,7 +582,7 @@
   },
   {
    "path": "brothersbe/tools/brother_paths.py",
-   "sha256": "10f310ff8651a815996064fe7905098b43e02bcf6417d9c9c74f5f7d1fb605f1"
+   "sha256": "51f784ad05ad774746746180e88b37d188c508f473ab090582f9b1e486cd9285"
   },
   {
    "path": "brothersbe/tools/sbe_authority_hook.py",

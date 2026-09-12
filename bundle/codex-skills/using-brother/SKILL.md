@@ -18,7 +18,8 @@ this one and fixes the other. Evaluate in order, stop at the first match:
 
 1. **Bare, and unfinished work exists here.** Discovery decides, never a
    guess: `python3 "$BROTHER_PLUGIN_ROOT/runtime/brother_run.py" --continue
-   --cwd <repo>` (`$CLAUDE_PLUGIN_ROOT` under Claude Code). One unfinished
+   --cwd <repo>` (`$CLAUDE_PLUGIN_ROOT` under Claude Code, `$PLUGIN_ROOT`
+   under Cursor). One unfinished
    outcome: offer or resume it by its
    plain-language name. Several: number them and ask which. In every
    case: never a run id, never a run directory, before the person.

@@ -10,6 +10,8 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
+from pathlib import Path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -129,6 +131,88 @@ class HonestVerbs(unittest.TestCase):
                                    "status", "--codex-bin", fake],
                                   capture_output=True, text=True)
             self.assertNotEqual(proc.returncode, 0)
+
+
+class ProductSkillLifecycle(unittest.TestCase):
+    def test_opt_in_installs_retains_and_verifies_companions(self):
+        from test_codex_product_skills import fixture
+        with tempfile.TemporaryDirectory() as d:
+            source = fixture(Path(d) / "export")
+            home = str(Path(d) / "home")
+            Path(home).mkdir()
+            installed = {}
+            roots = {"brother": source}
+            calls = []
+
+            def cli(_binary, args, _home, timeout=120):
+                calls.append(args)
+                data = {}
+                if args[:3] == ["plugin", "list", "--json"]:
+                    data = {"installed": list(installed.values())}
+                elif args[:3] == ["plugin", "marketplace", "add"]:
+                    root = source if args[3] == BI.MARKETPLACE_URL_DEFAULT else Path(args[3])
+                    catalog = json.loads((root / ".agents/plugins/marketplace.json").read_text())
+                    name = catalog["name"]
+                    roots[name] = root
+                    data = {"marketplaceName": name, "installedRoot": str(root)}
+                elif args[:2] == ["plugin", "add"]:
+                    name, market = args[2].split("@")
+                    path = roots[market] / ("bundle" if name == "brother" else "plugins/" + name)
+                    manifest = json.loads((path / ".codex-plugin/plugin.json").read_text())
+                    data = {"pluginId": args[2], "name": name, "marketplaceName": market,
+                            "version": manifest["version"], "installedPath": str(path)}
+                    installed[args[2]] = data
+                elif args[:2] == ["plugin", "remove"]:
+                    installed.pop(args[2], None)
+                return {"returncode": 0, "stdout": json.dumps(data), "stderr": "", "problem": None}
+
+            with mock.patch.object(BI, "run_codex", side_effect=cli):
+                result = BI.do_install("fake", home, BI.MARKETPLACE_URL_DEFAULT, "v1.0.14", product_skills=True)
+                self.assertEqual(result["verdict"], "PASS", result)
+                self.assertEqual(set(installed), {"brother@brother", "brothermode@brother-product-skills", "brothersbe@brother-product-skills"})
+                self.assertEqual(BI.do_status("fake", home, BI.MARKETPLACE_URL_DEFAULT, product_skills=True)["verdict"], "END-STATE")
+                self.assertEqual(BI.do_install("fake", home, BI.MARKETPLACE_URL_DEFAULT, "v1.0.14")["verdict"], "PASS")
+                self.assertIn("brothermode@brother-product-skills", installed)
+                before = dict(installed["brothermode@brother-product-skills"])
+                snapshot = BI.make_snapshot("fake", home, BI.MARKETPLACE_URL_DEFAULT, "v1.0.14")
+                self.assertIsNone(snapshot["problem"])
+                (source / "products/brothermode/tools/helper.py").write_text("new support")
+                self.assertEqual(BI.do_install("fake", home, BI.MARKETPLACE_URL_DEFAULT, "v1.0.14", product_skills=True)["verdict"], "PASS")
+                self.assertNotEqual(installed["brothermode@brother-product-skills"]["version"], before["version"])
+                self.assertEqual(BI.do_rollback("fake", home, snapshot["dir"])["verdict"], "PASS")
+                self.assertEqual(installed["brothermode@brother-product-skills"]["version"], before["version"])
+                root = Path(installed["brothermode@brother-product-skills"]["installedPath"])
+                (root / "tools/helper.py").write_text("tampered")
+                self.assertEqual(BI.do_status("fake", home, BI.MARKETPLACE_URL_DEFAULT, product_skills=True)["verdict"], "PARTIAL")
+                BI.do_uninstall("fake", home, BI.MARKETPLACE_URL_DEFAULT)
+                self.assertEqual(installed, {})
+            local_adds = [a for a in calls if a[:3] == ["plugin", "marketplace", "add"] and a[3] != BI.MARKETPLACE_URL_DEFAULT]
+            self.assertTrue(local_adds)
+            self.assertTrue(all("--ref" not in args for args in local_adds))
+
+    def test_local_marketplace_requires_explicit_export_input(self):
+        with tempfile.TemporaryDirectory() as d:
+            result = BI.install_product_skills("fake", d, "/private/source", "v1", {"installed_root": d})
+            self.assertEqual(result["status"], "FAIL")
+            self.assertIn("explicit", result["detail"])
+
+    def test_local_marketplace_repoint_omits_ref_on_both_attempts(self):
+        responses = [
+            {"returncode": 1, "stdout": "", "stderr": "already added from a different source", "problem": None},
+            {"returncode": 0, "stdout": "{}", "stderr": "", "problem": None},
+            {"returncode": 0, "stdout": '{"installedRoot":"/new/brother-product-skills"}', "stderr": "", "problem": None}]
+        with mock.patch.object(BI, "run_codex", side_effect=responses) as cli:
+            result = BI.ensure_marketplace("fake", "/home", "/new/brother-product-skills", None)
+        adds = [call.args[1] for call in cli.call_args_list if call.args[1][:3] == ["plugin", "marketplace", "add"]]
+        self.assertEqual(len(adds), 2)
+        self.assertEqual(adds[0], adds[1])
+        self.assertNotIn("--ref", adds[1])
+        self.assertEqual(result["installed_root"], "/new/brother-product-skills")
+
+    def test_product_skills_flags_are_explicit(self):
+        args = BI.build_argparser().parse_args(["install", "--ref", "v1.0.14", "--product-skills", "--product-skills-export", "/export"])
+        self.assertTrue(args.product_skills)
+        self.assertEqual(args.product_skills_export, "/export")
 
 
 if __name__ == "__main__":

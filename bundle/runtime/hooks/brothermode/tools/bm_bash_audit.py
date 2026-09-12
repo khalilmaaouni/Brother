@@ -369,11 +369,12 @@ def _strip_heredoc_bodies(command_text, fh):
     lines = command_text.split("\n")
     n = len(lines)
     out = []
+    quote_state = {}
     i = 0
     while i < n:
         out.append(lines[i])
         try:
-            ops = finder(lines[i])
+            ops = finder(lines[i], quote_state)
         except Exception:
             ops = []
         i += 1

@@ -408,6 +408,26 @@ class TheFallbackInheritsTheUnitDeadline(unittest.TestCase):
             self.assertEqual(kwargs["timeout"], 77)
             self.assertEqual(kwargs["timeout"], mw._timeout_s())
 
+    def test_fallback_uses_remaining_unit_allowance(self):
+        with mock.patch.dict(os.environ, {"MODEL_WORKER_TIMEOUT_S": "77",
+                                          "BROTHER_UNIT_TIME_LEFT_S": "3.25"}):
+            calls = []
+            def runner(argv, **kwargs):
+                calls.append(kwargs["timeout"])
+                return _FakeCompleted(stdout=json.dumps({"result": "did it"}))
+            _mw().run_model("prompt", runner=runner)
+            self.assertEqual(calls, [3.25])
+
+    def test_invalid_or_spent_unit_allowance_never_spawns(self):
+        for value in ("0", "-1", "nan", "inf", "bad"):
+            with self.subTest(value=value), mock.patch.dict(
+                    os.environ, {"BROTHER_UNIT_TIME_LEFT_S": value}):
+                runner = mock.Mock()
+                ok, reason, _ = _mw().run_model("prompt", runner=runner)
+                self.assertFalse(ok)
+                self.assertIn("failure_class=timeout", reason)
+                runner.assert_not_called()
+
 
 class TestClassifyFailure(unittest.TestCase):
     """SR-1(d): classify_failure() reads exactly one class from what the

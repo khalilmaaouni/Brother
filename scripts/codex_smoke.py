@@ -54,6 +54,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -386,10 +387,26 @@ class _Handler(BaseHTTPRequestHandler):
                                        {"reasoning_tokens": 0},
                                    "total_tokens": 2}}}
         name = self._tool_name(body)
+        # exec_command can return while its process is still running. The
+        # next request carries that session id, not a finished command.
+        # Poll the latest result until it exits; an immediate final message
+        # used to end the turn and kill a correctly granted git commit.
+        outputs = [item for item in body.get("input", [])
+                   if isinstance(item, dict) and item.get("type") == "function_call_output"]
+        output = outputs[-1].get("output", "") if outputs else ""
+        running = re.search(r"^Process running with session ID (\d+)\s*$", output,
+                            re.MULTILINE) if isinstance(output, str) else None
+        names = [(tool.get("function") or tool).get("name")
+                 for tool in body.get("tools", [])]
         if turn == 1 and name is not None:
-            item = {"type": "function_call", "id": "fc_c7",
-                    "call_id": "call_c7", "name": name,
+            item = {"type": "function_call", "id": "fc_c7_%d" % turn,
+                    "call_id": "call_c7_%d" % turn, "name": name,
                     "arguments": json.dumps({"cmd": self.brother_command})}
+        elif running and "write_stdin" in names:
+            item = {"type": "function_call", "id": "fc_c7_%d" % turn,
+                    "call_id": "call_c7_%d" % turn, "name": "write_stdin",
+                    "arguments": json.dumps({"session_id": int(running.group(1)),
+                                             "chars": "", "yield_time_ms": 10000})}
         else:
             item = {"type": "message", "id": "msg_c7", "role": "assistant",
                     "content": [{"type": "output_text",

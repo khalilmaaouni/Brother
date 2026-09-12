@@ -76,7 +76,7 @@ class _StubSpawn(object):
         self.run_dir = run_dir
         self.calls = []
 
-    def SpawningWorker(self, argv, cwd=None, environ=None):
+    def SpawningWorker(self, argv, cwd=None, environ=None, timeout=None):
         return _StubWorker(self, argv, cwd, environ)
 
 

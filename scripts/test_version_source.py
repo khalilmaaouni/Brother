@@ -84,6 +84,18 @@ BUNDLE_CODEX = {
     "skills": "./skills/",
 }
 
+BUNDLE_CURSOR = {
+    "name": "brother",
+    "version": "1.0.9",
+    "description": "d",
+    "author": {"name": "Khalil Maaouni"},
+    "repository": "https://github.com/khalilmaaouni/Brother",
+    "license": "MIT",
+    "skills": ["./skills/"],
+    "commands": ["./commands/"],
+    "hooks": "./cursor-hooks/hooks.json",
+}
+
 VERSIONING_MD = (
     "# Versioning\n\n"
     "Some prose.\n\n"
@@ -113,6 +125,7 @@ def build_fixture(root):
     write_json(root / ".claude-plugin" / "marketplace.json", MARKETPLACE)
     write_json(root / "bundle" / ".claude-plugin" / "plugin.json", BUNDLE_CLAUDE)
     write_json(root / "bundle" / ".codex-plugin" / "plugin.json", BUNDLE_CODEX)
+    write_json(root / "bundle" / ".cursor-plugin" / "plugin.json", BUNDLE_CURSOR)
     write_text(root / "docs" / "VERSIONING.md", VERSIONING_MD)
     write_json(root / "products" / "brothermode" / ".claude-plugin" / "plugin.json", PRODUCT_CLAUDE)
     write_json(root / "products" / "brothermode" / ".codex-plugin" / "plugin.json", PRODUCT_CLAUDE)
@@ -195,6 +208,8 @@ class VersionSourceTests(unittest.TestCase):
         self.assertEqual(bundle_claude["version"], "2.1.3")
         bundle_codex = json.loads((self.tmp / "bundle" / ".codex-plugin" / "plugin.json").read_text())
         self.assertEqual(bundle_codex["version"], "2.1.3")
+        bundle_cursor = json.loads((self.tmp / "bundle" / ".cursor-plugin" / "plugin.json").read_text())
+        self.assertEqual(bundle_cursor["version"], "2.1.3")
 
         marketplace = json.loads((self.tmp / ".claude-plugin" / "marketplace.json").read_text())
         self.assertEqual(marketplace["metadata"]["version"], "2.1.3")
@@ -225,6 +240,7 @@ class VersionSourceTests(unittest.TestCase):
         result = run(["--check", "--root", str(self.tmp)])
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("NO-DATA: products/brothersbe/.codex-plugin/plugin.json", result.stdout)
+        self.assertIn("NO-DATA: products/brothersbe/.cursor-plugin/plugin.json", result.stdout)
 
     def test_key_order_and_indentation_survive_a_write_apart_from_version(self):
         path = self.tmp / "bundle" / ".claude-plugin" / "plugin.json"
@@ -257,6 +273,59 @@ class VersionSourceTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("DRIFT: docs/VERSIONING.md:Current version", result.stdout)
 
+    def test_drifted_cursor_marketplace_metadata_version_reports_both_values(self):
+        cursor_path = self.tmp / ".cursor-plugin" / "marketplace.json"
+        write_json(cursor_path, {
+            "name": "brother",
+            "metadata": {"version": "0.0.1"},
+            "plugins": [
+                {"name": "brother", "version": "1.0.9"},
+                {"name": "brothermode", "version": "3.4.4"},
+                {"name": "brothersbe", "version": "3.7.3"},
+            ],
+        })
+        result = run(["--check", "--root", str(self.tmp)])
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("DRIFT: cursor-marketplace:metadata.version", result.stdout)
+        self.assertIn("source=1.0.9", result.stdout)
+        self.assertIn("carrier=0.0.1", result.stdout)
+
+    def test_write_bumps_cursor_marketplace_umbrella_not_product_versions(self):
+        cursor_path = self.tmp / ".cursor-plugin" / "marketplace.json"
+        write_json(cursor_path, {
+            "name": "brother",
+            "metadata": {"version": "1.0.9"},
+            "plugins": [
+                {"name": "brother", "version": "1.0.9"},
+                {"name": "brothermode", "version": "3.4.4"},
+                {"name": "brothersbe", "version": "3.7.3"},
+            ],
+        })
+        result = run(["--write", "--version", "1.0.10", "--root", str(self.tmp)])
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        doc = json.loads(cursor_path.read_text())
+        self.assertEqual(doc["metadata"]["version"], "1.0.10")
+        brother = next(p for p in doc["plugins"] if p["name"] == "brother")
+        self.assertEqual(brother["version"], "1.0.10")
+        brothermode = next(p for p in doc["plugins"] if p["name"] == "brothermode")
+        self.assertEqual(brothermode["version"], "3.4.4")
+        brothersbe = next(p for p in doc["plugins"] if p["name"] == "brothersbe")
+        self.assertEqual(brothersbe["version"], "3.7.3")
+
+        text = cursor_path.read_text()
+        self.assertTrue(text.endswith("\n"))
+        self.assertTrue(text.splitlines()[1].startswith("  \""))
+
+    def test_missing_cursor_marketplace_is_no_data_not_drift(self):
+        result = run(["--check", "--root", str(self.tmp)])
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("NO-DATA: cursor-marketplace:metadata.version", result.stdout)
+        self.assertIn("NO-DATA: cursor-marketplace:brother.version", result.stdout)
+        self.assertIn("NO-DATA: cursor-marketplace:brothermode.version", result.stdout)
+        self.assertIn("NO-DATA: cursor-marketplace:brothersbe.version", result.stdout)
+        self.assertNotIn("DRIFT: cursor-marketplace", result.stdout)
+
     def test_a_write_that_fails_part_way_restores_every_carrier(self):
         # docs/VERSIONING.md is the LAST carrier written; breaking it makes
         # the run fail after marketplace.json and both bundle manifests were
@@ -267,6 +336,7 @@ class VersionSourceTests(unittest.TestCase):
             self.tmp / ".claude-plugin" / "marketplace.json",
             self.tmp / "bundle" / ".claude-plugin" / "plugin.json",
             self.tmp / "bundle" / ".codex-plugin" / "plugin.json",
+            self.tmp / "bundle" / ".cursor-plugin" / "plugin.json",
             self.tmp / "docs" / "VERSIONING.md",
         ]
         before = {p: p.read_bytes() for p in watched}
