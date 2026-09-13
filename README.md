@@ -6,7 +6,7 @@
 
 You want to give an AI agent a task and get on with your day. But full auto asks for more trust than you can justify, and watching every action turns you into the agent's full-time supervisor.
 
-**Brother is built for autonomy you can justify:** agreed boundaries before the work, checks during execution, and an auditable record when you return. Brother ships surfaces for Claude Code, Codex, and Cursor. Enforcement depends on measured host capability and setup. Cursor fence enforcement remains ADVISORY until a live signed-in Cursor Agent deny canary passes.
+**Brother is built for autonomy you can justify:** agreed boundaries before the work, checks during execution, and an auditable record when you return. Brother ships surfaces for Claude Code, Codex, and Cursor. Enforcement depends on measured host capability and setup. Cursor enforcement remains ADVISORY until a live signed-in Cursor Agent deny canary passes.
 
 The goal is to let you step away for more useful work as the system earns confidence through a track record you can inspect. Current protection depends on the installed controls, the task, and the quality of its checks; Brother is not a blanket guarantee that any job is safe to leave unattended.
 
