@@ -1,8 +1,12 @@
 name: required-fast
+# NO-SELF-FIRING-CI LAW (founder order 2026-08-16, reaffirmed 2026-09-13):
+# this workflow must never fire by itself. on: pull_request is forbidden.
+# The real pre-merge gate is local: sh scripts/required_fast.sh. This file
+# stays dispatch-only, ubuntu-only, and is run by hand when wanted. The main
+# ruleset no longer requires this check, so dropping the PR trigger cannot
+# block merges.
 on:
-  pull_request:
-    branches:
-      - main
+  workflow_dispatch
 jobs:
   required-fast:
     runs-on: ubuntu-latest
