@@ -16,4 +16,6 @@
 - [Recover from failure/refusal](recover-from-failure.md)
 - [Scope/disable hooks](scope-hooks.md)
 - [Adopt on a team](adopt-on-a-team.md)
+- [Hand off work to a teammate](hand-off-to-a-teammate.md)
+- [Add Brother to an existing repository](add-brother-to-an-existing-repo.md)
 - [Prepare a release](prepare-a-release.md)
