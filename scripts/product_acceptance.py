@@ -957,6 +957,13 @@ def area_5(live=False):
 
     env = stub_env(tmp, ONE_UNIT_DECOMPOSER, HANGING_MODEL)
     env["BROTHER_RUNTIME_ROOT"] = runtime_root
+    # The worker spawn timeout is shortened via BROTHER_RUNTIME_ROOT above, but
+    # the controller's own retry backoff (RETRY_BACKOFF_BASE_SECONDS, 30s
+    # doubling) is a brother_run.py constant that fixture does not reach, so a
+    # reaped hung worker then slept ~30s + ~60s and tripped this test's 90s
+    # watchdog even though the reaper worked. Shorten the backoff for the test
+    # only; production default (30s) is unchanged.
+    env["BROTHER_RETRY_BACKOFF_BASE_S"] = "0.2"
 
     start = time.time()
     proc = _popen_group([sys.executable, BROTHER_RUN,

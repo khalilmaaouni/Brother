@@ -233,7 +233,7 @@ RATE_LIMIT_PARK_SECONDS = 900
 #: overloaded/timeout/empty backoff: base seconds, doubling per consecutive
 #: failure of the SAME unit this run, capped, then jittered upward by up to
 #: this fraction so many units failing together do not all wake in lockstep.
-RETRY_BACKOFF_BASE_SECONDS = 30
+RETRY_BACKOFF_BASE_SECONDS = float(os.environ.get("BROTHER_RETRY_BACKOFF_BASE_S") or 30)
 RETRY_BACKOFF_CAP_SECONDS = 300
 RETRY_BACKOFF_JITTER_FRACTION = 0.20
 
