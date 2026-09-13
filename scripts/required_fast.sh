@@ -121,6 +121,9 @@ run_check "cursor-plugin-self"  python3 scripts/test_cursor_plugin.py
 # is the defect, and the same payload through bm_cursor_hook.py --run is
 # denied. No binary is needed, so it also earns the fast slice.
 run_check "cursor-hook-run-self" python3 scripts/test_cursor_hook_run.py -v
+# The shipped deny chain end to end (hooks.json command, real fence, real
+# claim): about two seconds, no binary, so it earns the fast slice too.
+run_check "cursor-deny-chain-self" python3 scripts/test_cursor_deny_chain.py -v
 # Founder order 2026-09-12: Cursor stays at parity with Codex at every
 # release. Every tracked Codex surface and every codex- battery check needs
 # a Cursor twin, an exemption or a dated debt, and a debt past its release

@@ -1414,6 +1414,14 @@ run_check "cursor-plugin-self" python3 scripts/test_cursor_plugin.py
 # is the defect this check pins, and the same payload through
 # bm_cursor_hook.py --run is denied. No binary is needed.
 run_check "cursor-hook-run-self" python3 scripts/test_cursor_hook_run.py -v
+# The SHIPPED deny chain, end to end: the preToolUse command out of
+# bundle/cursor-hooks/hooks.json, ${PLUGIN_ROOT} resolved to bundle/, run
+# against a throwaway project another session has claimed. Exit 2, flat
+# Cursor deny naming the record, file untouched; the owner stays allowed;
+# an unclaimed project is the backward drive. Deterministic, no binary:
+# it does NOT prove a live signed-in Cursor honors the deny (that stays
+# NO-DATA until docs/cursor/SMOKE-RUNBOOK.md runs signed in).
+run_check "cursor-deny-chain-self" python3 scripts/test_cursor_deny_chain.py -v
 # The clean-install Cursor smoke. It installs into a throwaway HOME, proves
 # that HOME is signed out, and drives a print turn until it stops at the
 # auth boundary. It hashes the founder's own ~/.cursor plugin, rules,

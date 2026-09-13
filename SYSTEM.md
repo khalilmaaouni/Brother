@@ -16,7 +16,7 @@ to run the battery.
 | Parts | 210 |
 | Parts with a purpose written in the file | 208 |
 | Parts with a suite wired into the battery | 187 |
-| Checks in the battery | 291 |
+| Checks in the battery | 292 |
 
 2 part(s) carry no purpose line and are listed as NO-DATA below. They are
 shown rather than omitted, because a system record that hides its
@@ -491,6 +491,7 @@ undocumented corners looks complete and is not.
 - `codex-smoke-self`: `python3 scripts/test_codex_smoke.py -v`
 - `cursor-plugin-self`: `python3 scripts/test_cursor_plugin.py`
 - `cursor-hook-run-self`: `python3 scripts/test_cursor_hook_run.py -v`
+- `cursor-deny-chain-self`: `python3 scripts/test_cursor_deny_chain.py -v`
 - `cursor-smoke`: `python3 scripts/cursor_smoke.py`
 - `cursor-smoke-self`: `python3 scripts/test_cursor_smoke.py -v`
 - `client-parity`: `python3 scripts/test_client_parity.py -v`

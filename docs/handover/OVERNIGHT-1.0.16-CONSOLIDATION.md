@@ -5,7 +5,10 @@
 `PARTIAL: SAFE CHANGES READY, BLOCKERS PARKED`
 
 This candidate is not ready for a release cut. The isolated branch contains
-one completed P0 lane. No merge, push, tag, or publish was performed.
+two completed P0 lanes: public host truth, and the shipped Cursor deny-chain
+regression test. No merge, push, tag, or publish was performed. The umbrella
+version is unchanged at `1.0.15` (a bump is a release act, deliberately not
+taken here).
 
 ## Baseline
 
@@ -52,6 +55,48 @@ python3 scripts/system_doc.py --check            exit 0
 git diff --check                                 exit 0
 ```
 
+### Shipped Cursor deny chain (new this session)
+
+- Files: `scripts/test_cursor_deny_chain.py` (new), `scripts/check_all.sh`,
+  `scripts/required_fast.sh` (both register the new check)
+- Result: `PASS`
+- What it proves, that the sibling tests did not: it takes the real
+  `preToolUse` command out of `bundle/cursor-hooks/hooks.json`, resolves
+  `${PLUGIN_ROOT}` to `bundle/`, and runs it as a subprocess against a
+  throwaway project whose store holds a claim by ANOTHER session. It asserts
+  the whole shipped chain, not a stub: exit 2, a flat Cursor deny naming the
+  record and its takeover command, the fenced file left untouched, the
+  owner's own write still allowed, and byte-equality between the shipped
+  `bundle/runtime` copies and the `products/brothermode/tools` sources so the
+  chain under test is the one that ships.
+- Backward drive: the same foreign write against a project that holds NO
+  claim on the path comes back allow, exit 0, so the deny is the real fence
+  reading a real claim, not the adapter or the mode refusing everything.
+- What it does NOT establish: that a live signed-in Cursor Agent honors the
+  refusal. That stays `NO-DATA` (see Cursor enforcement below).
+
+Deciding commands and results (this session, evidence at
+`~/.claude/evidence/1789261995-63797-*.txt`):
+
+```text
+python3 scripts/test_cursor_deny_chain.py -v     OK, 6 tests, exit 0
+python3 scripts/public_host_truth.py             exit 0
+python3 scripts/test_public_host_truth.py        exit 0
+python3 scripts/doc_assurance.py                 exit 0
+python3 scripts/test_client_parity.py            exit 0
+python3 scripts/test_cursor_plugin.py            exit 0
+python3 scripts/test_cursor_hook_run.py          exit 0
+python3 scripts/test_cursor_smoke.py             exit 0 (signed-in smoke NO-DATA: cursor-agent not logged in)
+python3 scripts/test_cursor_battery.py           exit 0
+python3 scripts/test_required_fast.py            OK, 12 tests, exit 0
+git diff --check                                 exit 0
+sh -n scripts/check_all.sh; sh -n scripts/required_fast.sh   exit 0
+```
+
+`python3 scripts/system_doc.py --check` returns exit 1 until SYSTEM.md is
+regenerated for the new file; that regeneration is the last edit before the
+commit and is quoted in Battery below.
+
 ## Cursor enforcement
 
 - Signed in available: `NO-DATA`
@@ -61,8 +106,14 @@ git diff --check                                 exit 0
 - Founder Cursor witness: unchanged in deterministic signed-out fixtures
 - Final enforcement status: `ADVISORY`
 
-The checked-in adapter and deterministic deny translation tests pass. They do
-not establish that a live signed-in Cursor Agent honors the refusal.
+The checked-in adapter and deterministic deny tests pass, and now the SHIPPED
+deny chain (hooks.json command, real fence, real cross-session claim) is
+proven end to end by `scripts/test_cursor_deny_chain.py` (see Completed work).
+None of these establish that a live signed-in Cursor Agent honors the refusal;
+the signed-in half stays `NO-DATA` because `cursor-agent` reports not logged in
+on this machine, and per the live-Cursor requirement that value is preserved
+as `NO-DATA` rather than assumed. `docs/cursor/SMOKE-RUNBOOK.md` is the runbook
+that closes it.
 
 ## Other workstreams
 
@@ -82,18 +133,33 @@ The registered command was started:
 sh scripts/check_all.sh
 ```
 
-It reached the long product suites but was stopped after 28 minutes because
-other concurrent `check_all.sh` runs were already executing in the shared
-worktree. The captured run reported new host-truth checks as PASS and exposed
-pre-existing or environmental failures including missing roadmap fixtures,
-generated-state drift, acceptance fixture failures, and missing Cursor
-capability. The run did not produce a final summary line, so aggregate counts
-are `NO-DATA`.
+The full battery aggregate is `NO-DATA` this session for the same reason as
+the overnight run: the shared worktree had up to 17 concurrent
+`required_fast.sh` runs from other sessions during this window, so a
+whole-battery pass cannot be attributed. Rather than fight the contention,
+every check the fast gate contains, plus the new deny-chain check, was run
+individually with full evidence capture through `scripts/run_evidence.py` and
+each returned exit 0 (quoted in Completed work). The overnight `check_all.sh`
+run had already reported the new host-truth checks as PASS and exposed
+pre-existing or environmental failures (missing roadmap fixtures,
+generated-state drift, acceptance fixture failures, missing Cursor capability);
+those are unchanged and remain founder decision 2.
+
+SYSTEM.md was regenerated as the last edit before the commit, because adding
+`scripts/test_cursor_deny_chain.py` invalidated the whole-tree description:
+
+```text
+python3 scripts/system_doc.py            (regenerated SYSTEM.md)
+python3 scripts/system_doc.py --check    exit 0 (after regeneration)
+```
 
 ## Founder decisions
 
-1. Run the live signed-in Cursor deny canary and decide whether advisory status
-   may change.
+1. Run the live signed-in Cursor deny canary (docs/cursor/SMOKE-RUNBOOK.md)
+   and decide whether advisory status may change. The DETERMINISTIC half is
+   now closed: scripts/test_cursor_deny_chain.py proves the shipped chain
+   refuses a cross-session write end to end. Only the live signed-in witness
+   remains NO-DATA, blocked on cursor-agent login, which is founder-only.
 2. Decide whether to repair the pre-existing full-battery fixture failures as
    part of 1.0.16 or carry them into a separate repair cut.
 3. Approve fresh benchmark controls and real human Acceptance Time reviewers
