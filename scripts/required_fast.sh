@@ -53,9 +53,25 @@ run_check() {
   last="$(printf '%s\n' "$out" | tail -1 | cut -c1-72)"
   keep=""
   case "$code" in
-    0) pass=$((pass+1));   verdict="PASS   " ;;
+    0) pass=$((pass+1));   verdict="PASS   "
+       # THE READOUT NAMES THE CHECK'S OWN VERDICT, NOT WHATEVER PRINTED
+       # LAST. A unittest suite states its verdict on its own line ("OK", or
+       # "OK (skipped=N)"); a self-test block can print an adversarial
+       # "FAIL:"/"NO-DATA:" string as its last line on a green run, which
+       # reads as a failure to anyone skimming. Prefer the OK line when the
+       # output has one; a check that is not a unittest suite keeps its last
+       # line, which for those already is the verdict. Same logic as
+       # check_all.sh's run_check; verdict itself still comes from $code.
+       ok_line="$(printf '%s\n' "$out" | grep -E '^OK($| \()' | tail -1 | cut -c1-72)"
+       [ -n "$ok_line" ] && last="$ok_line" ;;
     2) nodata=$((nodata+1)); verdict="NO-DATA"; nodata_names="$nodata_names $name" ;;
     *) fail=$((fail+1));   verdict="FAIL   "; failed_names="$failed_names $name"
+       # THE READOUT NAMES THE FAILURE, NOT WHATEVER PRINTED LAST. Prefer the
+       # last line that actually carries a failure word; keep the generic
+       # last line only when nothing in the output says so, so a check with
+       # no such wording never goes silent. Same logic as check_all.sh.
+       fail_line="$(printf '%s\n' "$out" | grep -E 'FAIL|REFUSED|BLOCK|Error' | tail -1 | cut -c1-72)"
+       [ -n "$fail_line" ] && last="$fail_line"
        # CAPTURE EVERYTHING, READ A SLICE (same estate lesson as check_all.sh).
        keep="${TMPDIR:-/tmp}/required-fast-fail-$name-$worktree_key.txt"
        printf '%s\n' "$out" > "$keep" 2>/dev/null && last="$last  [full: $keep]"

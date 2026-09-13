@@ -99,21 +99,40 @@ commit and is quoted in Battery below.
 
 ## Cursor enforcement
 
-- Signed in available: `NO-DATA`
-- Forbidden action attempted in live Cursor: `NO-DATA`
-- Host honored a deny: `NO-DATA`
-- Forbidden file unchanged: `NO-DATA`
-- Founder Cursor witness: unchanged in deterministic signed-out fixtures
-- Final enforcement status: `ADVISORY`
+- Signed in available: `YES` (cursor-agent logged in as the founder; overnight
+  said NO-DATA/not found, the ground moved since)
+- Deterministic deny (candidate bundle): `PASS` via
+  `scripts/test_cursor_deny_chain.py` (the real hooks.json command refuses a
+  cross-session write)
+- Live signed-in smoke: `FAIL`, but NOT a candidate defect (see below)
+- Live signed-in deny: `NO-DATA` (the smoke never reached an edit, so no deny
+  was ever attempted)
+- Founder Cursor witness: `UNCHANGED` (before and after hash both
+  `a646765e87f51f8dfaa9fcb04c35c77b0ea808343ec070d1bb622a6dfdd7b0c9`)
+- Final enforcement status: `ADVISORY` (unchanged)
 
-The checked-in adapter and deterministic deny tests pass, and now the SHIPPED
-deny chain (hooks.json command, real fence, real cross-session claim) is
-proven end to end by `scripts/test_cursor_deny_chain.py` (see Completed work).
-None of these establish that a live signed-in Cursor Agent honors the refusal;
-the signed-in half stays `NO-DATA` because `cursor-agent` reports not logged in
-on this machine, and per the live-Cursor requirement that value is preserved
-as `NO-DATA` rather than assumed. `docs/cursor/SMOKE-RUNBOOK.md` is the runbook
-that closes it.
+The signed-in smoke was run now that cursor-agent is logged in
+(`python3 scripts/cursor_smoke.py --signed-in`, evidence at
+`~/.claude/evidence/1789262771-78243-*.txt`, exit 1). It reported HOOKS-FIRE
+FAIL, HOOKS-ROOT FAIL, EDIT FAIL. The ROOT CAUSE is environmental, not the
+1.0.16 candidate: the founder's user-level `~/.cursor/hooks.json` hardcodes
+absolute commands to `/Users/khalil.maaouni/Brother/bundle/cursor/cursor_hook.py`,
+a SUPERSEDED path that no longer exists (the root-level `bundle/cursor` tree
+was replaced by `products/brothermode`; `~/Brother` is now on `main`, which
+does not carry it). cursor-agent loaded that broken user-level hook and
+refused every mutating tool with `[Errno 2] No such file or directory`, so
+the turn never reached an edit or the engine.
+
+The candidate bundle itself is clean: `grep -rn 'bundle/cursor/cursor_hook'
+bundle/` returns nothing, its hooks live in `bundle/cursor-hooks/hooks.json`
+under `${PLUGIN_ROOT}` relative paths, and the deterministic deny chain over
+exactly that file passes. So the live signed-in requirement stays `NO-DATA`,
+preserved as instructed, and it is blocked by a stale machine config, not by
+the release candidate. This is a real founder-facing machine finding: the
+installed Cursor plugin needs reinstalling from the current bundle
+(`python3 products/brothermode/scripts/install_cursor.py`, or the equivalent
+in the current tree) so `~/.cursor/hooks.json` points at a script that exists;
+until then the founder's Cursor refuses every edit in every project.
 
 ## Other workstreams
 
@@ -124,6 +143,13 @@ that closes it.
 - Current competitive race: `NO-DATA`, not run
 - Acceptance Time: `NO-DATA: human trial not executed`
 - Unwired system parts: `NO-DATA`, classification not completed
+- Founder Cursor install (machine finding, this session): `BROKEN`. The
+  user-level `~/.cursor/hooks.json` points at the deleted superseded script
+  `~/Brother/bundle/cursor/cursor_hook.py`, so cursor-agent refuses every
+  mutating tool in every project. Fix: reinstall from the current bundle
+  (`python3 products/brothermode/scripts/install_cursor.py`, see
+  `docs/how-to/install-cursor.md`). Founder-only: it is his live machine
+  config, outside the release repository, so it was flagged, not edited.
 
 ## Battery
 
@@ -145,6 +171,14 @@ pre-existing or environmental failures (missing roadmap fixtures,
 generated-state drift, acceptance fixture failures, missing Cursor capability);
 those are unchanged and remain founder decision 2.
 
+A second small fix landed this session: `scripts/required_fast.sh`'s
+`run_check` readout showed a passing check's trailing adversarial
+`FAIL:`/`NO-DATA:` self-test line, which reads as a failure to a skimmer. It
+now prefers the unittest `OK` line on a pass and a real failure line on a
+fail, mirroring `scripts/check_all.sh`'s existing `run_check`; the verdict
+still comes only from the exit code. Proof:
+`python3 scripts/test_required_fast.py` returns 12 tests OK, exit 0.
+
 SYSTEM.md was regenerated as the last edit before the commit, because adding
 `scripts/test_cursor_deny_chain.py` invalidated the whole-tree description:
 
@@ -155,11 +189,14 @@ python3 scripts/system_doc.py --check    exit 0 (after regeneration)
 
 ## Founder decisions
 
-1. Run the live signed-in Cursor deny canary (docs/cursor/SMOKE-RUNBOOK.md)
-   and decide whether advisory status may change. The DETERMINISTIC half is
-   now closed: scripts/test_cursor_deny_chain.py proves the shipped chain
-   refuses a cross-session write end to end. Only the live signed-in witness
-   remains NO-DATA, blocked on cursor-agent login, which is founder-only.
+1. Reinstall the founder's Cursor plugin, then decide on advisory status.
+   The signed-in smoke was run this session and FAILED, but only because the
+   founder's `~/.cursor/hooks.json` points at a deleted script (see Other
+   workstreams); the 1.0.16 candidate bundle is clean and its deterministic
+   deny chain passes (scripts/test_cursor_deny_chain.py). So the DETERMINISTIC
+   half is closed and the live signed-in half stays NO-DATA until the stale
+   install is fixed and the smoke re-run. Fixing the install is one command;
+   it is founder-only because it is his live machine config.
 2. Decide whether to repair the pre-existing full-battery fixture failures as
    part of 1.0.16 or carry them into a separate repair cut.
 3. Approve fresh benchmark controls and real human Acceptance Time reviewers
