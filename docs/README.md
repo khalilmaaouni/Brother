@@ -4,7 +4,7 @@ Brother helps you delegate work without treating full auto as a leap of faith: d
 
 ## Your first useful delegation
 
-1. **Install:** [Claude Code](how-to/install-claude-code.md) or [Codex](how-to/install-codex.md), then verify the host setup.
+1. **Install:** [Claude Code](how-to/install-claude-code.md), [Codex](how-to/install-codex.md), or [Cursor](how-to/install-cursor.md), then verify the host setup.
 2. **Try it:** [First verified change](tutorials/first-verified-change.md), on a task whose expected answer you understand.
 3. **Know the limits:** [Safe delegation](how-to/delegate-safely.md) and [enforcement boundaries](reference/safety-boundaries.md).
 4. **Return to the work:** [Read the receipt](how-to/review-a-receipt.md), [resume or recover](how-to/recover-from-failure.md).
@@ -21,7 +21,7 @@ Evaluating rather than installing? Read [Where Brother fits](explanation/choosin
 
 ## Solve a task
 
-**Install/operate:** [Claude Code](how-to/install-claude-code.md) · [Codex](how-to/install-codex.md) · [Run](how-to/run-brother.md) · [Resume](how-to/resume-work.md) · [Recover](how-to/recover-from-failure.md) · [Scope hooks](how-to/scope-hooks.md)
+**Install/operate:** [Claude Code](how-to/install-claude-code.md) · [Codex](how-to/install-codex.md) · [Cursor](how-to/install-cursor.md) · [Run](how-to/run-brother.md) · [Resume](how-to/resume-work.md) · [Recover](how-to/recover-from-failure.md) · [Scope hooks](how-to/scope-hooks.md)
 
 **Define/verify:** [Outcome contract](how-to/write-an-outcome-contract.md) · [Schedulable plan](how-to/write-a-schedulable-plan.md) · [Review receipt](how-to/review-a-receipt.md) · [Migration](how-to/verify-a-migration.md) · [Decision-grade number](how-to/verify-a-number.md) · [Vault](how-to/use-the-vault.md) · [Team adoption](how-to/adopt-on-a-team.md) · [Release decision](how-to/prepare-a-release.md)
 
