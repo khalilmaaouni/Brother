@@ -4,11 +4,17 @@
 
 `PARTIAL: SAFE CHANGES READY, BLOCKERS PARKED`
 
-This candidate is not ready for a release cut. The isolated branch contains
-two completed P0 lanes: public host truth, and the shipped Cursor deny-chain
-regression test. No merge, push, tag, or publish was performed. The umbrella
-version is unchanged at `1.0.15` (a bump is a release act, deliberately not
-taken here).
+The isolated branch now passes the authoritative fast gate
+(`scripts/required_fast.sh`, exit 0, transition ALLOWED) with these completed
+lanes: public host truth, the shipped Cursor deny-chain regression test, the
+restored Area 5 acceptance calibration, a clearer required_fast readout, and a
+fixed README first-screen wording regression. It is a SAFE CANDIDATE, not a
+declared release: no merge, tag, or publish was performed; the umbrella version
+is unchanged at `1.0.15` (a bump is a release act, deliberately not taken
+here). Two things keep it from "ready": the live signed-in Cursor deny stays
+NO-DATA (blocked on a stale machine config, founder-only), and one heavier
+end-to-end acceptance check outside the fast gate needs an uncontended re-run
+(see Battery). Both are founder decisions, not code this session can close.
 
 ## Baseline
 
@@ -153,41 +159,44 @@ until then the founder's Cursor refuses every edit in every project.
 
 ## Battery
 
-The registered command was started:
+The authoritative gate is `scripts/required_fast.sh`, run once to a clean pass
+on the stable tree (evidence
+`~/.claude/evidence/1789264960-83188-sh-scripts-required-fast-sh.txt`):
 
 ```text
-sh scripts/check_all.sh
+sh scripts/required_fast.sh        [exit 0 after 317.6s]  transition: ALLOWED
 ```
 
-The full battery aggregate is `NO-DATA` this session for the same reason as
-the overnight run: the shared worktree had up to 17 concurrent
-`required_fast.sh` runs from other sessions during this window, so a
-whole-battery pass cannot be attributed. Rather than fight the contention,
-every check the fast gate contains, plus the new deny-chain check, was run
-individually with full evidence capture through `scripts/run_evidence.py` and
-each returned exit 0 (quoted in Completed work). The overnight `check_all.sh`
-run had already reported the new host-truth checks as PASS and exposed
-pre-existing or environmental failures (missing roadmap fixtures,
-generated-state drift, acceptance fixture failures, missing Cursor capability);
-those are unchanged and remain founder decision 2.
+Every check PASS, zero FAIL. Three checks report NO-DATA and are allowed by
+the evidence-obligation map because their private inputs are not shipped in the
+public export tree: `key-components`, `readiness-board`, `board-status`. New
+and fixed checks in this run: `cursor-deny-chain-self` PASS, `readme-honesty`
+PASS, and the Area 5 acceptance calibration is green.
 
-A second small fix landed this session: `scripts/required_fast.sh`'s
-`run_check` readout showed a passing check's trailing adversarial
-`FAIL:`/`NO-DATA:` self-test line, which reads as a failure to a skimmer. It
-now prefers the unittest `OK` line on a pass and a real failure line on a
-fail, mirroring `scripts/check_all.sh`'s existing `run_check`; the verdict
-still comes only from the exit code. Proof:
-`python3 scripts/test_required_fast.py` returns 12 tests OK, exit 0.
+A FIRST authoritative run had exposed one real REQUIRED_FOR_MERGE regression,
+`readme-honesty` FAIL, caused by the overnight host-truth edit putting the word
+"fence" on the README first screen; it was fixed (commit `71d5991`) and the
+gate re-run clean. A second run was discarded because another session ran git
+checkouts on this shared worktree mid-run, which mutated the tree under it; the
+quoted run above is the clean one on a stable, uncontested tree.
 
-SYSTEM.md was regenerated as the last edit before the commit, because adding
-`scripts/test_cursor_deny_chain.py` invalidated the whole-tree description:
+The full 35-minute `check_all.sh` aggregate is NOT quoted: the shared worktree
+was under heavy concurrent-battery contention throughout, and one heavier
+end-to-end check outside the fast gate,
+`test_product_acceptance.Area5RealTest.test_passes_against_a_real_hang`, hit
+its own 90s watchdog on the full `brother_run` path. That failure is on a path
+this session did not touch (it is not the calibration this session fixed), is
+plausibly contention driven, and needs an uncontended re-run to tell a real
+regression from load. It is recorded as a separate item, not as this cut's
+evidence.
 
-```text
-python3 scripts/system_doc.py            (regenerated SYSTEM.md)
-python3 scripts/system_doc.py --check    exit 0 (after regeneration)
-```
+Independent review: a fresh read-only reviewer verified commits `18fcf90` and
+`f9a6019` and returned SHIP on both, with clean dash, attribution and secret
+scans, and confirmed the required_fast readout change is display-only (the
+verdict still derives solely from the exit code) and that the Area 5 detach
+leaks no process.
 
-## Founder decisions
+## Founder decisions## Founder decisions
 
 1. Reinstall the founder's Cursor plugin, then decide on advisory status.
    The signed-in smoke was run this session and FAILED, but only because the
