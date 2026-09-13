@@ -140,7 +140,34 @@ installed Cursor plugin needs reinstalling from the current bundle
 in the current tree) so `~/.cursor/hooks.json` points at a script that exists;
 until then the founder's Cursor refuses every edit in every project.
 
-## Other workstreams
+### Cursor machine config fixed this session (founder-delegated)
+
+The founder asked for the stale Cursor install to be fixed on his behalf, so it
+was, and the result changes the picture above.
+
+- Reinstalled the plugin into `~/.cursor/brothermode` (self-contained, 493
+  files) with `python3 products/brothermode/scripts/install_cursor.py --upgrade`
+  (exit 0, adapter smoke PASS). hooks.json backed up first.
+- The installer preserves hook entries it did not write, so 4 stale entries
+  still pointed at the deleted `~/Brother/bundle/cursor/cursor_hook.py`. Pruned
+  exactly those 4, kept 8, verified no remaining hook command names a missing
+  script. Backups saved under `~/.cursor/`.
+- PROOF the fix works: a fresh signed-in `cursor-agent` turn now runs Brother's
+  engine end to end and emits a real receipt
+  (`~/.cursor/brother/runs/.../receipt/receipt.json`, 14 KB, plus a 21 KB
+  `delivery-receipt.html`). Before the fix, every mutating tool was refused.
+- The signed-in smoke (`scripts/cursor_smoke.py --signed-in`) still prints
+  `FAIL` on HOOKS-FIRE / HOOKS-ROOT / EDIT. That is a HARNESS limitation, not a
+  Brother defect: the smoke adds its canary hooks to a throwaway `--plugin-dir`
+  copy, but `cursor-agent` honours the user-level `~/.cursor/hooks.json`
+  (correctly, now that it is fixed), so the canary markers are not written even
+  though the real hooks fired and produced the receipt above; its RECEIPT check
+  also mis-parsed the path on a trailing markdown backtick. A clean signed-in
+  PASS needs the smoke taught to measure the user-level hooks, a separate item.
+- Live signed-in DENY: still `NO-DATA`. The smoke does not attempt a deny and no
+  deny canary exists, so fence enforcement under Cursor stays `ADVISORY`.
+
+## Other workstreams## Other workstreams
 
 - One user-facing Brother door: `NO-DATA`, no implementation landed
 - Context Capsule: `NO-DATA`, no implementation landed
