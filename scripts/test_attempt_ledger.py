@@ -214,5 +214,48 @@ class TheRefusalDoesTheReadingItself(unittest.TestCase):
         self.assertNotIn("reading how somebody else already solved this", why)
 
 
+class TheRefusalRunsFindOutInProcess(unittest.TestCase):
+    """LM3: the REFUSE branch used to NAME `python3 scripts/find_out.py` as a
+    chore for a human to go run themselves. It must now call find_out's own
+    searches in-process and fold the REAL return value into the refusal
+    text. test_find_out.py's own TheRefusalNamesTheExactCommand still checks
+    that the command text is named (unchanged, out of this fix's scope), so
+    what this fix removes is the "go run this yourself" FRAMING around it,
+    never the bare mention. Drives a real three-strike REFUSE on the
+    room-week fixture, since that lesson is itself recorded in the vault."""
+
+    def test_the_run_it_yourself_chore_framing_is_gone(self):
+        why = A.check(rows(2), P, CLASS)[1]
+        self.assertNotIn("Run it yourself", why)
+
+    def test_find_outs_real_result_is_folded_in(self):
+        why = A.check(rows(2), P, CLASS)[1]
+        self.assertIsNotNone(A.find_out,
+                             "find_out.py must import for this test to mean anything")
+        self.assertIn("find_out ran in-process", why)
+        vault_has_failures = os.path.isdir(
+            os.path.join(A.find_out.VAULT, "40-Failures"))
+        if vault_has_failures:
+            # This exact fixture (a visual cue that took a week) is the vault's
+            # own recorded lesson, so a live vault must surface a real match,
+            # never fall back to NO-DATA.
+            self.assertNotIn("NO-DATA across all 4 source(s)", why)
+            self.assertIn("vault failures:", why)
+        else:
+            # No vault in this test environment: the case stays deterministic
+            # by asserting the honest NO-DATA line replaced the chore instead.
+            self.assertIn(A.NODATA, why)
+
+    def test_a_missing_find_out_module_is_NO_DATA_not_a_crash(self):
+        real = A.find_out
+        try:
+            A.find_out = None
+            why = A.check(rows(2), P, CLASS)[1]
+            self.assertIn(A.NODATA, why)
+            self.assertNotIn("Run it yourself", why)
+        finally:
+            A.find_out = real
+
+
 if __name__ == "__main__":
     unittest.main()

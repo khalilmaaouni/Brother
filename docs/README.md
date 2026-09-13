@@ -25,6 +25,8 @@ Evaluating rather than installing? Read [Where Brother fits](explanation/choosin
 
 **Define/verify:** [Outcome contract](how-to/write-an-outcome-contract.md) · [Schedulable plan](how-to/write-a-schedulable-plan.md) · [Review receipt](how-to/review-a-receipt.md) · [Migration](how-to/verify-a-migration.md) · [Decision-grade number](how-to/verify-a-number.md) · [Vault](how-to/use-the-vault.md) · [Team adoption](how-to/adopt-on-a-team.md) · [Release decision](how-to/prepare-a-release.md)
 
+**Hand off or join an existing project:** [Hand off work to a teammate](how-to/hand-off-to-a-teammate.md) · [Add Brother to an existing repository](how-to/add-brother-to-an-existing-repo.md)
+
 ## Look up the contract
 
 - [Routing](reference/routing.md)
