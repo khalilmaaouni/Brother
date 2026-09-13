@@ -11,6 +11,8 @@
 - [Verify a decision-grade number](verify-a-number.md)
 - [Record native build and test evidence](native-evidence.md)
 - [Use the Vault](use-the-vault.md)
+- [Token optimization](token-optimization.md)
+- [Use BrotherDS](use-brotherds.md)
 - [Recover from failure/refusal](recover-from-failure.md)
 - [Scope/disable hooks](scope-hooks.md)
 - [Adopt on a team](adopt-on-a-team.md)
