@@ -729,5 +729,18 @@ class PolicyFileItself(PolicyFixture):
                             "partner data" % rule["id"])
 
 
+class Night0912Policy(unittest.TestCase):
+    def test_load_approvals_scalar_returns_problem(self):
+        from brothersbe import policy as policy_mod
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, 'approvals.json')
+            with open(p, 'w', encoding='utf-8') as fh:
+                fh.write('5')
+            records, problem = policy_mod.load_approvals(p)
+            self.assertEqual(records, [])
+            self.assertIsInstance(problem, str)
+            self.assertIn(p, problem)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -543,5 +543,15 @@ class CheckJson(unittest.TestCase):
         self.assertEqual(data["verdict"], "NO-DATA", out)
 
 
+class Night0912BmVaultLint(unittest.TestCase):
+    def test_duplicate_frontmatter_key_groups_survive_normalize(self):
+        text = "---\nid: a\ntype: note\nid: b\n---\nbody\n"
+        new, _changed = lint.normalize_frontmatter(
+            text,
+            ("valid_from", "valid_to", "observed_at", "ingested_at", "verified_at"))
+        self.assertIn("id: a", new)
+        self.assertIn("id: b", new)
+
+
 if __name__ == "__main__":
     unittest.main()

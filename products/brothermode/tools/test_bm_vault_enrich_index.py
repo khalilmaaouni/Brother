@@ -233,5 +233,18 @@ class MeasureOnAMissingQuerySetIsNoData(VaultFixture):
         self.assertIn("NO-DATA", detail[0])
 
 
+class Night0912BmVaultEnrichIndex(unittest.TestCase):
+    def test_measure_non_dict_query_rows_no_data(self):
+        with tempfile.TemporaryDirectory() as vault:
+            queries = os.path.join(vault, 'q.json')
+            with open(queries, 'w', encoding='utf-8') as fh:
+                json.dump(["not_a_dict"], fh)
+            hits, total, detail = eix.measure(vault, queries)
+            self.assertIsNone(hits)
+            self.assertIsNone(total)
+            self.assertEqual(len(detail), 1)
+            self.assertIn("NO-DATA", detail[0])
+
+
 if __name__ == "__main__":
     unittest.main()

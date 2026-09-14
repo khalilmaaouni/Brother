@@ -273,6 +273,10 @@ def load(vault):
             findings.append((rel, "declares source_ids without entity:, a crosswalk "
                                   "maps IDs to things, not to documents"))
             continue
+        if not entries:
+            # An entity note declaring source_ids: [] has zero crosswalk
+            # entries: NO-DATA in cmd_check/cmd_resolve, not a clean pass.
+            continue
         decls.append({
             # Keyed on the vault-relative stem, not the basename: two notes
             # named the same in different folders are two different entities,

@@ -880,7 +880,7 @@ def _sec_documents(ctx):
         task_id = t.get("task_id") or ""
         outputs = t.get("expected_outputs") or []
         if isinstance(outputs, str):
-            outputs = []
+            outputs = [outputs]
         checks = ctx["evidence_by_task"].get(task_id) or []
         label = t.get("title") or task_id
         out_items = ("".join("<li><code>%s</code></li>" % _esc(p)
@@ -1004,7 +1004,10 @@ def render_page(status, alerts, insights, briefings, decisions, facts,
         % (_esc(_PAGE_TITLE), bv.THEME_CSS, PAGE_CSS, _esc(_PAGE_TITLE),
            "\n".join(sections)))
     fp = fingerprint(html)
-    return html.replace(_FINGERPRINT_SLOT, fp), fp
+    # Replace only the header's own slot, never matching user text.
+    slot = '<span class="bm-fingerprint">%s</span>' % _FINGERPRINT_SLOT
+    return html.replace(slot, '<span class="bm-fingerprint">%s</span>'
+                        % fp), fp
 
 
 def build_page(store, project_id):
@@ -1327,11 +1330,17 @@ def cmd_brief_page(argv):
         rel = os.path.relpath(path, store.root).replace(os.sep, "/")
         bs.write_generated_document(path, html)
         prev = store.latest_view(project_id, "DEVELOPER_BRIEF", raw=True)
+        prev_url = (prev or {}).get("artifact_url") or ""
+        prev_at = (prev or {}).get("published_at") or ""
+        # A different insight must not inherit the old page's URL.
+        if (prev or {}).get("subject") != insight_id:
+            prev_url = ""
+            prev_at = ""
         store.record_view(project_id, {
             "kind": "DEVELOPER_BRIEF", "rel_path": rel,
             "fingerprint": fp,
-            "artifact_url": (prev or {}).get("artifact_url") or "",
-            "published_at": (prev or {}).get("published_at") or "",
+            "artifact_url": prev_url,
+            "published_at": prev_at,
             "subject": insight_id}, _view_actor(kv, hook=False))
         if kv.get("json"):
             _print_json({"path": path, "rel_path": rel,

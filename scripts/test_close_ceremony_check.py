@@ -79,7 +79,7 @@ def _make_valid_pack(root, name):
     zip_path = pack_dir + ".zip"
     with zipfile.ZipFile(zip_path, "w") as zf:
         for f in (start_here, board, session_log):
-            zf.write(f, os.path.basename(f))
+            zf.write(f, name + "/" + os.path.basename(f))
     now = time.time()
     os.utime(pack_dir, (now, now))
     return pack_dir
@@ -288,6 +288,54 @@ class AnUnreadablePathIsNeverSilentlyTreatedAsClean(unittest.TestCase):
         self.assertNotIn(LONG_TERM, out)
 
 
+class Night0912CloseCeremonyCheck(unittest.TestCase):
+    def test_zip_completeness_accepts_nested_pack_files(self):
+        root = tempfile.mkdtemp(prefix="ceremony-nested-")
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        pack = os.path.join(root, "pack1")
+        os.makedirs(pack)
+        with open(os.path.join(pack, "01-START-HERE.md"), "w") as fh:
+            fh.write(VALID_START_HERE)
+        with open(os.path.join(pack, "board.html"), "w") as fh:
+            fh.write("board")
+        with open(os.path.join(pack, "session-log.txt"), "w") as fh:
+            fh.write("log")
+        os.makedirs(os.path.join(pack, "sub"))
+        with open(os.path.join(pack, "sub", "inner.txt"), "w") as fh:
+            fh.write("x")
+        with zipfile.ZipFile(pack + ".zip", "w") as zf:
+            zf.write(os.path.join(pack, "01-START-HERE.md"), "pack1/01-START-HERE.md")
+            zf.write(os.path.join(pack, "board.html"), "pack1/board.html")
+            zf.write(os.path.join(pack, "session-log.txt"), "pack1/session-log.txt")
+            zf.write(os.path.join(pack, "sub", "inner.txt"), "pack1/sub/inner.txt")
+
+        old_run_scan = C.hps.run_scan
+        C.hps.run_scan = lambda root, terms, **kw: ([], [], [], {}, None)
+        try:
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = C.main(["--root", root, "--terms", "x"])
+        finally:
+            C.hps.run_scan = old_run_scan
+        self.assertEqual(rc, 0, buf.getvalue())
+
+
+class Night0912HandoverPackScan(unittest.TestCase):
+    def test_short_term_boundary_is_not_fooled_by_an_accented_letter(self):
+        short, long = hps.build_patterns(["abc"])
+        # e-acute (U+00E9) is an accented Latin letter, so 'abc' inside
+        # 'eacute-abc' is not a whole-word match; the old ASCII-only
+        # lookaround wrongly reported one.
+        self.assertIsNone(hps.first_match_len("éabc", short, long))
+        # guard the real whole-word behavior this boundary is meant to give
+        self.assertEqual(hps.first_match_len("abc", short, long), 3)
+        self.assertEqual(hps.first_match_len("x abc y", short, long), 3)
+        self.assertIsNone(hps.first_match_len("xabc", short, long))
+        # a short term written directly against CJK text with no space must
+        # still be caught: CJK stays a boundary character on purpose.
+        self.assertEqual(hps.first_match_len("社abc", short, long), 3)
+
+
 APP_LIKE_TERM = "BRAPPX"  # six characters, like the first target app's name
 
 
@@ -332,7 +380,7 @@ class ABrotherTreeScopedTermIsNotEnforcedOnHandoverPacks(unittest.TestCase):
         _write(os.path.join(pack, "%s-notes.md" % APP_LIKE_TERM),
                "the %s screens fold\n" % APP_LIKE_TERM)
         with zipfile.ZipFile(pack + ".zip", "a") as zf:
-            zf.writestr("%s-notes.md" % APP_LIKE_TERM,
+            zf.writestr("%s/%s-notes.md" % (os.path.basename(pack), APP_LIKE_TERM),
                         "the %s screens fold\n" % APP_LIKE_TERM)
         code, out = self._scanner()
         self.assertEqual(code, hps.EXIT_CLEAN, msg=out)

@@ -599,5 +599,19 @@ class TestCase8Skipped(unittest.TestCase):
             "cases 2 and 8")
 
 
+class Night0912BmReconcile(unittest.TestCase):
+    def test_git_unavailable_yields_no_data(self):
+        old_path = os.environ.get("PATH", "")
+        os.environ["PATH"] = ""
+        try:
+            d = tempfile.mkdtemp()
+            self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+            rows = RC.classify_push_state(d)
+            self.assertTrue(any(r["class"] == RC.NO_DATA for r in rows),
+                            "expected NO-DATA row when git unavailable")
+        finally:
+            os.environ["PATH"] = old_path
+
+
 if __name__ == "__main__":
     unittest.main()

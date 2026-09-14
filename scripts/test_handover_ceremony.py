@@ -440,5 +440,24 @@ class TestMainCLI(unittest.TestCase):
             2)
 
 
+class Night0912HandoverCeremony(unittest.TestCase):
+    def test_duplicate_lesson_names_do_not_overwrite_or_miscount(self):
+        with tempfile.TemporaryDirectory() as d:
+            lessons = [
+                lesson(name="Same Name", description="first"),
+                lesson(name="Same Name", description="second"),
+            ]
+            written, refused = emit_vault_notes(d, lessons, today="2026-08-29")
+            self.assertEqual(len(written), len(set(written)))
+            self.assertEqual(len(written), 1)
+            self.assertEqual(len(refused), 1)
+            files = [os.path.join(d, f) for f in os.listdir(d)]
+            self.assertEqual(len(files), 1)
+            with open(files[0], encoding="utf-8") as f:
+                content = f.read()
+            self.assertIn("first", content)
+            self.assertNotIn("second", content)
+
+
 if __name__ == "__main__":
     unittest.main()

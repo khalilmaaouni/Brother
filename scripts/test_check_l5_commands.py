@@ -194,5 +194,23 @@ class NoDataIsNeverAPass(unittest.TestCase):
         self.assertEqual(C.main(["--roadmap", path]), 2)
 
 
+class Night0912CheckL5Commands(unittest.TestCase):
+    def test_invented_long_flag_prefix_is_rejected(self):
+        d = tempfile.mkdtemp()
+        script = os.path.join(d, "foo.py")
+        with open(script, "w", encoding="utf-8") as fh:
+            fh.write("")
+        help_text = "usage: foo\n-h, --help\n--foobar\n"
+
+        def runner(argv):
+            import types
+            return types.SimpleNamespace(stdout=help_text, stderr="")
+
+        verdict, detail = C.check_command(
+            "python3 foo.py --foo", set(), runner=runner, roots=(d,))
+
+        self.assertEqual(verdict, C.FAIL, detail)
+
+
 if __name__ == "__main__":
     unittest.main()

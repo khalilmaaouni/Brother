@@ -14,7 +14,7 @@ ABSENT = "ABSENT"
 NODATA = "NO-DATA"
 
 REASON_SANDBOX = "no sandbox contract in this repository; Brother relies on the host's sandbox (see docs/reference/safety-boundaries.md)"
-REASON_FAIL_CLOSED = "some developer-mode hooks fail open on an internal error (docs/reference/safety-boundaries.md); no enforcement mode exists yet"
+REASON_FAIL_CLOSED = "some developer-mode hooks fail open on an internal error (docs/reference/safety-boundaries.md); an enforced fail-closed mode exists (BM_FENCE_MODE=enforced) but is opt-in, not the default"
 
 HEX40_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 

@@ -1,0 +1,31 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "claim-lifecycle-v1",
+  "title": "BrotherDS Claim Lifecycle v1",
+  "description": "WBS-50.01. The claim lifecycle state machine the roadmap names: DRAFT, CHECKED, FROZEN, DECISION_USED, OUTCOME_AVAILABLE, RESOLVED, SCORED. Generic, no client-specific data: a claim's own content (what is being asserted, which evidence backs it) is deferred to later WBS-50 units (Claim Evidence references, MDM quality claims, mobile product claims) and is out of scope here, so this record carries only what the lifecycle itself needs -- identity, revision linkage, and state. Only the keyword subset scripts/claim_lifecycle.py actually enforces is used here: type, required, properties, enum, const, additionalProperties, matching the same enforced subset outcome-contract-v1, mobile-journey-contract-v1 and golden-master-contract-v1 document. The transition, mutation and revision rules the roadmap states (a FROZEN revision cannot be silently mutated, a correction creates a new revision linked by supersedes, the old revision remains auditable, scoring resolves the historical revision, never its rewritten successor) are cross-record rules no single record's schema can express; scripts/claim_lifecycle.py enforces them by hand.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "claim_id", "revision_id", "state", "supersedes"],
+  "properties": {
+    "schema_version": {
+      "const": "claim-lifecycle-v1",
+      "description": "Which shape this record follows, so a reader never has to guess."
+    },
+    "claim_id": {
+      "type": "string",
+      "description": "Stable identifier shared by every revision of the same claim. A correction keeps this identifier; only revision_id changes."
+    },
+    "revision_id": {
+      "type": "string",
+      "description": "Identifier for this one revision. Unique per revision, never reused: a correction is a new record with a new revision_id, not a rewrite of this one."
+    },
+    "state": {
+      "enum": ["DRAFT", "CHECKED", "FROZEN", "DECISION_USED", "OUTCOME_AVAILABLE", "RESOLVED", "SCORED"],
+      "description": "Where this revision sits in the roadmap's own chain: DRAFT -> CHECKED -> FROZEN -> DECISION_USED -> OUTCOME_AVAILABLE -> RESOLVED -> SCORED. Each revision moves through this chain one step at a time; scripts/claim_lifecycle.py refuses any transition that is not the next state in this order."
+    },
+    "supersedes": {
+      "type": ["string", "null"],
+      "description": "The revision_id of the earlier revision this one corrects, or null for a claim's first revision. A non-null value must name a different revision_id than this record's own (a revision cannot supersede itself)."
+    }
+  }
+}

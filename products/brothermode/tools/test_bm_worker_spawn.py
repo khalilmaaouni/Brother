@@ -295,6 +295,15 @@ class TheExecPrimitiveIsPinnedHereToo(unittest.TestCase):
                          % unsanitised)
 
 
+class Night0912BmWorkerSpawn(unittest.TestCase):
+    def test_non_numeric_tokens_is_malformed(self):
+        w = S.SpawningWorker(["x"], runner=runner_returning(
+            stdout=json.dumps({"worker_claim": "ok", "artifacts": [],
+                               "cost": {"tokens": "abc"}})))
+        res = w.run({})
+        self.assertEqual(res.get("status"), "malformed")
+
+
 @unittest.skipUnless(os.name == "posix", "POSIX process groups")
 class TimeoutStopsDescendants(unittest.TestCase):
     def test_inner_model_timeout_also_cancels_its_descendants(self):

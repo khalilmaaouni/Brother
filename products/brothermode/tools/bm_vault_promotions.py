@@ -201,6 +201,18 @@ def cmd_promote(vault, ident, new_state, by, at, apply_changes):
         print("REFUSED: %s -> %s is not a legal move for %s"
               % (old_state, new_state, path))
         return 1
+    if new_state == "validated":
+        # AGENTS.md line 45: a failure note created on or after
+        # DEPTH_SINCE needs its depth fields before it counts as
+        # validated wisdom, never just a lesson-candidate. Wired to the
+        # contract rather than re-decided here, same posture as
+        # legal_move and check_separation_of_duties above.
+        missing = lc.missing_depth_fields(text)
+        if missing:
+            print("REFUSED: %s is a failure note created on or after %s and "
+                  "lacks %s; it stays a lesson-candidate (AGENTS.md depth rule)"
+                  % (path, lc.DEPTH_SINCE, ", ".join(missing)))
+            return 1
     if new_state != "candidate" and not by:
         print("bm_vault_promotions: promoting to %s needs --by; a promotion "
               "that is not recorded did not happen" % new_state, file=sys.stderr)

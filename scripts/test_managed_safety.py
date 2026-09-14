@@ -424,5 +424,26 @@ class EstablishedFailOpenIsNotReversed(_IsolatedTestCase):
                          "floor at A0")
 
 
+class TheWorkerProbePicksArgvByClient(unittest.TestCase):
+    """C3/Cursor: _check_worker's argv choice is a property of the client,
+    read directly rather than through shutil.which so this passes whether or
+    not cursor-agent is actually on the machine running the suite."""
+
+    def test_a_cursor_client_probes_for_cursor_agent_not_claude(self):
+        entry = managed_safety._check_worker({"BROTHER_MODEL_CLIENT": "cursor"})
+        self.assertIn("cursor-agent", entry["detail"], entry)
+        self.assertIn("client=cursor", entry["detail"], entry)
+
+    def test_a_codex_client_still_probes_for_codex_unchanged(self):
+        entry = managed_safety._check_worker({"BROTHER_MODEL_CLIENT": "codex"})
+        self.assertIn("codex", entry["detail"], entry)
+        self.assertIn("client=codex", entry["detail"], entry)
+
+    def test_an_unnamed_client_still_probes_for_claude_unchanged(self):
+        entry = managed_safety._check_worker({})
+        self.assertIn("claude", entry["detail"], entry)
+        self.assertIn("client=claude", entry["detail"], entry)
+
+
 if __name__ == "__main__":
     unittest.main()

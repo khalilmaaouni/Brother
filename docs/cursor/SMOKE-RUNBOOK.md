@@ -4,11 +4,29 @@ This proves the installed path is usable; it does not prove every Brother capabi
 
 ## Install
 
-Copy the bundle to `~/.cursor/plugins/local/brother`, then run `Developer: Reload Window` in Cursor. For headless runs, pass `--plugin-dir <path>` to `cursor-agent`.
+From the Brother checkout root:
+
+```bash
+python3 scripts/cursor_plugin_install.py
+python3 scripts/cursor_plugin_install.py validate
+python3 scripts/test_cursor_plugin.py
+```
+
+The installer copies the bundle to `~/.cursor/plugins/local/brother`.
+Run `Developer: Reload Window` in Cursor. The smoke script supplies its
+own temporary plugin directory through `--plugin-dir` to `cursor-agent`.
+
+The current source includes WBS-70 U1/U2's vendor adapter, U3's umbrella
+checkout discovery, U4's real mailbox skill aliases, U5's three native
+personas, U6's optional MCP configuration/server pair, and U7's reserved
+agent events. Persona limits are prompt-level; the reserved events add no
+gates. Package checks do not prove live hook enforcement. U8 is the current
+documentation pass; U9, final regeneration, has not started.
 
 ## The toy
 
-In a throwaway directory, create the toy.
+The smoke script creates this toy itself. To inspect it manually, use a
+throwaway directory:
 
 ```bash
 mkdir toy && cd toy && git init -q .
@@ -20,6 +38,8 @@ git add -A && git commit -q -m toy
 The test uses `unittest`, so the toy needs nothing installed.
 
 ## The signed-in smoke, exact command
+
+Run from the Brother checkout root, not from the manual toy directory.
 
 ```bash
 python3 scripts/cursor_smoke.py --signed-in
@@ -39,6 +59,15 @@ The signed-in run passes when all three verdicts pass and the witness is unchang
 
 RECEIPT is reported separately: a `brother_run` receipt path appeared in the output and the file exists, or NO-DATA.
 
-A measured deny is not part of this smoke. Until one is, fence enforcement under Cursor stays ADVISORY.
+The founder confirmed the install/adapter works on his real machine:
+"Cursor is fine mark is as tested", in the
+[2026-09-13 decision record](../decisions/cursor-live-canary-2026-09-13.json).
+That is the evidence for marking the adapter tested. It supplies no
+HOOKS-FIRE, HOOKS-ROOT, EDIT, or RECEIPT output from this script. The
+signed-in smoke test has not been run this session, so those automated
+results are NO-DATA for this session.
+
+A measured deny is not part of this smoke, and the verbal confirmation
+does not supply one. Measured denial remains NO-DATA on this evidence.
 
 <!-- doc-assurance: allow-missing mathlib.py (created in the temporary toy repository by the commands above) -->

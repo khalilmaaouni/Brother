@@ -367,7 +367,8 @@ def render_track_gantt(section_items, rows_by_id, denom, header, ticks, legend_h
         items = by_track.get(track, [])
         if not items:
             continue
-        ticked = sum(1 for i in items if rows_by_id.get(i["id"], {}).get("disposition") == "DONE")
+        # .get mirrors the other id reads; a track row may omit id.
+        ticked = sum(1 for i in items if rows_by_id.get(i.get("id"), {}).get("disposition") == "DONE")
         chip = track_chip_class(ticked, len(items))
         out.append(f'<h3>{esc(track)} <span class="chip {chip}">{ticked}/{len(items)}</span></h3>')
         for item in items:

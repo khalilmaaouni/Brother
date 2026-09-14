@@ -1,0 +1,103 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "golden-master-contract-v1",
+  "title": "Golden Master Contract v1",
+  "description": "WBS-40.01. A domain contract layered ON the shared outcome-contract-v1, never a second lifecycle: this record names no state, history, receipts or decision of its own. outcome_contract_ref points at the real outcome-contract-v1 JSON that owns those (state machine, receipts, history); scripts/golden_master_contract.py enforces that the referenced file exists and actually validates as outcome-contract-v1 before this record is accepted, so a golden-master contract can never point at nothing or at something malformed. Generic entity-resolution / MDM contract only: entity_type, examples, and every other field here name entity classes (customer/location, product/SKU, outlet, supplier) and general Golden Master mechanics, never a named client's own data, systems, or secrets. Only the keyword subset scripts/golden_master_contract.py actually enforces is used here: type, required, properties, enum, const, items, minItems, additionalProperties -- the same enforced subset outcome-contract-v1 and mobile-journey-contract-v1 document, for the same reason (a reader of any of the three files finds the same account).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "master_id", "outcome_contract_ref", "entity_type",
+    "business_purpose", "source_systems", "downstream_consumers",
+    "critical_attributes", "cardinality_constraints", "false_merge_cost_class",
+    "missed_match_cost_class", "review_policy", "merge_threshold",
+    "review_threshold", "survivorship_policy_ref", "rollback_required",
+    "quality_claim_ids", "locale_profiles", "publish_authority"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "golden-master-contract-v1",
+      "description": "Which shape this record follows, so a reader never has to guess."
+    },
+    "master_id": {
+      "type": "string",
+      "description": "A stable identifier for this one bounded golden-master record."
+    },
+    "outcome_contract_ref": {
+      "type": "string",
+      "description": "Path to the outcome-contract-v1 record this golden-master contract is layered on. Must resolve to a file that exists and validates as outcome-contract-v1 (enforced by hand, since the keyword subset has no cross-file reference check, matching how outcome_contract_ref is enforced by hand in mobile-journey-contract-v1)."
+    },
+    "entity_type": {
+      "type": "string",
+      "description": "The class of entity this master record resolves, e.g. customer/location, product/SKU, outlet, or supplier (the roadmap's own examples, stated as examples rather than a closed list). Left as an open string rather than a closed enum: WBS-40 must materially help enterprise Golden Master work in general, and a fixed enum would refuse every entity type the roadmap did not happen to name."
+    },
+    "business_purpose": {
+      "type": "string",
+      "description": "Why this master record exists, in plain words: the business decision or process it serves, not an implementation description."
+    },
+    "source_systems": {
+      "type": "array",
+      "minItems": 1,
+      "description": "The systems this master record is built from. At least one: a golden-master contract naming zero source systems describes no real master record.",
+      "items": {"type": "string"}
+    },
+    "downstream_consumers": {
+      "type": "array",
+      "description": "Systems or processes that consume this master record downstream. May be empty for a master record not yet wired to a consumer.",
+      "items": {"type": "string"}
+    },
+    "critical_attributes": {
+      "type": "array",
+      "minItems": 1,
+      "description": "The attributes this master record is matched and merged on. At least one: a golden-master contract with no critical attributes has nothing to resolve entities against.",
+      "items": {"type": "string"}
+    },
+    "cardinality_constraints": {
+      "type": "array",
+      "description": "Named cardinality rules this master record must hold (e.g. one customer maps to many locations). May be empty for an entity type with no stated constraint yet.",
+      "items": {"type": "string"}
+    },
+    "false_merge_cost_class": {
+      "type": "string",
+      "description": "The cost class of wrongly merging two distinct real-world entities into one master record, stated in plain words (this schema does not fix the taxonomy's values, so a project's own review policy can name its own tiers)."
+    },
+    "missed_match_cost_class": {
+      "type": "string",
+      "description": "The cost class of failing to merge two records that are the same real-world entity, stated in plain words (same open taxonomy as false_merge_cost_class)."
+    },
+    "review_policy": {
+      "type": "string",
+      "description": "The human review policy this master record's merge decisions follow, in plain words (e.g. when a match is auto-merged versus routed to a human)."
+    },
+    "merge_threshold": {
+      "type": "number",
+      "description": "The match score at or above which two candidate records are merged automatically."
+    },
+    "review_threshold": {
+      "type": "number",
+      "description": "The match score at or above which a candidate pair is routed to human review rather than discarded outright."
+    },
+    "survivorship_policy_ref": {
+      "type": "string",
+      "description": "A reference to where this master record's survivorship rules (which source wins per attribute) are defined. Not cross-file validated the way outcome_contract_ref is: this is a plain reference, not a second lifecycle record."
+    },
+    "rollback_required": {
+      "type": "boolean",
+      "description": "Whether this master record must carry a rollback path before it can publish merged results."
+    },
+    "quality_claim_ids": {
+      "type": "array",
+      "description": "Claim IDs this master record will feed once published (match precision, match recall, survivorship correctness, and similar). This contract does not score them itself. May be empty before publish.",
+      "items": {"type": "string"}
+    },
+    "locale_profiles": {
+      "type": "array",
+      "minItems": 1,
+      "description": "The locale profiles this master record's normalization must support (WBS-40.03's own concept: each normalization transform records the locale profile it ran under). At least one.",
+      "items": {"type": "string"}
+    },
+    "publish_authority": {
+      "type": "string",
+      "description": "Who or what holds authority to publish this master record's merged results downstream."
+    }
+  }
+}

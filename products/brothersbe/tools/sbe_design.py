@@ -3464,18 +3464,21 @@ def parse_exemption(text):
     if reason_hid_a_key:
         reason += (" [note: an owner:/expires:-looking line inside reason: was kept as "
                    "prose, not a key]")
+    if not checks and any(re.match(r"(?i)^\s*gates\s*:", l) for l in (text or "").splitlines()):
+        # Addressed to the hard gates (tools/sbe_gate.py), not to the design
+        # checks: that scanner honors and PRINTS it as a waiver, so skipping it
+        # here leaves it visible in exactly one shipped report rather than
+        # refused by the scanner it never spoke to. Checked BEFORE the
+        # "no checks and no reason" refusal below: a file naming only gates:
+        # and no reason: is still addressed to the gate scanner, not a
+        # free-text non-exemption.
+        return [], reason, ADDRESSED_TO_GATES
     if not checks and not seen_reason:
         return [], (text or "").strip(), (
             "it names no checks and no reason. An exemption states which of the %d design checks it "
             "waives and why, as two fields:  checks: %s  and  reason: <at least %d words>. A file of "
             "free text waives everything by default, which is an off switch and not an exemption"
             % (len(CHECKS), ", ".join(CHECKS), OVERRIDE_MIN_WORDS))
-    if not checks and any(re.match(r"(?i)^\s*gates\s*:", l) for l in (text or "").splitlines()):
-        # Addressed to the hard gates (tools/sbe_gate.py), not to the design
-        # checks: that scanner honors and PRINTS it as a waiver, so skipping it
-        # here leaves it visible in exactly one shipped report rather than
-        # refused by the scanner it never spoke to.
-        return [], reason, ADDRESSED_TO_GATES
     if not checks:
         return [], reason, ("it records a reason but names no checks; list the ones it waives "
                             "(checks: %s), because an exemption that names nothing waives everything"
@@ -3801,7 +3804,11 @@ def main():
         skip = waived_by.get(os.path.abspath(target), set())
         for name in which:
             if name in skip:
-                waivers += 1
+                # Not counted here: the exempt loop above already added
+                # len(waived) for this dossier, once per waived check; adding
+                # again here doubled every partial exemption's waived-check
+                # total (a `checks: adr` exemption printed "WAIVERS: 2" for
+                # one waived check).
                 say("  %-10s %-8s %s" % (">> " + name, "WAIVED",
                       "%s in %s names this check, so nothing opened a file for it here"
                       % (EXEMPT, os.path.relpath(target, root))))

@@ -265,6 +265,104 @@ class WhatOneInstallMustProduce(unittest.TestCase):
         self.assertEqual(on_disk["entries"], computed["entries"])
 
 
+class StartupMetadataFootprint(unittest.TestCase):
+    """WBS-70.01's first missing metric: bytes of frontmatter actually
+    rendered into a session's startup listing."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = self.tmp.name
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_a_file_with_no_frontmatter_contributes_zero(self):
+        commands_dir = os.path.join(self.root, 'commands')
+        os.makedirs(commands_dir)
+        with open(os.path.join(commands_dir, 'bare.md'), 'w') as f:
+            f.write('# no frontmatter here\n')
+        footprint, count = sb.count_startup_metadata_footprint(self.root)
+        self.assertEqual(footprint, 0)
+        self.assertEqual(count, 1)
+
+    def test_frontmatter_bytes_are_counted_not_the_body(self):
+        skills_dir = os.path.join(self.root, 'skills')
+        write_skill(skills_dir, 'one', ['name: one', 'description: x'])
+        skill_md = os.path.join(skills_dir, 'one', 'SKILL.md')
+        with open(skill_md, encoding='utf-8') as f:
+            whole_file_bytes = len(f.read().encode('utf-8'))
+        footprint, count = sb.count_startup_metadata_footprint(self.root)
+        self.assertEqual(count, 1)
+        self.assertGreater(footprint, 0)
+        self.assertLess(footprint, whole_file_bytes,
+                         'footprint must exclude the body, not the whole file')
+
+    def test_a_hidden_skill_is_excluded_same_rule_as_the_inventory(self):
+        skills_dir = os.path.join(self.root, 'skills')
+        write_skill(skills_dir, 'hidden', [
+            'name: hidden', 'user-invocable: false'])
+        footprint, count = sb.count_startup_metadata_footprint(self.root)
+        self.assertEqual((footprint, count), (0, 0))
+
+    def test_unterminated_frontmatter_contributes_zero_not_the_whole_file(self):
+        commands_dir = os.path.join(self.root, 'commands')
+        os.makedirs(commands_dir)
+        with open(os.path.join(commands_dir, 'broken.md'), 'w') as f:
+            f.write('---\nname: broken\nno closing delimiter\n')
+        footprint, _count = sb.count_startup_metadata_footprint(self.root)
+        self.assertEqual(footprint, 0)
+
+
+class SemanticDuplicateRoutes(unittest.TestCase):
+    """WBS-70.01's second missing metric: the same route exposed more than
+    once under a different product prefix."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = self.tmp.name
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_three_prefixed_variants_of_one_route_count_as_two_duplicates(self):
+        skills_dir = os.path.join(self.root, 'skills')
+        write_skill(skills_dir, 'brotherme-status', [])
+        write_skill(skills_dir, 'brothermode-status', [])
+        write_skill(skills_dir, 'brothersbe-status', [])
+        duplicates, groups = sb.count_semantic_duplicate_routes(self.root)
+        self.assertEqual(duplicates, 2)
+        self.assertIn('status', groups)
+        self.assertEqual(len(groups['status']), 3)
+
+    def test_no_collision_is_zero_duplicates(self):
+        skills_dir = os.path.join(self.root, 'skills')
+        write_skill(skills_dir, 'brotherme-status', [])
+        write_skill(skills_dir, 'brothermode-review', [])
+        duplicates, groups = sb.count_semantic_duplicate_routes(self.root)
+        self.assertEqual(duplicates, 0)
+        self.assertEqual(groups, {})
+
+    def test_a_bare_name_and_its_prefixed_twin_collide(self):
+        """A command 'brotherme-auto.md' and a skill 'auto' are the same
+        route reached two different ways, mirroring BrotherModeUp's real
+        layout."""
+        write_command(os.path.join(self.root, 'commands'), 'brotherme-auto.md')
+        write_skill(os.path.join(self.root, 'skills'), 'auto', [])
+        duplicates, groups = sb.count_semantic_duplicate_routes(self.root)
+        self.assertEqual(duplicates, 1)
+        self.assertIn('auto', groups)
+
+    def test_the_real_umbrella_bundle_has_known_duplicates(self):
+        """Calibration against the real tree: the umbrella bundle exposes
+        each product's status/review/etc under three product prefixes on
+        purpose, so this must be > 0 today, not a fixture-only result."""
+        bundle_root = os.path.join(sb.REPO_ROOT, 'bundle')
+        if not os.path.isdir(bundle_root):
+            self.skipTest('no bundle/ in this checkout')
+        duplicates, _groups = sb.count_semantic_duplicate_routes(bundle_root)
+        self.assertGreater(duplicates, 0)
+
+
 class CurrentArchitecture(unittest.TestCase):
     def test_inventory_accepts_complete_surface_above_retired_cap(self):
         from unittest.mock import patch

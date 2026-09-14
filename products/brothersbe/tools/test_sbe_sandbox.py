@@ -494,5 +494,34 @@ class TestSandboxBuildIsSmallerThanGoldenScenario(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+class Night0912SbeDecide(unittest.TestCase):
+    def test_non_mapping_flips_is_refused_or_recommendable(self):
+        import importlib.util
+        import json
+
+        spec = importlib.util.spec_from_file_location(
+            "sbe_decide", os.path.join(HERE, "sbe_decide.py"))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        table = {
+            'options': ['a', 'b'],
+            'criteria': [{'name': 'x', 'kind': 'choice', 'scores': {'v': ['a']}, 'note': 'n'}],
+            'flip': 'flip',
+            'flips': None,
+        }
+        d = tempfile.mkdtemp()
+        f = os.path.join(d, 't.json')
+        with open(f, 'w') as fh:
+            fh.write(json.dumps({'shape': table}))
+        t, err = mod.load_table(f, 'shape')
+        if err:
+            self.assertIn("flips", err)
+            return
+        try:
+            mod.recommend(t, {'x': 'v'})
+        except AttributeError as e:
+            self.fail("recommend raised AttributeError on a table load_table blessed: %s" % e)
+
+
 if __name__ == "__main__":
     unittest.main()

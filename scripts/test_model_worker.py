@@ -198,6 +198,15 @@ class TestVendorAdapterSelection(unittest.TestCase):
                          ["codex", "exec", "--json", "--sandbox",
                           "workspace-write"])
 
+    def test_cursor_argv_uses_only_flags_measured_from_its_own_help(self):
+        """U2: `_default_argv({"BROTHER_MODEL_CLIENT": "cursor"})` must equal
+        the argv documented against a real `cursor-agent --help` on this
+        machine (2026-09-13): -p/--print, --output-format json, --trust,
+        --mode ask."""
+        self.assertEqual(_mw()._default_argv({"BROTHER_MODEL_CLIENT": "cursor"}),
+                         ["cursor-agent", "-p", "--output-format", "json",
+                          "--trust", "--mode", "ask"])
+
     def test_an_unidentified_host_still_runs_the_claude_cli(self):
         """NO-DATA on the client is reported by brother_paths, never turned
         into a refusal here: this function has to return an argv, and the
@@ -208,9 +217,55 @@ class TestVendorAdapterSelection(unittest.TestCase):
         env = {"BROTHER_MODEL_CLIENT": "codex", "CLAUDECODE": "1"}
         self.assertEqual(_mw().model_client(env), "codex")
 
+    def test_the_cursor_override_is_honoured_too(self):
+        env = {"BROTHER_MODEL_CLIENT": "cursor", "CLAUDECODE": "1"}
+        self.assertEqual(_mw().model_client(env), "cursor")
+
     def test_an_unrecognised_override_is_ignored_not_trusted(self):
-        self.assertEqual(_mw().model_client({"BROTHER_MODEL_CLIENT": "cursor",
+        """U2: the old version of this test used "cursor" as the garbage
+        value; now that cursor is a real vendor, garbage is spelled "nope"."""
+        self.assertEqual(_mw().model_client({"BROTHER_MODEL_CLIENT": "nope",
                                           "CLAUDECODE": "1"}), "claude")
+
+    def test_default_argv_refuses_an_unrecognised_client_explicitly_named(self):
+        """model_client() stays tolerant (door.py's decomposer/diagnostic
+        paths rely on that), but _default_argv() decides which PAID vendor
+        actually runs a unit, and only claude/codex are wired. Naming
+        "deepseek" or "muse" here must not silently become a paid Claude
+        run: no adapter exists for either in this file (found 2026-09-13,
+        founder-reported: Claude credits still spent when delegating to
+        DeepSeek/Muse, traced to this exact silent fallback)."""
+        with self.assertRaises(ValueError) as ctx:
+            _mw()._default_argv({"BROTHER_MODEL_CLIENT": "deepseek"})
+        self.assertIn("deepseek", str(ctx.exception))
+        with self.assertRaises(ValueError):
+            _mw()._default_argv({"BROTHER_MODEL_CLIENT": "muse"})
+
+    def test_default_argv_still_falls_through_when_unset(self):
+        """Unset/empty is not "unrecognised": it is the legitimate
+        auto-detect path and must keep working exactly as before."""
+        self.assertEqual(_mw()._default_argv({}),
+                         _mw()._claude_argv({}))
+
+
+class TestRunModelRefusesAnUnwiredClientWithoutSpendingAnything(unittest.TestCase):
+    """The actual token-waste guarantee: run_model() must report the
+    unrecognised-client refusal WITHOUT ever invoking a subprocess, since
+    the whole point is that a unit named for a vendor with no adapter here
+    must not run (and be billed) on Claude instead."""
+
+    def test_no_subprocess_is_launched_for_an_unwired_client(self):
+        def _runner_must_not_be_called(*_a, **_k):
+            raise AssertionError(
+                "run_model must refuse before launching a subprocess for an "
+                "unrecognised BROTHER_MODEL_CLIENT")
+        with mock.patch.dict(os.environ, {"BROTHER_MODEL_CLIENT": "muse"}):
+            ok, reason, usage = _mw().run_model(
+                "prompt", runner=_runner_must_not_be_called)
+        self.assertFalse(ok)
+        self.assertTrue(reason.startswith("failure_class=other;"), reason)
+        self.assertIn("muse", reason)
+        self.assertIsNone(usage)
 
 
 class TestCodexOutputParser(unittest.TestCase):
@@ -297,6 +352,35 @@ class TestCodexOutputParser(unittest.TestCase):
         not only of a fixture: codex's own field map names no cache-creation
         count, which is why a codex run cannot print a share."""
         self.assertNotIn("tokens_cache_write", _mw().CODEX_USAGE_FIELD_MAP)
+
+
+class TestCursorOutputParser(unittest.TestCase):
+    """U2: Cursor's stdout envelope is the SAME shape as Claude's own
+    (a "result" string beside a "usage" sub-object), just camelCase keys, so
+    it reuses _parse_model_output with CURSOR_USAGE_FIELD_MAP rather than a
+    second parser. Fixture is the real envelope measured 2026-09-13:
+    `cursor-agent -p --output-format json --trust --mode ask`."""
+
+    LIVE_ENVELOPE = {"type": "result", "subtype": "success", "is_error": False,
+                     "result": "ok",
+                     "usage": {"inputTokens": 30412, "outputTokens": 90,
+                              "cacheReadTokens": 0, "cacheWriteTokens": 0}}
+
+    def test_the_measured_live_envelope_is_read_correctly(self):
+        claim, usage = _mw()._parse_model_output(
+            json.dumps(self.LIVE_ENVELOPE), _mw().CURSOR_USAGE_FIELD_MAP)
+        self.assertEqual(claim, "ok")
+        self.assertEqual(usage, {"tokens_in": 30412, "tokens_out": 90,
+                                 "tokens_cached": 0, "tokens_cache_write": 0})
+
+    def test_camelcase_keys_are_never_read_by_the_claude_field_map(self):
+        """Without the field map argument this parser reads Claude's own
+        snake_case keys, which do not exist in Cursor's envelope, so a
+        caller that forgets to pass CURSOR_USAGE_FIELD_MAP gets NO usage,
+        never an invented one from misreading the wrong keys."""
+        _claim, usage = _mw()._parse_model_output(
+            json.dumps(self.LIVE_ENVELOPE))
+        self.assertIsNone(usage)
 
 
 class _FakeCompleted(object):
@@ -538,6 +622,26 @@ class TestRunModelEmptyIsFailure(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("failure_class=empty", reason)
         self.assertIsNone(usage)
+
+    def test_empty_cursor_stdout_is_a_failure_classed_empty(self):
+        with mock.patch.dict(os.environ, {"BROTHER_MODEL_CLIENT": "cursor"}):
+            ok, reason, usage = _mw().run_model(
+                "prompt", runner=lambda *_a, **_k: _FakeCompleted(stdout=""))
+        self.assertFalse(ok)
+        self.assertIn("failure_class=empty", reason)
+        self.assertIn("cursor produced no stdout", reason)
+        self.assertIsNone(usage)
+
+    def test_a_normal_non_empty_cursor_answer_is_a_success_with_its_own_map(self):
+        with mock.patch.dict(os.environ, {"BROTHER_MODEL_CLIENT": "cursor"}):
+            out = json.dumps({"is_error": False, "result": "the real answer",
+                              "usage": {"inputTokens": 1, "outputTokens": 2}})
+            ok, claim, usage = _mw().run_model(
+                "prompt",
+                runner=lambda *_a, **_k: _FakeCompleted(stdout=out))
+        self.assertTrue(ok, claim)
+        self.assertEqual(claim, "the real answer")
+        self.assertEqual(usage, {"tokens_in": 1, "tokens_out": 2})
 
     def _real(self, out):
         with mock.patch.dict(os.environ, {"BROTHER_MODEL_CLIENT": "claude"}):

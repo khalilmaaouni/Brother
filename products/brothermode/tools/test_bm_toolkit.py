@@ -965,5 +965,23 @@ class RouteMissingTaskClassArgumentTests(unittest.TestCase):
         self.assertIn("route requires a task class argument", result.stderr)
 
 
+class Night0912BmToolkit(unittest.TestCase):
+    """A settings.json that is valid JSON but not an object (e.g. `[]`)
+    used to crash _apply_enabled with AttributeError on the unconditional
+    settings_data.get(...), taking the whole inventory command down with
+    it instead of reporting every plugin's enabled as null, the same
+    could-not-tell answer test_settings_json_unreadable_gives_null_for_
+    every_plugin already proves for unparseable JSON."""
+
+    def test_non_object_settings_json_reports_inventory_not_no_data(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            write_text(os.path.join(tmp, ".claude", "settings.json"), "[]")
+            write_claude_json(tmp, {"mcpServers": {}})
+            result = run_cli("inventory", "--home", tmp, "--root", tmp)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("NO-DATA", result.stdout)
+        self.assertIn("SUMMARY:", result.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

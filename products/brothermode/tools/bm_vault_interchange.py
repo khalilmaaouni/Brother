@@ -231,7 +231,8 @@ def _validate_value(name, value, prop_schema):
             problems.append("field %r exceeds maxLength %d (got %d characters)"
                             % (name, max_len, len(value)))
         pattern = prop_schema.get("pattern")
-        if pattern is not None and re.match(pattern, value) is None:
+        # JSON Schema 'pattern' is unanchored: search anywhere in the string.
+        if pattern is not None and re.search(pattern, value) is None:
             problems.append("field %r value %r does not match pattern %r"
                             % (name, value, pattern))
     if "enum" in prop_schema and value not in prop_schema["enum"]:
@@ -329,8 +330,10 @@ def evolve_check(v1, v2):
                             % (name, v1_field.get("type"), v2_field.get("type")))
             continue
         v1_enum = v1_field.get("enum")
-        if v1_enum is not None:
-            dropped = sorted(set(v1_enum) - set(v2_field.get("enum") or []))
+        v2_enum = v2_field.get("enum")
+        # A target without an enum is a widening, not a drop of every source value.
+        if v1_enum is not None and v2_enum is not None:
+            dropped = sorted(set(v1_enum) - set(v2_enum))
             if dropped:
                 problems.append("enum on field %r drops value(s) %s"
                                 % (name, dropped))

@@ -344,6 +344,9 @@ def cmd_classes(cls, json_out):
         except ValueError as e:
             print("NO-DATA: %s" % e)
             return 2
+        if out[c] is None:  # out-of-scope class, same NO-DATA as a bad table
+            print("NO-DATA: class %r is not declared" % c)
+            return 2
     if json_out:
         def _ser(v):
             return v  # already JSON-safe (str/bool/None)
@@ -391,6 +394,9 @@ def cmd_codes_check(vault, all_mode, staged, json_out):
     lists_data, err = load_code_lists(vault)
     if err:
         print("NO-DATA: %s" % err)
+        return 2
+    if lists_data is None:  # absent code lists are NO-DATA, never a clean zero-finding pass
+        print("NO-DATA: no code lists declared under %s" % vault)
         return 2
     notes = ct._load_notes(vault)
     if notes is None:

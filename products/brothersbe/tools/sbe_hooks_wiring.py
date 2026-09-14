@@ -107,7 +107,13 @@ def _hooks_json_wiring(data):
     """
     problems = []
     events = {}
-    for event, blocks in (data or {}).get("hooks", {}).items():
+    declared = (data or {}).get("hooks", {})
+    if not isinstance(declared, dict):
+        # A present-but-wrong-typed shape is the tampering this check exists
+        # to name, so it becomes a problem here, never an AttributeError.
+        return {"events": events,
+                "problems": ["hooks is %r, not an object of events" % (declared,)]}
+    for event, blocks in declared.items():
         by_matcher = {}
         for block in blocks:
             matcher = block.get("matcher", "")
@@ -132,7 +138,14 @@ def _hooks_json_missing_scripts(data, install_root):
     test_every_hook_command_points_at_a_file_that_exists checks the shipped
     file, applied here to whichever file (shipped or installed) is in hand."""
     missing = []
-    for event, blocks in (data or {}).get("hooks", {}).items():
+    # Reviewer addition: same shape bug as _hooks_json_wiring above (a
+    # present-but-null hooks field), which would otherwise crash here right
+    # after that function stopped crashing on the same input, since
+    # hooks_wiring_check calls both against the same data.
+    declared = (data or {}).get("hooks", {})
+    if not isinstance(declared, dict):
+        return missing
+    for event, blocks in declared.items():
         for block in blocks:
             for hook in block.get("hooks", []):
                 for cited in _PLUGIN_ROOT_CITATION.findall(hook.get("command", "")):

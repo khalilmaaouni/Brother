@@ -291,5 +291,19 @@ class RepoMarketplace(unittest.TestCase):
         self.assertEqual(names, {"brothermode", "brothersbe", "brother"})
 
 
+class Night0912CodexSkills(unittest.TestCase):
+    def test_missing_description_is_a_problem(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            skill = os.path.join(tmp, "s")
+            os.makedirs(skill)
+            with open(os.path.join(skill, "SKILL.md"), "w") as fh:
+                fh.write("---\nname: s\n---\nbody\n")
+            files, problems = CS.build(source_dir=tmp)
+            self.assertTrue(
+                problems,
+                "expected build to report the missing description",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

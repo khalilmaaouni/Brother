@@ -118,7 +118,7 @@ def _git_ls_files(root):
             text=True,
             timeout=60,
         )
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired:  # sbe: allow-silent caller surfaces this message as a NO-DATA verdict, not a swallow
         return None, "git ls-files timed out after 60 seconds"
     except Exception as exc:
         return None, str(exc)

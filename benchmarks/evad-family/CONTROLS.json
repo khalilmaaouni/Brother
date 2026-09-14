@@ -1,0 +1,40 @@
+{
+  "spec_version": "2026-09-14",
+  "source": {
+    "document": "benchmarks/competitive/CONTROLS.json, benchmarks/competitive/RUBRIC.md",
+    "note": "A new file, not a copy scored differently: benchmarks/competitive/CONTROLS.json's start_commit, token_budget and intervention_budget are each a single value for ONE fixture. evad-family holds three independent fixtures, each needing its OWN frozen start commit and its own budgets, so those three fields are per-task maps here instead. RUBRIC.md itself is reused unmodified: none of its six dimensions read anything task-specific, they only read diff.patch/meta.json against whatever --fixture directory is passed."
+  },
+  "gate_before_use": "Same gate as the competitive round: no new benchmark work until the P0 rows on docs/plan/READINESS-ROADMAP-2026-08-29.json close, per docs/plan/FIX-DIRECTIVE-2026-09-06.md section 31.",
+  "model_id": "NO-DATA: named once, identical across every competitor arm and every task, by whoever runs the round; write the exact id here before the round starts.",
+  "tasks": {
+    "task1-cache-invalidation": {
+      "fixture_dir": "benchmarks/evad-family/task1-cache-invalidation/",
+      "start_commit": "NO-DATA: produced by this task's own TASK.md Setup section; a session must run it and record the hash it prints here.",
+      "token_budget": "NO-DATA: named once per round, identical across every arm, before the round starts.",
+      "intervention_budget": "NO-DATA: named once per round, identical across every arm, before the round starts."
+    },
+    "task2-chunk-boundary": {
+      "fixture_dir": "benchmarks/evad-family/task2-chunk-boundary/",
+      "start_commit": "NO-DATA: produced by this task's own TASK.md Setup section; a session must run it and record the hash it prints here.",
+      "token_budget": "NO-DATA: named once per round, identical across every arm, before the round starts.",
+      "intervention_budget": "NO-DATA: named once per round, identical across every arm, before the round starts."
+    },
+    "task3-shallow-copy-leak": {
+      "fixture_dir": "benchmarks/evad-family/task3-shallow-copy-leak/",
+      "start_commit": "NO-DATA: produced by this task's own TASK.md Setup section; a session must run it and record the hash it prints here.",
+      "token_budget": "NO-DATA: named once per round, identical across every arm, before the round starts.",
+      "intervention_budget": "NO-DATA: named once per round, identical across every arm, before the round starts."
+    }
+  },
+  "scoring_note": "scripts/competitive_score.py reads token_budget and intervention_budget as flat top-level CONTROLS.json fields, not nested under tasks. When scoring a run for a given task, pass that task's own numbers with a per-task controls file (or invoke the script once per task with a shell substitution), never the whole tasks map: --controls does not know about the tasks key above, it only reads token_budget/intervention_budget directly.",
+  "machine": {
+    "descriptor_fields": ["hostname", "os", "os_version", "cpu_model", "cpu_count", "memory_gb", "measured_at"],
+    "how_to_capture": "uname -a; on macOS also sysctl -n machdep.cpu.brand_string hw.ncpu hw.memsize; on Linux also lscpu and free -h. Record the actual command output beside the run record, never assumed from a prior round."
+  },
+  "competitors": "NO-DATA: same four frameworks plus vanilla Claude Code as benchmarks/competitive/CONTROLS.json's competitors block; copy that block verbatim into this file, re-verified against this machine's ~/.claude/plugins/known_marketplaces.json, before the round starts rather than assuming it is still current.",
+  "raw_artifacts": {
+    "convention": "One run directory per competitor arm PER TASK, contract documented in benchmarks/competitive/RUBRIC.md: diff.patch, meta.json (declared_files, tokens_used, interventions), optionally receipt.json and transcript.txt.",
+    "root": "NO-DATA: named per round; a dated directory under benchmarks/results/ following the existing benchmarks/results/long-horizon-recovery/ convention is the closest sibling on this estate, with one subdirectory per task."
+  },
+  "publish_rule": "Same as the competitive round: publish raw artifacts, never only a composite score. scripts/competitive_score.py enforces this mechanically per task."
+}

@@ -282,6 +282,12 @@ def cmd_merge(vault, from_id, into_id, rule_version, effective, ids_mod, ev_mod)
               "unmerge it first" % (from_id, survivor, chain[-1]["valid_from"]),
               file=sys.stderr)
         return 1
+    # Refuse when the target already reaches the source: the new edge would close a cycle.
+    into_survivor, _ = resolve_entity(intervals, into_id, as_of=None)
+    if into_survivor == from_id:
+        print("bm_vault_identity: refused, --into %r is upstream of --from %r; "
+              "merging would create a cycle" % (into_id, from_id), file=sys.stderr)
+        return 1
 
     event_key = "merge:%s:%s:%s" % (from_id, into_id, effective)
     record = {

@@ -1282,5 +1282,13 @@ class DataOverlayTests(unittest.TestCase):
         self.assertNotIn('intake-overlay', out)
 
 
+class Night0912IntakeScore(unittest.TestCase):
+    def test_approval_prompt_before_plan_heading(self):
+        text = ("# Intake Record\n\nDo you approve this plan?\n\n## Plan\n"
+                "Do the migration.\n\n## Confirmation checklist\n- tests pass\n")
+        result = by_name(intake_score.score_record(text, 'dev', root=REPO_ROOT))['sequencing']
+        self.assertEqual(result.score, 0.0)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -322,10 +322,12 @@ def protected_patterns():
                           os.path.join(HERE, "sbe_bash_write_guard.py"))
     surface = _load_by_path("sbe_instruction_surface_for_baseline",
                             os.path.join(HERE, "sbe_instruction_surface.py"))
-    if guard is None or surface is None:
+    common = _load_by_path("sbe_guard_common_for_baseline",
+                           os.path.join(HERE, "sbe_guard_common.py"))
+    if guard is None or surface is None or common is None:
         return {"authorityPaths": [], "controlPlanePaths": []}
     return {"authorityPaths": list(guard.authority_patterns(surface)),
-            "controlPlanePaths": list(guard.CONTROL_PLANE_PATTERNS)}
+            "controlPlanePaths": list(common.CONTROL_PLANE_PATTERNS)}
 
 
 # ---------------------------------------------------------------------------

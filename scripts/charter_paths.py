@@ -79,7 +79,7 @@ def read_charter(path):
     try:
         with open(path, encoding="utf-8") as fh:
             return fh.read()
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         print("NO-DATA: cannot read %s (%s)" % (path, exc))
         return None
 

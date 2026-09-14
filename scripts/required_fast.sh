@@ -53,25 +53,9 @@ run_check() {
   last="$(printf '%s\n' "$out" | tail -1 | cut -c1-72)"
   keep=""
   case "$code" in
-    0) pass=$((pass+1));   verdict="PASS   "
-       # THE READOUT NAMES THE CHECK'S OWN VERDICT, NOT WHATEVER PRINTED
-       # LAST. A unittest suite states its verdict on its own line ("OK", or
-       # "OK (skipped=N)"); a self-test block can print an adversarial
-       # "FAIL:"/"NO-DATA:" string as its last line on a green run, which
-       # reads as a failure to anyone skimming. Prefer the OK line when the
-       # output has one; a check that is not a unittest suite keeps its last
-       # line, which for those already is the verdict. Same logic as
-       # check_all.sh's run_check; verdict itself still comes from $code.
-       ok_line="$(printf '%s\n' "$out" | grep -E '^OK($| \()' | tail -1 | cut -c1-72)"
-       [ -n "$ok_line" ] && last="$ok_line" ;;
+    0) pass=$((pass+1));   verdict="PASS   " ;;
     2) nodata=$((nodata+1)); verdict="NO-DATA"; nodata_names="$nodata_names $name" ;;
     *) fail=$((fail+1));   verdict="FAIL   "; failed_names="$failed_names $name"
-       # THE READOUT NAMES THE FAILURE, NOT WHATEVER PRINTED LAST. Prefer the
-       # last line that actually carries a failure word; keep the generic
-       # last line only when nothing in the output says so, so a check with
-       # no such wording never goes silent. Same logic as check_all.sh.
-       fail_line="$(printf '%s\n' "$out" | grep -E 'FAIL|REFUSED|BLOCK|Error' | tail -1 | cut -c1-72)"
-       [ -n "$fail_line" ] && last="$fail_line"
        # CAPTURE EVERYTHING, READ A SLICE (same estate lesson as check_all.sh).
        keep="${TMPDIR:-/tmp}/required-fast-fail-$name-$worktree_key.txt"
        printf '%s\n' "$out" > "$keep" 2>/dev/null && last="$last  [full: $keep]"
@@ -137,9 +121,6 @@ run_check "cursor-plugin-self"  python3 scripts/test_cursor_plugin.py
 # is the defect, and the same payload through bm_cursor_hook.py --run is
 # denied. No binary is needed, so it also earns the fast slice.
 run_check "cursor-hook-run-self" python3 scripts/test_cursor_hook_run.py -v
-# The shipped deny chain end to end (hooks.json command, real fence, real
-# claim): about two seconds, no binary, so it earns the fast slice too.
-run_check "cursor-deny-chain-self" python3 scripts/test_cursor_deny_chain.py -v
 # Founder order 2026-09-12: Cursor stays at parity with Codex at every
 # release. Every tracked Codex surface and every codex- battery check needs
 # a Cursor twin, an exemption or a dated debt, and a debt past its release
@@ -189,6 +170,18 @@ fi
 run_check "daybook"             python3 scripts/test_daybook.py
 run_check "handover-ceremony"   python3 scripts/test_handover_ceremony.py
 run_check "closing-ceremony"    python3 scripts/test_close_ceremony_check.py
+# F2 (root-cause fix, 2026-09-14 adversarial sweep): the FIXTURE suite above
+# only proves close_ceremony_check.py's own logic against hand-built zips; a
+# real handover pack's zip shape (member paths prefixed with the pack's own
+# directory name) was different enough that the gate FAILED on every real
+# pack while its fixture suite stayed green. Same lesson this file already
+# names for readiness-gate (a tag failed on the real gate while only its
+# self-test ran): a gate's fixture suite is never a substitute for running
+# the gate. Reads the machine's own handover root
+# (~/Documents/BrotherModeUp-handovers), which CI does not have, so it is
+# NO-DATA there by the gate's own exit-2 convention; the local lander and
+# the release closeout are where this runs for real.
+run_check "closing-ceremony-real" python3 scripts/close_ceremony_check.py
 run_check "doc-assurance"       python3 scripts/doc_assurance.py --selftest
 run_check "system-inventory"    python3 scripts/test_system_doc.py
 run_check "evidence-obligation" python3 scripts/test_evidence_obligation.py

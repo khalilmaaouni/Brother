@@ -4,7 +4,15 @@ import json
 import os
 import sys
 
-LEVELS = {"OPTIONAL", "REQUIRED_FOR_MERGE", "REQUIRED_FOR_RELEASE"}
+# WBS-20.02 (docs/decisions/evidence-vocabulary-2026-09-13.json, EV-3):
+# this is the one definition site for both triples, since this module is
+# the one actually wired to the enforced merge gate (required_fast.sh).
+# scripts/receipt_attest.py imports these instead of redeclaring them.
+# Tuple, not a set: order is part of what a caller may rely on (e.g. in a
+# "must be one of %s" message), and receipt_attest.py's prior declaration
+# used this exact order.
+VERDICTS = ("PASS", "FAIL", "NO-DATA")
+LEVELS = ("OPTIONAL", "REQUIRED_FOR_MERGE", "REQUIRED_FOR_RELEASE")
 
 
 class ObligationError(Exception):
@@ -79,6 +87,15 @@ def verdict_for_code(code):
     if code == 2:
         return "NO-DATA"
     return "FAIL"
+
+
+def exit_code_for_verdict(verdict):
+    """The forward mapping (verdict to process exit code), the counterpart
+    of verdict_for_code above. This is the one definition site: every other
+    module that needs it (reversibility_gate.py, merge_passport.py,
+    master_source_snapshot.py, device_matrix.py) imports this instead of
+    redeclaring it."""
+    return {"PASS": 0, "FAIL": 1, "NO-DATA": 2}.get(verdict, 1)
 
 
 def transition(args):

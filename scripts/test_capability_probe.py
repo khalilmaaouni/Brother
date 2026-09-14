@@ -100,5 +100,12 @@ class InventoryComparison(unittest.TestCase):
         self.assertIsNone(undocumented)
 
 
+class Night0912CapabilityProbe(unittest.TestCase):
+    def test_unimplemented_probe_kind_is_no_data(self):
+        state, reached, tried = CP.probe(
+            {"alternatives": [{"kind": "bogus", "probe": "x"}]})
+        self.assertEqual(CP.NODATA, state)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

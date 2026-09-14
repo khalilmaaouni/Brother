@@ -1,6 +1,6 @@
 {
   "name": "brother",
-  "version": "1.0.16",
+  "version": "1.0.17",
   "description": "Turn a plain-language outcome into checked work, a rerunnable receipt, useful local memory, and a human acceptance decision.",
   "author": {
     "name": "Khalil Maaouni"
@@ -21,6 +21,9 @@
   ],
   "commands": [
     "./commands/"
+  ],
+  "agents": [
+    "./agents/"
   ],
   "rules": "./rules/",
   "hooks": "./cursor-hooks/hooks.json"

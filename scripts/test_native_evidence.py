@@ -102,7 +102,7 @@ class NativeEvidenceTests(unittest.TestCase):
         """)
         wrapper = self.write_script("wrapper.py", """
             import subprocess, sys, time
-            subprocess.Popen([sys.executable, sys.argv[1], sys.argv[2]])
+            subprocess.Popen([sys.executable, sys.argv[1], sys.argv[2]])  # sbe: allow-silent test needs the child left running so the timeout kill can be observed
             time.sleep(10)
         """)
         code = N.main(["record", "--repo", self.repo, "--out", os.path.join(self.tmp, "timeout.json"),

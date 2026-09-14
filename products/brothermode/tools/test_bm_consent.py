@@ -1874,5 +1874,53 @@ class UpdateCommandFileCase(unittest.TestCase):
                       "the update command lost the rollback sentence")
 
 
+class Night0912BmTelemetry(unittest.TestCase):
+    """cmd_precompact_brief must not crash on a malformed transcript line: a
+    Bash tool_use whose recorded input carries an explicit JSON null command
+    (rather than an absent one) used to raise TypeError deep in the loop that
+    builds the 'Recent actions' section, so the whole resume brief was
+    silently never written."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="bm-telemetry-precompact-")
+        self.home = os.path.join(self.tmp, "home")
+        self.project = os.path.join(self.tmp, "project")
+        os.makedirs(self.home)
+        os.makedirs(self.project)
+        self.vault = os.path.join(self.home, "BrotherModeVault")
+        self.env = _clean_env(self.home)
+        self.env["BROTHERMODE_VAULT"] = self.vault
+        self.teldir = os.path.join(self.vault, "99-System", "telemetry")
+        _write_consented_config(
+            os.path.join(self.home, ".brotherme", "config.json"), self.vault)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_precompact_brief_null_bash_command(self):
+        path = os.path.join(self.tmp, "transcript.jsonl")
+        with io.open(path, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps({
+                "type": "assistant",
+                "message": {"content": [
+                    {"type": "tool_use", "name": "Bash",
+                     "input": {"command": None}}]},
+            }) + "\n")
+        payload = {"session_id": "sess-null-bash", "transcript_path": path,
+                  "cwd": self.project, "hook_event_name": "PreCompact"}
+        r = subprocess.run(
+            [sys.executable, TELEMETRY, "precompact-brief"],
+            cwd=self.project, env=self.env, input=json.dumps(payload),
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            universal_newlines=True, timeout=120)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("Traceback", r.stderr, r.stderr)
+        briefs = ([n for n in os.listdir(self.teldir)
+                   if n.startswith("last-resume-")]
+                  if os.path.isdir(self.teldir) else [])
+        self.assertEqual(len(briefs), 1,
+                         "resume brief was not written: %r" % (briefs,))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

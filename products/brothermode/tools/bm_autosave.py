@@ -384,6 +384,11 @@ def _safe_ref_component(s):
     _checked's caller."""
     s = _UNSAFE_REF_CHARS.sub("_", s or "")
     s = s.strip(".") or "unknown"
+    # git also rejects a ref component containing '..' or ending in
+    # '.lock'; rewrite both so update-ref cannot abort the snapshot.
+    s = s.replace("..", "__")
+    if s.endswith(".lock"):
+        s += "_"
     return s
 
 
@@ -942,7 +947,21 @@ def _extra_exclude_pathspecs():
     if raw is None or not raw.strip():
         return ()
     out = []
-    for piece in re.split(r"[,\n:]", raw):
+    # A colon after a lone drive letter (C:\ or C:/) is part of a Windows
+    # path, not a separator. Every other colon still separates, so the usual
+    # POSIX list "/a/secrets:/b/other" keeps splitting into two entries.
+    pieces = re.split(r"[,\n:]", raw)
+    joined = []
+    i = 0
+    while i < len(pieces):
+        if (re.fullmatch(r"\s*[A-Za-z]", pieces[i]) and i + 1 < len(pieces)
+                and pieces[i + 1][:1] in ("/", "\\")):
+            joined.append(pieces[i].strip() + ":" + pieces[i + 1])
+            i += 2
+            continue
+        joined.append(pieces[i])
+        i += 1
+    for piece in joined:
         pat = piece.strip()
         if not pat:
             continue

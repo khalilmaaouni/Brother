@@ -53,7 +53,12 @@ def _collect_symbols(tree):
                 symbols.append("%s.%s" % (self._class_stack[-1], node.name))
             else:
                 symbols.append(node.name)
+            # A def nested inside a function body is not a class member, so hide
+            # the enclosing class while walking this def's body.
+            enclosing = self._class_stack
+            self._class_stack = []
             self.generic_visit(node)
+            self._class_stack = enclosing
 
         visit_FunctionDef = _visit_func
         visit_AsyncFunctionDef = _visit_func
@@ -91,8 +96,13 @@ def build_map(roots):
 
     result = {}
     for path in sorted(files):
-        with open(path, encoding="utf-8", errors="replace") as fh:
-            source = fh.read()
+        try:
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                source = fh.read()
+        except OSError:
+            # A broken symlink or other unreadable .py is unparseable, not fatal.
+            result[path] = {"symbols": [], "imports": [], "parse_error": True}
+            continue
         try:
             tree = ast.parse(source, filename=path)
         except SyntaxError:

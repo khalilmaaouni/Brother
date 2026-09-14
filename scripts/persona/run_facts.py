@@ -50,7 +50,8 @@ def main(argv=None):
         n = sum(1 for r in R if r.get("round", 1) == rn)
         out.append("- through round %d: PASS %d of 40 (%d%%), verdicts %s, mean trust %.1f; scenarios run in that round: %d" % (rn, p, 100 * p // 40, c, t, n))
     agree = sum(1 for j in J if any(r["scenario"] == j["scenario"] and r.get("round", 1) == j.get("round", 1) and r["verdict"] == j.get("verdict") for r in R))
-    out += ["- Muse judge (meta/muse-spark-1.2) judgments: %d, agreeing with the actor on %d" % (len(J), agree), "- target: 36 of 40 (90 percent). NOT REACHED.", ""]
+    final_p = latest_by_round(rounds[-1])[0] if rounds else 0
+    out += ["- Muse judge (meta/muse-spark-1.2) judgments: %d, agreeing with the actor on %d" % (len(J), agree), "- target: 36 of 40 (90 percent). %s." % ("REACHED" if final_p >= 36 else "NOT REACHED"), ""]
     out += ["## Users' own lines (latest per scenario, worst trust first)"]
     latest = {}
     for r in R:

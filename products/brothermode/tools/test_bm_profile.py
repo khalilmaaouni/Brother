@@ -212,5 +212,23 @@ class VaultAndProjectConvenience(unittest.TestCase):
         self.assertIn("role: analyst", out, out)
 
 
+class Night0912BmProfile(unittest.TestCase):
+    def test_value_with_colon_space_is_not_folded_into_the_key(self):
+        # A value containing ": " must not shift the key/value split: record
+        # the SAME key three times with an identical colon-bearing value, so
+        # promotion can only fire if every entry lands on the same key.
+        # Under the pre-fix rsplit(": ", 1), the stored key becomes "tag: x"
+        # (not "tag") every time, so promoted("tag") never sees a match.
+        tmp, path = make_profile()
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        for _ in range(3):
+            code, out = run(["record", "--profile", path,
+                             "--key", "tag", "--value", "x: y"])
+            self.assertEqual(code, 0, out)
+        code, out = run(["promoted", "--profile", path, "--key", "tag"])
+        self.assertEqual(code, 0, out)
+        self.assertEqual(out.strip(), "x: y")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

@@ -57,6 +57,15 @@ class TestRender(unittest.TestCase):
         self.assertIn(MARKER, render(lesson(), "2026-08-29", "brother"))
 
 
+class Night0912WisdomCapture(unittest.TestCase):
+    def test_null_verified_by_does_not_crash_render(self):
+        # A JSON null for verified_by arrives as Python None, not an absent
+        # key: lesson.get("verified_by") then returns None (the key IS
+        # present), and None.strip() used to crash.
+        out = render(lesson(verified_by=None), "2026-08-29", "brother")
+        self.assertIn("verified-by: \n", out)
+
+
 class TestCapture(unittest.TestCase):
 
     def setUp(self):

@@ -350,5 +350,35 @@ class RealTreeCalibrationTests(unittest.TestCase):
                          "verdict says nothing about the tree")
 
 
+class Night0912BmLintWalltime(unittest.TestCase):
+    """Two findings from the night sweep: an annotated timing assignment
+    was never tracked (3dab38848e44), and an invalid-UTF8 file crashed
+    instead of being reported UNCHECKABLE (2c08c6155b3d)."""
+
+    def test_annotated_timing_assignment_is_followed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            write_fixture(tmp, "case.py", (
+                "import time\n"
+                "import unittest\n"
+                "class T(unittest.TestCase):\n"
+                "    def test_x(self):\n"
+                "        start = time.time()\n"
+                "        elapsed: float = time.time() - start\n"
+                "        self.assertLess(elapsed, 5.0)\n"))
+            result = run_cli(os.path.join(tmp, "case.py"))
+            self.assertEqual(result.returncode, 1,
+                             result.stdout + result.stderr)
+            self.assertIn("case.py:7:", result.stdout)
+
+    def test_invalid_utf8_file_is_uncheckable_not_raised(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "bad.py")
+            with open(path, "wb") as handle:
+                handle.write(b"\xff")
+            result = run_cli(tmp)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("UNCHECKABLE", result.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

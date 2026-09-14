@@ -462,7 +462,17 @@ def critical_path(weights, edges):
     forward = dict((n, []) for n in nodes)
     seen_edges = set()
     for a, b in edges:
-        if a not in known or b not in known or (a, b) in seen_edges or a == b:
+        if a not in known or b not in known:
+            continue
+        if a == b:
+            # A self-loop is a cycle of length one. Skipping it as though it
+            # were a duplicate would give an impossible graph a critical path.
+            raise DocsError(
+                "schedule-cycle",
+                "the work dependency graph has a cycle through %s: a record "
+                "waits on itself, so it has no critical path. Look at its "
+                "claimed files." % a)
+        if (a, b) in seen_edges:
             continue
         seen_edges.add((a, b))
         forward[a].append(b)
@@ -882,7 +892,7 @@ def module_inventory(root):
     return {"modules": modules, "tests": tests}
 
 
-def _import_targets(line):
+def _import_targets(line, module=""):
     """The dotted names one import line could be referring to, best first.
 
     `from a import b` MEANS a.b when b is a module, and that is the common shape
@@ -903,11 +913,21 @@ def _import_targets(line):
         return names, (names[0].split(".")[0] if names else "")
     mod = (m.group("mod") or "").strip()
     tail = re.sub(r"[()*]", " ", m.group("names") or "")
-    leaves = [n.strip() for n in tail.split(",") if n.strip()]
+    leaves = []
+    for raw in tail.split(","):
+        # An aliased from-import names the imported module before ` as `, so
+        # `from app import pay as p` names `pay`, not `pay as p`.
+        name = raw.split(" as ", 1)[0].strip()
+        if name:
+            leaves.append(name)
     bare = mod.strip(".")
     if not bare:
-        # A relative import with no module part (`from . import x`). The leaf is
-        # the only name there is, and it names a sibling module.
+        # A relative import with no module part (`from . import x`). The leaf
+        # names a SIBLING of the importing file, so it resolves against that
+        # file's own package rather than against any basename in the tree.
+        package = module.rsplit(".", 1)[0] if "." in module else ""
+        if package:
+            return ["%s.%s" % (package, leaf) for leaf in leaves], ""
         return leaves, ""
     return ["%s.%s" % (bare, leaf) for leaf in leaves] + [bare], \
         bare.split(".")[0]
@@ -928,26 +948,31 @@ def import_graph(root):
     edges, external = [], {}
     seen = set()
     for rel in files:
+        module = rel[:-3].replace("/", ".")
         for line in _read_text(root, rel).split("\n"):
-            candidates, head = _import_targets(line)
+            candidates, head = _import_targets(line, module)
             if not candidates:
                 continue
-            target = None
+            # EVERY candidate that resolves is an edge, not just the first:
+            # `from app import pay, util` names two local modules on one line,
+            # and stopping at pay dropped util from the graph.
+            targets = []
             for name in candidates:
                 target = local.get(name) or local.get(name.split(".")[0])
-                if target is not None:
-                    break
-            if target is None:
+                if target is not None and target not in targets:
+                    targets.append(target)
+            if not targets:
                 if head:
                     external[head] = external.get(head, 0) + 1
                 continue
-            if target == rel:
-                continue
-            key = (rel, target)
-            if key in seen:
-                continue
-            seen.add(key)
-            edges.append([rel, target])
+            for target in targets:
+                if target == rel:
+                    continue
+                key = (rel, target)
+                if key in seen:
+                    continue
+                seen.add(key)
+                edges.append([rel, target])
     # A module loaded by absolute path rather than by import name is invisible
     # to any import scan, and this project loads its siblings exactly that way
     # on purpose (a hostile sys.path must not be able to shadow bm_store). So the
@@ -1218,6 +1243,10 @@ def _floor_from_generated_facts(root):
         with io.open(path, encoding="utf-8") as fh:
             data = json.load(fh)
     except (ValueError, OSError):
+        return 0
+    if not isinstance(data, dict):
+        # A facts.json holding a list or a scalar carries no floor at all, and
+        # reading it as a mapping would crash rather than treat it as unreadable.
         return 0
     tier = data.get("tier")
     return tier if isinstance(tier, int) and tier in TIERS else 0
@@ -3500,13 +3529,16 @@ def current_doc_pages(root):
     record directory, plus README.md."""
     out = []
     docs = os.path.join(root, "docs")
+    # Match the record directories on a path boundary, so a sibling page such
+    # as docs/closure.md is not dropped for merely sharing a name prefix.
+    record_prefixes = tuple(d + "/" for d in VERIFY_RECORD_DIRS)
     for dirpath, _dirnames, filenames in os.walk(docs):
         for name in sorted(filenames):
             if not name.endswith((".md", ".html")):
                 continue
             rel = os.path.relpath(os.path.join(dirpath, name),
                                   root).replace(os.sep, "/")
-            if rel.startswith(VERIFY_RECORD_DIRS) or VERIFY_DATED_PAGE.search(name):
+            if rel.startswith(record_prefixes) or VERIFY_DATED_PAGE.search(name):
                 continue
             out.append(rel)
     if os.path.isfile(os.path.join(root, "README.md")):

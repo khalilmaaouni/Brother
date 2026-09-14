@@ -103,6 +103,7 @@ import os
 import platform
 import subprocess
 import sys
+import tempfile
 import time
 
 from . import version
@@ -1226,13 +1227,44 @@ def _check_seal(receipt):
             % (claimed, actual, GENERATOR))
 
 
-def _repo_top_level(cwd):
+def _cached_git(git_cache, key, cwd, *args):
+    """`_git(args, cwd)`, memoized in `git_cache` (a plain dict) under
+    `(key, abspath(cwd))` when `git_cache` is not None.
+
+    `git_cache=None` (the default, and every call site written before this
+    existed) computes fresh every time: nothing about correctness changes
+    for a caller that does not opt in. A caller verifying many receipts
+    against the SAME cwd in one pass -- `status.py`'s `_scan_evidence`,
+    mainly -- passes one dict across every `verify()` call it makes, and
+    `HEAD` and the repository root then answer ONCE per cwd instead of once
+    per receipt: neither fact depends on which receipt is being checked,
+    only on which tree it is being checked against, so re-forking git for
+    the same question N times over N receipts was pure waste, not a
+    correctness safeguard. Keyed by `key` as well as `cwd` so two different
+    questions about the same cwd (HEAD, show-toplevel) never collide in one
+    dict."""
+    if git_cache is None:
+        return _git(list(args), cwd)
+    full_key = (key, os.path.abspath(cwd))
+    if full_key not in git_cache:
+        git_cache[full_key] = _git(list(args), cwd)
+    return git_cache[full_key]
+
+
+def _resolve_head(cwd, git_cache=None):
+    """(code, out, err) for `git rev-parse HEAD` in `cwd`, exactly what
+    `_git` alone returns for that command. See `_cached_git` for the
+    memoization contract."""
+    return _cached_git(git_cache, "head", cwd, "rev-parse", "HEAD")
+
+
+def _repo_top_level(cwd, git_cache=None):
     """The absolute repository root reached from `cwd`, or None when `cwd` is
     not inside a work tree. Every path compared against `content_binding`
     output has to be spelled from HERE, because `git ls-tree --full-tree`
     answers in repository-root-relative paths no matter which directory the
     command ran in."""
-    code, out, _err = _git(["rev-parse", "--show-toplevel"], cwd)
+    code, out, _err = _cached_git(git_cache, "toplevel", cwd, "rev-parse", "--show-toplevel")
     if code != 0:
         return None
     # REALPATH, not the caller's spelling. On macOS the temporary
@@ -1253,7 +1285,7 @@ def _under_evidence_store(rel):
     return ("/" + EVIDENCE_STORE_REL + "/") in norm
 
 
-def _binding_exemptions(cwd, path, exclude_dirs, refs):
+def _binding_exemptions(cwd, path, exclude_dirs, refs, git_cache=None):
     """The repo-root-relative paths whose change must never stale a receipt:
     the receipt's own file, every other receipt in an evidence store, and any
     directory the caller excluded.
@@ -1277,7 +1309,7 @@ def _binding_exemptions(cwd, path, exclude_dirs, refs):
     THE PROPERTY THIS KEEPS. A commit that bundles a receipt with real work
     still changes a tracked path outside these exemptions, so it still stales
     the receipt exactly as before."""
-    root = _repo_top_level(cwd)
+    root = _repo_top_level(cwd, git_cache=git_cache)
     if root is None:
         return frozenset()
     exempt = set()
@@ -1345,7 +1377,7 @@ def _commit_known(cwd, ref):
     return code == 0
 
 
-def _check_commit(receipt, cwd, path=None, exclude_dirs=None):
+def _check_commit(receipt, cwd, path=None, exclude_dirs=None, git_cache=None):
     """(problem, note, nodata). The binding that makes a receipt evidence for
     ONE commit: `headCommit` binds to a DIGEST of the tracked content at that
     commit, not to the commit identifier itself (see
@@ -1365,8 +1397,15 @@ def _check_commit(receipt, cwd, path=None, exclude_dirs=None):
     merely for having been merged.
 
     A `headCommit` this repository does not hold returns NO-DATA rather than a
-    problem: nothing was compared, and NO-DATA is never a pass."""
-    code, out, err = _git(["rev-parse", "HEAD"], cwd)
+    problem: nothing was compared, and NO-DATA is never a pass.
+
+    `git_cache`, forwarded unchanged to `_repo_top_level` and this
+    function's own `git rev-parse HEAD`, lets a caller checking many
+    receipts against the same `cwd` in one pass (`status.py`'s
+    `_scan_evidence`) pay for each of those two facts once instead of once
+    per receipt; see `_cached_git`. `git_cache=None`, the default, computes
+    both fresh every time, exactly as before this parameter existed."""
+    code, out, err = _resolve_head(cwd, git_cache)
     if code != 0:
         return None, ("HEAD does not resolve in %s (%s), so the commit binding was not "
                       "checked and nothing here confirms which code this receipt covers"
@@ -1380,12 +1419,13 @@ def _check_commit(receipt, cwd, path=None, exclude_dirs=None):
                             "the content that receipt bound to was never read and nothing "
                             "here can say whether it still describes this tree"
                             % str(claimed)[:12])
-    exempt = _binding_exemptions(cwd, path, exclude_dirs, (claimed, current))
+    exempt = _binding_exemptions(cwd, path, exclude_dirs, (claimed, current), git_cache=git_cache)
     if claimed and content_binding.content_unchanged(cwd, claimed, current, exempt):
         return None, ("headCommit %s is the current head aside from commits that changed "
                       "nothing but this receipt and the evidence store around it"
                       % claimed[:12]), None
-    carried, carried_note = _carried_forward(receipt, cwd, claimed, current, exclude_dirs)
+    carried, carried_note = _carried_forward(receipt, cwd, claimed, current, exclude_dirs,
+                                             git_cache=git_cache)
     if carried:
         return None, carried_note, None
     return ("headCommit %s is not the current head %s: this receipt is evidence for a commit "
@@ -1393,7 +1433,7 @@ def _check_commit(receipt, cwd, path=None, exclude_dirs=None):
             % (str(claimed)[:12], current[:12]), None, None)
 
 
-def _carried_forward(receipt, cwd, claimed, current, exclude_dirs=None):
+def _carried_forward(receipt, cwd, claimed, current, exclude_dirs=None, git_cache=None):
     """(bool, note). The NARROW second way a receipt is still evidence for the
     tree in front of you, after the whole-tree digest has already said the tree
     moved: `claimed` is an ANCESTOR of the current head, and not one file the
@@ -1424,7 +1464,7 @@ def _carried_forward(receipt, cwd, claimed, current, exclude_dirs=None):
     a statement at all."""
     if not claimed or not current:
         return False, None
-    root = _repo_top_level(cwd)
+    root = _repo_top_level(cwd, git_cache=git_cache)
     if root is None:
         return False, None
     code, _out, _err = _git(["merge-base", "--is-ancestor", claimed, current], cwd)
@@ -1432,6 +1472,10 @@ def _carried_forward(receipt, cwd, claimed, current, exclude_dirs=None):
         return False, None
     covered = []
     for entry in receipt.get("coveredFiles") or []:
+        # A non-object entry carries no path to compare; skipping it here leaves
+        # the stale finding intact rather than raising AttributeError on .get.
+        if not isinstance(entry, dict):
+            continue
         rel = answered(entry.get("path"))
         if rel is None or _under_excluded(rel, exclude_dirs):
             continue
@@ -1505,6 +1549,13 @@ def _check_covered(receipt, cwd, exclude_dirs=None):
     ended = receipt.get("endedAtEpoch")
     problems, checked, touched, excluded = [], 0, 0, 0
     for entry in covered:
+        # A coveredFiles entry that is not a JSON object is a malformed receipt,
+        # named as a problem here rather than letting entry.get raise and take
+        # the whole verdict down with it.
+        if not isinstance(entry, dict):
+            problems.append("a coveredFiles entry holds %r, which is not a JSON object; a "
+                            "covered file entry must record a path" % (entry,))
+            continue
         rel = answered(entry.get("path"))
         if rel is None:
             problems.append("a coveredFiles entry records no path")
@@ -1579,7 +1630,7 @@ def commit_binding_holds(receipt, cwd, path=None, exclude_dirs=None):
     return problem is None and nodata is None
 
 
-def verify(path, cwd=None, exclude_dirs=None):
+def verify(path, cwd=None, exclude_dirs=None, git_cache=None):
     """PASS, FAIL or NO-DATA over one receipt, with the reasons it inspected.
 
     ORDER, and it is deliberate. Every FAIL condition is evaluated first, then
@@ -1593,6 +1644,13 @@ def verify(path, cwd=None, exclude_dirs=None):
     never judged: see `_check_covered` for why. Every existing caller that
     does not pass it keeps today's behavior exactly, because the default is
     an empty exclusion, not a guessed one.
+
+    `git_cache`, forwarded to `_check_commit`, memoizes `git rev-parse HEAD`
+    and `git rev-parse --show-toplevel` for `cwd` across repeated `verify()`
+    calls that share a cache dict and a cwd (see `_cached_git`); neither fact
+    can differ between two receipts checked against the same tree in the same
+    pass. `git_cache=None`, the default, computes both fresh every call,
+    exactly as before this parameter existed.
     """
     cwd = os.path.abspath(cwd or os.getcwd())
     inspected = ["receipt file %s" % path]
@@ -1638,7 +1696,8 @@ def verify(path, cwd=None, exclude_dirs=None):
         problems.append(seal_problem)
 
     inspected.append("the current git HEAD in %s" % cwd)
-    commit_problem, commit_note, commit_nodata = _check_commit(receipt, cwd, path, exclude_dirs)
+    commit_problem, commit_note, commit_nodata = _check_commit(receipt, cwd, path, exclude_dirs,
+                                                                git_cache=git_cache)
     if commit_problem:
         problems.append(commit_problem)
     if commit_note:
@@ -1694,6 +1753,198 @@ def verify(path, cwd=None, exclude_dirs=None):
 
     return {"verdict": "PASS", "reasons": notes, "inspected": inspected, "receipt": receipt,
             "trust": level, "trustWhy": why}
+
+
+#: Sibling of `EVIDENCE_STORE_REL`'s parent (".sbe/"), never inside it: a
+#: file under `.sbe/evidence/` would be walked by `status.py`'s
+#: `_scan_evidence` (every `*.json` there) and tried as a receipt, which
+#: this is not. One process-wide name, so two callers that both cache
+#: verify() outcomes for the same `.sbe/` never invent two files that could
+#: disagree about the same repository.
+VERIFY_CACHE_BASENAME = ".verify-cache.json"
+
+
+def load_verify_cache(cache_path):
+    """The verify-outcome cache at `cache_path`, or an empty one.
+
+    Missing file, unreadable file, corrupt JSON, or the wrong shape all
+    degrade to empty here: the caller then re-verifies every receipt fresh,
+    identical to `verify()` alone. This mirrors
+    `scripts/handover_pack_scan.py`'s own `_load_cache` (same degrade-never-
+    guess rule, same reason): a cache is a speedup, and it must never turn a
+    file it cannot trust into a wrong verdict.
+    """
+    empty = {"receipts": {}}
+    if not cache_path or not os.path.isfile(cache_path):
+        return empty
+    try:
+        with io.open(cache_path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return empty
+    if not isinstance(data, dict) or not isinstance(data.get("receipts"), dict):
+        return empty
+    return data
+
+
+def save_verify_cache(cache_path, cache):
+    """Atomic write (tempfile in the same directory, then `os.replace`), the
+    identical shape `scripts/handover_pack_scan.py::_save_cache` already
+    uses for this same problem. Best effort: a write failure (permissions,
+    disk full, a concurrent writer) is swallowed, because this cache only
+    ever speeds up the NEXT run and must never fail the current one."""
+    if not cache_path:
+        return
+    try:
+        cache_dir = os.path.dirname(cache_path) or "."
+        if cache_dir and not os.path.isdir(cache_dir):
+            os.makedirs(cache_dir)
+        fd, tmp_path = tempfile.mkstemp(dir=cache_dir, prefix=".tmp-verify-cache-")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(cache, fh)
+            os.replace(tmp_path, cache_path)
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+    except OSError:
+        pass
+
+
+def _receipt_stat_key(path):
+    """[mtime_ns, size] for `path`, or None when it cannot be stat'd. A
+    receipt this cannot stat is never a cache hit: this project would rather
+    re-verify it than answer from a guess about a file it cannot see."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return [st.st_mtime_ns, st.st_size]
+
+
+def _covered_stat_fingerprint(receipt_path, cwd, exclude_dirs):
+    """Sorted [rel, mtime_ns, size] rows for every file the receipt at
+    `receipt_path` claims to cover, or None when the receipt cannot be read.
+
+    THE GAP THIS CLOSES. verify_cached's own (receipt stat, HEAD) key answers
+    "has the receipt moved" and "has HEAD moved", but _check_covered inside
+    verify() judges a THIRD, independent fact: do the covered files' bytes on
+    disk, right now, still match what the receipt recorded. A covered file
+    edited without being committed moves neither the receipt's stat nor HEAD,
+    so the old key kept serving a cached PASS for code that had since changed
+    under it, exactly the case the evidence system exists to catch. mtime and
+    size are stat-cheap (the same cost _receipt_stat_key already pays for the
+    receipt itself), not a full re-hash of every covered file on every call;
+    an uncommitted edit changes at least one of the two.
+
+    None (unreadable receipt, unparseable JSON) is never treated as "nothing
+    to check": verify_cached below skips the cache entirely in that case, per
+    this cache's own degrade-never-guess rule.
+    """
+    try:
+        with io.open(receipt_path, encoding="utf-8") as fh:
+            receipt = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    rows = []
+    for entry in receipt.get("coveredFiles") or []:
+        rel = answered(entry.get("path"))
+        if rel is None or _under_excluded(rel, exclude_dirs):
+            continue
+        full = _covered_file(cwd, rel)
+        try:
+            st = os.stat(full)
+        except OSError:
+            rows.append([rel, None, None])
+            continue
+        rows.append([rel, st.st_mtime_ns, st.st_size])
+    return sorted(rows)
+
+
+def verify_cache_key(path, cwd, exclude_dirs):
+    """The `cache["receipts"]` key `verify_cached` reads and writes for this
+    (path, cwd, exclude_dirs). A caller pre-seeding or inspecting a cache
+    dict directly (a test, a debug script) must build the SAME key, never
+    retype the format, so this is the one place that owns the shape.
+
+    cwd and exclude_dirs are part of the key itself, not only the stored
+    entry: two trees at the same commit (a claimed worktree versus the
+    project root) resolve the SAME receipt-relative covered paths to
+    DIFFERENT files on disk, so a key that omitted them let one tree's
+    cached verdict answer for another's files."""
+    return "%s\x1e%s\x1e%s" % (os.path.abspath(path),
+                               os.path.abspath(cwd) if cwd else "",
+                               ",".join(sorted(str(d) for d in (exclude_dirs or ()))))
+
+
+def verify_cached(path, cwd=None, exclude_dirs=None, cache=None, git_cache=None):
+    """`verify(path, cwd, exclude_dirs)`, reusing a cached verdict from
+    `cache` (a dict shaped like `load_verify_cache`'s return) when ALL of:
+    this receipt file's own mtime and size have not changed since the cached
+    entry was written, the HEAD `cwd` resolves to right now is the SAME HEAD
+    that was current when the entry was written, AND every file the receipt
+    covers has the same mtime and size on disk now as it did then.
+
+    All three are facts of the (file, HEAD, covered-files) triple, never of
+    wall-clock time. `verify()` has exactly two file-content-shaped questions
+    to answer: does this receipt still bind to HEAD, and has any file it
+    covers changed since. The first is a fact of (receipt, HEAD) alone, but
+    the second is NOT: a covered file can change on disk with neither the
+    receipt's own bytes nor HEAD moving (the ordinary case is an uncommitted
+    edit to code the receipt already covers), and _check_covered inside
+    verify() judges exactly that. Missing this originally let the cache
+    serve a stale PASS for code that had since changed underneath it, which
+    defeats the entire reason this evidence system exists; see
+    _covered_stat_fingerprint's own docstring for the fix.
+
+    cwd and exclude_dirs are folded into the cache KEY itself (not just the
+    stored entry), because they change which files on disk a given receipt
+    path's covered entries even resolve to.
+
+    THE HEAD IS CHECKED PER RECEIPT, not once for the whole cache file.
+    `status.py`'s `_scan_evidence` can verify different receipts against
+    DIFFERENT working trees (a task record's own claimed worktree; see its
+    docstring), and those trees move independently of the project root. A
+    single whole-cache HEAD keyed to the root would either bust entries for
+    a worktree that never moved, or -- worse -- keep serving a claimed-
+    worktree entry whose OWN head moved while the root's had not. Comparing
+    per entry is still the full-bust rule this cache uses everywhere (an
+    entry either matches its own (stat, HEAD) pair or it is recomputed;
+    there is no partial, diff-based invalidation), just applied to the tree
+    the entry actually describes.
+
+    A changed receipt (different mtime or size -- the regenerate-in-place
+    shape `mint_default_many` already produces on every routine re-run) is
+    always re-verified, never served stale.
+
+    `cache=None`, the default, skips the cache entirely and behaves exactly
+    like `verify()` alone; every caller written before this existed keeps
+    that behavior unchanged. `git_cache` is forwarded to `verify()` and to
+    this function's own HEAD lookup, so checking the cache costs no extra
+    subprocess beyond what `verify()` would already pay.
+    """
+    if cache is None:
+        return verify(path, cwd=cwd, exclude_dirs=exclude_dirs, git_cache=git_cache)
+    stat_key = _receipt_stat_key(path)
+    head_code, head_out, _err = _resolve_head(cwd, git_cache)
+    head_commit = head_out.strip() if head_code == 0 else None
+    covered_key = _covered_stat_fingerprint(path, cwd, exclude_dirs)
+    key = verify_cache_key(path, cwd, exclude_dirs)
+    receipts = cache.setdefault("receipts", {})
+    if stat_key is not None and head_commit is not None and covered_key is not None:
+        cached = receipts.get(key)
+        if (cached is not None and cached.get("stat") == stat_key
+                and cached.get("headCommit") == head_commit
+                and cached.get("covered") == covered_key):
+            return cached["result"]
+    result = verify(path, cwd=cwd, exclude_dirs=exclude_dirs, git_cache=git_cache)
+    if stat_key is not None and head_commit is not None and covered_key is not None:
+        receipts[key] = {"stat": stat_key, "headCommit": head_commit,
+                         "covered": covered_key, "result": result}
+    return result
 
 
 def render(receipt, path):

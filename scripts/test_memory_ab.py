@@ -104,5 +104,15 @@ class OneBrokenTaskCostsNothingElse(unittest.TestCase):
         self.assertEqual(ab.pair(rows[:1]), {})
 
 
+class Night0912MemoryAb(unittest.TestCase):
+    def test_report_empty_is_no_data_not_positive_verdict(self):
+        import io
+        buf = io.StringIO()
+        ab.report([], out=buf)
+        text = buf.getvalue()
+        self.assertNotIn("no measured difference", text)
+        self.assertIn("VERDICT: NO-DATA", text)
+
+
 if __name__ == "__main__":
     unittest.main()

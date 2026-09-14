@@ -10,9 +10,11 @@ passes on healthy code and would ALSO pass on broken code is not evidence of
 anything. The only way to know a killer test really kills is to break the
 code on purpose and watch it die.
 
-THE FOUR BOUNDED MUTANT CLASSES, the consultation's own list, each seeded at
-exactly one NAMED, STABLE seam in a real product module (scripts/ is the
-canonical source; bundle/runtime is its generated, byte-identical mirror per
+THE SIX BOUNDED MUTANT CLASSES: the consultation's own original four, plus
+two added for WBS-80.03 (2/5 targets were still uncovered: evidence-hashing
+and Journey Passport verdict aggregation), each seeded at exactly one
+NAMED, STABLE seam in a real product module (scripts/ is the canonical
+source; bundle/runtime is its generated, byte-identical mirror per
 test_bundle_runtime.py, so mutating scripts/ alone is mutating the product):
 
   termination-condition comparison flip
@@ -55,6 +57,36 @@ test_bundle_runtime.py, so mutating scripts/ alone is mutating the product):
       cause. Killer: test_door_adversarial.py
       (test_json_that_never_parses_is_refused_after_bounded_attempts asserts
       the literal diagnostic string appears in the process output).
+
+  evidence-hashing goes content-blind
+      scripts/reversibility_gate.py, sha256_of_obj(): the one canonical-hash
+      function every passport (journey_passport.py, merge_passport.py) reuses
+      to detect tampered evidence. The mutant hashes a constant instead of
+      the object's own canonical JSON, so every digest collapses to the same
+      value regardless of content: tampering an evidence record no longer
+      changes its digest, which is the exact hollow-pass hole this hashing
+      exists to close. NOT killed by test_reversibility_gate.py: its own
+      checksum comparisons only ever hash the SAME object twice, and a
+      constant function still agrees with itself. Killer:
+      test_journey_passport.py (HollowPassDefenseTests:
+      test_tampered_journey_contract_is_refused and its three siblings
+      compare the digest of a TAMPERED copy against the digest recorded at
+      compose time and require MISMATCH; a content-blind hash reports MATCH
+      instead).
+
+  verdict-aggregation priority flip
+      scripts/journey_passport.py, compose_passport(): the headline
+      computation that rolls ten independent dimension verdicts into one
+      completeness["headline"] string. The correct priority is FAIL beats
+      NO-DATA beats PASS (the module's own docstring: a badge that reads
+      "basically fine" while a real dimension FAILED is the Muse hostile
+      review's strongest attack). The mutant checks no_data before failed,
+      so a passport with one FAILED dimension and one NO-DATA dimension
+      reports INCOMPLETE instead of BLOCKING FAILURE, masking the failure
+      under the softer label. Killer: test_journey_passport.py
+      (test_a_failed_dimension_takes_headline_priority_over_no_data composes
+      exactly that combination and asserts the headline starts with
+      "BLOCKING FAILURE" and still names the NO-DATA dimension too).
 
 MECHANICS. Never the working tree: scripts/ is copied whole into a fresh
 tempfile.mkdtemp() scratch directory (sibling modules the target or its
@@ -164,6 +196,48 @@ MUTANTS = {
                       "            continue\n",
         "killer": "test_door_adversarial.py",
     },
+    "hash-content-blind": {
+        "class": "evidence-hashing goes content-blind",
+        "guards": "the hollow-pass defense every passport reuses: a digest "
+                  "that no longer depends on the evidence object's own "
+                  "content can never notice tampering",
+        "target": "reversibility_gate.py",
+        "anchor_old": '    canonical = json.dumps(obj, sort_keys=True, ensure_ascii=False)\n'
+                      '    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()\n',
+        "anchor_new": '    canonical = json.dumps(obj, sort_keys=True, ensure_ascii=False)\n'
+                      '    return hashlib.sha256(b"constant").hexdigest()\n',
+        "killer": "test_journey_passport.py",
+    },
+    "headline-priority-flip": {
+        "class": "verdict-aggregation priority flip",
+        "guards": "the passport headline's FAIL-beats-NO-DATA priority: "
+                  "checking no_data first masks a real FAILED dimension "
+                  "as merely INCOMPLETE",
+        "target": "journey_passport.py",
+        "anchor_old": (
+            '    if failed:\n'
+            '        headline = ("BLOCKING FAILURE: %d of %d dimension(s) FAILED (%s); %d of %d dimension(s) "\n'
+            '                     "NOT ASSESSED (%s)." % (len(failed), total, ", ".join(failed),\n'
+            '                                              len(no_data), total, ", ".join(no_data) if no_data else "none"))\n'
+            '    elif no_data:\n'
+            '        headline = ("INCOMPLETE: %d of %d dimension(s) NOT ASSESSED (%s); do not treat this passport "\n'
+            '                     "as releasable." % (len(no_data), total, ", ".join(no_data)))\n'
+            '    else:\n'
+            '        headline = "ALL %d DIMENSION(S) ASSESSED: PASS." % total\n'
+        ),
+        "anchor_new": (
+            '    if no_data:\n'
+            '        headline = ("INCOMPLETE: %d of %d dimension(s) NOT ASSESSED (%s); do not treat this passport "\n'
+            '                     "as releasable." % (len(no_data), total, ", ".join(no_data)))\n'
+            '    elif failed:\n'
+            '        headline = ("BLOCKING FAILURE: %d of %d dimension(s) FAILED (%s); %d of %d dimension(s) "\n'
+            '                     "NOT ASSESSED (%s)." % (len(failed), total, ", ".join(failed),\n'
+            '                                              len(no_data), total, ", ".join(no_data) if no_data else "none"))\n'
+            '    else:\n'
+            '        headline = "ALL %d DIMENSION(S) ASSESSED: PASS." % total\n'
+        ),
+        "killer": "test_journey_passport.py",
+    },
 }
 
 
@@ -172,6 +246,15 @@ def _copy_scripts_scratch():
     dst = os.path.join(scratch, "scripts")
     shutil.copytree(HERE, dst,
                     ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    # A killer test can reach past scripts/ for a schema file two
+    # directories up from its own module (mobile_journey_contract.py's
+    # DEFAULT_SCHEMA resolves to ROOT/docs/schema/*.json). Mirror that one
+    # subtree so such a killer reads the real schema instead of NO-DATA
+    # regardless of which mutant is applied; nothing else under docs/ is
+    # needed by any current killer, so nothing else is copied.
+    schema_src = os.path.join(ROOT, "docs", "schema")
+    if os.path.isdir(schema_src):
+        shutil.copytree(schema_src, os.path.join(scratch, "docs", "schema"))
     return scratch, dst
 
 

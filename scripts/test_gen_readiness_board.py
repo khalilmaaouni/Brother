@@ -610,5 +610,14 @@ class PublicPage(unittest.TestCase):
         self.assertTrue(board.leaks('someone@example.com'))
 
 
+class Night0912GenReadinessBoard(unittest.TestCase):
+    def test_validate_reports_missing_row_id(self):
+        d = doc()
+        del d['rows'][0]['id']
+        problems = board.validate(d)
+        self.assertTrue(problems, 'a row without an id must be rejected')
+        self.assertTrue(any('id' in p.lower() for p in problems), problems)
+
+
 if __name__ == '__main__':
     unittest.main()

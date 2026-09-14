@@ -296,6 +296,48 @@ class TestAttribution(ReconcileCase):
         self.assertTrue(matched, "the type change was written off as pre-session dirt")
         self.assertIn("file kind changed", matched[0].why)
 
+    def test_a_rename_git_only_detects_after_the_baseline_is_not_attributed_on_the_old_name(self):
+        """Night 0912 defect 126cc12d8aa3. git's own rename detection is a
+        similarity heuristic over what is STAGED: deleting old.txt and later
+        adding an untracked new.txt with the same content reads as two
+        ordinary entries (D old.txt, ?? new.txt) until both sides are staged
+        together, at which point the SAME pair reads as one rename record (R
+        old.txt -> new.txt). So a file removed before the session opened, and
+        a same-content file added and staged during the session, can surface
+        a `renamed_from` git never reported at baseline time. old.txt was
+        already gone (kind "absent") in the baseline; it must not be
+        re-attributed to this session just because attribute() now sees a
+        renamedFrom pointing at it."""
+        old = os.path.join(self.root, "docs", "old.txt")
+        content = ("the quick brown fox jumps over the lazy dog and keeps "
+                   "running\nfor a long long time until it gets tired\n")
+        write(old, content)
+        self.git("add", "-A")
+        self.commit("add old.txt")
+        os.remove(old)
+        path = self.baseline()
+        baseline = json.loads(read(path))
+        prior_paths = dict((e["path"], e) for e in baseline["initialChangedPaths"])
+        self.assertEqual(prior_paths["docs/old.txt"]["kind"], "absent",
+                         "old.txt must already read absent in the baseline for "
+                         "this fixture to test the right thing")
+        new = os.path.join(self.root, "docs", "new.txt")
+        write(new, content)
+        self.git("add", "-A")
+        entries = sb.changed_entries(self.root)
+        renamed = [e for e in entries if e.path == "docs/new.txt"]
+        self.assertTrue(renamed and renamed[0].renamed_from == "docs/old.txt",
+                        "fixture did not reproduce a rename git only detects "
+                        "post-baseline; entries: %s"
+                        % [(e.path, e.status, e.renamed_from) for e in entries])
+        changes = sr.attribute(entries, baseline)
+        paths = [c.path for c in changes]
+        self.assertIn("docs/new.txt", paths)
+        self.assertNotIn(
+            "docs/old.txt", paths,
+            "docs/old.txt was already absent at session start; a rename git "
+            "only detects now must not attribute the old name to this session")
+
 
 class TestFailClosed(ReconcileCase):
     """The four conditions spec 1.4 item 9 names, each asserted on its own."""

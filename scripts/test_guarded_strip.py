@@ -121,5 +121,24 @@ class ExactMatchApplies(unittest.TestCase):
             [n for n in os.listdir(self.tmp) if n != "log.jsonl"], [])
 
 
+class Night0912GuardedStrip(unittest.TestCase):
+    def test_same_second_backup_does_not_overwrite(self):
+        with tempfile.TemporaryDirectory() as d:
+            target = os.path.join(d, "log.jsonl")
+            with open(target, "w", encoding="utf-8") as fh:
+                fh.write("original\n")
+            first = G.make_backup(target, d, clock=lambda: 1234567890)
+
+            with open(target, "w", encoding="utf-8") as fh:
+                fh.write("modified\n")
+            second = G.make_backup(target, d, clock=lambda: 1234567890)
+
+            self.assertNotEqual(first, second)
+            with open(first, encoding="utf-8") as fh:
+                self.assertEqual(fh.read(), "original\n")
+            with open(second, encoding="utf-8") as fh:
+                self.assertEqual(fh.read(), "modified\n")
+
+
 if __name__ == "__main__":
     unittest.main()

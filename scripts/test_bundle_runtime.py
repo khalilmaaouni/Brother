@@ -702,7 +702,8 @@ class HookPackageFilesFollowSiblingPathJoins(unittest.TestCase):
 
 class HookCommandsSmokeRunClean(unittest.TestCase):
     """Every Stop, SessionStart, PreCompact and SessionEnd command in the
-    real, committed bundle/hooks/hooks.json, run from a temporary HOME and
+    real, committed bundle/hooks/union.json (renamed 2026-09-13; see
+    bundle_runtime.HOOKS_JSON_NAME), run from a temporary HOME and
     a temporary git repository with CLAUDE_PLUGIN_ROOT pointed at the real
     bundle/, fed an empty JSON payload on stdin exactly like a live hook
     invocation. A crash (a Python traceback on stderr) is a failure; a
@@ -722,7 +723,12 @@ class HookCommandsSmokeRunClean(unittest.TestCase):
     def setUpClass(cls):
         repo_root = os.path.dirname(HERE)
         cls.bundle_dir = os.path.join(repo_root, "bundle")
-        hooks_json = os.path.join(cls.bundle_dir, "hooks", "hooks.json")
+        # Renamed 2026-09-13 (bundle_runtime.HOOKS_JSON_NAME): this file must
+        # never be named "hooks.json" again, since that is the exact path
+        # Claude Code auto-loads from an installed plugin, and brother also
+        # depends on brothermode/brothersbe, which register these same
+        # events themselves -- a "hooks.json" here double-fires every one.
+        hooks_json = os.path.join(cls.bundle_dir, "hooks", "union.json")
         with open(hooks_json, encoding="utf-8") as fh:
             cls.hooks_doc = json.load(fh)
 
@@ -780,7 +786,7 @@ class HookClosureFollowsTestPrefixedSiblings(unittest.TestCase):
         os.makedirs(self.tools_dir)
         hooks_dir = os.path.join(self.products_dir, "fakeprod", "hooks")
         os.makedirs(hooks_dir)
-        with open(os.path.join(hooks_dir, BR.HOOKS_JSON_NAME), "w",
+        with open(os.path.join(hooks_dir, BR.PRODUCT_HOOKS_JSON_NAME), "w",
                  encoding="utf-8") as fh:
             json.dump({"hooks": {"PreToolUse": [{"hooks": [{
                 "type": "command",
@@ -891,7 +897,7 @@ class HookMirrorFilesOutsideTheHooksJsonClosureAreStillTracked(unittest.TestCase
         hooks_dir = os.path.join(self.products_dir, self.product, "hooks")
         os.makedirs(tools_dir)
         os.makedirs(hooks_dir)
-        with open(os.path.join(hooks_dir, BR.HOOKS_JSON_NAME), "w",
+        with open(os.path.join(hooks_dir, BR.PRODUCT_HOOKS_JSON_NAME), "w",
                  encoding="utf-8") as fh:
             json.dump({"hooks": {"PreToolUse": [{"hooks": [{
                 "type": "command",

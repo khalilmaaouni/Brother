@@ -128,6 +128,9 @@ def reproduce_manifest(export_root, run_rel, manifest):
     "filed run <path>: ".
     """
     committed_verdict = str(manifest.get('verdict', '(no verdict field)'))
+    # No artefact means no hash was verified, so this cannot be a pass.
+    if not manifest.get('artefacts'):
+        return False, 'DIVERGES (no artefacts listed)'
     for entry in manifest.get('artefacts', []):
         rel = entry.get('path')
         want_hash = entry.get('sha256')

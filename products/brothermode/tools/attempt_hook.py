@@ -144,7 +144,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # C3: the config directory is resolved by brother_paths, the one seam
 # that knows which coding client is running (docs/codex/HOOKS-MAPPING.md).
 sys.path.insert(0, HERE)
-import brother_paths  # noqa: E402
+try:
+    import brother_paths  # noqa: E402
+except ImportError:  # partial deployment: same guard as attempt_ledger.py's _default_store
+    brother_paths = None
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 import attempt_ledger as ledger  # noqa: E402
@@ -170,7 +173,8 @@ _FIND_OUT_TOP = 2
 #: and the FIND_OUT_* paths above.
 OUTCOMES = os.environ.get(
     "BM_HOOK_OUTCOMES",
-    brother_paths.config_path("hook-outcomes.jsonl"))
+    brother_paths.config_path("hook-outcomes.jsonl") if brother_paths is not None
+    else os.path.join(os.path.expanduser("~"), ".claude", "hook-outcomes.jsonl"))
 
 #: See the module docstring's THE SLIDING WINDOW section. Four is the row's own
 #: shape (A, B, A, B) rather than a tuned number: three would fire on A, B, A,

@@ -103,7 +103,8 @@ HUMAN_END = bs.HUMAN_BLOCK_END
 # generator. This is what makes I11 enforceable across runs: without a recorded
 # anchor there is nothing for a moved line to disagree with.
 _CITE_RE = re.compile(
-    r"^<!-- bm-cite: path=(?P<path>\S+) lines=(?P<start>\d+)-(?P<end>\d+) "
+    # Paths may contain spaces; delimit the path on the following " lines=".
+    r"^<!-- bm-cite: path=(?P<path>.+?) lines=(?P<start>\d+)-(?P<end>\d+) "
     r"sha256=(?P<sha>[0-9a-f]{64}) anchor=(?P<anchor>.*) -->$")
 
 # Files worth searching for a dependency. Text only, and an explicit list rather
@@ -446,7 +447,9 @@ def merge_citations(recorded, added, recited):
 # The dependency map, DISCOVERED.
 # ---------------------------------------------------------------------------
 
-_DEF_RE = re.compile(r"^\s*(?:def|class)\s+([A-Za-z_][A-Za-z0-9_]*)")
+# async def defines a symbol too, and missing it drops a search term.
+_DEF_RE = re.compile(
+    r"^\s*(?:async\s+def|def|class)\s+([A-Za-z_][A-Za-z0-9_]*)")
 
 
 def cited_symbols(cite):

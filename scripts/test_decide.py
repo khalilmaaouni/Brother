@@ -202,12 +202,24 @@ class TheRealDecisionStillResolves(unittest.TestCase):
     DECISIONS = os.path.join(ROOT, "docs", "decisions")
 
     def specs(self):
+        """Every decide.py-shaped spec under docs/decisions/, not every JSON
+        file there. That directory also holds outcome contracts, model/lane
+        decisions, and architecture rulings (their own schemas, none of them
+        decide.py's) -- an "options" key is the one thing every real
+        decide.py spec has and none of the others do, checked against the
+        whole directory before this filter was added: 5 non-decide.py files,
+        every one of them missing "options", every decide.py file carrying
+        it. Without this, a new architecture record in that directory fails
+        THIS module's own tests for a shape it was never in."""
         found = []
         for name in sorted(os.listdir(self.DECISIONS)):
             if not name.endswith(".json"):
                 continue
             with open(os.path.join(self.DECISIONS, name), encoding="utf-8") as fh:
-                found.append((name, json.load(fh)))
+                spec = json.load(fh)
+            if "options" not in spec:
+                continue
+            found.append((name, spec))
         return found
 
     def load(self):
@@ -334,14 +346,19 @@ class TheRealDecisionStillResolves(unittest.TestCase):
 
     def test_the_chosen_option_is_one_that_exists(self):
         """A decision record naming an option that is not on the page would
-        render a banner with nothing marked, which reads as no decision."""
+        render a banner with nothing marked, which reads as no decision.
+        A "+"-joined choice ("D+B") bundles two real options into one
+        founder decision; every part must still be a real option id, or the
+        same nothing-marked failure happens for a part of it."""
         spec = self.load()
         for name, spec in self.specs():
             decided = spec.get("decided") or {}
             if not decided:
                 continue
             ids = {o.get("id") for o in spec["options"]}
-            self.assertIn(decided.get("choice"), ids, name)
+            choice = decided.get("choice") or ""
+            for part in choice.split("+"):
+                self.assertIn(part, ids, name)
 
     def test_every_option_carries_pros_cons_a_diagram_and_a_source(self):
         for name, spec in self.specs():

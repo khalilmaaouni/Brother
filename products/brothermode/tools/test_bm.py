@@ -10407,5 +10407,148 @@ class TestTheExportSeamIsDrivenBothWays(unittest.TestCase):
             "claims to read")
 
 
+def _night0912_load(rel, name):
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), rel)
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+class Night0912Benchmark(unittest.TestCase):
+    """A superscript digit passes str.isdigit() but int() raises on it, so a
+    selector like that crashed the argument check instead of being refused."""
+
+    def test_unicode_digit_selector_is_refused_not_crashed(self):
+        mod = _night0912_load("../scripts/benchmark.py", "bm_night0912")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            rc = mod.main(["²"])
+        self.assertEqual(rc, 2)
+        self.assertIn("is not a scenario number", out.getvalue())
+
+
+class Night0912BenchBlindPack(unittest.TestCase):
+    """A .sealed.json whose JSON is a list crashed load_manifest on .get,
+    where every other unreadable sealed file is skipped."""
+
+    def test_load_manifest_skips_non_dict_sealed_json(self):
+        mod = _night0912_load("../scripts/bench_blind_pack.py", "bench_blind_pack_night0912")
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "bad.sealed.json"), "w") as f:
+                f.write("[]")
+            self.assertEqual(mod.load_manifest(d), {})
+
+
+class Night0912BenchmarkComparative(unittest.TestCase):
+    """--list says it takes no other options and --dry-run says it takes only
+    --task; both silently ignored an option they did not check."""
+
+    def _run(self, argv, stub):
+        mod = _night0912_load("../scripts/benchmark_comparative.py", "bc_night0912")
+        called = []
+        setattr(mod, stub, lambda *a, **k: called.append(True) or 0)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = mod.main(argv)
+        return rc, called, buf.getvalue()
+
+    def test_list_rejects_task(self):
+        rc, called, out = self._run(["--list", "--task", "T1"], "list_tasks")
+        self.assertEqual(rc, 2)
+        self.assertFalse(called)
+        self.assertIn("--list takes no other options", out)
+
+    def test_list_rejects_probe_installed(self):
+        rc, called, out = self._run(["--list", "--probe-installed"], "list_tasks")
+        self.assertEqual(rc, 2)
+        self.assertFalse(called)
+        self.assertIn("--list takes no other options", out)
+
+    def test_dry_run_rejects_probe_installed(self):
+        rc, called, out = self._run(["--dry-run", "--probe-installed"], "dry_run")
+        self.assertEqual(rc, 2)
+        self.assertFalse(called)
+        self.assertIn("--dry-run takes only --task", out)
+
+
+class Night0912BmMcpServer(unittest.TestCase):
+    """A non-object params (or tools/call arguments) raised AttributeError out
+    of _handle_line, and main() has no guard around it, so one malformed
+    request ended the MCP server. Each now answers -32602."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.mod = _night0912_load("../mcp/bm_mcp_server.py", "bm_mcp_server_night0912")
+
+    def _run(self, msg):
+        return self.mod._handle_line(json.dumps(msg))
+
+    def test_initialize_with_list_params_returns_jsonrpc_error(self):
+        resp = self._run({"jsonrpc": "2.0", "id": 1,
+                          "method": "initialize", "params": [1]})
+        self.assertIsInstance(resp, dict)
+        self.assertEqual(resp["error"]["code"], -32602)
+
+    def test_tools_call_with_list_params_returns_jsonrpc_error(self):
+        resp = self._run({"jsonrpc": "2.0", "id": 2,
+                          "method": "tools/call", "params": [1]})
+        self.assertIsInstance(resp, dict)
+        self.assertEqual(resp["error"]["code"], -32602)
+
+    def test_tools_call_with_list_arguments_returns_jsonrpc_error(self):
+        resp = self._run({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                          "params": {"name": "bm_status", "arguments": [1]}})
+        self.assertIsInstance(resp, dict)
+        self.assertEqual(resp["error"]["code"], -32602)
+
+
+class Night0912BmLearn(unittest.TestCase):
+    """bc9434889465: _parse's own docstring says it REFUSES anything
+    unrecognized, but only checked the '--' prefix; a single-dash flag like
+    -x fell through to positional, silently treated as a record name."""
+
+    def test_unrecognized_single_dash_flag_exits_2(self):
+        stderr = io.StringIO()
+        old_stderr = sys.stderr
+        sys.stderr = stderr
+        try:
+            with self.assertRaises(SystemExit) as cm:
+                learn_mod._parse(["-x", "--trigger", "a"], {"trigger"})
+            self.assertEqual(cm.exception.code, 2)
+            self.assertIn("bm_learn: unrecognized flag -x", stderr.getvalue())
+        finally:
+            sys.stderr = old_stderr
+
+
+class Night0912BmScore(unittest.TestCase):
+    def test_today_age_zero_counts_as_recent(self):
+        spec = importlib.util.spec_from_file_location(
+            "night0912_bm_score", os.path.join(HERE, "bm_score.py"))
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        m.results = []
+        m.check = lambda n, v, e: m.results.append((n, v, e))
+        m.LEDGER = "L"
+        m.CORRECTIONS = "C"
+        m.RATINGS = "R"
+        m.REVIEWS = "V"
+        m.SESSIONS_GLOB = os.path.join(tempfile.mkdtemp(), "*.log")
+        m.read_jsonl = lambda p: ([{"ts": "2026-01-01", "schema": 2, "cache_read": 0,
+                                    "cache_write": 0, "session_id": "s"}]
+                                  if p == m.LEDGER else [])
+        m.real_sessions = lambda led: led
+        m.prediction_counts = lambda: {"sealed": 0}
+        m.REGISTRIES = []
+        m.age_days = lambda ts: 0.0 if ts == "2026-01-01" else None
+        with contextlib.redirect_stdout(io.StringIO()):
+            try:
+                m.main()
+            except SystemExit:
+                pass
+        ev = [e for n, v, e in m.results if n == "ledger-coverage"][0]
+        self.assertIn("1 sessions across 1 active days", ev)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

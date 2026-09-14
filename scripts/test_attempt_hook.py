@@ -590,5 +590,35 @@ class TheInstalledCopyWorksStandalone(unittest.TestCase):
         self.assertTrue(all(row["outcome"] == "failed" for row in rows))
 
 
+class Night0912AttemptHook(unittest.TestCase):
+    """e8c4c67294b7: a partial deployment missing brother_paths.py must not
+    crash attempt_hook.py at import time (same guard as attempt_ledger.py's
+    _default_store)."""
+
+    def test_import_survives_missing_brother_paths(self):
+        import importlib.util
+        src = os.path.join(HERE, "attempt_hook.py")
+        saved = sys.modules.get("brother_paths", "__missing__")
+        # None in sys.modules forces the next `import brother_paths` to raise
+        # ImportError, without touching disk (HERE always contains the real
+        # brother_paths.py, so a sys.path trick alone would not reproduce it).
+        sys.modules["brother_paths"] = None
+        try:
+            spec = importlib.util.spec_from_file_location(
+                "attempt_hook_no_brother_paths", src)
+            mod = importlib.util.module_from_spec(spec)
+            try:
+                spec.loader.exec_module(mod)
+            except ImportError as exc:
+                self.fail("attempt_hook.py raised ImportError when "
+                          "brother_paths is unavailable: %s" % exc)
+            self.assertIsNone(mod.brother_paths)
+        finally:
+            if saved == "__missing__":
+                sys.modules.pop("brother_paths", None)
+            else:
+                sys.modules["brother_paths"] = saved
+
+
 if __name__ == "__main__":
     unittest.main()

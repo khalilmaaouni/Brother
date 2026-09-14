@@ -120,7 +120,8 @@ def gate(seed_path):
     unapplied = []
     for line in section.splitlines():
         stripped = line.strip()
-        if not stripped.startswith("-"):
+        # Any Markdown bullet marker can introduce a correction item.
+        if not stripped.startswith(("-", "*", "+")):
             continue
         if not EXPECTED_CORRECTION_RE.search(stripped):
             continue

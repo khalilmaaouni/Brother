@@ -6,7 +6,7 @@
 
 You want to give an AI agent a task and get on with your day. But full auto asks for more trust than you can justify, and watching every action turns you into the agent's full-time supervisor.
 
-**Brother is built for autonomy you can justify:** agreed boundaries before the work, checks during execution, and an auditable record when you return. Brother ships surfaces for Claude Code, Codex, and Cursor. Enforcement depends on measured host capability and setup. Cursor enforcement remains ADVISORY until a live signed-in Cursor Agent deny canary passes.
+**Brother is built for autonomy you can justify:** agreed boundaries before the work, checks during execution, and an auditable record when you return. It is a plugin for Claude Code and Codex that connects scoped execution, verification, delivery evidence, and local memory.
 
 The goal is to let you step away for more useful work as the system earns confidence through a track record you can inspect. Current protection depends on the installed controls, the task, and the quality of its checks; Brother is not a blanket guarantee that any job is safe to leave unattended.
 
@@ -416,7 +416,7 @@ It is not an automatic source of truth, a secrets store, or proof that repeat er
 
 **Learn:** [Documentation home](docs/README.md) · [First verified change](docs/tutorials/first-verified-change.md) · [Why NO-DATA exists](docs/explanation/no-data.md)
 
-**Do:** [Install Claude](docs/how-to/install-claude-code.md) · [Install Codex](docs/how-to/install-codex.md) · [Install Cursor](docs/how-to/install-cursor.md) · [Resume](docs/how-to/resume-work.md) · [Verify a migration](docs/how-to/verify-a-migration.md) · [Verify a number](docs/how-to/verify-a-number.md)
+**Do:** [Install Claude](docs/how-to/install-claude-code.md) · [Install Codex](docs/how-to/install-codex.md) · [Resume](docs/how-to/resume-work.md) · [Verify a migration](docs/how-to/verify-a-migration.md) · [Verify a number](docs/how-to/verify-a-number.md)
 
 **Look up:** [Routing](docs/reference/routing.md) · [Outcome contract](docs/reference/outcome-contract.md) · [Verdicts](docs/reference/verdicts.md) · [Receipt](docs/reference/receipt-model.md) · [Work units](docs/reference/work-units.md) · [Hooks](docs/reference/hooks.md)
 
@@ -428,7 +428,7 @@ It is not an automatic source of truth, a secrets store, or proof that repeat er
 - A model-authored test is not automatically an independent oracle.
 - Memory is not evidence.
 - Tool exit success is not delivery proof.
-- Claude Code, Codex, and Cursor have different host surfaces.
+- Claude Code and Codex have different host surfaces.
 - Hook scope depends on install path/configuration; read [Hook scope](docs/reference/hooks.md).
 - Tiny reversible tasks can still cost more through Brother than doing them directly, but not in every case any more: when a request already names its own existing file or files, and its own existing check written the one way Brother already knows how to run today (in the specific, narrow shape it already recognizes, not yet any test file in any framework), uses no risky wording, and the tree it runs against is already clean, Brother skips straight to doing the work and never opens a separate model session just to plan it, automatically, with nothing to turn on. Most everyday requests do not qualify, including one phrased only as plain instructions with no file or check named in it. Measured here with the model calls stood in by a script rather than a real one, so the figures below are Brother's own code and never a wait on a real model: four small requests were driven through the one command a person types, and all four finished successfully; the two that qualified opened no separate planning session at all, against one each for the two that did not, while Brother's own code took between 5.62 and 8.4 seconds either way. What a person waiting on a real model actually experiences from this is not recorded on this page.
 - Exact version capability belongs in the public release and generated `SYSTEM.md`, not copied historical prose.

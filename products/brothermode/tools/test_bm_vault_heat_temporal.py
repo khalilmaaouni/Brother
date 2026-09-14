@@ -184,5 +184,20 @@ class TheVaultScanContract(unittest.TestCase):
             os.chmod(path, 0o644)
 
 
+class Night0912BmVaultHeatTemporal(unittest.TestCase):
+    def test_malformed_valid_to_is_not_open_ended(self):
+        with tempfile.TemporaryDirectory() as d:
+            text = "\n".join([
+                "---",
+                "valid_from: 2020-01-01",
+                "valid_to: not-a-date",
+                "---",
+            ]) + "\n"
+            with open(os.path.join(d, "Note.md"), "w", encoding="utf-8") as fh:
+                fh.write(text)
+            notes = heat.scan_vault(d)
+            self.assertNotIn("Note", heat.as_of(notes, datetime.date(2025, 1, 1)))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

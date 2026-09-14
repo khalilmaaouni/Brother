@@ -146,5 +146,9 @@ def markdown_to_html(text):
                and not OL_RE.match(lines[i]) and not lines[i].lstrip().startswith("|")):
             para.append(lines[i].strip())
             i += 1
+        if not para:
+            # A pipe line that is not a table must still be consumed, or the outer loop spins.
+            para.append(lines[i].strip())
+            i += 1
         out.append("<p>%s</p>" % render_inline(" ".join(para)))
     return title, "\n".join(out)

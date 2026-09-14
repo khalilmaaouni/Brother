@@ -202,5 +202,26 @@ class PerAttributeOrderIsStillTheOneVocabulary(unittest.TestCase):
             del surv.PER_ATTRIBUTE_ORDER["a_bad_attribute"]
 
 
+class Night0912BmVaultSurvivorship(unittest.TestCase):
+    def test_resolve_override_winner_neither_note(self):
+        a = {"path": "A.md", "subject": None}
+        b = {"path": "B.md", "subject": None}
+        overrides = [{"attribute": "value", "winner": "C.md", "ts": "2020-01-01T00:00:00Z", "by": "x"}]
+        winner, loser, reason = surv.resolve(".", a, b, "value", None, overrides)
+        self.assertIsNone(winner)
+        self.assertIsNone(loser)
+        self.assertIn("C.md", reason)
+
+    def test_cmd_override_bare_filename(self):
+        old = os.getcwd()
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                os.chdir(d)
+                surv.cmd_override("value", "A.md", "me", None, True, "overrides.jsonl")
+                self.assertTrue(os.path.isfile(os.path.join(d, "overrides.jsonl")))
+        finally:
+            os.chdir(old)
+
+
 if __name__ == "__main__":
     unittest.main()

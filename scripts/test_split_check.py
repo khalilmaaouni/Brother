@@ -172,5 +172,15 @@ class Boundaries(FixtureCase):
         self.assertIn("NO-DATA", out)
 
 
+class Night0912SplitCheck(FixtureCase):
+    def test_time_col_without_cutoff_is_no_data_not_a_crash(self):
+        train = self.write("train.csv", "id,date\n1,2026-01-01\n")
+        test = self.write("test.csv", "id,date\n2,2026-01-02\n")
+        code, out = run_main("--train", train, "--test", test,
+                              "--key", "id", "--time-col", "date")
+        self.assertEqual(code, 2, out)
+        self.assertIn("NO-DATA", out)
+
+
 if __name__ == "__main__":
     unittest.main()

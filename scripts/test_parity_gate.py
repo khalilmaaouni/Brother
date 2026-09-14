@@ -207,5 +207,16 @@ class TheShippedAssessmentIsHonest(unittest.TestCase):
             self.assertLess(pct, 100)
 
 
+class Night0912ParityGate(unittest.TestCase):
+    def test_non_integer_level_scores_nodata_without_crashing(self):
+        cells = [cell(level="3", critical=True)]
+        pct, rows, blocking = P.score(cells)
+
+        self.assertEqual(pct, 0.0)
+        self.assertEqual(rows[0]['credit'], 0.0)
+        self.assertIn(P.NODATA, rows[0]['note'])
+        self.assertIn(rows[0], blocking)
+
+
 if __name__ == "__main__":
     unittest.main()

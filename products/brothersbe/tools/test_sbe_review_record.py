@@ -1265,5 +1265,51 @@ class TestResultDerivation(ReviewScenario):
         self.assertNotIn("resultDisagreement", record)
 
 
+class Night0912Cli(unittest.TestCase):
+    """Two night-sweep defects in `brothersbe.cli`, unit-tested directly:
+    a non-string conceptId reaching `_finding_slug` with an AttributeError,
+    and `doctor`'s plugin-manifest check crashing when the manifest's
+    top-level JSON is a list rather than an object."""
+
+    def setUp(self):
+        sys.path.insert(0, os.path.join(ROOT, "src"))
+        import brothersbe.cli as cli_mod
+        self.cli = cli_mod
+
+    def tearDown(self):
+        sys.path.remove(os.path.join(ROOT, "src"))
+
+    def test_non_string_concept_id_is_rejected(self):
+        raw = [dict(_GOOD_FINDING, conceptId=1, locations=["src/a.py:1"])]
+        structured, errors = self.cli.normalize_review_findings(raw)
+        self.assertEqual(structured, [])
+        self.assertTrue(errors)
+        self.assertIn("conceptId", errors[0])
+
+    def test_list_plugin_manifest_fails_not_crashes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            os.makedirs(os.path.join(tmp, ".claude-plugin"))
+            with open(os.path.join(tmp, ".claude-plugin", "plugin.json"), "w") as fh:
+                fh.write("[]")
+            old_repo_root = self.cli.repo_root
+            old_hooks = self.cli._hooks_wiring_check
+            old_install = self.cli._install_identity_check
+            old_env = self.cli._environment_checks
+            self.cli.repo_root = lambda: tmp
+            self.cli._hooks_wiring_check = lambda root: ("hooks-wiring", "PASS", "stub")
+            self.cli._install_identity_check = lambda root: ("install-identity", "PASS", "stub")
+            self.cli._environment_checks = lambda: []
+            try:
+                checks = self.cli._doctor_checks()
+            finally:
+                self.cli.repo_root = old_repo_root
+                self.cli._hooks_wiring_check = old_hooks
+                self.cli._install_identity_check = old_install
+                self.cli._environment_checks = old_env
+        manifest = [c for c in checks if c[0] == "plugin-manifest"][0]
+        self.assertEqual(manifest[1], "FAIL")
+        self.assertIn("VERSION", manifest[2])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

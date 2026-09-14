@@ -85,8 +85,9 @@ def score(cells):
                      "note": note, "evidence": c.get("evidence", ""),
                      "critical": bool(c.get("critical")),
                      "incumbent": c.get("incumbent", "")})
+    # A level outside LEVEL_CREDIT is NO-DATA, so it must block without comparing it to 3.
     blocking = [r for r in rows
-                if r["critical"] and (r["level"] is None or r["level"] < 3)]
+                if r["critical"] and (r["level"] not in LEVEL_CREDIT or r["level"] < 3)]
     return 100.0 * earned, rows, blocking
 
 

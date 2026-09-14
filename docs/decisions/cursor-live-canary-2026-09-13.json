@@ -1,0 +1,9 @@
+{
+  "decision": "Cursor adapter live canary recorded",
+  "date": "2026-09-13",
+  "founder_words": "Cursor is fine mark is as tested",
+  "context": "WBS-70 Cursor adapter, units U1/U2/U3/U4/U5/U7 closed tonight (commits babde7a93, 50d0bbf72, ea43e1b69, 543589507, fe2b16343/35c9288f3). products/brothermode/docs/CURSOR-COMPAT.md line 5 states 'Cursor is ADVISORY until a live canary is recorded.' No automated canary-record check exists yet (test_cursor_plugin.py has no such assertion).",
+  "what_this_records": "The founder's own real-machine confirmation that the Cursor install/adapter works, given verbally in this session. This is the live canary the doc's own ADVISORY condition names.",
+  "follow_up": "CURSOR-COMPAT.md's ADVISORY prose is a product document; per the repo's own standing rule, its text is drafted by Codex, not Claude. This record exists so a bounded Codex pass can update the doc citing this evidence, rather than the orchestrating session silently rewriting founder-facing prose itself.",
+  "not_yet_done": "The doc's ADVISORY line has not been edited. A mechanical canary-record check in test_cursor_plugin.py also does not yet exist."
+}

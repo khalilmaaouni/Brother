@@ -2444,5 +2444,20 @@ class TestArtifactDigestShapeGuard(unittest.TestCase):
         self.assertTrue(any("defective document" in p for p in problems), problems)
 
 
+class Night0912Contracts(unittest.TestCase):
+    """A night-sweep defect: schemaVersion is in IDENTITY_SPINE, so a
+    document missing it was named once by the explicit check and again by
+    the generic missing-required-fields list, in violation of this
+    function's own 'reported ONCE' docstring contract."""
+
+    def test_missing_schema_version_reported_once(self):
+        verdict, evidence, problems = mod.validate_passport({})
+        self.assertEqual(verdict, "FAIL")
+        count = sum(1 for p in problems if 'schemaVersion' in p)
+        self.assertEqual(
+            count, 1,
+            "schemaVersion named %d times in %r" % (count, problems))
+
+
 if __name__ == "__main__":
     unittest.main()

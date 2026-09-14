@@ -437,7 +437,9 @@ def _apply_enabled(plugins, settings_data):
     settings.json could not be read at all (could-not-tell); false means
     it WAS read and the plugin's "<name>@<marketplace>" key is simply
     absent from enabledPlugins (a fact). These two are never conflated."""
-    if settings_data is None:
+    if not isinstance(settings_data, dict):
+        # valid JSON that is not an object (or unread) carries no
+        # enabledPlugins map, so enabled is unknown, never false.
         for plugin in plugins:
             plugin["enabled"] = None
         return

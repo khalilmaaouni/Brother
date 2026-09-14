@@ -310,6 +310,19 @@ class TestProgressComputation(unittest.TestCase):
         md = program_mod.render_status_md(report)
         self.assertIn("1 of 2 items measured.", md)
 
+    def test_duplicate_acceptance_met_does_not_inflate_progress(self):
+        items = {
+            "BR-A.yaml": (
+                "id: BR-A\ntitle: Dup\nstatus: in_progress\n"
+                "acceptance:\n  - a\n  - b\n"
+                "acceptance_met:\n  - 0\n  - 0\n  - 0\n"
+            ),
+        }
+        root = _make_root(self.tmp, items=items)
+        report = program_mod.build_program_report(root)
+        item = report["items"][0]
+        self.assertEqual(item["progress_percent"], 50)
+
 
 class TestRisks(unittest.TestCase):
     def setUp(self):

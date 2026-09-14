@@ -2616,12 +2616,18 @@ def main(argv):
               % (opts["task"], ", ".join(TASK_ORDER)))
         return 2
     if opts["list"]:
-        if opts["dry_run"] or opts["arm"] or opts["model"] or opts["run_id"]:
+        # --task is not a listing option: silently ignoring it would run a
+        # listing while the caller asked for a cell.
+        if (opts["dry_run"] or opts["arm"] or opts["model"] or opts["run_id"]
+                or opts["task"] or opts["probe_installed"]):
             print("benchmark_comparative: --list takes no other options")
             return 2
         return list_tasks()
     if opts["dry_run"]:
-        if opts["arm"] or opts["model"] or opts["run_id"]:
+        # --probe-installed is not a dry-run option: ignoring it would print
+        # a calibration report while the caller asked for a canary.
+        if (opts["arm"] or opts["model"] or opts["run_id"]
+                or opts["probe_installed"]):
             print("benchmark_comparative: --dry-run takes only --task")
             return 2
         try:

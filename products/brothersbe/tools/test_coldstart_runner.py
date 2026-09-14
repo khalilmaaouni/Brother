@@ -50,6 +50,26 @@ class RunnerGuards(unittest.TestCase):
         done = self._run("--help")
         self.assertEqual(done.returncode, 0)
 
+    def test_zero_runs_is_not_complete(self):
+        import json
+        import tempfile
+
+        tmp = tempfile.mkdtemp()
+        try:
+            env = dict(os.environ)
+            env["BROTHERSBE_VAULT"] = tmp
+            done = subprocess.run(
+                [sys.executable, RUNNER, "--max-budget-usd", "1", "--runs", "0"],
+                capture_output=True, text=True, timeout=60, env=env)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            receipt = os.path.join(tmp, "99-System", "telemetry", "coldstart.jsonl")
+            with open(receipt, encoding="utf-8") as fh:
+                row = json.loads(fh.read().strip().splitlines()[-1])
+            self.assertEqual(row["runs"], [])
+            self.assertFalse(row["complete"])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
 
 if __name__ == "__main__":
     unittest.main()

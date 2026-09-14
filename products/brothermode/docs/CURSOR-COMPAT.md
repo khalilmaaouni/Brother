@@ -1,24 +1,40 @@
 # BrotherMode Cursor compatibility mode
 
-Status: CURRENT. Built 2026-08-10. Independent Cursor install, manage,
-uninstall, plus a local Fable-to-Cursor harness. Fence enforcement under
-Cursor is ADVISORY until a live canary is recorded.
+Status: CURRENT, updated 2026-09-13. Cursor install/adapter tested on the
+founder's real machine, confirmed in the
+[decision record](../../../docs/decisions/cursor-live-canary-2026-09-13.json):
+"Cursor is fine mark is as tested". This is verbal real-machine confirmation,
+not an automated smoke result or a measured hook denial.
 
 ## What you get
 
 1. **Independent run in Cursor.** BrotherMode's store, project CLI, rules,
-   and a Cursor-native hook adapter install under `~/.cursor/brothermode`
-   without Claude Code being present.
+   and native hook adapter install under `~/.cursor/brothermode`.
 2. **Install / manage / uninstall.** `scripts/install_cursor.py`,
    `tools/bm_cursor.py status|doctor|emit-rules|emit-hooks`, and
-   `scripts/uninstall_cursor.py`.
-3. **Remote control from Claude Code (Fable or Opus).** A local mailbox
-   under `.brothermode/cursor-mailbox/` carries work packets. Planner
-   dispatches and adopts; Cursor claims and executes. No network.
+   `scripts/uninstall_cursor.py` (paths relative to the BrotherMode product).
+3. **Local mailbox harness.** A planner dispatches and adopts work packets
+   under `.brothermode/cursor-mailbox/`; Cursor claims and executes them.
+4. **Umbrella plugin.** See the [install guide](../../../docs/how-to/install-cursor.md)
+   for the bundle install, native personas, and optional MCP server.
+
+WBS-70 U1 through U7 have landed in the source tree:
+
+| Units | Landed behavior and source (repository-relative paths) |
+|---|---|
+| U1/U2, `babde7a93` | `scripts/model_worker.py` selects `cursor-agent` with `BROTHER_MODEL_CLIENT=cursor`, parses its JSON result and camelCase usage fields. Default argv is `cursor-agent -p --output-format json --trust --mode ask`, a read-only mode; write workers need the `MODEL_WORKER_CMD` override. |
+| U3, `50d0bbf72` | `products/brothermode/tools/bm_cursor.py` discovers the umbrella layout, including `~/.cursor/plugins/local/brother`, and returns its nested `runtime/hooks/brothermode` checkout root. Callers append `tools` themselves. Flat compatibility checkouts still work. |
+| U4, `ea43e1b69` | `scripts/codex_surface.py` preserves the real mailbox instructions for the dispatch and execute skill aliases, instead of replacing them with generic engine stubs. |
+| U5, `543589507` | `bundle/.cursor-plugin/plugin.json` declares agents. `bundle/agents/brother-executor.md`, `bundle/agents/brother-planner.md`, and `bundle/agents/brother-reviewer.md` carry execution, planning, and review instructions. Their limits are prompt-level instructions, not agent permissions enforced by frontmatter. See `bundle/skills/using-brother/references/cursor-native.md`. |
+| U6, `b3b257b05` | Optional `bundle/mcp.json` launches the mirrored `bundle/runtime/hooks/brothermode/mcp/bm_mcp_server.py` from the nested checkout. Validation accepts both absent, refuses a half-shipped pair. Missing or unparseable sibling tools produce an explicit tool error without crashing the server. |
+| U7, `fe2b16343` / `35c9288f3` | `products/brothermode/tools/bm_cursor_hook.py` recognizes ten additional reserved agent events. They remain non-gating and unwired in the bundle hook configuration. |
+
+This lists source changes, not a final regeneration result. U8 is the current
+documentation pass; U9, the final regeneration pass, has not started.
 
 ## Install
 
-From a BrotherMode checkout:
+From `products/brothermode` in a Brother checkout:
 
 ```
 python3 scripts/install_cursor.py
@@ -56,42 +72,20 @@ python3 <checkout>/tools/bm_cursor.py emit-hooks --write ~/.cursor/hooks.json --
 
 Packaged console script name: `bm-cursor` (see `pyproject.toml`).
 
-## Harness: Fable plans, Cursor executes
+## Harness: planner dispatches, Cursor executes
 
-Planner (Claude Code, Fable or Opus), from the project:
+Use `skills/cursor-dispatch/SKILL.md` for the planner and
+`skills/cursor-execute/SKILL.md` for the executor (paths relative to the
+BrotherMode product). The bundle aliases preserve those instructions at
+`bundle/skills/brothermode-cursor-dispatch/SKILL.md` and
+`bundle/skills/brothermode-cursor-execute/SKILL.md` (repository-relative).
 
-```
-python3 <checkout>/tools/bm_cursor.py dispatch \
-  --objective "Add the healthz route and a failing-then-passing test" \
-  --read-scope app/ \
-  --write-scope app/routes.py \
-  --write-scope tests/test_healthz.py \
-  --done-check 'python -m pytest tests/test_healthz.py' \
-  --with-worktree
-```
-
-Executor (Cursor Agent), from the same project:
-
-```
-python3 <checkout>/tools/bm_cursor.py claim-next
-# ... do the work inside write_scope / worktree ...
-python3 <checkout>/tools/bm_cursor.py record-result \
-  --packet-id <id> \
-  --worker-claim "added healthz and test" \
-  --artifact app/routes.py \
-  --done-output /tmp/done.txt
-```
-
-Planner adopts (re-runs done_check itself):
-
-```
-python3 <checkout>/tools/bm_cursor.py adopt --packet-id <id>
-```
-
-Skills:
-
-- Claude Code planner: `/brothermode:cursor-dispatch` (`skills/cursor-dispatch`)
-- Cursor executor: `skills/cursor-execute` (also summarized in the rules file)
+The sequence in `tools/bm_cursor.py` is `dispatch`, `claim-next`,
+`record-result`, then `adopt`. Dispatch declares read/write scope and a
+`--done-check`; adoption re-runs that check. Use `--with-worktree` for
+isolation and pin `--project` to the absolute project root when working in
+a worktree: discovery walks for a `.git` directory, while a worktree has a
+`.git` file. The shipped skills include the headless `cursor-agent` route.
 
 Controller seam: `tools/bm_cursor.py:CursorMailboxWorker` implements the
 same `run(brief) -> pending` shape as `RecordIntentWorker` in
@@ -104,7 +98,7 @@ Cursor events wired (native `hooks.json` version 1):
 
 | Cursor event | Adapter action |
 |---|---|
-| `preToolUse` (Write\|Shell\|Delete\|Edit) | Translate to Claude PreToolUse; run fence; bash-audit pre on Shell |
+| `preToolUse` (Write\|Shell\|Delete\|Edit) | Translate to the shared PreToolUse contract; run fence; bash-audit pre on Shell |
 | `beforeShellExecution` | Treat as Bash PreToolUse (apply_patch path + audit pre) |
 | `postToolUse` / `afterShellExecution` | Bash-audit post |
 | `afterFileEdit` | Observe only (too late to refuse) |
@@ -112,21 +106,27 @@ Cursor events wired (native `hooks.json` version 1):
 
 Adapter: `tools/bm_cursor_hook.py`. Template: `hooks/cursor.hooks.json`.
 
-Cursor can also load Claude Code hooks from `~/.claude/settings.json` when
-third-party skills are enabled (vendor doc:
-https://cursor.com/docs/reference/third-party-hooks). The native install
-path above does not depend on that setting.
+The umbrella plugin uses `bundle/cursor-hooks/hooks.json` (repository-relative).
+Its lifecycle entries wrap real scripts through the adapter's `--run` mode;
+the quiet compatibility-template lifecycle rows above do not describe those
+bundle entries.
+
+The ten newly reserved events are `postToolUseFailure`, `subagentStart`,
+`subagentStop`, `beforeMCPExecution`, `afterMCPExecution`, `beforeReadFile`,
+`beforeSubmitPrompt`, `afterAgentResponse`, `afterAgentThought`, and
+`workspaceOpen`. Recognition alone adds no hook behavior. Only `preToolUse`
+and `beforeShellExecution` are gate events. Tab events remain unrecognized.
 
 ### Honest limit on enforcement
 
-Payload shapes were read from Cursor's Hooks documentation on 2026-08-10.
-A LIVE canary that proves Cursor Agent or Cloud Agent actually executes
-these hooks and honours `permission: deny` has NOT been measured in this
-tree. Codex taught the same lesson (docs/mistakes/M19): a fence that looks
-installed and does not fire is worse than no fence. Until a dated canary
-lands, treat Cursor fences as ADVISORY and use worktrees for isolation.
+The [2026-09-13 decision record](../../../docs/decisions/cursor-live-canary-2026-09-13.json)
+satisfies the previous condition to record a real-machine canary: the founder
+confirmed the install/adapter works. It does not contain hook-denial output
+or the signed-in smoke's individual verdicts. The signed-in smoke test has
+not been run this session. Measured `permission: deny` enforcement remains
+NO-DATA on this evidence; use worktrees for isolation.
 
-Cloud Agent note (vendor doc): project `.cursor/hooks.json` runs in cloud
+Cloud Agent scope, as documented in the shipped execution skill: project `.cursor/hooks.json` runs in cloud
 agents; user `~/.cursor/hooks.json` does not. Prefer `--project` when the
 executor is a Cloud Agent.
 
@@ -144,6 +144,6 @@ executor is a Cloud Agent.
 ## Related pages
 
 - `docs/RUNTIMES.md` (generated runtime registry; Cursor row)
-- `docs/HOOKS.md` (Claude Code hook contract the adapter targets)
+- `docs/HOOKS.md` (shared hook contract the adapter targets)
 - `docs/proposals/2026-08-02-full-auto-and-codex-execution-modes.md` (packet shape ancestor)
 - `docs/FULL-AUTO.md` (controller harness)

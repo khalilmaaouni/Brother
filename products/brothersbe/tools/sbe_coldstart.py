@@ -126,7 +126,7 @@ def main(argv=None):
         # A batch is complete only when every run produced a readable transcript.
         # A run the CLI cut off at the spend ceiling is a partial measurement, and
         # the receipt says so rather than averaging it in as if it finished.
-        complete = all(r.get("outcome") == "ok" for r in runs)
+        complete = bool(runs) and all(r.get("outcome") == "ok" for r in runs)
         row = {
             "head_sha": head_sha(),
             "measured_at": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),

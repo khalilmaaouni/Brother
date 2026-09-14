@@ -164,10 +164,17 @@ def build(source_dir=None, accepted=ACCEPTED_KEYS):
                                 "not invent one" % name)
                 continue
             kept, stripped = strip_frontmatter(lines, accepted)
-            if not any(_KEY_LINE.match(l) for l in kept):
-                problems.append("%s/SKILL.md: stripping left no frontmatter "
-                                "key at all, so it carries neither name nor "
-                                "description" % name)
+            # Codex's validator requires each accepted key to be present, not
+            # just some key to survive stripping.
+            present = set()
+            for l in kept:
+                match = _KEY_LINE.match(l)
+                if match:
+                    present.add(match.group(1))
+            missing = [key for key in accepted if key not in present]
+            if missing:
+                problems.append("%s/SKILL.md: missing required frontmatter "
+                                "key(s): %s" % (name, ", ".join(missing)))
                 continue
             files["%s/SKILL.md" % name] = render(kept, body).encode("utf-8")
             if stripped:

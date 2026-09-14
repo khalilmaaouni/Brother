@@ -474,5 +474,139 @@ class ThePublicExampleValueIsNotASecret(unittest.TestCase):
         self.assertFalse(any(p.search(only_example) for p in G.SECRET_SHAPES))
 
 
+class DocsCurrentBlocksAStaleSystemMd(unittest.TestCase):
+    """F5(b): a stale SYSTEM.md used to surface only on CI, after the push,
+    because nothing before the push ran system_doc.py --check. This drives
+    check_docs_current directly, against a stub runner, so it never depends
+    on this checkout's own SYSTEM.md actually being fresh or stale."""
+
+    def test_a_clean_check_reads_ok(self):
+        def ok_runner(cmd, **kw):
+            return subprocess.CompletedProcess(cmd, 0, "SYSTEM.md still describes the code", "")
+        result = G.check_docs_current(cwd=G.ROOT, runner=ok_runner)
+        self.assertEqual([(G.OK, "docs-current", "SYSTEM.md still describes the code")], result)
+
+    def test_a_stale_check_blocks_not_warns(self):
+        def stale_runner(cmd, **kw):
+            return subprocess.CompletedProcess(
+                cmd, 1, "SYSTEM.md NO LONGER DESCRIBES THE CODE.\nRegenerate it with: "
+                        "python3 scripts/system_doc.py", "")
+        verdict, name, detail = G.check_docs_current(cwd=G.ROOT, runner=stale_runner)[0]
+        self.assertEqual(G.BLOCK, verdict, detail)
+        self.assertEqual("docs-current", name)
+
+    def test_a_cwd_that_is_not_this_repository_is_no_data_not_block(self):
+        with tempfile.TemporaryDirectory(prefix="pre-push-gate-docs-current-") as tmp:
+            def never_called(cmd, **kw):
+                raise AssertionError("system_doc.py must never run against an unrelated cwd")
+            result = G.check_docs_current(cwd=tmp, runner=never_called)
+        self.assertEqual(G.NODATA, result[0][0], result)
+
+
+class TheDriftBudgetIsReadFromTheEnvironment(unittest.TestCase):
+    """check_drift's timeout was a literal 90 seconds; under a load average
+    above 300 record_drift.py needs about 160, the timeout read as NO-DATA and
+    NO-DATA refused every push. The budget is now PRE_PUSH_DRIFT_TIMEOUT_S,
+    read at call time, 90 when unset or unusable, and a timeout names it."""
+
+    ENV_VAR = "PRE_PUSH_DRIFT_TIMEOUT_S"
+
+    def setUp(self):
+        from unittest import mock
+        self.mock = mock
+        self._saved = os.environ.get(self.ENV_VAR)
+        os.environ.pop(self.ENV_VAR, None)
+        # check_drift returns early when record_drift.py is missing. These
+        # tests are about the timeout budget, not that file's presence.
+        self._isfile = mock.patch.object(G.os.path, "isfile", return_value=True)
+        self._isfile.start()
+
+    def tearDown(self):
+        self._isfile.stop()
+        if self._saved is None:
+            os.environ.pop(self.ENV_VAR, None)
+        else:
+            os.environ[self.ENV_VAR] = self._saved
+
+    def _run_with_captured_timeout(self):
+        calls = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append(kwargs)
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        with self.mock.patch.object(G.subprocess, "run", side_effect=fake_run):
+            rows = G.check_drift()
+        self.assertEqual(len(calls), 1)
+        return calls[0].get("timeout"), rows
+
+    def test_default_timeout_is_90(self):
+        timeout, rows = self._run_with_captured_timeout()
+        self.assertEqual(timeout, 90)
+        self.assertEqual(rows[0][0], G.OK)
+
+    def test_env_timeout_is_200(self):
+        os.environ[self.ENV_VAR] = "200"
+        timeout, _rows = self._run_with_captured_timeout()
+        self.assertEqual(timeout, 200)
+
+    def test_non_integer_env_falls_back_to_90(self):
+        os.environ[self.ENV_VAR] = "abc"
+        timeout, _rows = self._run_with_captured_timeout()
+        self.assertEqual(timeout, 90)
+
+    def test_zero_env_falls_back_to_90(self):
+        os.environ[self.ENV_VAR] = "0"
+        timeout, _rows = self._run_with_captured_timeout()
+        self.assertEqual(timeout, 90)
+
+    def test_timeout_expired_is_nodata_naming_the_env_var(self):
+        def exploding_runner(cmd, **kwargs):
+            raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout", 90))
+
+        rows = G.check_drift(runner=exploding_runner)
+        self.assertEqual(len(rows), 1)
+        status, _family, message = rows[0]
+        self.assertEqual(status, G.NODATA)
+        self.assertIn(self.ENV_VAR, message)
+
+    def test_a_drift_failure_with_no_output_warns_instead_of_crashing(self):
+        # Night sweep finding 5d78186cac16: a nonzero exit with empty stdout
+        # and stderr crashed on "".splitlines()[0] with IndexError.
+        def silent_failure(cmd, **kwargs):
+            return subprocess.CompletedProcess(cmd, 1, "", "")
+
+        rows = G.check_drift(runner=silent_failure)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0][0], G.WARN)
+        self.assertIn("no output", rows[0][2])
+
+
+class Night0912PrePushGate(unittest.TestCase):
+    def test_remote_rules_endpoint_failure_is_nodata_not_ok(self):
+        def runner(cmd, **kw):
+            if cmd[:3] == ['gh', 'repo', 'view']:
+                return subprocess.CompletedProcess(cmd, 0, 'owner/repo\n', '')
+            return subprocess.CompletedProcess(cmd, 1, '', 'network error')
+
+        res = G.check_remote_rules(runner=runner)
+        self.assertEqual(res[0][0], G.NODATA)
+
+    def test_remote_rules_plan_without_rulesets_is_ok_not_nodata(self):
+        # Review fix: a free private repository answers the rules endpoint with
+        # HTTP 403 "Upgrade to GitHub Pro". No rule can exist there, so the
+        # push cannot be refused remotely; reading it as NO-DATA would refuse
+        # every push to such a repository.
+        for err in ("gh: Upgrade to GitHub Pro or make this repository public "
+                    "to enable this feature. (HTTP 403)", "gh: Not Found (HTTP 404)"):
+            def runner(cmd, err=err, **kw):
+                if cmd[:3] == ['gh', 'repo', 'view']:
+                    return subprocess.CompletedProcess(cmd, 0, 'owner/repo\n', '')
+                return subprocess.CompletedProcess(cmd, 1, '', err)
+
+            res = G.check_remote_rules(runner=runner)
+            self.assertEqual(res[0][0], G.OK, err)
+
+
 if __name__ == "__main__":
     unittest.main()

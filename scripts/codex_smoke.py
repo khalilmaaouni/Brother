@@ -580,9 +580,13 @@ def main(argv=None):
 
     # Since the portability release the Codex marketplace offers ONE plugin:
     # brother@brother carries the runtime, the skills, the commands and both
-    # products' hooks itself (bundle/hooks/hooks.json, mirrored tools under
-    # bundle/runtime/hooks/). brothermode@brother must therefore be REFUSED
-    # here, and a marketplace that still offers it is the defect.
+    # products' hooks itself (bundle/hooks/union.json, renamed 2026-09-13,
+    # mirrored tools under bundle/runtime/hooks/). Codex itself does not read
+    # this file (its plugin validator refuses any manifest carrying a
+    # "hooks" key; scripts/codex_hooks_install.py wires Codex's OWN
+    # user-scope hooks file straight from products/*/hooks/hooks.json
+    # instead). brothermode@brother must therefore be REFUSED here, and a
+    # marketplace that still offers it is the defect.
     step2b = sh([args.codex_bin, "plugin", "add", "brothermode@brother",
                 "--json"], env=env)
     report("2b plugin add brothermode (expected refusal)", step2b)

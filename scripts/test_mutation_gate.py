@@ -4,12 +4,12 @@ kill (R27.3, docs/plan/HARDENING-2026-08-30-CODEX.md mechanism 5).
 
 Three things are proven:
 
-  1. Every one of the four registered mutants has a UNIQUE anchor in the
+  1. Every one of the six registered mutants has a UNIQUE anchor in the
      REAL current scripts/ source. If a later refactor moves or duplicates
      the seam, this fails here, before a real run silently starts reading
      NO-DATA for a class the brief says must stay seeded.
 
-  2. THE FORWARD DRIVE: every one of the four real, registered mutants is
+  2. THE FORWARD DRIVE: every one of the six real, registered mutants is
      actually run end to end (a fresh scratch copy, the real patch, the
      real named killer test file as a subprocess) and must come back
      KILLED. This is slower than a fixture test (it runs real product test
@@ -56,14 +56,16 @@ class RegisteredMutantsMatchTheRealSource(unittest.TestCase):
     """Drive (1): every anchor is unique in the real, current source, right
     now, not as of whenever the anchor text was copied in."""
 
-    def test_exactly_four_classes_are_registered(self):
-        self.assertEqual(len(MG.MUTANTS), 4)
+    def test_exactly_six_classes_are_registered(self):
+        self.assertEqual(len(MG.MUTANTS), 6)
         classes = {e["class"] for e in MG.MUTANTS.values()}
         self.assertEqual(classes, {
             "termination-condition comparison flip",
             "tuple or dict field deletion",
             "boundary check removal",
             "parse-failure-to-continue",
+            "evidence-hashing goes content-blind",
+            "verdict-aggregation priority flip",
         })
 
     def test_every_mutant_names_a_real_guard(self):
@@ -119,6 +121,22 @@ class TheForwardDriveEveryRealMutantIsActuallyKilled(unittest.TestCase):
         self.assertIn("the decomposer was never asked", r["output"],
                      "the mutant should silence the real diagnostic and "
                      "leave only the placeholder reason behind")
+
+    def test_hash_content_blind_is_killed(self):
+        r = MG.run_mutant("hash-content-blind", MG.MUTANTS["hash-content-blind"])
+        self.assertEqual(r["verdict"], "KILLED", r["output"][-800:])
+        self.assertIn("MISMATCH", r["output"],
+                     "a content-blind hash should make the tampered-evidence "
+                     "check report MATCH where MISMATCH was expected, which "
+                     "is what should fail loudly in the killer's own output")
+
+    def test_headline_priority_flip_is_killed(self):
+        r = MG.run_mutant("headline-priority-flip", MG.MUTANTS["headline-priority-flip"])
+        self.assertEqual(r["verdict"], "KILLED", r["output"][-800:])
+        self.assertIn("BLOCKING FAILURE", r["output"],
+                     "the killer expects the headline to start with "
+                     "BLOCKING FAILURE when a FAIL and a NO-DATA coexist; "
+                     "the priority-flipped mutant should fail that assertion")
 
     def test_the_real_battery_exits_zero_and_names_nothing_as_survived(self):
         results, code = MG.run_battery(MG.MUTANTS, out=io.StringIO())

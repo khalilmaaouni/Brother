@@ -223,5 +223,13 @@ class ThreePatternsAreFindableByOneBroadProblemQuery(unittest.TestCase):
         self.assertGreaterEqual(len(hits), 3)
 
 
+class Night0912PatternNote(unittest.TestCase):
+    def test_empty_what_does_not_raise(self):
+        for what in ("", "   ", "\n\t "):
+            body = P.note_body('n', 's', what, 'e', 'all')
+            self.assertIsInstance(body, str)
+            self.assertIn("description: ", body)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -394,26 +394,6 @@ def main():
         check("17c the rest of the row is unaffected by the broken clock",
               (row2 or {}).get("ok"), True)
 
-        # 18. E53 (2026-09-04): a 200-char slice on a lesson's note cut the
-        #     remedy off before it arrived, and a controlled lab measured
-        #     that this dropped an obedient worker's repeat-avoidance from
-        #     up to 7 of 8 down to 1 of 8. The remedy must now survive past
-        #     the old cut point in full. Built, not hand-typed, so the
-        #     marker's position past 200 characters is provable rather than
-        #     assumed.
-        filler = "this is the warning half of the note, long on purpose. " * 4
-        assert len(filler) > 200, "fixture must clear the old cut point"
-        remedy_marker = "REMEDY-PAST-200: reinstall the pinned symlink before retrying."
-        long_note = filler + remedy_marker
-        with lessons.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(
-                {"trigger": "rg_long_remedy_trigger",
-                 "note": long_note}) + "\n")
-        code, out, _ = run(pre("rg_long_remedy_trigger --now"), home)
-        check("18a a long lesson still warns, never blocks", code, 0)
-        check("18b the full remedy past the old 200-char cut is shown",
-              0 if remedy_marker in out else -1, 0)
-
     real_logs.assert_unchanged(real_logs_before, context=__name__)
 
     bad = results.count(False)

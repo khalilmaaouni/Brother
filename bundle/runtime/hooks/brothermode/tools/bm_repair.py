@@ -181,7 +181,12 @@ def repair(unit, verdict, worker, verifier=None, recall=None, cwd=None,
                 "recall_note": recall_note,
             })
             return record
-        current = verifier(unit, cwd=cwd)
+        try:
+            current = verifier(unit, cwd=cwd)
+        except Exception as exc:  # noqa: BLE001
+            # a verifier that throws is a recorded attempt, not a raise
+            current = {"verdict": bm_verify.FAIL,
+                       "reason": "verifier raised %s: %s" % (type(exc).__name__, exc)}
         record["attempts"].append({
             "attempt": n,
             "worker_status": (worker_result or {}).get("status"),

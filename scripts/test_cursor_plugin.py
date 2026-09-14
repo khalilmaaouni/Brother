@@ -119,6 +119,78 @@ class TestCursorPluginPackage(unittest.TestCase):
                         offenders.append(os.path.relpath(path, REPO))
         self.assertEqual([], offenders)
 
+    def test_manifest_declares_the_three_agents(self):
+        manifest = json.loads(_read(os.path.join(
+            "bundle", ".cursor-plugin", "plugin.json")))
+        self.assertIn("agents", manifest)
+        self.assertTrue(manifest["agents"])
+
+    def test_agents_exist_with_exactly_name_and_description(self):
+        for name in inst.AGENT_NAMES:
+            path = os.path.join("bundle", "agents", name + ".md")
+            text = _read(path)
+            fields, _ = inst._parse_frontmatter(text)
+            self.assertIsNotNone(fields, path)
+            self.assertEqual({"name", "description"}, set(fields.keys()),
+                              path)
+            self.assertEqual(name, fields["name"], path)
+            self.assertTrue(fields["description"], path)
+            self.assertFalse(_has_dash(text), path)
+
+    def test_agents_do_not_ship_deepseek_or_muse(self):
+        agents_dir = os.path.join(REPO, "bundle", "agents")
+        offenders = []
+        for name in inst.AGENT_NAMES:
+            path = os.path.join(agents_dir, name + ".md")
+            with io.open(path, encoding="utf-8", errors="ignore") as fh:
+                text = fh.read().lower()
+            if "deepseek" in text or "muse" in text:
+                offenders.append(os.path.relpath(path, REPO))
+        self.assertEqual([], offenders)
+
+    def test_agents_forbid_release_actions(self):
+        # Wave 3 design critique (WAVE-3-DESIGN-CRITIQUES-2026-09-13.md,
+        # "Cursor-native agent personas"): the executor must explicitly
+        # forbid merge/push/release since Cursor agent frontmatter has no
+        # permission system of its own.
+        executor = _read(os.path.join("bundle", "agents",
+                                       "brother-executor.md")).lower()
+        for forbidden in ("git push", "git merge", "git tag", "release"):
+            self.assertIn(forbidden, executor)
+
+    def test_validate_bundle_catches_a_missing_agent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            shutil.copytree(os.path.join(REPO, "bundle"), tmp,
+                             dirs_exist_ok=True)
+            os.unlink(os.path.join(tmp, "agents", "brother-executor.md"))
+            problems = inst.validate_bundle(tmp)
+        self.assertTrue(any("brother-executor" in p for p in problems))
+
+    def test_optional_mcp_component_ships_consistently(self):
+        # U6: an optional bundled component, so its ABSENCE would not be a
+        # problem; but products/brothermode/mcp/bm_mcp_server.py exists in
+        # this tree, so a fresh generation must have mirrored it and
+        # validate_bundle must see a consistent pair, never a half ship.
+        self.assertTrue(os.path.isfile(os.path.join(
+            REPO, "products", "brothermode", "mcp", "bm_mcp_server.py")))
+        self.assertTrue(os.path.isfile(os.path.join(REPO, "bundle", "mcp.json")))
+        self.assertTrue(os.path.isfile(os.path.join(
+            REPO, "bundle", "runtime", "hooks", "brothermode", "mcp",
+            "bm_mcp_server.py")))
+        self.assertEqual([], inst.validate_bundle(os.path.join(REPO, "bundle")))
+
+    def test_validate_bundle_flags_a_half_shipped_mcp_component(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            half = os.path.join(tmp, "bundle-half-mcp")
+            inst.copy_tree(os.path.join(REPO, "bundle"), half)
+            server = os.path.join(half, "runtime", "hooks", "brothermode",
+                                  "mcp", "bm_mcp_server.py")
+            self.assertTrue(os.path.isfile(server))
+            os.unlink(server)
+            problems = inst.validate_bundle(half)
+            self.assertTrue(any("mcp.json declares an MCP server" in p
+                                for p in problems), problems)
+
     def test_docs_page_exists(self):
         text = _read(os.path.join("docs", "how-to", "install-cursor.md"))
         self.assertIn("cursor_plugin_install.py", text)

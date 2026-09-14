@@ -2,11 +2,14 @@
 """Calibration for tools/bm_vault_context.py, WBS row VB3-03.
 
 Unit-level only: the request id is immutable and carries no tenant string, the
-enterprise-mode field check names exactly what is missing, and tenant_env refuses a
+enterprise-mode field check names exactly what is missing, tenant_env refuses a
 tenant that is not a clean, pre-provisioned single-segment name -- never a guess, never a
-silent fallback to the shared environment. The end-to-end request-id-in-ledger, enterprise
-refusal and two-tenant leakage properties are calibrated against the real HTTP server in
-test_bm_vault_serve.py, which is where a served answer's shape actually lives.
+silent fallback to the shared environment -- and classify_answer_class/
+build_request_envelope stay a deterministic keyword table and a read-only-by-default
+envelope, never a model call and never a silent write grant. The end-to-end
+request-id-in-ledger, enterprise refusal and two-tenant leakage properties are
+calibrated against the real HTTP server in test_bm_vault_serve.py, which is where a
+served answer's shape actually lives.
 
 No em or en dashes anywhere in this file.
 """
@@ -109,6 +112,96 @@ class TenantEnv(unittest.TestCase):
         env, err = ctx.tenant_env(self.tmp, "tenant-b")
         self.assertIsNone(env)
         self.assertIn("not provisioned", err)
+
+
+class ClassifyAnswerClass(unittest.TestCase):
+    def test_update_named_system_record_is_transactional(self):
+        self.assertEqual(
+            ctx.classify_answer_class("Update the SAP record for outlet 4021"),
+            "TRANSACTIONAL_ACTION")
+
+    def test_ambiguous_fix_never_classifies_transactional(self):
+        # "fix" could mean "explain what's wrong" or "change it" -- a genuinely
+        # ambiguous verb, so this must land on a non-mutating class, never
+        # TRANSACTIONAL_ACTION, per the bias-to-safe rule.
+        result = ctx.classify_answer_class("Fix the customer's hierarchy")
+        self.assertNotEqual(result, "TRANSACTIONAL_ACTION")
+        self.assertIn(result, ctx.ANSWER_CLASSES)
+
+    def test_golden_account_mastering_question_is_master_lookup(self):
+        # More specific than STANDARD_POLICY: this asks for the one authoritative
+        # mastering source, not a standing rule.
+        self.assertEqual(
+            ctx.classify_answer_class(
+                "What is the current Golden Account mastering authority?"),
+            "MASTER_LOOKUP")
+
+    def test_open_ended_why_question_is_exploratory(self):
+        # Mentions a metric noun ("volume") but asks why it moved, not for its
+        # certified value, so this is analysis, not OFFICIAL_METRIC.
+        self.assertEqual(
+            ctx.classify_answer_class("Why is volume declining at outlet 12?"),
+            "EXPLORATORY_ANALYSIS")
+
+    def test_direct_metric_value_ask_is_official_metric(self):
+        self.assertEqual(
+            ctx.classify_answer_class("What is the current revenue for outlet 12?"),
+            "OFFICIAL_METRIC")
+
+    def test_none_and_blank_text_default_to_exploratory_never_crash(self):
+        for bad in (None, "", "   "):
+            self.assertEqual(ctx.classify_answer_class(bad), "EXPLORATORY_ANALYSIS")
+
+    def test_mutating_verb_without_a_named_target_is_not_transactional(self):
+        # "update" with no record/system named: not unambiguous enough on its own.
+        self.assertNotEqual(
+            ctx.classify_answer_class("Update me on the outlet situation"),
+            "TRANSACTIONAL_ACTION")
+
+
+class BuildRequestEnvelope(unittest.TestCase):
+    def test_transactional_question_without_authorization_stays_read_only(self):
+        env, missing = ctx.build_request_envelope(
+            "Update the SAP record for outlet 4021")
+        self.assertEqual(env["answer_class"], "TRANSACTIONAL_ACTION")
+        self.assertEqual(env["allowed_actions"], ["read"])
+
+    def test_explicit_authorization_is_the_only_way_to_widen_allowed_actions(self):
+        env, _ = ctx.build_request_envelope(
+            "Update the SAP record for outlet 4021",
+            explicit_action_authorization=["read", "write"])
+        self.assertEqual(env["allowed_actions"], ["read", "write"])
+
+    def test_no_tenant_or_principal_surfaces_missing_enterprise_fields(self):
+        # Reuses missing_enterprise_fields rather than a second check: this must be
+        # the exact list that function returns for the same two absent values.
+        env, missing = ctx.build_request_envelope("What is the current revenue?")
+        self.assertEqual(missing, ctx.missing_enterprise_fields(None, None))
+        self.assertEqual(missing, ["tenant", "principal"])
+
+    def test_tenant_and_principal_present_reports_nothing_missing(self):
+        _, missing = ctx.build_request_envelope(
+            "What is the current revenue?", tenant="tenant-a", principal="alice")
+        self.assertEqual(missing, [])
+
+    def test_schema_actor_and_question_shape(self):
+        env, _ = ctx.build_request_envelope(
+            "Why is volume declining at outlet 12?",
+            human="alice", agent="bm_vault_serve", purpose="ops review",
+            channel="slack", locale="en-US")
+        self.assertEqual(env["schema"], ctx.REQUEST_ENVELOPE_SCHEMA)
+        self.assertEqual(env["actor"],
+                         {"human": "alice", "agent": "bm_vault_serve",
+                          "purpose": "ops review"})
+        self.assertEqual(env["channel"], "slack")
+        self.assertEqual(env["locale"], "en-US")
+        self.assertEqual(env["question"], {"text": "Why is volume declining at outlet 12?"})
+        self.assertRegex(env["request_id"], r"^[0-9a-f]{32}$")
+
+    def test_request_id_reuses_new_request_id_two_calls_never_collide(self):
+        env1, _ = ctx.build_request_envelope("q1")
+        env2, _ = ctx.build_request_envelope("q2")
+        self.assertNotEqual(env1["request_id"], env2["request_id"])
 
 
 class TenantRegexShape(unittest.TestCase):

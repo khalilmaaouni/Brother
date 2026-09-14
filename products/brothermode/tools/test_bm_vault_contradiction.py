@@ -699,5 +699,22 @@ class HP2EvidenceMustBeAboutTheClaim(unittest.TestCase):
         self.assertEqual(tier, contradiction.TIER_EVIDENCED, reason)
 
 
+class Night0912BmVaultContradiction(unittest.TestCase):
+    def test_empty_grep_pattern_is_not_holds(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        with open(os.path.join(tmp, "target.md"), "w", encoding="utf-8") as fh:
+            fh.write("hello\n")
+        lesson = {"path": os.path.join(tmp, "lesson.md"),
+                  "evidence_locator": "grep:target.md:",
+                  "applies_to": []}
+        probe = contradiction.make_evidence_probe(tmp)
+        self.assertNotEqual(probe(lesson), contradiction.HOLDS)
+
+    def test_japanese_second_occurrence_after_report(self):
+        text = "以前、不合格を合格扱いした。今回も合格扱いにする。"
+        self.assertIsNotNone(contradiction.unsafe_directive(text))
+
+
 if __name__ == "__main__":
     unittest.main()

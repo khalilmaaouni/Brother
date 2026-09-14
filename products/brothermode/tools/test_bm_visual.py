@@ -1582,5 +1582,15 @@ class TestGanttDiagram(unittest.TestCase):
                               bv.TOKENS_DARK["paper"]), 4.5)
 
 
+class Night0912BmVisual(unittest.TestCase):
+    def test_alerts_for_chat_picks_top_two_rungs_in_ladder_order(self):
+        a_settled = bv.alert('SETTLED', 'step-passed', 'x', '1', 'done')
+        a_needs = bv.alert('NEEDS YOU', 'consent', 'x', '', 'need')
+        a_atrisk = bv.alert('AT RISK', 'open-risk', 'x', '2', 'risk')
+        got = bv.alerts_for_chat([a_settled, a_needs, a_atrisk])
+        self.assertEqual([a['rung'] for a in got],
+                         ['NEEDS YOU', 'AT RISK'])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

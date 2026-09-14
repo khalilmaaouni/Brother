@@ -402,5 +402,31 @@ class TestHooksWiringUnderACodexClientThatWiredItsOwnHooks(
         self.assertIn("sbe_fence_hook.py", check["detail"], text)
 
 
+class Night0912SbeHooksWiring(unittest.TestCase):
+
+    def test_installed_hooks_null_is_fail_not_crash(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "sbe_hooks_wiring", os.path.join(HERE, "sbe_hooks_wiring.py"))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        mod.running_client = lambda: ""
+        with tempfile.TemporaryDirectory() as tmp:
+            os.makedirs(os.path.join(tmp, "hooks"))
+            with open(os.path.join(tmp, "hooks", "hooks.json"), "w") as fh:
+                json.dump({"hooks": {}}, fh)
+            installed = os.path.join(tmp, "installed-hooks.json")
+            with open(installed, "w") as fh:
+                json.dump({"hooks": None}, fh)
+            os.environ["SBE_HOOKS_JSON"] = installed
+            try:
+                out = mod.hooks_wiring_check(tmp, "1.0")
+            finally:
+                os.environ.pop("SBE_HOOKS_JSON", None)
+        self.assertEqual(out[0], "hooks-wiring")
+        self.assertEqual(out[1], "FAIL")
+        self.assertIn(installed, out[2])
+
+
 if __name__ == "__main__":
     unittest.main()

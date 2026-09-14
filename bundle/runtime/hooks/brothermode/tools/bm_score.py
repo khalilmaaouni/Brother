@@ -34,7 +34,10 @@ def main():
     # real_sessions everywhere: scorecard, nag, and these checks must all mean
     # the same thing by "session" (weekly-review-1 law, extended here 2026-07-23)
     rows = real_sessions(led)
-    recent = [r for r in rows if (age_days(r.get("ts", "")) or 99) <= 7]
+    # age_days 0.0 means "today": `or 99` treated 0.0 as falsy and dropped
+    # today's rows, so test existence explicitly instead of truthiness.
+    recent = [r for r in rows if (lambda d: d is not None and d <= 7)(
+        age_days(r.get("ts", "")))]
 
     # 1. ledger coverage: lines per active day (can only measure what exists)
     days = {}

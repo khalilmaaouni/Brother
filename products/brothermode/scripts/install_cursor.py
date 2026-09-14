@@ -239,14 +239,16 @@ def main(argv=None):
             _out("%s  project hooks: would write %s"
                  % (prefix, project_hooks))
         else:
-            backup_file(project_hooks, dry=False)
             existing_p = {}
             if os.path.isfile(project_hooks):
                 try:
                     existing_p = json.loads(
                         io.open(project_hooks, encoding="utf-8").read())
-                except ValueError:
-                    existing_p = {}
+                except ValueError as exc:
+                    _err("install_cursor.py: %s is not valid JSON: %s"
+                         % (project_hooks, exc))
+                    return EXIT_REFUSED
+            backup_file(project_hooks, dry=False)
             write_hooks(project_hooks,
                         merge_hooks(existing_p, None, target), dry=False)
             _out("  project hooks: %s" % project_hooks)

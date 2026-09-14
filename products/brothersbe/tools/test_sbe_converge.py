@@ -425,5 +425,42 @@ class TestAmendment(ConvergeScenario):
         self.assertIn("PASS", text)
 
 
+class Night0912Converge(unittest.TestCase):
+    def test_scope_unplanned_source_with_no_plan_is_review_required(self):
+        tools_dir = os.path.dirname(os.path.abspath(__file__))
+        src_dir = os.path.join(tools_dir, "..", "src")
+        if src_dir not in sys.path:
+            sys.path.insert(0, src_dir)
+        from brothersbe import converge
+
+        old_resolve = converge._resolve
+        old_show = converge._show
+        old_git = converge._git
+        old_changed = converge.impact_mod.changed_files
+        old_identity = converge.evidence_mod.repository_identity
+        converge._resolve = lambda c, r: ("a" if r == "base" else "b") * 40
+        converge._show = lambda c, s, r: None
+        converge._git = lambda *a, **k: (0, "", "")
+        converge.impact_mod.changed_files = lambda c, b, h: ["foo.py"]
+        converge.evidence_mod.repository_identity = lambda c: "test"
+        try:
+            with tempfile.TemporaryDirectory() as root:
+                cwd = os.path.join(root, "repo")
+                dossier = os.path.join(root, "design")
+                os.makedirs(cwd)
+                os.makedirs(dossier)
+                report = converge.evaluate(dossier, cwd, "base", "head")
+            scope = [d for d in report["dimensions"] if d["name"] == "SCOPE"][0]
+            self.assertEqual(scope["verdict"], "REVIEW-REQUIRED")
+            self.assertTrue(any(f["verdict"] == "REVIEW-REQUIRED"
+                                for f in scope["findings"]))
+        finally:
+            converge._resolve = old_resolve
+            converge._show = old_show
+            converge._git = old_git
+            converge.impact_mod.changed_files = old_changed
+            converge.evidence_mod.repository_identity = old_identity
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

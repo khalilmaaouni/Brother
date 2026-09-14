@@ -165,5 +165,19 @@ class TestActionsCoverEveryClass(unittest.TestCase):
         self.assertEqual(set(ACTIONS), set(ORDER))
 
 
+class Night0912AutonomyDial(unittest.TestCase):
+    def test_json_array_is_no_data(self):
+        import importlib.util
+
+        path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            'autonomy_dial.py')
+        spec = importlib.util.spec_from_file_location(
+            'autonomy_dial_night0912', path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        self.assertEqual(mod.main(['--json', '[1]']), 2)
+
+
 if __name__ == "__main__":
     unittest.main()

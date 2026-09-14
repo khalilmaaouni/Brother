@@ -2043,6 +2043,37 @@ class VR2SearchTailProtections(unittest.TestCase):
                          "the noise tail reached the reader; the floor is not "
                          "doing anything:\n%s" % out)
 
+    def test_06_link_expansion_never_serves_a_policy_denied_neighbor(self):
+        """VB2-01 x C: _linked_neighbors' guard applies the identical
+        _denied(id, path) predicate the main policy trim uses above it, so a
+        note the access policy denies must never reach the served list via
+        link expansion either. Note A carries the anchor and is recalled
+        directly; A links to note B, which the deny predicate withholds. B
+        must not appear served, and must leave only the withheld count as
+        its trace, never its id, title or path."""
+        con = self._mem_index(
+            [(1, "/v/seam-source.md", 1.0, "SeamGuardWidget.swift breaks this way.")],
+            "SeamGuardWidget.swift")
+        denied_path = "/v/seam-denied-neighbor.md"
+        con.execute(
+            "INSERT INTO notes (id, path, title, descr, source, kind, mtime, "
+            "body, content_hash) VALUES (?,?,?,?,?,?,?,?,?)",
+            (2, denied_path, "seam-denied-neighbor", "a note", "vault", "lesson",
+             1.0, "a note A links to, that policy denies", "hash2"))
+        con.execute("INSERT INTO links (note_id, target) VALUES (?,?)",
+                    (1, "seam-denied-neighbor"))
+        with self._isolated_decay():
+            fused, why, total = bm_vault._search(
+                con, paths=["SeamGuardWidget.swift"], limit=5, fast=True,
+                deny=lambda path: path == denied_path)
+        served = [nid for nid, _ in fused]
+        self.assertEqual(served, [1],
+                         "a policy-denied note reached the served list via "
+                         "link expansion: %r" % (served,))
+        self.assertNotIn(2, why, why)
+        self.assertEqual(why.get("__policy_withheld__"), 1, why)
+        self.assertEqual(total, 1, total)
+
 
 VR3_DECOY = """---
 name: an-unrelated-bm-vault-somewhere-else

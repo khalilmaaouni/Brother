@@ -617,6 +617,29 @@ class TestJsonContractAndExit(TeamScenario):
             self.assertNotIn(needle, body,
                              "status must read the estate, never the network")
 
+    def test_a_non_object_plan_is_no_plan_at_all_not_a_crash(self):
+        """Night 0912 defect 5bc48fc02e4c. `08-plan.json` is written only by
+        `sbe plan --write`, always an object, but this file is on disk and
+        can be truncated, hand-edited, or replaced with the wrong shape
+        (a bare JSON list) by anything else that touches it; build_team_
+        report read `plan.get("tasks", [])` on whatever `_read_json_or_none`
+        returned, and a valid-but-non-dict JSON value (a list) is truthy, so
+        it passed the `if plan:` guard and crashed on `.get` a list does not
+        have. A non-object plan must read exactly like no plan at all (the
+        severity-8 "no plan exists yet" NO-DATA finding), never a traceback."""
+        doss = self._change("chg-a", "src/a.py")
+        io.open(os.path.join(doss, "08-plan.json"), "w").write("[1, 2]")
+        code, text, err = self.team("--json")
+        self.assertNotIn("Traceback", text + err,
+                         "a non-object plan crashed sbe status --team: %s" % (text + err))
+        data = json.loads(text[text.index("{"):])
+        plan_findings = [f for f in data["findings"]
+                         if f.get("change") == "chg-a" and f.get("severity") == 8]
+        self.assertTrue(plan_findings,
+                        "a non-object plan did not read as 'no plan exists yet': %s"
+                        % data["findings"])
+        self.assertIn("no plan exists", plan_findings[0]["detail"])
+
 
 class TestHandoverIntegration(TeamScenario):
     """LT-302.B: the smallest possible read path so `sbe status --team` can

@@ -90,11 +90,16 @@ CODEX_SANDBOX_HINT = (
 
 
 def default_model_cmd(env=None):
-    """The decomposer nobody named, per host. Under Codex that is Codex's own
-    headless exec (the argv model_worker already ships and documents), never
-    `claude -p`; under anything else it is unchanged."""
-    if MW.model_client(env) == brother_paths.CODEX:
+    """The decomposer nobody named, per host. Under Codex or Cursor that is
+    the host's own headless exec (the argv model_worker already ships and
+    documents), never `claude -p`, for the same reason CODEX_SANDBOX_HINT
+    gives for Codex: a Codex-only or Cursor-only machine has no claude
+    binary at all. Under anything else it is unchanged."""
+    client = MW.model_client(env)
+    if client == brother_paths.CODEX:
         return list(MW.CODEX_ARGV)
+    if client == brother_paths.CURSOR:
+        return list(MW.CURSOR_ARGV)
     return list(DEFAULT_MODEL_CMD)
 
 
@@ -120,15 +125,27 @@ def is_codex_cmd(cmd):
     return bool(cmd) and os.path.basename(cmd[0]) == "codex"
 
 
+def is_cursor_cmd(cmd):
+    """True when this command line is Cursor's own headless exec."""
+    return bool(cmd) and os.path.basename(cmd[0]) == "cursor-agent"
+
+
 def decomposer_text(cmd, stdout):
     """What the decomposer actually said, from its stdout.
 
     `codex exec --json` prints JSONL events rather than the answer, so the
     agent's own last message is pulled out of them with the parser
-    model_worker already owns and tests. Every other command speaks plain
-    text on stdout and is returned unchanged."""
+    model_worker already owns and tests. `cursor-agent ... --output-format
+    json` prints one JSON object with the answer under "result" (the same
+    shape as a `claude -p --output-format json` answer, see CURSOR_ARGV in
+    model_worker.py), unwrapped with the parser that already reads that
+    shape. Every other command speaks plain text on stdout and is returned
+    unchanged."""
     if is_codex_cmd(cmd) and "--json" in cmd:
         claim, _usage = MW._parse_codex_output(stdout)
+        return claim if claim else stdout
+    if is_cursor_cmd(cmd) and "--output-format" in cmd:
+        claim, _usage = MW._parse_model_output(stdout, MW.CURSOR_USAGE_FIELD_MAP)
         return claim if claim else stdout
     return stdout
 

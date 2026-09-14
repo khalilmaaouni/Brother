@@ -634,6 +634,16 @@ def copy_tree(source, target, dry_run):
         rel = "" if rel == "." else rel
         skip = _ignore_names(dirpath, dirnames)
         dirnames[:] = [d for d in dirnames if d not in skip]
+        # A symlinked directory is refused exactly like a symlinked file
+        # below: os.walk lists it in dirnames and never descends, so
+        # without this it was skipped silently and the install succeeded
+        # with content missing.
+        for d in dirnames:
+            if os.path.islink(os.path.join(dirpath, d)):
+                raise ValueError(
+                    "%s is a symlink. Refusing to install a tree containing "
+                    "symlinks (see scripts/checksums.sh for why)."
+                    % os.path.join(dirpath, d))
         dest_dir = os.path.join(target, rel) if rel else target
         if not dry_run:
             try:

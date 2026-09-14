@@ -533,6 +533,20 @@ def run_node(node, parts, worker, cwd=None, max_attempts=3):
     refused = refusal_reader(node["id"])
     if refused:
         reason = refused.get("note", "worker replay requires review")
+        # A SCOPE VIOLATION OUTRANKS A BUDGET REFUSAL (WBS-80, 2026-09-13):
+        # record["integration_block"] was already set above, from the
+        # scope audit taken BEFORE repair ever ran, and it names the exact
+        # undeclared file ("QUARANTINE: ... never declared: requirements
+        # .txt"). Overwriting it with the worker's own generic "ran out of
+        # attempts" note (this block, unconditionally, until now) threw
+        # that specific fact away for any unit whose check never went
+        # green on the first try -- exactly the unit a person most needs
+        # the file name for. Kept as the leading clause when one was
+        # already recorded; the budget note still follows, since both are
+        # true and a person reading the receipt should see why no further
+        # repair was attempted too.
+        if record.get("integrable") is False and record.get("integration_block"):
+            reason = "%s (%s)" % (record["integration_block"], reason)
         record.update(verdict="NO-DATA", reason=reason, integrable=False,
                       integration_block=reason,
                       failure_class=failure_class_of(refused))
@@ -728,7 +742,7 @@ def worker_budget_refusal(root, unit_id):
     try:
         with open(path, encoding="utf-8") as fh:
             state = json.load(fh)
-    except FileNotFoundError:
+    except FileNotFoundError:  # sbe: allow-silent no prior worker wrote a budget file, so there is nothing to refuse
         return None
     except (OSError, ValueError):
         return "worker budget is unreadable; inspect the lane before resuming"
@@ -818,8 +832,27 @@ class LaneWorker(object):
                     or attempts < 0 or not isinstance(state["in_flight"], bool)):
                 raise ValueError("invalid worker budget")
             if state["in_flight"]:
-                return held("earlier worker may have written; inspect the lane "
-                            "before any replay", "timeout")
+                # A1 FIX (fast-route orphan safety, WBS-10.07): in_flight
+                # only ever means "the last attempt never came back to say
+                # what happened" -- a live worker OR a dead one, and this
+                # budget file alone cannot tell those apart. brother_run.py's
+                # _settle_units_already_delivered writes "claim.orphaned_by_
+                # kill" to this run's own journal the moment it proves the
+                # claim is still "claimed" with its owner dead (a real kill,
+                # never an ordinary release), before the round loop ever
+                # makes a new claim. worktree_lane._crash_orphaned_claim
+                # reads that same event for the same reason worktree_lane.py
+                # already trusts it to decide lane reuse; reusing it here
+                # closes the other half of the same crash: without this, a
+                # unit killed mid-worker refuses every future attempt
+                # forever, spending its whole retry budget on held() results
+                # that never spawn a worker, and a bare resume never lands
+                # it (the exact orphan this state exists to prevent).
+                orphaned = bool(worktree_lane) and \
+                    worktree_lane._crash_orphaned_claim(uid)
+                if not orphaned:
+                    return held("earlier worker may have written; inspect "
+                                "the lane before any replay", "timeout")
             if remaining <= 0 or attempts >= 3:
                 return held("whole-unit time or attempt allowance exhausted")
             state.update(attempts=attempts + 1, in_flight=True)
@@ -1273,6 +1306,25 @@ def _reclaim_unmerged_lanes(cwd, lane_branches, why):
         integrate_mod.cleanup_lane(cwd, branch, uid)
 
 
+def conflict_note(int_verdict):
+    """One clear line naming a CONFLICT, or None when `int_verdict` is not
+    one. WBS-10.06 (clear conflict handling): integrate.integrate_one
+    already detects a lane that no longer applies to canonical, aborts the
+    merge, and returns a reason -- but the caller below folded CONFLICT
+    into the same generic "failed" state a broken done_check produces, so
+    a person reading that state could not tell a stale worktree from a
+    real bug. This is the missing name, kept as a pure function so it is
+    testable without a real git tree: given the dict integrate_one (or
+    merge_queue's own mapping of it) returns, say whether it was this."""
+    if not int_verdict or integrate_mod is None:
+        return None
+    if int_verdict.get("verdict") != integrate_mod.CONFLICT:
+        return None
+    return ("CONFLICT, not a failed check: unit %s's lane no longer "
+            "applies to canonical; rebase or re-plan it. %s"
+            % (int_verdict.get("unit", "?"), int_verdict.get("reason", "")))
+
+
 def rolling_dispatch(plan_ready, start, wait_any, integrate, cap,
                      live_view=None, breaker=None):
     """PLAN, START, WAIT, INTEGRATE, with everything injected so its
@@ -1510,7 +1562,7 @@ def rolling_run(doc, parts, worker, cwd, cap, store, owner=None, work_id="",
                 # sbe: allow-silent the trace must never block integration; the problem is printed above
                 sys.stderr.write("unit-trace: NO-DATA: %s\n" % exc)
         branch = lane_branches.get(uid)
-        merged, int_verdict = False, {}
+        merged, int_verdict, _note = False, {}, None
         # QUARANTINE (or NO-DATA scope) never integrates even on a PASS
         # verdict: run_node() already set integrable=False for those, so
         # gating on it here is the same rule this estate already enforces
@@ -1522,6 +1574,13 @@ def rolling_run(doc, parts, worker, cwd, cap, store, owner=None, work_id="",
                     harness_revision=harness_revision)
                 merged = int_verdict.get("verdict") in (
                     integrate_mod.INTEGRATED, integrate_mod.ALREADY_INTEGRATED)
+                # WBS-10.06: name a conflict distinctly from a failed check
+                # the moment it happens, on the same stderr a person already
+                # watches, rather than leaving it indistinguishable inside
+                # the generic "failed" state set below.
+                _note = conflict_note(int_verdict)
+                if _note:
+                    print("loop_bridge: %s" % _note, file=sys.stderr)
             integrate_mod.cleanup_lane(cwd, branch, uid)
         # T1 FOLLOW-UP, same sidecar run() feeds: read-merge-write so an
         # earlier unit's usage is not lost when this one releases. Rolling
@@ -1548,7 +1607,7 @@ def rolling_run(doc, parts, worker, cwd, cap, store, owner=None, work_id="",
             if row is not None:
                 row["status"] = "DONE"
         return {"id": uid, "state": state, "record": record,
-               "integration": int_verdict}
+               "integration": int_verdict, "conflict_note": _note}
 
     try:
         records = rolling_dispatch(plan_ready, start, wait_any, integrate_fn,

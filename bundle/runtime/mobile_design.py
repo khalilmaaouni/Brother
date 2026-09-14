@@ -4,6 +4,12 @@
 Original local implementation. No hosted catalog, network, scraping or model
 inference. Search is token matching, never semantic similarity or revenue proof.
 Every reference keeps its source; missing visual evidence remains NO-DATA.
+
+WBS-30.03 design evidence adapter: evidence_record() and check_staleness()
+strengthen one board reference with a stable id, source date, media hash,
+journey step, device class, locale, accessibility observation and rationale
+for inclusion, feeding visual_reference_ids on mobile-journey-contract-v1.
+Evidence and context only, never an automatic UX verdict.
 """
 import argparse
 import datetime
@@ -20,6 +26,8 @@ import native_evidence as N
 from mobile_workflow import Refusal, require, read_json, write_new, digest
 
 SCHEMA = "brother-mobile-board-v1"
+EVIDENCE_SCHEMA = "brother-design-evidence-v1"
+STALENESS_SCHEMA = "brother-design-evidence-staleness-v1"
 
 
 def words(value):
@@ -47,10 +55,90 @@ def board(path):
         require(position not in positions, "Ambiguous flow ordering")
         positions.add(position)
         require(isinstance(screen.get("elements"), list) and all(isinstance(e, str) and e.strip() for e in screen["elements"]), "Elements must be strings")
+        for key in ("device_class", "locale", "accessibility_observation", "rationale"):
+            if key in screen:
+                require(isinstance(screen[key], str) and screen[key].strip(), "%s must be a non-empty string" % key)
         media = screen.get("media")
         if media is not None:
             require(N.valid_file_hash(media) and N.hash_file(media["path"]) == media, "Screen media is missing, changed or malformed")
     return data
+
+
+def evidence_record(path, screen_id):
+    """Design evidence adapter (WBS-30.03): the stable, named-field record for
+    ONE design reference already curated on a mobile_design board. Evidence
+    and context only -- status reflects whether a media hash was captured
+    for this reference, never design correctness, review outcome or a UX
+    pass/fail. See check_staleness for the separate, narrowly-scoped hash
+    check that catches a reference id whose target changed underneath it."""
+    data = board(path)
+    matches = [s for s in data["screens"] if s["id"] == screen_id]
+    require(len(matches) == 1, "Reference id not found on this board")
+    screen = matches[0]
+    media = screen.get("media")
+    return {
+        "schema": EVIDENCE_SCHEMA,
+        "status": "PASS" if media else "NO-DATA",
+        "reference_id": screen["id"],
+        "source_date": screen["observed_at"],
+        "journey_step": {"flow": screen["flow"], "step": screen["step"]},
+        "device_class": screen.get("device_class", "NO-DATA"),
+        "locale": screen.get("locale", "NO-DATA"),
+        "accessibility_observation": screen.get("accessibility_observation", "NO-DATA"),
+        "rationale_for_inclusion": screen.get("rationale", "NO-DATA"),
+        "media": media if media else "NO-DATA",
+        "board": digest(path),
+        "limits": ["Evidence and context, never an automatic UX verdict: status names only whether a media hash was captured.",
+                   "A recorded reference does not certify the design was reviewed, approved, correct or still current -- see check_staleness."],
+    }
+
+
+def check_staleness(evidence_path, board_path):
+    """Does a previously recorded evidence reference id still resolve to a
+    file whose hash matches what was recorded? Named failure mode (WAVE-2
+    Muse hostile review, WBS-30.03): a stable id can keep resolving after
+    its target quietly changed or was replaced, so an id-exists check
+    alone silently passes against the wrong target. This re-hashes the
+    file the id CURRENTLY resolves to on the board and compares it
+    against the hash captured in the evidence record, not against the
+    board's own (possibly re-synced) inline hash. Scoped to hash identity
+    only: never a design correctness or UX verdict."""
+    evidence = read_json(evidence_path)
+    require(isinstance(evidence, dict) and evidence.get("schema") == EVIDENCE_SCHEMA, "Not a design evidence record")
+    reference_id = evidence.get("reference_id")
+    require(isinstance(reference_id, str) and reference_id.strip(), "Evidence record has no reference id")
+    raw = read_json(board_path)
+    require(isinstance(raw, dict) and raw.get("schema") == SCHEMA and isinstance(raw.get("screens"), list), "Unsupported reference board")
+    matches = [s for s in raw["screens"] if isinstance(s, dict) and s.get("id") == reference_id]
+    resolves = len(matches) == 1
+    checks = [{"name": "reference_resolves", "status": "PASS" if resolves else "FAIL"}]
+    recorded_media = evidence.get("media")
+    recorded_media = recorded_media if isinstance(recorded_media, dict) else None
+    if not resolves:
+        checks.append({"name": "media_hash_match", "status": "NO-DATA"})
+    else:
+        current_media = matches[0].get("media")
+        current_media = current_media if isinstance(current_media, dict) else None
+        if recorded_media is None and current_media is None:
+            checks.append({"name": "media_hash_match", "status": "NO-DATA"})
+        elif recorded_media is None or current_media is None:
+            checks.append({"name": "media_hash_match", "status": "FAIL"})
+        else:
+            try:
+                fresh = digest(current_media["path"])
+            except (Refusal, OSError, KeyError):
+                fresh = None
+            checks.append({"name": "media_hash_match", "status": "PASS" if fresh is not None and fresh["sha256"] == recorded_media.get("sha256") else "FAIL"})
+    status = "FAIL" if any(c["status"] == "FAIL" for c in checks) else "NO-DATA" if any(c["status"] == "NO-DATA" for c in checks) else "PASS"
+    return {
+        "schema": STALENESS_SCHEMA,
+        "status": status,
+        "reference_id": reference_id,
+        "checks": checks,
+        "board": digest(board_path),
+        "limits": ["Hash match confirms the file the id currently resolves to is byte-identical to what evidence_record captured, nothing more.",
+                   "Never a design correctness, review or UX verdict; a matched hash is not a review and a mismatch is not a defect."],
+    }
 
 
 def search(path, query="", app=None, flow=None, element=None):
@@ -144,7 +232,11 @@ def main(argv=None):
     m = sub.add_parser("media")
     m.add_argument("--asset", required=True); m.add_argument("--role", required=True, choices=("runtime", "marketing", "prototype"))
     m.add_argument("--max-bytes", type=int); m.add_argument("--max-duration", type=float)
-    for p in (s, b, m):
+    e = sub.add_parser("evidence")
+    e.add_argument("--board", required=True); e.add_argument("--id", required=True, dest="screen_id")
+    c = sub.add_parser("check-staleness")
+    c.add_argument("--evidence", required=True); c.add_argument("--board", required=True)
+    for p in (s, b, m, e, c):
         p.add_argument("--out", required=True)
     args = parser.parse_args(argv)
     try:
@@ -152,8 +244,12 @@ def main(argv=None):
             result = search(args.board, args.query, args.app, args.flow, args.element)
         elif args.action == "brief":
             result = brief(args.board, args.query, args.outcome)
-        else:
+        elif args.action == "media":
             result = inspect_media(args.asset, args.role, args.max_bytes, args.max_duration)
+        elif args.action == "evidence":
+            result = evidence_record(args.board, args.screen_id)
+        else:
+            result = check_staleness(args.evidence, args.board)
         write_new(args.out, result)
         print("mobile_design: " + result["status"])
         print(args.out)

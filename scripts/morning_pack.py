@@ -80,9 +80,11 @@ DEFAULT_CODEX_LANE = os.path.expanduser(
     "~/.claude/evidence/CODEX-LANE-2026-09-05.md")
 
 #: mirrors ~/.claude/hooks/github_cost_wall.py's own trigger regex: the No
-#: Self-Firing CI law's forbidden triggers, checked here read-only.
+#: Self-Firing CI law's forbidden triggers, checked here read-only. The
+#: second alternative also catches inline lists like ``on: [push]``.
 AUTO_TRIGGER_RE = re.compile(
-    r"^\s*(push|pull_request|pull_request_target|schedule)\s*:",
+    r"^\s*(push|pull_request|pull_request_target|schedule)\s*:"
+    r"|^\s*on\s*:\s*\[[^\]]*\b(push|pull_request|pull_request_target|schedule)\b",
     re.MULTILINE)
 
 

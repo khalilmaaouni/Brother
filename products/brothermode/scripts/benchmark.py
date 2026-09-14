@@ -554,7 +554,7 @@ def main(argv):
     bad_flags = [a for a in argv if a.startswith("-") and a != "--quiet"]
     selectors = [a for a in argv if not a.startswith("-")]
     bad_selectors = [a for a in selectors
-                     if not a.isdigit() or not 1 <= int(a) <= len(SCENARIOS)]
+                     if not a.isdecimal() or not 1 <= int(a) <= len(SCENARIOS)]
     if bad_flags or bad_selectors:
         for a in bad_flags:
             print("benchmark: unknown option %r. The only option is --quiet." % a)

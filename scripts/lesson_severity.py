@@ -40,6 +40,7 @@ Python 3, standard library only. No network.
 import argparse
 import json
 import os
+import re
 import sys
 
 CRITICAL, HIGH, MEDIUM, LOW, WISDOM = "CRITICAL", "HIGH", "MEDIUM", "LOW", "WISDOM"
@@ -92,12 +93,13 @@ def rank_of_text(text):
     not the same as the criteria being met, and this estate has been bitten
     enough times by a label that outran its evidence."""
     low = (text or "").lower()
+    # Match "again" and "lied" as whole words so "against" and "applied" do not match.
     if any(p in low for p in ("reported clean", "read clean", "declared dead",
-                              "claimed landed", "lied", "silently passed",
-                              "false green")):
+                              "claimed landed", "silently passed",
+                              "false green")) or re.search(r"\blied\b", low):
         return CRITICAL, "the note describes the system misreporting itself"
-    if any(p in low for p in ("again", "second time", "third time", "recurred",
-                              "same mistake", "keeps happening")):
+    if any(p in low for p in ("second time", "third time", "recurred",
+                              "same mistake", "keeps happening")) or re.search(r"\bagain\b", low):
         return HIGH, "the note describes a recurrence"
     if any(p in low for p in ("cost", "wasted", "lost an hour", "minutes")):
         return MEDIUM, "the note describes time spent"

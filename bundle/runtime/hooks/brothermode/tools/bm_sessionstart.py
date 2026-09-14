@@ -254,14 +254,18 @@ def main():
     code, detect_out = _run([_tool("tools", "bm_handover.py"), "detect"],
                             capture=True)
     detect_out = (detect_out or "").rstrip("\n")
+    suppressed_first_run = False
     if code == 0 and detect_out and first_run:
-        detect_out = "\n".join(
+        filtered = "\n".join(
             ln for ln in detect_out.splitlines()
             if not ln.startswith("NO-DATA: no handover pack exists yet")
             and not ln.startswith("NO-DATA: no handover zip exists yet"))
+        # A first-run all-suppressed output is not a failure; track it.
+        suppressed_first_run = bool(filtered == "" and detect_out)
+        detect_out = filtered
     if code == 0 and detect_out:
         _say(detect_out + "\n")
-    else:
+    elif not suppressed_first_run:
         _say(
             "baton ceremony check (bm_handover.py detect) could not run "
             "this session; run it by hand, see CLAUDE.md baton ceremony "

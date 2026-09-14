@@ -124,7 +124,9 @@ import claim_store  # noqa: E402
 import contract_check  # noqa: E402
 import decide  # noqa: E402
 import door  # noqa: E402
+import fable_authority  # noqa: E402
 import fast_path  # noqa: E402
+import host_capability  # noqa: E402
 import integrate  # noqa: E402
 import journal  # noqa: E402
 import loom  # noqa: E402
@@ -233,7 +235,7 @@ RATE_LIMIT_PARK_SECONDS = 900
 #: overloaded/timeout/empty backoff: base seconds, doubling per consecutive
 #: failure of the SAME unit this run, capped, then jittered upward by up to
 #: this fraction so many units failing together do not all wake in lockstep.
-RETRY_BACKOFF_BASE_SECONDS = float(os.environ.get("BROTHER_RETRY_BACKOFF_BASE_S") or 30)
+RETRY_BACKOFF_BASE_SECONDS = 30
 RETRY_BACKOFF_CAP_SECONDS = 300
 RETRY_BACKOFF_JITTER_FRACTION = 0.20
 
@@ -1228,6 +1230,14 @@ def _write_receipt(run_dir, receipts, report, log_path=None):
         # every integration and refusal back to that document by now.
         body = receipt_door.receipt_record(run_dir, receipts, log_path)
         body["report"] = report
+        # WBS-70.03, Host Capability Receipt: the fourteen facts a
+        # consequential run can identify about the host it ran under
+        # (host_capability.py, "a fact looked up in a table, never a
+        # judgement"). Computed last, inside this same try/except, so a
+        # broken host read degrades this one key to the module's own
+        # NO-DATA rather than losing the whole receipt.
+        body["host_capability"] = host_capability.host_capability_receipt(
+            run_dir=run_dir, receipt_path=path)
         os.makedirs(out_dir, exist_ok=True)
         with open(path, "w", encoding="utf-8") as fh:
             json.dump(body, fh, indent=1, default=str)
@@ -3386,10 +3396,6 @@ def _settle_units_already_delivered_locked(record, claims_path, cwd, log,
             continue
         if not isinstance(claim, dict):
             continue
-        budget_hold = loop_bridge.worker_budget_refusal(run_dir, uid)
-        if budget_hold:
-            log.note("%s: %s was not settled: %s" % (NODATA, uid, budget_hold))
-            continue
         # REPAIR ROUND 3, R2: every read below this line can raise on a
         # malformed claims.json record, claim_store.live() alone does
         # float(claim.get("expires_at", 0)), which throws ValueError on a
@@ -3434,6 +3440,21 @@ def _settle_units_already_delivered_locked(record, claims_path, cwd, log,
             # while still true.
             journal.append(run_dir, "claim.orphaned_by_kill",
                            parent_ids=journal.previous(run_dir), unit_id=uid)
+            # A1 FIX (fast-route orphan safety): the dead-claim proof above
+            # and the journal write it feeds are never skipped for a unit
+            # whose worker budget still reads in_flight -- that is exactly
+            # the shape a real kill leaves, and loop_bridge.LaneWorker.run
+            # (scripts/loop_bridge.py) now reads this same journal event to
+            # tell a confirmed kill apart from a worker that might still be
+            # writing. Only the SETTLE-AS-DELIVERED shortcut below (which
+            # would mark the unit done from merge evidence alone) still
+            # defers to worker_budget_refusal: that ambiguity is real and
+            # this function must never guess through it.
+            budget_hold = loop_bridge.worker_budget_refusal(run_dir, uid)
+            if budget_hold:
+                log.note("%s: %s was not settled: %s"
+                         % (NODATA, uid, budget_hold))
+                continue
             branch = worktree_lane.branch_for(uid)
             if not integrate._already_integrated(cwd, branch):
                 continue  # never merged before the kill; the ordinary retry applies
@@ -4589,14 +4610,22 @@ def _classify_attempt_failure(text):
 def _parse_reset_seconds(text):
     """A parseable "resets <N>s" (or "resets in <N> seconds") near the
     failure_class marker, as a positive int, or None when nothing parses
-    (the caller then falls back to RATE_LIMIT_PARK_SECONDS)."""
+    (the caller then falls back to RATE_LIMIT_PARK_SECONDS).
+
+    BrotherSBE L11 (silent-failure-lints) once flagged a try/except
+    ValueError around the int() below as an error-swallowing return-None.
+    It wasn't hiding anything: RESETS_IN_SECONDS_RE's own capture group is
+    `(\\d+)`, so `match.group(1)` is always one or more decimal digit
+    characters, and int() on a string built entirely from decimal digits
+    (Unicode ones included) cannot raise ValueError. The catch was dead
+    code around an error this function can never produce, so it is gone;
+    a future edit that lets the group capture something non-numeric would
+    now raise instead of failing silently, which is the correct outcome
+    for a regex/parsing contract broken that way."""
     match = RESETS_IN_SECONDS_RE.search(text or "")
     if not match:
         return None
-    try:
-        seconds = int(match.group(1))
-    except ValueError:
-        return None
+    seconds = int(match.group(1))
     return seconds if seconds > 0 else None
 
 
@@ -4887,7 +4916,8 @@ def _governor_wait_close(log, start, clock=None):
 
 
 def _fact_spec(title, eyebrow, plain_summary, question, option_id,
-              option_name, one_liner, marks, footer="", extra_options=None):
+              option_name, one_liner, marks, footer="", extra_options=None,
+              would_change=None):
     """I3: one decide.py spec, reusing its screen model outright (never
     forked), carrying exactly the one option this run's own state already
     supports. `marks` is {criterion_key: (weight, mark, why)}, and every
@@ -4908,7 +4938,17 @@ def _fact_spec(title, eyebrow, plain_summary, question, option_id,
     1" contract is unchanged. An extra option that names no `scores` is
     unmarked on every criterion (decide.score()'s own rule) and so totals
     0.0, which is why a refuse option can sit on this same screen without
-    ever outranking the measured one at the recorded-default resolver."""
+    ever outranking the measured one at the recorded-default resolver.
+
+    `would_change`, when given, is a list of sentences naming what would
+    move this screen's own recommendation (decide.render()'s "What would
+    change this answer" section, decide.py:328-332). RS-7: this function
+    used to drop the field on the floor, so both of this run's own
+    auto-resolved screens (intent, forcing-condition) rendered without it,
+    the one section receipt_door.py's acceptance/release/answers specs all
+    carry. Every caller that predates this parameter passes nothing, so
+    the section stays absent exactly as before (decide.render()'s own
+    `if spec.get("would_change")` guard)."""
     criteria = [{"key": key, "label": key.replace("_", " "), "weight": weight,
                 "why": why} for key, (weight, _mark, why) in marks.items()]
     option = {"id": option_id, "name": option_name, "one_liner": one_liner,
@@ -4917,7 +4957,7 @@ def _fact_spec(title, eyebrow, plain_summary, question, option_id,
     return {"title": title, "eyebrow": eyebrow, "plain_summary": plain_summary,
            "question": question, "criteria": criteria,
            "options": [option] + list(extra_options or []),
-           "footer": footer}
+           "footer": footer, "would_change": list(would_change or [])}
 
 
 def _auto_resolver(moment, spec, scored, close):
@@ -4935,9 +4975,54 @@ def _auto_resolver(moment, spec, scored, close):
     lets a non-interactive run (and every test that predates this seam)
     keep running to completion unattended."""
     top = scored[0]["option"] if scored else {}
-    return {"choice": top.get("id"), "name": top.get("name", NODATA),
-           "by": "brother_run (recorded default: the top-ranked option)",
-           "auto": True}
+    result = {"choice": top.get("id"), "name": top.get("name", NODATA),
+             "by": "brother_run (recorded default: the top-ranked option)",
+             "auto": True}
+    if moment == "intent":
+        # RS-6 (docs/decisions/ruling-not-stall-2026-09-13.json): record-only,
+        # fire-and-forget. record_ruling() almost always refuses here (this
+        # is a whole-outcome decision, not autonomy_dial's single-file
+        # A0 shape, RS-2; and no one unit's check_passed_before applies to
+        # picking an outcome before any unit has run, RS-4, so NO-DATA is
+        # passed honestly rather than guessed), and a refusal changes
+        # nothing about this function's own return value above. Any
+        # exception here is swallowed too: a recording failure must never
+        # change what this screen resolves to.
+        try:
+            rows = scored[0].get("rows") if scored else []
+            evidence = "; ".join(
+                "%s: %.2f (%s)" % (r.get("label"), r.get("product", 0.0),
+                                    r.get("why") or NODATA)
+                for r in (rows or [])) or NODATA
+            fable_authority.record_ruling(
+                question=spec.get("question") or NODATA,
+                choice=result.get("name") or NODATA,
+                reason=("recorded default: %r ranked highest of %d "
+                        "option(s) considered at %.2f/10%s"
+                        % (result.get("name") or NODATA, len(scored),
+                           scored[0]["total"] if scored else 0.0,
+                           " (the ranking does not separate the top two)"
+                           if close else "")),
+                evidence=evidence,
+                cost_if_wrong="a wrong intent choice is corrected by "
+                              "re-running this outcome with a different "
+                              "plan; not an irreversible act and not "
+                              "measured in currency",
+                deciding_check="the outcome contract's per-unit "
+                               "done_checks, run once the drain decomposes "
+                               "and executes this intent; not yet measured "
+                               "at this screen",
+                reversibility="reversible: a re-run can choose differently",
+                human_override_path="tell brother_run which option to "
+                                    "choose instead of the recorded default",
+                observables={"single_file_or_named_target": False,
+                            "contract_change": "none",
+                            "crosses_boundary": False,
+                            "reversible_under_hour": True},
+                check_passed_before=None)
+        except Exception:  # sbe: allow-silent a ruling-record failure must never change this screen's own resolution (RS-6, record-only)
+            pass
+    return result
 
 
 def _recorded_answer_resolver(run_dir, screen):
@@ -5951,7 +6036,17 @@ def main(argv=None):
                     else 10.0,
                     "%d of %d piece(s) already carry a verified DONE status on "
                     "this run's own Work document" % (already, total_units)),
-            }, extra_options=[refuse_option] + lens_options), resolver=live_resolver)
+            }, extra_options=[refuse_option] + lens_options,
+            would_change=[
+                "The already-progressed share moves: it is read live from "
+                "this run's own Work document, so more or fewer pieces "
+                "verified DONE before you read this moves the "
+                "already_progressed mark, and the recommendation with it.",
+                "You pick Refuse, or the lens-correction option below when "
+                "one is offered, instead of Proceed: neither names a score, "
+                "so neither is ever picked automatically, whatever this "
+                "screen's own marks come out to.",
+            ]), resolver=live_resolver)
         # Persisted only for a real decision (proceed or otherwise), never
         # for a refusal (the run stops before anything is claimed, so there
         # is nothing left to resume into) and never for "nobody yet" (an
@@ -6300,7 +6395,7 @@ def main(argv=None):
                 # typed number.
                 avg_attempts = (sum(attempts_now.get(uid, 0)
                                     for uid in remaining) / len(remaining))
-                _human_moment(log, "forcing-condition", _fact_spec(
+                forcing_spec = _fact_spec(
                     title="Stop retrying, or keep guessing",
                     eyebrow="Forcing condition",
                     plain_summary="%d piece(s) of this run (%s) never "
@@ -6318,8 +6413,70 @@ def main(argv=None):
                         1.0, round(10.0 * avg_attempts / MAX_UNIT_ATTEMPTS, 2),
                         "the stuck piece(s) used %.1f of %d allowed outer "
                         "attempts on average, measured from this run's own "
-                        "claim store" % (avg_attempts, MAX_UNIT_ATTEMPTS))}),
-                    resolver=live_resolver)
+                        "claim store" % (avg_attempts, MAX_UNIT_ATTEMPTS))},
+                    would_change=[
+                        "The stuck piece(s) pass their own check first: this "
+                        "screen never renders at all, since the drain only "
+                        "reaches here once a round moves nothing forward.",
+                        "The average attempts spent differs from %.1f (read "
+                        "live from this run's own claim store): the "
+                        "retry_budget_spent mark moves with it."
+                        % avg_attempts,
+                    ])
+                # RS-1's own evidence (docs/decisions/ruling-not-stall-
+                # 2026-09-13.json) named this call's return as discarded
+                # entirely; it no longer is, so a ruling can be built from
+                # what the screen actually resolved to.
+                forcing_choice = _human_moment(log, "forcing-condition",
+                                               forcing_spec,
+                                               resolver=live_resolver)
+                # RS-6: record-only, fire-and-forget, same rule as the
+                # intent site in _auto_resolver above. record_ruling()
+                # almost always refuses here too (a stop/keep-guessing call
+                # spans every remaining stuck piece, not one unit's own
+                # check, so no single check_passed_before applies, RS-4:
+                # NO-DATA is passed honestly). A refusal, or any exception
+                # raised inside the call, changes nothing about
+                # forcing_choice or this run's own control flow below.
+                try:
+                    fable_authority.record_ruling(
+                        question=forcing_spec.get("question") or NODATA,
+                        choice=(forcing_choice.get("name")
+                               or forcing_choice.get("choice") or NODATA),
+                        reason=("recorded default: %d piece(s) (%s) spent "
+                                "%.1f of %d allowed outer attempts on "
+                                "average; the engine's own rule is to stop "
+                                "rather than guess a fourth time"
+                                % (len(remaining), ", ".join(remaining),
+                                   avg_attempts, MAX_UNIT_ATTEMPTS)),
+                        evidence=("retry_budget_spent scored %.2f/10 "
+                                  "across %s, measured from this run's own "
+                                  "claim store"
+                                  % (round(10.0 * avg_attempts
+                                           / MAX_UNIT_ATTEMPTS, 2),
+                                     ", ".join(remaining))),
+                        cost_if_wrong="stopping when another attempt would "
+                                      "have passed costs a person's time to "
+                                      "resume the run by hand; guessing "
+                                      "again when the budget is truly spent "
+                                      "costs a further unverified attempt "
+                                      "against the same stuck piece(s)",
+                        deciding_check="each stuck piece's own done_check, "
+                                       "already run %d times without "
+                                       "passing (brother_run's own retry "
+                                       "budget)" % MAX_UNIT_ATTEMPTS,
+                        reversibility="reversible: a person can resume "
+                                      "this run and let it try again",
+                        human_override_path="resume this run and keep "
+                                            "retrying the named piece(s) "
+                                            "instead of stopping",
+                        observables={"single_file_or_named_target": False,
+                                    "contract_change": "none",
+                                    "crosses_boundary": False,
+                                    "reversible_under_hour": True},
+                        check_passed_before=None)
+                except Exception:  # sbe: allow-silent a ruling-record failure must never change this screen's own resolution (RS-6, record-only)
+                    pass
             else:
                 log.say("brother_run: the last round moved nothing forward, "
                         "so this run stops rather than repeating itself; %d "

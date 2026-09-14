@@ -91,15 +91,26 @@ def find_guard(explicit=None):
     if explicit:
         return (explicit, None) if os.path.isfile(explicit) else (
             None, "the guard named on the command line does not exist: %s" % explicit)
-    root = os.path.expanduser("~/.claude/plugins/cache/brother/brothersbe")
-    if not os.path.isdir(root):
-        return None, "no installed brothersbe plugin at %s" % root
-    versions = sorted(d for d in os.listdir(root) if os.path.isdir(os.path.join(root, d)))
-    for ver in reversed(versions):
-        cand = os.path.join(root, ver, "tools", "sbe_bash_write_guard.py")
-        if os.path.isfile(cand):
-            return cand, None
-    return None, "no sbe_bash_write_guard.py under any version in %s" % root
+    # Two marketplace-name spellings install the same plugin on this estate:
+    # brothersbe/brothersbe (the marketplace's own name, per
+    # test_bm_store.py and test_sbe_install.py) and brother/brothersbe (what
+    # NORTH-STAR-DEBATE-2026-08-29.md found "a user actually gets" and what
+    # this machine's own installed_plugins.json names live). Check both
+    # rather than hardcoding one, so the guard is found either way.
+    roots = [os.path.expanduser("~/.claude/plugins/cache/brothersbe/brothersbe"),
+             os.path.expanduser("~/.claude/plugins/cache/brother/brothersbe")]
+    tried = []
+    for root in roots:
+        if not os.path.isdir(root):
+            tried.append(root)
+            continue
+        versions = sorted(d for d in os.listdir(root) if os.path.isdir(os.path.join(root, d)))
+        for ver in reversed(versions):
+            cand = os.path.join(root, ver, "tools", "sbe_bash_write_guard.py")
+            if os.path.isfile(cand):
+                return cand, None
+        tried.append(root)
+    return None, "no sbe_bash_write_guard.py under any version in %s" % " or ".join(tried)
 
 
 def measure(guard, command, cwd):

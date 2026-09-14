@@ -208,7 +208,10 @@ def install_plugin(dry_run, script_dir):
                  encoding="utf-8") as fh:
         version = json.load(fh)["version"]
     tag = "v%s" % version
-    clone_dest = os.path.join(os.environ["HOME"], ".claude", "skills", "brothersbe")
+    # os.path.expanduser falls back to the account database when HOME is
+    # unset, so --dry-run can name the fallback on a machine without it.
+    clone_dest = os.path.join(os.path.expanduser("~"), ".claude", "skills",
+                              "brothersbe")
 
     if dry_run:
         say("would: install the brothersbe plugin: claude plugin "

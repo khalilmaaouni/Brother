@@ -124,6 +124,11 @@ def main(argv=None):
         print("split-check: NO-DATA: --cutoff given without --time-col")
         return 2
 
+    # a time column with no cutoff has nothing to compare; NO-DATA, not a crash
+    if args.time_col and not args.cutoff:
+        print("split-check: NO-DATA: --time-col given without --cutoff")
+        return 2
+
     try:
         train_header, train_rows = read_csv(args.train)
         test_header, test_rows = read_csv(args.test)

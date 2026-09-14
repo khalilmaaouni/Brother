@@ -93,10 +93,6 @@ try:
     import brother_paths  # noqa: E402
 except ImportError:  # pragma: no cover, exercised only by a partial deployment
     brother_paths = None
-try:
-    import find_out  # noqa: E402
-except ImportError:  # pragma: no cover, exercised only by a partial deployment
-    find_out = None
 
 
 def _default_store():
@@ -331,7 +327,6 @@ def check(rows, problem, klass, strikes=DEFAULT_STRIKES, lessons_path=LESSONS,
                        "adjustment" % (n, klass, strikes))
     tried, worked, _note = base_rate(rows, klass)
     finding = research(rows, problem, klass, lessons_path, other_ledgers)
-    find_out_report = _find_out_report(problem)
     return REFUSE, (
         "class %r has already failed %d time(s) on %r, which is the limit. "
         "Across the whole ledger this class has been tried %d time(s) and "
@@ -339,49 +334,10 @@ def check(rows, problem, klass, strikes=DEFAULT_STRIKES, lessons_path=LESSONS,
         "neither is another attempt at this class: CHANGE THE CLASS, and write "
         "down which one you are abandoning and why; or STOP GUESSING AND GO AND "
         "FIND OUT, which means one decisive experiment that cannot fail if the "
-        "mechanism works. python3 scripts/find_out.py %r already ran in-process, "
-        "so here it is instead of a chore: the literal ask, reread verbatim: "
-        "%r. %s %s"
-        % (klass, n, problem, tried, worked, problem, finding["reread_ask"],
-           _reference_text(finding), find_out_report))
-
-
-def _find_out_report(problem):
-    """Run find_out.py's own four searches IN-PROCESS against `problem`, and
-    fold the real return value into one line: a real match from a source, or
-    an honest NO-DATA naming which sources answered nothing. This replaces
-    the old chore of naming `python3 scripts/find_out.py` in the refusal text
-    and leaving a human to run it; the research now actually runs here.
-
-    Mirrors find_out.main()'s own loop over its four sources but returns a
-    string instead of printing, and never reimplements a source's search
-    logic, only calls find_out's own public functions on find_out's own
-    default paths (VAULT, MEMORY)."""
-    if find_out is None:
-        return ("find_out.py could not be imported, so no automatic research "
-                 "ran; that is %s, not a clean search" % NODATA)
-    words = find_out._words(problem)
-    sources = (
-        ("vault failures", find_out.vault_failures(words, find_out.VAULT)),
-        ("vault learned", find_out.vault_learned(words, find_out.VAULT)),
-        ("patterns", find_out.patterns(problem, find_out.VAULT)),
-        ("memory index", find_out.memory_index(words, find_out.MEMORY)),
-    )
-    lines, any_hit = [], False
-    for name, hits in sources:
-        if hits is None:
-            lines.append("%s: %s (source not found)" % (name, NODATA))
-        elif not hits:
-            lines.append("%s: no match" % name)
-        else:
-            any_hit = True
-            score, path, title = hits[0]
-            lines.append("%s: %s (%s)" % (name, title, path))
-    header = "find_out ran in-process against %r" % problem
-    if not any_hit:
-        return "%s: %s across all %d source(s), nothing resolved automatically. %s" % (
-            header, NODATA, len(sources), "; ".join(lines))
-    return "%s: %s" % (header, "; ".join(lines))
+        "mechanism works. Run it yourself: python3 scripts/find_out.py %r. "
+        "That research already ran, so here it is instead of a "
+        "chore: the literal ask, reread verbatim: %r. %s"
+        % (klass, n, problem, tried, worked, problem, finding["reread_ask"], _reference_text(finding)))
 
 
 def refusal_research(rows, problem, klass, strikes=DEFAULT_STRIKES,
@@ -450,6 +406,10 @@ def main(argv=None):
         return EXIT_ALLOW
 
     if args.cmd == "list":
+        # An unreadable ledger is not an empty one; say so rather than "0 recorded".
+        if rows is None:
+            print("%s: the ledger could not be read" % NODATA, file=sys.stderr)
+            return EXIT_NODATA
         for row in (rows or []):
             print("%-10s %-26s %-24s %s"
                   % (row.get("outcome", "?"), str(row.get("problem"))[:26],

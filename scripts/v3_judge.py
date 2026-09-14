@@ -275,7 +275,8 @@ def _rule_certify(diff, added, files):
     hashes = _all_matching(code, r'\b[0-9a-f]{40}\b|rev-parse')
     if not hashes:
         return NOT_APPLICABLE, 'this diff names no commit hash and resolves none'
-    resolved = _first(added, r'cat-file')
+    # Only code files can resolve a hash; cat-file in a Markdown note is prose, not a resolution.
+    resolved = _first(code, r'cat-file')
     if not resolved:
         return DECLINED, hashes[0].strip()[:160]
     return APPLIED, resolved

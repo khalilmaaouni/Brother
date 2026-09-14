@@ -71,7 +71,8 @@ def untracked_paths(path):
 
 
 def diff_text(path):
-    proc = _git(path, "diff")
+    # HEAD includes staged-only work that plain `git diff` would omit.
+    proc = _git(path, "diff", "HEAD")
     return proc.stdout if proc.returncode == 0 else ""
 
 

@@ -701,10 +701,12 @@ def _canary_result(cid, klass, responses):
         content_wm = result.get("content_watermark")
         acl_wm = result.get("acl_watermark")
         if content_wm != acl_wm:
+            drift = None
+            if content_wm is not None and acl_wm is not None:
+                drift = content_wm - acl_wm
             return (FAIL, "%s watermark-coupling: forced state watermark-drift "
                           "caught: content watermark at %r, acl watermark at "
-                          "%r, drift=%r" % (cid, content_wm, acl_wm,
-                                            content_wm - acl_wm))
+                          "%r, drift=%r" % (cid, content_wm, acl_wm, drift))
         return (PASS, "%s watermark-coupling: content and acl watermarks "
                       "both at %r after 2 updates (bound=0 drift)"
                       % (cid, content_wm))

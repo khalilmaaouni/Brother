@@ -264,5 +264,28 @@ class CLISmoke(unittest.TestCase):
             self.assertIn("REFUSED", second.stdout)
 
 
+class Night0912BmVaultAttributes(unittest.TestCase):
+    def test_cmd_classes_unknown_class_reports_no_data(self):
+        import io
+        import contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = a.cmd_classes("no_such_class", False)
+        self.assertEqual(rc, 2)
+        self.assertIn("NO-DATA", buf.getvalue())
+
+    def test_cmd_codes_check_absent_code_lists_reports_no_data(self):
+        import io
+        import contextlib
+        with tempfile.TemporaryDirectory() as vault:
+            with open(os.path.join(vault, "note.md"), "w", encoding="utf-8") as fh:
+                fh.write("---\nclass: product\n---\n")
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = a.cmd_codes_check(vault, True, False, False)
+        self.assertEqual(rc, 2)
+        self.assertIn("NO-DATA", buf.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()

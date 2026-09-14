@@ -405,7 +405,12 @@ def resolve_root(start=None, refuse_past_git_boundary=False,
         p = os.path.realpath(env)
         if os.path.isdir(p):
             probe = os.path.realpath(start or os.getcwd())
-            contains_start = probe == p or probe.startswith(p + os.sep)
+            # os.path.join(p, "") is p itself when p is already a
+            # separator-terminated root ("/"), and p + os.sep otherwise;
+            # appending os.sep unconditionally doubled it at the filesystem
+            # root, so no real start path ever matched.
+            contains_start = (probe == p
+                              or probe.startswith(os.path.join(p, "")))
             if refuse_past_git_boundary and not contains_start:
                 raise OwnershipRefused(
                     "root-outside-start",
@@ -4306,9 +4311,12 @@ def _lead_flag(field, value):
     outside the pair would silently become 0 under a bool() cast, and a 0
     there is the difference between a decision that offered the founder
     control and one that did not."""
-    if value in (0, 1):
-        return int(value)
-    raise ValueError("%s must be 0 or 1, got %r" % (field, value))
+    # True/False are ints but are not the integers 0 or 1 the contract
+    # names; a float 1.0 is not an int at all. `value in (0, 1)` matched
+    # both by equality, then coerced them: refuse, do not coerce.
+    if isinstance(value, bool) or not isinstance(value, int) or value not in (0, 1):
+        raise ValueError("%s must be 0 or 1, got %r" % (field, value))
+    return value
 
 
 def _lead_window(sql, params, since, until, limit):
@@ -12902,7 +12910,12 @@ class Store(object):
         row survived, so has_receipt kept reporting safety for work whose
         ref was gone. Called by bm_autosave.py's pruner in the SAME call
         that deletes the refs. Returns the number of rows deleted."""
-        shas = [s for s in (snapshot_shas or []) if s]
+        # An empty-string snapshot_sha is a real value a receipt may carry
+        # (snapshot_sha is TEXT NOT NULL), so `if s` dropped it from the
+        # delete set by mistake; only None (never a real column value) is
+        # filtered here, so the delete still names exactly the rows asked
+        # for, nothing broader.
+        shas = [s for s in (snapshot_shas or []) if s is not None]
         if not shas:
             return 0
         with self._transaction():
@@ -18923,6 +18936,12 @@ def _verify_view_reflects_active_records(store, root):
                 "hand-edited past recognition" % state_path)
         return problems
     generated_block = on_disk[begin_idx:end_idx] if has_block else ""
+    # Scoped to the `## active` SECTION, not the whole block: an active
+    # record whose uuid renders under some other heading (verify() used to
+    # accept this, since the old check only tested presence anywhere in
+    # generated_block) still reads as present to a whole-block test, even
+    # though no reader of STATE.md would ever look for it there.
+    active_section = _state_active_section(generated_block)
     # IMPORTANT (fix-round 8): checks the lifecycle_uuid PREFIX, never the
     # raw NAME: a short name (or one that also occurs inside other
     # rendered text) would satisfy a substring test vacuously, and a
@@ -18932,11 +18951,12 @@ def _verify_view_reflects_active_records(store, root):
     # every record, so it is both non-vacuous and correct regardless of
     # name redaction.
     for r in active_rows:
-        if r["lifecycle_uuid"][:8] not in generated_block:
+        if r["lifecycle_uuid"][:8] not in active_section:
             # LOOP 5: records.name is scrub-only under export_column, same
             # as every other problem string built in verify() proper.
             problems.append(
-                "active record %r (%s) does not appear in the generated STATE.md view"
+                "active record %r (%s) does not appear in the generated "
+                "STATE.md view's active section"
                 % (mask_absolute_paths(redact_text(r["name"] or "")),
                    r["lifecycle_uuid"][:8]))
     # SBE11 fix (2026-08-15): THE OTHER DIRECTION. Everything above asks
@@ -18954,12 +18974,11 @@ def _verify_view_reflects_active_records(store, root):
     # render_state_md prints parked, complete and adopted records under
     # their own headings on purpose, so a uuid appearing anywhere in the
     # document proves nothing.
-    stale_section = _state_active_section(generated_block)
-    if stale_section:
+    if active_section:
         for r in _exec(store,
                 "SELECT lifecycle_uuid, name, state FROM records "
                 "WHERE state != 'active'").fetchall():
-            if r["lifecycle_uuid"][:8] in stale_section:
+            if r["lifecycle_uuid"][:8] in active_section:
                 problems.append(
                     "record %r (%s) is %s in the store but the generated "
                     "STATE.md view still lists it as active; the file is "
@@ -20068,6 +20087,10 @@ def cmd_decide(argv):
 
 
 def cmd_dashboard(argv):
+    # Refuse unknown flags before doing anything: dashboard rewrites
+    # STATE.md, and a mistyped flag used to be silently ignored while the
+    # file was overwritten anyway.
+    _reject_unknown_flags("dashboard", _parse_kv(argv), ())
     root, _source = require_root()
     # _out_prerendered, not _out (fix-round 7): render_state_md's own
     # newlines are this document's structure, not founder text; blanket

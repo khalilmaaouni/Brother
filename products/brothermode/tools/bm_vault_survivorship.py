@@ -163,6 +163,10 @@ def resolve(vault, a, b, attribute, auth_mod, overrides):
     override = active_override(attribute, a.get("subject"), overrides)
     if override is not None:
         winner_path = override.get("winner")
+        # An override only applies when it names one of the two colliding notes.
+        if winner_path not in (a["path"], b["path"]):
+            return None, None, "override names %s, neither %s nor %s, so it does not apply" % (
+                winner_path, a["path"], b["path"])
         winner, loser = (a, b) if a["path"] == winner_path else (b, a)
         return winner, loser, "override recorded by %s on %s outranks the table" % (
             override.get("by"), override.get("ts"))
@@ -231,7 +235,10 @@ def cmd_override(attribute, winner, by, subject, apply_changes, store):
     if not apply_changes:
         print("dry run: nothing was written. Re-run with --apply to write.")
         return 0
-    os.makedirs(os.path.dirname(store), exist_ok=True)
+    # A bare filename has no directory part; os.makedirs("") would crash.
+    parent = os.path.dirname(store)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
     fd = os.open(store, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o644)
     try:
         os.write(fd, (line + "\n").encode("utf-8"))

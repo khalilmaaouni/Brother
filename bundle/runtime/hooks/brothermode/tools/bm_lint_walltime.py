@@ -212,6 +212,13 @@ def _scan_scope(body, source_lines, violations):
                 and isinstance(node.targets[0], ast.Name)):
             assignments.setdefault(node.targets[0].id, []).append(
                 (node.lineno, node.value))
+        # Annotated assignments assign the same name and must be recorded,
+        # or a later assertLess on that name is not flagged.
+        elif (isinstance(node, ast.AnnAssign)
+                and isinstance(node.target, ast.Name)
+                and node.value is not None):
+            assignments.setdefault(node.target.id, []).append(
+                (node.lineno, node.value))
     for node in nodes:
         operands = _operands_of(node)
         if operands is None:
@@ -311,7 +318,7 @@ def lint_paths(paths):
         try:
             with io.open(file_path, encoding="utf-8") as handle:
                 source = handle.read()
-        except (IOError, OSError) as exc:
+        except (IOError, OSError, UnicodeDecodeError) as exc:
             sys.stderr.write("bm_lint_walltime: cannot read %s: %s\n"
                              % (file_path, exc))
             # Fail CLOSED: a file this lint cannot read is a finding, not

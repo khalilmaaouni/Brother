@@ -170,47 +170,16 @@ def build_hanging_worker(tmp):
 
 
 def build_escaping_worker(tmp):
-    """--calibrate only: a real detached grandchild that survives the worker's
-    whole process group being killed.
-
-    The worker is spawned with start_new_session=True (bm_worker_spawn.py), so
-    on timeout it is reaped with os.killpg(worker_pid, SIGKILL), which kills
-    every process in the worker's session. A plain `(sleep 9999 & ...)`
-    subshell does NOT escape: backgrounding with `&` keeps the grandchild in
-    that same process group, so killpg reaps it and no leak survives, which is
-    exactly what stopped this calibration forcing the test red once the
-    group-kill hardening shipped. To be a real escape, the grandchild must
-    start its OWN session: it forks, the parent records the child pid and
-    exits, and the child calls setsid() (creating a new session, leaving the
-    worker's group) before exec'ing sleep. setsid(1) is absent on this mac, so
-    the detach is done in python. That child is then outside the group killpg
-    targets and survives, so the calibration can once again create the leak
-    the test must catch."""
+    """--calibrate only: a real detached grandchild that survives the
+    foreground process being killed. The subshell backgrounds `sleep` and
+    exits immediately, orphaning it (reparented away from this script's
+    process group), before the foreground itself also hangs."""
     worker = os.path.join(tmp, "escape.sh")
     pidfile = os.path.join(tmp, "escape.pid")
     _write(worker,
           "#!/bin/sh\n"
           "cat >/dev/null\n"
-          "python3 -c '"
-          "import os, sys\n"
-          "pid = os.fork()\n"
-          "if pid:\n"
-          "    open(\"%s\", \"w\").write(str(pid))\n"
-          "    sys.exit(0)\n"
-          "os.setsid()\n"
-          # Detach the survivor's std fds to /dev/null BEFORE exec. It escapes
-          # the worker's process group (setsid) so killpg cannot reap it, which
-          # is the whole point; but if it kept the worker's inherited stdout
-          # pipe, the spawner reading that pipe would block on an EOF that
-          # never comes (the survivor holds the write end open), and the
-          # calibration would hang instead of forcing the test red. Closing
-          # the fds is what makes the escape observable rather than wedging.
-          "devnull = os.open(os.devnull, os.O_RDWR)\n"
-          "os.dup2(devnull, 0)\n"
-          "os.dup2(devnull, 1)\n"
-          "os.dup2(devnull, 2)\n"
-          "os.execvp(\"sleep\", [\"sleep\", \"9999\"])"
-          "'\n"
+          "(sleep 9999 & echo $! > %s)\n"
           "exec sleep 9999\n" % pidfile)
     return worker, pidfile
 

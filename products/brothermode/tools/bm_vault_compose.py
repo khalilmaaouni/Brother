@@ -229,7 +229,7 @@ def cmd_split(args):
     if not notes:
         print("NO-DATA: no markdown files found under %s" % vault)
         return 2
-    exact, by_basename = mods.graph._build_indices(notes)
+    exact, by_basename, _alias_conflicts = mods.graph._build_indices(notes)
     file_index = mods.graph._build_file_index(vault)
     source_stem, err = _resolve_note_arg(mods, args.note, exact, by_basename, file_index)
     if err:
@@ -332,7 +332,7 @@ def cmd_merge(args):
     if not notes:
         print("NO-DATA: no markdown files found under %s" % vault)
         return 2
-    exact, by_basename = mods.graph._build_indices(notes)
+    exact, by_basename, _alias_conflicts = mods.graph._build_indices(notes)
     file_index = mods.graph._build_file_index(vault)
 
     from_stem, err = _resolve_note_arg(mods, args.from_note, exact, by_basename, file_index)

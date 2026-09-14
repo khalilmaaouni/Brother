@@ -1158,6 +1158,25 @@ class TestContinueLaunchCommandShape(unittest.TestCase):
                       "prompt must bound the mission to one turn")
 
 
+class Night0912ContinueRejectsEmptyOverrides(unittest.TestCase):
+    """187e56bc8195 / 28d979535b60: an explicitly empty --deadline or
+    --liveness-timeout must fail closed (exit 2), never silently fall back
+    to "no deadline" / the default timeout. Both checks run and return
+    before cmd_continue ever touches kv.get("root") or the store, so this
+    needs no fixture: same "no store, no subprocess" shape as
+    TestContinueLaunchCommandShape above."""
+
+    def setUp(self):
+        self.cont = _load(os.path.join(HERE, "bm_continue.py"), "bm_continue")
+
+    def test_empty_deadline_is_rejected(self):
+        self.assertEqual(self.cont.cmd_continue(["--deadline", ""]), 2)
+
+    def test_empty_liveness_timeout_is_rejected(self):
+        self.assertEqual(
+            self.cont.cmd_continue(["--liveness-timeout", ""]), 2)
+
+
 # ---------------------------------------------------------------------------
 # Successor liveness (Phase C step 3 of the 2026-08-08 finalization plan).
 # Written and run RED before tools/bm_continue.py grew any of it, which is

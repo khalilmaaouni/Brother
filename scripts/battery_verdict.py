@@ -130,6 +130,9 @@ def parse_check_all_output(text):
 def load_expectations(path):
     with open(path, encoding="utf-8") as fh:
         data = json.load(fh)
+    if not isinstance(data, dict):
+        # a JSON array or scalar root has no .get; report it as NO-DATA
+        raise ValueError("expectations root is not an object")
     return data.get("checks", {})
 
 

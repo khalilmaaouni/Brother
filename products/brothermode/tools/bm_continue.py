@@ -1093,7 +1093,9 @@ def cmd_continue(argv):
                                    "permission-mode", "liveness-timeout",
                                    "max-generations", "deadline"))
     try:
-        timeout = float(kv.get("liveness-timeout") or LIVENESS_TIMEOUT)
+        # An explicit empty --liveness-timeout must be rejected, not defaulted.
+        timeout = float(kv["liveness-timeout"] if "liveness-timeout" in kv
+                        else LIVENESS_TIMEOUT)
     except ValueError:
         _err("bm_continue: --liveness-timeout wants a number of seconds, "
              "got %r." % kv.get("liveness-timeout"))
@@ -1106,7 +1108,8 @@ def cmd_continue(argv):
     generation = relay_generation()
     maximum = relay_max(override=kv.get("max-generations"))
     deadline = relay_deadline(override=kv.get("deadline"))
-    if kv.get("deadline") and deadline is None:
+    # "in kv" catches an explicitly empty --deadline; .get() would not.
+    if "deadline" in kv and deadline is None:
         _err("bm_continue: --deadline %r could not be read as a time. "
              "Nothing was launched: a deadline you typed and the machine "
              "dropped would be the silent unbounding this brake exists to "

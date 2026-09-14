@@ -173,5 +173,31 @@ class TheFixturesCarryNothingPrivate(unittest.TestCase):
             self.assertTrue(os.path.isfile(path), path)
 
 
+class Night0912BmQueueNumbers(unittest.TestCase):
+    def test_status_count_is_full_cell_match(self):
+        rows = [{"Status": "Not waiting on development"}]
+        results, _ = Q.compute(rows, ["Status"])
+        value = [r["value"] for r in results
+                 if r["key"] == "waiting_on_development"][0]
+        self.assertEqual(0, value)
+
+    def test_expect_requires_five_numbers(self):
+        import io
+        from contextlib import redirect_stdout, redirect_stderr
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "x.csv")
+            with open(path, "w", newline="") as f:
+                f.write("Status,End Date\n")
+                f.write("waiting on development,2026-01-01\n")
+                f.write("waiting on test resource,2026-01-01\n")
+                f.write("waiting on qc lead,2026-01-01\n")
+                f.write("in testing,2026-01-01\n")
+                f.write("queued,2026-01-01\n")
+            out, err = io.StringIO(), io.StringIO()
+            with redirect_stdout(out), redirect_stderr(err):
+                code = Q.main(["--expect", "1,1", path])
+            self.assertNotEqual(0, code)
+
+
 if __name__ == "__main__":
     unittest.main()

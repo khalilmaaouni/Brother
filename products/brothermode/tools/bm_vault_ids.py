@@ -184,7 +184,10 @@ def cmd_assign(vault, apply_changes):
         try:
             with open(path, encoding="utf-8") as fh:
                 text = fh.read()
-        except OSError as exc:
+        except (OSError, ValueError) as exc:
+            # ValueError covers UnicodeDecodeError: a note that is not valid
+            # UTF-8 is skipped, never decoded lossily, because --apply writes
+            # the text back and a replaced byte would be lost for good.
             print("SKIP %s: %s" % (rel, exc))
             continue
         if frontmatter(text)[0] is None:

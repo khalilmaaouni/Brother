@@ -125,7 +125,7 @@ def candidates(vault):
             continue  # no frontmatter: skip, never patched
         if note_type(block) in EXEMPT_TYPES:
             continue
-        if VERIFIED_RE.search(block):
+        if re.search(r"^verified_at:", block, re.M):
             continue  # already has a verified_at (fresh/stale/malformed): leave it
         value, evidence = derive(vault, relpath, block, text)
         out.append((relpath, end, text, value, evidence))

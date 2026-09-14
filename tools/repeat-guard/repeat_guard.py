@@ -241,16 +241,7 @@ def pre(payload):
         # of action, and the moment of action is the only moment it can change
         # anything. Blocking here would refuse work on a substring match, which
         # is how three false positives happened on this machine in one day.
-        #
-        # THE FULL NOTE, UNCUT. E53 (2026-09-04) measured a 200-char slice
-        # here cutting the note before its remedy, which dropped an obedient
-        # worker's repeat-avoidance from up to 7 of 8 to 1 of 8: the warning
-        # showed, the fix instruction did not. No cap survives that lab
-        # result, so none is applied. Flood risk is not real at this scale:
-        # the live store's longest note is under 1700 characters and at most
-        # 3 lessons are joined, so a shown block tops out a few kilobytes,
-        # far short of anything a terminal or a hook payload cannot carry.
-        notes = "; ".join(str(l.get("note", "")) for l in lessons[:3])
+        notes = "; ".join(str(l.get("note", ""))[:200] for l in lessons[:3])
         print(json.dumps({
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",

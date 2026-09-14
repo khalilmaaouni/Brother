@@ -543,6 +543,12 @@ docs/decisions/README.md
 # and readme-honesty checks every figure against it (1.0.13 cut, founder's
 # go-live night: the public CI refused the release PR without it).
 docs/decisions/light-path-for-small-changes-2026-09-04.json
+# Another record leaves as a leaf for the same reason: docs/how-to/install-cursor.md
+# and docs/cursor/SMOKE-RUNBOOK.md both cite it as the real confirmation behind
+# Cursor's live-canary status, replacing the earlier "ADVISORY until a live
+# canary" wording; the export-public link check refuses a public page whose
+# link points at a file the export tree does not carry.
+docs/decisions/cursor-live-canary-2026-09-13.json
 docs/onboarding/README.md
 
 # The official Cursor adapter needs its discovery file and signed-in runbook.

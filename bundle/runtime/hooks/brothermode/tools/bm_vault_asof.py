@@ -93,7 +93,7 @@ def build_effective_windows(vault, bt, bg):
         problems_by_stem[stem] = problems
 
     notes = bg._load_notes(vault)
-    exact, by_basename = bg._build_indices(notes)
+    exact, by_basename, _alias_conflicts = bg._build_indices(notes)
     file_index = bg._build_file_index(vault)
     typed = bg._typed_edges(notes, exact, by_basename, file_index)
     superseded_by = typed["superseded_by"]  # old_stem -> [new_stem, ...]

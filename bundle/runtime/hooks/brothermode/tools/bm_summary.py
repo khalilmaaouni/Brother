@@ -312,7 +312,8 @@ def main(argv):
     while i < len(argv):
         tok = argv[i]
         if tok == "--project":
-            if i + 1 >= len(argv):
+            # a following flag is not a value
+            if i + 1 >= len(argv) or argv[i + 1].startswith("-"):
                 _err(_USAGE)
                 _err("bm_summary: --project needs a value")
                 return EXIT_USAGE

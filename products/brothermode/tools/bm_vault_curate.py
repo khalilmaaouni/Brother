@@ -149,7 +149,7 @@ def _graph_context(graph, vault):
     notes = graph._load_notes(vault)
     if not notes:
         return None
-    exact, by_basename = graph._build_indices(notes)
+    exact, by_basename, _alias_conflicts = graph._build_indices(notes)
     file_index = graph._build_file_index(vault)
     typed = graph._typed_edges(notes, exact, by_basename, file_index)
 
@@ -561,7 +561,7 @@ def cmd_accept(args):
     note_path = os.path.join(vault, older + ".md")
     graph = _load_module("bm_vault_graph")
     notes = graph._load_notes(vault)
-    _, by_basename = graph._build_indices(notes)
+    _, by_basename, _alias_conflicts = graph._build_indices(notes)
     link = _link_spelling(target, by_basename)
     with open(note_path, encoding="utf-8", errors="replace") as f:
         body = f.read()

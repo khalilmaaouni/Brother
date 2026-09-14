@@ -349,5 +349,28 @@ class HelpTests(unittest.TestCase):
         self.assertFalse(result.stdout.startswith("NO-DATA:"))
 
 
+class Night0912BmForecast(unittest.TestCase):
+    """614050a16b06: a forecast record whose recorded_at cannot be parsed
+    must not silently read as age 0.0 (never overdue). Excluding it from
+    age tracking let `check` report PASS over a forecast whose true age is
+    unknown; it must instead fail closed (treated as infinitely old)."""
+
+    def test_check_with_unparseable_recorded_at_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = os.path.join(tmp, "forecasts-log.jsonl")
+            with io.open(log, "w", encoding="utf-8") as handle:
+                handle.write(
+                    '{"kind": "forecast", "task": "T", "clock": "agent", '
+                    '"basis": "judged", "likely_minutes": 10.0, '
+                    '"recorded_at": "2026-08-11 00:00:00"}\n')
+            result = run_cli("check", "--log", log, "--now",
+                             "2030-01-01T00:00:00Z", "--max-open-hours",
+                             "12")
+            self.assertNotEqual(result.returncode, 0,
+                                result.stdout + result.stderr)
+            self.assertFalse(result.stdout.startswith("PASS"),
+                             result.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

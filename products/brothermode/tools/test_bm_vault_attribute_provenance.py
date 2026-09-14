@@ -189,5 +189,13 @@ class ZeroSilentExcepts(VaultFixture):
             ap.load_store(self.store)
 
 
+class Night0912BmVaultAttributeProvenance(unittest.TestCase):
+    def test_by_status_skips_null_set_at(self):
+        rows = ap.by_status(
+            [{"verification_status": "unverified", "set_at": None}],
+            "unverified")
+        self.assertEqual(rows, [])
+
+
 if __name__ == "__main__":
     unittest.main()

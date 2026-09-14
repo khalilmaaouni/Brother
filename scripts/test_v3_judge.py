@@ -125,5 +125,24 @@ class TheCLI(unittest.TestCase):
             os.unlink(path)  # sbe: allow-silent the fixture is this test's own temp file
 
 
+class Night0912V3Judge(unittest.TestCase):
+    def test_certify_ignores_cat_file_in_markdown(self):
+        diff_text = '\n'.join([
+            'diff --git a/a.py b/a.py',
+            '--- a/a.py',
+            '+++ b/a.py',
+            '@@ -0,0 +1 @@',
+            '+x = rev-parse',
+            'diff --git a/note.md b/note.md',
+            '--- a/note.md',
+            '+++ b/note.md',
+            '@@ -0,0 +1 @@',
+            '+use git cat-file',
+            '',
+        ])
+        verdict, _evidence = J.judge(diff_text, 'repeat-guard:certify')
+        self.assertEqual(verdict, 'DECLINED')
+
+
 if __name__ == '__main__':
     unittest.main()

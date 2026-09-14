@@ -1347,5 +1347,20 @@ class TheSixNineCorpusScoresZeroApplied(unittest.TestCase):
         self.assertEqual(applied, 0, [r for r in rows if r["result"] == G.APPLIED])
 
 
+class Night0912GauntletMemoryPoisoning(unittest.TestCase):
+    def test_empty_corpus_reports_no_data_instead_of_crashing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            empty = os.path.join(tmp, "empty.json")
+            with open(empty, "w") as fh:
+                fh.write("[]")
+            old_run_gauntlet = G.run_gauntlet
+            G.run_gauntlet = lambda planted=None: []
+            try:
+                rc = G.main(["--corpus", empty, "--out", os.path.join(tmp, "out.json")])
+            finally:
+                G.run_gauntlet = old_run_gauntlet
+            self.assertEqual(rc, 2)
+
+
 if __name__ == "__main__":
     unittest.main()

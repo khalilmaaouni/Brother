@@ -291,5 +291,13 @@ class CliSmokeTest(VaultFixture):
         self.assertEqual(0, rc, out)
 
 
+class Night0912BmVaultIdentity(VaultFixture):
+    def test_merge_into_upstream_is_refused(self):
+        r1 = self._merge(A_ID, B_ID, "v1", "2026-01-15")
+        self.assertEqual(0, r1[0], r1[1])
+        r2 = self._merge(B_ID, A_ID, "v1", "2026-01-16")
+        self.assertNotEqual(0, r2[0], r2[1])
+
+
 if __name__ == "__main__":
     unittest.main()

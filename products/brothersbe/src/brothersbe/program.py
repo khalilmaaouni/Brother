@@ -674,14 +674,16 @@ def _progress_for(item):
     met = item["acceptance_met"]
     if acceptance and met is not None:
         total = len(acceptance)
-        matched = 0
+        # A set, not a count: duplicate acceptance_met entries must never
+        # inflate progress past 100 for the same distinct criterion.
+        matched = set()
         for entry in met:
             if isinstance(entry, int) and 0 <= entry < total:
-                matched += 1
+                matched.add(entry)
             elif isinstance(entry, str) and entry in acceptance:
-                matched += 1
+                matched.add(acceptance.index(entry))
         if total > 0:
-            pct = int(round((matched / float(total)) * 100))
+            pct = int(round((len(matched) / float(total)) * 100))
             return pct, "derived from acceptance"
     return None, "not measured"
 

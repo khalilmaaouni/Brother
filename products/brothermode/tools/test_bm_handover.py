@@ -1267,6 +1267,49 @@ class TestBoardCopy(HandoverCase):
         read_me = self.read(os.path.join(out_dir, "00-READ-ME-FIRST.md"))
         self.assertIn("No board was found", read_me)
 
+    def test_freshness_wins_over_hardcoded_order_when_roles_reverse(self):
+        """The regression this fix closes. BOARD_CANDIDATES lists GANTT.html
+        before COMMAND-CENTER.html, so a selection that trusts ORDER over
+        freshness always picks GANTT.html whenever both exist, whichever
+        one is actually newer. Here COMMAND-CENTER.html is the one
+        committed MOST RECENTLY by real git history, while GANTT.html is
+        both first in BOARD_CANDIDATES order and the older commit: the
+        exact shape that would silently ship a stale board again, the way
+        BOARD_CANDIDATES' own comment already records happening once, to
+        the other file, for three days."""
+        plan_dir = os.path.join(self.root, "docs", "plan")
+        os.makedirs(plan_dir)
+        gantt = os.path.join(plan_dir, "GANTT.html")
+        cc = os.path.join(plan_dir, "COMMAND-CENTER.html")
+        self.write(gantt,
+                  "<html>older board, first in BOARD_CANDIDATES order</html>")
+        git = self._real_git_repo()
+        git("add", "docs/plan/GANTT.html")
+        git("commit", "-q", "--date", "2020-01-01T00:00:00+0900",
+            "-m", "add the older board")
+        # Committed LATER, so it is the fresher file by real git history,
+        # even though it sorts second in BOARD_CANDIDATES.
+        self.write(cc,
+                  "<html>newer board, second in BOARD_CANDIDATES order</html>")
+        git("add", "docs/plan/COMMAND-CENTER.html")
+        git("commit", "-q", "--date", "2020-06-01T00:00:00+0900",
+            "-m", "add the newer board")
+        self.claim("fence-alpha")
+        out_dir = os.path.join(self.root, "docs", "handover", "pack1")
+        code, out, err = self.run_cli(
+            "skeleton", "--out", "docs/handover/pack1", "--date",
+            "2026-08-11", "--slot", "pack1")
+        self.assertEqual(0, code, "stdout=%r stderr=%r" % (out, err))
+        self.assertTrue(
+            os.path.isfile(os.path.join(out_dir, "COMMAND-CENTER.html")),
+            "the freshest-by-git-history board was not copied")
+        self.assertFalse(
+            os.path.isfile(os.path.join(out_dir, "GANTT.html")),
+            "the OLDER board (by git history) was copied instead of the "
+            "newer one, just because it sorts first in BOARD_CANDIDATES: "
+            "the selection is still order-aware, not freshness-aware")
+        self.assertIn("board copy: included (COMMAND-CENTER.html)", out)
+
 
 # ---------------------------------------------------------------------------
 # V4: zip

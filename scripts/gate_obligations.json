@@ -10,6 +10,10 @@
       "obligation": "REQUIRED_FOR_RELEASE",
       "reason": "needs a Codex binary, which public CI does not have; the release closeout runs it."
     },
+    "closing-ceremony-real": {
+      "obligation": "REQUIRED_FOR_RELEASE",
+      "reason": "reads the machine's own handover root (~/Documents/BrotherModeUp-handovers), which CI does not have; the local lander and the release closeout run it for real, the fixture suite alone is not this gate."
+    },
     "key-components": {
       "obligation": "REQUIRED_FOR_MERGE",
       "expected_absent_input": "docs/plan/KEY-COMPONENTS.json",

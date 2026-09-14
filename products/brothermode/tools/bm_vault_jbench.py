@@ -172,7 +172,8 @@ def run_benchmark(bm, fixture, limit=DEFAULT_LIMIT):
         by_class = {c: [] for c in declared}
         for case in fixture["cases"]:
             by_class.setdefault(case["class"], []).append(case)
-        for cls in declared:
+        # Iterate every class present, including undeclared ones, so no case is silently skipped.
+        for cls in by_class:
             cases = by_class.get(cls, [])
             if not cases:
                 per_class[cls] = None

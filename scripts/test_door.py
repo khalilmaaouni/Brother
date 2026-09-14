@@ -329,6 +329,13 @@ class TheHostsOwnDecomposer(unittest.TestCase):
         self.assertEqual(cmd, list(model_worker.CODEX_ARGV))
         self.assertNotIn("claude", cmd)
 
+    def test_a_cursor_host_defaults_to_the_cursor_argv_model_worker_ships(self):
+        """U2: a Cursor-only machine has no claude binary either, so it gets
+        model_worker's own measured CURSOR_ARGV, never `claude -p`."""
+        cmd = door_mod.default_model_cmd({"BROTHER_CLIENT": "cursor"})
+        self.assertEqual(cmd, list(model_worker.CURSOR_ARGV))
+        self.assertNotIn("claude", cmd)
+
     def test_the_codex_answer_is_read_out_of_its_jsonl_events(self):
         events = "\n".join([
             json.dumps({"type": "response.created"}),
@@ -337,6 +344,13 @@ class TheHostsOwnDecomposer(unittest.TestCase):
         ])
         self.assertEqual(
             door_mod.decomposer_text(list(model_worker.CODEX_ARGV), events),
+            '[{"id": "U1"}]')
+
+    def test_the_cursor_answer_is_read_out_of_its_json_envelope(self):
+        envelope = json.dumps({"is_error": False, "result": '[{"id": "U1"}]',
+                               "usage": {"inputTokens": 1, "outputTokens": 2}})
+        self.assertEqual(
+            door_mod.decomposer_text(list(model_worker.CURSOR_ARGV), envelope),
             '[{"id": "U1"}]')
 
     def test_a_plain_command_s_stdout_is_returned_unchanged(self):
@@ -810,6 +824,115 @@ class LensInferenceEndToEnd(unittest.TestCase):
 
         record = self._run_door_in(repo)
         self.assertIsNone(record["lens_inferred"])
+
+
+class FrozenPromptSetRouteCorrectness(unittest.TestCase):
+    """WBS-10.01's own gate (~/Downloads/BROTHER_1.0.17_CONVERGENCE_ROADMAP_
+    2026-09-14.md line 798): "Frozen prompt set proves route correctness."
+
+    door.py's own routing is tree-signal based, never a parse of the
+    outcome text (infer_lenses(root, listed_files, ...) takes no outcome
+    argument; see its docstring's "one-visible-Brother rule": no match
+    asks no question and states no assumption, rather than guessing). So a
+    frozen SCENARIO here pins both halves of one request: the outcome
+    sentence a person would actually type (documentation, not a routing
+    input) and the repository tree door.py actually routes on. The outcome
+    text is carried so a reviewer can see the scenario is a real one, not
+    grep for it.
+
+    PINNED, for every scenario, run through the real door.py subprocess
+    exactly as LensInferenceEndToEnd does above:
+
+      1. lens_inferred matches the frozen expectation exactly (a plain
+         "add retry/backoff and test it" tree infers nothing at all, which
+         is what keeps door from exposing a pack's taxonomy or reciting a
+         menu for ordinary work; a tree carrying a real domain signal still
+         infers its pack, so the router is proven to discriminate, not to
+         have gone silent everywhere);
+      2. pending_challenge is None on every plain-tree scenario: no extra
+         question is ever surfaced for ordinary reversible work (roadmap's
+         "Do not: recite a menu");
+      3. running the SAME scenario twice, into two independent stores,
+         gives BYTE-IDENTICAL lens_inferred and pending_challenge: the
+         route is a property of the tree, not of run order or timing.
+    """
+
+    #: (name, outcome, {relative_path: content}, expected_lens_or_None)
+    #: The outcome text mirrors the roadmap's own worked example
+    #: (line 776) plus three siblings of the same shape: an ordinary,
+    #: reversible, single-repository coding request with no domain
+    #: manifests, decision records, dashboards, or infrastructure files.
+    #: One positive control (a migrations/ directory, backend-senior's own
+    #: signal, distinct from architect's openapi.yaml/openapi.yml/
+    #: openapi.json path signals so it cannot lose a specificity tie to a
+    #: sibling pack) proves the frozen set is not pinning "always None": a
+    #: real backend-senior signal still fires.
+    SCENARIOS = (
+        ("retry_backoff",
+         "add retry/backoff to this API client and test it",
+         {"client.py": "class Client:\n    pass\n",
+          "test_client.py": "def test_client():\n    pass\n"},
+         None),
+        ("readme_typo",
+         "fix the typo in the README",
+         {"README.md": "# Proejct\n"},
+         None),
+        ("parser_unit_test",
+         "add a unit test for the date parser",
+         {"parser.py": "def parse(s):\n    return s\n",
+          "test_parser.py": "def test_parse():\n    pass\n"},
+         None),
+        ("migrations_control",
+         "add a new endpoint to this service",
+         {"migrations/0001_init.py": "# initial migration\n"},
+         "backend-senior"),
+    )
+
+    def _run_once(self, repo, outcome):
+        stub_tmp = tempfile.mkdtemp(prefix="door-frozen-stub-")
+        stub = os.path.join(stub_tmp, "stub.py")
+        _stub_that_writes_one_unit(stub)
+        store = tempfile.mkdtemp(prefix="door-frozen-store-")
+        proc = subprocess.run(
+            [sys.executable, DOOR, outcome,
+             "--model-cmd", "%s %s" % (shlex.quote(sys.executable), shlex.quote(stub)),
+             "--store", store],
+            capture_output=True, text=True, timeout=60, cwd=repo)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        files = [f for f in os.listdir(store) if f.endswith(".json")]
+        self.assertEqual(len(files), 1)
+        with open(os.path.join(store, files[0]), encoding="utf-8") as fh:
+            return json.load(fh)
+
+    def test_frozen_scenarios_route_correctly_and_stably(self):
+        for name, outcome, tree, expected_lens in self.SCENARIOS:
+            with self.subTest(scenario=name):
+                repo = tempfile.mkdtemp(prefix="door-frozen-repo-%s-" % name)
+                for rel, content in tree.items():
+                    path = os.path.join(repo, rel)
+                    os.makedirs(os.path.dirname(path) or repo, exist_ok=True)
+                    with open(path, "w", encoding="utf-8") as fh:
+                        fh.write(content)
+
+                first = self._run_once(repo, outcome)
+                second = self._run_once(repo, outcome)
+
+                first_lens = (first["lens_inferred"] or {}).get("lens")
+                second_lens = (second["lens_inferred"] or {}).get("lens")
+                self.assertEqual(
+                    first_lens, expected_lens,
+                    "%s: expected lens %r, got %r" % (name, expected_lens, first_lens))
+                self.assertEqual(
+                    first_lens, second_lens,
+                    "%s: lens drifted between two runs of the identical "
+                    "tree: %r then %r" % (name, first_lens, second_lens))
+
+                if expected_lens is None:
+                    self.assertIsNone(
+                        first["pending_challenge"],
+                        "%s: a plain tree must never surface a pending "
+                        "challenge question" % name)
+                    self.assertIsNone(second["pending_challenge"])
 
 
 if __name__ == "__main__":

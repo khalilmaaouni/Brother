@@ -867,7 +867,10 @@ def _lifecycle_problems(data, binding, body):
     problems.extend(table_problems)
     identity = tuple(f for f in identity_names if f in scoped)
     required = scoped
-    missing = _missing_fields(data, required)
+    # schemaVersion is already named by the explicit check just above; drop
+    # it here so a missing version is reported once, per this function's
+    # own "reported ONCE" contract, not twice under two different voices.
+    missing = [f for f in _missing_fields(data, required) if f != "schemaVersion"]
     if missing:
         problems.append("missing required field(s): %s" % ", ".join(missing))
 

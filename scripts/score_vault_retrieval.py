@@ -357,6 +357,13 @@ def run(vault, corpus_path, tool, k, limit, out_path, hook=None):
     work = tempfile.mkdtemp(prefix="vault-retrieval-")
     try:
         os.makedirs(os.path.join(work, "home"))
+        # An older/deployed bm_vault.py that hardcodes ~/.claude (never learned
+        # BROTHER_CONFIG_DIR) resolves that path through the sandboxed HOME above and
+        # expects the directory to already exist: sqlite3.connect() does not create
+        # missing parent directories. Without this, indexing such a tool fails with
+        # "unable to open database file" and the whole run reports NO-DATA, which is
+        # not an honest verdict about retrieval quality, only about a missing mkdir.
+        os.makedirs(os.path.join(work, "home", ".claude"))
         os.makedirs(os.path.join(work, "cfg"))
         staged = _stage(vault, work)
         env = _env(work, staged, _sources_dir(vault))

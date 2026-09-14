@@ -16,7 +16,7 @@ repository's `products/` tree. Source: `.claude-plugin/marketplace.json`'s
 | Internal name | Ships from | Version | Covers | For |
 | :-- | :-- | :-- | :-- | :-- |
 | BrotherMode | products/brothermode (this repository) | 3.4.5 | execution provenance: what an assistant or teammate actually did, what checked it, what it is waiting on | whoever runs the project |
-| BrotherSBE | products/brothersbe (this repository) | 3.7.3 | change assurance: hard gates that refuse a change on evidence, not confidence | engineers |
+| BrotherSBE | products/brothersbe (this repository) | 3.7.4 | change assurance: hard gates that refuse a change on evidence, not confidence | engineers |
 | BrotherDS | khalilmaaouni/BrotherDS | 0.1.0, EXPERIMENTAL | claim verification: whether a promised number turned out to be true | nobody yet, nothing to install |
 
 BrotherDS reports its own north star, Verified Claim Rate, as NO-DATA today:
@@ -35,7 +35,7 @@ This repository (`brother`, the router plugin under `bundle/`) versions
 separately from the three products it fronts, because it is a marketplace and
 a facade, not a merge of their code. Its own version lives in
 `.claude-plugin/marketplace.json` and `bundle/.claude-plugin/plugin.json`.
-Current version: 1.0.16.
+Current version: 1.0.17.
 
 ## Stage 0, Stage 1, Stage 2
 

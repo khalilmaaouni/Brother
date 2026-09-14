@@ -35,6 +35,8 @@ EXIT_REFUSED = 4
 
 PLUGIN_NAME = "brother"
 EXCLUDE_DIR = {".git", "__pycache__", ".venv-embed", ".brothermode"}
+AGENT_NAMES = ("brother-planner", "brother-executor", "brother-reviewer")
+OUTSIDE_MODEL_VENDORS = ("deepseek", "muse")
 
 
 def _out(text):
@@ -73,6 +75,30 @@ def copy_tree(source, dest, dry=False):
     return copied
 
 
+def _parse_frontmatter(text):
+    """Return (fields, body) for a '---' Markdown frontmatter block, or
+    (None, text) if the file does not open with one."""
+    if not text.startswith("---\n"):
+        return None, text
+    end = text.find("\n---", 4)
+    if end == -1:
+        return None, text
+    header = text[4:end]
+    body = text[end + 4:]
+    fields = {}
+    for line in header.splitlines():
+        if not line.strip() or ":" not in line:
+            continue
+        key, _, value = line.partition(":")
+        fields[key.strip()] = value.strip()
+    return fields, body
+
+
+def _names_outside_model_vendor(text):
+    lowered = text.lower()
+    return any(vendor in lowered for vendor in OUTSIDE_MODEL_VENDORS)
+
+
 def validate_bundle(root):
     problems = []
     manifest = os.path.join(root, ".cursor-plugin", "plugin.json")
@@ -88,6 +114,8 @@ def validate_bundle(root):
     if doc.get("name") != PLUGIN_NAME:
         problems.append("plugin.json name is %r, want %r" % (doc.get("name"),
                                                              PLUGIN_NAME))
+    if not doc.get("agents"):
+        problems.append("plugin.json missing agents declaration")
     hooks = os.path.join(root, "cursor-hooks", "hooks.json")
     if not os.path.isfile(hooks):
         problems.append("missing cursor-hooks/hooks.json")
@@ -97,6 +125,54 @@ def validate_bundle(root):
     skill = os.path.join(root, "skills", "using-brother", "SKILL.md")
     if not os.path.isfile(skill):
         problems.append("missing skills/using-brother/SKILL.md")
+    for name in AGENT_NAMES:
+        rel = os.path.join("agents", name + ".md")
+        path = os.path.join(root, rel)
+        if not os.path.isfile(path):
+            problems.append("missing %s" % rel)
+            continue
+        with io.open(path, encoding="utf-8") as fh:
+            text = fh.read()
+        fields, _ = _parse_frontmatter(text)
+        if fields is None:
+            problems.append("%s has no frontmatter block" % rel)
+            continue
+        if set(fields.keys()) != {"name", "description"}:
+            problems.append(
+                "%s frontmatter must be exactly name and description, got %r"
+                % (rel, sorted(fields.keys())))
+        if fields.get("name") != name:
+            problems.append("%s frontmatter name is %r, want %r"
+                             % (rel, fields.get("name"), name))
+        if not fields.get("description"):
+            problems.append("%s frontmatter description is empty" % rel)
+        if _names_outside_model_vendor(text):
+            problems.append("%s names an outside model vendor" % rel)
+    rules_dir = os.path.join(root, "rules")
+    if os.path.isdir(rules_dir):
+        for dirpath, _dirnames, filenames in os.walk(rules_dir):
+            for fn in filenames:
+                path = os.path.join(dirpath, fn)
+                with io.open(path, encoding="utf-8", errors="ignore") as fh:
+                    if _names_outside_model_vendor(fh.read()):
+                        problems.append("%s names an outside model vendor"
+                                         % os.path.relpath(path, root))
+    # MCP is an OPTIONAL bundled component (docs/plan/1.0.17/
+    # WBS-70-CODEX-U3-U9-REVIEW-2026-09-13.txt, U6): its absence is not a
+    # validation failure. What IS a failure is a half-shipped pair: an
+    # mcp.json declaring a server with no mirrored server file to run, or
+    # a mirrored server file that mcp.json never wires in. Consistency
+    # only, never a requirement that the component exist.
+    mcp_json = os.path.join(root, "mcp.json")
+    mcp_server = os.path.join(root, "runtime", "hooks", "brothermode", "mcp",
+                              "bm_mcp_server.py")
+    if os.path.isfile(mcp_json) and not os.path.isfile(mcp_server):
+        problems.append("mcp.json declares an MCP server but "
+                        "runtime/hooks/brothermode/mcp/bm_mcp_server.py is "
+                        "missing")
+    if os.path.isfile(mcp_server) and not os.path.isfile(mcp_json):
+        problems.append("runtime/hooks/brothermode/mcp/bm_mcp_server.py is "
+                        "bundled but mcp.json does not declare it")
     return problems
 
 

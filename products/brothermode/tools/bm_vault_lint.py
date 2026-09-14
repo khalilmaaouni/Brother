@@ -406,16 +406,22 @@ def _group_lines(block):
 
 def _reorder(groups, temporal_fields):
     house = list(HOUSE_ORDER_HEAD) + list(temporal_fields) + list(HOUSE_ORDER_TAIL)
-    by_key = {g[0]: g for g in groups if g[0] is not None}
+    # A key can repeat; move every group under it, never drop an earlier one.
+    by_key = {}
+    for g in groups:
+        if g[0] is not None:
+            by_key.setdefault(g[0], []).append(g)
     ordered = [g for g in groups if g[0] is None]  # preamble, always first
     for key in house:
         if key in by_key:
-            ordered.append(by_key.pop(key))
+            ordered.extend(by_key.pop(key))
     # everything else keeps its original relative order
     for g in groups:
         if g[0] is not None and g[0] in by_key:
             ordered.append(g)
-            del by_key[g[0]]
+            by_key[g[0]].remove(g)
+            if not by_key[g[0]]:
+                del by_key[g[0]]
     return ordered
 
 

@@ -72,7 +72,8 @@ def _read(path):
             doc = json.load(fh)
     except (OSError, ValueError) as exc:
         return None, "could not read %s: %s" % (path, exc)
-    runs = doc.get("runs")
+    # a non-object store cannot carry a runs list; report it as malformed, not a crash.
+    runs = doc.get("runs") if isinstance(doc, dict) else None
     if not isinstance(runs, list):
         return None, "%s holds no runs list" % path
     return runs, ""

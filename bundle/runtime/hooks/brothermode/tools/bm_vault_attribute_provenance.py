@@ -191,7 +191,7 @@ def by_status(records, status, min_age_days=0, as_of=None):
         raw = r.get("set_at", "")
         try:
             set_date = datetime.date.fromisoformat(raw)
-        except ValueError:  # sbe: allow-silent unparseable set_at skipped per docstring, never counted as either old or new by a guess
+        except (ValueError, TypeError):  # sbe: allow-silent unparseable set_at skipped per docstring, never counted as either old or new by a guess
             continue
         if (ref - set_date).days >= min_age_days:
             out.append(r)

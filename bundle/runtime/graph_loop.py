@@ -59,6 +59,11 @@ import os
 import shutil
 import sys
 
+HERE = os.path.dirname(os.path.abspath(__file__))
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)
+import resource_gate  # noqa: E402  (sibling module, scripts/resource_gate.py)
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ROADMAP = os.path.join(ROOT, 'docs', 'plan', 'READINESS-ROADMAP-2026-08-29.json')
 
@@ -244,6 +249,30 @@ def machine_capacity():
                      'rather than refusing outright' % (free_gib, DISK_CLEANUP_GIB))
     else:
         notes.append('%.1f GiB free, above the cleanup band' % free_gib)
+    # Live CPU load, from resource_gate (W2 of the readiness roadmap): disk and
+    # core COUNT above say what the machine could ever support, never what it
+    # is doing right now. resource_gate.read() exists and is tested but sat
+    # uninvoked from any real dispatch path (its own docstring records this).
+    # Same graduated response as the disk bands: oversubscription drops slots
+    # to 1 rather than refusing outright, and an unreadable load1 is treated
+    # as oversubscribed too, on resource_gate's own stated reasoning ("assuming
+    # healthy is how a scarce machine gets dispatched into").
+    reading = resource_gate.read()
+    load1, cores_available = reading.get('load1'), reading.get('cores_available')
+    if load1 is None or cores_available is None:
+        if slots > 1:
+            slots = 1
+        notes.append('LOAD NO-DATA: load1 or cores_available unreadable (%s); '
+                     'parallelism held at 1 rather than assumed healthy'
+                     % reading.get('errors'))
+    elif load1 > cores_available:
+        if slots > 1:
+            slots = 1
+        notes.append('LOAD BAND: 1-minute load %.2f exceeds %d available core(s), '
+                     'so parallelism drops to 1 rather than adding to the '
+                     'oversubscription' % (load1, cores_available))
+    else:
+        notes.append('load1 %.2f within %d available core(s)' % (load1, cores_available))
     return slots, notes
 
 

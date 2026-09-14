@@ -50,6 +50,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -579,18 +580,83 @@ def check_drift(cwd=ROOT, runner=None):
     script = os.path.join(ROOT, "scripts", "record_drift.py")
     if not os.path.isfile(script):
         return [(NODATA, "drift", "record_drift.py is not present")]
+    # The budget is read at call time, from the environment, so a loaded
+    # machine can be given more room without editing this file. An unset,
+    # non-integer, zero or negative value means the 90 second default.
+    raw = os.environ.get("PRE_PUSH_DRIFT_TIMEOUT_S", "")
+    try:
+        budget = int(raw)
+    except (TypeError, ValueError):
+        budget = 90
+    if budget <= 0:
+        budget = 90
     runner = runner or (lambda cmd, **kw: subprocess.run(
-        cmd, capture_output=True, text=True, cwd=cwd, timeout=90))
+        cmd, capture_output=True, text=True, cwd=cwd, timeout=budget))
+    started = time.monotonic()
     try:
         proc = runner([sys.executable, script])
+    except subprocess.TimeoutExpired:
+        elapsed = time.monotonic() - started
+        return [(NODATA, "drift",
+                 "the drift check did not finish within its %d second budget "
+                 "(%.1f seconds elapsed); raise PRE_PUSH_DRIFT_TIMEOUT_S to "
+                 "give it longer" % (budget, elapsed))]
     except Exception as exc:  # noqa: BLE001
         return [(NODATA, "drift", "could not run the drift check: %s" % exc)]
     if proc.returncode == 0:
         return [(OK, "drift", "the board still matches the world")]
+    detail = (proc.stderr or proc.stdout or "").strip()
+    # A nonzero exit with no output must still name the drift, not crash on
+    # the empty string's splitlines()[0].
+    if not detail:
+        detail = "the drift check exited nonzero with no output"
+    else:
+        detail = detail.splitlines()[0][:160]
     return [(WARN, "drift",
-             "the board has drifted from the world: %s"
-             % (proc.stderr or proc.stdout or "").strip().splitlines()[0][:160])]
+             "the board has drifted from the world: %s" % detail)]
 
+
+
+def check_docs_current(cwd=ROOT, runner=None):
+    """F5(b) (root-cause fix, 2026-09-14 adversarial sweep): SYSTEM.md is
+    generated from the code, and required_fast.sh already refuses a stale
+    copy (its own docs-runtime-drift check) -- but that gate only runs
+    AFTER a push, on CI, because nothing before the push checked it. Twice
+    in one day a branch was pushed after regenerating only the SPECIFIC new
+    checks a change touched, never the full local gate, and both times the
+    first place the staleness actually surfaced was a failed GitHub Actions
+    run, costing a second commit and a second CI round trip for the same
+    class of omission. This is cheap (measured ~1s) and unambiguous
+    (system_doc.py --check either exits 0 or names exactly what changed),
+    so it BLOCKS rather than WARNS: unlike check_drift's board-versus-world
+    comparison, there is no legitimate reason to push a stale SYSTEM.md."""
+    script = os.path.join(ROOT, "scripts", "system_doc.py")
+    if not os.path.isfile(script):
+        return [(NODATA, "docs-current", "system_doc.py is not present")]
+    # SYSTEM.md is generated FROM this repository's own products/ and
+    # scripts/, so the check is only meaningful when cwd IS this checkout
+    # (the normal case: the gate runs from the repo it is gating). A cwd
+    # that is not this tree (a test fixture, a --cwd pointed elsewhere)
+    # never carries the structure system_doc.py describes, so running it
+    # there would refuse on emptiness rather than on real staleness.
+    try:
+        same_tree = os.path.samefile(cwd, ROOT)
+    except OSError:
+        same_tree = False
+    if not same_tree:
+        return [(NODATA, "docs-current",
+                 "cwd is not this repository's own checkout; nothing to check")]
+    runner = runner or (lambda cmd, **kw: subprocess.run(
+        cmd, capture_output=True, text=True, cwd=cwd, timeout=30))
+    try:
+        proc = runner([sys.executable, script, "--check"])
+    except Exception as exc:  # noqa: BLE001
+        return [(NODATA, "docs-current", "could not run system_doc.py --check: %s" % exc)]
+    if proc.returncode == 0:
+        return [(OK, "docs-current", "SYSTEM.md still describes the code")]
+    return [(BLOCK, "docs-current",
+             "SYSTEM.md is stale: %s"
+             % (proc.stdout or proc.stderr or "").strip().splitlines()[-1][:160])]
 
 
 def check_remote_rules(cwd=ROOT, runner=None):
@@ -624,7 +690,20 @@ def check_remote_rules(cwd=ROOT, runner=None):
     except Exception:  # noqa: BLE001
         return [(NODATA, "remote-rules", "the rules endpoint could not be read")]
     if rules.returncode != 0:
-        return [(OK, "remote-rules", "no ruleset on main")]
+        # A plan without rulesets (a free private repository answers HTTP 403
+        # "Upgrade to GitHub Pro") or a 404 means no rule can exist on main, so
+        # nothing remote can refuse this push: that is an answer, not a gap.
+        detail = "%s %s" % (rules.stdout or "", rules.stderr or "")
+        if "Upgrade to GitHub Pro" in detail or "HTTP 404" in detail:
+            return [(OK, "remote-rules",
+                     "rulesets are not available on this repository's plan, "
+                     "so main can carry no required-check rule")]
+        # Any other nonzero exit is an unanswered question (network, auth,
+        # host), not evidence that main carries no ruleset.
+        return [(NODATA, "remote-rules",
+                 "the rules endpoint could not be read, so whether main "
+                 "carries a required-check rule is unknown. That is not a "
+                 "pass")]
     types = (rules.stdout or "").strip()
     if "required_status_checks" not in types:
         return [(OK, "remote-rules", "main carries no required-check rule")]
@@ -651,7 +730,8 @@ def gate(cwd=ROOT, runner=None, stdin_text=None, remote_url=None, env=None):
              + check_collision(cwd, runner, stdin_text)
              + check_correctness(cwd, runner, stdin_text)
              + check_edition(cwd, remote_url, env)
-             + check_remote_rules(cwd, runner) + check_drift(cwd, runner))
+             + check_remote_rules(cwd, runner) + check_drift(cwd, runner)
+             + check_docs_current(cwd, runner))
     rank = {BLOCK: 0, NODATA: 1, WARN: 2, OK: 3}
     found.sort(key=lambda f: rank.get(f[0], 9))
     return found

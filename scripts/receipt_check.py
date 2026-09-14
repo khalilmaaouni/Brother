@@ -102,19 +102,27 @@ def _sources(record):
 
 
 def _contract_receipts(record):
-    """[(id, path, ref)] for a top-level receipts[] list, the
+    """[(id, path, ref, verdict)] for a top-level receipts[] list, the
     outcome-contract-v1 shape (docs/schema/outcome-contract-v1.json): a
     record with no options key but a receipts key. None when the record is
     not shaped this way at all (has options, or has no receipts key), so a
     caller can tell "not a contract record" apart from "a contract record
     with an empty receipts list" (the latter is still NO-DATA, but for a
-    different, more specific reason)."""
+    different, more specific reason).
+
+    WBS-20.02 (docs/decisions/evidence-vocabulary-2026-09-13.json, EV-4):
+    verdict is now surfaced instead of dropped. The schema requires the
+    field (receipts[].required names id, path, verdict, ref), and until
+    this change nothing anywhere read it back, so a receipt with a FAIL
+    or NO-DATA verdict and a resolvable ref was indistinguishable from
+    one that actually backed its claim."""
     if "options" in record:
         return None
     receipts = record.get("receipts")
     if receipts is None:
         return None
-    return [(r.get("id", ""), r.get("path", ""), r.get("ref", "")) for r in receipts]
+    return [(r.get("id", ""), r.get("path", ""), r.get("ref", ""), r.get("verdict", ""))
+            for r in receipts]
 
 
 def check(record):
@@ -131,16 +139,22 @@ def check(record):
 
 
 def check_contract(record):
-    """[{option, status, receipt, reason, what}], same row shape as check(),
-    for the outcome-contract-v1 shape: each receipts[] entry resolved
-    through the same resolve_receipt() the options path uses. "option"
-    carries the receipt's own id and "what" its human readable path, so the
-    same print/--json formatting in main() works unchanged for both shapes."""
+    """[{option, status, receipt, reason, what, verdict}], same row shape
+    as check() plus one field, for the outcome-contract-v1 shape: each
+    receipts[] entry resolved through the same resolve_receipt() the
+    options path uses. "option" carries the receipt's own id and "what"
+    its human readable path, so the same print/--json formatting in
+    main() works unchanged for both shapes.
+
+    "verdict" (EV-4) is the receipt's own recorded PASS/FAIL/NO-DATA,
+    surfaced rather than dropped; "status" stays RESOLVED/UNVERIFIED,
+    answering a different question (does the citation point at something
+    that exists) than verdict answers (did that thing say yes)."""
     rows = []
-    for rid, rpath, ref in _contract_receipts(record) or []:
+    for rid, rpath, ref, verdict in _contract_receipts(record) or []:
         status, reason = resolve_receipt(ref, ROOT, os.path.expanduser("~"))
         rows.append({"option": rid, "status": status, "receipt": ref,
-                     "reason": reason, "what": rpath})
+                     "reason": reason, "what": rpath, "verdict": verdict})
     return rows
 
 

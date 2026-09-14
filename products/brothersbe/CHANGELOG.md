@@ -6,6 +6,14 @@ What this file does NOT record: internal working notes and measurements from
 the estates this project was built on, which stay untracked by the publish
 checklist's own rules.
 
+## 3.7.4 (2026-09-13)
+
+The E76, E82, E97 and E29 defect series closes the gaps where repository hook scope, stale intake state, public-install fixtures, empty honesty tables, report-tool output, checksum comparison, and missing manifest files could be accepted or reported unclearly. The write and receipt paths now keep their evidence current, clean up temporary test trees, preserve the product's public export, and keep the repository's three write guards enabled. Covered by the affected honesty, install, public-install, checksum, receipt-shape, and protection tests.
+
+The R-1 through R-8 remediation series makes the user-facing flow answer the named ask, record and acknowledge handovers only with evidence, expose intake question counts and non-interactive answers, preserve readable non-ASCII outcomes, and judge push effects as well as paths. Verify now reports NO-DATA with a nonzero result when every hard gate is unavailable, literal-main pushes are refused when the default branch cannot be resolved, unfenced repositories are reported once, and session reconcile names records it drops. Covered by the affected verify, intake, handover, session-reconcile, fence-report, and bash-guard tests.
+
+Codex hook wiring now uses one path helper and the host's own hooks configuration, while the door reports the decomposer's exit code and the Codex runbook names the route to a receipt. The installer scopes hooks to named repositories and allowlists the remote origin before invoking git. Covered by the affected hook, install, dispatch, receipt, and public-install tests.
+
 ## 3.7.3 (2026-09-02)
 
 The eval suite reaches 547 of 547 for the first time. Seven standing regressions

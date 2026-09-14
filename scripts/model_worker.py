@@ -251,32 +251,82 @@ def _claude_argv(env=None):
 #: grant, recorded in docs/codex/SMOKE-RUNBOOK.md.
 CODEX_ARGV = ["codex", "exec", "--json", "--sandbox", "workspace-write"]
 
+#: CURSOR: `cursor-agent -p --output-format json --trust --mode ask`. Every
+#: flag is quoted from this machine's own help output, run 2026-09-13 against
+#: cursor-agent 2026.09.10-fd3934a (`cursor-agent --help` and
+#: `cursor-agent -p --help`, identical output):
+#:   -p, --print            "Print responses to console (for scripts or
+#:                           non-interactive use)"
+#:   --output-format <fmt>  "text | json | stream-json (default: text)"
+#:   --trust                "Trust the current workspace without prompting"
+#:   --mode <mode>          "plan: read-only/planning. ask: Q&A style ...
+#:                           (read-only)" (choices: "plan", "ask")
+#: `ask` is the read-only mode; a worker that needs Cursor to WRITE picks a
+#: different argv via MODEL_WORKER_CMD, the override seam every other vendor
+#: already uses. Live envelope, same command, verified 2026-09-13:
+#:   {"type":"result","subtype":"success","is_error":false,"result":"ok",
+#:    "usage":{"inputTokens":30412,"outputTokens":90,"cacheReadTokens":0,
+#:             "cacheWriteTokens":0}}
+#: which is the same shape as the claude envelope (a "result" string beside a
+#: "usage" sub-object, "is_error" alongside), just with camelCase usage keys,
+#: so this adapter reuses _parse_model_output with its own field map below
+#: rather than a second parser.
+CURSOR_ARGV = ["cursor-agent", "-p", "--output-format", "json", "--trust",
+               "--mode", "ask"]
+
 #: The explicit override for which adapter runs, ahead of brother_paths'
-#: client detection. A lane on a Claude machine can still drive the Codex
-#: adapter with BROTHER_MODEL_CLIENT=codex, which is how the stub tests below
-#: exercise both without either client installed.
+#: client detection. A lane on a Claude machine can still drive the Codex or
+#: Cursor adapter with BROTHER_MODEL_CLIENT=codex/cursor, which is how the
+#: stub tests below exercise all three without any other client installed.
 MODEL_CLIENT_ENV = "BROTHER_MODEL_CLIENT"
 
 
 def model_client(env=None):
-    """Which vendor adapter to use: "claude" or "codex".
+    """Which vendor adapter to use: "claude", "codex", or "cursor".
 
-    BROTHER_MODEL_CLIENT when it names one of the two, else the client
-    brother_paths identifies, else "claude". The final fallback is Claude and
+    BROTHER_MODEL_CLIENT when it names one of the three, else the client
+    brother_paths identifies, else "claude". The last resort is Claude and
     not NO-DATA on purpose: this function has to return an argv, and the
     pre-C3 behaviour of an unidentified host was the claude CLI. The NO-DATA
     that matters (which client is running) is reported by brother_paths and by
     the gates that read it, never invented here."""
     env = os.environ if env is None else env
     named = (env.get(MODEL_CLIENT_ENV) or "").strip().lower()
-    if named in (brother_paths.CLAUDE, brother_paths.CODEX):
+    if named in (brother_paths.CLAUDE, brother_paths.CODEX, brother_paths.CURSOR):
         return named
     return brother_paths.client(env) or brother_paths.CLAUDE
 
 
 def _default_argv(env=None):
-    if model_client(env) == brother_paths.CODEX:
+    """The vendor argv for THIS worker's own paid dispatch.
+
+    Reads BROTHER_MODEL_CLIENT directly rather than trusting model_client()'s
+    tolerant fallback. model_client() is also called from door.py's
+    decomposer/diagnostic paths, where treating an unrecognised value as
+    "unset" is harmless; here it decides which paid vendor actually runs the
+    unit, and only the wired adapters are allowed (claude, codex, cursor). A
+    unit told to run on "deepseek" or "muse" has no adapter in this file at
+    all, so silently running it on paid Claude instead (the old behaviour)
+    is how a session can believe work was delegated to OpenRouter while
+    every token was billed to the Claude account (found 2026-09-13,
+    founder-reported: Claude credits still spent when delegating to
+    DeepSeek/Muse). Refusing here makes that misconfiguration visible
+    instead: run_model() turns this ValueError into a named
+    failure_class=other rather than ever building the claude argv for it."""
+    env = os.environ if env is None else env
+    named = (env.get(MODEL_CLIENT_ENV) or "").strip().lower()
+    if named and named not in (
+            brother_paths.CLAUDE, brother_paths.CODEX, brother_paths.CURSOR):
+        raise ValueError(
+            "BROTHER_MODEL_CLIENT=%r names no adapter this worker has "
+            "(only %r); refusing rather than silently running the unit on "
+            "paid Claude" % (named, (brother_paths.CLAUDE, brother_paths.CODEX,
+                                      brother_paths.CURSOR)))
+    client = model_client(env)
+    if client == brother_paths.CODEX:
         return list(CODEX_ARGV)
+    if client == brother_paths.CURSOR:
+        return list(CURSOR_ARGV)
     return _claude_argv(env)
 
 
@@ -298,6 +348,19 @@ def _default_argv(env=None):
 USAGE_FIELD_MAP = {"tokens_in": "input_tokens", "tokens_out": "output_tokens",
                     "tokens_cached": "cache_read_input_tokens",
                     "tokens_cache_write": "cache_creation_input_tokens"}
+
+
+#: Cursor's own usage keys, camelCase rather than Anthropic's snake_case
+#: (measured live 2026-09-13, see CURSOR_ARGV above: "usage":
+#: {"inputTokens":30412,"outputTokens":90,"cacheReadTokens":0,
+#: "cacheWriteTokens":0}), renamed to the same build_cost_block names
+#: USAGE_FIELD_MAP renames Claude's to. Unlike Codex, Cursor's envelope
+#: carries a cache-write count, so tokens_cache_write is real here too, not
+#: an absent field the way CODEX_USAGE_FIELD_MAP deliberately omits it.
+CURSOR_USAGE_FIELD_MAP = {"tokens_in": "inputTokens",
+                          "tokens_out": "outputTokens",
+                          "tokens_cached": "cacheReadTokens",
+                          "tokens_cache_write": "cacheWriteTokens"}
 
 
 #: Codex's JSONL event names and token fields, read on 2026-09-04 from the
@@ -413,7 +476,7 @@ def _parse_codex_output(raw):
     return (claim or text), (usage or None)
 
 
-def _parse_model_output(raw):
+def _parse_model_output(raw, usage_field_map=USAGE_FIELD_MAP):
     """(claim_text, usage_or_None) from the model command's stdout.
 
     With --output-format json a real `claude -p` answer is one JSON object
@@ -422,7 +485,12 @@ def _parse_model_output(raw):
     test's plain-text stub via MODEL_WORKER_CMD, a malformed line, an
     unexpected shape) falls back to the raw text as the claim and NO usage:
     a worker that cannot read a structured answer must never invent token
-    counts for it."""
+    counts for it.
+
+    usage_field_map defaults to Claude's own USAGE_FIELD_MAP; Cursor's
+    envelope is the same shape ("result" beside a "usage" sub-object, see
+    CURSOR_ARGV above) with camelCase keys, so run_model passes
+    CURSOR_USAGE_FIELD_MAP instead of this parser being duplicated."""
     text = (raw or "").strip()
     if not text:
         return "(model produced no stdout)", None
@@ -437,7 +505,7 @@ def _parse_model_output(raw):
     raw_usage = parsed.get("usage")
     usage = {}
     if isinstance(raw_usage, dict):
-        for field, cli_key in USAGE_FIELD_MAP.items():
+        for field, cli_key in usage_field_map.items():
             val = raw_usage.get(cli_key)
             if isinstance(val, (int, float)) and not isinstance(val, bool):
                 usage[field] = val
@@ -568,7 +636,10 @@ def run_model(prompt, cwd=None, runner=None):
     whenever the model's stdout could not be read as --output-format json's
     shape (see _parse_model_output); it is never a fabricated number."""
     runner = runner or subprocess.run
-    argv = _model_argv(prompt)
+    try:
+        argv = _model_argv(prompt)
+    except ValueError as exc:
+        return False, "failure_class=other; %s" % exc, None
     timeout = _timeout_s()
     remaining = os.environ.get("BROTHER_UNIT_TIME_LEFT_S")
     if remaining is not None:
@@ -610,7 +681,8 @@ def run_model(prompt, cwd=None, runner=None):
     # driven through MODEL_WORKER_CMD falls back to the raw text with no
     # usage under both, which is the pre-C3 behaviour.
     stdout_text = (completed.stdout or "").strip()
-    if model_client() == brother_paths.CODEX:
+    client = model_client()
+    if client == brother_paths.CODEX:
         # SR-1: empty is a failure for codex too, not the literal claim
         # "(model produced no stdout)" the pure parser still returns for
         # anyone reading it directly.
@@ -621,10 +693,13 @@ def run_model(prompt, cwd=None, runner=None):
         claim, usage = _parse_codex_output(completed.stdout)
         return True, claim, usage
 
+    # CLAUDE and CURSOR share one envelope shape ("result" beside a "usage"
+    # sub-object, is_error alongside: see CURSOR_ARGV above), so they share
+    # this path too; only the usage field names differ, picked below.
     if not stdout_text:
         cls = classify_failure(empty=True)
-        return False, ("failure_class=%s; claude produced no stdout"
-                        % cls), None
+        return False, ("failure_class=%s; %s produced no stdout"
+                        % (cls, client)), None
     try:
         parsed = json.loads(stdout_text)
     except ValueError:
@@ -640,7 +715,9 @@ def run_model(prompt, cwd=None, runner=None):
             why, cls = foreign
             return False, ("failure_class=%s; model answer is not the "
                             "expected shape: %s" % (cls, why)), None
-    claim, usage = _parse_model_output(completed.stdout)
+    usage_map = (CURSOR_USAGE_FIELD_MAP if client == brother_paths.CURSOR
+                else USAGE_FIELD_MAP)
+    claim, usage = _parse_model_output(completed.stdout, usage_map)
     return True, claim, usage
 
 

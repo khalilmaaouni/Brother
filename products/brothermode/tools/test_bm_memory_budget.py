@@ -96,5 +96,25 @@ class MemoryBudget(unittest.TestCase):
                         "offender names the lines breach: %s" % out[:300])
 
 
+class Night0912BmMemoryBudget(unittest.TestCase):
+    """846092bd2c2e: when every matched MEMORY.md is unreadable (here, a
+    directory sitting where the file is expected, so open() raises), main
+    fell through to `return EXIT_OK` because `offenders` was empty, even
+    though nothing was actually checked. A scan that read nothing must
+    never report success."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="bm-membudget-night0912-")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_unreadable_file_does_not_report_success(self):
+        d = os.path.join(self.tmp, "proj", "memory", "MEMORY.md")
+        os.makedirs(d)  # MEMORY.md as a directory: matches the glob, unreadable as a file
+        code, out = run(["--root", self.tmp])
+        self.assertNotEqual(0, code, out[:200])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

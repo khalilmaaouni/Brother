@@ -156,5 +156,42 @@ class TestFixtureFileItself(unittest.TestCase):
                           % (case.get("id"), target))
 
 
+class Night0912BmVaultJbench(unittest.TestCase):
+    def test_undeclared_class_case_is_run(self):
+        spec = importlib.util.spec_from_file_location(
+            "bm_vault_jbench_night0912", TOOL)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        class BM:
+            def __init__(self):
+                self.calls = 0
+                self._default_vault = lambda: ""
+
+            def _schema(self, con):
+                con.execute("CREATE TABLE notes(id INTEGER PRIMARY KEY, path TEXT)")
+
+            def _upsert_note(self, con, path, title, *a):
+                con.execute("INSERT INTO notes(path) VALUES(?)", (path,))
+
+            def _search(self, con, text=None, limit=10, fast=True):
+                self.calls += 1
+                return ([(1, 1.0)], None, 1)
+
+        bm = BM()
+        fixture = {
+            "notes": [{"stem": "n1", "body": "b"}],
+            "cases": [
+                {"id": "c1", "query": "q", "class": "lexical_only", "expected_note": "n1"},
+                {"id": "c2", "query": "q", "class": "bogus", "expected_note": "n1"},
+            ],
+        }
+        per, overall, _detail = mod.run_benchmark(bm, fixture, limit=10)
+        self.assertEqual(bm.calls, 2)
+        self.assertEqual(overall, (2, 2))
+        self.assertIn("bogus", per)
+        self.assertEqual(per["bogus"], (1, 1))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,6 +1,6 @@
 {
   "name": "brothersbe",
-  "version": "3.7.3",
+  "version": "3.7.4",
   "description": "Make missing evidence visible on risky backend and data work, with PASS, FAIL, and NO-DATA kept distinct for human review.",
   "author": {
     "name": "Khalil Maaouni"

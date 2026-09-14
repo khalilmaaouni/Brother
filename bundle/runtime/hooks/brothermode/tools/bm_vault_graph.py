@@ -56,10 +56,23 @@ FRONT_RELATES = re.compile(r"^relates:\s*(.*)$", re.M)
 # runs both ways in meaning), resolved the same way, and a dangling target is a broken
 # edge the gate fails on, same as supersedes:.
 FRONT_CONTRADICTS = re.compile(r"^contradicts:\s*(.*)$", re.M)
+# The back-reference pair a superseded note must carry once some other note names it in
+# a supersedes: field: superseded_by: (a wikilink back to the superseding note, resolved
+# the same way as the fields above) and valid_to: (a plain date value, not a link, so
+# only non-emptiness is checked, never resolved).
+FRONT_SUPERSEDED_BY = re.compile(r"^superseded_by:\s*(.*)$", re.M)
+FRONT_VALID_TO = re.compile(r"^valid_to:\s*(.*)$", re.M)
+# The recording contract's aliases: field (17 notes in 40-Failures/ carry it as of
+# 2026-09-13): a YAML flow list of double-quoted strings, e.g.
+# aliases: ["n-a1c4e8f2b3d64a7c"], the note's own stable id copied in so
+# [[n-a1c4e8f2b3d64a7c]] resolves as a wikilink the way Obsidian's native alias
+# support already treats it. Matched like FRONT_TAGS (whole bracketed value on one
+# line); _parse_aliases below strips the quotes _resolve never has to see.
+FRONT_ALIASES = re.compile(r"^aliases:\s*\[(.*?)\]\s*$", re.M)
 
 ALLOWED_STATUS = {"open", "closed", "standing"}
 ALLOWED_TYPE = {"failure", "finding", "decision", "session-log", "overview", "index",
-                 "reference", "pattern"}
+                 "reference", "pattern", "log", "capture", "session", "context-pack"}
 
 
 def _vault_root(cli_vault):
@@ -156,6 +169,16 @@ def _project_prefix(source_stem):
     return source_dir + "/" if source_dir else ""
 
 
+def _parse_aliases(block):
+    """aliases: ["n-abc123", "another-alias"] (on-disk format confirmed against the
+    17 real 40-Failures/ notes 2026-09-13: always double-quoted, always a flow
+    list on one line). Empty or absent aliases: returns []."""
+    m = FRONT_ALIASES.search(block)
+    if not m:
+        return []
+    return [a.strip().strip('"').strip("'") for a in m.group(1).split(",") if a.strip()]
+
+
 def _build_indices(notes):
     exact = {}                # lower(stem) -> canonical stem
     by_basename = {}           # lower(basename) -> [stem, ...]
@@ -164,7 +187,47 @@ def _build_indices(notes):
         exact.setdefault(stem.lower(), stem)
         base = posixpath.basename(stem).lower()
         by_basename.setdefault(base, []).append(stem)
-    return exact, by_basename
+
+    # aliases: registers into the SAME exact dict _resolve already checks first, so
+    # [[n-abc123]] resolves exactly like a real vault-relative path would. Two
+    # different notes claiming the same alias is a genuine defect (only one of them
+    # can win the wikilink): the first note to claim it keeps the registration, every
+    # later claimant is reported as a duplicate_alias conflict rather than silently
+    # overwriting the index.
+    alias_owner = {}       # lower(alias) -> stem of the note that claimed it first
+    alias_conflicts = []   # [{"alias": alias, "notes": [stem, stem]}, ...]
+    for n in notes:
+        stem = n["stem"]
+        block = _frontmatter_block(n["body"])
+        if not block:
+            continue
+        for alias in _parse_aliases(block):
+            key = alias.lower()
+            if not key:
+                continue
+            owner = alias_owner.get(key)
+            if owner is not None and owner != stem:
+                alias_conflicts.append({"alias": alias, "notes": sorted([owner, stem])})
+                continue
+            # An alias equal to another note's basename would otherwise pre-empt
+            # that note's existing by_basename fallback resolution (exact is
+            # checked first in _resolve) and silently hijack every bare
+            # [[basename]] wikilink pointing at it -- found by adversarial review
+            # to affect 82% of the vault's wikilinks (bare-basename links
+            # outnumber path-qualified ones). Refuse the claim and report it the
+            # same way an alias-vs-alias collision is reported, rather than
+            # registering it.
+            basename_owners = [s for s in by_basename.get(key, []) if s != stem]
+            if basename_owners:
+                alias_conflicts.append({
+                    "alias": alias,
+                    "notes": sorted([stem] + basename_owners),
+                    "reason": "alias collides with an existing note's basename",
+                })
+                continue
+            alias_owner[key] = stem
+            exact.setdefault(key, stem)
+    return exact, by_basename, alias_conflicts
 
 
 def _resolve(link_clean, source_stem, exact, by_basename, file_index):
@@ -280,6 +343,30 @@ def _typed_edges(notes, exact, by_basename, file_index):
     }
 
 
+def _supersedes_pairing_violations(notes, exact, by_basename, file_index, supersedes):
+    """Every supersedes: edge (source note replaces target note) requires the TARGET
+    note's own frontmatter to carry superseded_by: naming the source back (resolved the
+    same wikilink way FRONT_SUPERSEDES already is, reusing _typed_edge_targets rather
+    than a second resolver) plus a non-empty valid_to:. Either missing means the
+    superseding relationship is one-sided, which is what this catches. Returns a list of
+    (source_stem, target_stem) pairs, one per violation."""
+    note_by_stem = {n["stem"]: n for n in notes}
+    violations = []
+    for source_stem, targets in supersedes.items():
+        for target_stem in targets:
+            target_note = note_by_stem.get(target_stem)
+            if target_note is None:
+                continue
+            block = _frontmatter_block(target_note["body"])
+            back_resolved, _back_broken = _typed_edge_targets(
+                block, FRONT_SUPERSEDED_BY, target_stem, exact, by_basename, file_index)
+            m = FRONT_VALID_TO.search(block)
+            has_valid_to = bool(m and m.group(1).strip())
+            if source_stem not in back_resolved or not has_valid_to:
+                violations.append((source_stem, target_stem))
+    return violations
+
+
 def _frontmatter_block(body):
     if not body.startswith("---"):
         return ""
@@ -348,7 +435,7 @@ def _is_generated(body):
 
 
 def _measure(vault_root, notes):
-    exact, by_basename = _build_indices(notes)
+    exact, by_basename, alias_conflicts = _build_indices(notes)
     file_index = _build_file_index(vault_root)
     wikilink_count = 0
     broken = []
@@ -425,6 +512,8 @@ def _measure(vault_root, notes):
     structural_orphan_pct = (round(100.0 * structural_orphan_count / len(notes), 2)
                               if notes else 0.0)
     typed = _typed_edges(notes, exact, by_basename, file_index)
+    supersedes_unpaired = _supersedes_pairing_violations(
+        notes, exact, by_basename, file_index, typed["supersedes"])
     rot = _rot_scan(vault_root, notes)
     return {
         "note_count": len(notes),
@@ -458,6 +547,17 @@ def _measure(vault_root, notes):
         "contradicts_edge_count": sum(len(v) for v in typed["contradicts"].values()) // 2,
         "typed_broken_count": len(typed["broken"]),
         "typed_broken": typed["broken"],
+        # The pairing lint: a supersedes: edge whose target does not carry a matching
+        # superseded_by:/valid_to: back-reference, named as {source, target} pairs so
+        # the message can read "unpaired supersedes: source -> target" the same
+        # direction supersedes: itself already reads in.
+        "supersedes_unpaired_count": len(supersedes_unpaired),
+        "supersedes_unpaired": [{"source": s, "target": t} for s, t in supersedes_unpaired],
+        # aliases: two different notes claiming the same alias means only one of
+        # them can win a [[wikilink]] to it, a genuine defect the same way a bad
+        # status/type value is: reported, never silently resolved one way.
+        "alias_conflicts_count": len(alias_conflicts),
+        "alias_conflicts": alias_conflicts,
         # VB4-07: rot detection, report-only, never a delete path.
         "empty_note_count": len(rot["empty_notes"]),
         "empty_notes": rot["empty_notes"],
@@ -494,6 +594,10 @@ def _measure_findings(stats):
     for b in stats["typed_broken"]:
         findings.append({"kind": "broken_%s_edge" % b["field"], "path": b["source"],
                           "detail": "[[%s]]" % b["link"]})
+    for c in stats["alias_conflicts"]:
+        findings.append({"kind": "duplicate_alias", "path": c["notes"][0],
+                          "detail": "%s also claimed by %s (alias %r)"
+                                    % (c["notes"][1], c["notes"][0], c["alias"])})
     for a in stats["ambiguous_resolved"]:
         findings.append({"kind": "ambiguous_resolved", "path": a["source"],
                           "detail": "[[%s]] -> %s" % (a["link"], a["resolved_to"])})
@@ -678,6 +782,18 @@ def cmd_check(args):
         violations.append("broken %s: %s -> [[%s]]" % (b["field"], b["source"], b["link"]))
         findings.append({"kind": "broken_%s_edge" % b["field"], "path": b["source"],
                           "detail": "[[%s]]" % b["link"]})
+    for u in stats["supersedes_unpaired"]:
+        violations.append(
+            "unpaired supersedes: %s -> %s (missing superseded_by/valid_to on the "
+            "superseded note)" % (u["source"], u["target"]))
+        findings.append({"kind": "unpaired_supersedes", "path": u["target"],
+                          "detail": u["source"]})
+    for c in stats["alias_conflicts"]:
+        violations.append("duplicate alias %r: %s and %s" % (
+            c["alias"], c["notes"][0], c["notes"][1]))
+        findings.append({"kind": "duplicate_alias", "path": c["notes"][0],
+                          "detail": "%s also claimed by %s (alias %r)"
+                                    % (c["notes"][1], c["notes"][0], c["alias"])})
     if json_out:
         verdict = "FAIL" if violations else "PASS"
         counts = dict(stats)
@@ -708,7 +824,7 @@ def cmd_edges(args):
     if not notes:
         print("NO-DATA: no markdown files found under %s" % vault)
         return 3
-    exact, by_basename = _build_indices(notes)
+    exact, by_basename, _alias_conflicts = _build_indices(notes)
     file_index = _build_file_index(vault)
     target, kind = _resolve(_clean_link(args.note), "", exact, by_basename, file_index)
     if target is None or kind not in ("note", "ambiguous"):

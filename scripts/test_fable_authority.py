@@ -217,6 +217,91 @@ class RecordAmber(unittest.TestCase):
         self.assertEqual(line['overrule_sentence'], 'Revert the restructure')
 
 
+class RecordRuling(unittest.TestCase):
+    """WBS-10.03 (docs/decisions/ruling-not-stall-2026-09-13.json). A ruling
+    is admitted only when all eight fields are present, autonomy_dial
+    classifies the observables A0, and check_passed_before is exactly
+    False (the check discriminated: red before, green after)."""
+
+    def _fields(self):
+        return dict(
+            question='rename the local helper for clarity?',
+            choice='rename it',
+            reason='pure rename, no behavior change',
+            evidence='grep shows one call site, updated in the same diff',
+            cost_if_wrong='a five-minute revert',
+            deciding_check='python3 scripts/test_x.py',
+            reversibility='minutes',
+            human_override_path='Revert the rename',
+        )
+
+    def _observables_a0(self):
+        return dict(single_file_or_named_target=True, contract_change='none',
+                    crosses_boundary=False, reversible_under_hour=True)
+
+    def test_written_when_a0_and_check_discriminated(self):
+        path = os.path.join(tempfile.mkdtemp(), 'ruling.jsonl')
+        entry = fa.record_ruling(observables=self._observables_a0(),
+                                  check_passed_before=False, path=path,
+                                  **self._fields())
+        self.assertIsNotNone(entry)
+        self.assertEqual(entry['status'], 'RULED-FABLE')
+        self.assertEqual(entry['human_override_path'], 'Revert the rename')
+        with open(path, encoding='utf-8') as fh:
+            line = json.loads(fh.readline())
+        self.assertEqual(line['question'], self._fields()['question'])
+
+    def test_refused_when_a_required_field_is_missing(self):
+        for missing in self._fields():
+            fields = self._fields()
+            fields[missing] = ''
+            entry = fa.record_ruling(observables=self._observables_a0(),
+                                      check_passed_before=False,
+                                      path=os.path.join(tempfile.mkdtemp(), 'r.jsonl'),
+                                      **fields)
+            self.assertIsNone(entry, 'missing %r should refuse' % missing)
+
+    def test_refused_when_classify_is_not_a0(self):
+        """An observables dict naming nothing lands A2 per autonomy_dial's
+        own contract, never A0."""
+        entry = fa.record_ruling(observables={}, check_passed_before=False,
+                                  path=os.path.join(tempfile.mkdtemp(), 'r.jsonl'),
+                                  **self._fields())
+        self.assertIsNone(entry)
+
+    def test_refused_when_check_passed_before_true(self):
+        """The check already passed before the work began, so it could not
+        have caught a wrong choice: not a ruling."""
+        entry = fa.record_ruling(observables=self._observables_a0(),
+                                  check_passed_before=True,
+                                  path=os.path.join(tempfile.mkdtemp(), 'r.jsonl'),
+                                  **self._fields())
+        self.assertIsNone(entry)
+
+    def test_refused_when_check_passed_before_none(self):
+        """NO-DATA: nothing could be measured, so it is never admitted."""
+        entry = fa.record_ruling(observables=self._observables_a0(),
+                                  check_passed_before=None,
+                                  path=os.path.join(tempfile.mkdtemp(), 'r.jsonl'),
+                                  **self._fields())
+        self.assertIsNone(entry)
+
+    def test_defaults_to_ruling_log_when_no_path_given(self):
+        """RS-5: the session-scoped default, same seam as record_amber's
+        own default-when-no-path-given."""
+        saved = fa.RULING_LOG
+        d = tempfile.mkdtemp()
+        try:
+            fa.RULING_LOG = os.path.join(d, 'ruling-records.jsonl')
+            entry = fa.record_ruling(observables=self._observables_a0(),
+                                      check_passed_before=False,
+                                      **self._fields())
+            self.assertIsNotNone(entry)
+            self.assertTrue(os.path.isfile(fa.RULING_LOG))
+        finally:
+            fa.RULING_LOG = saved
+
+
 class QueueRed(unittest.TestCase):
     def test_a_red_decision_is_queued_never_acted_on(self):
         path = os.path.join(tempfile.mkdtemp(), 'r.jsonl')

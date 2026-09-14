@@ -133,10 +133,38 @@ LAUNCHER_NAME = "brother-run"
 VERIFIER_NAME = "verify_runtime.py"
 #: The two products whose hooks.json a Codex-only or Claude-only install
 #: must still carry, in the order their commands appear in the merged
-#: bundle/hooks/hooks.json (brothermode first, per the brief).
+#: bundle/hooks/union.json (brothermode first, per the brief).
 HOOK_PRODUCTS = ("brothermode", "brothersbe")
-HOOKS_JSON_NAME = "hooks.json"
+#: DECISION 2026-09-13: this file is NEVER named "hooks.json". Claude Code
+#: auto-loads an installed plugin's own hooks/hooks.json by convention, and
+#: brother ALSO declares brothermode+brothersbe as real plugin dependencies
+#: (needed for their 15 slash-commands), which Claude auto-enables and which
+#: register these same hook events themselves. A brother-owned hooks.json at
+#: the conventional path made every shared hook fire twice, all session, on
+#: Claude Code -- the only host left reading it (Codex's plugin validator
+#: refuses any manifest carrying a "hooks" key at all; Cursor has its own
+#: separate live generator, scripts/cursor_plugin_install.py). Naming this
+#: output "union.json" instead is the whole fix: check_hooks() below also
+#: actively refuses a resurrected bundle/hooks/hooks.json, so moving this
+#: back is a red gate, not a quiet regression.
+HOOKS_JSON_NAME = "union.json"
+#: The retired path check_hooks() must never find populated again.
+RETIRED_HOOKS_JSON_NAME = "hooks.json"
+#: What a PRODUCT's own hooks file is named on disk (products/<name>/hooks/
+#: this), which is NOT renamed and never will be: Codex's own installer
+#: (codex_hooks_install.py) and Cursor's (cursor_plugin_install.py) both
+#: read a product's hooks straight from this exact name. Only brother's
+#: OWN merged output (HOOKS_JSON_NAME above) moved; a product's source file
+#: did not, so this is a separate constant, not a reuse of HOOKS_JSON_NAME.
+PRODUCT_HOOKS_JSON_NAME = "hooks.json"
 HOOKS_MANIFEST_NAME = "HOOKS-MANIFEST.json"
+#: The one product that ships an optional MCP server today. Its
+#: mcp/bm_mcp_server.py is not part of any hooks.json closure (nothing
+#: calls it via a hook), so it needs its own small mirror step below
+#: rather than folding into compute_hook_closure.
+MCP_PRODUCT = "brothermode"
+MCP_SERVER_NAME = "bm_mcp_server.py"
+MCP_JSON_NAME = "mcp.json"
 #: Matches the exact command shape every hook in both products uses:
 #: `... "${CLAUDE_PLUGIN_ROOT}/tools/<name>.py" ...`.
 _HOOK_TOOL_RE = re.compile(
@@ -434,7 +462,7 @@ def _load_hooks_json(product, products_dir=PRODUCTS_DIR):
     """The hooks.json `product` ships, or None when it is absent or not
     readable JSON. Never raises: a product carrying no hooks/hooks.json
     contributes nothing to the mirror rather than failing the whole run."""
-    path = os.path.join(products_dir, product, "hooks", HOOKS_JSON_NAME)
+    path = os.path.join(products_dir, product, "hooks", PRODUCT_HOOKS_JSON_NAME)
     try:
         with open(path, encoding="utf-8") as fh:
             return json.load(fh)
@@ -590,7 +618,8 @@ def _rewrite_plugin_root_command(command, product):
 
 
 def merged_hooks_doc(products=HOOK_PRODUCTS, products_dir=PRODUCTS_DIR):
-    """bundle/hooks/hooks.json's content: the union of every named
+    """bundle/hooks/union.json's content (see HOOKS_JSON_NAME): the union
+    of every named
     product's own hooks.json, each command rewritten to its mirrored
     location, `products`' own order preserved (brothermode's event order
     first, then any event brothersbe alone carries); within one event,
@@ -651,7 +680,8 @@ def generate_hooks(products=HOOK_PRODUCTS, products_dir=PRODUCTS_DIR,
     """Mirrors every named product's hook-tool closure into
     bundle/runtime/hooks/<product>/tools/, writes their manifest
     (bundle/runtime/hooks/HOOKS-MANIFEST.json), and writes
-    bundle/hooks/hooks.json. Returns (hook_counts, changed): hook_counts is
+    bundle/hooks/union.json (see HOOKS_JSON_NAME). Returns (hook_counts,
+    changed): hook_counts is
     {product: command_count reported by that product's own hooks.json},
     changed is the list of paths (relative to the bundle root) written or
     updated."""
@@ -690,8 +720,9 @@ def generate_hooks(products=HOOK_PRODUCTS, products_dir=PRODUCTS_DIR,
 
 def check_hooks(products=HOOK_PRODUCTS, products_dir=PRODUCTS_DIR,
                runtime_dir=RUNTIME_DIR):
-    """Read-only: do bundle/runtime/hooks/ and bundle/hooks/hooks.json
-    match products/*/hooks/ right now? Returns (ok, problems); never
+    """Read-only: do bundle/runtime/hooks/ and bundle/hooks/union.json
+    match products/*/hooks/ right now, and does the retired
+    bundle/hooks/hooks.json stay gone? Returns (ok, problems); never
     writes anything."""
     problems = []
     for product in products:
@@ -748,6 +779,100 @@ def check_hooks(products=HOOK_PRODUCTS, products_dir=PRODUCTS_DIR,
         problems.append("hooks/%s: stale, does not match a fresh "
                         "generation from the products' own hooks.json"
                         % HOOKS_JSON_NAME)
+    # DECISION 2026-09-13 (see HOOKS_JSON_NAME above): a file at the retired
+    # conventional name means brother would double-fire every shared hook on
+    # Claude Code again. This is a hard FAIL, not a warning, and it fires
+    # whether the file reappeared by a bad merge, a manual edit, or someone
+    # "fixing" this generator back to its old name.
+    retired_path = os.path.join(bundle_dir, "hooks", RETIRED_HOOKS_JSON_NAME)
+    if os.path.isfile(retired_path):
+        problems.append("hooks/%s: must not exist (retired 2026-09-13 -- "
+                        "its presence double-fires every shared hook on "
+                        "Claude Code; see HOOKS_JSON_NAME's docstring)"
+                        % RETIRED_HOOKS_JSON_NAME)
+    return (not problems), problems
+
+
+def _mcp_server_src(product=MCP_PRODUCT, products_dir=PRODUCTS_DIR):
+    """Path to `product`'s own mcp/bm_mcp_server.py, or None when the
+    product ships no MCP server. The component is OPTIONAL: its absence
+    is not an error anywhere in this module, only nothing to mirror."""
+    path = os.path.join(products_dir, product, "mcp", MCP_SERVER_NAME)
+    return path if os.path.isfile(path) else None
+
+
+def _mcp_json_bytes(product=MCP_PRODUCT):
+    """bundle/mcp.json's content. Deliberately NOT a copy of
+    products/<product>/mcp.json's own dev-checkout template (cwd
+    ${PLUGIN_ROOT}, args mcp/bm_mcp_server.py): nothing mirrors a server
+    to ${PLUGIN_ROOT}/mcp/ in the installed umbrella layout. The settled
+    U3 checkout contract (bm_cursor.py's find_checkout) nests the real
+    checkout at runtime/hooks/<product>/, and this generator mirrors the
+    server into runtime/hooks/<product>/mcp/, sibling to the tools/
+    mirror already there, so cwd must point at that same nested root for
+    the server's own __file__-relative sibling lookup
+    (mcp/bm_mcp_server.py's ../tools/bm_store.py) to resolve at all."""
+    doc = {
+        "mcpServers": {
+            product: {
+                "command": "python3",
+                "args": ["mcp/" + MCP_SERVER_NAME],
+                "cwd": "${PLUGIN_ROOT}/runtime/hooks/%s" % product,
+            }
+        }
+    }
+    return (json.dumps(doc, indent=2, sort_keys=True) + "\n").encode("utf-8")
+
+
+def generate_mcp(product=MCP_PRODUCT, products_dir=PRODUCTS_DIR,
+                 runtime_dir=RUNTIME_DIR):
+    """Mirrors `product`'s optional mcp/bm_mcp_server.py next to its
+    already-mirrored tools/ (runtime/hooks/<product>/mcp/, sibling of
+    runtime/hooks/<product>/tools/), and writes bundle/mcp.json pointing
+    at it. Returns the list of changed paths (relative to the bundle
+    root); [] when the product ships no MCP server (nothing to mirror,
+    nothing written: an optional component absent from products/ is not
+    drift) or a fresh generation changed nothing."""
+    src = _mcp_server_src(product, products_dir)
+    if src is None:
+        return []
+    changed = []
+    dst = os.path.join(runtime_dir, "hooks", product, "mcp", MCP_SERVER_NAME)
+    if _write_if_changed(dst, _read_bytes(src)):
+        changed.append("runtime/hooks/%s/mcp/%s" % (product, MCP_SERVER_NAME))
+    bundle_dir = os.path.dirname(runtime_dir)
+    mcp_json_path = os.path.join(bundle_dir, MCP_JSON_NAME)
+    if _write_if_changed(mcp_json_path, _mcp_json_bytes(product)):
+        changed.append(MCP_JSON_NAME)
+    return changed
+
+
+def check_mcp(product=MCP_PRODUCT, products_dir=PRODUCTS_DIR,
+             runtime_dir=RUNTIME_DIR):
+    """Read-only: does bundle/runtime/hooks/<product>/mcp/ and
+    bundle/mcp.json match a fresh generation right now? Returns (ok,
+    problems); never writes. A product that ships no
+    mcp/bm_mcp_server.py is OK with no problems: the component is
+    optional, and nothing to mirror is not drift."""
+    src = _mcp_server_src(product, products_dir)
+    if src is None:
+        return True, []
+    problems = []
+    dst = os.path.join(runtime_dir, "hooks", product, "mcp", MCP_SERVER_NAME)
+    if not os.path.isfile(dst):
+        problems.append("runtime/hooks/%s/mcp/%s: missing from "
+                        "bundle/runtime" % (product, MCP_SERVER_NAME))
+    elif _read_bytes(src) != _read_bytes(dst):
+        problems.append("runtime/hooks/%s/mcp/%s: bundle/runtime copy "
+                        "does not match its products/ source"
+                        % (product, MCP_SERVER_NAME))
+    bundle_dir = os.path.dirname(runtime_dir)
+    mcp_json_path = os.path.join(bundle_dir, MCP_JSON_NAME)
+    if not os.path.isfile(mcp_json_path):
+        problems.append("%s: missing" % MCP_JSON_NAME)
+    elif _read_bytes(mcp_json_path) != _mcp_json_bytes(product):
+        problems.append("%s: stale, does not match a fresh generation"
+                        % MCP_JSON_NAME)
     return (not problems), problems
 
 
@@ -1014,18 +1139,21 @@ def main(argv=None):
         ok, problems, closure = check()
         cs_ok, cs_problems = CS.check()
         hooks_ok, hooks_problems = check_hooks()
-        if ok and cs_ok and hooks_ok:
+        mcp_ok, mcp_problems = check_mcp()
+        if ok and cs_ok and hooks_ok and mcp_ok:
             total_hook_commands = sum(
                 count_hook_commands(_load_hooks_json(p) or {"hooks": {}})
                 for p in HOOK_PRODUCTS)
             print("bundle_runtime: bundle/runtime matches scripts/ for all "
                   "%d closure file(s) and %d data file(s), bundle/codex-skills "
-                  "matches bundle/skills, and bundle/hooks/hooks.json matches "
-                  "%d hook command(s) across %d product(s)"
+                  "matches bundle/skills, bundle/hooks/%s matches "
+                  "%d hook command(s) across %d product(s), and the optional "
+                  "MCP mirror matches products/%s"
                   % (len(closure), len(compute_data_files(closure)),
-                     total_hook_commands, len(HOOK_PRODUCTS)))
+                     HOOKS_JSON_NAME, total_hook_commands, len(HOOK_PRODUCTS),
+                     MCP_PRODUCT))
             return 0
-        for problem in problems + cs_problems + hooks_problems:
+        for problem in problems + cs_problems + hooks_problems + mcp_problems:
             print("bundle_runtime: DRIFT: %s" % problem, file=sys.stderr)
         return 1
 
@@ -1037,8 +1165,9 @@ def main(argv=None):
 
     closure, changed = generate()
     hook_counts, hooks_changed = generate_hooks()
+    mcp_changed = generate_mcp()
     changed = (changed + ["codex-skills/" + c for c in cs_changed]
-              + hooks_changed)
+              + hooks_changed + mcp_changed)
     if changed:
         print("bundle_runtime: wrote %d file(s): %s"
               % (len(changed), ", ".join(changed)))
@@ -1046,9 +1175,9 @@ def main(argv=None):
         print("bundle_runtime: no changes; bundle/runtime already matches "
               "scripts/ for %d closure file(s) and %d data file(s)"
               % (len(closure), len(compute_data_files(closure))))
-    print("bundle_runtime: bundle/hooks/hooks.json carries %d hook "
+    print("bundle_runtime: bundle/hooks/%s carries %d hook "
           "command(s) across %d product(s) (%s)"
-          % (sum(hook_counts.values()), len(hook_counts),
+          % (HOOKS_JSON_NAME, sum(hook_counts.values()), len(hook_counts),
              ", ".join("%s=%d" % (p, n) for p, n in hook_counts.items())))
     return 0
 

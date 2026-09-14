@@ -218,5 +218,15 @@ class ExitCodes(unittest.TestCase):
         self.assertEqual(code_unattr, 2)
 
 
+class Night0912WriteLedger(unittest.TestCase):
+    def test_non_object_json_line_is_skipped_not_raised(self):
+        with tempfile.TemporaryDirectory() as td:
+            ledger = os.path.join(td, 'ledger.jsonl')
+            with open(ledger, 'w', encoding='utf-8') as fh:
+                fh.write('null\n')
+            verdict, _why = wl.attribute('some/file.py', 'sess', ledger_path=ledger)
+        self.assertEqual(wl.UNATTRIBUTED, verdict)
+
+
 if __name__ == '__main__':
     unittest.main()

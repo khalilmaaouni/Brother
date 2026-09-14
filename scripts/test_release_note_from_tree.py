@@ -1038,5 +1038,25 @@ class ThePreflightStepRunsBeforeTheLongSteps(unittest.TestCase):
             step_4_body)
 
 
+class Night0912ReleaseNoteFromTree(unittest.TestCase):
+    def test_previous_release_line_ignores_quoted_placeholder(self):
+        import export_public as EXP  # noqa: E402, already on sys.path via R
+        d = tempfile.mkdtemp()
+        try:
+            stamp = "Cut from hub commit `" + "a" * 40 + "` (hub, private)."
+            text = ("%s\n\n%s\n\nSee also 0.9.11.md, whose note still "
+                    "reads \"%s\".\n"
+                    % (EXP.SOURCE_REVISION_HEADER, stamp,
+                       EXP.SOURCE_REVISION_PLACEHOLDER))
+            with open(os.path.join(d, "1.0.0.md"), "w", encoding="utf-8") as f:
+                f.write(text)
+            line = R.previous_release_line("1.0.1", releases_dir=d)
+            self.assertIn("Previous release", line)
+            self.assertIn("was cut from hub commit", line)
+            self.assertIn("a" * 40, line)
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main()

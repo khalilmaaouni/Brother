@@ -1040,6 +1040,355 @@ def silent_failure_lints(ctx=None):
     return "PASS", "%d file(s) scanned under %s, clean%s" % (scanned, root, note)
 
 
+# Agent-brief hygiene: the same silent-failure-lint family, aimed at the agent
+# `.md` briefs this repository dispatches subagents from
+# (products/brothersbe/*/agents/*.md, products/brothermode/*/agents/*.md).
+# Mirrors Microsoft's Foundry deck's tool-design table (concise descriptions,
+# one sentence per tool/parameter, load only what is context-relevant) and
+# closes a documented failure mode with a mechanical check rather than a
+# maintainer's memory: BMAD-METHOD's own GitHub Issue #1343 measured agents
+# burning 67%+ of a 200K context window at activation from unminimized
+# loading, and the maintainer's only fix was manual discipline, never a lint.
+#
+# Scoped to this repo's own frontmatter shape (grepped, not guessed):
+# products/brothersbe/agents/*.md carries a bracket `tools:` allowlist
+# (`tools: [Read, Grep, Glob, Bash]`); products/brothermode/agents/*.md
+# instead carries `disallowedTools:` and no `tools:` line at all. A brief
+# with no `tools:` list has nothing this check can compare against its
+# description, so it is counted and named, never silently skipped and never
+# treated as a hit.
+_AGENT_TOOLS_RX = re.compile(r'^tools:\s*\[(.*?)\]')
+_AGENT_DESC_RX = re.compile(r'^description:\s*(.*)$')
+
+# The phrase this repo's own read-only reviewer agents actually use to
+# declare themselves (grepped across products/brothersbe/agents/*.md,
+# 2026-09-13): every one opens its description with "Read-only ..." and
+# repeats the promise in its body ("You are **read-only**"). A tools list
+# naming a write-capable tool is irrelevant to a description that makes that
+# promise, which is exactly the calibration this check needs: not "Write is
+# ever wrong", but "Write is wrong on a brief whose own words rule it out".
+_AGENT_READONLY_DESC_RX = re.compile(r'\bread-only\b', re.I)
+_AGENT_WRITE_TOOLS = ("Write", "Edit", "NotebookEdit")
+
+# ~200 characters is about the length of one dense, well-written sentence
+# (30-35 words). Measured against every real agent brief in this repository
+# (2026-09-13): the shortest multi-sentence descriptions here (researcher.md,
+# 167 chars; fast-worker.md, 198 chars) still read under this bar, while
+# every products/brothersbe/agents/*.md reviewer description (247-416 chars)
+# reads over it. A description this long is the per-brief shape of
+# BMAD-METHOD #1343's finding: text an orchestrator reloads on every dispatch
+# decision, written well past the one sentence Foundry's table asks for.
+AGENT_DESC_MAX_CHARS = 200
+
+
+def _agent_brief_exemption(line):
+    """The waiving reason on this line, or None. Same rule as LINT_PATTERNS:
+    the marker alone waives nothing, and neither does its own text echoed
+    back as the reason."""
+    if EXEMPTION not in line:
+        return None
+    reason = answered(line.split(EXEMPTION, 1)[1])
+    if not reason or EXEMPTION in reason or len(reason) < 8 or len(reason.split()) < 2:
+        return None
+    return reason
+
+
+def check_agent_brief_hygiene(ctx=None):
+    """Agent-brief `.md` files whose frontmatter would burn context at dispatch
+    time, returning (verdict, evidence). Opt-in via a positional dir arg or
+    SBE_LINT_ROOT, exactly like silent_failure_lints, so this never scans a
+    tree nobody pointed it at.
+
+    Two findings, both read straight off the frontmatter's first 40 lines:
+      (a) the `tools:` list carries Write, Edit or NotebookEdit while the
+          description promises read-only behaviour;
+      (b) the description exceeds AGENT_DESC_MAX_CHARS.
+    A `# sbe: allow-silent <reason>` comment on the offending line waives
+    that one finding, the same convention and the same substantive-reason
+    floor as the source lints above.
+    """
+    root = os.environ.get("SBE_LINT_ROOT")
+    for a in sys.argv[1:]:
+        if not a.startswith("-") and os.path.isdir(a):
+            root = a
+    if not root:
+        return "NO-DATA", ("no lint root: pass a directory or set SBE_LINT_ROOT. Nothing was "
+                           "opened, so there is nothing to call clean")
+    if not os.path.isdir(root):
+        return "FAIL", "SBE_LINT_ROOT=%s is not a directory, so no agent brief was scanned" % root
+    briefs, unopened = [], []
+    pruner = Pruner()
+    for dp, dns, fns in os.walk(root, onerror=pruner.onerror):
+        dns[:] = pruner(dp, dns)
+        if os.path.basename(dp) != "agents":
+            continue
+        for fn in sorted(fns):
+            if not fn.endswith(".md"):
+                continue
+            path = os.path.join(dp, fn)
+            problem = evidence_problem(path)
+            if problem:
+                unopened.append("%s (%s)" % (os.path.relpath(path, root), problem))
+                continue
+            try:
+                lines = open(path, encoding="utf-8", errors="replace").read().splitlines()
+            except OSError as e:
+                unopened.append("%s (%s)" % (os.path.relpath(path, root), type(e).__name__))
+                continue
+            briefs.append((os.path.relpath(path, root), lines))
+    if unopened or pruner.denied:
+        refused = sorted(set(unopened)) + sorted(set(pruner.denied))
+        return "FAIL", ("%d agent brief(s) or director(y/ies) under %s exist and could not be "
+                        "read (%s); a brief this check cannot open is a broken record, not a "
+                        "clean one" % (len(refused), root, _first_named(refused, "; ")))
+    if not briefs:
+        return "NO-DATA", ("no */agents/*.md file found under %s, so no agent brief was "
+                           "examined" % root)
+
+    hits, exempt, no_tools_list, vacuous_files = [], [], [], []
+    for rel, lines in briefs:
+        # Rendered, the way check_vault_log_per_active_day and _registry_lines
+        # already read their evidence: a brief whose whole body sits inside an
+        # HTML comment, or holds nothing but whitespace or a placeholder
+        # ("TODO", "-", "N/A" in any of the disguises `vacuous()` already
+        # reads), declares no frontmatter a reader can see. Scanning the RAW
+        # text anyway would find a `tools:` line hiding inside the comment and
+        # certify it as real, which is the exact rendered-vs-raw defect this
+        # file's own docstrings describe elsewhere; scanning nothing and still
+        # calling it "clean" is the emptiness defect this whole project exists
+        # to catch. Neither is safe, so a vacuous brief is disclosed and
+        # excluded from both the hit scan and the clean count.
+        rendered = without_comments("\n".join(lines))
+        if not rendered.strip() or all_vacuous(rendered) or vacuous(rendered):
+            vacuous_files.append(rel)
+            continue
+        rlines = rendered.splitlines()
+        tools_m = tools_i = desc_m = desc_i = None
+        for i, line in enumerate(rlines[:40]):   # frontmatter is the file's own opening lines
+            if tools_m is None:
+                m = _AGENT_TOOLS_RX.match(line)
+                if m:
+                    tools_m, tools_i = m, i
+            if desc_m is None:
+                m = _AGENT_DESC_RX.match(line)
+                if m:
+                    desc_m, desc_i = m, i
+        if tools_m is None:
+            no_tools_list.append(rel)
+        else:
+            tools = [t.strip() for t in tools_m.group(1).split(",") if t.strip()]
+            desc = desc_m.group(1) if desc_m else ""
+            if _AGENT_READONLY_DESC_RX.search(desc):
+                bad = sorted(set(tools) & set(_AGENT_WRITE_TOOLS))
+                if bad:
+                    reason = _agent_brief_exemption(rlines[tools_i])
+                    if reason:
+                        exempt.append("%s:%d" % (rel, tools_i + 1))
+                    else:
+                        hits.append("%s:%d tools list carries %s while the description promises "
+                                   "read-only behavior" % (rel, tools_i + 1, ", ".join(bad)))
+        if desc_m is not None:
+            desc_text = desc_m.group(1).split(EXEMPTION, 1)[0].rstrip(" #").strip()
+            if len(desc_text) > AGENT_DESC_MAX_CHARS:
+                reason = _agent_brief_exemption(rlines[desc_i])
+                if reason:
+                    exempt.append("%s:%d" % (rel, desc_i + 1))
+                else:
+                    hits.append("%s:%d description is %d chars, over the %d-char one-sentence "
+                               "budget" % (rel, desc_i + 1, len(desc_text), AGENT_DESC_MAX_CHARS))
+    scanned = len(briefs)
+    if vacuous_files and len(vacuous_files) == scanned:
+        # Every brief found renders as nothing: empty, wrapped whole in an
+        # HTML comment, or holding only a placeholder. That is not a clean
+        # tree, it is zero tools-vs-description comparisons, the same "clean
+        # sentence over a set of files nobody could examine" defect this file's
+        # docstring names for silent_failure_lints' own empty_files branch.
+        return "NO-DATA", ("%d agent brief(s) found under %s and every one of them renders as "
+                           "empty (blank, wholly commented out, or holding nothing but a "
+                           "placeholder), so no frontmatter was examined and there is nothing "
+                           "to call clean" % (scanned, root))
+    note = ""
+    if no_tools_list:
+        note += ("; %d brief(s) carry no `tools:` list (disallowedTools or none), so no tools-vs-"
+                "description comparison was made for them: %s"
+                % (len(no_tools_list), _first_named(sorted(no_tools_list), ", ")))
+    if vacuous_files:
+        note += ("; %d of the %d brief(s) found render as empty (blank, commented out, or a "
+                "placeholder) and were not examined for either finding: %s"
+                % (len(vacuous_files), scanned, _first_named(sorted(vacuous_files), ", ")))
+    if hits:
+        return "FAIL", ("%d hit(s) in %d agent brief(s) scanned: %s%s"
+                        % (len(hits), scanned, _first_named(hits), note))
+    if exempt:
+        return "PASS", ("%d agent brief(s) scanned under %s, 0 unexempted hit(s), %d suppressed "
+                        "by an inline `%s` comment (%s)%s"
+                        % (scanned, root, len(exempt), EXEMPTION, _first_named(exempt, ", "), note))
+    return "PASS", "%d agent brief(s) scanned under %s, clean%s" % (scanned, root, note)
+
+
+# Agent-brief cache-order hygiene: same family and same SBE_LINT_ROOT root as
+# check_agent_brief_hygiene just above, aimed at a different failure mode in
+# the same files. Microsoft's Foundry prompt-cache anatomy guidance puts
+# stable content (identity, constraints, tool definitions) FIRST and volatile
+# content (the actual task, retrieved context) LAST, because one early token
+# invalidates every cached token that follows it. Token-shield's own measured
+# multipliers give this a cost, not just a shape: a cache write on an
+# invalidated prefix bills 1.25x-2x base input, a cache read only 0.1x
+# (~/SaveClaudeTokens/README.md), so a brief that puts a concrete scenario or
+# file path ahead of its role statement pays the write price on every
+# dispatch instead of the read price.
+#
+# Calibrated against this repository's own real agent `.md` files (grepped,
+# 2026-09-13, never invented): products/brothersbe/agents/backend-reviewer.md
+# opens "You review backend changes. You are **read-only**...";
+# products/brothersbe/agents/implementation-worker.md opens "You implement
+# one task from one `sbe work brief`..."; products/brothermode/agents/
+# builder.md opens "You are the Builder...". Every real brief states identity
+# before anything concrete. That is the shape this check enforces: the first
+# non-blank body line either opens with identity, or it is flagged for
+# opening with a concrete path, a quoted request, or a named scenario instead.
+_AGENT_IDENTITY_RX = re.compile(
+    r"^You(?:'re| are| review| implement| analyze| investigate| write| act| produce| hold| work)\b",
+    re.I)
+# 3+ path segments ending in a file extension: the shape a concrete "the file
+# you're working on" reference takes in this repo's own prose, e.g.
+# "products/brothersbe/tools/sbe_score.py" or an absolute "/Users/.../x.py".
+_AGENT_PATH_RX = re.compile(r"(?:/|\b[\w.\-]+/)[\w.\-]+/[\w.\-]+\.\w{1,6}\b")
+# A quoted sentence (contains a space, 8+ chars past it): a verbatim request,
+# not a short code-identifier quote.
+_AGENT_QUOTE_RX = re.compile(r'"[^"\n]*\s[^"\n]{8,}"')
+_AGENT_SCENARIO_RX = re.compile(
+    r"^(?:Fix|Implement|Debug|Investigate|Review|Add|Update)\b.{10,}"
+    r"|^The user (?:wants|asked|requested|said)\b",
+    re.I)
+
+
+def _agent_brief_variable_content(line):
+    """Why this line reads as concrete/variable content, or None."""
+    if _AGENT_PATH_RX.search(line):
+        return "a concrete file path"
+    if _AGENT_QUOTE_RX.search(line):
+        return "a quoted request"
+    if _AGENT_SCENARIO_RX.match(line):
+        return "a concrete scenario"
+    return None
+
+
+def check_agent_brief_cache_order(ctx=None):
+    """Agent `.md` briefs whose opening body line states a concrete scenario,
+    file path, or quoted request before the stable identity/role sentence,
+    returning (verdict, evidence). Same opt-in (SBE_LINT_ROOT or a positional
+    dir), same */agents/*.md discovery, and the same vacuous-file exclusion
+    as check_agent_brief_hygiene, so a brief examined by one is examined by
+    the other under the same root.
+
+    Soft, not gate, like agent-brief-hygiene beside it: a fresh heuristic,
+    not yet hardened by rounds of review.
+    """
+    root = os.environ.get("SBE_LINT_ROOT")
+    for a in sys.argv[1:]:
+        if not a.startswith("-") and os.path.isdir(a):
+            root = a
+    if not root:
+        return "NO-DATA", ("no lint root: pass a directory or set SBE_LINT_ROOT. Nothing was "
+                           "opened, so there is nothing to call clean")
+    if not os.path.isdir(root):
+        return "FAIL", "SBE_LINT_ROOT=%s is not a directory, so no agent brief was scanned" % root
+    briefs, unopened = [], []
+    pruner = Pruner()
+    for dp, dns, fns in os.walk(root, onerror=pruner.onerror):
+        dns[:] = pruner(dp, dns)
+        if os.path.basename(dp) != "agents":
+            continue
+        for fn in sorted(fns):
+            if not fn.endswith(".md"):
+                continue
+            path = os.path.join(dp, fn)
+            problem = evidence_problem(path)
+            if problem:
+                unopened.append("%s (%s)" % (os.path.relpath(path, root), problem))
+                continue
+            try:
+                lines = open(path, encoding="utf-8", errors="replace").read().splitlines()
+            except OSError as e:
+                unopened.append("%s (%s)" % (os.path.relpath(path, root), type(e).__name__))
+                continue
+            briefs.append((os.path.relpath(path, root), lines))
+    if unopened or pruner.denied:
+        refused = sorted(set(unopened)) + sorted(set(pruner.denied))
+        return "FAIL", ("%d agent brief(s) or director(y/ies) under %s exist and could not be "
+                        "read (%s); a brief this check cannot open is a broken record, not a "
+                        "clean one" % (len(refused), root, _first_named(refused, "; ")))
+    if not briefs:
+        return "NO-DATA", ("no */agents/*.md file found under %s, so no agent brief was "
+                           "examined" % root)
+
+    hits, exempt, vacuous_files, no_body = [], [], [], []
+    for rel, lines in briefs:
+        rendered = without_comments("\n".join(lines))
+        if not rendered.strip() or all_vacuous(rendered) or vacuous(rendered):
+            vacuous_files.append(rel)
+            continue
+        rlines = rendered.splitlines()
+        # The region of interest is what comes AFTER the frontmatter's
+        # closing `---`, the opposite half of the file from the `tools:`/
+        # `description:` scan above. A file with no closing `---` has no
+        # frontmatter to skip past, and is read from its own first line
+        # instead of being silently excluded.
+        body_start = 0
+        if rlines and rlines[0].strip() == "---":
+            for i in range(1, len(rlines)):
+                if rlines[i].strip() == "---":
+                    body_start = i + 1
+                    break
+        first_i = None
+        for i in range(body_start, len(rlines)):
+            if rlines[i].strip():
+                first_i = i
+                break
+        if first_i is None:
+            no_body.append(rel)
+            continue
+        first_line = rlines[first_i].strip()
+        if _AGENT_IDENTITY_RX.match(first_line):
+            continue  # identity stated first: the order this check asks for
+        reason = _agent_brief_variable_content(first_line)
+        if reason is None:
+            continue  # neither identity nor a recognized variable-content
+                      # marker: too ambiguous to call either way, so this
+                      # check stays silent rather than guessing
+        waiver = _agent_brief_exemption(rlines[first_i])
+        if waiver:
+            exempt.append("%s:%d" % (rel, first_i + 1))
+        else:
+            hits.append("%s:%d opens its body with %s before any identity/role "
+                       "statement, invalidating the cached prefix on every dispatch"
+                       % (rel, first_i + 1, reason))
+    scanned = len(briefs)
+    if vacuous_files and len(vacuous_files) == scanned:
+        return "NO-DATA", ("%d agent brief(s) found under %s and every one of them renders as "
+                           "empty (blank, wholly commented out, or holding nothing but a "
+                           "placeholder), so no opening line was examined and there is nothing "
+                           "to call clean" % (scanned, root))
+    note = ""
+    if no_body:
+        note += ("; %d brief(s) render with no body content past frontmatter, so no opening "
+                "line was examined for them: %s"
+                % (len(no_body), _first_named(sorted(no_body), ", ")))
+    if vacuous_files:
+        note += ("; %d of the %d brief(s) found render as empty (blank, commented out, or a "
+                "placeholder) and were not examined: %s"
+                % (len(vacuous_files), scanned, _first_named(sorted(vacuous_files), ", ")))
+    if hits:
+        return "FAIL", ("%d hit(s) in %d agent brief(s) scanned: %s%s"
+                        % (len(hits), scanned, _first_named(hits), note))
+    if exempt:
+        return "PASS", ("%d agent brief(s) scanned under %s, 0 unexempted hit(s), %d suppressed "
+                        "by an inline `%s` comment (%s)%s"
+                        % (scanned, root, len(exempt), EXEMPTION, _first_named(exempt, ", "), note))
+    return "PASS", "%d agent brief(s) scanned under %s, clean%s" % (scanned, root, note)
+
+
 # The citation inventory: every external URL cited in the shipped documentation
 # (README.md, SKILL.md, docs/) must have an entry in docs/CITATIONS.md carrying
 # four answered fields: the claim, the population it measured, its date or
@@ -1072,8 +1421,18 @@ def _doc_urls(text):
     nothing: a URL a reader cannot see is not a citation, and an inventory whose
     entries sit inside a comment declares nothing.
     """
-    return [m.group(0).rstrip(_URL_TRAILING)
-            for m in _URL_RX.finditer(_HTML_COMMENT_RX.sub("", text))]
+    body = _HTML_COMMENT_RX.sub("", text)
+    urls = []
+    for m in _URL_RX.finditer(body):
+        url, i = m.group(0), m.end()
+        # A ')' belongs to the URL while it closes an unmatched '(' inside
+        # it; markdown's link-closing ')' has no '(' to balance and stays
+        # out, so /foo_(bar) is no longer truncated at its own closing paren.
+        while i < len(body) and body[i] == ")" and url.count("(") > url.count(")"):
+            url += ")"
+            i += 1
+        urls.append(url.rstrip(_URL_TRAILING))
+    return urls
 
 
 def _parse_citations(text):
@@ -1590,6 +1949,27 @@ CHECKS = {
                                                  "value": "%(dir)s"},
                                   full_fixture={"files": {"src/ok.py": "def f():\n    return 1\n"},
                                                 "env": {"SBE_LINT_ROOT": "%(dir)s/src"}}),
+    # soft, not gate: a fresh heuristic without the hardened, multi-round
+    # lineage the other lints above carry. --strict must not start blocking
+    # merges on this one until it has earned that (opt in with --strict-soft).
+    "agent-brief-hygiene": Check(
+        check_agent_brief_hygiene, reads=("SBE_LINT_ROOT",), kind="tree", severity="soft",
+        empty_fixture={"files": {"notes.txt": "no agent brief here\n"}, "value": "%(dir)s"},
+        full_fixture={"files": {"agents/ok.md":
+                                "---\nname: ok\ndescription: Read-only review.\n"
+                                "tools: [Read, Grep]\n---\nBody.\n"},
+                      "env": {"SBE_LINT_ROOT": "%(dir)s"}}),
+    # soft, not gate: same reason as agent-brief-hygiene above, a fresh
+    # heuristic without the hardened, multi-round lineage the other lints
+    # carry. --strict must not start blocking merges on this one until it has
+    # earned that (opt in with --strict-soft).
+    "agent-brief-cache-order": Check(
+        check_agent_brief_cache_order, reads=("SBE_LINT_ROOT",), kind="tree", severity="soft",
+        empty_fixture={"files": {"notes.txt": "no agent brief here\n"}, "value": "%(dir)s"},
+        full_fixture={"files": {"agents/ok.md":
+                                "---\nname: ok\ndescription: Read-only review.\n"
+                                "tools: [Read, Grep]\n---\nYou are read-only. Investigate only.\n"},
+                      "env": {"SBE_LINT_ROOT": "%(dir)s"}}),
     "citation-inventory": Check(check_citation_inventory, reads=("SBE_CITATION_ROOT",), kind="tree",
                                 severity="gate",
                                 empty_fixture={"files": {"README.md": "# Notes\n\nA shipped doc "

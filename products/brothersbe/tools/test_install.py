@@ -322,5 +322,35 @@ class TestOriginUrlIsAllowlisted(unittest.TestCase):
             self.assertIsNone(reason)
 
 
+class Night0912Install(unittest.TestCase):
+    def test_dry_run_without_home_names_install_step(self):
+        import contextlib
+        import importlib.util
+        import io as _io
+
+        spec = importlib.util.spec_from_file_location('ins', INSTALL_PY)
+        ins = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(ins)
+
+        d = tempfile.mkdtemp()
+        os.makedirs(os.path.join(d, '.claude-plugin'))
+        with open(os.path.join(d, '.claude-plugin', 'plugin.json'), 'w') as fh:
+            json.dump({'version': '1.0.0'}, fh)
+
+        saved = os.environ.pop('HOME', None)
+        out = _io.StringIO()
+        err = _io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                ins.install_plugin(True, d)
+        finally:
+            if saved is not None:
+                os.environ['HOME'] = saved
+            shutil.rmtree(d, ignore_errors=True)
+
+        self.assertIn('would: install the brothersbe plugin',
+                      out.getvalue() + err.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

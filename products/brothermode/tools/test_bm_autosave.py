@@ -2127,5 +2127,41 @@ class TestCrossFamilyF3InheritedGitEnvironment(unittest.TestCase):
             "the child inherits every git redirection the parent has")
 
 
+class Night0912BmAutosave(unittest.TestCase):
+    def test_extra_exclude_pathspecs_keeps_windows_drive_path(self):
+        old = os.environ.get("BROTHERMODE_AUTOSAVE_EXCLUDE")
+        os.environ["BROTHERMODE_AUTOSAVE_EXCLUDE"] = r"C:\my\secrets"
+        try:
+            out = autosave._extra_exclude_pathspecs()
+            self.assertEqual(len(out), 1)
+            self.assertIn(r"C:\my\secrets", out[0])
+        finally:
+            if old is None:
+                os.environ.pop("BROTHERMODE_AUTOSAVE_EXCLUDE", None)
+            else:
+                os.environ["BROTHERMODE_AUTOSAVE_EXCLUDE"] = old
+
+    def test_extra_exclude_still_splits_posix_absolute_paths(self):
+        # Review fix: the draft stopped splitting any colon followed by a
+        # slash, which merged the common POSIX list into one broken pattern
+        # and silently dropped both excludes.
+        old = os.environ.get("BROTHERMODE_AUTOSAVE_EXCLUDE")
+        os.environ["BROTHERMODE_AUTOSAVE_EXCLUDE"] = "/a/secrets:/b/other,C:/x"
+        try:
+            out = autosave._extra_exclude_pathspecs()
+            self.assertEqual(list(out), [":(exclude,glob)/a/secrets",
+                                         ":(exclude,glob)/b/other",
+                                         ":(exclude,glob)C:/x"])
+        finally:
+            if old is None:
+                os.environ.pop("BROTHERMODE_AUTOSAVE_EXCLUDE", None)
+            else:
+                os.environ["BROTHERMODE_AUTOSAVE_EXCLUDE"] = old
+
+    def test_safe_ref_component_rejects_double_dot_and_lock_suffix(self):
+        self.assertNotIn("..", autosave._safe_ref_component("a..b"))
+        self.assertFalse(autosave._safe_ref_component("a.lock").endswith(".lock"))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

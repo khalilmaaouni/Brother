@@ -138,6 +138,11 @@ def main(argv):
                 print("autonomy-dial: NO-DATA: --json value is not valid "
                       "JSON; nothing here is a decision")
                 return 2
+            if not isinstance(observables, dict):
+                # A non-object cannot carry observables; NO-DATA.
+                print("autonomy-dial: NO-DATA: --json value must be a JSON "
+                      "object; nothing here is a decision")
+                return 2
             i += 2
             continue
         i += 1

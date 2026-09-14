@@ -194,9 +194,9 @@ def surface_mod():
                  os.path.join(HERE, "sbe_instruction_surface.py"))
 
 
-def authority_mod():
-    return _load("sbe_authority_hook_for_reconcile",
-                 os.path.join(HERE, "sbe_authority_hook.py"))
+def common_mod():
+    return _load("sbe_guard_common_for_reconcile",
+                 os.path.join(HERE, "sbe_guard_common.py"))
 
 
 def _version_sort_key(version):
@@ -266,7 +266,7 @@ def family_of(root, rel):
     write-time refusal and the end-of-session refusal must never disagree
     about what protected means, and two lists is how they would."""
     return guard_mod().protected_family(
-        fence_mod(), surface_mod(), authority_mod(), root, rel)
+        fence_mod(), surface_mod(), common_mod(), root, rel)
 
 
 # ---------------------------------------------------------------------------
@@ -457,12 +457,15 @@ def attribute(current, baseline):
             out.append(SessionChange(entry.path, entry.status, entry.kind,
                                      "; ".join(detail)))
         if entry.renamed_from:
-            # Both sides of a rename are surviving changes: the old name is
-            # gone and the new name is new, and naming only one of them would
-            # let "modify a protected file and then rename it" report half the
-            # story (spec fixture 6).
-            out.append(SessionChange(entry.renamed_from, entry.status, "absent",
-                                     "renamed to %s during this session" % entry.path))
+            was_old = prior.get(entry.renamed_from)
+            if was_old is None or was_old.get("kind") != "absent":
+                # Both sides of a rename are surviving changes: the old name is
+                # gone and the new name is new, and naming only one of them would
+                # let "modify a protected file and then rename it" report half the
+                # story (spec fixture 6). An old name already absent at session
+                # start is pre-session dirt and is not this session's.
+                out.append(SessionChange(entry.renamed_from, entry.status, "absent",
+                                         "renamed to %s during this session" % entry.path))
     return out
 
 

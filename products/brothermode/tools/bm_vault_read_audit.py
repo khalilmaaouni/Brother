@@ -167,6 +167,9 @@ def _last_hash(path):
         row = json.loads(last)
     except ValueError:  # sbe: allow-silent caller treats None as write failure, docstring above
         return None
+    if not isinstance(row, dict):
+        # Valid JSON that is not an object has no "hash" to chain from.
+        return None
     h = row.get("hash")
     return h if isinstance(h, str) else None
 

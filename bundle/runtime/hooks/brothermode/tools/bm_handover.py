@@ -68,6 +68,7 @@ import io
 import os
 import re
 import shutil
+import subprocess
 import sys
 import time
 import zipfile
@@ -200,35 +201,89 @@ DEFAULT_HUMAN = {
         "followed by exactly where the baton lies."),
 }
 
-#: The live board to copy into a pack, checked in this order. GANTT.html
-#: is the project's current board (the progress-page law); COMMAND-
-#: CENTER.html is the older name, kept as a fallback for a project that
-#: has not moved to GANTT.html yet. Fixes a real defect: for three days
-#: this generator copied only COMMAND-CENTER.html (last written 2026-08-17)
-#: while the live board moved to GANTT.html (written same-day, every
-#: close), so every pack in that window shipped a stale copy of a page
-#: nobody was looking at any more. _board_source is the one place that
-#: decides which file wins, so cmd_skeleton's copy, _struct_00's text, and
-#: cmd_verify_close's check 1b can never disagree about which file is
-#: "the" board.
+#: The candidate board files a pack may copy. GANTT.html is the project's
+#: current board (the progress-page law); COMMAND-CENTER.html is the older
+#: name. Fixes a real defect: for three days this generator copied only
+#: COMMAND-CENTER.html (last written 2026-08-17) while the live board moved
+#: to GANTT.html (written same-day, every close), so every pack in that
+#: window shipped a stale copy of a page nobody was looking at any more.
+#: The FIX is freshness-aware, not order-aware: _board_source picks
+#: whichever candidate git's own history says was committed most recently
+#: (never file mtime), falling back to this tuple's order only when
+#: neither candidate has git history to compare. A hardcoded preference
+#: for GANTT.html would only work for as long as GANTT.html happens to be
+#: the newer of the two; the day the roles reverse, that shape reproduces
+#: the exact defect it was written to fix. _board_source is still the one
+#: place that decides which file wins, so cmd_skeleton's copy,
+#: _struct_00's text, and cmd_verify_close's check 1b can never disagree
+#: about which file is "the" board.
 BOARD_CANDIDATES = (
     ("docs", "plan", "GANTT.html"),
     ("docs", "plan", "COMMAND-CENTER.html"),
 )
 
 
+def _git_log_date(root, rel):
+    """The `%ai` date of the most recent commit touching `rel` (a path
+    tuple relative to `root`), or None for every honest unknown: no git on
+    PATH, `root` is not inside a repository, or the file is untracked.
+    Mirrors bm_vault_lint.py's _git_first_commit_date: a relative path
+    passed through `--` with cwd=root, never an absolute path, so this
+    reads the right file regardless of the caller's own cwd."""
+    try:
+        proc = subprocess.run(
+            ("git", "log", "-1", "--format=%ai", "--", os.path.join(*rel)),
+            cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    date = proc.stdout.decode("utf-8", errors="replace").strip()
+    return date or None
+
+
 def _board_source(root):
-    """(rel_path_tuple, abs_path) for the first BOARD_CANDIDATES entry that
-    exists in this project, or (None, None) if neither does. The in-pack
-    filename is always the source file's OWN basename (rel_path_tuple[-1]):
-    a GANTT.html copy is never renamed to COMMAND-CENTER.html or back, so
-    the name in the pack always matches the name a reader would recognize
-    from the live project."""
+    """(rel_path_tuple, abs_path) for whichever BOARD_CANDIDATES entry is
+    actually the FRESHEST, among the ones that exist in this project, or
+    (None, None) if none does.
+
+    Freshness is real git history (_git_log_date), never file mtime: a
+    fresh checkout stamps every file with the checkout's own time, which
+    this repo's own failures index already names as meaningless for this
+    purpose (a-fresh-worktrees-mtime-is-checkout-time). Ordering by
+    BOARD_CANDIDATES used to stand in for freshness, on the assumption
+    that GANTT.html is always the newer name; that assumption is exactly
+    what broke for three days (see BOARD_CANDIDATES' own comment) and
+    would break again the day the roles reverse.
+
+    Only ONE candidate existing needs no comparison. With more than one,
+    the candidate with the latest git date wins; a tie (as when one
+    commit touched both) keeps BOARD_CANDIDATES order as the tie break.
+    A candidate with no git history (never committed, or `root` is not a
+    repository) is outranked by any candidate that has one; if NONE of
+    the existing candidates has git history, there is no freshness signal
+    at all, so this falls back to the original BOARD_CANDIDATES order,
+    which is also the correct answer for a project that is not a git
+    repository to begin with. The in-pack filename is always the source
+    file's OWN basename (rel_path_tuple[-1]): a GANTT.html copy is never
+    renamed to COMMAND-CENTER.html or back, so the name in the pack always
+    matches the name a reader would recognize from the live project."""
+    existing = []
     for rel in BOARD_CANDIDATES:
         p = bs.safe_project_path(root, *rel)
         if os.path.isfile(p):
-            return rel, p
-    return None, None
+            existing.append((rel, p))
+    if not existing:
+        return None, None
+    if len(existing) == 1:
+        return existing[0]
+    dated = [(rel, p, _git_log_date(root, rel)) for rel, p in existing]
+    dated = [(rel, p, d) for rel, p, d in dated if d is not None]
+    if not dated:
+        return existing[0]
+    best_rel, best_p, _best_date = max(dated, key=lambda entry: entry[2])
+    return best_rel, best_p
 
 def _report_superseded_board_copies(pack_dir, board_rel):
     """M21. Report every board copy sitting in `pack_dir` that is NOT the
@@ -1041,9 +1096,9 @@ def _struct_00(ctx):
             "stamp: %s), from the moment this pack was generated, is "
             "included as `%s`. This project keeps two possible board file "
             "names, `docs/plan/GANTT.html` and the older `docs/plan/"
-            "COMMAND-CENTER.html`; GANTT.html wins whenever both exist, so "
-            "a stale board can never again travel silently under a name "
-            "nobody is watching."
+            "COMMAND-CENTER.html`; whichever one git's own history says was "
+            "committed most recently wins, so a stale board can never "
+            "again travel silently under a name nobody is watching."
             % ("/".join(board_rel), mtime, board_name))
     else:
         lines.append(

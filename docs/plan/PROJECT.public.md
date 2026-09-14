@@ -17,7 +17,7 @@ and BrotherSBE) shipping from the same repository and the same release.
   registers (discovery only, presence asserted, not behaviour), and
   uninstalls clean. Proven in path mode
   against this tree on 2026-09-03 (commit 0ac3688b): `PASSED: one command
-  installed the bundle plus brothermode 3.4.5 and brothersbe 3.7.3, uninstall
+  installed the bundle plus brothermode 3.4.5 and brothersbe 3.7.4, uninstall
   clean (discovery only: presence of 2 entries asserted, behaviour not)`,
   exit 0. `--github` mode proves the same claim against the published copy
   instead, and needs the release tag to exist to resolve. The verdict is

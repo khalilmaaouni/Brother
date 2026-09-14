@@ -19,7 +19,7 @@ def save(path, state):
     if not withheld:
         try:
             os.remove(path)
-        except FileNotFoundError:
+        except FileNotFoundError:  # sbe: allow-silent target already absent, removal's goal is already met
             pass
         return
 
@@ -46,7 +46,7 @@ def save(path, state):
         if temp_path is not None:
             try:
                 os.remove(temp_path)
-            except FileNotFoundError:
+            except FileNotFoundError:  # sbe: allow-silent temp file already replaced or cleaned up, nothing left to remove
                 pass
 
 
