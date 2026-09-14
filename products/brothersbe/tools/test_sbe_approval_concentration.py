@@ -146,5 +146,12 @@ class MainSubprocessCase(unittest.TestCase):
             self.assertIn("NO-DATA", proc.stdout)
 
 
+class Night0912SbeApprovalConcentration(unittest.TestCase):
+    def test_multiple_approved_by_trailers_are_all_counted(self):
+        line = record("a" * 40, trailer="alice" + sac.TRAILER_SEP + "bob")
+        counts, _warnings = sac.parse_records(line)
+        self.assertEqual({'alice': 1, 'bob': 1}, counts)
+
+
 if __name__ == "__main__":
     unittest.main()

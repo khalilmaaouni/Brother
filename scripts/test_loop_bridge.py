@@ -1609,5 +1609,39 @@ class WholeUnitWorkerSafety(unittest.TestCase):
         self.assertEqual(p["repair"].called, [])
 
 
+class ConflictIsNamedNotFoldedIntoFailed(unittest.TestCase):
+    """WBS-10.06 (clear conflict handling). integrate.integrate_one already
+    detects a lane that no longer applies to canonical and safely aborts
+    the merge, but the rolling-dispatch integration callback folded that
+    CONFLICT verdict into the same generic "failed" state a broken
+    done_check produces (see rolling_run's integrate_fn, which sets
+    state = "failed" on ANY non-merge outcome). conflict_note() is the
+    pure seam that names a conflict distinctly wherever a caller reads it,
+    tested here without a real git tree."""
+
+    def test_a_conflict_verdict_is_named(self):
+        note = B.conflict_note({"verdict": B.integrate_mod.CONFLICT,
+                                "unit": "U9",
+                                "reason": "does not apply cleanly"})
+        self.assertIsNotNone(note)
+        self.assertIn("CONFLICT", note)
+        self.assertIn("U9", note)
+        self.assertIn("does not apply cleanly", note)
+
+    def test_an_integrated_verdict_is_not_named(self):
+        self.assertIsNone(B.conflict_note(
+            {"verdict": B.integrate_mod.INTEGRATED, "unit": "U9"}))
+
+    def test_needs_repair_is_not_named_a_conflict(self):
+        """A real broken check must stay a plain failure, never dressed
+        up as a worktree problem it is not."""
+        self.assertIsNone(B.conflict_note(
+            {"verdict": B.integrate_mod.NEEDS_REPAIR, "unit": "U9"}))
+
+    def test_empty_or_missing_verdict_is_not_named(self):
+        self.assertIsNone(B.conflict_note({}))
+        self.assertIsNone(B.conflict_note(None))
+
+
 if __name__ == "__main__":
     unittest.main()

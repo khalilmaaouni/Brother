@@ -683,6 +683,13 @@ class WbsUnblocksColumn(unittest.TestCase):
         self.assertEqual(cells[7], "1")
 
 
+class Night0912GenCommandCenter(unittest.TestCase):
+    def test_render_short_gantt_missing_id_renders_no_data(self):
+        roadmap = {"short": [{"track": "A-trust", "title": "row without id"}]}
+        rendered = gen.render_short_gantt(roadmap, {})
+        self.assertIn("NO-DATA: row without id", rendered)
+
+
 if __name__ == "__main__":
     # Moved here from mid-file 2026-08-27: it used to sit right after
     # DeclaredRisks, so unittest.main()'s default loader (which reads

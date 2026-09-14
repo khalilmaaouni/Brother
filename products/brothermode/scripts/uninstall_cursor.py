@@ -138,7 +138,12 @@ def main(argv=None):
         project_hooks = os.path.join(os.path.abspath(args.project),
                                      ".cursor", "hooks.json")
         if os.path.isfile(project_hooks):
-            doc = json.loads(io.open(project_hooks, encoding="utf-8").read())
+            # Refuse malformed project hooks like the user hooks path above.
+            try:
+                doc = json.loads(io.open(project_hooks, encoding="utf-8").read())
+            except ValueError as exc:
+                _err("uninstall_cursor.py: hooks.json is not valid JSON: %s" % exc)
+                return EXIT_REFUSED
             new_doc, removed = strip_our_hooks(doc, target)
             removed_total += removed
             if dry:

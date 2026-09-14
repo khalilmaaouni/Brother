@@ -310,7 +310,7 @@ def evaluate(dossier_dir, cwd, base, head):
                                          "unmeasured, a category distinct from unplanned, "
                                          "never silently counted as clean" % rel,
                                "evidence": rel})
-    if not plan and not dossier_named:
+    if not plan and not dossier_named and not unplanned:
         scope_verdict = "NO-DATA"
         scope_findings.append({"verdict": "NO-DATA",
                                "detail": "no plan and no dossier-named paths: nothing to "

@@ -336,5 +336,23 @@ class TestThePullRequestPipeline(unittest.TestCase):
                         "every history-dependent check becomes a guess")
 
 
+class Night0912BmCiContext(unittest.TestCase):
+    def test_bitbucket_pr_id_without_destination_branch_is_pull_request(self):
+        path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            '../scripts/bm_ci_context.py')
+        spec = importlib.util.spec_from_file_location('bm_ci_context', path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        with tempfile.TemporaryDirectory() as cwd:
+            rec = mod.capture('bitbucket', {'BITBUCKET_PR_ID': '1'}, cwd)
+            probs = mod.problems(rec)
+        self.assertEqual('pull_request', rec['mode'])
+        self.assertTrue(probs)
+        text = '\n'.join(probs)
+        self.assertIn('sourceCommit', text)
+        self.assertIn('destinationCommit', text)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

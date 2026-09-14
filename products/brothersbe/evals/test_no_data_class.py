@@ -73,7 +73,7 @@ defects: the scenarios and the expected verdicts are data held here, the code
 under test is whatever --tools points at. A test that can only be run against the
 fixed code proves nothing about what it caught.
 """
-import ast, copy, datetime, json, os, random, stat, subprocess, sys, tempfile
+import ast, copy, datetime, json, os, random, stat, subprocess, sys, tempfile, unittest
 from importlib.machinery import SourceFileLoader
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -2034,6 +2034,57 @@ def git_commit(d, message):
         subprocess.run(["git", "-C", d] + cmd, check=True, capture_output=True)
     subprocess.run(["git", "-C", d, "add", "."], check=True, capture_output=True)
     subprocess.run(["git", "-C", d, "commit", "-qm", message], check=True, capture_output=True)
+
+
+class Night0912SbeGatelock(unittest.TestCase):
+    """tools/sbe_gatelock.py::acquire, not otherwise covered by a unittest
+    file (git grep -l sbe_gatelock -- '*test_*.py' finds only this file).
+    Run directly with `python3 -m unittest
+    test_no_data_class.Night0912SbeGatelock`; this file's own main() does
+    not discover or run it, and adding the class does not change main()'s
+    behaviour."""
+
+    def test_stale_marker_unremovable_respects_timeout(self):
+        import importlib.util, tempfile, threading
+        spec = importlib.util.spec_from_file_location(
+            "sbe_gatelock",
+            os.path.join(os.path.dirname(HERE), "tools", "sbe_gatelock.py"))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        tmp = tempfile.mkdtemp()
+        p = os.path.join(tmp, "marker")
+        with open(p, "w") as fh:
+            fh.write("-1 0\n")
+        mod.marker_path = lambda root: p
+        mod.owner_text = lambda tool, root: "owner"
+        result = []
+
+        def run():
+            try:
+                mod.acquire(tmp, "test", timeout=0.1, quiet=True)
+                result.append(("ok", None))
+            except Exception as e:
+                result.append(("exc", type(e).__name__))
+
+        orig_remove = os.remove
+
+        def bad_remove(path):
+            if os.path.abspath(path) == os.path.abspath(p):
+                raise OSError("simulated unremovable")
+            return orig_remove(path)
+
+        os.remove = bad_remove
+        try:
+            t = threading.Thread(target=run, daemon=True)
+            t.start()
+            t.join(2.0)
+            self.assertFalse(t.is_alive(),
+                             "acquire did not honor timeout for unremovable stale marker")
+            self.assertTrue(result, "acquire did not return or raise")
+            self.assertEqual(result[0][0], "exc")
+            self.assertEqual(result[0][1], "BatteryMarkerBusy")
+        finally:
+            os.remove = orig_remove
 
 
 if __name__ == "__main__":

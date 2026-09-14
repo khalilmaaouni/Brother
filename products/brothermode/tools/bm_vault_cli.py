@@ -19,6 +19,10 @@ is it healthy, what may I not do" in one read-only call.
   lint <check|fix> [--vault V] ...   -> bm_vault_lint.py (subcommand is yours to pick)
   contract <check|resolve> [...]     -> bm_vault_contract.py (subcommand is yours to pick)
   curate <find|list|accept|reject>   -> bm_vault_curate.py (subcommand is yours to pick)
+  ids [--vault V]                    -> bm_vault_ids.py check (report-only; assign/resolve are not routed)
+  authority [--vault V]              -> bm_vault_authority.py check
+  staleness [--vault V] [--horizon ...] [--date ...] -> bm_vault_staleness.py check
+  pack --vault V --query Q [--budget N] [--identity I] -> bm_vault_pack.py (no subcommand of its own)
   commit --vault V -m MSG [--dry-run] -> bake, gate, and commit the vault, see below
   doctor                             -> read-only report, see below
   bind PATH                          -> the one first-run binding step, see below
@@ -133,6 +137,10 @@ VERBS = {
     "lint": ("bm_vault_lint.py", None),
     "contract": ("bm_vault_contract.py", None),
     "curate": ("bm_vault_curate.py", None),
+    "ids": ("bm_vault_ids.py", "check"),
+    "authority": ("bm_vault_authority.py", "check"),
+    "staleness": ("bm_vault_staleness.py", "check"),
+    "pack": ("bm_vault_pack.py", None),
 }
 
 AGENT_RULES = """\

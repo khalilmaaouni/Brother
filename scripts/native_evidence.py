@@ -325,7 +325,7 @@ def record(args):
                     if os.name == "posix":
                         try:
                             os.killpg(proc.pid, signal.SIGKILL)
-                        except ProcessLookupError:
+                        except ProcessLookupError:  # sbe: allow-silent process group already exited, the kill's goal is already met
                             pass
                     else:
                         proc.kill()

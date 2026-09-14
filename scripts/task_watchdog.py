@@ -164,6 +164,9 @@ def dirty_paths():
         if len(line) < 4:
             continue
         path = line[3:].strip().strip('"')
+        if " -> " in path:
+            # Rename lines read "old -> new"; the tracked path is the new one.
+            path = path.rsplit(" -> ", 1)[1].strip().strip('"')
         if path.startswith(".sbe/") or path.startswith(".brothermode/"):
             continue
         paths.append(path)

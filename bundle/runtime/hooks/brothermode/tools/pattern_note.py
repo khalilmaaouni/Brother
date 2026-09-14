@@ -62,8 +62,7 @@ def _load_intake_gate():
     the module cannot be loaded, so the caller can fail closed rather than
     silently skip the gate."""
     here = os.path.dirname(os.path.abspath(__file__))
-    path = os.path.join(here, "..", "products", "brothermode", "tools",
-                        "bm_vault_intake.py")
+    path = os.path.join(here, "bm_vault_intake.py")  # sibling of this file, not a re-prefixed products/... subtree
     if not os.path.isfile(path):
         return None
     try:

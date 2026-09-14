@@ -63,7 +63,19 @@ def main(argv=None):
     ap.add_argument("--max-age-hours", type=float, default=24.0)
     ap.add_argument("--terms", default=hps.TERMS_FILE,
                     help="private terms list (default: %s)" % hps.TERMS_FILE)
+    ap.add_argument("--no-cache", action="store_true",
+                    help="force a full rescan of every pack, ignoring and not updating the "
+                         "persistent scan cache (default: cache on, opt out only to force-"
+                         "verify or to debug a suspected stale cache)")
     args = ap.parse_args(argv)
+    # Measured 2026-09-13: this scan alone took ~52s over 1,560 directories,
+    # 6,321 files and 205 zips, none of which had changed since the prior
+    # close. Cached and stored beside the packs themselves (a sibling
+    # dotfile, excluded from the scan it accelerates) since old packs are
+    # effectively immutable; see handover_pack_scan.py's own docstring for
+    # the exact correctness rule.
+    cache_path = None if args.no_cache else os.path.join(
+        args.root, hps.CACHE_BASENAME)
 
     if not os.path.isdir(args.root):
         print("NO-DATA: handover root %s does not exist" % args.root)
@@ -106,7 +118,7 @@ def main(argv=None):
     # Reuses handover_pack_scan's scanner by import, never a second copy of
     # the matching rule, so the standalone dry run and this gate agree.
     hits, short_patterns, long_patterns, _stats, no_data_reason = hps.run_scan(
-        args.root, args.terms)
+        args.root, args.terms, cache_path=cache_path)
     if hits is None:
         problems.append("private terms list unreadable, could not check any "
                         "pack (%s): a stop, not a pass" % no_data_reason)
@@ -137,9 +149,19 @@ def main(argv=None):
         problems.append("no zip beside the pack (%s missing)" % zip_path)
     else:
         with zipfile.ZipFile(zip_path) as zf:
-            inside = {os.path.basename(n) for n in zf.namelist()
-                      if not n.endswith("/")}
-        missing = [f for f in files if f not in inside]
+            inside = {n for n in zf.namelist() if not n.endswith("/")}
+        # Full relative paths, not top-level entries, so nested files match zip
+        # members. A real zip archives the pack under its own directory name
+        # (confirmed against a real shipped pack: every member is
+        # "<pack-dir-name>/<rel>", never bare "<rel>"), so this must prefix
+        # or every real pack reads as missing every one of its own files.
+        pack_name_in_zip = os.path.basename(pack.rstrip(os.sep))
+        pack_files = []
+        for dirpath, _dirnames, filenames in os.walk(pack):
+            for fn in filenames:
+                rel = os.path.relpath(os.path.join(dirpath, fn), pack)
+                pack_files.append(pack_name_in_zip + "/" + rel.replace(os.sep, "/"))
+        missing = [f for f in sorted(pack_files) if f not in inside]
         if missing:
             problems.append("zip is missing pack files: %s" % ", ".join(missing))
 

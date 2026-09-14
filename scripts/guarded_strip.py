@@ -94,6 +94,11 @@ def make_backup(path, backup_dir, clock=None):
     stamp = time.strftime("%Y%m%dT%H%M%S", time.localtime(clock()))
     name = "%s.%s.bak" % (os.path.basename(path), stamp)
     backup_path = os.path.join(backup_dir, name)
+    # never overwrite an earlier same-second backup of the same file
+    suffix = 1
+    while os.path.exists(backup_path):
+        backup_path = os.path.join(backup_dir, "%s.%d" % (name, suffix))
+        suffix += 1
     shutil.copy2(path, backup_path)
     return backup_path
 

@@ -519,8 +519,8 @@ def make_evidence_probe(base_dir, allowed_roots=None):
             return HOLDS if _about_the_claim(lesson, rest, target) else WEAK
         if kind == "grep":
             relpath, sep2, pattern = rest.partition(":")
-            if not sep2:
-                return NO_DATA_EVIDENCE
+            if not sep2 or not pattern:
+                return NO_DATA_EVIDENCE  # empty pattern matches everything, not evidence
             if _escapes_tree(base_dir, relpath, allowed_roots):
                 return ESCAPES
             target = _resolved(relpath)
@@ -846,17 +846,20 @@ def _japanese_phrase_hit(text, phrases):
     if not text:
         return False
     for phrase in phrases:
-        idx = text.find(phrase)
-        if idx == -1:
-            continue
-        win_start = max(0, idx - _JA_WINDOW_CHARS)
-        win_end = min(len(text), idx + len(phrase) + _JA_WINDOW_CHARS)
-        window = text[win_start:win_end]
-        if any(neg in window for neg in _NEGATION_JA):
-            continue
-        if _sentence_reported(text, idx):
-            continue
-        return True
+        start = 0
+        while True:
+            idx = text.find(phrase, start)
+            if idx == -1:
+                break
+            start = idx + 1
+            win_start = max(0, idx - _JA_WINDOW_CHARS)
+            win_end = min(len(text), idx + len(phrase) + _JA_WINDOW_CHARS)
+            window = text[win_start:win_end]
+            if any(neg in window for neg in _NEGATION_JA):
+                continue
+            if _sentence_reported(text, idx):
+                continue
+            return True
     return False
 
 

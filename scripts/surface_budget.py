@@ -114,6 +114,95 @@ def count_repo_surface(repo_root):
     return len(command_files), len(skill_names), detail
 
 
+# WBS-70.01 names five things a surface budget should measure. The
+# inventory above already counts two of them (commands = "user-visible
+# advanced routes", skills = "automatically discoverable skills"). These
+# two close two more of the remaining three with real counting logic
+# against the actual files, not invented numbers. "activated context" (what
+# gets auto-loaded into a session versus what a person must type) has no
+# settled operational definition in this repo yet and is left as an honest
+# gap rather than guessed at.
+
+#: Per-product command/skill prefixes the umbrella's own bundle uses to
+#: expose each product's routes under one door (bundle/commands,
+#: bundle/skills). Stripping them is how a route exposed twice, once under
+#: its product's own name and once under the umbrella's prefixed name, is
+#: recognised as the same route rather than two different ones.
+KNOWN_ROUTE_PREFIXES = ('brotherme-', 'brothermode-', 'brothersbe-')
+
+
+def _frontmatter_bytes(path):
+    """Bytes of the YAML frontmatter block (the `---`-delimited header)
+    of one command or skill file: this is the name/description text the
+    harness renders into every session's startup tool listing, not the
+    file's whole body which loads only if the entry is actually invoked.
+    A file with no frontmatter, or an unterminated one, contributes 0."""
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+    except OSError:
+        return 0
+    if not lines or lines[0].strip() != '---':
+        return 0
+    total = len(lines[0].encode('utf-8'))
+    for line in lines[1:]:
+        total += len(line.encode('utf-8'))
+        if line.strip() == '---':
+            return total
+    return 0
+
+
+def count_startup_metadata_footprint(repo_root):
+    """WBS-70.01 "startup metadata footprint": total bytes of frontmatter
+    across every user-invocable command and skill in one repo, i.e. the
+    text actually rendered into a session's startup listing for this
+    tree. Returns (footprint_bytes, file_count)."""
+    footprint = 0
+    file_count = 0
+    for commands_dir in sorted(_find_named_dirs(repo_root, 'commands')):
+        for entry in sorted(os.listdir(commands_dir)):
+            full = os.path.join(commands_dir, entry)
+            if entry.endswith('.md') and os.path.isfile(full):
+                footprint += _frontmatter_bytes(full)
+                file_count += 1
+    for skills_dir in sorted(_find_named_dirs(repo_root, 'skills')):
+        for entry in sorted(os.listdir(skills_dir)):
+            skill_md = os.path.join(skills_dir, entry, 'SKILL.md')
+            if os.path.isfile(skill_md) and _is_user_invocable(skill_md):
+                footprint += _frontmatter_bytes(skill_md)
+                file_count += 1
+    return footprint, file_count
+
+
+def _normalize_route_name(name):
+    """Strips one known per-product prefix so 'brotherme-status' and
+    'status' compare equal. Only one prefix is ever stripped: these
+    prefixes do not nest."""
+    for prefix in KNOWN_ROUTE_PREFIXES:
+        if name.startswith(prefix):
+            return name[len(prefix):]
+    return name
+
+
+def count_semantic_duplicate_routes(repo_root):
+    """WBS-70.01 "semantic duplicate routes": entries in one repo whose
+    name collides with another entry's name once the known per-product
+    prefix is stripped, e.g. 'brotherme-status' and 'brothermode-status'
+    and 'brothersbe-status' are the same route exposed three times under
+    different product namespaces, exactly the cognitive-compression
+    target this subsection names. Returns (duplicate_count, groups):
+    duplicate_count is every entry beyond the first in each colliding
+    group; groups maps the normalized name to every raw name that
+    produced it, restricted to groups with more than one member."""
+    names = repo_entry_names(repo_root)
+    by_norm = {}
+    for name in names:
+        by_norm.setdefault(_normalize_route_name(name), []).append(name)
+    groups = {k: v for k, v in sorted(by_norm.items()) if len(v) > 1}
+    duplicate_count = sum(len(v) - 1 for v in groups.values())
+    return duplicate_count, groups
+
+
 def compute_total(repos):
     """repos: list of (name, path). Returns (total, missing_names, lines)."""
     total = 0
@@ -263,6 +352,28 @@ def main(argv=None):
     for line in lines:
         print(line)
     print('TOTAL: %d (numeric surface cap retired)' % total)
+
+    footprint_total = 0
+    duplicate_total = 0
+    for name, path in REPOS:
+        if not os.path.isdir(path):
+            continue
+        footprint, file_count = count_startup_metadata_footprint(path)
+        footprint_total += footprint
+        print('%s: startup metadata footprint %d bytes across %d files'
+              % (name, footprint, file_count))
+        duplicates, groups = count_semantic_duplicate_routes(path)
+        duplicate_total += duplicates
+        if groups:
+            group_desc = '; '.join(
+                '%s <- %s' % (norm, ', '.join(raw)) for norm, raw in groups.items())
+            print('%s: semantic duplicate routes %d (%s)'
+                  % (name, duplicates, group_desc))
+        else:
+            print('%s: semantic duplicate routes 0' % name)
+    print('STARTUP METADATA FOOTPRINT TOTAL: %d bytes' % footprint_total)
+    print('SEMANTIC DUPLICATE ROUTES TOTAL: %d' % duplicate_total)
+
     code, message = inventory_verdict(total, missing)
     print(message)
     return code

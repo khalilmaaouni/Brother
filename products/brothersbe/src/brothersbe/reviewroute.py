@@ -541,9 +541,14 @@ def _diff_lines(cwd, base, head, path):
     if code != 0:
         return [], []
     added, removed = [], []
+    in_hunk = False
     for line in out.split("\n"):
-        if line.startswith("+++") or line.startswith("---"):
+        if line.startswith("@@"):
+            in_hunk = True
             continue
+        if not in_hunk:
+            continue
+        # A removed line may itself start with '---'; only file headers live before @@.
         if line.startswith("+"):
             added.append(line[1:])
         elif line.startswith("-"):
@@ -658,7 +663,8 @@ def _qa_hits(cwd, base, head, files):
         added_asserts = sum(1 for l in added if _ASSERTION.search(l))
         removed_asserts = sum(1 for l in removed if _ASSERTION.search(l))
         weakening_marker = any(_WEAKENING_MARKER.search(l) for l in added)
-        if removed_asserts > added_asserts or weakening_marker:
+        # A marker is only weakening when no assertion is added back.
+        if removed_asserts > added_asserts or (weakening_marker and not added_asserts):
             weakened.append(f)
     if weakened:
         return [_hit(
@@ -815,7 +821,11 @@ def _record_routed(cwd, reviewer_names):
         return routed_counts(cwd)
     directory = os.path.join(cwd, ".sbe")
     if not os.path.isdir(directory):
-        os.makedirs(directory)
+        try:
+            os.makedirs(directory)
+        except FileExistsError:
+            # A file named .sbe cannot hold the ledger; routing itself still stands.
+            return routed_counts(cwd)
     data = routed_counts(cwd)
     for name in reviewer_names:
         data[name] = int(data.get(name, 0)) + 1

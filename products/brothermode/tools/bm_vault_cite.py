@@ -194,7 +194,10 @@ def _read_citations(path):
                 if not line:
                     continue
                 try:
-                    records.append(json.loads(line))
+                    record = json.loads(line)
+                    if not isinstance(record, dict):  # valid JSON non-objects are records with no note_id
+                        record = {}
+                    records.append(record)
                 except ValueError as e:
                     sys.stderr.write(
                         "bm_vault_cite: skipping malformed line %d (%s)\n" % (i, e))

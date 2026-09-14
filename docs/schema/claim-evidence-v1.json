@@ -1,0 +1,46 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "claim-evidence-v1",
+  "title": "BrotherDS Claim Evidence references v1",
+  "description": "WBS-50.02. 'BrotherDS should consume Evidence v2 IDs/references rather than copy every raw artifact into claim JSON... A claim still remains portable enough to explain itself.' No single settled Evidence v2 ID format exists yet (docs/plan/1.0.17/EVIDENCE-V2-DESIGN.md: the WBS-20.01 draft was retracted after Opus found three competing evidence vocabularies already in production -- receipt_attest.py's in-toto predicate, receipt_door.py's verified/no-data state, and the outcome-contract's plain receipts[] -- with no Fable/Opus ruling yet on which one wins). Rather than invent a fourth vocabulary, this record reuses the one reference grammar that already exists and is already enforced end to end: docs/schema/outcome-contract-v1.json's receipts[].ref grammar (file:/evidence:/url:), checked by scripts/contract_check.py's RECEIPT_REF_PREFIXES and resolved by scripts/receipt_check.py. Each evidence entry is a reference plus a short human note explaining what it establishes for this claim, never the raw artifact body: additionalProperties:false on the evidence item leaves no field to paste raw content into. Only the keyword subset scripts/claim_evidence.py actually enforces is used here: type, required, properties, enum, const, items, additionalProperties, matching the same enforced subset claim-lifecycle-v1 and the other WBS-50/WBS-20 schemas document. The ref-grammar check and the non-empty-note check are cross-field/pattern rules the enforced subset cannot express (no pattern, no minLength keyword); scripts/claim_evidence.py enforces them by hand, the same way contract_check.py's own RECEIPT REF GRAMMAR (F4) rule does for outcome-contract-v1.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "claim_id", "revision_id", "evidence"],
+  "properties": {
+    "schema_version": {
+      "const": "claim-evidence-v1",
+      "description": "Which shape this record follows, so a reader never has to guess."
+    },
+    "claim_id": {
+      "type": "string",
+      "description": "The claim_id this evidence list belongs to. Matches a claim-lifecycle-v1 record's own claim_id (see scripts/claim_evidence.py's check_matches_claim)."
+    },
+    "revision_id": {
+      "type": "string",
+      "description": "The exact claim revision this evidence list was assembled for. Matches a claim-lifecycle-v1 record's own revision_id: a correction (a new revision_id per WBS-50.01) needs its own evidence record, never a silent edit of this one."
+    },
+    "evidence": {
+      "type": "array",
+      "description": "References into evidence that already exists elsewhere, never a copy of it. May be empty, but the key is always present.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "ref", "note"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "A short identifier for this evidence entry, unique within this record."
+          },
+          "ref": {
+            "type": "string",
+            "description": "Where the referenced evidence actually lives. Must start with one of the reference prefixes scripts/receipt_check.py resolves: file:, evidence:, or url: (scripts/contract_check.py's RECEIPT_REF_PREFIXES, reused rather than redeclared). Never a raw artifact body pasted inline."
+          },
+          "note": {
+            "type": "string",
+            "description": "A short, non-empty, human-readable explanation of what this reference establishes for the claim -- the roadmap's 'a claim still remains portable enough to explain itself', met by carrying the explanation alongside the pointer rather than the artifact itself. Examples the roadmap names: MDM sample evidence, native journey evidence, pipeline reconciliation, forecast derivation -- these are examples, not an exhaustive or enforced list."
+          }
+        }
+      }
+    }
+  }
+}

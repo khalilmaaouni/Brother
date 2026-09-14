@@ -113,6 +113,151 @@ class TestCursorHookAdapter(unittest.TestCase):
         self.assertEqual(claude["tool_input"]["file_path"], "app.py")
 
 
+class TestFindCheckout(unittest.TestCase):
+    """WBS-70 U3: find_checkout() must see the umbrella plugin layout
+    (VERSION-less, nested at runtime/hooks/brothermode/) as well as the
+    original flat compat layout, without breaking the contract every
+    caller relies on: the return value is a directory callers append
+    "tools" (or "VERSION") to themselves."""
+
+    ENV_VARS = ("BROTHERMODE_ROOT", "BROTHER_PLUGIN_ROOT",
+                "CLAUDE_PLUGIN_ROOT", "PLUGIN_ROOT",
+                "BROTHER_CONFIG_DIR", "CLAUDE_CONFIG_DIR")
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="bm-cursor-checkout-test-")
+        self.addCleanup(lambda: shutil.rmtree(self.tmp, ignore_errors=True))
+        self._saved_env = {name: os.environ.get(name) for name in self.ENV_VARS}
+        self.addCleanup(self._restore_env)
+
+    def _restore_env(self):
+        for name, value in self._saved_env.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
+    def _clear_env(self):
+        for name in self.ENV_VARS:
+            os.environ.pop(name, None)
+
+    def _touch(self, path):
+        parent = os.path.dirname(path)
+        os.makedirs(parent, exist_ok=True)
+        with io.open(path, "w", encoding="utf-8") as fh:
+            fh.write("x\n")
+
+    def test_umbrella_layout_returns_nested_root_not_tools_tools(self):
+        # The installed-bundle shape: no VERSION anywhere, the real
+        # checkout nests under runtime/hooks/brothermode/.
+        nested = os.path.join(self.tmp, "runtime", "hooks", "brothermode")
+        self._touch(os.path.join(nested, "tools", "bm_cursor.py"))
+        self._touch(os.path.join(nested, "tools", "bm_store.py"))
+        self._clear_env()
+        os.environ["BROTHERMODE_ROOT"] = self.tmp
+        found = bc.find_checkout()
+        self.assertEqual(found, nested)
+        # The literal plan ask (return the tools dir itself) would have
+        # produced .../tools, and every caller appending "tools" again
+        # would land on a nonexistent .../tools/tools path.
+        self.assertTrue(found.endswith(os.path.join("hooks", "brothermode")))
+        self.assertTrue(os.path.isfile(os.path.join(found, "tools",
+                                                     "bm_store.py")))
+
+    def test_flat_compat_layout_still_works(self):
+        self._touch(os.path.join(self.tmp, "VERSION"))
+        self._touch(os.path.join(self.tmp, "tools", "bm_store.py"))
+        self._clear_env()
+        os.environ["BROTHERMODE_ROOT"] = self.tmp
+        self.assertEqual(bc.find_checkout(), self.tmp)
+
+    def test_local_cursor_plugin_candidate_without_env_var(self):
+        # Cursor itself only ever loads a local plugin from
+        # ~/.cursor/plugins/local/brother; nothing exports a variable
+        # naming it, so find_checkout must look there unprompted.
+        fake_home = os.path.join(self.tmp, "home")
+        local_plugin = os.path.join(fake_home, ".cursor", "plugins",
+                                    "local", "brother")
+        nested = os.path.join(local_plugin, "runtime", "hooks",
+                              "brothermode")
+        self._touch(os.path.join(nested, "tools", "bm_cursor.py"))
+        self._touch(os.path.join(nested, "tools", "bm_store.py"))
+        self._clear_env()
+        # Neutralise the earlier rungs: with no override, plugin_root()
+        # falls back to this module's own real on-disk location (a
+        # genuine flat checkout) which would match before this candidate
+        # is even reached. Point it at nothing so discovery falls through
+        # to the local-plugin candidate under test.
+        os.environ["BROTHER_PLUGIN_ROOT"] = os.path.join(
+            self.tmp, "not-a-real-plugin-root")
+        old_home = os.environ.get("HOME")
+        os.environ["HOME"] = fake_home
+        try:
+            self.assertEqual(bc.find_checkout(), nested)
+        finally:
+            if old_home is None:
+                os.environ.pop("HOME", None)
+            else:
+                os.environ["HOME"] = old_home
+
+    def test_missing_environment_does_not_crash_discovery(self):
+        # No BROTHERMODE_ROOT, no plugin-root variable, nothing: every
+        # candidate must be produced and checked without raising, and
+        # discovery must still land on a real answer (this checkout).
+        self._clear_env()
+        try:
+            found = bc.find_checkout()
+        except Exception as exc:  # noqa: BLE001 - the property under test
+            self.fail("find_checkout() raised with no env set: %r" % exc)
+        self.assertIsNotNone(found)
+        self.assertTrue(os.path.isfile(os.path.join(found, "VERSION")))
+
+    def test_broken_first_candidate_does_not_stop_discovery(self):
+        # A malformed candidate (VERSION is a directory, bm_store.py is a
+        # dangling symlink) must read as "no match", never crash the
+        # whole call and take every other caller down with it (the same
+        # failure class this file shipped once before, in a different
+        # function: a-model-drafted-crash-fix-can-quietly-weaken-the-
+        # safety-property-the-code-protects).
+        broken = os.path.join(self.tmp, "broken")
+        os.makedirs(os.path.join(broken, "VERSION"))  # a directory, not a file
+        os.makedirs(os.path.join(broken, "tools"))
+        dangling = os.path.join(broken, "tools", "bm_store.py")
+        os.symlink(os.path.join(broken, "does-not-exist"), dangling)
+        self._clear_env()
+        os.environ["BROTHERMODE_ROOT"] = broken
+        try:
+            found = bc.find_checkout()
+        except Exception as exc:  # noqa: BLE001 - the property under test
+            self.fail("find_checkout() raised on a broken candidate: %r"
+                     % exc)
+        # Falls through past the broken candidate to a real one instead
+        # of stopping there.
+        self.assertIsNotNone(found)
+        self.assertNotEqual(found, broken)
+
+    def test_doctor_gets_a_usable_path_from_umbrella_checkout(self):
+        # A real caller (cmd_doctor via the "doctor" subcommand) must be
+        # able to use the corrected return value the same way it uses the
+        # flat shape: checkout/tools/<adapter>.
+        nested = os.path.join(self.tmp, "runtime", "hooks", "brothermode")
+        self._touch(os.path.join(nested, "tools", "bm_cursor.py"))
+        self._touch(os.path.join(nested, "tools", "bm_store.py"))
+        adapter_src = os.path.join(HERE, "bm_cursor_hook.py")
+        shutil.copy(adapter_src, os.path.join(nested, "tools",
+                                              "bm_cursor_hook.py"))
+        proc = _run(
+            [os.path.join(HERE, "bm_cursor.py"), "doctor",
+             "--checkout", nested,
+             "--hooks", os.path.join(self.tmp, "no-such-hooks.json")],
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertNotIn("no BrotherMode checkout found", proc.stdout)
+        self.assertNotIn(
+            os.path.join(nested, "tools", "tools", "bm_cursor_hook.py"),
+            proc.stdout)
+
+
 class TestCursorHarness(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="bm-cursor-test-")
@@ -315,7 +460,8 @@ class TestCursorDocsAndSkills(unittest.TestCase):
         self.assertTrue(os.path.isfile(path))
         with io.open(path, encoding="utf-8") as fh:
             text = fh.read()
-        self.assertIn("ADVISORY", text)
+        self.assertNotIn("ADVISORY", text)
+        self.assertIn("decision record", text)
         self.assertIn("install_cursor.py", text)
         self.assertNotIn("\u2014", text)  # no em dash
         self.assertNotIn("\u2013", text)  # no en dash
@@ -328,6 +474,167 @@ class TestCursorDocsAndSkills(unittest.TestCase):
                 text = fh.read()
             self.assertTrue(text.startswith("---\n"))
             self.assertIn("bm_cursor.py", text)
+
+
+class Night0912InstallCursor(unittest.TestCase):
+    def test_invalid_project_hooks_json_refused(self):
+        import importlib.util
+
+        here = os.path.dirname(os.path.abspath(__file__))
+        script = os.path.join(here, '../scripts/install_cursor.py')
+        spec = importlib.util.spec_from_file_location('install_cursor', script)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        source = os.path.dirname(os.path.dirname(os.path.abspath(mod.__file__)))
+        old_looks = mod._install.looks_like_brothermode
+        old_copy = mod._install.copy_tree
+        old_emit = mod._bmc.cmd_emit_rules
+        old_write = mod._bmc._write_json
+        old_smoke = mod.smoke
+        try:
+            mod._install.looks_like_brothermode = (
+                lambda p: os.path.realpath(p) == os.path.realpath(source))
+            mod._install.copy_tree = lambda s, t, d: 0
+            mod._bmc.cmd_emit_rules = lambda argv: 0
+            mod._bmc._write_json = lambda p, d: None
+            mod.smoke = lambda t, h: []
+
+            with tempfile.TemporaryDirectory() as tmp:
+                target = os.path.join(tmp, 'target')
+                hooks = os.path.join(tmp, 'hooks.json')
+                project = os.path.join(tmp, 'project')
+                os.makedirs(os.path.join(project, '.cursor'))
+                project_hooks = os.path.join(project, '.cursor', 'hooks.json')
+                original = '{ invalid json'
+                with open(project_hooks, 'w', encoding='utf-8') as fh:
+                    fh.write(original)
+
+                code = mod.main(['--target', target, '--hooks', hooks,
+                                 '--project', project])
+
+                self.assertEqual(mod.EXIT_REFUSED, code)
+                with open(project_hooks, encoding='utf-8') as fh:
+                    self.assertEqual(original, fh.read())
+        finally:
+            mod._install.looks_like_brothermode = old_looks
+            mod._install.copy_tree = old_copy
+            mod._bmc.cmd_emit_rules = old_emit
+            mod._bmc._write_json = old_write
+            mod.smoke = old_smoke
+
+
+class Night0912UninstallCursor(unittest.TestCase):
+    def test_malformed_project_hooks_refuses(self):
+        import contextlib
+        import importlib.util
+
+        root = os.path.dirname(os.path.abspath(__file__))
+        src = os.path.join(root, '../scripts/uninstall_cursor.py')
+        spec = importlib.util.spec_from_file_location('uc_night0912', src)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        old_home = os.environ.get('HOME')
+        with tempfile.TemporaryDirectory() as tmp:
+            os.environ['HOME'] = tmp
+            try:
+                proj = os.path.join(tmp, 'proj')
+                os.makedirs(os.path.join(proj, '.cursor'))
+                with open(os.path.join(proj, '.cursor', 'hooks.json'), 'w') as fh:
+                    fh.write('not json at all\n')
+
+                err = io.StringIO()
+                with contextlib.redirect_stderr(err):
+                    try:
+                        rc = mod.main(['--project', proj, '--dry-run'])
+                    except Exception as exc:
+                        self.fail('uncaught %s: %s' % (type(exc).__name__, exc))
+
+                self.assertEqual(rc, mod.EXIT_REFUSED)
+                self.assertIn('not valid JSON', err.getvalue())
+            finally:
+                if old_home is None:
+                    os.environ.pop('HOME', None)
+                else:
+                    os.environ['HOME'] = old_home
+
+
+class Night0912BmCursor(unittest.TestCase):
+    """Three findings from the night sweep against cmd_claim, cmd_doctor
+    and cmd_cancel."""
+
+    def test_claim_next_claims_oldest_not_lexicographically_first(self):
+        # 8dfeb8be8452: packet ids are random, so the lexicographically
+        # first inbox filename is not the oldest queued packet.
+        with tempfile.TemporaryDirectory() as root:
+            base = os.path.join(root, ".brothermode", "cursor-mailbox")
+            inbox = os.path.join(base, "inbox")
+            os.makedirs(inbox)
+            older = {"packet_id": "cx-zzzzzzzzzzzz", "state": "queued",
+                     "created_at": "2020-01-01T00:00:00Z",
+                     "updated_at": "2020-01-01T00:00:00Z"}
+            newer = {"packet_id": "cx-aaaaaaaaaaaa", "state": "queued",
+                     "created_at": "2025-01-01T00:00:00Z",
+                     "updated_at": "2025-01-01T00:00:00Z"}
+            for p in (older, newer):
+                with open(os.path.join(inbox, p["packet_id"] + ".json"),
+                          "w") as f:
+                    json.dump(p, f)
+            bc.cmd_claim(["--next", "--project", root])
+            claimed = os.listdir(os.path.join(base, "claimed"))
+            self.assertEqual(claimed, ["cx-zzzzzzzzzzzz.json"])
+
+    def test_claim_next_is_not_stopped_by_one_unreadable_packet(self):
+        # Review fix: sorting by created_at reads every inbox packet, so one
+        # corrupt file must sort last instead of crashing every claim.
+        with tempfile.TemporaryDirectory() as root:
+            base = os.path.join(root, ".brothermode", "cursor-mailbox")
+            inbox = os.path.join(base, "inbox")
+            os.makedirs(inbox)
+            with open(os.path.join(inbox, "cx-000000000000.json"), "w") as f:
+                f.write("{not json")
+            good = {"packet_id": "cx-bbbbbbbbbbbb", "state": "queued",
+                    "created_at": "2025-01-01T00:00:00Z",
+                    "updated_at": "2025-01-01T00:00:00Z"}
+            with open(os.path.join(inbox, "cx-bbbbbbbbbbbb.json"), "w") as f:
+                json.dump(good, f)
+            bc.cmd_claim(["--next", "--project", root])
+            claimed = os.listdir(os.path.join(base, "claimed"))
+            self.assertEqual(claimed, ["cx-bbbbbbbbbbbb.json"])
+
+    def test_doctor_survives_non_object_hooks_json(self):
+        # 5b8d50323450: a hooks.json holding a valid JSON list (not an
+        # object) must report FAIL, not crash with AttributeError.
+        with tempfile.TemporaryDirectory() as td:
+            hooks = os.path.join(td, "hooks.json")
+            with open(hooks, "w") as f:
+                f.write("[]")
+            try:
+                rc = bc.cmd_doctor(["--hooks", hooks, "--checkout", td])
+            except AttributeError as e:
+                self.fail("AttributeError: %s" % e)
+            self.assertEqual(rc, bc.EXIT_FAILED)
+
+    def test_cancel_refuses_an_already_returned_packet(self):
+        # 5ebe1cc8d626: cmd_cancel only refused an archived packet; a
+        # packet already returned (outbox, not archive) was silently
+        # overwritten with state "cancelled" instead of being refused.
+        with tempfile.TemporaryDirectory() as root:
+            base = os.path.join(root, ".brothermode", "cursor-mailbox")
+            outbox = os.path.join(base, "outbox")
+            os.makedirs(outbox)
+            pid = "cx-123456789abc"
+            packet = {"packet_id": pid, "state": "returned",
+                      "created_at": "2020-01-01T00:00:00Z",
+                      "updated_at": "2020-01-01T00:00:00Z",
+                      "result": {"status": "returned"}}
+            with open(os.path.join(outbox, pid + ".json"), "w") as f:
+                json.dump(packet, f)
+            rc = bc.cmd_cancel(["--packet-id", pid, "--project", root])
+            self.assertEqual(rc, bc.EXIT_REFUSED)
+            archive_file = os.path.join(base, "archive", pid + ".json")
+            self.assertFalse(os.path.isfile(archive_file))
 
 
 if __name__ == "__main__":

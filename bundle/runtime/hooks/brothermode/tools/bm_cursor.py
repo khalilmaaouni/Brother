@@ -122,8 +122,51 @@ def default_record_path():
     return os.path.join(default_cursor_home(), "brothermode-install.json")
 
 
+def default_local_plugin_target():
+    """Where scripts/cursor_plugin_install.py puts (or symlinks) the
+    packaged bundle. No environment variable names this path: Cursor
+    itself loads a local plugin only from here."""
+    return os.path.join(default_cursor_home(), "plugins", "local", "brother")
+
+
+def _is_flat_checkout(path):
+    """The original, compat shape: VERSION and tools/bm_store.py sit
+    directly under `path` (a bare product or repo checkout).
+
+    os.path.isfile already swallows a missing path, a dangling symlink, or
+    a permission error (returns False rather than raising), so a malformed
+    candidate here cannot take find_checkout() down with it."""
+    return (os.path.isfile(os.path.join(path, "VERSION"))
+            and os.path.isfile(os.path.join(path, "tools", "bm_store.py")))
+
+
+def _umbrella_checkout(path):
+    """The installed-plugin shape: an umbrella root (the packaged bundle,
+    or the Cursor local-plugin symlink to it) nests the real checkout at
+    runtime/hooks/brothermode/. The bundle ships no VERSION file there, so
+    this shape is recognised by the tool files alone, not by VERSION.
+
+    Returns the nested checkout root on a match (the directory callers
+    still treat as `checkout`, appending "tools" or "VERSION" to it
+    themselves), or None. Same crash-safety note as _is_flat_checkout: a
+    broken candidate (missing directory, dangling symlink) reads as "no
+    match" here, never as an exception."""
+    nested = os.path.join(path, "runtime", "hooks", "brothermode")
+    if (os.path.isfile(os.path.join(nested, "tools", "bm_cursor.py"))
+            and os.path.isfile(os.path.join(nested, "tools", "bm_store.py"))):
+        return nested
+    return None
+
+
 def find_checkout():
-    """Prefer a Cursor install, then the Claude clone path, then this repo."""
+    """Prefer a Cursor install, then the Claude clone path, then this repo.
+
+    Every candidate is tried both ways: the flat compat shape first
+    (VERSION + tools/bm_store.py at the candidate itself), then the
+    umbrella shape (an installed plugin bundle nesting the real checkout
+    under runtime/hooks/brothermode/). Either match returns a checkout root
+    that every caller here still treats the same way: "tools" is a direct
+    child, and VERSION is a direct child when the shape carries one."""
     candidates = [
         os.environ.get("BROTHERMODE_ROOT"),
         # C3: BROTHER_PLUGIN_ROOT, CLAUDE_PLUGIN_ROOT, then Codex's own
@@ -133,16 +176,18 @@ def find_checkout():
         brother_paths.plugin_root(),
         default_install_target(),
         os.path.join(brother_paths.config_dir(), "skills", "brothermode"),
+        default_local_plugin_target(),
         REPO_ROOT,
     ]
     for raw in candidates:
         if not raw:
             continue
         path = os.path.abspath(raw)
-        if (os.path.isfile(os.path.join(path, "VERSION"))
-                and os.path.isfile(os.path.join(path, "tools",
-                                                "bm_store.py"))):
+        if _is_flat_checkout(path):
             return path
+        umbrella = _umbrella_checkout(path)
+        if umbrella:
+            return umbrella
     return None
 
 
@@ -353,7 +398,8 @@ def cmd_doctor(argv):
     if os.path.isfile(hooks):
         try:
             data = _read_json(hooks)
-            if not isinstance(data.get("hooks"), dict):
+            if (not isinstance(data, dict)
+                    or not isinstance(data.get("hooks"), dict)):
                 problems.append("FAIL: %s has no hooks object" % hooks)
             else:
                 events = data["hooks"]
@@ -663,7 +709,20 @@ def cmd_claim(argv):
             return EXIT_REFUSED
     else:
         inbox = os.path.join(base, "inbox")
-        names = sorted(n for n in os.listdir(inbox) if n.endswith(".json"))
+
+        def _oldest_first(n):
+            # One unreadable packet must not stop every claim: it sorts after
+            # every readable one, so it is reached only when nothing else is.
+            try:
+                data = _read_json(os.path.join(inbox, n))
+            except (IOError, OSError, ValueError):
+                return (1, "", n)
+            created = data.get("created_at") if isinstance(data, dict) else None
+            return (0, created or "", n)
+
+        names = sorted(
+            (n for n in os.listdir(inbox) if n.endswith(".json")),
+            key=_oldest_first)
         if not names:
             _err("bm-cursor claim: inbox empty")
             return EXIT_REFUSED
@@ -924,6 +983,10 @@ def cmd_cancel(argv):
         _err("bm-cursor cancel: packet already archived")
         return EXIT_REFUSED
     packet = _read_json(path)
+    if packet.get("state") not in ("queued", "claimed", "running"):
+        _err("bm-cursor cancel: packet %s is already %s"
+             % (args.packet_id, packet.get("state")))
+        return EXIT_REFUSED
     packet["state"] = "cancelled"
     packet["updated_at"] = _now()
     dest = _packet_path(base, "archive", packet["packet_id"])

@@ -63,6 +63,7 @@ def main(argv=None):
         return EXIT_NO_DATA
 
     offenders = []
+    checked = 0
     for f in files:
         try:
             size = os.path.getsize(f)
@@ -71,6 +72,7 @@ def main(argv=None):
         except OSError as e:
             print("SKIP %s (%s)" % (f, e))
             continue
+        checked += 1
         breaches = []
         if size > args.budget:
             breaches.append("bytes")
@@ -91,6 +93,10 @@ def main(argv=None):
                 detail.append("%d lines, %d over" % (lines, lines - args.max_lines))
             print("  %s (%s) [%s]" % (f, "; ".join(detail), ", ".join(breaches)))
         return EXIT_OVER_BUDGET
+    # A scan that read nothing must never report success.
+    if checked == 0:
+        print("NO-DATA: no readable MEMORY.md files under %s" % args.root)
+        return EXIT_NO_DATA
     return EXIT_OK
 
 

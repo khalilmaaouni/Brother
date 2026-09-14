@@ -23,6 +23,8 @@ import subprocess
 import sys
 import tempfile
 
+import evidence_obligation
+
 
 PREDICATE_TYPE = (
     "https://github.com/khalilmaaouni/Brother/blob/main/docs/reference/"
@@ -34,8 +36,13 @@ SSH_NAMESPACE = "brother-receipt-v1"
 SSH_TOOL_NAME = "brother receipt_attest"
 DEFAULT_RELATED = ["https://in-toto.io/attestation/human-review/v0.1"]
 
-VERDICTS = ("PASS", "FAIL", "NO-DATA")
-OBLIGATIONS = ("OPTIONAL", "REQUIRED_FOR_MERGE", "REQUIRED_FOR_RELEASE")
+# WBS-20.02 (docs/decisions/evidence-vocabulary-2026-09-13.json, EV-3):
+# defined once in evidence_obligation.py, the module actually wired to the
+# enforced merge gate. Imported, not redeclared, so the two can no longer
+# silently drift the way they had (identical membership, no import between
+# them, until this change).
+VERDICTS = evidence_obligation.VERDICTS
+OBLIGATIONS = evidence_obligation.LEVELS
 INDEPENDENCE = (
     "self-authored",
     "cross-derived",

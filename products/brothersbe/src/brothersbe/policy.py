@@ -706,7 +706,10 @@ def load_approvals(path):
         data = _read_json(path)
     except ValueError as exc:
         return [], str(exc)
-    records = data if isinstance(data, list) else data.get("approvals")
+    # A scalar or other non-mapping body has no .get(); treat it like a mapping
+    # with no 'approvals' key so the caller gets a problem string, not an AttributeError.
+    records = data if isinstance(data, list) else (
+        data.get("approvals") if isinstance(data, dict) else None)
     if not isinstance(records, list):
         return [], ("approvals at %s are not a list and carry no 'approvals' list, so this "
                     "run cannot tell who approved what" % path)

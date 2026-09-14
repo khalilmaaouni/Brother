@@ -7,14 +7,11 @@ argument-hint: "[what you are trying to do]"
 # Brother
 
 One door. Read `$ARGUMENTS` for what the work IS, never for a product name
-the person is not expected to know. `brother-run` below means
-`"${CLAUDE_PLUGIN_ROOT}/runtime/brother-run"` under Claude Code,
-`"${PLUGIN_ROOT}/runtime/brother-run"` under Cursor, or
-`"${BROTHER_PLUGIN_ROOT}/runtime/brother-run"` as the vendor-neutral
-name. A plugin install resolves those on its own and runs from ITS OWN
-directory, so it works pointed at any repository with no Brother checkout
-nearby; where that variable is unset, run `python3 scripts/brother_run.py`
-with the same arguments.
+the person is not expected to know. `brother-run` below is this host's
+resolved runtime entry point (exact variable per host:
+`docs/maintainer/BROTHER-MAINTAINER-VERBS.md#brother-run-path-resolution`);
+where none resolves, run `python3 scripts/brother_run.py` with the same
+arguments.
 
 ## Bare `/brother`, or "continue"/"resume"
 

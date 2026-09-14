@@ -666,27 +666,34 @@ def previous_release_line(target_version="1.0.0", releases_dir=None):
             text = fh.read()
     except OSError:
         return "`%s` could not be read; the previous revision is %s." % (rel, NODATA)
-    if (EXP.SOURCE_REVISION_HEADER not in text
-            or EXP.SOURCE_REVISION_PLACEHOLDER in text):
+    if EXP.SOURCE_REVISION_HEADER not in text:
         return ("`%s` carries no revision stamp (still the placeholder "
                 "\"%s\"), so the change set since it cannot be enumerated "
                 "from the record." % (rel, EXP.SOURCE_REVISION_PLACEHOLDER))
+    # The real stamp is checked before the placeholder: a stamped note can
+    # still quote an older note's placeholder text (for example in a "see
+    # also" sentence about a prior release), and that quoted text must not
+    # be mistaken for this note's own placeholder.
     m = re.search(r"Cut from hub commit `([0-9a-f]+)`", text)
-    if not m:
-        # A zero context critic read this branch's old sentence in the
-        # shipped 1.0.0 note ("carries a Source revision section in a
-        # shape this script does not recognize, so no revision is printed
-        # here") and correctly called it a cut script talking to itself: a
-        # release note is for a reader of THIS release, not a diagnostic
-        # about this generator's own parser. The diagnostic goes to
-        # stderr; the note gets nothing where the sentence used to stand.
-        print("previous_release_line: %s carries a Source revision "
-              "section this generator does not recognize; omitting the "
-              "previous-release sentence rather than describing the "
-              "generator's own limitation inside the note" % rel,
-              file=sys.stderr)
-        return ""
-    return "Previous release `%s` was cut from hub commit `%s`." % (rel, m.group(1))
+    if m:
+        return "Previous release `%s` was cut from hub commit `%s`." % (rel, m.group(1))
+    if EXP.SOURCE_REVISION_PLACEHOLDER in text:
+        return ("`%s` carries no revision stamp (still the placeholder "
+                "\"%s\"), so the change set since it cannot be enumerated "
+                "from the record." % (rel, EXP.SOURCE_REVISION_PLACEHOLDER))
+    # A zero context critic read this branch's old sentence in the
+    # shipped 1.0.0 note ("carries a Source revision section in a
+    # shape this script does not recognize, so no revision is printed
+    # here") and correctly called it a cut script talking to itself: a
+    # release note is for a reader of THIS release, not a diagnostic
+    # about this generator's own parser. The diagnostic goes to
+    # stderr; the note gets nothing where the sentence used to stand.
+    print("previous_release_line: %s carries a Source revision "
+          "section this generator does not recognize; omitting the "
+          "previous-release sentence rather than describing the "
+          "generator's own limitation inside the note" % rel,
+          file=sys.stderr)
+    return ""
 
 
 PATCH_NOTE_MARKER = "# Format: patch-manifest-v1"

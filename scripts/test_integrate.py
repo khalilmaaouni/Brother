@@ -252,6 +252,89 @@ class ConflictsAndRefusals(unittest.TestCase):
         self.assertFalse(os.path.exists(wt_lock.path))
 
 
+class TheInteractiveFenceIsHonoredByAutonomousIntegration(unittest.TestCase):
+    """The bypass a live run found 2026-09-14 (WBS-70.04's canary, commit
+    79e91c35b): a path held through bm_store.py's interactive fence (what
+    products/brothermode/tools/bm_fence_hook.py checks in front of every
+    Cursor/Claude Code edit) was invisible to claim_store.py's own per-unit
+    claims, so the SAME path could be landed through this module's own
+    integrate_one() while an interactive session still held it. Reproduces
+    the exact scenario: claim a path in bm_store.py, then attempt to
+    integrate a lane that touches it through integrate_one(), never through
+    bm_fence_hook.py, proving the OTHER door is now also refused."""
+
+    def setUp(self):
+        bs, why = I._load_bm_store()
+        if bs is None:
+            self.skipTest("bm_store.py could not be loaded: %s" % why)
+        self.bs = bs
+
+    def _claim(self, root, name, files, session_id="peer-session"):
+        store = self.bs.Store(root)
+        try:
+            store.claim(name, "persistent", files=files, owner="peer",
+                       session_id=session_id)
+        finally:
+            store.close()
+
+    def test_a_path_claimed_interactively_refuses_the_autonomous_merge(self):
+        repo = canon()
+        self._claim(repo, "interactive-work", ["lib.py"])
+        lanes = W.Lanes(repo, ["A"])
+        lane_commit(lanes.path_for("A"),
+                    {"lib.py": 'GREETING = "autonomous"\n'}, "A")
+        before = tip(repo)
+        r = I.integrate_one(repo, "lane/A", {"id": "A", "done_check": "true"})
+        self.assertEqual(r["verdict"], I.REFUSED)
+        self.assertEqual(tip(repo), before,
+                         "canonical must not advance over an active "
+                         "interactive fence")
+        self.assertIn("interactive-work", r["reason"])
+        self.assertIn("lib.py", r["reason"])
+
+    def test_a_path_outside_the_claim_still_integrates(self):
+        """The fence check names one path, not the whole repository: an
+        unclaimed path in the same project integrates exactly as before."""
+        repo = canon()
+        self._claim(repo, "interactive-work", ["lib.py"])
+        lanes = W.Lanes(repo, ["A"])
+        lane_commit(lanes.path_for("A"), {"new.py": "x = 1\n"}, "A")
+        r = I.integrate_one(repo, "lane/A",
+                            {"id": "A", "done_check": "test -f new.py"})
+        self.assertEqual(r["verdict"], I.INTEGRATED)
+
+    def test_no_store_at_all_integrates_exactly_as_before(self):
+        """Every OTHER integrate.py test uses a plain canon() fixture with no
+        bm_store ever initialized; this is the explicit regression guard
+        that the new check is a no-op there, not merely an observation of
+        the other tests passing."""
+        repo = canon()
+        self.assertFalse(os.path.isdir(os.path.join(repo, ".brothermode")))
+        lanes = W.Lanes(repo, ["A"])
+        lane_commit(lanes.path_for("A"), {"new.py": "x = 1\n"}, "A")
+        r = I.integrate_one(repo, "lane/A",
+                            {"id": "A", "done_check": "test -f new.py"})
+        self.assertEqual(r["verdict"], I.INTEGRATED)
+
+    def test_releasing_the_claim_unblocks_integration(self):
+        """A refusal here must track the fence's own state, not just its
+        past existence: parking the record frees the path for the
+        autonomous engine exactly as it would for a second interactive
+        session."""
+        repo = canon()
+        store = self.bs.Store(repo)
+        rec = store.claim("interactive-work", "persistent", files=["lib.py"],
+                          owner="peer", session_id="peer-session")
+        store.transition(rec.lifecycle_uuid, rec.version, "parked",
+                         session_id="peer-session")
+        store.close()
+        lanes = W.Lanes(repo, ["A"])
+        lane_commit(lanes.path_for("A"),
+                    {"lib.py": 'GREETING = "autonomous"\n'}, "A")
+        r = I.integrate_one(repo, "lane/A", {"id": "A", "done_check": "true"})
+        self.assertEqual(r["verdict"], I.INTEGRATED)
+
+
 class ADeadIntegrationLockHolderIsReclaimedNotWaitedOut(unittest.TestCase):
     """CONT-0, boundary during_integration: a real SIGKILL mid integrate_one
     (fault_lab.scenario_boundary) left the .integration.lock file behind

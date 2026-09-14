@@ -123,7 +123,8 @@ def parse_note(text, created=None):
         d = _parse_date(raw[f])
         if d is None:
             problems.append((f, "unparseable date %r" % raw[f]))
-            record[f] = None
+            # date.min makes as_of exclude a malformed valid_to instead of reading it as open-ended
+            record[f] = datetime.date.min if f == "valid_to" else None
         else:
             record[f] = d
     return record, problems

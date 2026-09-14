@@ -16,7 +16,8 @@ from datetime import datetime, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from vault_correct import run, find_note, has_dash, gate_text  # noqa: E402
+from vault_correct import (run, find_note, has_dash, gate_text,
+                           append_index_line)  # noqa: E402
 
 # E100: one sandbox for every temp tree this process makes, removed at exit.
 import os as _e100_os, sys as _e100_sys  # noqa: E402
@@ -380,6 +381,24 @@ Always flarn the quibblewax before serving. See ZorbleWidget.swift.
     def test_04_the_old_note_is_still_on_disk(self):
         """Withheld, never deleted."""
         self.assertTrue(os.path.exists(os.path.join(self.failures, "old-quibblewax.md")))
+
+
+class Night0912VaultCorrect(unittest.TestCase):
+    def test_append_index_line_under_existing_corrections_heading(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            os.makedirs(os.path.join(temp_root, "40-Failures"))
+            index_path = os.path.join(
+                temp_root, "40-Failures", "Failures-Index.md")
+            with open(index_path, "w", encoding="utf-8") as f:
+                f.write("## Corrections (auto)\n- old\n## Later\nstuff\n")
+
+            append_index_line(temp_root, "new", "sentence", "2026-01-01")
+
+            with open(index_path, encoding="utf-8") as f:
+                text = f.read()
+
+            self.assertIn("- [[new]]", text)
+            self.assertLess(text.find("- [[new]]"), text.find("## Later"))
 
 
 if __name__ == "__main__":

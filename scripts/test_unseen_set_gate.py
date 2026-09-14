@@ -143,5 +143,19 @@ class UnseenSetGate(unittest.TestCase):
         self.assertEqual(status, unseen_set_gate.PASS)
 
 
+class Night0912UnseenSetGate(UnseenSetGate):
+    def test_star_bullet_unapplied_expected_correction_fails_gate(self):
+        # The bullet detector must not key on "-" alone: a "*" or "+"
+        # Markdown bullet is an equally valid correction item, and one left
+        # unapplied must still FAIL rather than being silently skipped.
+        section = PASSING_SECTION + (
+            "* W-05: expected, fix needed (PENDING)\n"
+        )
+        self._write_record("# Record\n\n" + section)
+        status, message = unseen_set_gate.gate(self.seed_path)
+        self.assertEqual(status, unseen_set_gate.FAIL, message)
+        self.assertIn("W-05", message)
+
+
 if __name__ == "__main__":
     unittest.main()

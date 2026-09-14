@@ -187,33 +187,57 @@ def load_surface_module():
     return _SURFACE_MOD
 
 
-def load_guard_module():
-    """`tools/sbe_bash_write_guard.py`, for CONTROL_PLANE_PATTERNS: the one
-    list of grant-and-control files (task registry, break-glass, approvals,
-    the guard tools themselves, STATE.md). Reused by path so the Bash channel
-    and this structured-write channel can never protect two different lists;
-    a hostile refuter proved the gap by granting itself CLAUDE.md through a
-    tasks.json rewrite this hook allowed. Cached; never raises."""
-    global _GUARD_MOD, _GUARD_MOD_ERROR
-    if _GUARD_MOD is not None or _GUARD_MOD_ERROR is not None:
-        return _GUARD_MOD
+def load_common_module():
+    """`tools/sbe_guard_common.py`, for CONTROL_PLANE_PATTERNS and
+    confirmed_surface: the small, dependency-free module both this hook and
+    `tools/sbe_bash_write_guard.py` share so the two channels can never
+    protect two different lists or apply two different case-fold rules; a
+    hostile refuter proved the gap by granting itself CLAUDE.md through a
+    tasks.json rewrite this hook allowed, back when each guard kept its own
+    copy. Cached; never raises."""
+    global _COMMON_MOD, _COMMON_MOD_ERROR
+    if _COMMON_MOD is not None or _COMMON_MOD_ERROR is not None:
+        return _COMMON_MOD
     result = _load_by_path(
-        "sbe_bash_write_guard_for_authority_hook", "sbe_bash_write_guard.py")
-    _GUARD_MOD, _GUARD_MOD_ERROR = result.mod, result.error
-    return _GUARD_MOD
+        "sbe_guard_common_for_authority_hook", "sbe_guard_common.py")
+    _COMMON_MOD, _COMMON_MOD_ERROR = result.mod, result.error
+    return _COMMON_MOD
 
 
-_GUARD_MOD = None
-_GUARD_MOD_ERROR = None
+_COMMON_MOD = None
+_COMMON_MOD_ERROR = None
 
 
-def control_plane_surface(fence_mod, guard_mod, root, rel):
+def require_common_module():
+    """`load_common_module()`, or an OpenFail naming why not.
+
+    UNLIKE `load_guard_module()` before it, a failure here is NOT a partial
+    degrade: `confirmed_surface` (in `tools/sbe_guard_common.py`) is not a
+    bonus check, it is how every iteration of decide()'s per-target loop
+    below decides whether a path is an authority surface AT ALL, so a
+    session with no `sbe_guard_common.py` available cannot tell an authority
+    file from an ordinary one and must fail open on the whole call, exactly
+    like `require_fence_module()`, `require_surface_module()` and
+    `require_tasks_module()` already do for their own required siblings. This
+    is the same posture this file already holds for every OTHER required
+    dependency, applied here rather than a new one invented for this file."""
+    mod = load_common_module()
+    if mod is None:
+        raise OpenFail(
+            "tools/sbe_guard_common.py could not be imported (%s), and this hook holds "
+            "no private copy of the confirmed-surface match or the control-plane pattern "
+            "list on purpose, so it cannot tell which paths are authority-bearing or "
+            "control-plane" % _COMMON_MOD_ERROR)
+    return mod
+
+
+def control_plane_surface(fence_mod, common_mod, root, rel):
     """The control-plane pattern `rel` falls under, or "" for none. Matching
     is fence_mod.paths_overlap, the same comparison the Bash guard uses for
     the same list, so the two channels cannot drift."""
-    if guard_mod is None:
+    if common_mod is None:
         return ""
-    for pattern in getattr(guard_mod, "CONTROL_PLANE_PATTERNS", ()):
+    for pattern in getattr(common_mod, "CONTROL_PLANE_PATTERNS", ()):
         if fence_mod.paths_overlap(rel, pattern, root):
             return "control-plane file (%s)" % pattern
     return ""
@@ -285,88 +309,15 @@ DISABLE_ENV = "BROTHERSBE_AUTHORITY_HOOK_OFF"
 # ---------------------------------------------------------------------------
 # Case-insensitive filesystem hazard for the authority-surface match itself.
 #
-# `_matched_surface` compares exact spellings on purpose (CLAUDE.md is not
-# claude.md; that is the surface list's own design, not a bug). But a write
-# aimed at "claude.md" on a case-insensitive volume (the macOS default) can
-# land on the SAME on-disk entry as an existing "CLAUDE.md" regardless of
-# what string the tool call spelled, and a check that only ever compares
-# strings would miss it: exactly the hazard tools/sbe_fence_hook.py's own
-# `paths_overlap` already handles for scope overlap, and the technique is
-# reused here rather than re-derived (`_same_entry_case_insensitive`, which
-# confirms two spellings name one entry by inode where both exist, or by
-# probing the volume itself when they do not, and never trusts a case-folded
-# STRING match alone).
+# `confirmed_surface`, `_case_fold_candidate` and `_known_segments` used to
+# live here. They moved to `tools/sbe_guard_common.py` (see
+# `require_common_module()` above) so `tools/sbe_bash_write_guard.py` could
+# reach `confirmed_surface` without execing this whole file, and this file
+# imports them back the same way rather than keeping a private copy: see
+# `sbe_guard_common.py`'s own module docstring for why a case-folded
+# STRING match alone must never be trusted and how the filesystem
+# confirmation actually works.
 # ---------------------------------------------------------------------------
-
-_KNOWN_SEGMENTS = None
-
-
-def _known_segments(surface_mod):
-    """{lowercased path segment: its canonical spelling}, built once from the
-    literal tuples `_matched_surface` itself is built from, plus the fixed
-    literals its docstring names (CLAUDE.md, agents, skills, SKILL.md,
-    .github, workflows) that do not live in a named tuple. Covers exactly the
-    segments the nine detected families are spelled with; a case-folded
-    hazard in a segment none of the nine families ever name is out of scope
-    by the same logic `_matched_surface` itself uses to decide what counts."""
-    global _KNOWN_SEGMENTS
-    if _KNOWN_SEGMENTS is not None:
-        return _KNOWN_SEGMENTS
-    seg = {}
-    for d in surface_mod.AUTHORITY_TOP_DIRS:
-        seg[d.lower()] = d
-    for f in surface_mod.AUTHORITY_ROOT_FILES:
-        seg[f.lower()] = f
-    for p in surface_mod.AUTHORITY_CODEOWNERS_PATHS:
-        for part in p.split("/"):
-            seg[part.lower()] = part
-    seg["claude.md"] = "CLAUDE.md"
-    seg["agents"] = "agents"
-    seg["skills"] = "skills"
-    seg["skill.md"] = "SKILL.md"
-    seg[".github"] = ".github"
-    seg["workflows"] = "workflows"
-    _KNOWN_SEGMENTS = seg
-    return seg
-
-
-def _case_fold_candidate(surface_mod, rel):
-    """`rel` with every path segment that case-insensitively matches a known
-    authority-surface segment replaced by that segment's canonical spelling,
-    or "" when no segment needed replacing (nothing to fold)."""
-    seg = _known_segments(surface_mod)
-    parts = rel.split("/")
-    changed = False
-    fixed = []
-    for p in parts:
-        canon = seg.get(p.lower())
-        if canon is not None and canon != p:
-            changed = True
-            fixed.append(canon)
-        else:
-            fixed.append(p)
-    if not changed:
-        return ""
-    return "/".join(fixed)
-
-
-def confirmed_surface(fence_mod, surface_mod, root, rel):
-    """The authority surface `rel` matches, exact spelling first. Failing
-    that, the case-folded candidate spelling IF the filesystem confirms the
-    two name one entry, never on the string fold alone. Returns "" when
-    neither is an authority surface."""
-    surface = surface_mod._matched_surface(rel)
-    if surface:
-        return surface
-    candidate = _case_fold_candidate(surface_mod, rel)
-    if not candidate or candidate == rel:
-        return ""
-    candidate_surface = surface_mod._matched_surface(candidate)
-    if not candidate_surface:
-        return ""
-    if fence_mod._same_entry_case_insensitive(root, rel, candidate):
-        return candidate_surface
-    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -557,13 +508,13 @@ def decide(payload):
 
         surface_mod = require_surface_module()
         tasks_mod = require_tasks_module()
-        guard_mod = load_guard_module()
-        if guard_mod is None:
-            notes.append(
-                "sbe_authority_hook: tools/sbe_bash_write_guard.py could not "
-                "be imported (%s), so control-plane files are NOT checked on "
-                "this call; the authority surface is still enforced."
-                % _GUARD_MOD_ERROR)
+        # Required, not a partial degrade like the old load_guard_module()
+        # this replaces: confirmed_surface (below) needs sbe_guard_common.py
+        # for every target, not only for the control-plane bonus check, so a
+        # session with no sbe_guard_common.py available cannot tell an
+        # authority file from an ordinary one and must fail this whole call
+        # open, exactly like the require_*_module() calls above it.
+        common_mod = require_common_module()
 
         try:
             data = tasks_mod.load_registry(root)
@@ -580,9 +531,9 @@ def decide(payload):
                 # Outside the project root. This hook guards a project, not
                 # the filesystem, same as the fence hook.
                 continue
-            surface = confirmed_surface(fence_mod, surface_mod, root, rel)
+            surface = common_mod.confirmed_surface(fence_mod, surface_mod, root, rel)
             if not surface:
-                surface = control_plane_surface(fence_mod, guard_mod, root, rel)
+                surface = control_plane_surface(fence_mod, common_mod, root, rel)
             if not surface:
                 continue
             covered = any(

@@ -1695,5 +1695,82 @@ class VenvEmbedExclusionCase(unittest.TestCase):
         self.assertIn(".venv-embed", r.stdout + r.stderr)
 
 
+class Night0912Install(unittest.TestCase):
+    def test_copy_tree_raises_on_symlinked_directory(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            'install',
+            os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         '../scripts/install.py'))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        src = tempfile.mkdtemp()
+        dst = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, src, ignore_errors=True)
+        self.addCleanup(shutil.rmtree, dst, ignore_errors=True)
+        real = os.path.join(src, 'real')
+        os.mkdir(real)
+        with open(os.path.join(real, 'f'), 'w') as fh:
+            fh.write('x')
+        os.symlink(real, os.path.join(src, 'linkdir'))
+        with self.assertRaises(ValueError):
+            mod.copy_tree(src, dst, False)
+
+
+class Night0912MigrateInstall(unittest.TestCase):
+    def _load_module(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            'migrate_install',
+            os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         '../scripts/migrate_install.py'))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_apply_refuses_to_remove_running_tree(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        fake_root = os.path.join(tmp, '.claude', 'skills', 'brotherme')
+        os.makedirs(os.path.join(fake_root, 'scripts'))
+        os.makedirs(os.path.join(fake_root, '.claude-plugin'))
+        with open(os.path.join(fake_root, '.claude-plugin', 'plugin.json'), 'w') as fh:
+            fh.write('{"name":"brotherme"}')
+        with open(os.path.join(fake_root, 'scripts', 'install.py'), 'w') as fh:
+            fh.write(os.linesep.join(['import sys', 'sys.exit(0)', '']))
+        mod = self._load_module()
+        mod.ROOT = fake_root
+        mod.main(['--home', tmp, '--apply',
+                  '--i-understand-this-changes-every-session'])
+        self.assertTrue(os.path.isdir(fake_root),
+                        'the running tree was removed instead of refused')
+
+    def test_apply_preflight_fails_on_undecodable_dry_run(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        fake_root = os.path.join(tmp, 'fake_root')
+        os.makedirs(os.path.join(fake_root, 'scripts'))
+        os.makedirs(os.path.join(fake_root, '.claude-plugin'))
+        with open(os.path.join(fake_root, '.claude-plugin', 'plugin.json'), 'w') as fh:
+            fh.write('{"name":"brotherme"}')
+        with open(os.path.join(fake_root, 'scripts', 'install.py'), 'w') as fh:
+            fh.write(os.linesep.join([
+                'import sys',
+                'sys.stdout.buffer.write(bytes([255]))',
+                'sys.exit(0)',
+                '']))
+        mod = self._load_module()
+        mod.ROOT = fake_root
+        skill_dir = os.path.join(tmp, '.claude', 'skills', 'brotherme')
+        os.makedirs(skill_dir)
+        with open(os.path.join(skill_dir, 'stub'), 'w') as fh:
+            fh.write('x')
+        mod.main(['--home', tmp, '--apply',
+                  '--i-understand-this-changes-every-session'])
+        self.assertTrue(os.path.isdir(skill_dir),
+                        'the stranded skill directory was removed before '
+                        'a strict-decoding reinstall could fail')
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

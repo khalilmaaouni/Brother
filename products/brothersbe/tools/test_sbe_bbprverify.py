@@ -365,5 +365,16 @@ class TestReadOnlyLaw(unittest.TestCase):
                          + "\n  ".join(findings))
 
 
+class Night0912Bbprverify(BbprverifyCase):
+    """A 200 body whose 'source' key is a non-dict (a malformed response, not
+    absence) used to crash `.get('commit')` with AttributeError instead of
+    mapping to an UNVERIFIABLE control."""
+
+    def test_evaluate_handles_non_dict_source(self):
+        fetch = FakeFetch([(200, {"source": "not-a-dict"}, None)])
+        report = self.evaluate(fetch)
+        self.assertEqual(report.get("final"), "UNVERIFIABLE")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

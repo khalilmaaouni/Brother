@@ -1,0 +1,6 @@
+{
+ "_NOTE": "This file is a fixture-only convention invented by benchmarks/safe-unwatched-time/run_benchmark.py, never a record any real Brother engine writes. No directory under docs/plan/runs carries one; scripts/safe_unwatched_time.py never reads it. It exists here only to prove that the harness's preservation-check plumbing computes the right verdict WHEN a positive recoverability and repeated-mistakes signal exists, since no instrument on this estate produces that signal for a real run today (benchmarks/gauntlets/long-horizon-recovery.json: RECOVERY TIME's own entry reads 'status: partial', and HUMAN INTERVENTIONS' own entry reads 'instrument: NO INSTRUMENT YET').",
+ "scope_checked_clean": true,
+ "recoverability_ok": true,
+ "repeated_mistakes_ok": true
+}

@@ -136,12 +136,49 @@ SEPARATION_OF_DUTIES_ENFORCED = True
 # class horizon, since a lifecycle state is exactly that kind of claim.
 EXPIRY_HORIZON_DAYS = 180
 
+# AGENTS.md line 45 (Kay Vault, 3. Note conventions): a `type: failure` note
+# created on or after DEPTH_SINCE must carry these four frontmatter fields
+# before it counts as validated wisdom, not just a lesson-candidate. Plain
+# module-level policy, same declared-table posture as
+# SEPARATION_OF_DUTIES_ENFORCED above: contract decides, writer wires.
+DEPTH_FIELDS = ("evidence_refs", "regression_fixture", "owner", "review_by")
+DEPTH_SINCE = "2026-09-13"
+_DEPTH_FIELD_RE = {k: re.compile(r"^%s:\s*(.+?)\s*$" % k, re.M) for k in DEPTH_FIELDS}
+_TYPE_RE = re.compile(r"^type:\s*(.+?)\s*$", re.M)
+_CREATED_RE = re.compile(r"^created:\s*(.+?)\s*$", re.M)
+
 
 def _frontmatter(text):
     if not text.startswith("---"):
         return ""
     end = text.find("\n---", 3)
     return text[3:end] if end != -1 else ""
+
+
+def missing_depth_fields(text):
+    """DEPTH_FIELDS names absent or empty in a failure note's frontmatter, or
+    [] when the rule does not apply. [] immediately for anything not
+    `type: failure` (AGENTS.md line 45 names failure notes only). [] for a
+    note whose `created:` is present and reads before DEPTH_SINCE (a pre-rule
+    note, exempt by the same line, never retrofitted). A note with NO
+    `created:` field counts as new and is NOT exempt: fail closed rather than
+    invent an age nobody recorded, the same posture read_promotion above
+    takes for a missing promoted_at."""
+    block = _frontmatter(text)
+    tm = _TYPE_RE.search(block)
+    if not tm or tm.group(1).strip().strip('"').strip("'") != "failure":
+        return []
+    cm = _CREATED_RE.search(block)
+    if cm:
+        created = cm.group(1).strip().strip('"').strip("'")
+        if created < DEPTH_SINCE:
+            return []
+    missing = []
+    for field in DEPTH_FIELDS:
+        m = _DEPTH_FIELD_RE[field].search(block)
+        if not m or not m.group(1).strip().strip('"').strip("'"):
+            missing.append(field)
+    return missing
 
 
 def read_promotion(text):

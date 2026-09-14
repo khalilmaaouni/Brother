@@ -104,8 +104,10 @@ def note_body(name, solves, what, evidence, project, borrowed="", receipt=""):
     ]
     if receipt:
         lines.append("receipt: %s" % receipt)
+    desc_parts = (what or "").strip().splitlines()
+    # why: required --what '' must not IndexError; fall back to NODATA
     lines += [
-        "description: %s" % what.strip().splitlines()[0][:200],
+        "description: %s" % (desc_parts[0][:200] if desc_parts else NODATA),
         "---",
         "",
         "# %s" % name,

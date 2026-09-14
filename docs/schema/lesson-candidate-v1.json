@@ -1,0 +1,68 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "lesson-candidate-v1",
+  "title": "Vault Lesson Candidate v1",
+  "description": "WBS-60.03. The lesson-candidate contract the roadmap names, verbatim: 'Every candidate includes: observed symptom; context; mistaken action if any; root cause; correction; evidence IDs; affected domain; generalizable Core lesson?; acceptance/reality status.' Field naming beyond that list is this session's own inference, named explicitly in the commit: affected_domain is restricted to the closed domain-tag set vault_domain_tags.py enforces for WBS-60.01 (core, mobile, mdm, brotherds), since a lesson candidate is exactly the kind of record that vocabulary exists to tag; acceptance_status's three-value vocabulary (PENDING, ACCEPTED, REJECTED) is not stated anywhere in the roadmap text, which only asks for 'acceptance/reality status' without naming values. Only the keyword subset scripts/contract_check.py enforces is used here: type, required, properties, enum, const, additionalProperties, matching outcome-contract-v1, mobile-journey-contract-v1, golden-master-contract-v1 and claim-lifecycle-v1. The promotion rule this roadmap section states elsewhere (section 6.7: create lesson candidates only when supported by accepted evidence, repeated failure, a resolved outcome, or an explicit human decision) is a cross-record, cross-cutting policy, not a structural property of one record; scripts/vault_promotion_policy.py (WBS-60.04) enforces it, not this schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "candidate_id",
+    "observed_symptom",
+    "context",
+    "mistaken_action",
+    "root_cause",
+    "correction",
+    "evidence_ids",
+    "affected_domain",
+    "generalizable_core_lesson",
+    "acceptance_status"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "lesson-candidate-v1",
+      "description": "Which shape this record follows, so a reader never has to guess."
+    },
+    "candidate_id": {
+      "type": "string",
+      "description": "Stable identifier for this candidate."
+    },
+    "observed_symptom": {
+      "type": "string",
+      "description": "The roadmap's 'observed symptom': what was actually seen, in the words of the observation, not an interpretation."
+    },
+    "context": {
+      "type": "string",
+      "description": "The roadmap's 'context': the situation the symptom occurred in."
+    },
+    "mistaken_action": {
+      "type": ["string", "null"],
+      "description": "The roadmap's 'mistaken action if any'. Null when no mistaken action was involved (a lesson can be WISDOM, not a mistake, per lesson_severity.py's own precedent)."
+    },
+    "root_cause": {
+      "type": "string",
+      "description": "The roadmap's 'root cause': why the symptom happened, not merely what happened."
+    },
+    "correction": {
+      "type": "string",
+      "description": "The roadmap's 'correction': what closes the root cause."
+    },
+    "evidence_ids": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "The roadmap's 'evidence IDs'. May be an empty array for a candidate not yet evidenced; scripts/vault_promotion_policy.py (WBS-60.04), not this schema, decides whether an un-evidenced candidate may be promoted."
+    },
+    "affected_domain": {
+      "enum": ["core", "mobile", "mdm", "brotherds"],
+      "description": "The roadmap's 'affected domain', restricted to the WBS-60.01 domain-tag closed set (this session's inference, named in the commit: the roadmap does not repeat the vocabulary here, but WBS-60.01 already defines the one closed set a domain field in this Vault should draw from)."
+    },
+    "generalizable_core_lesson": {
+      "type": "boolean",
+      "description": "The roadmap's 'generalizable Core lesson?' -- WBS-60.05's own question, answered here per candidate: does this lesson represent a reusable Core failure mode."
+    },
+    "acceptance_status": {
+      "enum": ["PENDING", "ACCEPTED", "REJECTED"],
+      "description": "The roadmap's 'acceptance/reality status'. Vocabulary is this session's own inference (named in the commit): the roadmap does not name the values, only the concept."
+    }
+  }
+}

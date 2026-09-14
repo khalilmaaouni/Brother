@@ -1,0 +1,6 @@
+{
+ "receipts": [
+  {"unit_id": "u1", "state": "proven"},
+  {"unit_id": "u2", "state": "proven"}
+ ]
+}

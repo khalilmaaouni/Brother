@@ -220,7 +220,9 @@ def check_command(command, owned, runner=None, help_cache=None, roots=None):
                             "declines to rule on %s"
                             % (script, ", ".join(sorted(flags))))
 
-    unknown = sorted(f for f in flags if f not in text)
+    # Match whole flags: --foo is not --foobar just because the text contains it.
+    known = set(LONG_FLAG.findall(text))
+    unknown = sorted(f for f in flags if f not in known)
     if unknown:
         return FAIL, ("%s does not accept %s: its own --help lists no such flag"
                       % (script, ", ".join(unknown)))

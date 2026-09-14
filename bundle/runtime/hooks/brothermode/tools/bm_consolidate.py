@@ -166,7 +166,9 @@ def draft_summary(candidates):
         lines.append("")
         lines.append("Draft summary (placeholder -- requires human review before approval):")
         lines.append("TODO: a human writes the consolidated summary for this group here.")
-        proposals.append({"batch_id": _slug(key), "group_key": key, "members": members,
+        # Distinct keys can slug identically (e.g. "a b" vs "a-b"); append a key hash.
+        batch_id = _slug(key) + "-" + hashlib.sha1(key.encode("utf-8")).hexdigest()[:8]
+        proposals.append({"batch_id": batch_id, "group_key": key, "members": members,
                           "body": "\n".join(lines)})
     return proposals
 

@@ -184,10 +184,18 @@ def require_surface_module():
                           "the authority-surface family list")
 
 
-def require_authority_module():
-    return require_module("sbe_authority_hook_for_bash_guard",
-                          os.path.join(HERE, "sbe_authority_hook.py"),
-                          "the case-fold-confirmed authority-surface match")
+def require_common_module():
+    """`tools/sbe_guard_common.py`, for `confirmed_surface` and
+    `CONTROL_PLANE_PATTERNS`: the small, dependency-free module this guard
+    and `tools/sbe_authority_hook.py` share so the Bash channel and the
+    structured-write channel can never protect two different lists or apply
+    two different case-fold rules, and so this guard no longer pays a full
+    sibling exec of sbe_authority_hook.py (750+ lines) just to reach the one
+    function it actually used from it."""
+    return require_module("sbe_guard_common_for_bash_guard",
+                          os.path.join(HERE, "sbe_guard_common.py"),
+                          "the case-fold-confirmed authority-surface match and the "
+                          "control-plane pattern list")
 
 
 def load_repo_scope_module():
@@ -231,25 +239,13 @@ def require_tasks_module():
 # nothing.
 # ---------------------------------------------------------------------------
 
-CONTROL_PLANE_PATTERNS = (
-    ".sbe/policy.yml",
-    ".sbe/checks.yml",
-    ".sbe/tasks.json",
-    # The grant files. Found by a hostile refuter of this guard: break-glass is
-    # the one record that clears any protected change, and it was protected by
-    # nothing, so an agent could write itself the exemption through the very
-    # channel this file exists to close. Approvals, waivers and decisions grant
-    # the same way and belong here for the same reason.
-    ".sbe/break-glass.json",
-    ".sbe/approvals.json",
-    ".sbe/waivers.json",
-    ".sbe/decisions/*",
-    "src/brothersbe/evidence.py",
-    "src/brothersbe/policy.py",
-    "tools/sbe_*guard*.py",
-    "tools/sbe_*hook*.py",
-    "STATE.md",
-)
+# CONTROL_PLANE_PATTERNS used to be defined here, privately. It moved to
+# tools/sbe_guard_common.py (reached through require_common_module() above)
+# so this guard and tools/sbe_authority_hook.py can never protect two
+# different lists: a hostile refuter proved that gap by granting itself
+# CLAUDE.md through a tasks.json rewrite the other guard allowed, back when
+# each side kept its own copy. See sbe_guard_common.py's own module
+# docstring for the full list and why each entry is there.
 
 #: The other half of what this guard reads, defined further down beside the
 #: write-command table because it needs that section's word readers:
@@ -295,7 +291,7 @@ def authority_patterns(surface_mod):
     return tuple(pats)
 
 
-def protected_family(fence_mod, surface_mod, authority_mod, root, rel):
+def protected_family(fence_mod, surface_mod, common_mod, root, rel):
     """The protected family `rel` belongs to, or "" for none.
 
     Authority families first, through the sibling that already knows how to
@@ -305,10 +301,10 @@ def protected_family(fence_mod, surface_mod, authority_mod, root, rel):
     directory prefixes and case."""
     if rel in (".", ""):
         return ROOT_FAMILY
-    surface = authority_mod.confirmed_surface(fence_mod, surface_mod, root, rel)
+    surface = common_mod.confirmed_surface(fence_mod, surface_mod, root, rel)
     if surface:
         return surface
-    for pattern in authority_patterns(surface_mod) + CONTROL_PLANE_PATTERNS:
+    for pattern in authority_patterns(surface_mod) + common_mod.CONTROL_PLANE_PATTERNS:
         if fence_mod.paths_overlap(rel, pattern, root):
             return pattern
     return ""
@@ -560,7 +556,10 @@ def _sed_targets(words, flags):
                   or _is_inplace_flag(f) for f in flags)
     if not inplace:
         return []
-    scripted = any(f in ("-e", "-f", "--expression", "--file")
+    # -f/--file name a script file that sed READS, and its word sits in
+    # `words`; --file=script attaches it to the flag, and -e's argument is
+    # inline script, so only those two spellings mean no word is skipped.
+    scripted = any(f in ("-e", "--expression")
                    or f.startswith("--expression=") or f.startswith("--file=")
                    for f in flags)
     return list(words) if scripted else _rest(words, 1)
@@ -574,17 +573,30 @@ def _dd_targets(segment):
     return out
 
 
-def _git_targets(words):
+def _git_targets(segment):
     """The paths a git subcommand writes into the working tree. Only the
     subcommands that touch tracked files directly; `git commit` and friends
     write history, which the Stop reconciler judges from the changes
-    themselves."""
-    if not words:
-        return []
-    sub = words[0]
+    themselves. Returns (subcommand, paths). Git's own value-taking options
+    (-c core.foo=bar, -C /dir) sit before the subcommand, so their value
+    word is skipped by name rather than read as the subcommand."""
+    words = [t.text for t in segment if not t.is_op]
+    k = 0
+    while k < len(words) and _ASSIGNMENT.match(words[k]):
+        k += 1
+    if k >= len(words) or os.path.basename(words[k].strip()) != "git":
+        return "", []
+    k += 1
+    while k < len(words) and _is_flag(words[k]):
+        if words[k] in GIT_VALUE_FLAGS:
+            k += 1  # this option's separate value word, not the subcommand
+        k += 1
+    if k >= len(words):
+        return "", []
+    sub = words[k]
     if sub in ("rm", "mv", "restore", "checkout", "clean", "apply", "stash"):
-        return _rest(words, 1)
-    return []
+        return sub, [w for w in words[k + 1:] if not _is_flag(w)]
+    return sub, []
 
 
 # ---------------------------------------------------------------------------
@@ -748,6 +760,12 @@ def _push_targets(refspecs, start):
             dst = dst.split(":")[-1]
         if dst.startswith("refs/heads/"):
             dst = dst[len("refs/heads/"):]
+        # A refspec of HEAD names whatever branch HEAD is on, not a branch
+        # literally called HEAD, so resolve it before the default-branch check.
+        if dst == "HEAD":
+            here = current_branch(start)
+            if here:
+                dst = here
         if dst:
             branches.append(dst)
     if not branches:
@@ -973,8 +991,9 @@ def segment_candidates(segment, depth):
         for p in _dd_targets(segment):
             out.append(Candidate(p, "dd of=", True))
     elif name == "git":
-        for p in _git_targets(words):
-            out.append(Candidate(p, "git %s" % (words[0] if words else ""), True))
+        git_sub, git_paths = _git_targets(segment)
+        for p in git_paths:
+            out.append(Candidate(p, "git %s" % git_sub, True))
     elif name in SHELL_INTERPRETERS and depth < MAX_DEPTH:
         payload = _payload_of(segment, ("-c",))
         if payload:
@@ -1150,9 +1169,25 @@ def _exec_target_raw(segment):
             # happens to be in and be refused as "another project's tool"
             # when nothing at that path was ever going to run.
             return None, None
-        words = _words_after_name(segment)
-        if words:
-            return words[0], (words[1] if len(words) > 1 else None)
+        # Walk the segment's own words (assignments, interpreter name, then
+        # its options) so an option taking a separate value word (-X dev,
+        # -W error) does not have that value mistaken for the script file.
+        value_flags = ("-X", "-W")
+        words = [t.text for t in segment if not t.is_op]
+        k = 0
+        while k < len(words) and _ASSIGNMENT.match(words[k]):
+            k += 1
+        k += 1  # the interpreter name itself
+        after = []
+        while k < len(words):
+            w = words[k]
+            if _is_flag(w):
+                k += 2 if w in value_flags else 1
+                continue
+            after.append(w)
+            k += 1
+        if after:
+            return after[0], (after[1] if len(after) > 1 else None)
     return None, None
 
 
@@ -1465,7 +1500,7 @@ def decide(payload):
 
         fence_mod = require_fence_module()
         surface_mod = require_surface_module()
-        authority_mod = require_authority_module()
+        common_mod = require_common_module()
         tasks_mod = require_tasks_module()
 
         try:
@@ -1530,7 +1565,7 @@ def decide(payload):
                 # Outside the project root. This guard governs a project, not
                 # the filesystem, exactly as both sibling hooks do.
                 continue
-            family = protected_family(fence_mod, surface_mod, authority_mod, root, rel)
+            family = protected_family(fence_mod, surface_mod, common_mod, root, rel)
             if not family:
                 continue
             declared = any(
@@ -1643,7 +1678,7 @@ def cmd_classify(argv):
     try:
         fence_mod = require_fence_module()
         surface_mod = require_surface_module()
-        authority_mod = require_authority_module()
+        common_mod = require_common_module()
     except OpenFail as e:
         _warn("this guard cannot classify anything here, so every Bash command would be "
               "ALLOWED. Reason: %s" % e)
@@ -1664,7 +1699,7 @@ def cmd_classify(argv):
             rel = fence_mod.canonical_target(root, c.raw, root)
             if rel is None:
                 continue
-            family = protected_family(fence_mod, surface_mod, authority_mod, root, rel)
+            family = protected_family(fence_mod, surface_mod, common_mod, root, rel)
             seen += 1
             _warn("%s %s | %s | protected: %s"
                   % ("WRITE " if c.write else "mention", rel, c.why, family or "no"))

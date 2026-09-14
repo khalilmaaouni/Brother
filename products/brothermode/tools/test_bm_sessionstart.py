@@ -124,5 +124,51 @@ class FirstRunVaultNudge(unittest.TestCase):
         self.assertNotIn(NUDGE, out)
 
 
+class Night0912BmSessionstart(unittest.TestCase):
+    """Whitebox, in-process (unlike the subprocess-driven classes above):
+    the defect is inside main()'s own control flow after bm_handover.py
+    detect succeeds but every line it printed was a first-run-suppressed
+    NO-DATA, which a real subprocess fixture cannot reach without also
+    faking bm_handover.py's own state; monkeypatching main()'s module
+    globals is the direct way to drive that one branch."""
+
+    def test_first_run_suppressed_no_data_does_not_report_failure(self):
+        import contextlib
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "bm_sessionstart_ut", SESSIONSTART)
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+
+        m._load_bm_repo_scope = lambda: None
+        m._is_first_run = lambda: True
+        m._no_vault_bound = lambda: False
+
+        def fake_run(args, stdin_text=None, capture=False, keep_stderr=False):
+            base = os.path.basename(str(args[0]))
+            if base == "setup.py":
+                return 0, ""
+            if base == "bm_handover.py" and len(args) > 1 and args[1] == "detect":
+                return 0, ("NO-DATA: no handover pack exists yet\n"
+                           "NO-DATA: no handover zip exists yet\n")
+            return 0, ""
+
+        m._run = fake_run
+
+        old_stdin = sys.stdin
+        sys.stdin = io.StringIO("{}")
+        buf = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(buf):
+                m.main()
+        finally:
+            sys.stdin = old_stdin
+
+        out = buf.getvalue()
+        self.assertNotIn("could not run", out)
+        self.assertNotIn("baton ceremony", out)
+
+
 if __name__ == "__main__":
     unittest.main()

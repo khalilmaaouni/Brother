@@ -159,6 +159,90 @@ class MeasureVerb(unittest.TestCase):
         self.assertEqual(code, 3, out)
 
 
+class IdsVerb(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="bm-vault-cli-ids-")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_ids_routes_to_check_and_exits_zero_when_all_ids_present(self):
+        # _note()'s default frontmatter already declares id: n-0123456789abcdef.
+        vault = os.path.join(self.tmp, "v")
+        _clean_vault(vault)
+        code, out = run(["ids", "--vault", vault])
+        self.assertEqual(code, 0, out)
+        self.assertIn("with a stable id", out)
+
+    def test_ids_fail_exits_with_childs_own_code(self):
+        vault = os.path.join(self.tmp, "v")
+        os.makedirs(vault, exist_ok=True)
+        _write(os.path.join(vault, "one.md"),
+               _note().replace("id: n-0123456789abcdef\n", ""))
+        code, out = run(["ids", "--vault", vault])
+        self.assertEqual(code, 1, out)
+        self.assertIn("missing an id", out)
+
+
+class AuthorityVerb(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="bm-vault-cli-authority-")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_authority_routes_to_check_and_exits_zero(self):
+        vault = os.path.join(self.tmp, "v")
+        _clean_vault(vault)
+        code, out = run(["authority", "--vault", vault])
+        self.assertEqual(code, 0, out)
+        self.assertIn("declaring authority", out)
+
+
+class StalenessVerb(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="bm-vault-cli-staleness-")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_staleness_routes_to_check_and_exits_zero(self):
+        vault = os.path.join(self.tmp, "v")
+        _clean_vault(vault)
+        code, out = run(["staleness", "--vault", vault])
+        self.assertEqual(code, 0, out)
+        self.assertIn("unverified, no clock", out)
+
+
+class PackVerb(unittest.TestCase):
+    """pack carries no forced subcommand (bm_vault_pack.py takes flags, never a
+    subparser), so this proves --query and --vault both reach the sibling file
+    verbatim, exactly as CurateVerb/LintVerb prove for a forced-subcommand verb."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="bm-vault-cli-pack-")
+        self.home = os.path.join(self.tmp, "home")
+        os.makedirs(os.path.join(self.home, ".claude"))
+        self.vault = os.path.join(self.tmp, "v")
+        _clean_vault(self.vault)
+        self.env = _scratch_env(self.home)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_pack_routes_and_prints_a_pack_object(self):
+        code, out = run(["pack", "--vault", self.vault, "--query", "test query"],
+                        env=self.env)
+        self.assertEqual(code, 0, out)
+        pack = json.loads(out)
+        self.assertEqual(pack.get("schema"), "brother-context-pack-v1")
+
+    def test_pack_without_query_exits_with_childs_own_code(self):
+        code, out = run(["pack", "--vault", self.vault], env=self.env)
+        self.assertEqual(code, 2, out)
+        self.assertIn("--query", out)
+
+
 class LintVerb(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="bm-vault-cli-lint-")

@@ -248,7 +248,14 @@ def append_index_line(vault_root, slug, sentence, today):
     line = "- [[%s]] %s. %s\n" % (slug, today, sentence)
     heading = "## Corrections (auto)\n"
     if heading in index_content:
-        index_content = index_content.rstrip("\n") + "\n" + line
+        # Insert before the next section so the line stays under Corrections.
+        start = index_content.find(heading) + len(heading)
+        nxt = re.search(r"(?m)^## ", index_content[start:])
+        if nxt:
+            at = start + nxt.start()
+            index_content = index_content[:at] + line + index_content[at:]
+        else:
+            index_content = index_content.rstrip("\n") + "\n" + line
     else:
         if not index_content.endswith("\n"):
             index_content += "\n"

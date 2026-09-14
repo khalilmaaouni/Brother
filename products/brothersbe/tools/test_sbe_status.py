@@ -1084,5 +1084,83 @@ class TestDeploymentDrift(StatusFixture):
         self.assertNotIn("DEPLOYMENT:", rendered)
 
 
+class TestVerifyCacheWiring(StatusFixture):
+    """WP: a real dossier's evidence store (8 receipts) cost 7.5-9.7s per
+    `sbe status`, flat across repeated runs, because `_scan_evidence` called
+    `evidence_mod.verify` fresh for every receipt every time and `verify()`
+    itself re-forked git 3-4 times per receipt. The fixes land in
+    evidence.py (`git_cache`, `verify_cached`); this class proves the WIRING
+    here, in `_scan_evidence` itself, never changes what a caller of `sbe
+    status` sees, whether the on-disk verify-cache is cold, warm, missing,
+    or corrupt.
+    """
+
+    def _scan(self):
+        sys.path.insert(0, os.path.join(ROOT, "src"))
+        try:
+            from brothersbe import status as status_mod
+            from brothersbe import tasks as tasks_mod
+            evidence_dir = tasks_mod.evidence_dir(self.repo)
+            return status_mod._scan_evidence(self.repo, evidence_dir)
+        finally:
+            sys.path.pop(0)
+
+    def _cache_path(self):
+        return os.path.join(self.repo, ".sbe", ".verify-cache.json")
+
+    def test_scan_evidence_is_byte_identical_cold_warm_and_after_a_cache_reload(self):
+        self.run_evidence(".sbe/evidence/design.json", "design", covers="README.md",
+                          kinds=("design",))
+        self.run_evidence(".sbe/evidence/gate.json", "gate", exit_code=1,
+                          covers="README.md", kinds=("gate",))
+        cache_path = self._cache_path()
+        self.assertFalse(os.path.exists(cache_path),
+                         "no verify-cache file should exist before the first scan")
+
+        cold = self._scan()
+        self.assertTrue(os.path.isfile(cache_path),
+                        "_scan_evidence must persist a verify cache for the next call")
+
+        warm = self._scan()  # same process, the cache file now sits on disk
+        self.assertEqual(cold, warm)
+
+        # A THIRD pass with the cache file deleted, simulating a machine
+        # that never ran this before: the same answer, just recomputed.
+        os.remove(cache_path)
+        rebuilt = self._scan()
+        self.assertEqual(cold, rebuilt)
+
+        # And a cache file that is simply garbage must degrade the same
+        # way, never surface as a finding of its own.
+        write(self.repo, os.path.join(".sbe", ".verify-cache.json"), "{not json")
+        degraded = self._scan()
+        self.assertEqual(cold, degraded)
+
+    def test_scan_evidence_cache_file_is_never_read_as_a_receipt(self):
+        self.run_evidence(".sbe/evidence/design.json", "design", covers="README.md",
+                          kinds=("design",))
+        self._scan()  # writes .sbe/.verify-cache.json, a sibling of evidence_dir
+        self.assertTrue(os.path.isfile(self._cache_path()))
+        result = self._scan()
+        self.assertEqual(1, result["count"],
+                         "the verify-cache file must never be walked as a second receipt "
+                         "(it lives beside evidence_dir, never inside it)")
+        self.assertEqual([], result["broken"], result["broken"])
+
+    def test_a_carried_forward_receipt_is_identical_across_a_cache_reload(self):
+        # Exercises the drift path (`_binding_exemptions` / `_carried_
+        # forward`, the two extra git calls per receipt fix 1 also hoists)
+        # rather than only the `claimed == current` fast path.
+        self.run_evidence(".sbe/evidence/score.json", "score", covers="README.md",
+                          kinds=("score",))
+        write(self.repo, "unrelated.txt", "noise\n")
+        self.commit("advance head past the receipt, covering nothing it named")
+
+        cold = self._scan()
+        self.assertEqual([], cold["broken"], cold["broken"])
+        warm = self._scan()
+        self.assertEqual(cold, warm)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

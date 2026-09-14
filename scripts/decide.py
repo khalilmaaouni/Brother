@@ -320,9 +320,14 @@ def render(spec, fragment=False):
              E(c.get("why", ""))))
     A('</tbody></table></div></section>')
 
-    chosen_id = decided.get("choice")
+    # A compound choice ("D+B") records a founder decision that bundled two
+    # options rather than picking one; splitting on "+" marks every part as
+    # chosen instead of matching the whole string against no option's id,
+    # which used to render with nothing marked at all -- a page that looks
+    # like no decision was made over a real one.
+    chosen_ids = set((decided.get("choice") or "").split("+"))
     for i, s in enumerate(scored):
-        s["option"]["_chosen"] = (s["option"].get("id") == chosen_id)
+        s["option"]["_chosen"] = (s["option"].get("id") in chosen_ids)
         A(render_option(s, i == 0, annotations))
 
     if spec.get("would_change"):

@@ -510,14 +510,14 @@ def open_forecasts(log_path, now_iso, max_open_hours):
                 age = (now - _parse_iso(record.get("recorded_at"))
                        ).total_seconds() / 3600.0
             except Exception:
-                # A malformed recorded_at must not silently read as age 0.0
-                # (never overdue) below: that is exactly the forecasting
-                # bias this module exists to catch, so it is surfaced here
-                # rather than swallowed, without changing the return shape.
+                # An unparseable recorded_at must not read as age 0.0
+                # (never overdue) below: treat it as infinitely old so an
+                # open forecast with an unknown age fails closed.
                 sys.stderr.write(
                     "bm_forecast: task %r has a forecast record with an "
-                    "unparseable recorded_at, excluded from age tracking\n"
+                    "unparseable recorded_at, treating its age as infinite\n"
                     % (task,))
+                ages[task] = float("inf")
                 continue
             if ages.get(task) is None or age > ages[task]:
                 ages[task] = age

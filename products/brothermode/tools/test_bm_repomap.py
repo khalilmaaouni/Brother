@@ -121,5 +121,25 @@ class TestCliMain(FixtureTreeCase):
         self.assertEqual(rc, 2)
 
 
+class Night0912BmRepomap(FixtureTreeCase):
+    def test_nested_func_not_class_qualified(self):
+        p = self.write("a.py", "class A:\n    def m(self):\n        def inner(): pass\n")
+        syms = brm.build_map([self.tmp])[p]["symbols"]
+        self.assertIn("A.m", syms)
+        self.assertIn("inner", syms)
+        self.assertNotIn("A.inner", syms)
+
+    def test_broken_py_symlink_does_not_raise(self):
+        good = self.write("ok.py", "def f(): pass\n")
+        os.symlink(os.path.join(self.tmp, "missing.py"),
+                   os.path.join(self.tmp, "bad.py"))
+        result = brm.build_map([self.tmp])
+        self.assertIn(good, result)
+        self.assertIn("f", result[good]["symbols"])
+        bad = os.path.join(self.tmp, "bad.py")
+        if bad in result:
+            self.assertTrue(result[bad]["parse_error"])
+
+
 if __name__ == "__main__":
     unittest.main()

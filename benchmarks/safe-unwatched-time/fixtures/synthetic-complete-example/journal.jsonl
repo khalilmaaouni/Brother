@@ -1,0 +1,7 @@
+{"at": "2026-01-01T00:00:00+00:00", "type": "run.opened", "unit_id": null, "payload": {"units": 2}}
+{"at": "2026-01-01T00:30:00+00:00", "type": "unit.done", "unit_id": "u1", "payload": {"files_changed": 1}}
+{"at": "2026-01-01T00:31:00+00:00", "type": "evidence.verified", "unit_id": "u1", "payload": {"check_exit": 0}}
+{"at": "2026-01-01T01:00:00+00:00", "type": "unit.done", "unit_id": "u2", "payload": {"files_changed": 1}}
+{"at": "2026-01-01T01:01:00+00:00", "type": "evidence.verified", "unit_id": "u2", "payload": {"check_exit": 0}}
+{"at": "2026-01-01T01:25:00+00:00", "type": "receipt.issued", "unit_id": null, "payload": {"receipts": 2, "unproven": 0, "verified": 2}}
+{"at": "2026-01-01T01:30:00+00:00", "type": "acceptance.screened", "unit_id": null, "payload": {"screens": 1}}

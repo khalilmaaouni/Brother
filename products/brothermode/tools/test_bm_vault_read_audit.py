@@ -174,5 +174,14 @@ class WhoReadListsTheRightEvents(unittest.TestCase):
             self.assertIn("0 record(s)", out.getvalue())
 
 
+class Night0912BmVaultReadAudit(unittest.TestCase):
+    def test_last_line_valid_json_not_object_does_not_raise(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "audit.jsonl")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("[]")
+            ra.record_read("note", "surface", path=path)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -468,15 +468,12 @@ def _install_dry_run_preview(info):
              "--settings", info["settings_path"]],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             encoding="utf-8",
-            # replace, not strict: this text only ever becomes a printed
-            # preview line for a human (build_plan) or gates the apply
-            # preflight on whether the call SUCCEEDED at all (main); no
-            # caller parses this string to decide what gets deleted or
-            # installed, so a lossy decode here trades a rare mangled
-            # character for a preview that still renders, the same
-            # errors="replace" idiom scripts/bm_commit_msg_hook.py and
-            # tools/bm_project.py already use for a display-only read.
-            errors="replace", timeout=300)
+            # strict, not replace: main's apply preflight reuses this
+            # exact call to prove the real strict-decoding reinstall can
+            # run, so a lossy decode here would let that preflight pass
+            # and destroy the stranded directory before the real run
+            # then fails on the same bytes.
+            errors="strict", timeout=300)
     except (OSError, subprocess.SubprocessError, ValueError) as exc:
         # ValueError also catches UnicodeDecodeError: this call already
         # runs (as the printed plan's preview) before main()'s apply
@@ -628,6 +625,17 @@ def main(argv):
         _out("")
         _out("Nothing to apply: not a stranded install.")
         return EXIT_OK
+
+    # Refuse to remove the running tree: removing the stranded
+    # skill directory would delete this very script when ROOT and
+    # skill_dir resolve to the same directory.
+    if os.path.realpath(info["skill_dir"]) == os.path.realpath(ROOT):
+        _out("")
+        _err("REFUSED: %s is the same directory as this running "
+             "script's own tree (%s), so removing it would delete the "
+             "only copy of the code doing the removing. Nothing was "
+             "changed." % (info["skill_dir"], ROOT))
+        return EXIT_REFUSED
 
     _out("")
     # Preflight, BEFORE the one irreversible step: prove a real reinstall

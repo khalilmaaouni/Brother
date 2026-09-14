@@ -24,7 +24,7 @@ SESSION_THRESHOLD_DEFAULT = 5
 NOTE_THRESHOLD_DEFAULT = 8
 
 DATE_PREFIX = re.compile(r"^(\d{4}-\d{2}-\d{2})-")
-FRONT_CREATED = re.compile(r"^created:\s*(\d{4}-\d{2}-\d{2})\s*$", re.M)
+FRONT_CREATED = re.compile(r"""^created:\s*["']?(\d{4}-\d{2}-\d{2})["']?\s*$""", re.M)
 
 
 def _vault_root(cli_vault):

@@ -1773,5 +1773,90 @@ class TestTheProgrammeSection(unittest.TestCase):
         self.assertEqual(bw._sec_programme(ctx), bw._sec_programme(ctx))
 
 
+class Night0912BmView(unittest.TestCase):
+    """Each test here loads its own isolated copy of bm_view.py (rather
+    than the shared bw/bv this file's other classes use) because each one
+    monkeypatches module internals (bv drawing functions, _store_or_refuse,
+    render_developer_brief_html) to isolate one function, and a shared copy
+    would leak those patches into every other test in this file."""
+
+    def _load_bm_view(self):
+        spec = importlib.util.spec_from_file_location('bm_view', VIEW_FILE)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_render_page_keeps_fingerprint_literal_in_goal(self):
+        mod = self._load_bm_view()
+        mod.bv.diagram_pipeline = lambda f: 'p'
+        mod.bv.diagram_gantt = lambda g: None
+        mod.bv.diagram_timeline = lambda p: None
+        mod.bv.counts_rows = lambda f: ['c']
+        mod.bv.diagram_fork = lambda f: None
+        mod.bv.diagram_gates = lambda f: None
+        mod.bv.diagram_lanes = lambda f: None
+        mod.bv.to_svg = lambda x: str(x) if x else ''
+        status = {'fields': [('Goal', '@@BM-FINGERPRINT@@', None),
+                             ('Progress', 'nothing planned yet', None)],
+                  'next': ('n', 'w', 'c')}
+        html, fp = mod.render_page(status, [], [], [], [],
+                                   {'newest_at': '2020'}, [])
+        # Doc tree, not a raw grep on html (design section 13.0 mechanism 1,
+        # enforced on this file by test_this_suite_never_greps_the_raw_
+        # html_with_assert_in above).
+        body_text = Doc.text_of(Doc(html).rootnode)
+        self.assertIn('@@BM-FINGERPRINT@@', body_text)
+
+    def test_sec_documents_shows_string_expected_outputs(self):
+        mod = self._load_bm_view()
+        mod.bv.FINISHED_TASK_STATES = {'done'}
+        task = {'task_id': 't1', 'title': 'T', 'status': 'done',
+                'expected_outputs': 'out.txt'}
+        ctx = {'tasks': [task], 'project_evidence': [],
+               'evidence_by_task': {}}
+        html = mod._sec_documents(ctx)
+        body_text = Doc.text_of(Doc(html).rootnode)
+        self.assertIn('out.txt', body_text)
+
+    def test_brief_page_does_not_inherit_url_from_other_insight(self):
+        mod = self._load_bm_view()
+
+        class S:
+            root = tempfile.mkdtemp()
+
+            def get_insight(self, iid, raw=True):
+                return {'insight_id': iid, 'project_id': 'P',
+                        'supersedes': None}
+
+            def list_projects(self, raw=True):
+                return [{'project_id': 'P'}]
+
+            def latest_view(self, pid, kind, raw=True):
+                if kind == 'DEVELOPER_BRIEF':
+                    return {'artifact_url': 'http://old',
+                            'published_at': '2020',
+                            'rel_path': 'old.html',
+                            'fingerprint': 'f',
+                            'subject': 'A'}
+                return None
+
+            def record_view(self, pid, data, actor):
+                self.recorded = data
+
+            def close(self):
+                pass
+
+        s = S()
+        mod._store_or_refuse = lambda kv, write: s
+        mod._ensure_brief_dir = lambda store, root, pid: tempfile.mkdtemp()
+        mod.bs.write_generated_document = (
+            lambda path, html: open(path, 'w').write(html))
+        mod.render_developer_brief_html = (
+            lambda store, row: '<html></html>')
+        mod.cmd_brief_page(['--project-id', 'P', '--insight-id', 'B'])
+        self.assertEqual(
+            getattr(s, 'recorded', {}).get('artifact_url'), '')
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

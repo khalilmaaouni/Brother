@@ -37,11 +37,23 @@ def auc_rank_sum(rows, score_key):
 
 
 def main(argv):
-    args = [a for a in argv[1:] if not a.startswith("--margin")]
+    args = []
     margin = 0.05
-    for a in argv[1:]:
-        if a.startswith("--margin="):
+    i = 1
+    while i < len(argv):
+        a = argv[i]
+        if a == "--margin":
+            # Also accept the documented space-separated --margin VALUE form.
+            if i + 1 >= len(argv):
+                print("usage: promotion_threshold_check.py holdout.csv [--margin=0.05]", file=sys.stderr)
+                return 2
+            margin = float(argv[i + 1])
+            i += 1
+        elif a.startswith("--margin="):
             margin = float(a.split("=", 1)[1])
+        else:
+            args.append(a)
+        i += 1
     if len(args) != 1:
         print("usage: promotion_threshold_check.py holdout.csv [--margin=0.05]", file=sys.stderr)
         return 2

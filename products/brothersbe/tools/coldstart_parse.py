@@ -99,7 +99,9 @@ def parse_transcript(path):
                 if block.get("type") != "tool_use":
                     continue
                 name = block.get("name")
-                target = (block.get("input") or {}).get("file_path") or ""
+                tool_input = block.get("input") or {}
+                # Grep and Glob report the target as "path"; Read uses "file_path".
+                target = tool_input.get("file_path") or tool_input.get("path") or ""
                 if name in READ_TOOLS and any(p in target for p in INTERNAL_PREFIXES):
                     internal_docs += 1
                 if name in ("Write", "Edit") and turns_to_artifact is None:

@@ -411,5 +411,18 @@ class TestCLI(unittest.TestCase):
             self.assertIn("record", payload)
 
 
+class Night0912BmSummary(unittest.TestCase):
+    def _run(self, args, cwd):
+        proc = subprocess.run(
+            [sys.executable, SUMMARY_FILE] + args, cwd=cwd,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        return proc.returncode, proc.stdout.decode("utf-8")
+
+    def test_project_flag_not_consumed_as_value(self):
+        with tempfile.TemporaryDirectory() as d:
+            code, _out = self._run(["--project", "--json"], d)
+            self.assertEqual(code, bsum.EXIT_USAGE)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -265,5 +265,40 @@ class ScanDuplicates(unittest.TestCase):
         self.assertIn("NO-DATA", out, out)
 
 
+class Night0912BmVaultDistill(unittest.TestCase):
+    def test_distill_does_not_overwrite_existing_slug(self):
+        import importlib.util
+        import argparse
+
+        module_path = os.path.join(HERE, 'bm_vault_distill.py')
+        spec = importlib.util.spec_from_file_location('bm_vault_distill_night0912', module_path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        class D:
+            returncode = 0
+            stdout = b''
+            stderr = b''
+
+        mod._run_bm_vault = lambda args: D()
+
+        with tempfile.TemporaryDirectory() as vault:
+            os.makedirs(os.path.join(vault, '40-Failures'))
+            note_path = os.path.join(vault, '40-Failures', 'existing.md')
+            with open(note_path, 'w', encoding='utf-8') as f:
+                f.write('ORIGINAL')
+
+            input_path = os.path.join(vault, 'input.json')
+            with open(input_path, 'w', encoding='utf-8') as f:
+                json.dump([{'slug': 'existing', 'title': 'New', 'detail': 'D',
+                            'symptom': 'S'}], f)
+
+            rc = mod.cmd_distill(argparse.Namespace(vault=vault, input=input_path))
+            self.assertEqual(rc, 0)
+
+            with open(note_path, encoding='utf-8') as f:
+                self.assertEqual(f.read(), 'ORIGINAL')
+
+
 if __name__ == "__main__":
     unittest.main()

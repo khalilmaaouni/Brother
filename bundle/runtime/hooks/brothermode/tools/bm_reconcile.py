@@ -139,13 +139,15 @@ def _run_git(root, *args):
 
 
 def _git_toplevel(root):
-    """The real repository root git itself would use, or None when `root`
-    is not inside a git repository (or git is unavailable). A push-state
-    finding is meaningless outside a git repo, so callers use this to
-    decide whether to say anything at all."""
+    """The real repository root git itself would use, or None when git is
+    unavailable, or "" when `root` is not inside a git repository. A
+    push-state finding is meaningless outside a git repo, so callers use
+    this to decide whether to say anything at all."""
     result = _run_git(root, "rev-parse", "--show-toplevel")
-    if result.returncode != 0:
+    if result.returncode == 127:
         return None
+    if result.returncode != 0:
+        return ""
     return result.stdout.strip()
 
 
@@ -156,7 +158,13 @@ def classify_push_state(root):
     ordinary state, not a fault); one WITH a repo but no upstream tracking
     branch cannot answer whether the work has shipped anywhere, which is
     NO-DATA, named."""
-    if _git_toplevel(root) is None:
+    top = _git_toplevel(root)
+    if top is None:
+        return [_row(NO_DATA, "push-state", root,
+                     "external push/release state is unobservable: git "
+                     "is not available on PATH", "install git, or check "
+                     "the remote by hand")]
+    if not top:
         return []
     result = _run_git(root, "rev-parse", "--abbrev-ref",
                       "--symbolic-full-name", "@{u}")

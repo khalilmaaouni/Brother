@@ -6,6 +6,7 @@ which would put two writers on one path are NEVER in the same batch. On
 83 lines, and had two efforts fix the same defect within an hour. Every one of
 those was a concurrency failure that a dependency edge cannot express.
 """
+import collections
 import contextlib
 import io
 import json
@@ -157,12 +158,20 @@ class DiskBandVersusExplicitSlots(unittest.TestCase):
     test_resource_gate.py's own injected readings.
     """
 
+    #: The real shutil.disk_usage() returns a namedtuple supporting both
+    #: positional unpacking (graph_loop's own machine_capacity()) and
+    #: attribute access (resource_gate._read_disk_free_gib()'s `.free`). A
+    #: bare tuple satisfies only the first caller and breaks the second with
+    #: an AttributeError, which a mock this test's own mtime never exercised
+    #: until machine_capacity() gained a second consumer of the same mock.
+    _DiskUsage = collections.namedtuple('_DiskUsage', 'total used free')
+
     def _cleanup_band_disk_usage(self):
         # A total large enough that "used" is never negative; only "free"
-        # (the third element the code unpacks) matters to machine_capacity.
+        # matters to machine_capacity.
         free = int((gl.DISK_CLEANUP_GIB - 1) * 1024 ** 3)
         total = 500 * 1024 ** 3
-        return (total, total - free, free)
+        return self._DiskUsage(total, total - free, free)
 
     def test_an_unpinned_plan_still_drops_to_one_slot_under_the_band(self):
         """THE REAL SCHEDULER'S BEHAVIOR MUST NOT CHANGE: a caller that
@@ -186,6 +195,56 @@ class DiskBandVersusExplicitSlots(unittest.TestCase):
             p = gl.plan(d, slots=2)
         self.assertEqual(p['capacity'], 2)
         self.assertEqual(sorted(n['id'] for n in p['batch']), ['A', 'B'])
+
+
+class LoadBandDropsSlotsEvenOnHealthyDisk(unittest.TestCase):
+    """2026-09-13: machine_capacity() checked disk and core COUNT but never
+    live load, so a genuinely oversubscribed machine (load1 above available
+    cores) dispatched exactly as if it were idle. resource_gate.py already
+    reads load1 and reported it correctly, but nothing in the real dispatch
+    path called it (verified: only resource_gate's own test imported it).
+    These two tests drive the new call backwards: an oversubscribed load
+    drops capacity to 1 even with plenty of disk free, and an unreadable
+    load1/cores reading does the same rather than assuming healthy, on
+    resource_gate.py's own stated reasoning."""
+
+    def _healthy_disk_usage(self):
+        free = int((gl.DISK_CLEANUP_GIB + 50) * 1024 ** 3)
+        total = 500 * 1024 ** 3
+        return DiskBandVersusExplicitSlots._DiskUsage(total, total - free, free)
+
+    def test_an_oversubscribed_load_drops_capacity_to_one_despite_healthy_disk(self):
+        d = doc([node('A', owns=['a']), node('B', owns=['b'])])
+        with unittest.mock.patch.object(
+                gl.shutil, 'disk_usage', return_value=self._healthy_disk_usage()), \
+             unittest.mock.patch.object(
+                gl.resource_gate, 'read',
+                return_value={'load1': 9.0, 'cores_available': 4, 'errors': {}}):
+            p = gl.plan(d, slots=None)
+        self.assertEqual(p['capacity'], 1)
+
+    def test_an_unreadable_load_reading_drops_capacity_to_one_rather_than_assumed_healthy(self):
+        d = doc([node('A', owns=['a']), node('B', owns=['b'])])
+        with unittest.mock.patch.object(
+                gl.shutil, 'disk_usage', return_value=self._healthy_disk_usage()), \
+             unittest.mock.patch.object(
+                gl.resource_gate, 'read',
+                return_value={'load1': None, 'cores_available': None,
+                             'errors': {'load1': 'simulated'}}):
+            p = gl.plan(d, slots=None)
+        self.assertEqual(p['capacity'], 1)
+
+    def test_a_pinned_slot_count_survives_an_oversubscribed_load_too(self):
+        """Same rule as the disk band above: a concurrency test's own
+        --slots is a deliberate pin, never quietly overridden by capacity."""
+        d = doc([node('A', owns=['a']), node('B', owns=['b'])])
+        with unittest.mock.patch.object(
+                gl.shutil, 'disk_usage', return_value=self._healthy_disk_usage()), \
+             unittest.mock.patch.object(
+                gl.resource_gate, 'read',
+                return_value={'load1': 9.0, 'cores_available': 4, 'errors': {}}):
+            p = gl.plan(d, slots=2)
+        self.assertEqual(p['capacity'], 2)
 
 
 class Ordering(unittest.TestCase):

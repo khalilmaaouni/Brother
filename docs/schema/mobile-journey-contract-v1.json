@@ -1,0 +1,111 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "mobile-journey-contract-v1",
+  "title": "Mobile Journey Contract v1",
+  "description": "WBS-30.01. A domain contract layered ON the shared outcome-contract-v1, never a second lifecycle: this record names no state, history, receipts or decision of its own. outcome_contract_ref points at the real outcome-contract-v1 JSON that owns those (state machine, receipts, history); scripts/mobile_journey_contract.py enforces that the referenced file exists and actually validates as outcome-contract-v1 before this record is accepted, so a journey contract can never point at nothing or at something malformed. Feeds Context Capsule, the unit plan, native evidence obligations (scripts/native_evidence.py, wrapped for Evidence v2 per WBS-30.05, not yet built), and the Journey Passport (WBS-30.06, not yet built). Only the keyword subset scripts/mobile_journey_contract.py actually enforces is used here: type, required, properties, enum, const, items, minItems, additionalProperties -- the same enforced subset outcome-contract-v1 documents, for the same reason (a reader of either file finds the same account).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "journey_id", "outcome_contract_ref", "human_outcome",
+    "entry_state", "exit_state", "supported_device_classes", "supported_os_range",
+    "locales", "accessibility_obligations", "network_state_obligations",
+    "interruption_obligations", "privacy_constraints", "performance_budgets",
+    "visual_reference_ids", "required_native_tests", "human_acceptance_items",
+    "post_release_claims"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "mobile-journey-contract-v1",
+      "description": "Which shape this record follows, so a reader never has to guess."
+    },
+    "journey_id": {
+      "type": "string",
+      "description": "A stable identifier for this one bounded journey (WBS-30.10's own rule: one journey, not the most complex feature)."
+    },
+    "outcome_contract_ref": {
+      "type": "string",
+      "description": "Path to the outcome-contract-v1 record this journey is layered on. Must resolve to a file that exists and validates as outcome-contract-v1 (enforced by hand, since the keyword subset has no cross-file reference check, matching how receipts[].ref is enforced by hand in the shared contract)."
+    },
+    "human_outcome": {
+      "type": "string",
+      "description": "The outcome a real user experiences when this journey succeeds, in plain words, not an implementation description."
+    },
+    "entry_state": {
+      "type": "string",
+      "description": "The app/user state this journey starts from."
+    },
+    "exit_state": {
+      "type": "string",
+      "description": "The app/user state this journey ends in when it succeeds."
+    },
+    "supported_device_classes": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Which device classes this journey is claimed to work on. WBS-30.07's Device Matrix names the dimension; this contract states the claim, the matrix proves or refuses it.",
+      "items": {"type": "string"}
+    },
+    "supported_os_range": {
+      "type": "string",
+      "description": "The OS version range this journey is claimed to work on, e.g. an iOS range string."
+    },
+    "locales": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Which locales this journey is claimed to work correctly in."
+    },
+    "accessibility_obligations": {
+      "type": "array",
+      "description": "What this journey must do for accessibility. May be empty (enforced by hand: an empty array here is a stated decision that none apply, never a silently-skipped field, distinct from the key being absent, which the required list already forbids).",
+      "items": {"type": "string"}
+    },
+    "network_state_obligations": {
+      "type": "array",
+      "description": "What this journey must do under named network conditions (offline, slow, interrupted mid-request). May be empty for the same reason as accessibility_obligations.",
+      "items": {"type": "string"}
+    },
+    "interruption_obligations": {
+      "type": "array",
+      "description": "What this journey must do when interrupted (backgrounded, a call, a notification). May be empty for the same reason as accessibility_obligations.",
+      "items": {"type": "string"}
+    },
+    "privacy_constraints": {
+      "type": "array",
+      "description": "What this journey must never do with user data. May be empty only when the journey genuinely touches no user data (enforced by hand: contract_check-style, an empty array is refused unless human_outcome or entry_state/exit_state names no personal data path).",
+      "items": {"type": "string"}
+    },
+    "performance_budgets": {
+      "type": "array",
+      "description": "Named performance budgets this journey must stay inside (e.g. time to first frame, memory ceiling). May be empty.",
+      "items": {
+        "type": "object",
+        "required": ["metric", "budget"],
+        "additionalProperties": false,
+        "properties": {
+          "metric": {"type": "string"},
+          "budget": {"type": "string"}
+        }
+      }
+    },
+    "visual_reference_ids": {
+      "type": "array",
+      "description": "Stable reference IDs into the current mobile_design boards/briefs (WBS-30.03's own reference IDs), not raw asset paths. May be empty for a journey with no visual reference yet.",
+      "items": {"type": "string"}
+    },
+    "required_native_tests": {
+      "type": "array",
+      "minItems": 1,
+      "description": "The exact native test identifiers that must pass for this journey (feeds native evidence obligations, WBS-30.05). At least one: a journey contract with zero required tests cannot ever reach a PASS Journey Passport.",
+      "items": {"type": "string"}
+    },
+    "human_acceptance_items": {
+      "type": "array",
+      "description": "What a human must observe and accept for this journey, since a native test suite cannot certify feel or visual correctness on its own. May be empty only for a journey with no human-observable surface.",
+      "items": {"type": "string"}
+    },
+    "post_release_claims": {
+      "type": "array",
+      "description": "Claim IDs this journey will feed once released (BrotherDS claims per WBS-30.11: completion rate, crash-free sessions, latency, return usage, helpfulness). Mobile does not score them itself. May be empty before release.",
+      "items": {"type": "string"}
+    }
+  }
+}

@@ -105,5 +105,26 @@ class ReadsWithoutModifyingAndLeavesAResumeKit(unittest.TestCase):
         self.assertIn("diff.patch", report)
 
 
+class Night0912LaneResume(unittest.TestCase):
+    def test_staged_only_changes_are_in_patch(self):
+        repo = make_repo()
+        run = lambda *a: subprocess.run(a, cwd=repo, check=True,  # noqa: E731
+                                        capture_output=True, text=True)
+        # tracked.txt is already modified in the working tree (make_repo);
+        # staging it here (no further edit) makes it a staged-only change.
+        run("git", "add", "tracked.txt")
+        out = tempfile.mkdtemp()
+
+        code = L.main([repo, "--out", out])
+        self.assertEqual(code, 0)
+        with open(os.path.join(out, "diff.patch"), encoding="utf-8") as fh:
+            patch = fh.read()
+        with open(os.path.join(out, "REPORT.md"), encoding="utf-8") as fh:
+            report = fh.read()
+        self.assertTrue(patch.strip(), "staged-only change must be in diff.patch")
+        self.assertIn("tracked.txt", patch)
+        self.assertIn("modified/staged tracked file(s): 1", report)
+
+
 if __name__ == "__main__":
     unittest.main()

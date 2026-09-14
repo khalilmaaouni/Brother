@@ -564,6 +564,12 @@ SUITES = (
     "test_bm_vault.py",
     "test_bm_vault_catalog.py",
     "test_bm_vault_graph.py",
+    # Found unregistered by an adversarial quality sweep 2026-09-14: the
+    # inventory gate itself (this file) refuses to run at all while these
+    # exist on disk but are missing here, so nobody's "all tests pass"
+    # claim in that window could have actually included test_all.py.
+    "test_bm_vault_pack.py",
+    "test_bm_vault_plugins.py",
     # 2026-08-30, VB4-04: the frontmatter schema linter, registered with its
     # module and its CI step in the same change per the same lesson every
     # vault entry above already closes.
@@ -600,6 +606,10 @@ SUITES = (
     # Registered in the same change that creates the suite, same lesson as every vault
     # entry here: the inventory gate refuses a test_*.py on disk that SUITES does not name.
     "test_vault_index_refresh.py",
+    # Same lesson, same window: this branch's own retrieval-fusion suite
+    # was left unregistered too. Registered here rather than left for the
+    # next thing to trip over the same hole.
+    "test_vault_answer_flow.py",
     # tools/brothermode_cli.py, the one deterministic public runtime boundary
     # named in V3-FREEZE-2026-08-07.md answer 4: a thin dispatch layer over
     # tools/bm_project.py, tools/bm_lead.py, tools/bm_view.py,

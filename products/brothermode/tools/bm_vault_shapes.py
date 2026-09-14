@@ -133,7 +133,8 @@ def _parse_kv_entries(value):
         for part in full_raw.split(";"):
             key, sep, val = part.partition("=")
             if sep:
-                raw[key.strip()] = val.strip()
+                # strip surrounding quotes so quoted parent/location/external values resolve as bare ids
+                raw[key.strip()] = val.strip().strip('"').strip("'")
         out.append((raw, full_raw))
     return out
 

@@ -233,5 +233,23 @@ class NeverBlocks(unittest.TestCase):
         self.assertIn("NUDGE", out, out)
 
 
+class Night0912BmVaultPromote(unittest.TestCase):
+    def test_quoted_created_frontmatter(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "bm_vault_promote_night0912", TOOL)
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        d = tempfile.mkdtemp()
+        try:
+            os.makedirs(os.path.join(d, "40-Failures"))
+            with open(os.path.join(d, "40-Failures", "f.md"), "w", encoding="utf-8") as fh:
+                fh.write('---\ncreated: "2026-01-01"\n---\nbody\n')
+            last = m._last_distillation_date(d)
+            self.assertEqual(last, "2026-01-01")
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

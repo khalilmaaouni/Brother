@@ -663,5 +663,43 @@ class TestWorkflowFiles(unittest.TestCase):
             self.assertIn(allowed, self.consumer_action_code, self.consumer_action_code)
 
 
+class Night0912Adopt(unittest.TestCase):
+    """Two defects found by a night sweep: a `.git` FILE (worktree or
+    submodule) read as ABSENT by `os.path.isdir`, and a root-level
+    migration/dbt file whose `os.path.dirname` empty string proposed the
+    protected path "/"."""
+
+    def setUp(self):
+        src = os.path.join(ROOT, "src")
+        if src not in sys.path:
+            sys.path.insert(0, src)
+        from brothersbe import adopt as mod
+        self.adopt = mod
+
+    def test_adoption_report_treats_git_file_as_present(self):
+        with tempfile.TemporaryDirectory() as root:
+            with open(os.path.join(root, '.git'), 'w') as fh:
+                fh.write('gitdir: /tmp/other')
+            _protections, facts = self.adopt.adoption_report(root)
+            git_fact = next(f for f in facts if f['name'] == 'git-repository')
+            self.assertEqual(git_fact['status'], 'PRESENT')
+
+    def test_propose_policy_keeps_root_level_migration_relative(self):
+        with tempfile.TemporaryDirectory() as root:
+            detected = {
+                'languages': {},
+                'otherExtensionFiles': 0,
+                'matchedPaths': {'db-migration': ['001_init.sql']},
+                'hasMigrations': True,
+                'hasDbtModels': False,
+                'hasApiContracts': False,
+                'hasCiWorkflows': False,
+            }
+            policy = self.adopt.propose_policy(root, detected)
+            paths = policy['protectedPaths']['migrations']['paths']
+            self.assertNotEqual(paths, ['/'])
+            self.assertTrue(all(path in ('.', './') for path in paths))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

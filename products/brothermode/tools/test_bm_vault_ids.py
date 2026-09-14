@@ -212,5 +212,26 @@ class TheAssignCommandIsSafe(unittest.TestCase):
         self.assertEqual(ids.cmd_check(self.vault), 0)
 
 
+class Night0912BmVaultIds(unittest.TestCase):
+    def test_invalid_utf8_note_does_not_crash_cmd_assign(self):
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "bad.md"), "wb") as fh:
+                fh.write(b"---\n\xff\xfe\n---\n")
+            rc = ids.cmd_assign(d, apply_changes=False)
+        self.assertEqual(0, rc)
+
+    def test_apply_leaves_an_invalid_utf8_note_byte_for_byte(self):
+        raw = b"---\ntitle: x\n\xff\xfe\n---\nbody\n"
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "bad.md")
+            with open(path, "wb") as fh:
+                fh.write(raw)
+            rc = ids.cmd_assign(d, apply_changes=True)
+            with open(path, "rb") as fh:
+                after = fh.read()
+        self.assertEqual(0, rc)
+        self.assertEqual(raw, after)
+
+
 if __name__ == "__main__":
     unittest.main()

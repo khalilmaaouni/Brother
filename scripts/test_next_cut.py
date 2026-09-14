@@ -99,5 +99,23 @@ class NextCutTest(unittest.TestCase):
         self.assertTrue(proc.stdout.startswith("NO-DATA:"), proc.stdout)
 
 
+class Night0912NextCut(unittest.TestCase):
+    def test_non_integer_patch_returns_nodata(self):
+        with tempfile.TemporaryDirectory() as d:
+            policy = os.path.join(d, "policy.md")
+            manifest = os.path.join(d, "plugin.json")
+            with open(policy, "w", encoding="utf-8") as fh:
+                fh.write(FRIDAY_POLICY)
+            with open(manifest, "w", encoding="utf-8") as fh:
+                fh.write('{"version": "1.0.x"}')
+
+            proc = subprocess.run(
+                [sys.executable, NEXT_CUT, "--policy", policy,
+                 "--manifest", manifest, "--today", "2026-01-01"],
+                capture_output=True, text=True)
+
+        self.assertEqual(proc.returncode, 3, proc.stdout + proc.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

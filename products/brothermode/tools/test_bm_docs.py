@@ -6467,5 +6467,122 @@ class TestCommandFilesMirrorTheirSkillMarkers(unittest.TestCase):
             "carries, which is exactly the FX-D defect this pin exists to "
             "catch: %s" % "; ".join(offenders))
 
+
+class Night0912BmDocs(unittest.TestCase):
+    """Six findings from the night sweep: a self-loop cycle, a non-dict
+    facts.json, a record-directory prefix collision, and three import-graph
+    resolution gaps (multi-target from-imports, an aliased from-import, a
+    relative from-import resolved against the wrong package)."""
+
+    DOCS = os.path.join(HERE, "bm_docs.py")
+
+    def _mod(self):
+        spec = importlib.util.spec_from_file_location(
+            "bm_docs_for_night0912_tests", self.DOCS)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def _write(self, root, rel, text=""):
+        path = os.path.join(root, *rel.split("/"))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with io.open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        return path
+
+    def test_critical_path_raises_on_self_loop(self):
+        # 2d5c7e16e909
+        bd = self._mod()
+        with self.assertRaises(bd.DocsError):
+            bd.critical_path({"a": 1}, [("a", "a")])
+
+    def test_floor_from_generated_facts_tolerates_non_dict(self):
+        # 5f85b37ad92a
+        bd = self._mod()
+        with tempfile.TemporaryDirectory() as d:
+            path = self._write(d, "Documentation/90-generated/facts.json",
+                               "[]")
+            self.assertEqual(bd._floor_from_generated_facts(d), 0)
+
+    def test_current_doc_pages_keeps_sibling_of_record_dir(self):
+        # 325ce2338a87
+        bd = self._mod()
+        with tempfile.TemporaryDirectory() as d:
+            self._write(d, "docs/closure/old.md", "# page\n")
+            self._write(d, "docs/closure.md", "# page\n")
+            self._write(d, "docs/closure-archive/note.md", "# page\n")
+            pages = bd.current_doc_pages(d)
+            self.assertIn("docs/closure.md", pages)
+            self.assertIn("docs/closure-archive/note.md", pages)
+            self.assertNotIn("docs/closure/old.md", pages)
+
+    def test_import_graph_records_every_module_on_one_from_line(self):
+        # 9f70e78ad7a6
+        bd = self._mod()
+        with tempfile.TemporaryDirectory() as d:
+            for name in ("pay", "util", "checkout"):
+                self._write(d, "app/%s.py" % name,
+                           "from app import pay, util\n"
+                           if name == "checkout" else "")
+            g = bd.import_graph(d)
+            edges = set(tuple(e) for e in g["edges"])
+            self.assertIn(("app/checkout.py", "app/pay.py"), edges)
+            self.assertIn(("app/checkout.py", "app/util.py"), edges)
+
+    def test_import_graph_resolves_aliased_from_import(self):
+        # d1b53136851b
+        bd = self._mod()
+        with tempfile.TemporaryDirectory() as d:
+            self._write(d, "app/pay.py")
+            self._write(d, "app/checkout.py", "from app import pay as p\n")
+            g = bd.import_graph(d)
+            edges = set(tuple(e) for e in g["edges"])
+            self.assertIn(("app/checkout.py", "app/pay.py"), edges)
+
+    def test_import_graph_relative_from_import_binds_to_own_package(self):
+        # 8aec75a8fe40
+        bd = self._mod()
+        with tempfile.TemporaryDirectory() as d:
+            self._write(d, "pkg/b.py")
+            self._write(d, "other/b.py")
+            self._write(d, "pkg/a.py", "from . import b\n")
+            g = bd.import_graph(d)
+            edges = set(tuple(e) for e in g["edges"])
+            self.assertIn(("pkg/a.py", "pkg/b.py"), edges)
+            self.assertNotIn(("pkg/a.py", "other/b.py"), edges)
+
+
+class Night0912BmPacks(unittest.TestCase):
+    """Two findings from the night sweep against bm_packs.py's citation
+    regex (a path with a space) and its def-scanner (async def)."""
+
+    PACKS = os.path.join(HERE, "bm_packs.py")
+
+    def _mod(self):
+        spec = importlib.util.spec_from_file_location(
+            "bm_packs_for_night0912_tests", self.PACKS)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_read_existing_parses_citation_path_with_spaces(self):
+        # 45d16f98e323
+        bp = self._mod()
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "pack.md")
+            line = ("<!-- bm-cite: path=my file.py lines=1-1 sha256="
+                    + "a" * 64 + " anchor=x -->")
+            with io.open(p, "w", encoding="utf-8") as fh:
+                fh.write(line + "\n")
+            data = bp.read_existing(p)
+        self.assertEqual([c["path"] for c in data["cites"]], ["my file.py"])
+
+    def test_cited_symbols_includes_async_def(self):
+        # 1595f4690c5c
+        bp = self._mod()
+        names = bp.cited_symbols({"body": "async def handler(): pass"})
+        self.assertEqual(names, ["handler"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

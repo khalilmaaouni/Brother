@@ -1093,5 +1093,40 @@ class TestBlankAgreesWithSbeChecks(unittest.TestCase):
         self.assertFalse(decisions_mod._blank("0"))
 
 
+class Night0912Decisions(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from brothersbe import tasks
+        cls.tasks = tasks
+
+    def test_dossier_intake_json_array_returns_none(self):
+        with tempfile.TemporaryDirectory() as root:
+            dossier = os.path.join(root, 'design', 'x')
+            os.makedirs(dossier)
+            with open(os.path.join(dossier, '00-intake.json'), 'w') as fh:
+                fh.write('[]')
+            self.assertIsNone(decisions_mod._dossier_intake(root, 'x'))
+
+    def test_lineage_receipts_does_not_claim_none_when_unreadable_receipt_exists(self):
+        with tempfile.TemporaryDirectory() as root:
+            store = self.tasks.evidence_dir(root)
+            os.makedirs(store, exist_ok=True)
+            with open(os.path.join(store, 'bad.json'), 'w') as fh:
+                fh.write('{not json')
+            res = decisions_mod._lineage_receipts(root, 'target.txt')
+            summaries = [h['summary'] for h in res['hops']]
+            self.assertTrue(any('could not be read' in s for s in summaries))
+            self.assertFalse(any('none names' in s for s in summaries))
+
+    def test_lineage_does_not_count_notes_store_as_read(self):
+        with tempfile.TemporaryDirectory() as root:
+            os.makedirs(os.path.join(root, '.sbe', 'notes', 'foo-txt'))
+            data = decisions_mod.lineage(root, 'foo.txt')
+            final = data['notes'][-1]
+            notes_hop = [h for h in data['hops'] if h['kind'] == 'notes-NO-DATA'][0]
+            self.assertIn('not read', notes_hop['summary'])
+            self.assertNotIn('1 read', final)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

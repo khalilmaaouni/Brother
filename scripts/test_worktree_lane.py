@@ -316,6 +316,71 @@ class StaleLaneRefusal(unittest.TestCase):
         self.assertIn("lane/A", problem)
 
 
+class AStaleRefLockFromAKillIsCleared(unittest.TestCase):
+    """2026-09-14, the flake behind test_brother_run's resume tests: a run
+    SIGKILLed while its git was mid `checkout -b lane/<unit>` leaves a
+    `refs/heads/lane/<unit>.lock` with NO ref behind it (git dies between
+    the lock-create and the rename). That lock is INVISIBLE to _stale_lane
+    (rev-parse --verify of the ref exits 1, since the ref never landed), yet
+    the next acquire()'s own `git checkout -b` dies on it with "cannot lock
+    ref ... File exists", so acquire() sets branch=None and the unit is
+    refused forever with "its own checkout failed". This drives that exact
+    residue deterministically, no kill and no timing: stage the bare lock,
+    then prove acquire() clears it and hands back a real branch."""
+
+    def _lock_path(self, repo, branch):
+        common = subprocess.run(["git", "rev-parse", "--git-common-dir"],
+                                cwd=repo, capture_output=True, text=True)
+        common_dir = common.stdout.strip()
+        if not os.path.isabs(common_dir):
+            common_dir = os.path.normpath(os.path.join(repo, common_dir))
+        return os.path.join(common_dir, "refs", "heads", branch + ".lock")
+
+    def test_a_bare_ref_lock_is_removed_and_a_real_branch_is_returned(self):
+        repo = a_repo()
+        branch = W.branch_for("A")
+        lock_path = self._lock_path(repo, branch)
+        os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+        with open(lock_path, "w", encoding="utf-8") as fh:
+            fh.write("")  # a dead run's leftover, no ref ever written
+        # The ref itself does not exist: this is exactly the state
+        # _stale_lane cannot see.
+        self.assertEqual(W._stale_lane(repo, branch), None)
+
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            path, got_branch, problem = W.acquire(repo, "A")
+        self.assertTrue(path, problem)
+        self.assertEqual(got_branch, branch,
+                         "acquire returned no branch: the stale ref lock was "
+                         "not cleared before `git checkout -b` (%s)" % problem)
+        self.assertFalse(os.path.isfile(lock_path),
+                         "the stale ref lock was left on disk")
+
+    def test_the_lock_sweep_is_scoped_to_this_lane_branch_alone(self):
+        """It must never touch a DIFFERENT lane's lock, or index.lock, or
+        anything but the one branch acquire() is about to create."""
+        repo = a_repo()
+        other_lock = self._lock_path(repo, W.branch_for("B"))
+        index_lock = os.path.join(repo, ".git", "index.lock")
+        os.makedirs(os.path.dirname(other_lock), exist_ok=True)
+        for p in (other_lock, index_lock):
+            with open(p, "w", encoding="utf-8") as fh:
+                fh.write("")
+        try:
+            with contextlib.redirect_stderr(io.StringIO()):
+                path, _b, problem = W.acquire(repo, "A")
+            self.assertTrue(path, problem)
+            self.assertTrue(os.path.isfile(other_lock),
+                            "another lane's ref lock must not be removed")
+            self.assertTrue(os.path.isfile(index_lock),
+                            "index.lock must not be removed")
+        finally:
+            for p in (other_lock, index_lock):
+                if os.path.isfile(p):
+                    os.remove(p)
+
+
 class OneDefinitionOfLiveness(unittest.TestCase):
     """E86. orphan_report() decided liveness by time alone
     (expires_at > now), while claim_store.live() also treats a dead owning pid

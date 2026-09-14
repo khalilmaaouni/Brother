@@ -131,7 +131,9 @@ def count(rows, columns, spec):
                       % (role.replace("_", " "), NODATA,
                          ", ".join(HEADERS[role])))
     rx = re.compile(spec["pattern"], re.I)
-    n = sum(1 for r in rows if rx.search(str(r.get(col, "") or "").strip()))
+    # Anchored at the start of the cell: a prefix like "Not " must not let
+    # the pattern match as a substring anywhere in the cell (re.search did).
+    n = sum(1 for r in rows if rx.match(str(r.get(col, "") or "").strip()))
     return n, ""
 
 
@@ -183,6 +185,11 @@ def main(argv=None):
     missing = [r["label"] for r in results if r["value"] is None]
     if args.expect:
         want = [w.strip() for w in args.expect.split(",")]
+        if len(want) != len(results):
+            print("%s: --expect needs five comma separated numbers, got %d. "
+                  "Refusing to compare a prefix." % (NODATA, len(want)),
+                  file=sys.stderr)
+            return 2
         got = [r["value"] for r in results]
         diffs = [(r["label"], w, g) for r, w, g in zip(results, want, got)
                  if g is None or str(g) != w]

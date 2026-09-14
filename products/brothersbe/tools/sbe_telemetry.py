@@ -2071,7 +2071,15 @@ def cmd_data_purge(argv):
     it = iter(argv)
     for a in it:
         if a == "--category":
-            only = next(it, "")
+            # A missing value used to fall through to "" and disable the
+            # filter, so `--category` last purged every category.
+            val = next(it, None)
+            if val is None:
+                print(DATA_PURGE_USAGE)
+                print("data-purge: --category requires a value; refusing rather than purging "
+                      "every category")
+                return 2
+            only = val
     items = [(c, p, w) for (c, p, w) in stored_inventory() if not only or c == only]
     if only and not items:
         print("data-purge: no category named %r; categories are %s"

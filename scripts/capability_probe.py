@@ -94,7 +94,8 @@ def probe(capability):
         tried.append((alt.get("probe"), state, detail))
         if state == PRESENT:
             return PRESENT, detail, tried
-    if not tried:
+    if not tried or all(state == NODATA for _, state, _ in tried):
+        # No implemented check ran, so a failure to reach it proves nothing.
         return NODATA, "", tried
     return MISSING, "", tried
 

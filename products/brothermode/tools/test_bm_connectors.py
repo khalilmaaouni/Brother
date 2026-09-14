@@ -383,5 +383,32 @@ class CanaryClasses(unittest.TestCase):
             self.assertNotIn("import %s" % banned, src)
 
 
+class Night0912BmConnectors(unittest.TestCase):
+    """1e4ed1969bea: a watermark-coupling canary response carrying
+    content_watermark but omitting acl_watermark must return a FAIL verdict,
+    not raise TypeError from content_wm - acl_wm with acl_wm None."""
+
+    def test_watermark_coupling_missing_acl_watermark_returns_fail(self):
+        text = json.dumps({"content_watermark": 5})
+        responses = {5: {"id": 5, "result": {"content": [{"text": text}]}}}
+        verdict, line = bc._canary_result(
+            "snowflake", "watermark-coupling", responses)
+        self.assertEqual(verdict, bc.FAIL)
+        self.assertIn("watermark", line)
+
+
+class Night0912BmMockMcp(unittest.TestCase):
+    """ff244a3c2944: handle() assumed the decoded JSON request is a mapping;
+    a valid JSON line that is not an object (e.g. null) crashed with
+    AttributeError on req.get(...) instead of being ignored, the same way
+    serve()'s own malformed-JSON branch already ignores an unparseable
+    line with no reply expected."""
+
+    def test_non_object_json_request_is_ignored(self):
+        sys.path.insert(0, HERE)
+        import bm_mock_mcp as mm  # noqa: E402
+        self.assertIsNone(mm.handle(None, "github", [], None))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

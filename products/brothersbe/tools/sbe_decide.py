@@ -150,6 +150,8 @@ def load_table(path, key):
                    "number or choice, a 'scores' mapping and a 'note'")
     elif not isinstance(t.get("flip"), str) or not t["flip"].strip():
         problem = "lacks a 'flip' condition (the sentence naming what would reverse the recommendation)"
+    elif "flips" in t and not isinstance(t["flips"], dict):
+        problem = "has a 'flips' key that is not a mapping from option to flip condition"
     if problem:
         return None, ("table %r in %s is valid JSON and still not a decision table this tool "
                       "can read: it %s. Fix the table; a malformed table is a table defect, "

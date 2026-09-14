@@ -102,6 +102,12 @@ class GatherJbeqTests(unittest.TestCase):
                               msg="JBEQ output contains ~/ path")
 
 
+class Night0912MorningPack(unittest.TestCase):
+    def test_auto_trigger_re_matches_inline_list(self):
+        self.assertIsNotNone(MP.AUTO_TRIGGER_RE.search("on: [push]"))
+        self.assertIsNotNone(MP.AUTO_TRIGGER_RE.search("on: [pull_request]"))
+
+
 if __name__ == "__main__":
     unittest.main()
 

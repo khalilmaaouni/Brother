@@ -43,7 +43,8 @@ def vault_root(explicit=None):
 def render(lesson, created, project):
     """One note, in the exact frontmatter shape bake already reads."""
     tags = ", ".join(lesson.get("tags") or ["lesson"])
-    verified = lesson.get("verified_by", "").strip()
+    # A JSON null arrives as None; it means the same as absent.
+    verified = (lesson.get("verified_by") or "").strip()
     return (
         "---\n"
         "type: failure\n"

@@ -326,8 +326,8 @@ class TestCaseVariantPaths(GuardCase):
         fence._same_entry_case_insensitive = lambda root, t, c: False
         try:
             surface = bg.require_surface_module()
-            authority = bg.require_authority_module()
-            family = bg.protected_family(fence, surface, authority, self.root, "claude.md")
+            common = bg.require_common_module()
+            family = bg.protected_family(fence, surface, common, self.root, "claude.md")
             self.assertEqual(
                 family, "",
                 "a case-folded string match was trusted with no filesystem confirmation")
@@ -1035,6 +1035,39 @@ class TheRepoConfigCannotSwitchOffThisGuard(GuardCase):
         self.assertFalse(run.denied,
                          "an ordinary read-only command was refused: %s"
                          % run.stdout)
+
+
+class Night0912SbeBashWriteGuard(unittest.TestCase):
+
+    def test_push_head_resolves_to_default_branch(self):
+        root = tempfile.mkdtemp()
+        os.makedirs(os.path.join(root, '.git', 'refs', 'remotes', 'origin'))
+        with open(os.path.join(root, '.git', 'HEAD'), 'w') as f:
+            f.write('ref: refs/heads/main')
+        with open(os.path.join(root, '.git', 'refs', 'remotes', 'origin',
+                               'HEAD'), 'w') as f:
+            f.write('ref: refs/remotes/origin/main')
+        seg = bg.split_commands(bg.tokenize('git push origin HEAD'))[0]
+        finding = bg.push_effect(seg, root, root, 'git push origin HEAD')
+        self.assertIsNotNone(finding)
+        self.assertTrue(finding.reason)
+
+    def test_git_global_value_flag_is_not_the_subcommand(self):
+        segs = bg.split_commands(
+            bg.tokenize('git -c core.foo=bar rm CLAUDE.md'))
+        cands = bg.segment_candidates(segs[0], 0)
+        self.assertTrue(any(c.raw == 'CLAUDE.md' and c.write for c in cands))
+
+    def test_sed_file_script_is_not_a_write_target(self):
+        targets = bg._sed_targets(['CLAUDE.md', 'notes.txt'], ['-i', '-f'])
+        self.assertNotIn('CLAUDE.md', targets)
+        self.assertIn('notes.txt', targets)
+
+    def test_interpreter_value_flag_is_not_the_script(self):
+        seg = bg.split_commands(
+            bg.tokenize('python3 -X dev /other/project/tool.py'))[0]
+        raw, sub = bg._exec_target_raw(seg)
+        self.assertEqual(raw, '/other/project/tool.py')
 
 
 if __name__ == "__main__":

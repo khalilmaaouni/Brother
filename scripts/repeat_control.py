@@ -432,6 +432,16 @@ def compute_abandonment(sessions, outcome_rows):
             if row_ts >= ts:  # a tie counts as NOT PREVENTED, the conservative read
                 ran_again = True
                 break
+        # TODO (flagged by independent verifier, 2026-09-13): on the real corpus
+        # ran_again has never once come out True (100% "prevented"), the same
+        # shape as the 2026-09-05 audit's sig-collision defect, where a detector
+        # that never fires in one direction cannot be told apart from a broken
+        # one. Reachability of ran_again=True IS already proven at unit level
+        # (test_repeat_control.py's test_one_abandons_one_repeats, driven
+        # backwards per its own comment); what is still missing is the same
+        # proof against a REAL repeat-guard row, to rule out a real-corpus-only
+        # cause (e.g. a field or ordering assumption real rows violate). Out of
+        # E53's scope; not fixed here.
         bucket = "not_prevented" if ran_again else "prevented"
         entry = per_session.setdefault(
             session, {"rows": 0, "prevented": 0, "not_prevented": 0})

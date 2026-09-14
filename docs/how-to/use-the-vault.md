@@ -1,72 +1,61 @@
 # Use the Vault
 
-The Vault is durable local memory for lessons worth recalling at the point of work. It is not a transcript archive and it is not proof. Current repository state, current evidence and a human decision outrank recalled text.
+Use the Vault for durable lessons that should change future work, not as a transcript archive. The useful test is: can a future task retrieve this lesson, understand its limits, and check whether it still applies?
 
-## The retrieval path
+## 1. Choose a local knowledge directory
 
-```mermaid
-flowchart LR
-    N[Markdown notes] --> I[index]
-    I --> X[local SQLite index]
-    Q[concrete symptom or anchor] --> R[recall]
-    X --> R
-    R --> H[human checks evidence and limits]
-    H --> W[current work and verification]
-```
+Use an existing Markdown knowledge directory or create a dedicated one. Keep it outside a target repository that must remain clean. Set `BM_VAULT_ROOT` to its absolute path in the environment that launches your coding host. `BROTHERMODE_VAULT` and recorded configuration are fallback sources; see [root selection](../reference/vault.md).
 
-## Configure one root
+The index lives under the selected client configuration directory, not necessarily beside the notes. Indexing can also include configured project-memory sources. Inspect the reported roots and counts before using sensitive material. Do not assume the Vault directory is the only source.
 
-Use an existing Markdown knowledge directory or create a dedicated one outside a repository that must remain clean. Set `BM_VAULT_ROOT` in the environment that launches Brother. `BROTHERMODE_VAULT` and Brother-recorded configuration are fallback sources. An explicit `--vault` argument has highest precedence.
+## 2. Write a retrievable lesson
 
-Do not assume the selected directory is the only source. The runtime can also read configured project memory. Inspect the reported roots and counts before using sensitive material. Local storage does not guarantee provider isolation, because recalled text may be sent to the coding host as context.
-
-## Write for retrieval
-
-Use the observable symptom as the title or first line. Include context, the failed or successful approach, the invariant, evidence, limits and the condition that should trigger a recheck.
+Create a Markdown note with your editor. This illustrative example is not a claim about your application:
 
 ```markdown
-# Timeout retry can repeat an operation
+# Retry after timeout can duplicate a charge
 
-Symptom: a caller sees the operation twice after a timeout.
-Context: retry path; inspect the current provider semantics.
-Constraint: retries preserve the same idempotency key.
-Failed approach: create a new key for every attempt.
-Evidence: link the current regression check.
-Recheck when: provider, retry policy, or key lifetime changes.
-Do not infer: every timeout means the first operation failed.
+Symptom: a customer sees two charges after a request times out.
+Context: payment retry path; inspect the current provider's semantics.
+Constraint: retries must preserve the same idempotency key.
+Failed approach: generate a fresh key for each attempt.
+Evidence: link the incident and the exact regression check here.
+Recheck when: provider, retry policy, or idempotency lifetime changes.
+Do not infer: every timeout means the first charge failed.
 ```
 
-Keep credentials, secrets, raw customer data and unnecessary chat history out of notes. A note without evidence metadata may be surfaced as unverified. That warning is the correct result.
+Replace illustrative evidence with an actual reference before relying on the note. Name relevant paths or symbols to help exact-anchor retrieval. Describe the symptom as well as the cause: a future worker may know only the symptom.
 
-## Index and recall
+## 3. Index and ask a concrete question
 
 From a Brother checkout, with `BM_VAULT_ROOT` set:
 
 ```bash
 python3 products/brothermode/tools/bm_vault.py index --vault "$BM_VAULT_ROOT"
 python3 products/brothermode/tools/bm_vault.py status
-python3 products/brothermode/tools/bm_vault.py recall --query "timeout retry operation twice" --limit 3 --fast --explain
+python3 products/brothermode/tools/bm_vault.py recall --query "retry timeout duplicate charge" --limit 3 --fast --explain
 ```
 
-`index` writes derived local state. `status` reports the index path, note count, freshness and limitations. `recall` accepts a symptom or exact file or symbol anchor. `--fast` skips optional dense retrieval. `--explain` shows which retrieval signals ran. Current retrieval combines lexical search, anchors and linked-note expansion. Optional dense retrieval depends on local tooling and can report NO-DATA.
+Indexing writes the local search database. `status` reports its path, note count, freshness, and retrieval limitations; it can initialize the database if absent. `--fast` skips dense retrieval. `--explain` exposes retrieval signals instead of asking you to trust ranking silently.
 
-No results means useful context was not supplied. Reword the symptom, name a path or symbol, inspect the note directly, or refresh the index after changing notes. A match does not verify the note.
+Expected result: the relevant note appears with enough context to identify it. Counts and ranking vary with your notes. No results means retrieval has not supplied useful context; it does not mean the project has no relevant history. Reword the symptom, name a file, inspect the note directly, or refresh the index after changing notes.
 
-## Use recall at the point of action
+A note without evidence metadata can appear as `UNVERIFIED` with a withholding warning. That is the expected treatment of the illustrative note above, not a failure to hide. Missing optional embedding tooling can report `NO-DATA` while lexical retrieval still returns a match. Neither a match nor a zero exit code verifies the lesson's content.
 
-Open the matched note. Check its evidence, age and applicability against current code and requirements. Record which lesson influenced the work and which current check supports using it. If the note is stale, correct or deprecate it explicitly.
+## 4. Use recall without promoting it to authority
 
-At session close, commit lessons before indexing them. Indexing committed state keeps an uncommitted note from looking like an empty or failed index. Closing guidance is in [the Vault reference](../reference/vault.md) and the [correction learning guide](../../products/brothermode/docs/CORRECTION-LEARNING.md).
+Open the matched note. Check its evidence, age, and applicability against the current code and requirement. Ask Brother to state which lesson influenced the work and what current check supports its use. If the lesson is stale, correct or deprecate it explicitly rather than silently following it.
 
-## Persona patterns
+Local storage is not a promise of offline execution: recalled text supplied to your coding host may be sent to its model provider. Do not index anything you are not permitted to expose through that workflow.
 
-| Problem | Use the Vault this way |
-| --- | --- |
-| A maintainer repeats a known defect | Search the symptom and exact file, then verify the recalled remedy against a current test. |
-| A data analyst needs a definition | Store the definition, grain and source pointer, then recheck the current claim evidence. |
-| A reviewer inherits an unfamiliar project | Recall by the changed path, inspect linked notes, and keep current receipts authoritative. |
-| A team wants automatic learning | Propose a candidate lesson, require human approval, then retrieve it for matching work. |
+A strong lesson contains the observable symptom, context, technique/decision that failed or succeeded, learned invariant/constraint, evidence/reference, and conditions under which it should be ignored/rechecked.
 
-## What the Vault does not decide
+Write for retrieval: phrase the symptom in words a future practitioner will observe. Keep credentials, secrets, raw customer data, and unnecessary conversation history out.
 
-It does not promote a note to truth, hide NO-DATA, or replace a receipt. A growing note count is not evidence of useful learning. To evaluate value across runs, record the lesson retrieved, whether it changed the plan, whether that change was correct and whether the known failure recurred.
+Recall relevant memory at the point of action, not as a giant session-start dump.
+
+## Verify the result
+
+When memory influences work, current evidence still establishes the present claim. If memory conflicts with current truth, memory loses and should be corrected/deprecated.
+
+To evaluate value across runs, record which lesson was retrieved, whether it changed the plan, whether that change was correct, and whether the known failure recurred. A growing note count alone is not evidence that the system learns usefully.

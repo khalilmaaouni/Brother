@@ -212,7 +212,9 @@ class TestRequiredFastPRException(unittest.TestCase):
     These cases write fixture workflow files into a temporary
     .github/workflows directory (the seam TestNoSelfFiringCI._workflows now
     takes a root=) so the real hub tree, whose required-fast.yml is
-    dispatch-only today, is never mutated by this test file."""
+    `pull_request` into main today (an accepted exception: ubuntu-latest,
+    `timeout-minutes: 20`, no matrix, per the ACCEPTED fixture below), is
+    never mutated by this test file."""
 
     ACCEPTED = """\
 on:

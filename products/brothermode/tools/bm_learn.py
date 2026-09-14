@@ -142,6 +142,10 @@ def _parse(argv, known, wants_value=()):
             kv[name] = True
             i += 1
             continue
+        if tok.startswith("-"):
+            # A single dash is still a flag, so -x is refused like --x.
+            _err("bm_learn: unrecognized flag %s" % tok)
+            sys.exit(2)
         positional.append(tok)
         i += 1
     return positional, kv

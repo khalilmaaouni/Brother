@@ -308,5 +308,34 @@ class TestExplainerSelfContained(unittest.TestCase):
                      "no explicit data-theme toggle override found")
 
 
+class Night0912Markdown(unittest.TestCase):
+    """A night-sweep defect: a '|' line with no following table-separator
+    row matched neither the table branch nor the paragraph while-loop (which
+    itself refuses to consume a '|' line), so `i` never advanced and
+    `markdown_to_html` spun forever. Run in a thread with a timeout: a
+    regression here must fail the test, not hang the whole suite."""
+
+    def test_pipe_line_without_separator_terminates(self):
+        import threading
+
+        src = os.path.join(ROOT, "src")
+        if src not in sys.path:
+            sys.path.insert(0, src)
+        from brothersbe import markdown as mod
+
+        result = {}
+
+        def run():
+            result["value"] = mod.markdown_to_html("| not a table\n")
+
+        thread = threading.Thread(target=run)
+        thread.daemon = True
+        thread.start()
+        thread.join(timeout=5)
+        self.assertFalse(thread.is_alive(),
+                         "markdown_to_html hung on a pipe line without a table separator")
+        self.assertEqual(result.get("value"), (None, "<p>| not a table</p>"))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

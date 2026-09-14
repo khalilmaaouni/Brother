@@ -143,7 +143,7 @@ def load_entries(ledger_path=None):
             if not line:
                 continue
             try:
-                entries.append(json.loads(line))
+                entry = json.loads(line)
             except ValueError:
                 # Skipped so one bad append cannot blind attribution, but
                 # said out loud: a dropped line is a dropped write record,
@@ -151,6 +151,14 @@ def load_entries(ledger_path=None):
                 print("write_ledger: %s:%d is not valid JSON, skipping"
                       % (ledger_path, n), file=sys.stderr)
                 continue
+            # Valid JSON that is not an object (null, a number) cannot carry
+            # path/session, so skip it like a corrupt line instead of raising
+            # later in attribute()'s .get().
+            if not isinstance(entry, dict):
+                print("write_ledger: %s:%d is not a JSON object, skipping"
+                      % (ledger_path, n), file=sys.stderr)
+                continue
+            entries.append(entry)
     return entries
 
 

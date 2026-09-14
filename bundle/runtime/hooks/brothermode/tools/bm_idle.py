@@ -666,10 +666,12 @@ def _run(argv):
     # verdict stays the first line every caller already parses.
     unstaged = unstaged_items(data["items"])
     if unstaged:
+        # _validate_queue never requires the id to be a string, so stringify
+        # each id before joining: an integer id must not crash the join.
         sys.stdout.write(
             "CHAIN: %d queued item(s) name no stage of the north-star chain "
             "(docs/NORTH-STAR-CHAIN.md): %s%s\n"
-            % (len(unstaged), ", ".join(unstaged[:12]),
+            % (len(unstaged), ", ".join(str(i) for i in unstaged[:12]),
                "" if len(unstaged) <= 12 else ", and %d more" % (len(unstaged) - 12)))
     return exit_code
 

@@ -159,7 +159,10 @@ def capture(provider, env, cwd=None):
     runs git, writes nothing, decides nothing."""
     say = declared(provider, env)
     saw = measured(cwd)
-    is_pr = bool(say.get("pull_request_id") and say.get("destination_branch"))
+    # Bitbucket marks pull request runs with BITBUCKET_PR_ID alone; GitHub
+    # also needs its base ref.
+    is_pr = bool(say.get("pull_request_id") and (
+        provider == "bitbucket" or say.get("destination_branch")))
     record = {
         "provider": provider,
         "mode": "pull_request" if is_pr else "branch",

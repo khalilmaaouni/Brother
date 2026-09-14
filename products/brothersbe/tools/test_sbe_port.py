@@ -110,6 +110,21 @@ class TheGenerator(unittest.TestCase):
         self.assertNotEqual(verdict.returncode, 0)
         self.assertIn("not generated", verdict.stderr)
 
+    def test_check_FAILS_when_a_generated_skill_has_no_source(self):
+        """The mirror of the missing-file case above: a skill removed from
+        skills/ that is still sitting in the generated tree is drift the
+        per-source pass (which only ever walks skills/) cannot see on its
+        own; night 0912 defect d31ebc0c4d79."""
+        run("codex", "--out", self.out)
+        orphan = os.path.join(self.out, "skills", "zzz-orphan")
+        os.makedirs(orphan)
+        with io.open(os.path.join(orphan, "SKILL.md"), "w", encoding="utf-8") as handle:
+            handle.write("orphan with no source in skills/\n")
+        verdict = run("codex", "--out", self.out, "--check")
+        self.assertNotEqual(verdict.returncode, 0,
+                            "a generated skill with no source in skills/ still passed --check")
+        self.assertIn("zzz-orphan", verdict.stderr)
+
     def test_cursor_uses_the_same_shape_as_codex(self):
         """Both hosts were verified by reading a real installed example. If that
         stops being true the port for one of them is silently wrong."""

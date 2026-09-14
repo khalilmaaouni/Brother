@@ -451,6 +451,9 @@ def _validate_raw_finding(entry, index):
     concept_id = entry.get("conceptId")
     locations = entry.get("locations")
     location = entry.get("location")
+    # A conceptId is slugged later, so a non-string would crash the slug.
+    if concept_id is not None and not isinstance(concept_id, str):
+        bad("conceptId must be a string")
     if concept_id:
         if not (isinstance(locations, list) and locations
                and all(isinstance(l, str) and l.strip() for l in locations)):
@@ -2016,7 +2019,9 @@ def _doctor_checks(target=None):
     else:
         try:
             with io.open(manifest, encoding="utf-8") as fh:
-                declared = json.load(fh).get("version")
+                parsed = json.load(fh)
+            # A top-level JSON list has no .get; treat it as an unusable manifest.
+            declared = parsed.get("version") if isinstance(parsed, dict) else None
             out.append(("plugin-manifest",
                         "PASS" if declared == version() else "FAIL",
                         "manifest %s, VERSION %s" % (declared, version())))

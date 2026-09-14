@@ -82,7 +82,22 @@ def _entries(path):
         rest = m.group(2)
         if ": " not in rest:
             continue
-        key, value = rest.rsplit(": ", 1)
+        # Values may contain ": ", so split only after the known key prefix
+        # rather than on the last ": " in the whole line.
+        prefix = ""
+        if rest.startswith(CORRECT_PREFIX):
+            prefix = CORRECT_PREFIX
+            rest = rest[len(CORRECT_PREFIX):]
+        if rest.startswith("preference: "):
+            name, sep, value = rest[len("preference: "):].partition(": ")
+            if not sep:
+                continue
+            key = prefix + "preference: " + name
+        else:
+            key, sep, value = rest.partition(": ")
+            if not sep:
+                continue
+            key = prefix + key
         out.append((key, value))
     return out
 

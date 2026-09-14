@@ -2247,14 +2247,9 @@ def alerts_for_chat(alerts):
     distinct rungs, in ladder order. Several alerts at once create a bad
     experience, and the cap is the mitigation every source in the research
     agrees on."""
-    rungs, out = [], []
-    for a in alerts:
-        if a["rung"] not in rungs:
-            if len(rungs) == 2:
-                continue
-            rungs.append(a["rung"])
-        out.append(a)
-    return out
+    # Take the two HIGHEST priority rungs present (RUNGS is already ladder order).
+    keep = [r for r in RUNGS if any(a["rung"] == r for a in alerts)][:2]
+    return [a for r in keep for a in alerts if a["rung"] == r]
 
 
 def render_alert(alert_row, medium):

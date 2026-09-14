@@ -527,6 +527,23 @@ def _scan_evidence(root, evidence_dir):
     claimed receipt whose worktree is gone, an unclaimed receipt, and an
     unreadable registry all verify against root exactly as before: linkage
     that cannot be read never upgrades a verdict.
+
+    TWO SPEEDUPS, neither changes a single verdict this function returns for
+    the same repository state, both measured on a real dossier evidence
+    store (8 receipts): `git rev-parse HEAD` and `git rev-parse
+    --show-toplevel` for a given cwd cannot differ between two receipts
+    checked against that same cwd in this one pass, so `git_cache` (a plain
+    dict, see `evidence_mod._cached_git`) memoizes both instead of paying
+    for them again on every receipt. And a receipt whose own file has not
+    changed (mtime, size) since it was last verified against the SAME HEAD
+    cannot have a different verdict today, so `evidence_mod.verify_cached`
+    reuses that outcome from a small JSON side-file, `.sbe/.verify-cache.
+    json` beside `evidence_dir` -- OUTSIDE it, so `os.walk(evidence_dir)`
+    above never tries to read the cache file as a receipt. Missing, corrupt
+    or stale-shaped cache degrades to a full re-verify of every receipt,
+    same as if this cache did not exist; a HEAD move or a regenerated
+    receipt is never served a stale answer (see `verify_cached`'s own
+    docstring for exactly what invalidates one entry).
     """
     broken, clean, failing, kindless, receipts = [], [], [], [], []
     kinds_covered = set()
@@ -553,6 +570,16 @@ def _scan_evidence(root, evidence_dir):
             if name.endswith(".json"):
                 paths.append(os.path.join(dirpath, name))
     paths.sort()
+    # A cache SIBLING of evidence_dir, never inside it: see
+    # evidence_mod.VERIFY_CACHE_BASENAME's own comment for why a file under
+    # evidence_dir would be walked above and tried as a receipt. `git_cache`
+    # is per-call only (never persisted): it exists purely so the git facts
+    # every receipt in THIS pass shares (HEAD, repo root, one per distinct
+    # cwd) are fetched once instead of once per receipt.
+    verify_cache_path = os.path.join(os.path.dirname(evidence_dir),
+                                     evidence_mod.VERIFY_CACHE_BASENAME)
+    verify_cache = evidence_mod.load_verify_cache(verify_cache_path)
+    git_cache = {}
     for full in paths:
         # SERIALIZED RELATIVE PATHS ARE POSIX-SPELLED, ON EVERY PLATFORM.
         # `os.path.relpath` answers in the host's spelling, so on Windows this
@@ -573,8 +600,9 @@ def _scan_evidence(root, evidence_dir):
         verify_cwd, claimed_task = (None, None)
         if receipt_run_id and receipt_run_id in claimed_by_run_id:
             verify_cwd, claimed_task = claimed_by_run_id[receipt_run_id]
-        result = evidence_mod.verify(full, cwd=verify_cwd or root,
-                                     exclude_dirs=(exclude_rel,))
+        result = evidence_mod.verify_cached(full, cwd=verify_cwd or root,
+                                            exclude_dirs=(exclude_rel,),
+                                            cache=verify_cache, git_cache=git_cache)
         verdict = result["verdict"]
         if verdict == "FAIL":
             broken.append({
@@ -631,6 +659,7 @@ def _scan_evidence(root, evidence_dir):
                 "path": rel,
                 "coveredFiles": covered_paths,
             })
+    evidence_mod.save_verify_cache(verify_cache_path, verify_cache)
     note = (("%d receipt(s) found under %s" % (len(paths), evidence_dir)) if paths
            else "evidence store %s exists and holds no receipt" % evidence_dir)
     if kindless:
@@ -2191,6 +2220,8 @@ def build_team_report(path):
         handover_entries.append(h_entry)
 
         plan = _read_json_or_none(os.path.join(doss, "08-plan.json"))
+        if not isinstance(plan, dict):
+            plan = None  # a non-object plan is no plan at all, not a crash
         plan_ids = set()
         plan_owns = set()
         commands = 0

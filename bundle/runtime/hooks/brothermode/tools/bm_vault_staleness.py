@@ -64,7 +64,7 @@ SKIP_DIRS = {".git", ".trash", ".obsidian"}
 NO_DERIVABLE_DATE = "no-derivable-date"
 
 TYPE_RE = re.compile(r"^type:\s*(.+)$", re.M)
-VERIFIED_RE = re.compile(r"^verified_at:\s*(\S+)\s*$", re.M)
+VERIFIED_RE = re.compile(r"^verified_at:\s*(.*)$", re.M)  # capture the whole value, so whitespace is malformed not absent
 LIFECYCLE_RE = re.compile(r"^lifecycle:\s*(.+)$", re.M)
 EXPIRY_AT_RE = re.compile(r"^expiry_at:\s*(\S+)\s*$", re.M)
 

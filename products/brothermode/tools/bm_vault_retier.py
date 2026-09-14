@@ -135,7 +135,7 @@ def _resolve_evidence_locator(value, repo_root):
         return None
     if common != repo_root_norm:
         return None
-    if not os.path.exists(candidate):
+    if not os.path.isfile(candidate):  # docstring promises a real file; a directory is not evidence
         return None
     rel = os.path.relpath(candidate, repo_root_norm)
     return "path:%s" % rel.replace(os.sep, "/")

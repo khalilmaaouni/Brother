@@ -61,7 +61,8 @@ def load_json(path, notes_no_data):
     except (OSError, json.JSONDecodeError):
         notes_no_data.append(path)
         return None
-    items = data['items'] if isinstance(data, dict) else data
+    # A dict with no 'items' key is a valid-but-empty snapshot: NO-DATA, not a crash.
+    items = data.get('items') if isinstance(data, dict) else data
     if not items:
         notes_no_data.append(path)
         return None

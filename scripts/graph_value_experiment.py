@@ -329,7 +329,10 @@ def main(argv=None):
                     "graph_success": graph_wins, "graph_only": graph_only},
         "verdict": verdict,
     }
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    out_dir = os.path.dirname(out_path)
+    if out_dir:
+        # A bare filename has no directory component; makedirs('') crashes.
+        os.makedirs(out_dir, exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as fh:
         json.dump(result, fh, indent=2)
         fh.write("\n")

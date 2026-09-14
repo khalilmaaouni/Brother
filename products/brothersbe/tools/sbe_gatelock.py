@@ -194,8 +194,9 @@ def acquire(root, tool, timeout=None, quiet=False):
                 try:
                     os.remove(path)
                 except OSError:
-                    pass  # sbe: allow-silent a stale marker another process removed first is the outcome this cleanup wants; the acquire loop above retries and its own busy or unreadable branches do the reporting
-                continue
+                    pass  # sbe: allow-silent a stale marker that cannot be removed must still respect the deadline; fall through to the wait below instead of spinning (defect 196)
+                else:
+                    continue
             if state == "absent":
                 continue
             if state == "unreadable" and not quiet and not announced:

@@ -61,6 +61,46 @@ SLEEP_STUB = (
     "sys.exit(0)\n"
 )
 
+# A hook that crashes with an uncaught exception, never a SystemExit. Proves
+# the adapter's fail-open path catches more than the "exit(2)" case.
+CRASH_STUB = (
+    "import sys\n"
+    "sys.stdin.read()\n"
+    "raise RuntimeError('boom, not a SystemExit')\n"
+)
+
+# A hook that always denies, used against non-gate events to prove the gate
+# set decides the outcome, not the wrapped script's own exit code.
+ALWAYS_DENY_STUB = (
+    "import sys\n"
+    "sys.stdin.read()\n"
+    "sys.stderr.write('always deny\\n')\n"
+    "sys.exit(2)\n"
+)
+
+# WBS-90/U7 (2026-09-13): events Cursor's Hooks vendor page names (read
+# 2026-08-07 and 2026-09-13, both dates recorded in
+# products/brothermode/tools/bm_runtimes.py's runtime registry) that
+# bm_cursor_hook.py now RESERVES: recognized so "unknown event" no longer
+# fires for them, but never gated and never wired to a hooks.json entry.
+NEW_RESERVED_EVENTS = (
+    "postToolUseFailure",
+    "subagentStart",
+    "subagentStop",
+    "beforeMCPExecution",
+    "afterMCPExecution",
+    "beforeReadFile",
+    "beforeSubmitPrompt",
+    "afterAgentResponse",
+    "afterAgentThought",
+    "workspaceOpen",
+)
+
+# Cursor Tab (autocomplete) events. The plan says do not wire Tab events;
+# they are not agent events, so they stay off EVENTS entirely and must
+# still land on the unknown-event fail-open path.
+TAB_EVENTS = ("beforeTabFileRead", "afterTabFileEdit")
+
 
 class CursorHookRunTest(unittest.TestCase):
     def setUp(self):
@@ -81,6 +121,25 @@ class CursorHookRunTest(unittest.TestCase):
         return subprocess.run(
             [sys.executable, ADAPTER, event, "--run", script],
             input=json.dumps(payload),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=run_env,
+        )
+
+    def run_adapter_direct(self, event, payload=None, raw_stdin=None,
+                            env=None, timeout=60):
+        """Call the adapter with no --run: exercises event_name()/handle()
+        directly, the same path a hooks.json entry with no --run target
+        would take, and the only path that can print "unknown event"."""
+        run_env = dict(os.environ)
+        if env:
+            run_env.update(env)
+        stdin_text = raw_stdin if raw_stdin is not None else json.dumps(
+            payload if payload is not None else {})
+        return subprocess.run(
+            [sys.executable, ADAPTER, event],
+            input=stdin_text,
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -260,6 +319,59 @@ class CursorHookRunTest(unittest.TestCase):
         self.assertEqual(proc.returncode, 0)
         with open(marker) as handle:
             self.assertEqual(handle.read(), "cursor")
+
+    def test_k_newly_reserved_events_stay_allow_with_no_unknown_warning(self):
+        for event in NEW_RESERVED_EVENTS:
+            proc = self.run_adapter_direct(event)
+            self.assertEqual(proc.returncode, 0, event)
+            decision = json.loads(proc.stdout)
+            self.assertEqual(decision.get("permission"), "allow", event)
+            self.assertTrue(decision.get("continue"), event)
+            self.assertNotIn("unknown event", proc.stderr, event)
+
+    def test_l_tab_events_are_not_reserved_and_fail_open_as_unknown(self):
+        for event in TAB_EVENTS:
+            proc = self.run_adapter_direct(
+                event, {"hook_event_name": event})
+            self.assertEqual(proc.returncode, 0, event)
+            decision = json.loads(proc.stdout)
+            self.assertEqual(decision.get("permission"), "allow", event)
+            self.assertIn("unknown event", proc.stderr, event)
+
+    def test_m_unknown_event_fails_open_with_warning(self):
+        proc = self.run_adapter_direct(
+            "totallyMadeUpEvent", {"hook_event_name": "totallyMadeUpEvent"})
+        self.assertEqual(proc.returncode, 0)
+        decision = json.loads(proc.stdout)
+        self.assertEqual(decision.get("permission"), "allow")
+        self.assertIn("unknown event", proc.stderr)
+
+    def test_n_malformed_stdin_fails_open(self):
+        proc = self.run_adapter_direct(
+            "preToolUse", raw_stdin="not valid json{")
+        self.assertEqual(proc.returncode, 0)
+        decision = json.loads(proc.stdout)
+        self.assertEqual(decision.get("permission"), "allow")
+        self.assertIn("not JSON", proc.stderr)
+
+    def test_o_uncaught_exception_in_wrapped_script_fails_open(self):
+        stub = self.write_stub("crash_stub.py", CRASH_STUB)
+        proc = self.run_adapter(
+            "beforeShellExecution",
+            stub,
+            {"command": "ls", "cwd": "/tmp", "hook_event_name": "beforeShellExecution"},
+        )
+        self.assertEqual(proc.returncode, 0)
+        decision = json.loads(proc.stdout)
+        self.assertEqual(decision.get("permission"), "allow")
+        self.assertIn("boom, not a SystemExit", proc.stderr)
+
+    def test_p_reserved_events_never_gate_even_on_run_mode_exit_two(self):
+        stub = self.write_stub("always_deny_stub.py", ALWAYS_DENY_STUB)
+        for event in NEW_RESERVED_EVENTS:
+            proc = self.run_adapter(event, stub, {})
+            self.assertEqual(proc.returncode, 0, event)
+            self.assertEqual(json.loads(proc.stdout), {}, event)
 
 
 if __name__ == "__main__":

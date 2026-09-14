@@ -139,9 +139,12 @@ What the code actually writes inside your project today:
   owner-only where the platform supports it (on Windows this is best-effort;
   rely on your user profile's access control).
 
-You can verify both claims yourself; the tools are about 212,800 lines of
-standard-library Python and shell (re-measured 2026-08-30 after the MCP
-connector catalog landed; the figure of 152,700 from 2026-08-20 drifted past
+You can verify both claims yourself; the tools are about 250,800 lines of
+standard-library Python and shell (re-measured 2026-09-12 after the night
+sweep's fixes and their tests landed; the figure of 212,800 from 2026-08-30
+drifted past the 15 percent guard the test enforces; before it, re-measured
+2026-08-30 after the MCP connector catalog landed, the figure of 152,700 from
+2026-08-20 drifted past
 the 15 percent guard the test enforces, as did the figure of
 128,300 from 2026-08-10 before it,
 standard-library Python and shell (re-measured 2026-08-31 after the VB3-04

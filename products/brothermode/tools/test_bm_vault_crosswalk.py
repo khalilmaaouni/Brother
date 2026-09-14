@@ -398,5 +398,16 @@ class TestCli(Fixture):
         self.assertEqual(rc, 2)
 
 
+class Night0912BmVaultCrosswalk(unittest.TestCase):
+    def test_empty_source_ids_declaration_is_no_data(self):
+        tmp = tempfile.mkdtemp(prefix="bm-crosswalk-night-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        with open(os.path.join(tmp, "n.md"), "w", encoding="utf-8") as fh:
+            fh.write("---\nentity: foo\nsource_ids: []\n---\n")
+        rc, out = run(xw.cmd_check, tmp)
+        self.assertEqual(rc, 2)
+        self.assertIn("NO-DATA", out)
+
+
 if __name__ == "__main__":
     unittest.main()

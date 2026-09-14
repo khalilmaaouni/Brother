@@ -65,7 +65,10 @@ def next_weekday_date(today, weekday_name):
 
 def bump_patch(version):
     parts = version.split(".")
-    parts[-1] = str(int(parts[-1]) + 1)
+    try:
+        parts[-1] = str(int(parts[-1]) + 1)
+    except ValueError:
+        return None  # Non-integer patch: caller reports NO-DATA.
     return ".".join(parts)
 
 
@@ -114,6 +117,10 @@ def main(argv=None):
 
     cut_date = next_weekday_date(today, weekday)
     version = bump_patch(current_version)
+    if version is None:
+        print("NO-DATA: version %r has a non-integer patch component"
+              % current_version)
+        return EXIT_NODATA
 
     print("next cut weekday: %s" % weekday)
     print("next cut date: %s" % cut_date.isoformat())

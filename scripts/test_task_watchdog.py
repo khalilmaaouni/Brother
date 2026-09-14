@@ -18,12 +18,13 @@ from datetime import datetime, timezone
 # repository root: the watchdog's own first live run caught the root form
 # BLOCKED (sibling import off sys.path), which is this line's receipt.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import task_watchdog  # noqa: E402
 from task_watchdog import (examine, owns, age_hours, verify_runnable,
                            apply_quarantine, check_lane_cap,
                            audit_idempotency, triage_lines,
                            ready_set_summary, format_ready_summary,
                            save_quarantine_state, save_triage_offset,
-                           _parse_float_arg)
+                           dirty_paths, _parse_float_arg)
 
 NOW = datetime(2026, 8, 28, 6, 0, 0, tzinfo=timezone.utc)
 OLD = "2026-08-22T21:00:00Z"
@@ -395,6 +396,19 @@ class TestParseFloatArg(unittest.TestCase):
             result = _parse_float_arg("12.5", "--budget", 900.0)
         self.assertEqual(result, 12.5)
         self.assertEqual(buf.getvalue(), "")
+
+
+class Night0912TaskWatchdog(unittest.TestCase):
+    def test_rename_porcelain_line_yields_new_path_only(self):
+        from types import SimpleNamespace
+        from unittest import mock
+
+        fake = SimpleNamespace(returncode=0,
+                               stdout="R  a.txt -> b.txt\n")
+        with mock.patch.object(task_watchdog.subprocess, "run",
+                               return_value=fake):
+            paths = dirty_paths()
+        self.assertEqual(paths, ["b.txt"])
 
 
 if __name__ == "__main__":

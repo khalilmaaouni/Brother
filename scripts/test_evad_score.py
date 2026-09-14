@@ -205,5 +205,17 @@ class RunDirs(unittest.TestCase):
             self.assertEqual(dirs, [os.path.join(d1, "same")])
 
 
+class Night0912EvadScore(unittest.TestCase):
+    def test_read_list_store_returns_problem_not_attribute_error(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "HISTORY.json")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write("[]")
+            runs, problem = E._read(path)
+
+        self.assertIsNone(runs)
+        self.assertTrue(problem)
+
+
 if __name__ == "__main__":
     unittest.main()

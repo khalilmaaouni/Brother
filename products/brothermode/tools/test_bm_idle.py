@@ -547,5 +547,24 @@ class ReconcileTests(unittest.TestCase):
                          "reconcile must never write to the real queue file")
 
 
+class Night0912BmIdle(unittest.TestCase):
+    """A queue item whose id is not a string (e.g. an int) made every verb
+    crash with TypeError while joining the unstaged-id list for the CHAIN
+    line, so a valid queue was reported as NO-DATA instead of its real
+    verdict."""
+
+    def test_non_string_id_does_not_crash_depth(self):
+        with tempfile.TemporaryDirectory() as d:
+            qpath = write_queue(d, {
+                "schema": 1, "min_depth": 1,
+                "items": [{"id": 1, "state": "queued", "title": "x"}]})
+            result = run_cli("depth", "--queue", qpath, "--root", d)
+            self.assertEqual(result.returncode, 0,
+                             result.stdout + result.stderr)
+            self.assertTrue(result.stdout.startswith("DEPTH"), result.stdout)
+            self.assertIn("CHAIN", result.stdout)
+            self.assertIn("1", result.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

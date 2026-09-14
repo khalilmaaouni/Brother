@@ -2047,7 +2047,9 @@ def cmd_precompact_brief():
                         name = b.get("name", "")
                         inp = b.get("input") or {}
                         if name == "Bash":
-                            desc = "Bash: " + (inp.get("command", "")[:100])
+                            # A malformed Bash input can carry a JSON null command;
+                            # coerce so one bad transcript line cannot abort the brief.
+                            desc = "Bash: " + str(inp.get("command") or "")[:100]
                         elif name in ("Edit", "Write", "Read"):
                             desc = name + ": " + str(inp.get("file_path", ""))
                         else:

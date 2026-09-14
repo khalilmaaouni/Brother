@@ -5069,28 +5069,28 @@ class TestHelpFlagWritesNothing(unittest.TestCase):
 
     # -- CALIBRATION ------------------------------------------------------
 
-    def test_calibrated_dashboard_with_the_help_gate_bypassed_still_rewrites_state(self):
-        """CALIBRATION. cmd_dashboard is unchanged by this fix: it still
-        writes, by design. Call it directly with ["--help"], the way main()
-        used to, and the original defect reproduces in full (STATE.md
-        rewritten, a backup left behind). That is the proof the tests above
-        pass because of the gate in main(), and not because something else
-        quietly made the dashboard read-only."""
+    def test_calibrated_dashboard_with_the_help_gate_bypassed_now_refuses(self):
+        """CALIBRATION, updated by the night sweep fix for 06fdbaad481b
+        (cmd_dashboard ignored unknown flags, including a typo, and still
+        rewrote STATE.md). cmd_dashboard now carries its OWN
+        _reject_unknown_flags gate, so calling it directly with ["--help"],
+        bypassing main()'s own --help interception the way this test used
+        to prove was the only thing stopping it, no longer reaches
+        render_state_md at all: it refuses with SystemExit(2), like any
+        other unrecognized flag, and STATE.md is untouched."""
         d = self._seeded_project()
         state = os.path.join(d, "STATE.md")
         backups = lambda: sorted(n for n in os.listdir(d)
                                  if n.startswith("STATE.md.bak-"))
         mtime_before, bak_before = os.stat(state).st_mtime_ns, backups()
         with mock.patch.object(bs, "require_root", lambda *a, **k: (d, "test")):
-            bs.cmd_dashboard(["--help"])  # THE BUG: argv is never inspected
-        self.assertNotEqual(
-            os.stat(state).st_mtime_ns, mtime_before,
-            "REINJECTION CHECK: reaching cmd_dashboard with ['--help'] must "
-            "still rewrite STATE.md, the exact defect the gate in main() "
-            "now prevents from ever getting here")
-        self.assertNotEqual(backups(), bak_before,
-                            "REINJECTION CHECK: and must still leave one MORE "
-                            "backup behind than the fixture's own writes did")
+            with self.assertRaises(SystemExit) as ctx:
+                bs.cmd_dashboard(["--help"])
+            self.assertEqual(ctx.exception.code, 2)
+        self.assertEqual(os.stat(state).st_mtime_ns, mtime_before,
+                         "cmd_dashboard's own gate must refuse before any write")
+        self.assertEqual(backups(), bak_before,
+                         "a refused dashboard must not leave a backup either")
 
 
 # ---------------------------------------------------------------------------
@@ -24619,6 +24619,131 @@ class TestEveryProjectScopedTableIsPurged(unittest.TestCase):
                         "%s still holds a row naming purged project 'p1'; "
                         "purge_project must delete it, or the table must "
                         "be added to _EXEMPT above with a reason" % t)
+
+
+class Night0912BmStore(unittest.TestCase):
+    """Night sweep 2026-09-12, batch e-tools/bm_store: six confirmed defects
+    drafted by DeepSeek V4.1 Flash, reviewed and applied here."""
+
+    def test_delete_autosave_receipts_removes_empty_string_sha(self):
+        # 9d01b62d4508: the list comprehension's `if s` filter dropped an
+        # empty-string snapshot_sha, a real value the column allows
+        # (TEXT NOT NULL), so the receipt was never deleted.
+        with tempfile.TemporaryDirectory() as d:
+            store = bs.Store(d)
+            try:
+                store.write_autosave_receipt(
+                    "wt", "sess", "", "tree", "head", 0, 0)
+                n = store.delete_autosave_receipts("wt", [""])
+                self.assertEqual(n, 1)
+                row = bs._exec(
+                    store,
+                    "SELECT COUNT(*) AS n FROM autosave_receipts "
+                    "WHERE worktree_id=? AND snapshot_sha=?",
+                    ("wt", "")).fetchone()
+                self.assertEqual(row["n"], 0)
+            finally:
+                store.close()
+
+    def test_resolve_git_dirs_accepts_a_real_linked_worktree(self):
+        # 9160018d3d04 REVIEWED AS INTENDED, not fixed (see REVIEW.md): the
+        # draft's repro hand-crafted a per-worktree gitdir with no refs/
+        # directory, but a real `git worktree add` always creates one
+        # (git 2.50.1, both -b and --detach), so _looks_like_git_admin_dir's
+        # existing objects-or-refs check already accepts a genuine linked
+        # worktree today. This test proves that with the actual git binary,
+        # not a hand-crafted layout, and is a regression guard on the
+        # UNCHANGED product code, not on a fix.
+        with tempfile.TemporaryDirectory() as td:
+            main = os.path.join(td, "main")
+            os.makedirs(main)
+            run = lambda *args: subprocess.run(  # noqa: E731
+                ["git"] + list(args), cwd=main, check=True,
+                capture_output=True, text=True)
+            run("init", "-q")
+            run("config", "user.email", "a@example.com")
+            run("config", "user.name", "a")
+            with open(os.path.join(main, "f.txt"), "w") as f:
+                f.write("x")
+            run("add", "f.txt")
+            run("commit", "-q", "-m", "init")
+            wt = os.path.join(td, "wt")
+            run("worktree", "add", "-q", wt, "-b", "wtbranch")
+            worktree_gitdir, common_dir = bs._resolve_git_dirs(wt)
+            self.assertIsNotNone(worktree_gitdir)
+            self.assertEqual(common_dir,
+                             os.path.realpath(os.path.join(main, ".git")))
+
+    def test_resolve_root_env_root_is_filesystem_root(self):
+        # 2b305b068940: appending os.sep unconditionally to the env root
+        # doubled the separator at "/", so no real start path ever matched
+        # and a root of "/" (which trivially contains every absolute path)
+        # was reported as not containing the caller's start.
+        bs_saved = os.environ.get("BROTHERMODE_ROOT")
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                os.environ["BROTHERMODE_ROOT"] = os.sep
+                root, source = bs.resolve_root(d, env_must_contain_start=True)
+                self.assertEqual(root, os.sep)
+                self.assertEqual(source, "env")
+        finally:
+            if bs_saved is None:
+                os.environ.pop("BROTHERMODE_ROOT", None)
+            else:
+                os.environ["BROTHERMODE_ROOT"] = bs_saved
+
+    def test_verify_rejects_active_record_under_wrong_section(self):
+        # 9209e0c7afb6: the forward "every active record is in the file"
+        # check tested presence anywhere in generated_block, not scoped to
+        # the "## active" section, so an active record rendered under a
+        # different heading (a stale or hand-edited STATE.md) passed.
+        with tempfile.TemporaryDirectory() as d:
+            store = bs.Store(d)
+            try:
+                store.claim("thing", "ephemeral", "obj", [])
+            finally:
+                store.close()
+            bs.write_state_view(d)
+            p = os.path.join(d, "STATE.md")
+            with open(p, encoding="utf-8") as f:
+                text = f.read()
+            text = text.replace("## active", "## parked")
+            with open(p, "w", encoding="utf-8") as f:
+                f.write(text)
+            problems = bs.verify(d)
+            self.assertTrue(problems)
+
+    def test_dashboard_refuses_unknown_flags(self):
+        # 06fdbaad481b: cmd_dashboard called no _reject_unknown_flags at
+        # all, so `dashboard --bogus` was silently accepted and still
+        # rewrote STATE.md.
+        def _read_or_none(path):
+            if not os.path.exists(path):
+                return None
+            with open(path, encoding="utf-8") as f:
+                return f.read()
+
+        with tempfile.TemporaryDirectory() as d:
+            _run_cli(["init"], d)
+            state_path = os.path.join(d, "STATE.md")
+            before = _read_or_none(state_path)
+            r = _run_cli(["dashboard", "--bogus"], d)
+            self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+            self.assertIn("unrecognized flag", r.stdout)
+            after = _read_or_none(state_path)
+            self.assertEqual(before, after,
+                             "a refused dashboard must not rewrite STATE.md")
+
+    def test_lead_flag_refuses_non_integer_zero_or_one(self):
+        # d6e7a3612274: `value in (0, 1)` matched True/False (bool is a
+        # subclass of int) and 1.0/0.0 (float equality), then coerced them
+        # with int(value) instead of refusing, contrary to the docstring's
+        # "never coerced".
+        for bad in (1.0, 0.0, True, False, "1", None):
+            with self.assertRaises(ValueError):
+                bs._lead_flag("control_offered", bad)
+        self.assertEqual(bs._lead_flag("control_offered", 0), 0)
+        self.assertEqual(bs._lead_flag("control_offered", 1), 1)
 
 
 if __name__ == "__main__":

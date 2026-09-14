@@ -51,12 +51,13 @@ capability_probe.py's six existing machine-tooling probes, which answer a
 different question (is a tool installed on this machine) from the one this
 file answers (can THIS run, right now, actually enforce a fence).
 
-A DOCUMENTED, UNCLOSED HOLE THIS FILE DOES NOT CLOSE: a PreToolUse payload
-whose `tool_name` is not a string bypasses bm_fence_hook's mode check
-entirely before it ever reaches enforced-vs-advisory (see
-products/brothermode/README.md, the fence's own documented residual
-limit). Nothing here narrows that gap, and nothing here may be read as
-having closed it.
+CLOSED 2026-09-12 (605e0d4e7): a PreToolUse payload whose `tool_name` is
+not a string, or is malformed, is now denied under enforced mode rather
+than bypassing bm_fence_hook's mode check (products/brothermode/tools/
+bm_fence_hook.py, `_FailOpen("bad-payload")` handled as a refusal; drilled
+by scripts/fence_enforced_drill.py). This file still answers a different
+question (can THIS run, right now, actually enforce a fence) than that
+fix; nothing here duplicates or replaces it.
 
 Python 3, standard library only. No network.
 """
@@ -171,9 +172,12 @@ def _check_worker(env):
         except ValueError as exc:
             return _detail(NODATA, "MODEL_WORKER_CMD could not be parsed: %s"
                            % exc)
+    elif client == "codex":
+        argv = list(model_worker.CODEX_ARGV)
+    elif client == "cursor":
+        argv = list(model_worker.CURSOR_ARGV)
     else:
-        argv = list(model_worker.CODEX_ARGV
-                    if client == "codex" else model_worker.CLAUDE_ARGV)
+        argv = list(model_worker.CLAUDE_ARGV)
     if not argv:
         return _detail(NODATA, "no worker command is configured")
     found = shutil.which(argv[0])

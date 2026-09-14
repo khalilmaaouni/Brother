@@ -53,6 +53,8 @@ import os
 import re
 import sys
 
+import receipt_check
+
 _EN_DASH = chr(0x2013)
 _EM_DASH = chr(0x2014)
 
@@ -74,11 +76,11 @@ DISPLAY_STATES = ('open', 'close-call', 'decided', 'superseded', 'not a contract
 # receipts[].ref grammar, read off docs/schema/README.md and the amended
 # outcome-contract-v1.json (branch u4-contract-schema, PR 528, amended in
 # flight): file:<path>:<start>-<end> | evidence:<name> | url:<u>.
-# ponytail: scripts/receipt_check.py (branch u8-pr485-disposition) is the
-# module meant to own this resolution; it does not exist on main yet as of
-# this commit. Import receipt_check.resolve_receipt once it lands and
-# delete _resolve_ref_inline below rather than keeping two copies.
-_REF_FILE_RE = re.compile(r'^file:(.+):(\d+)-(\d+)$')
+# WBS-20.02 (docs/decisions/evidence-vocabulary-2026-09-13.json, EV-5):
+# this used to duplicate scripts/receipt_check.py's resolver and disagreed
+# with it four ways on the same input (repo-root against cwd, range
+# grammar, url-capture convention, isfile against exists). Deleted; now
+# imports receipt_check.resolve_receipt, the single resolver.
 
 
 def _clean(text):
@@ -86,39 +88,15 @@ def _clean(text):
 
 
 def _resolve_ref_inline(ref):
-    """Three-prefix grammar, no network calls. Returns 'RESOLVED' or
-    'UNVERIFIED'. A url ref is UNVERIFIED unless a captured copy exists
-    under ~/.claude/evidence: no naming convention for that capture exists
-    on this estate yet, so this looks for any evidence file whose name
-    contains a filesystem-safe encoding of the url. Replace this heuristic
-    the day a real convention lands."""
+    """Delegates to receipt_check.resolve_receipt (the single resolver,
+    EV-5), against this repo's own root and the real home directory.
+    Returns 'RESOLVED' or 'UNVERIFIED', discarding the reason string:
+    daybook's board renders a status pill, not the reason."""
     if not ref or not isinstance(ref, str):
         return 'UNVERIFIED'
-    m = _REF_FILE_RE.match(ref)
-    if m:
-        path, start, end = m.group(1), int(m.group(2)), int(m.group(3))
-        if start < 1 or end < start or not os.path.isfile(path):
-            return 'UNVERIFIED'
-        try:
-            with open(path, 'r', encoding='utf-8', errors='replace') as fh:
-                n_lines = sum(1 for _ in fh)
-        except OSError:
-            return 'UNVERIFIED'
-        return 'RESOLVED' if n_lines >= end else 'UNVERIFIED'
-    if ref.startswith('evidence:'):
-        name = ref[len('evidence:'):]
-        target = os.path.join(os.path.expanduser('~/.claude/evidence'), name)
-        return 'RESOLVED' if name and os.path.exists(target) else 'UNVERIFIED'
-    if ref.startswith('url:'):
-        url = ref[len('url:'):]
-        safe = re.sub(r'[^A-Za-z0-9]+', '_', url).strip('_')
-        evdir = os.path.expanduser('~/.claude/evidence')
-        if safe and os.path.isdir(evdir):
-            for name in os.listdir(evdir):
-                if safe in name:
-                    return 'RESOLVED'
-        return 'UNVERIFIED'
-    return 'UNVERIFIED'
+    status, _reason = receipt_check.resolve_receipt(
+        ref, receipt_check.ROOT, os.path.expanduser('~'))
+    return status
 
 
 def resolve_receipt(receipt):

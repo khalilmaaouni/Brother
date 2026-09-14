@@ -56,6 +56,20 @@ TOOL_MAP = {
 }
 
 # Cursor events this adapter understands. Unknown events fail open.
+#
+# The nine below are wired: hooks.json can name them and handle() runs
+# real logic for them. WBS-90/U7 (2026-09-13) adds the ten RESERVED
+# events beneath the blank line: names Cursor's own Hooks vendor page
+# lists (fetched 2026-08-07 and again 2026-09-13, both read verbatim
+# into products/brothermode/tools/bm_runtimes.py's runtime registry and
+# docs/handover/.../08-EVIDENCE.md) that this adapter does not yet act
+# on. Reserving them only changes one thing: handle() stops printing
+# "unknown event" for them and falls straight to the same allow it
+# already gave unknown events. No hooks.json entry names any of them;
+# no behavior fires. beforeTabFileRead and afterTabFileEdit are Cursor
+# Tab (autocomplete) events, not agent events, and are deliberately left
+# OFF this list per the plan's "do not wire Tab events" instruction, so
+# they keep hitting the unknown-event path if Cursor ever sends one.
 EVENTS = frozenset((
     "preToolUse",
     "postToolUse",
@@ -66,9 +80,22 @@ EVENTS = frozenset((
     "sessionEnd",
     "preCompact",
     "stop",
+
+    "postToolUseFailure",
+    "subagentStart",
+    "subagentStop",
+    "beforeMCPExecution",
+    "afterMCPExecution",
+    "beforeReadFile",
+    "beforeSubmitPrompt",
+    "afterAgentResponse",
+    "afterAgentThought",
+    "workspaceOpen",
 ))
 
 # Events that can refuse a write. afterFileEdit is detection only.
+# The ten reserved events above are never added here: none of them gate
+# anything, matching "reserved, fail open" from the plan title.
 GATE_EVENTS = frozenset(("preToolUse", "beforeShellExecution"))
 
 

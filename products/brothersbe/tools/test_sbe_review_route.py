@@ -994,5 +994,59 @@ class TestHonestBlocklistDocstring(RouteFixture):
             self.assertIn("mechanically indistinguishable", doc, doc)
 
 
+class Night0912Reviewroute(unittest.TestCase):
+    def _mod(self):
+        sys.path.insert(0, os.path.join(ROOT, "src"))
+        try:
+            from brothersbe import reviewroute as mod
+        finally:
+            sys.path.pop(0)
+        return mod
+
+    def test_diff_lines_keeps_removed_line_beginning_with_two_dashes(self):
+        mod = self._mod()
+        orig_git = mod._git
+
+        def fake_git(args, cwd):
+            return 0, '''--- a/doc.md
++++ b/doc.md
+@@ -1,3 +1,2 @@
+ line1
+--- authentication is required
+ line3
+''', ''
+        mod._git = fake_git
+        try:
+            added, removed = mod._diff_lines('dummy', 'b', 'h', 'doc.md')
+        finally:
+            mod._git = orig_git
+        self.assertIn('-- authentication is required', removed)
+
+    def test_qa_hits_with_marker_and_added_assertion_is_quiet(self):
+        mod = self._mod()
+        orig_git = mod._git
+
+        def fake_git(args, cwd):
+            return 0, '''--- /dev/null
++++ b/test_foo.py
+@@ -0,0 +1,2 @@
++@pytest.mark.skip
++assert True
+''', ''
+        mod._git = fake_git
+        try:
+            hits = mod._qa_hits('dummy', 'b', 'h', ['test_foo.py'])
+        finally:
+            mod._git = orig_git
+        self.assertEqual([], hits)
+
+    def test_record_routed_handles_sbe_as_file(self):
+        mod = self._mod()
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, '.sbe'), 'w') as fh:
+                fh.write('file')
+            self.assertEqual({}, mod._record_routed(d, ['security-reviewer']))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

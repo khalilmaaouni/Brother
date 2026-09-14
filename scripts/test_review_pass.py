@@ -444,5 +444,190 @@ class TheReceiptCarriesTheReviewAndOrdersItFirst(unittest.TestCase):
         self.assertEqual([], block["findings"])
 
 
+# ---------------------------------------------------------------------------
+# WBS-10.04's bridge: a CONFIRMED finding outside the roadmap's five
+# human-only exceptions is repaired by products/brothermode/tools/
+# bm_repair.py's own bounded loop and re-verified before "repaired" is ever
+# trusted. No model call anywhere below, same discipline as the reviewer
+# tests above: a fake worker edits the temp repo directly, and the REAL
+# bm_repair.repair()/bm_verify.verify() (loaded through loop_bridge.
+# load_parts(), the estate's own portable resolver) judge what it did.
+# ---------------------------------------------------------------------------
+
+_REPAIR_BROKEN_PY = "def add_one(n):\n    return n  # bug: should be n + 1\n"
+_REPAIR_FIXED_PY = "def add_one(n):\n    return n + 1\n"
+_REPAIR_TEST_PY = (
+    "import sys\nfrom broken import add_one\n\n"
+    "def main():\n"
+    "    assert add_one(2) == 3, 'add_one(2) should be 3'\n"
+    "    print('ok')\n    return 0\n\n"
+    "if __name__ == '__main__':\n    sys.exit(main())\n"
+)
+#: A worker's "fix" that guts the CHECK instead of the code: the exact
+#: failure mode guard_repair_patch exists for (2026-09-13 hostile-review
+#: direction on this exact bridge).
+_REPAIR_GUTTED_TEST_PY = (
+    "import sys\n\ndef main():\n    print('ok')\n    return 0\n\n"
+    "if __name__ == '__main__':\n    sys.exit(main())\n"
+)
+
+
+def _repair_repo(tmp):
+    """A one-commit repo carrying a real bug and a real test that catches
+    it, so bm_repair's own verifier (a real `python3 test_broken.py`
+    subprocess) has something genuine to judge."""
+    repo = os.path.join(tmp, "repair-fixture")
+    os.makedirs(repo)
+    with open(os.path.join(repo, "broken.py"), "w", encoding="utf-8") as fh:
+        fh.write(_REPAIR_BROKEN_PY)
+    with open(os.path.join(repo, "test_broken.py"), "w",
+             encoding="utf-8") as fh:
+        fh.write(_REPAIR_TEST_PY)
+    for argv in (["git", "init", "-q", "-b", "main"],
+                ["git", "config", "user.email", "s32@example.invalid"],
+                ["git", "config", "user.name", "s32 fixture"],
+                ["git", "add", "-A"],
+                ["git", "commit", "-q", "-m", "base"]):
+        sh(argv, repo)
+    return repo
+
+
+def _repair_finding(**extra):
+    finding = {
+        "id": "U9-1", "unit": "U9", "file": "broken.py",
+        "reviewer": "backend-reviewer", "severity": "major",
+        "failure": "add_one does not add one",
+        "check_command": "python3 test_broken.py",
+        "check_exit_code": 1, "state": receipt_door.FINDING_CONFIRMED,
+        "repaired": False,
+    }
+    finding.update(extra)
+    return finding
+
+
+class _FixingWorker(object):
+    """Edits the actual bug. What a real repair worker is supposed to do."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def run(self, brief, cwd=None):
+        self.calls += 1
+        with open(os.path.join(cwd, "broken.py"), "w", encoding="utf-8") as fh:
+            fh.write(_REPAIR_FIXED_PY)
+        return {"status": "returned", "worker_claim": "fixed add_one"}
+
+
+class _TestGuttingWorker(object):
+    """Edits the CHECK instead of the bug: the check now passes, the bug is
+    untouched. This is what guard_repair_patch must catch."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def run(self, brief, cwd=None):
+        self.calls += 1
+        with open(os.path.join(cwd, "test_broken.py"), "w",
+                 encoding="utf-8") as fh:
+            fh.write(_REPAIR_GUTTED_TEST_PY)
+        return {"status": "returned", "worker_claim": "made it pass"}
+
+
+_NO_RECALL = lambda q, cwd=None: ("", "")  # noqa: E731
+
+
+class ARepairableConfirmedFindingIsRepairedAndReverified(unittest.TestCase):
+    """The bridge's main path: a CONFIRMED finding with no exception-class
+    signal reaches bm_repair.repair(), and only a genuine, re-verified fix
+    flips "repaired" to True."""
+
+    def test_a_confirmed_non_exception_finding_is_repaired_and_reverified(self):
+        with tempfile.TemporaryDirectory(prefix="s32-repair-") as tmp:
+            repo = _repair_repo(tmp)
+            worker = _FixingWorker()
+            result = review_pass.repair_confirmed_finding(
+                {"id": "U9", "objective": "fix add_one"}, _repair_finding(),
+                "", repo, worker=worker, recall=_NO_RECALL)
+        self.assertEqual(1, worker.calls)
+        self.assertIs(True, result["repaired"], result.get("repair_note"))
+        self.assertEqual(0, result["check_exit_code"])
+        self.assertEqual("REPAIRED", result["repair_outcome"])
+        print("\nrepair bridge: %s" % result["repair_note"])
+
+    def test_a_repair_that_guts_the_check_is_refused_despite_reaching_pass(self):
+        """bm_repair reports REPAIRED because the check now passes, but it
+        passes because the worker edited the test file, not the bug. The
+        bridge refuses to call this "repaired" whatever bm_repair says."""
+        with tempfile.TemporaryDirectory(prefix="s32-repair-guard-") as tmp:
+            repo = _repair_repo(tmp)
+            worker = _TestGuttingWorker()
+            result = review_pass.repair_confirmed_finding(
+                {"id": "U9", "objective": "fix add_one"}, _repair_finding(),
+                "", repo, worker=worker, recall=_NO_RECALL)
+        self.assertEqual(1, worker.calls)
+        self.assertEqual("REPAIRED", result["repair_outcome"],
+                         "the fixture is wrong if bm_repair itself did not "
+                         "reach PASS here")
+        self.assertIs(False, result["repaired"],
+                      "a repair that only edited the test file was trusted")
+        self.assertIn("test, spec or check file", result["repair_note"])
+        print("\nrepair guard: %s" % result["repair_note"])
+
+
+class AnExceptionClassFindingIsNeverAutoRepaired(unittest.TestCase):
+    """One of WBS-10.04's five named exceptions -- confirmed or not, cheap
+    fix or not -- never reaches the repair worker at all."""
+
+    def test_a_security_sensitive_finding_never_reaches_the_worker(self):
+        with tempfile.TemporaryDirectory(prefix="s32-repair-exc-") as tmp:
+            repo = _repair_repo(tmp)
+            worker = _FixingWorker()
+            finding = _repair_finding(
+                failure="the stored credential is logged in plaintext")
+            result = review_pass.repair_confirmed_finding(
+                {"id": "U9", "objective": "fix add_one"}, finding, "auth",
+                repo, worker=worker, recall=_NO_RECALL)
+        self.assertEqual(0, worker.calls,
+                         "a security-sensitive design choice reached the "
+                         "repair worker")
+        self.assertIs(False, result["repaired"])
+        self.assertIn(review_pass.EXCEPTION_SECURITY_DESIGN,
+                      result["repair_note"])
+        print("\nexception class held: %s" % result["repair_note"])
+
+    def test_an_eligible_finding_is_not_misclassified(self):
+        """The negative control on the classifier itself: an ordinary logic
+        bug, on a unit with no risk class, names no exception."""
+        self.assertEqual("", review_pass.finding_exception_class(
+            _repair_finding(), ""))
+
+
+class TheRepairPatchGuardCatchesWhatMattersMost(unittest.TestCase):
+    """guard_repair_patch, driven directly: the two ways a repair's own
+    diff proves it cannot be trusted, and the one way it passes clean."""
+
+    def test_a_diff_touching_a_test_file_is_refused(self):
+        diff = ("diff --git a/test_broken.py b/test_broken.py\n"
+               "--- a/test_broken.py\n+++ b/test_broken.py\n"
+               "@@ -1,1 +1,1 @@\n-assert add_one(2) == 3\n+print('ok')\n")
+        reason = review_pass.guard_repair_patch(diff, "python3 test_broken.py")
+        self.assertIn("test, spec or check file", reason)
+
+    def test_a_diff_that_removes_more_assertions_than_it_adds_is_refused(self):
+        diff = ("diff --git a/broken.py b/broken.py\n"
+               "--- a/broken.py\n+++ b/broken.py\n"
+               "@@ -1,3 +1,1 @@\n-assert n > 0\n-assert n < 100\n"
+               "+pass\n")
+        reason = review_pass.guard_repair_patch(diff, "python3 check.py")
+        self.assertIn("narrows what the check proves", reason)
+
+    def test_a_clean_fix_to_the_code_passes_the_guard(self):
+        diff = ("diff --git a/broken.py b/broken.py\n"
+               "--- a/broken.py\n+++ b/broken.py\n"
+               "@@ -1,2 +1,2 @@\n-    return n\n+    return n + 1\n")
+        self.assertEqual("", review_pass.guard_repair_patch(
+            diff, "python3 test_broken.py"))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

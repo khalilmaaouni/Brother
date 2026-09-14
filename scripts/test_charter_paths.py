@@ -117,5 +117,17 @@ class CharterPaths(Fixture):
         self.assertEqual(code, 0, out)
 
 
+class Night0912CharterPaths(unittest.TestCase):
+    def test_invalid_utf8_charter_is_nodata(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            os.makedirs(os.path.join(tmp, "docs"))
+            charter = os.path.join(tmp, "docs", "CHARTER.md")
+            with open(charter, "wb") as fh:
+                fh.write(b"\xff\xfe")
+
+            self.assertIsNone(charter_paths.read_charter(charter))
+            self.assertEqual(charter_paths.main(["--root", tmp]), 2)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

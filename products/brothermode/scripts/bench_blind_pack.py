@@ -261,6 +261,10 @@ def load_manifest(pack_dir):
                 data = json.load(fh)
         except (IOError, OSError, ValueError):
             continue
+        # A malformed sealed file whose JSON is not an object has no
+        # comparison_id field; skip it rather than crash on .get.
+        if not isinstance(data, dict):
+            continue
         comparison_id = data.get("comparison_id")
         if not comparison_id:
             continue

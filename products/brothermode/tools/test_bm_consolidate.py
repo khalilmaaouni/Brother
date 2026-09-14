@@ -219,5 +219,33 @@ class Contract(unittest.TestCase):
         self.assertEqual(len(os.listdir(self.approved_dir)), 1)
 
 
+class Night0912BmConsolidate(unittest.TestCase):
+    """b697dbaf5de1: two distinct note groups whose directory names differ
+    only by characters _slug() normalizes to '-' (e.g. "a b" vs "a-b") must
+    not collide on the same batch_id / proposal filename."""
+
+    def test_distinct_slug_collisions_keep_two_proposals(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d1 = os.path.join(tmp, "a b")
+            d2 = os.path.join(tmp, "a-b")
+            os.makedirs(d1)
+            os.makedirs(d2)
+            p1 = os.path.join(d1, "note.md")
+            p2 = os.path.join(d2, "note.md")
+            open(p1, "w").close()
+            open(p2, "w").close()
+            cands = [
+                {"path": p1, "status": "stale", "sha256": "x"},
+                {"path": p2, "status": "stale", "sha256": "y"},
+            ]
+            proposals = bc.draft_summary(cands)
+            out = os.path.join(tmp, "out")
+            for proposal in proposals:
+                bc.write_proposal(proposal, out)
+            files = os.listdir(out)
+            self.assertEqual(len(files), 2)
+            self.assertEqual(len(files), len(proposals))
+
+
 if __name__ == "__main__":
     unittest.main()

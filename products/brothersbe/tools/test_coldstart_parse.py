@@ -74,5 +74,33 @@ class HookOutputFieldNames(unittest.TestCase):
         self.assertEqual(self._one({"type": "system", "hook_output": "x" * 99}), 0)
 
 
+class Night0912ColdstartParse(unittest.TestCase):
+    def test_grep_path_counts_as_internal_doc(self):
+        import json
+        import tempfile
+
+        event = {
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "name": "Grep",
+                        "input": {"pattern": "x", "path": "docs/notes.md"},
+                    }
+                ]
+            },
+        }
+        with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False) as fh:
+            fh.write(json.dumps(event) + "\n")
+            path = fh.name
+        try:
+            got = coldstart_parse.parse_transcript(path)["internal_docs_opened"]
+        finally:
+            os.unlink(path)
+
+        self.assertEqual(got, 1)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1515,5 +1515,293 @@ class TestVerifyReleaseReceiptForReleaseArtifactDigest(unittest.TestCase):
         self.assertNotIn("defective", evidence)
 
 
+class TestVerifyCacheAndGitCache(EvidenceFixture):
+    """PERFORMANCE, NOT A NEW VERDICT: `verify()` on a real project's evidence
+    store re-forked git 3-4 times PER RECEIPT (`git rev-parse HEAD`, `git
+    rev-parse --show-toplevel`, `git merge-base --is-ancestor`, `git diff
+    --name-only`), measured at 7.5-9.7s for 8 receipts, flat across repeated
+    runs (zero caching). Two independent fixes, proven separately here:
+
+    FIX 1, `git_cache`: `git rev-parse HEAD` and `git rev-parse
+    --show-toplevel` answer the SAME question for every receipt checked
+    against the same `cwd` in one pass, so `_scan_evidence` (status.py) now
+    computes each once and hands it to every `verify()` call it makes.
+    Proven with a COUNTING SPY over the real `_git` (every git process below
+    still actually runs; only the call count is observed) rather than a
+    mock, because a grep of this project's own tests for a subprocess-
+    call-count pattern (`grep -rn "subprocess.run\\|call_count\\|Mock" tools/
+    test_sbe_evidence.py tools/test_sbe_status.py`) found none to mirror,
+    and this file's own module docstring is explicit that mocking the
+    command under test would test the mock: a spy that counts real calls
+    without faking any of their answers keeps that promise.
+
+    FIX 2, the verify-outcome cache (`verify_cached`, `load_verify_cache`,
+    `save_verify_cache`): a receipt whose own file has not changed and whose
+    repository HEAD has not moved cannot have a different verdict, so its
+    LAST verdict is reused instead of re-run.
+    """
+
+    def _spy_on_git(self):
+        """(mod, calls, restore). `calls` collects every args tuple passed to
+        the real `_git` while the spy is installed; `restore()` puts the
+        original back. The real subprocess still runs every time -- this
+        counts, it never fakes."""
+        sys.path.insert(0, os.path.join(ROOT, "src"))
+        from brothersbe import evidence as mod
+        calls = []
+        real_git = mod._git
+
+        def spy(args, cwd):
+            calls.append(tuple(args))
+            return real_git(args, cwd)
+
+        mod._git = spy
+
+        def restore():
+            mod._git = real_git
+            sys.path.pop(0)
+
+        return mod, calls, restore
+
+    def test_git_cache_hoists_head_and_toplevel_across_receipts_in_one_pass(self):
+        path_a, code_a, text_a = self.generate(out=self.receipt_path("a.json"))
+        path_b, code_b, text_b = self.generate(out=self.receipt_path("b.json"))
+        self.assertEqual(0, code_a, text_a)
+        self.assertEqual(0, code_b, text_b)
+        # Advance HEAD past both receipts with a file NEITHER covers, so both
+        # take the "carried forward" path: today, that path calls
+        # `_repo_top_level` TWICE per receipt on its own (once from
+        # `_binding_exemptions`, once from `_carried_forward`), on top of
+        # once again for the next receipt -- the exact redundancy this fix
+        # closes on both axes in a single scenario.
+        write(self.repo, "unrelated.txt", "noise\n")
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-qm", "advance head past both receipts")
+
+        mod, calls, restore = self._spy_on_git()
+        try:
+            git_cache = {}
+            r1 = mod.verify(path_a, cwd=self.repo, git_cache=git_cache)
+            r2 = mod.verify(path_b, cwd=self.repo, git_cache=git_cache)
+        finally:
+            restore()
+
+        self.assertEqual("PASS", r1["verdict"], r1["reasons"])
+        self.assertEqual("PASS", r2["verdict"], r2["reasons"])
+        head_calls = [c for c in calls if c[:2] == ("rev-parse", "HEAD")]
+        toplevel_calls = [c for c in calls if c[:2] == ("rev-parse", "--show-toplevel")]
+        self.assertEqual(1, len(head_calls),
+                         "two receipts checked against the same cwd must resolve HEAD once, "
+                         "not once each: %r" % (calls,))
+        self.assertEqual(1, len(toplevel_calls),
+                         "two receipts checked against the same cwd, each itself needing the "
+                         "repo root twice on the carried-forward path, must resolve it once "
+                         "for the whole pass: %r" % (calls,))
+
+        # Hoisting must never change WHAT is found, only how many times git
+        # is asked: the same verify() without a git_cache reaches the exact
+        # same reasons.
+        r1_uncached = mod.verify(path_a, cwd=self.repo)
+        self.assertEqual(r1_uncached["reasons"], r1["reasons"])
+        self.assertEqual(r1_uncached["verdict"], r1["verdict"])
+
+    def test_verify_cached_and_verify_agree_on_every_verdict(self):
+        path, code, text = self.generate()
+        self.assertEqual(0, code, text)
+        sys.path.insert(0, os.path.join(ROOT, "src"))
+        try:
+            from brothersbe import evidence as mod
+            direct = mod.verify(path, cwd=self.repo)
+            cache = {}
+            first = mod.verify_cached(path, cwd=self.repo, cache=cache)
+            second = mod.verify_cached(path, cwd=self.repo, cache=cache)
+        finally:
+            sys.path.pop(0)
+        self.assertEqual("PASS", direct["verdict"], direct["reasons"])
+        self.assertEqual(direct, first, "a cold verify_cached() call must match verify()")
+        self.assertEqual(first, second, "a warm verify_cached() call must match the cold one")
+
+    def test_a_changed_receipt_is_reverified_never_served_stale(self):
+        path, code, text = self.generate()
+        self.assertEqual(0, code, text)
+        sys.path.insert(0, os.path.join(ROOT, "src"))
+        try:
+            from brothersbe import evidence as mod
+            head_code, head_out, _e = mod._git(["rev-parse", "HEAD"], self.repo)
+            self.assertEqual(0, head_code)
+            current_head = head_out.strip()
+            st = os.stat(path)
+            poisoned = {"verdict": "FAIL", "reasons": ["poisoned: never a real verdict"],
+                       "inspected": [], "receipt": None, "trust": None, "trustWhy": None}
+            covered = mod._covered_stat_fingerprint(path, self.repo, None)
+            cache_key = mod.verify_cache_key(path, self.repo, None)
+            cache = {"receipts": {cache_key: {
+                "stat": [st.st_mtime_ns, st.st_size],
+                "headCommit": current_head,
+                "covered": covered,
+                "result": poisoned,
+            }}}
+            # Unchanged file, unchanged HEAD: the poisoned entry IS served,
+            # proving a real hit is honored (the control the next assertion
+            # needs to mean anything).
+            hit = mod.verify_cached(path, cwd=self.repo, cache=cache)
+            self.assertEqual(poisoned, hit)
+
+            # Regenerate the SAME receipt path (the exact shape
+            # `mint_default_many` already produces on a routine re-run):
+            # content, mtime and size all change.
+            self.generate(out=path)
+            os.utime(path, None)  # force the mtime forward even on a coarse clock
+            miss = mod.verify_cached(path, cwd=self.repo, cache=cache)
+        finally:
+            sys.path.pop(0)
+        self.assertNotEqual(poisoned, miss,
+                            "a regenerated receipt must never be served the old verdict")
+        self.assertEqual("PASS", miss["verdict"], miss["reasons"])
+
+    def test_a_head_move_invalidates_the_cached_entry(self):
+        path, code, text = self.generate()
+        self.assertEqual(0, code, text)
+        sys.path.insert(0, os.path.join(ROOT, "src"))
+        try:
+            from brothersbe import evidence as mod
+            cache = {}
+            before = mod.verify_cached(path, cwd=self.repo, cache=cache)
+            self.assertEqual("PASS", before["verdict"], before["reasons"])
+            key = mod.verify_cache_key(path, self.repo, None)
+            head_before = cache["receipts"][key]["headCommit"]
+
+            write(self.repo, "unrelated.txt", "noise\n")
+            git(self.repo, "add", "-A")
+            git(self.repo, "commit", "-qm", "move head, nothing this receipt covers")
+
+            after = mod.verify_cached(path, cwd=self.repo, cache=cache)
+            head_after = cache["receipts"][key]["headCommit"]
+        finally:
+            sys.path.pop(0)
+        self.assertNotEqual(head_before, head_after,
+                            "the cache entry must be rewritten under the new HEAD, not left "
+                            "pointing at the old one")
+        self.assertEqual("PASS", after["verdict"], after["reasons"])
+        # Recomputed, not reused verbatim: the commit-binding note names a
+        # DIFFERENT fact once HEAD is no longer this receipt's own commit
+        # (ancestor-and-carried-forward, rather than "is the current head").
+        self.assertNotEqual(before["reasons"], after["reasons"])
+
+    def test_an_uncommitted_edit_to_a_covered_file_invalidates_the_cached_entry(self):
+        """The gap an adversarial review found: neither the receipt's own
+        stat nor HEAD moves when a covered file is edited without being
+        committed, which is the ORDINARY shape of a dirty working tree, not
+        an edge case. Before _covered_stat_fingerprint, this exact sequence
+        served the stale PASS forever."""
+        path, code, text = self.generate()
+        self.assertEqual(0, code, text)
+        sys.path.insert(0, os.path.join(ROOT, "src"))
+        try:
+            from brothersbe import evidence as mod
+            cache = {}
+            before = mod.verify_cached(path, cwd=self.repo, cache=cache)
+            self.assertEqual("PASS", before["verdict"], before["reasons"])
+            self.assertIn("src/service.py",
+                          [row[0] for row in cache["receipts"][
+                              mod.verify_cache_key(path, self.repo, None)]["covered"]],
+                          "the fixture receipt must cover src/service.py for this test "
+                          "to prove anything")
+
+            # Neither the receipt file nor HEAD moves: only the covered
+            # source file, on disk, uncommitted.
+            write(self.repo, "src/service.py", "def handle():\n    return 2\n")
+
+            after = mod.verify_cached(path, cwd=self.repo, cache=cache)
+        finally:
+            sys.path.pop(0)
+        self.assertNotEqual("PASS", after["verdict"],
+                            "an uncommitted edit to a covered file must never still read PASS "
+                            "from a cache keyed only on the receipt's own stat and HEAD")
+
+    def test_corrupt_or_missing_cache_file_degrades_to_full_recompute(self):
+        sys.path.insert(0, os.path.join(ROOT, "src"))
+        try:
+            from brothersbe import evidence as mod
+            missing = mod.load_verify_cache(os.path.join(self.out, "does-not-exist.json"))
+            self.assertEqual({"receipts": {}}, missing)
+
+            garbage_path = os.path.join(self.out, "garbage.json")
+            write(self.out, "garbage.json", "{not json")
+            garbage = mod.load_verify_cache(garbage_path)
+            self.assertEqual({"receipts": {}}, garbage)
+
+            wrong_shape_path = os.path.join(self.out, "wrong-shape.json")
+            write(self.out, "wrong-shape.json", json.dumps(["not", "a", "dict"]))
+            wrong_shape = mod.load_verify_cache(wrong_shape_path)
+            self.assertEqual({"receipts": {}}, wrong_shape)
+
+            # A degraded (empty) cache must still reach the CORRECT verdict,
+            # never a wrong-but-fast one, because nothing in it was trusted.
+            path, code, text = self.generate()
+            self.assertEqual(0, code, text)
+            direct = mod.verify(path, cwd=self.repo)
+            recovered = mod.verify_cached(path, cwd=self.repo, cache=garbage)
+        finally:
+            sys.path.pop(0)
+        self.assertEqual(direct, recovered)
+
+    def test_cache_round_trips_through_an_atomic_file_write(self):
+        sys.path.insert(0, os.path.join(ROOT, "src"))
+        try:
+            from brothersbe import evidence as mod
+            path, code, text = self.generate()
+            self.assertEqual(0, code, text)
+            cache_path = os.path.join(self.out, ".verify-cache.json")
+            cache = mod.load_verify_cache(cache_path)
+            direct = mod.verify(path, cwd=self.repo)
+            first = mod.verify_cached(path, cwd=self.repo, cache=cache)
+            mod.save_verify_cache(cache_path, cache)
+            self.assertTrue(os.path.isfile(cache_path))
+
+            reloaded_cache = mod.load_verify_cache(cache_path)
+            second = mod.verify_cached(path, cwd=self.repo, cache=reloaded_cache)
+        finally:
+            sys.path.pop(0)
+        self.assertEqual(direct, first)
+        self.assertEqual(direct, second,
+                         "a verify-cache reloaded from disk in a fresh call must serve the "
+                         "same verdict a live in-memory cache would")
+
+
+class Night0912Evidence(unittest.TestCase):
+
+    def _mod(self):
+        sys.path.insert(0, os.path.join(ROOT, "src"))
+        try:
+            from brothersbe import evidence as mod
+            return mod
+        finally:
+            sys.path.pop(0)
+
+    def test_non_object_covered_files_entry_returns_fail_not_attributeerror(self):
+        mod = self._mod()
+        receipt = {
+            "schemaVersion": "1.4", "generator": "g", "generatorVersion": "1",
+            "runId": "x", "argv": ["true"], "argvRedactions": 0,
+            "startedAt": "2020-01-01T00:00:00Z", "endedAt": "2020-01-01T00:00:00Z",
+            "durationSeconds": 0.5, "exitCode": 0, "headCommit": "deadbeef",
+            "stdoutSha256": "a", "stderrSha256": "b", "environment": "e",
+            "toolVersions": {"python": "3"}, "workingTreeDirty": False,
+            "coveredFilesSource": "x", "checkKindsSource": "x", "checkIdSource": "x",
+            "coveredFiles": ["foo.py"],
+        }
+        with tempfile.TemporaryDirectory() as td:
+            p = os.path.join(td, "r.json")
+            with open(p, "w") as fh:
+                json.dump(receipt, fh)
+            result = mod.verify(p, cwd=td)
+        self.assertEqual(result["verdict"], "FAIL")
+        self.assertTrue(
+            any("coveredFiles" in str(r) for r in result["reasons"]),
+            "expected a reason naming the malformed coveredFiles entry, got: %r"
+            % (result["reasons"],))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

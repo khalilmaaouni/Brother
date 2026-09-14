@@ -1,6 +1,6 @@
 ---
 name: brotherds
-description: Use when a number is about to reach a decision. Turns a figure into a checkable claim that carries its query, its grain, its uncertainty and what it does not establish, then runs the core gates and the matching claim pack and returns PASS, FAIL or NO-DATA. Triggers include "what is our", "how much did", "did the promotion work", "what is the forecast", "is this number right", "can I put this in the deck", "elasticity", "incremental", "lift", "MAPE", "forecast accuracy", "verify this claim", "claim receipt", "can I trust this number", "did the A/B test work", "is the detector accurate", "did the merge go right", "is the pipeline reconciled", "can we trust this match rate", "evaluate the steward review", "dedup precision", "dedup recall", "golden record", "customer master cleanup", "Japanese name matching", "is the forecast calibrated", "what does the team keep getting wrong", and any moment you are about to state a figure a person will act on.
+description: Use when a number is about to reach a decision. Turns a figure into a checkable claim that carries its query, its grain, its uncertainty and what it does not establish, then runs the core gates and the matching claim pack and returns PASS, FAIL or NO-DATA. Also use for MDM product identification: resolving or verifying a Japanese retail JAN/EAN/GTIN barcode, or classifying a product's packaging type from its name. Triggers include "what is our", "how much did", "did the promotion work", "what is the forecast", "is this number right", "can I put this in the deck", "elasticity", "incremental", "lift", "MAPE", "forecast accuracy", "verify this claim", "claim receipt", "can I trust this number", "did the A/B test work", "is the detector accurate", "did the merge go right", "is the pipeline reconciled", "can we trust this match rate", "evaluate the steward review", "dedup precision", "dedup recall", "golden record", "customer master cleanup", "Japanese name matching", "is the forecast calibrated", "what does the team keep getting wrong", "MDM product identification", "JAN code", "JAN code verification", "barcode check", "Japanese retail barcode", "find this product's barcode", "verify this GTIN", and any moment you are about to state a figure a person will act on.
 ---
 
 # BrotherDS
@@ -249,6 +249,36 @@ evidence stays NO-DATA. docs/MDM-SCIENCE.md is the field reference.
 For a quantile forecast, `score` now also records the weighted interval score
 and whether reality fell inside the 0.1 to 0.9 band, and `ledger` prints the
 band's coverage against the nominal 0.8 once five quantile claims resolve.
+
+## MDM product identification: JAN / EAN / GTIN barcode lookup
+
+Different shape from the claim workflow above: no `bds.py check` here, this
+is resolving or verifying a product identifier, not gating a stated number.
+Trigger on a missing or suspect Japanese retail barcode, or on identifying a
+product from a bare name, for MDM or product-master cleanup work.
+
+Full protocol, worked example, and the literal subagent brief for the web
+research steps: `docs/MDM-JAN-LOOKUP.md`. In short, in order:
+
+1. Internal join first, always, before any internet call: check every other
+   file or table already on hand for the missing code.
+   `python3 mdm_jan_lookup.py resolve --input <csv> [<csv> ...] --out <out.csv>`.
+2. Checksum-validate every candidate (`mdm_validate.gtin_check`, reused, not
+   reimplemented): a code that fails is provably wrong, one that passes is
+   only plausible.
+3. Only unresolved rows go to real web research, run by a subagent briefed
+   with the anti-fabrication and anti-delegation rules in
+   `docs/MDM-JAN-LOOKUP.md` verbatim: never invent a code or a URL, never
+   delegate the search to another agent, report NONE rather than guess.
+4. Report HIGH/MEDIUM/LOW/NONE confidence, justified in each row's own notes.
+   A second-opinion LLM lane's output is a proposal only, checksum-gated
+   before it can count above NONE.
+5. Packaging type (`loose`/`case`/`half_case`/`syrup`/`powder`/`canister`/
+   `other`) comes from the product name text via `classify_packaging`
+   (`python3 mdm_jan_lookup.py classify "<name>"`), never guessed
+   independently.
+
+Done-check for this capability: `python3 mdm_jan_lookup.py --selftest`.
 
 ## In 1.0.13
 

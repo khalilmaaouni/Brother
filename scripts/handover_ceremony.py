@@ -305,6 +305,7 @@ def emit_vault_notes(dir_path, lessons, project="brother", today=None):
     (written_paths, refused_reasons)."""
     os.makedirs(dir_path, exist_ok=True)
     written, refused = [], []
+    seen = set()
     for lesson in lessons:
         try:
             filename, content = build_vault_note(
@@ -312,6 +313,12 @@ def emit_vault_notes(dir_path, lessons, project="brother", today=None):
         except ValueError as e:
             refused.append(str(e))
             continue
+        # duplicate slugs target one path; refuse the later one so counts match
+        if filename in seen:
+            refused.append("lesson %r produces duplicate note %s; already "
+                           "written this run" % (lesson.get("name"), filename))
+            continue
+        seen.add(filename)
         path = os.path.join(dir_path, filename)
         with open(path, "w", encoding="utf-8") as f:
             f.write(content)

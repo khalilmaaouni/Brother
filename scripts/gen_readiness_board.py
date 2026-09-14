@@ -170,6 +170,9 @@ def validate(doc):
     ids = set(r.get('id') for r in rows)
     gate_ids = set(g.get('id') for g in doc.get('gates', []))
     for r in rows:
+        # A row with no id passes every other check and then KeyErrors in ready_rows.
+        if not r.get('id'):
+            problems.append('row has no id, so ready_rows cannot name it')
         for dep in r.get('depends_on', []):
             if dep not in ids:
                 problems.append('row %s depends on %s which does not exist' % (r.get('id'), dep))

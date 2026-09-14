@@ -22,12 +22,20 @@ import sys
 
 # Where a reference makes a tool reachable. Order matters only for reporting.
 WIRING_SITES = [
-    ("gate", ["scripts/check_all.sh", "scripts/required_fast.sh"]),
+    ("gate", ["scripts/check_all.sh", "scripts/required_fast.sh",
+              "products/brothermode/scripts/local-gates.sh",
+              "products/brothersbe/scripts/local-gates.sh"]),
     # EVERY hooks file, not just the bundled one. The first root set named only
     # bundle/hooks/hooks.json and therefore reported the vault engine as
     # unreachable while products/brothermode/hooks/hooks.json registered it on
     # SessionStart. A root set that misses a real door manufactures dead tools.
-    ("hooks", ["bundle/hooks/hooks.json",
+    # bundle/hooks/hooks.json was RENAMED to bundle/hooks/union.json on
+    # 2026-09-13 (it double-fired every shared hook on Claude Code, since
+    # brothermode/brothersbe already register the same events themselves);
+    # a missing root is dropped silently by this module's own frontier
+    # construction, so leaving the retired name out here is correct, not an
+    # oversight.
+    ("hooks", ["bundle/hooks/union.json",
                "products/brothermode/hooks/hooks.json",
                "products/brothersbe/hooks/hooks.json"]),
     ("bundle", ["bundle/runtime/RUNTIME-MANIFEST.json"]),

@@ -77,7 +77,10 @@ def main():
         path = ledger_path(payload)
         d = os.path.dirname(path)
         if d and not os.path.isdir(d):
-            os.makedirs(d)
+            # exist_ok closes the TOCTOU race: without it a concurrent hook
+            # hits FileExistsError here, which the outer except swallows,
+            # and its event is lost rather than written.
+            os.makedirs(d, exist_ok=True)
         with open(path, "a") as fh:
             fh.write(json.dumps(line, sort_keys=True) + "\n")
         try:

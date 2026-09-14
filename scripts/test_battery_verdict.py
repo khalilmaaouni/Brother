@@ -924,5 +924,18 @@ class BatteryVerdictTest(unittest.TestCase):
 
 
 
+class Night0912BatteryVerdict(unittest.TestCase):
+    def test_expectations_json_array_reports_no_data(self):
+        with tempfile.TemporaryDirectory() as d:
+            exp = os.path.join(d, "exp.json")
+            with open(exp, "w", encoding="utf-8") as fh:
+                fh.write("[]")
+            proc = subprocess.run(
+                [sys.executable, SCRIPT, "--check-expectations", exp],
+                capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+        self.assertIn("NO-DATA", proc.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

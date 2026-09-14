@@ -131,7 +131,9 @@ def check(runtime, out):
     """[] when the tree matches the source, else the disagreements by name."""
     subdir, label = RUNTIMES[runtime]
     problems = []
-    for name, desc, path in source_skills():
+    sources = source_skills()
+    expected = set(name for name, _desc, _path in sources)
+    for name, desc, path in sources:
         target = os.path.join(out, subdir, name, "SKILL.md")
         if not os.path.isfile(target):
             problems.append("%s: not generated at %s" % (name, target))
@@ -141,6 +143,15 @@ def check(runtime, out):
         if actual != render(name, desc, label, body_of(path)):
             problems.append("%s: generated copy differs from skills/%s/SKILL.md"
                             % (name, name))
+    # A generated skill with no source is drift the per-source pass above
+    # cannot see (it only ever walks skills/, never the output tree).
+    generated_root = os.path.join(out, subdir)
+    if os.path.isdir(generated_root):
+        for entry in sorted(os.listdir(generated_root)):
+            target = os.path.join(generated_root, entry, "SKILL.md")
+            if os.path.isfile(target) and entry not in expected:
+                problems.append("%s: generated at %s has no source in skills/%s/SKILL.md"
+                                % (entry, target, entry))
     return problems
 
 

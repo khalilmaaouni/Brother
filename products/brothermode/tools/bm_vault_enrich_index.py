@@ -333,6 +333,9 @@ def measure(vault, queries_path):
     hits = 0
     detail = []
     for row in rows:
+        if not isinstance(row, dict):
+            # Non-object row: no query fields to measure; report NO-DATA.
+            return None, None, ["NO-DATA: %r carries a non-object query row" % queries_path]
         q = row.get("query", "")
         note = row.get("expected_note", "")
         hit = lexical_hit(vault, q, note)

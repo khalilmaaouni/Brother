@@ -190,6 +190,10 @@ def cmd_distill(args):
             continue
 
         note_path = os.path.join(failures_dir, slug + ".md")
+        if os.path.exists(note_path):
+            # The vault's bodies are append-only; never overwrite an existing note at this slug.
+            print("SKIP %s: note already exists at %s" % (slug, note_path))
+            continue
         try:
             os.makedirs(failures_dir, exist_ok=True)
             with open(note_path, "w", encoding="utf-8") as f:

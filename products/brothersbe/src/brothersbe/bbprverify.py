@@ -349,8 +349,12 @@ def evaluate(repo, number, token, fetch=None, cwd=None, head=None, token_source=
     participants = []
     downstream = None
     if status == 200 and isinstance(body, dict):
-        source = body.get("source") or {}
-        commit = source.get("commit") or {}
+        source = body.get("source")
+        if not isinstance(source, dict):
+            source = {}
+        commit = source.get("commit")
+        if not isinstance(commit, dict):
+            commit = {}
         first_sha = commit.get("hash")
         author = body.get("author") or {}
         participants = [p for p in (body.get("participants") or []) if isinstance(p, dict)]
@@ -492,8 +496,13 @@ def evaluate(repo, number, token, fetch=None, cwd=None, head=None, token_source=
         f_status, f_body, f_err = fetch("GET", pr_url, token)
         f_sha = None
         if f_status == 200 and isinstance(f_body, dict):
-            f_source = f_body.get("source") or {}
-            f_sha = (f_source.get("commit") or {}).get("hash")
+            f_source = f_body.get("source")
+            if not isinstance(f_source, dict):
+                f_source = {}
+            f_commit = f_source.get("commit")
+            if not isinstance(f_commit, dict):
+                f_commit = {}
+            f_sha = f_commit.get("hash")
         if f_sha:
             last_sha = f_sha
             if last_sha != first_sha:

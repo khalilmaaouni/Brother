@@ -1,0 +1,16 @@
+reviewer,change,condition,seconds,decision,defects_found,lines_inspected
+fabricated-reviewer-1,medium-feature,raw_diff,120,reject,FABRICATED: found the inverted check,FABRICATED: read all 40 lines
+fabricated-reviewer-2,medium-feature,raw_diff,130,reject,FABRICATED: found the inverted check,FABRICATED: read 35 lines
+fabricated-reviewer-3,medium-feature,raw_diff,140,accept,FABRICATED: missed it,FABRICATED: skimmed 10 lines
+fabricated-reviewer-4,medium-feature,raw_diff,150,reject,FABRICATED: found it on second pass,FABRICATED: read 40 lines
+fabricated-reviewer-5,medium-feature,raw_diff,160,reject,FABRICATED: found the inverted check,FABRICATED: read 38 lines
+fabricated-reviewer-1,auth-security,ordinary_summary,80,reject,FABRICATED: summary named the bypass,FABRICATED: read the summary only
+fabricated-reviewer-2,auth-security,ordinary_summary,85,reject,FABRICATED: summary named the bypass,FABRICATED: read the summary only
+fabricated-reviewer-3,auth-security,ordinary_summary,90,reject,FABRICATED: summary named the bypass,FABRICATED: read the summary only
+fabricated-reviewer-4,auth-security,ordinary_summary,95,accept,FABRICATED: trusted the summary,FABRICATED: read the summary only
+fabricated-reviewer-5,auth-security,ordinary_summary,100,reject,FABRICATED: summary named the bypass,FABRICATED: read the summary only
+fabricated-reviewer-1,schema-migration,brother_receipt,40,reject,FABRICATED: receipt flagged NOT NULL,FABRICATED: read REVIEW FIRST section
+fabricated-reviewer-2,schema-migration,brother_receipt,45,reject,FABRICATED: receipt flagged NOT NULL,FABRICATED: read REVIEW FIRST section
+fabricated-reviewer-3,schema-migration,brother_receipt,50,reject,FABRICATED: receipt flagged NOT NULL,FABRICATED: read REVIEW FIRST section
+fabricated-reviewer-4,schema-migration,brother_receipt,55,reject,FABRICATED: receipt flagged NOT NULL,FABRICATED: read REVIEW FIRST section
+fabricated-reviewer-5,schema-migration,brother_receipt,60,reject,FABRICATED: receipt flagged NOT NULL,FABRICATED: read REVIEW FIRST section

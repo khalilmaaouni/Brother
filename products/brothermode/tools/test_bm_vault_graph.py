@@ -469,6 +469,43 @@ class TypedEdges(unittest.TestCase):
         self.assertIn("typed edges: 1 supersedes, 1 relates, 0 contradicts, 1 broken", out, out)
 
 
+class SupersedesPairing(unittest.TestCase):
+    """A supersedes: edge is one-sided unless the superseded note carries a matching
+    superseded_by:/valid_to: back-reference. Paired.md supersedes Old-Paired.md, and
+    Old-Paired.md names the back-reference correctly with both fields: that pair must
+    stay clean. New.md supersedes Old.md (same pair as the TypedEdges fixture above,
+    rebuilt here in isolation) with no back-reference on Old.md at all: that pair must
+    fail the gate, named in the source-to-target direction supersedes: itself uses."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp, cls.vault = make_vault({
+            "Paired.md": ("---\ntype: reference\nstatus: open\n"
+                          "supersedes: [[Old-Paired]]\n---\nNo bearing text.\n"),
+            "Old-Paired.md": ("---\ntype: reference\nstatus: closed\n"
+                              "superseded_by: [[Paired]]\nvalid_to: 2026-09-13\n---\n"
+                              "No links.\n"),
+            "New.md": ("---\ntype: reference\nstatus: open\n"
+                       "supersedes: [[Old]]\n---\nNo bearing text.\n"),
+            "Old.md": "---\ntype: reference\nstatus: closed\n---\nNo links.\n",
+        })
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_a_properly_paired_supersedes_passes_clean(self):
+        code, out = run(["check", "--vault", self.vault])
+        self.assertNotIn("Paired -> Old-Paired", out, out)
+
+    def test_an_unpaired_supersedes_fails_the_gate(self):
+        code, out = run(["check", "--vault", self.vault])
+        self.assertEqual(code, 2, out)
+        self.assertIn(
+            "unpaired supersedes: New -> Old (missing superseded_by/valid_to on the "
+            "superseded note)", out, out)
+
+
 class ContradictsEdges(unittest.TestCase):
     """D10 (vault benchmark v2): contradicts: as a symmetric edge, resolved the same
     way supersedes:/relates: already are. A.md declares contradicts: [[B]]; B.md
@@ -519,6 +556,95 @@ class ContradictsEdges(unittest.TestCase):
         code, out = run(["measure", "--vault", self.vault])
         self.assertEqual(code, 0, out)
         self.assertIn("typed edges: 0 supersedes, 0 relates, 1 contradicts, 1 broken", out, out)
+
+
+class Aliases(unittest.TestCase):
+    """aliases: frontmatter (17 real 40-Failures/ notes carry it as of 2026-09-13,
+    each aliases: ["<own-id>"]), the note's own stable id copied in so Obsidian
+    resolves [[<id>]] as a wikilink to it. B.md declares aliases: ["n-testalias123"]
+    and A.md links [[n-testalias123]]: that must resolve clean, never show up as a
+    broken link, or the gate would actively discourage the very feature it checks.
+    C.md and D.md both declare aliases: ["n-dupe"], a genuine defect (only one of
+    them can win that wikilink): reported as duplicate_alias, never silently
+    resolved one way."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp, cls.vault = make_vault({
+            "A.md": ("---\ntype: reference\nstatus: open\n---\n"
+                     "See [[n-testalias123]].\n"),
+            "B.md": ('---\ntype: reference\nstatus: open\n'
+                     'aliases: ["n-testalias123"]\n---\nNo links.\n'),
+            "C.md": ('---\ntype: reference\nstatus: open\n'
+                     'aliases: ["n-dupe"]\n---\nNo links.\n'),
+            "D.md": ('---\ntype: reference\nstatus: open\n'
+                     'aliases: ["n-dupe"]\n---\nNo links.\n'),
+        })
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_a_link_to_a_notes_alias_resolves_clean(self):
+        code, out = run(["measure", "--vault", self.vault, "--json"])
+        self.assertEqual(code, 0, out)
+        stats = json.loads(out)["counts"]
+        self.assertEqual(stats["broken"], [], out)
+        self.assertEqual(stats["broken_count"], 0, out)
+
+    def test_duplicate_alias_fails_the_gate_and_names_both_files(self):
+        code, out = run(["check", "--vault", self.vault, "--json"])
+        self.assertEqual(code, 2, out)
+        data = json.loads(out)
+        dup = [f for f in data["findings"] if f["kind"] == "duplicate_alias"]
+        self.assertEqual(len(dup), 1, out)
+        self.assertIn("C", dup[0]["path"] + dup[0]["detail"], out)
+        self.assertIn("D", dup[0]["path"] + dup[0]["detail"], out)
+        self.assertEqual(data["counts"]["alias_conflicts_count"], 1, out)
+
+    def test_duplicate_alias_names_both_files_in_the_prose_check(self):
+        code, out = run(["check", "--vault", self.vault])
+        self.assertEqual(code, 2, out)
+        self.assertIn("duplicate alias", out, out)
+        self.assertIn("C", out, out)
+        self.assertIn("D", out, out)
+
+
+class AliasBasenameCollision(unittest.TestCase):
+    """Found by adversarial review: exact (checked before by_basename in
+    _resolve) is where aliases register, so an alias equal to another note's
+    basename used to silently pre-empt that note's normal bare-[[basename]]
+    resolution -- affecting 82% of the vault's wikilinks (bare-basename
+    outnumbers path-qualified). x/target.md is the real note; y/impostor.md
+    claims aliases: ["target"], target.md's own basename. A bare [[target]]
+    must still resolve to x/target, never to the impostor, and the attempted
+    hijack must be reported the same way an alias-vs-alias collision is."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp, cls.vault = make_vault({
+            "x/target.md": "---\ntype: reference\nstatus: open\n---\nreal.\n",
+            "linker.md": "---\ntype: reference\nstatus: open\n---\nSee [[target]].\n",
+            "y/impostor.md": ('---\ntype: reference\nstatus: open\n'
+                               'aliases: ["target"]\n---\nfake.\n'),
+        })
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_bare_basename_link_still_resolves_to_the_real_note(self):
+        code, out = run(["measure", "--vault", self.vault, "--json"])
+        self.assertEqual(code, 0, out)
+        stats = json.loads(out)["counts"]
+        self.assertEqual(stats["broken"], [], out)
+
+    def test_the_hijack_attempt_is_reported_as_a_conflict(self):
+        code, out = run(["check", "--vault", self.vault, "--json"])
+        data = json.loads(out)
+        dup = [f for f in data["findings"] if f["kind"] == "duplicate_alias"]
+        self.assertEqual(len(dup), 1, out)
+        self.assertGreaterEqual(data["counts"]["alias_conflicts_count"], 1, out)
 
 
 class RotScan(unittest.TestCase):
@@ -719,6 +845,31 @@ class PatternType(unittest.TestCase):
         self.assertTrue(code == 2 and "bad type value 'patern': Bad.md" in out,
                         "misspelt type did not fail as expected: code=%d out=%s"
                         % (code, out[:300]))
+
+
+class Night0912PatternNote(unittest.TestCase):
+    """products/brothermode/tools/pattern_note.py has no dedicated test
+    file of its own (git grep -l pattern_note -- '*test_*.py' surfaces
+    this file only via PatternType's docstring, which drives bm_vault_
+    graph.py's check on a synthetic note, never pattern_note.py itself);
+    this class loads and exercises the module directly."""
+
+    def _load(self):
+        here = os.path.dirname(os.path.abspath(__file__))
+        spec = importlib.util.spec_from_file_location(
+            "pattern_note", os.path.join(here, "pattern_note.py"))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_write_with_default_gate_writes_note(self):
+        mod = self._load()
+        vault = tempfile.mkdtemp()
+        os.makedirs(os.path.join(vault, "50-Reference"))
+        path, written = mod.write("test", "solves", "what", "evidence", vault=vault)
+        self.assertTrue(written)
+        self.assertIsNotNone(path)
+        self.assertTrue(os.path.isfile(path))
 
 
 if __name__ == "__main__":

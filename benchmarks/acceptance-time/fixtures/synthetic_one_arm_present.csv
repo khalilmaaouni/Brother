@@ -1,0 +1,6 @@
+reviewer,change,condition,seconds,decision,defects_found,lines_inspected
+fabricated-reviewer-1,medium-feature,raw_diff,120,reject,FABRICATED test row,FABRICATED test row
+fabricated-reviewer-2,medium-feature,raw_diff,130,reject,FABRICATED test row,FABRICATED test row
+fabricated-reviewer-3,medium-feature,raw_diff,140,reject,FABRICATED test row,FABRICATED test row
+fabricated-reviewer-4,medium-feature,raw_diff,150,reject,FABRICATED test row,FABRICATED test row
+fabricated-reviewer-5,medium-feature,raw_diff,160,reject,FABRICATED test row,FABRICATED test row

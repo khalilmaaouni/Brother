@@ -253,6 +253,17 @@ class ARetryNeverEscapesItsLane(unittest.TestCase):
         self.assertEqual(got["attempts"][0]["worker_status"], "refused-no-lane")
 
 
+class Night0912BmRepair(unittest.TestCase):
+    def test_verifier_exception_is_recorded_not_raised(self):
+        def verifier(unit, cwd=None):
+            raise RuntimeError("boom")
+
+        got = R.repair(UNIT, RED, Worker(), verifier=verifier, recall=NO_RECALL)
+        self.assertEqual(got["outcome"], R.EXHAUSTED)
+        self.assertEqual(len(got["attempts"]), R.DEFAULT_MAX_ATTEMPTS)
+        self.assertIn("RuntimeError", got["reason"])
+
+
 class TheSelftestIsRunnableByHand(unittest.TestCase):
     def test_selftest_exits_zero(self):
         self.assertEqual(R.main(["--selftest"]), 0)

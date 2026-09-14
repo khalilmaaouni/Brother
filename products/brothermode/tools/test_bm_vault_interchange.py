@@ -441,5 +441,20 @@ class TestNoData(unittest.TestCase):
         self.assertIn("NO-DATA", err)
 
 
+class Night0912BmVaultInterchange(unittest.TestCase):
+    def test_pattern_matches_anywhere_in_string(self):
+        schema = {"type": "object",
+                  "properties": {"x": {"type": "string", "pattern": "[0-9]{4}"}}}
+        problems = ic.validate_record({"x": "abc1234"}, schema)
+        self.assertEqual(problems, [])
+
+    def test_enum_removed_is_widening_not_a_drop(self):
+        v1 = {"properties": {"x": {"type": "string", "enum": ["a", "b"]}}}
+        v2 = {"properties": {"x": {"type": "string"}}}
+        ok, message = ic.evolve_check(v1, v2)
+        self.assertTrue(ok, message)
+        self.assertEqual(message, "forward-compatible")
+
+
 if __name__ == "__main__":
     unittest.main()

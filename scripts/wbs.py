@@ -64,7 +64,10 @@ Python 3.9 floor, standard library only.
 import argparse
 import json
 import os
+import shutil
+import subprocess
 import sys
+import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ROADMAP = os.path.join(ROOT, 'docs', 'plan', 'READINESS-ROADMAP-2026-08-29.json')
@@ -238,10 +241,139 @@ def nodata_nodes(doc):
             and (n.get('status') or '').upper() not in ('DONE', 'SUPERSEDED')]
 
 
+def extract_packages(doc):
+    """A flat list of work packages, whichever plan schema this doc uses.
+
+    READINESS-ROADMAP shape: rows/features, nested subtasks under is_leaf().
+    A scoped-initiative shape (e.g. FIVE-LAYER-OPTIMISATION-1.0.17.json):
+    lanes[].work_packages[], already flat, no subtasks nesting.
+
+    Returns (top_level_status_or_None, [package_dict, ...]). A package dict
+    is used only for its own 'id', 'status' and 'owns' fields here; this is
+    deliberately narrower than check_node()'s full granularity audit, which
+    stays scoped to the roadmap shape it was written for.
+    """
+    if 'lanes' in doc:
+        packages = []
+        for lane in doc.get('lanes', []):
+            packages.extend(lane.get('work_packages', []))
+        return doc.get('status'), packages
+    packages = []
+    for node in doc.get('rows', []) + doc.get('features', []):
+        if is_leaf(node):
+            packages.append(node)
+        else:
+            packages.extend(node.get('subtasks') or [])
+    return doc.get('status'), packages
+
+
+def prove(plan_path, ref):
+    """CLOSED must mean present in `ref`, not present in whoever's working
+    tree wrote the status. Verifies two things, and runs no arbitrary code
+    from the plan file itself:
+
+      1. Every CLOSED-status package's declared 'owns' paths actually exist
+         in `ref` (a git ref/commit, e.g. origin/main) -- checked in a
+         throwaway worktree, never the shared checkout. This alone is the
+         check that would have caught a file genuinely written and then
+         lost during packaging, and a file marked CLOSED that was never
+         written at all: both look identical from outside git, and both
+         fail this one check.
+      2. The plan's own top-level status cannot contradict its children
+         (all CLOSED under a NOT-STARTED parent, or vice versa).
+
+    A package's own done_check is prose, not a command ("python3 foo.py
+    prints X"), so it is never auto-executed here -- running arbitrary text
+    from a plan file as a shell command is its own hazard, and separate
+    from this specific gap. Read the done_check by hand until a package
+    schema carries an actual runnable 'cmd' field.
+
+    Returns (ok, problems): problems is empty exactly when ok is True.
+    """
+    problems = []
+    try:
+        doc = load(plan_path)
+    except (OSError, ValueError) as exc:
+        return False, ['NO-DATA: cannot read %s: %s' % (plan_path, exc)]
+
+    top_status, packages = extract_packages(doc)
+    if not packages:
+        return False, ['NO-DATA: %s has no work packages under either the roadmap or '
+                        'lanes schema' % plan_path]
+
+    closed = [p for p in packages if str(p.get('status') or '').upper().startswith('CLOSED')]
+    top = str(top_status or '').upper()
+    if closed and top == 'NOT-STARTED':
+        problems.append('plan-level status is NOT-STARTED but %d work package(s) read CLOSED'
+                         % len(closed))
+    if packages and len(closed) == len(packages) and top not in ('', 'NOT-STARTED') \
+            and 'CLOSED' not in top and 'SHIP' not in top and 'DONE' not in top:
+        problems.append('every work package is CLOSED but plan-level status is %r, '
+                         'neither CLOSED nor SHIPPED' % top_status)
+
+    if not closed:
+        return (not problems), problems
+
+    # The repo containing `ref` is found from plan_path's own location, never
+    # from the calling process's ambient cwd: a caller running from a
+    # different repo (or a test fixture proving a throwaway repo) must not
+    # silently resolve `ref` against the wrong history.
+    plan_dir = os.path.dirname(os.path.abspath(plan_path)) or '.'
+    root = subprocess.run(['git', '-C', plan_dir, 'rev-parse', '--show-toplevel'],
+                          capture_output=True, text=True)
+    if root.returncode != 0:
+        return False, ['NO-DATA: %s is not inside a git repository: %s'
+                        % (plan_path, root.stderr.strip())]
+    repo_root = root.stdout.strip()
+
+    tmp = tempfile.mkdtemp(prefix='wbs-prove-')
+    os.rmdir(tmp)  # git worktree add requires the target not exist yet
+    try:
+        r = subprocess.run(['git', '-C', repo_root, 'worktree', 'add', '--detach', tmp, ref],
+                            capture_output=True, text=True)
+        if r.returncode != 0:
+            return False, ['NO-DATA: could not create a worktree at ref %r in %s: %s'
+                            % (ref, repo_root, r.stderr.strip())]
+        for pkg in closed:
+            pid = pkg.get('id') or pkg.get('title') or '<unnamed>'
+            for path in (pkg.get('owns') or []):
+                full = os.path.join(tmp, path)
+                if not os.path.exists(full):
+                    problems.append('%s: declared deliverable %r is CLOSED but missing from %s'
+                                     % (pid, path, ref))
+    finally:
+        subprocess.run(['git', '-C', repo_root, 'worktree', 'remove', '--force', tmp],
+                        capture_output=True)
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    return (not problems), problems
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--stats', action='store_true', help='print granularity figures only')
+    ap.add_argument('--prove', metavar='PLAN_JSON',
+                     help='verify every CLOSED work package in PLAN_JSON actually exists '
+                          '(deliverables present, status internally consistent) in --ref, '
+                          'not just in whoever wrote the status')
+    ap.add_argument('--ref', default='HEAD',
+                     help='git ref to prove against (default HEAD; use origin/main to check '
+                          'what actually shipped, not the local working tree)')
     args = ap.parse_args(argv)
+
+    if args.prove:
+        ok, problems = prove(args.prove, args.ref)
+        for p in problems:
+            print('wbs --prove: %s' % p, file=sys.stderr)
+        if ok:
+            print('wbs --prove: every CLOSED work package in %s has its declared deliverables '
+                  'present in %s, and the plan status is internally consistent. This does not '
+                  'run any package\'s own done_check (prose, not a command) -- it proves the '
+                  'file exists, not that it behaves as specified.' % (args.prove, args.ref))
+            return 0
+        print('FAIL: %d problem(s) proving %s against %s' % (len(problems), args.prove, args.ref),
+              file=sys.stderr)
+        return 1
     try:
         doc = load()
     except (OSError, ValueError) as exc:

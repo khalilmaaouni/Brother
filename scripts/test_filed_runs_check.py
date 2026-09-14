@@ -184,5 +184,16 @@ class Verdicts(FixtureCase):
         self.assertIn("NO-DATA", out)
 
 
+class Night0912FiledRunsCheck(unittest.TestCase):
+    def test_empty_manifest_artefacts_is_not_reproduces(self):
+        with tempfile.TemporaryDirectory(prefix="frc-") as export_root:
+            ok, line = F.reproduce_manifest(
+                export_root, "some/run", {"verdict": "PASS", "artefacts": []})
+
+        self.assertFalse(ok)
+        self.assertTrue(line.startswith("DIVERGES") or line.startswith("NO-DATA"))
+        self.assertNotIn("REPRODUCES", line)
+
+
 if __name__ == "__main__":
     unittest.main()

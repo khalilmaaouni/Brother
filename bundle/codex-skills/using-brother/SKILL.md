@@ -103,6 +103,13 @@ For an iPhone, iPad or SwiftUI outcome, load references/native-mobile.md.
 It supplies reference, research, design, motion, build and handoff steps
 within the existing execution route and product verdicts.
 
+## Cursor-native agents
+
+For the three shipped Cursor agent personas (`brother-planner`,
+`brother-executor`, `brother-reviewer`), what each is allowed to do, and
+how Cursor's own Plan/Agent/Ask modes map onto them, load
+references/cursor-native.md.
+
 ## More detail: verbs, boundaries, handback, closing
 
 Read when the verb table, a boundary this router must never cross, the

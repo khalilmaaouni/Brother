@@ -655,6 +655,61 @@ def _stale_lane(repo, branch, runner=None):
     return {"path": path, "sha": sha}
 
 
+def _clear_stale_branch_lock(repo, branch, runner=None):
+    """Remove a stale `refs/heads/<branch>.lock` left by a crashed run, or
+    None when there is nothing to remove.
+
+    THE CRASH THIS CLOSES, reproduced 2026-09-14: a run SIGKILLed while its
+    git was between `checkout -b`'s lock-create and the rename that writes
+    the ref leaves the lock file with no ref behind it. git never removes a
+    ref lock on its own (it has no owner recorded in the file to prove
+    staleness by), so the next `git checkout -b <branch>` in a fresh lane
+    dies with "cannot lock ref '<branch>': ... File exists", acquire() reads
+    that as `made.returncode != 0`, sets branch=None, and the unit is
+    refused forever with "its own checkout failed": the exact flake this
+    estate's resume tests were seeing on CI, where a slow runner hits the
+    sub-millisecond kill window often enough to matter.
+
+    SAFE TO REMOVE HERE. Removing a lock a LIVE git holds would be a
+    corruption path, so this is only ever done for a `lane/<unit>` branch
+    (the caller already restricts itself to BRANCH_PREFIX), and only from
+    acquire(), which is the one and only creator of that branch, runs under
+    this module's own _GIT_LOCK, and is reached only after claim_store has
+    granted this process the unit's exclusive claim across every process on
+    the host. So no other live git can be mid-creation of THIS exact lane
+    branch: a `lane/<unit>.lock` found here is always a dead run's residue.
+    The scope is a single named file under the common git dir; it never
+    touches index.lock, packed-refs.lock, or any ref but this one.
+
+    Branch refs live in the COMMON git dir (shared across linked
+    worktrees), never a per-worktree one, so the lock is resolved against
+    `git rev-parse --git-common-dir` rather than any lane's own admin dir."""
+    common = _git(["rev-parse", "--git-common-dir"], repo, runner)
+    if common.returncode != 0:
+        return None  # not resolvable; the ordinary checkout path will report it
+    common_dir = (common.stdout or "").strip()
+    if not common_dir:
+        return None
+    if not os.path.isabs(common_dir):
+        common_dir = os.path.normpath(os.path.join(repo, common_dir))
+    lock_path = os.path.join(common_dir, "refs", "heads", branch + ".lock")
+    if not os.path.isfile(lock_path):
+        return None
+    try:
+        os.remove(lock_path)
+    except OSError as exc:
+        # Never fatal: the ordinary `git checkout -b` below will still fail
+        # loudly on the lock and the unit is refused with its own reason,
+        # exactly as before this sweep existed. Said out loud so the cause
+        # is on the record rather than discovered at the next crash.
+        print("worktree_lane: a stale ref lock for %s exists at %s and could "
+              "not be removed (%s); the fresh checkout will report it"
+              % (branch, lock_path, exc), file=sys.stderr)
+        return None
+    return ("a stale ref lock for %s (left by an earlier run killed mid "
+            "checkout) was removed before creating a fresh lane" % branch)
+
+
 def _clear_stale_lane(repo, branch, runner=None):
     """Refuse to reuse a leftover `lane/<unit>` branch from an earlier run:
     remove it first, or say why it could not be removed. Called from
@@ -669,9 +724,20 @@ def _clear_stale_lane(repo, branch, runner=None):
     record rather than silent."""
     if not branch.startswith(BRANCH_PREFIX):
         return True, None  # never this function's business
+    # A SIGKILLed run whose git was mid `checkout -b` for this exact branch
+    # leaves a stale `refs/heads/<branch>.lock` with NO ref written: git
+    # creates the lock, then dies before the rename that would produce the
+    # ref. That lock is invisible to _stale_lane below (rev-parse --verify
+    # of the ref exits 1, so `stale` reads None and this function used to
+    # return "nothing to clear"), yet acquire()'s own `git checkout -b`
+    # then fails with "cannot lock ref ... File exists", so the unit is
+    # refused forever with "its own checkout failed" on every retry. Swept
+    # here, before _stale_lane, because the lock outlives the ref it never
+    # became.
+    lock_note = _clear_stale_branch_lock(repo, branch, runner)
     stale = _stale_lane(repo, branch, runner)
     if stale is None:
-        return True, None
+        return True, lock_note
     sha_short = stale["sha"][:9]
     if stale["path"] and os.path.isdir(stale["path"]):
         proc = _git(["worktree", "remove", "--force", stale["path"]], repo, runner)

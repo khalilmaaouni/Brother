@@ -17,10 +17,12 @@ default wiring parses too.
 import io
 import json
 import os
+import shutil
 import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 import importlib.util
@@ -444,6 +446,75 @@ class TestHeartbeatWriter(unittest.TestCase):
             with open(ledger) as fh:
                 content = fh.read()
             self.assertNotIn("NOTAKEY-canary", content)
+
+
+class Night0912SbeHeartbeat(unittest.TestCase):
+    """sbe_heartbeat.py's own hard rule is IT NEVER BLOCKS and never drops an
+    event; two hooks firing at once for a session whose .sbe/runtime/
+    directory does not exist yet raced on os.makedirs(d) (no exist_ok), so
+    the loser's FileExistsError propagated to the outer catch-all at the
+    bottom of main() and its whole event, not just the mkdir, was silently
+    dropped.
+
+    Two threads in this process, synchronized with a Barrier around the
+    REAL os.makedirs call (not os.path.isdir): both threads see the
+    directory absent, both are released from the barrier at the same
+    instant, and one of the two real mkdir syscalls loses the OS-level
+    race. This is deliberately NOT the draft's own approach of mocking
+    os.path.isdir with a Barrier: CPython's os.makedirs(name,
+    exist_ok=True) calls os.path.isdir(name) a SECOND time internally
+    (inside its own except OSError handler, to confirm the existing entry
+    really is a directory before swallowing FileExistsError), and a
+    Barrier(2) sized for one isdir call per thread hangs forever waiting
+    for a second arrival that never comes from the thread whose mkdir
+    succeeded outright and never re-enters that handler. Synchronizing on
+    the real makedirs call instead leaves os.path.isdir alone (so
+    exist_ok's own internal check sees the truth) and still forces the
+    race deterministically, unlike two real subprocesses started via Popen,
+    which is not correlated enough for os-level mkdir to reliably collide
+    on this file's own 30s test budget (in practice never observed to
+    collide in trial runs at 20 subprocesses)."""
+
+    def test_concurrent_hook_invocations_do_not_lose_an_event(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        payload = {"project_dir": tmp, "hook_event_name": "PostToolUse",
+                   "session_id": "s", "tool_name": "Bash", "tool_input": {}}
+        orig_load = hb.json.load
+        hb.json.load = lambda f: payload
+
+        orig_makedirs = hb.os.makedirs
+        barrier = threading.Barrier(2)
+
+        def sync_makedirs(path, *a, **kw):
+            barrier.wait(timeout=10)
+            return orig_makedirs(path, *a, **kw)
+
+        hb.os.makedirs = sync_makedirs
+
+        results = []
+
+        def run():
+            results.append(hb.main())
+
+        threads = [threading.Thread(target=run) for _ in range(2)]
+        try:
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(15)
+                self.assertFalse(t.is_alive(), "a hook thread did not finish")
+        finally:
+            hb.json.load = orig_load
+            hb.os.makedirs = orig_makedirs
+
+        self.assertEqual(results, [0, 0], "main() must return 0 either way")
+        ledger = os.path.join(tmp, ".sbe", "runtime", "heartbeat.jsonl")
+        with open(ledger) as fh:
+            lines = fh.read().splitlines()
+        self.assertEqual(len(lines), 2,
+                         "%d of 2 concurrent hook events reached the ledger"
+                         % len(lines))
 
 
 if __name__ == "__main__":

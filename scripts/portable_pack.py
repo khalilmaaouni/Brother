@@ -340,11 +340,14 @@ def verify_pack(zip_path):
         except ValueError as e:
             problems.append("05-STATE.json does not parse: %s" % e)
         else:
-            repo_states = state.get("repos") or {}
-            heads = [r.get("head") for r in repo_states.values()
-                    if isinstance(r, dict) and r.get("head")]
-            if not heads:
-                problems.append("05-STATE.json carries no repo HEAD sha")
+            if not isinstance(state, dict):
+                problems.append("05-STATE.json is not a JSON object")
+            else:
+                repo_states = state.get("repos") or {}
+                heads = [r.get("head") for r in repo_states.values()
+                        if isinstance(r, dict) and r.get("head")]
+                if not heads:
+                    problems.append("05-STATE.json carries no repo HEAD sha")
 
         if "04-LESSONS.json" in names:
             try:

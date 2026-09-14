@@ -584,11 +584,13 @@ def score_sequencing(lines):
     plan_idx = find_first_heading_index(lines, lambda t: re.search(r'\bplan\b', t, re.IGNORECASE))
     approval_idx = find_first_heading_index(
         lines, lambda t: re.search(r'\bapproval\b|\bapprove\b|\bconfirm', t, re.IGNORECASE))
-    if approval_idx is None:
-        for i, line in enumerate(lines):
-            if _looks_like_an_approval_prompt(line):
+    # A plain-text prompt can precede the first approval-ish heading, so take the
+    # EARLIEST approval point: fall back to the first prompt and keep whichever is first.
+    for i, line in enumerate(lines):
+        if _looks_like_an_approval_prompt(line):
+            if approval_idx is None or i < approval_idx:
                 approval_idx = i
-                break
+            break
     if plan_idx is None or approval_idx is None:
         return None, "no Plan heading and/or approval prompt found, cannot determine order"
     if approval_idx < plan_idx:

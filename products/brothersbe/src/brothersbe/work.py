@@ -429,8 +429,10 @@ def cmd_start(args, exit_ok, exit_failed, exit_usage):
     # Rule 3: every dependency must be closed clean, and FORCED is not clean.
     # Scoped to change_id: a dependsOn edge points at a SIBLING task inside
     # THIS dossier's own plan, never a same-named task some other dossier
-    # happens to have derived.
-    for dep in task.get("dependsOn") or []:
+    # happens to have derived. Routed through _str_list for the same reason
+    # cmd_brief's identical Rule 3 is: a bare-string dependsOn must not
+    # iterate character by character into phantom dependency ids.
+    for dep in _str_list(task.get("dependsOn")):
         problem = _dependency_problem(data, dep, change_id)
         if problem:
             sys.stdout.write("sbe work start: refused. %s\n" % problem)
@@ -1017,7 +1019,7 @@ def cmd_brief(args, exit_ok, exit_failed, exit_usage):
     # NOT scoped to a change here (see `_dependency_problem`'s docstring):
     # this stays the original, unscoped check `tools/test_sbe_work_brief.py`
     # already pins.
-    for dep in task.get("dependsOn") or []:
+    for dep in _str_list(task.get("dependsOn")):
         problem = _dependency_problem(data, dep)
         if problem:
             sys.stdout.write("sbe work brief: refused. %s\n" % problem)

@@ -858,6 +858,10 @@ def main(argv=None):
         print("frozen: OK %s" % frozen_result)
 
     rows = run_gauntlet(planted=planted)
+    if not rows:
+        # A zero-case corpus is NO-DATA, never a crash in the max() below.
+        print("%s: the corpus named no cases at all; this is not a pass" % NODATA)
+        return 2
     width = max(len(r["id"]) for r in rows)
     for row in rows:
         print("%-*s  %-16s  %-10s  %s" % (width, row["id"], row["class"],

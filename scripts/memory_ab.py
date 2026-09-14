@@ -167,7 +167,10 @@ def report(rows, out=sys.stdout):
         print("  token delta                   : NO-DATA, no pair reported tokens", file=out)
     print("  repeat mistakes / unsupported claims / human corrections: NO-DATA, "
           "not yet wired; absence is stated, never counted as zero", file=out)
-    if not gained and not lost:
+    if not pairs:
+        # zero paired tasks is no measurement, not a null result.
+        print("  VERDICT: NO-DATA, no paired tasks", file=out)
+    elif not gained and not lost:
         print("  VERDICT: no measured difference. This is a real answer, and it is "
               "not evidence FOR memory.", file=out)
     print("  caveat: each task ran OFF then ON in that fixed order, so any warm "

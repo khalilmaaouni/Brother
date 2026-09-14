@@ -199,5 +199,14 @@ class RetierFixtureVault(unittest.TestCase):
         self.assertIn("0 notes changed", buf2.getvalue())
 
 
+class Night0912BmVaultRetier(unittest.TestCase):
+    def test_directory_evidence_is_not_a_locator(self):
+        m = load_tool()
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, "evidence_dir"))
+            res = m._resolve_evidence_locator("evidence_dir", d)
+            self.assertIsNone(res)
+
+
 if __name__ == "__main__":
     unittest.main()

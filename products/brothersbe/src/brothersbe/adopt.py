@@ -201,14 +201,14 @@ def propose_policy(root, detected):
             not_proposed[key] = {"missingPaths": missing, "why": why}
     if detected["hasMigrations"]:
         protected["migrations"] = {
-            "paths": sorted(set(os.path.dirname(p) + "/" for p in
+            "paths": sorted(set((os.path.dirname(p) or ".") + "/" for p in
                                 detected["matchedPaths"].get("db-migration", []))),
             "why": "a migration directory this scan detected; schema changes other code "
                    "and queries depend on",
         }
     if detected["hasDbtModels"]:
         protected["dbtModels"] = {
-            "paths": sorted(set(os.path.dirname(p) + "/" for p in
+            "paths": sorted(set((os.path.dirname(p) or ".") + "/" for p in
                                 detected["matchedPaths"].get("dbt-model", []))),
             "why": "a dbt models directory this scan detected; warehouse models other "
                    "models and reports select from",
@@ -352,7 +352,7 @@ def adoption_report(root):
         or os.path.exists(os.path.join(root, "bitbucket-pipelines.yml")))
     product_ci_present = os.path.exists(
         os.path.join(root, ".github", "workflows", "brothersbe-gates.yml"))
-    is_git = os.path.isdir(os.path.join(root, ".git"))
+    is_git = os.path.exists(os.path.join(root, ".git"))
 
     missing = ("a GitHub token with repo scope, plus admin rights on the target "
               "repository; this tool holds no credentials and asked for none")

@@ -13,10 +13,10 @@ to run the battery.
 
 | | |
 |---|---:|
-| Parts | 210 |
-| Parts with a purpose written in the file | 208 |
-| Parts with a suite wired into the battery | 187 |
-| Checks in the battery | 292 |
+| Parts | 254 |
+| Parts with a purpose written in the file | 252 |
+| Parts with a suite wired into the battery | 188 |
+| Checks in the battery | 289 |
 
 2 part(s) carry no purpose line and are listed as NO-DATA below. They are
 shown rather than omitted, because a system record that hides its
@@ -43,25 +43,35 @@ undocumented corners looks complete and is not.
 | `acceptance_trial_assign` | Acceptance Compression trial: reviewer assignment and results validation | **NO-DATA**, nothing in the battery runs it |
 | `adapter_conformance` | ONE ordered suite, unchanged across every provider. | `adapter-conformance-self` |
 | `annotations_store` | a correction made once is a fact from then on. | `annotations-self` |
+| `assurance_graph` | WBS-20.04 Assurance Graph: link every externally meaningful 1.0.17 claim | **NO-DATA**, nothing in the battery runs it |
 | `attempt_hook` | a PostToolUse hook on Bash that writes to scripts/attempt_ledger.py | `attempt-hook-tests` |
 | `attempt_ledger` | stop the third attempt at a technique that failed twice. | `attempt-ledger-self`, `real-logs-unchanged` |
 | `authority_path_coverage` | R1: does one event receive two independent enforcing decisions? | `authority-path-coverage-self` |
 | `autonomy_dial` | The A0 to A3 autonomy dial, wired: docs/plan/AUTONOMY-POLICY-V1.md made | `autonomy-dial-self` |
 | `battery_verdict` | A6, one canonical machine-readable answer to "is current | `battery-verdict-self` |
 | `benchmark_atomic` | Atomic benchmark harness: this estate against the host harness's main | `benchmark-atomic-self` |
+| `benchmark_harness` | WBS-90.01 Benchmark Harness: run one task through one arm and score it | **NO-DATA**, nothing in the battery runs it |
 | `blocker_freshness` | Re-measure every release blocker's own done-check, cheaply, on demand. | `blocker-fresh` |
 | `board_status` | what is ACTUALLY done, counted from evidence. | `board-status-self` |
+| `brief_optimizer_score` | Mechanically score baseline + candidate_a + candidate_b of gen_briefs.py | **NO-DATA**, nothing in the battery runs it |
 | `brother_install` | A2: one tool that takes a Codex home from an unknown state to Brother's | `adapter-conformance-self`, `brother-install-self`, `keep-current-self` |
 | `brother_paths` | C3: the one place Brother resolves its plugin root, its config directory, | `brother-paths-self` |
 | `brother_run` | a plain outcome in, a verified delivery report out. | `adapter-conformance-self`, `brother-run-self`, `bundle-runtime-self`, `codex-smoke`, `codex-smoke-self`, `fault-lab-self`, `limit-watch-self`, `product-acceptance-self`, `release-closeout-self`, `release-invariant`, `release-invariant-self`, `tiny-task-cost-self`, `virgin-unit-proof`, `virgin-unit-proof-self` |
+| `brother_wastage_census` | .py: a corrected with-Brother vs without-Brother census. | **NO-DATA**, nothing in the battery runs it |
+| `brother_worktree_census` | Read-only worktree and disk census: one row per `git worktree`, per repo. | **NO-DATA**, nothing in the battery runs it |
 | `bundle_runtime` | package brother_run.py's own execution engine into | `bundle-runtime-self`, `regen-generated-self` |
+| `canary_pipeline_smoke` | WBS-30.10 Canary Pipeline Smoke: prove the ten sibling mobile-path modules | **NO-DATA**, nothing in the battery runs it |
 | `capability_probe` | what this machine can actually do, measured not remembered. | `capability-probe-self` |
 | `changelog_from_commits` | .py: a changelog generated from git history, never | `changelog-commits-self` |
 | `charter_paths` | every repository path docs/CHARTER.md names must exist here. | `charter-paths`, `charter-paths-self` |
 | `check_filtering_spec` | Does docs/plan/PRIVACY-FILTERING-SPEC.md still classify every content | `filtering-spec`, `filtering-spec-self` |
 | `check_installed_surface` | does a clean install really deliver the manifest? | `installed-surface` |
 | `check_l5_commands` | the plan's L5 commands must be real commands. | `l5-commands`, `l5-self` |
+| `claim_evidence` | WBS-50.02 BrotherDS Claim Contract v2, Claim Evidence references: the | **NO-DATA**, nothing in the battery runs it |
+| `claim_lifecycle` | WBS-50.01 BrotherDS Claim Contract v2, Claim lifecycle: the explicit | **NO-DATA**, nothing in the battery runs it |
+| `claim_score` | WBS-50.03 Verified Claim Rate 2D. The roadmap's own words: | **NO-DATA**, nothing in the battery runs it |
 | `claim_store` | no worker starts before its claim exists, and two never own one unit. | `claim-store-self`, `fault-lab-self`, `mutation-gate`, `mutation-gate-self` |
+| `clerical_review_plan` | WBS-40.06 Clerical Review Sampling Plan. | **NO-DATA**, nothing in the battery runs it |
 | `client_parity` | the Cursor adapter must stay at parity with the Codex adapter | `client-parity` |
 | `close_ceremony_check` | The closing ceremony law's enforcer (founder order 2026-08-30 at close). | `close-ceremony`, `close-ceremony-tests` |
 | `codex_battery` | X8/C7.2 Codex battery: proves the public Brother plugin works on a real | `codex-battery-self` |
@@ -70,8 +80,11 @@ undocumented corners looks complete and is not.
 | `codex_skills` | generate bundle/codex-skills/ from bundle/skills/, with the | `codex-skills-current` |
 | `codex_smoke` | the clean-install Codex smoke test, run in an isolated home. | `codex-smoke`, `codex-smoke-self` |
 | `codex_surface` | Generate Codex-visible aliases for Brother's product skills and commands. | `codex-surface-current` |
+| `complexity_gate` | Refuses a 4+ agent dispatch that cannot name its dependency graph. | **NO-DATA**, nothing in the battery runs it |
+| `context_capsule` | WBS-10.02, the per-unit dispatch context this estate | **NO-DATA**, nothing in the battery runs it |
 | `continuity` | the resume screen. E73.1 of the productization directive. | `continuity-self` |
 | `contract_check` | does a record follow the outcome contract, the one project | `bundle-runtime-self`, `contract-check-self` |
+| `cost_per_unit` | .py: tokens spent per git commit landed, over a trailing window. | **NO-DATA**, nothing in the battery runs it |
 | `coverage_check` | Coverage checker for the unified WBS (docs/plan/UNIFIED-WBS.md), task 0. | `coverage`, `coverage-self` |
 | `cursor_battery` | Verify a released Cursor adapter in a detached clone and retain its evidence. | `cursor-battery-self` |
 | `cursor_plugin_install` | Install the Brother Cursor plugin to ~/.cursor/plugins/local/brother. | **NO-DATA**, nothing in the battery runs it |
@@ -81,6 +94,8 @@ undocumented corners looks complete and is not.
 | `decide` | never hand a human a wall, hand them a screen. | `decide-self` |
 | `decide_round` | a ROUND of decisions is still a screen, never a wall of popups. | **NO-DATA**, nothing in the battery runs it |
 | `delivery_status` | the ONE goal for this session, as named steps with a | `delivery-status-self` |
+| `dependency_graph_check` | validate a WBS-00.03 release dependency graph | **NO-DATA**, nothing in the battery runs it |
+| `device_matrix` | Device Matrix abstraction, physical-device adapter seam (WBS-30.07/30.08). | **NO-DATA**, nothing in the battery runs it |
 | `doc_assurance` | the public documentation corpus is checked against the tree it | `doc-assurance`, `doc-assurance-self` |
 | `door` | a plain English outcome becomes a canonical Work document. | `brother-run-self`, `bundle-runtime-self`, `door-self`, `mutation-gate`, `mutation-gate-self` |
 | `e53_lesson_ab` | does a lesson SHOWN at the moment of action change the action. | **NO-DATA**, nothing in the battery runs it |
@@ -113,11 +128,15 @@ undocumented corners looks complete and is not.
 | `gen_readiness_board` | Render the readiness board from docs/plan/READINESS-ROADMAP-2026-08-29.json. | `readiness-board-self`, `roadmap-public-clean` |
 | `gen_receipt_schema` | One-shot generator for docs/plan/delivery-receipt-v1.schema.json from the | **NO-DATA**, nothing in the battery runs it |
 | `git_worktree_guard` | Pre-tool-use guard for git worktree safety. | `git-worktree-guard-self` |
+| `golden_master_contract` | WBS-40.01 Golden Master Contract: validate a golden-master record against | **NO-DATA**, nothing in the battery runs it |
+| `golden_master_quality_claims` | WBS-50.04 MDM quality claims. The roadmap's own words (docs/plan, WBS-50.04): | **NO-DATA**, nothing in the battery runs it |
 | `graph_loop` | The graph loop: which nodes may run RIGHT NOW, and which may run TOGETHER. | `graph-loop`, `graph-loop-self` |
 | `graph_value_experiment` | VB-15 / D15: is multi-hop graph retrieval worth anything here, measured. | **NO-DATA**, nothing in the battery runs it |
 | `guarded_strip` | never delete rows from a real file without counting them first. | `guarded-strip-self` |
 | `handover_ceremony` | Handover ceremony: collects a session's closing state and emits it as | `handover-ceremony` |
 | `handover_pack_scan` | the dry run the founder reads before any pack is rewritten. | **NO-DATA**, nothing in the battery runs it |
+| `host_capability` | WBS-70.03's Host Capability Receipt. | **NO-DATA**, nothing in the battery runs it |
+| `host_projection_parity` | WBS-70.02, proves the 3 real host-projection | **NO-DATA**, nothing in the battery runs it |
 | `identity_guard` | refuse NEW commits whose author or committer email domain | `export-public-self`, `identity-guard`, `identity-guard-self` |
 | `intake_inflight` | the decision-in-progress file a turn re-reads instead of | `intake-inflight-self` |
 | `intake_measure` | Intake V2's closing measure against the plan's own targets. | `intake-measure-self` |
@@ -129,12 +148,14 @@ undocumented corners looks complete and is not.
 | `jbeq_regression` | JBEQ-MDM regression harness: re-decide the pinned round 6 fact sheets | `jbeq-regression-round6-self` |
 | `journal` | one append-only causal log per run, fed by the writers that | `journal-self` |
 | `journal_projection` | the delivery report, receipts-bound and a live | `journal-projection-self` |
+| `journey_passport` | WBS-30.06 Journey Passport: a VIEW composing evidence that already exists | `mutation-gate`, `mutation-gate-self` |
 | `keep_current` | update a Codex install only after every link reads PASS. | `keep-current-self` |
 | `key_components` | the components this estate built on purpose cannot be lost, | `key-components`, `key-components-self` |
 | `land_queue` | the hub PR lander as a product script, not five loose shell files. | `land-queue-self` |
 | `lane_resume` | turn a dead lane's worktree into a patch a fresh lane can apply. | `lane-resume-self` |
 | `laws_audit` | R28.1, the law auditor (docs/plan/READINESS-ROADMAP-2026-08-29.json). | `laws-audit`, `laws-audit-self` |
 | `leaf_pin_check` | Does the umbrella promise the release tag the leaf actually published? | `leaf-pins`, `leaf-pins-self` |
+| `lesson_candidate` | WBS-60.03 Vault convergence, Lesson candidate contract: validate a lesson | **NO-DATA**, nothing in the battery runs it |
 | `lesson_repeat_trial` | was the lesson SHOWN before the failure it describes. | `lesson-repeat-trial-tests` |
 | `lesson_severity` | how bad was it, decided by criteria rather than by feeling. | **NO-DATA**, nothing in the battery runs it |
 | `lifecycle_hooks` | the undeclared-write refusal, at the layer that can stop it. | `lifecycle-hooks-self` |
@@ -144,19 +165,31 @@ undocumented corners looks complete and is not.
 | `loop_bridge` | the scheduler's ready set becomes real dispatches. | `loop-bridge-self`, `virgin-unit-proof`, `virgin-unit-proof-self` |
 | `make_benchmark_bundle` | Assembles a self-contained, reproducible bundle for the vault memory-ab / | `benchmark-bundle-self` |
 | `managed_safety` | Brother-managed execution is safe by construction, not by | `managed-safety-self` |
+| `master_source_snapshot` | WBS-40.02 Source Snapshot: structural-only .xlsx snapshot record. | **NO-DATA**, nothing in the battery runs it |
+| `matcher_boundary` | WBS-40.04 Matcher Boundary: the contract an external matcher's output | **NO-DATA**, nothing in the battery runs it |
+| `mdm_canary_smoke` | WBS-40.11 MDM Canary Smoke: prove the ten WBS-40 (Golden Master / MDM) | **NO-DATA**, nothing in the battery runs it |
 | `memory_ab` | Memory ON versus OFF: the same tasks, run both ways, differences recorded. | `memory-ab`, `vault-benchmark-v2-self` |
 | `memory_ab_runner` | Runner for scripts/memory_ab.py (VB-11, D04 part B), 2026-08-30 run. | **NO-DATA**, nothing in the battery runs it |
 | `memory_lift` | did the memory fix actually change anything, measured on real work. | `memory-lift-self` |
+| `merge_passport` | WBS-40.07 Merge Passport: a VIEW composing evidence that already exists | **NO-DATA**, nothing in the battery runs it |
 | `merge_queue` | conflict-aware batching for the one-integrator merge queue (W8). | `merge-queue`, `merge-queue-self` |
 | `mobile_design` | Search a user-curated mobile reference board and inspect creative media. | `bundle-runtime-self`, `mobile-design` |
+| `mobile_journey_contract` | WBS-30.01 Mobile Journey Contract: validate a journey record against | **NO-DATA**, nothing in the battery runs it |
+| `mobile_plan_compiler` | WBS-30.04 Mobile plan compiler. | **NO-DATA**, nothing in the battery runs it |
+| `mobile_product_claims` | WBS-50.05 Mobile product claims. The roadmap's own words (docs/plan, | **NO-DATA**, nothing in the battery runs it |
+| `mobile_reference_lock` | WBS-30.02 Reference Lock v2: the honest partial case. | **NO-DATA**, nothing in the battery runs it |
 | `mobile_workflow` | Native mobile workflow support for Brother's existing execution engine. | `bundle-runtime-self`, `mobile-workflow` |
 | `model_worker` | NIGHT-01: the real coding-model worker for the graph loop. | `bundle-runtime-self`, `loop-bridge-self`, `model-worker` |
 | `morning_pack` | .py: fills docs/plan/MORNING-STEERING-2026-09-05.md section | `morning-pack-self` |
 | `mutation_gate` | R27.3, the assurance mutation gate. | `mutation-gate`, `mutation-gate-self` |
 | `native_evidence` | record and validate a native build or test evidence bundle. | `bundle-runtime-self`, `native-evidence-self` |
+| `native_evidence_v2` | wrap a scripts/native_evidence.py output record into | **NO-DATA**, nothing in the battery runs it |
 | `negative_space_audit` | R27.2, the generated negative-space contract audit. | `negative-space-audit`, `negative-space-audit-self` |
 | `next_cut` | Print the next release cut: the date, the version it would be, and the | `next-cut-self` |
 | `night_tick` | The durable half of the night watch. | `night-tick-selftest` |
+| `normalization_trace` | WBS-40.03 Normalization Trace: derived-matching-key audit trail. | **NO-DATA**, nothing in the battery runs it |
+| `optimization_loop` | .py: sequences Brother's real Observe/Evaluate/Optimise | **NO-DATA**, nothing in the battery runs it |
+| `oracle_stability` | WBS-80.02 Oracle stability: run a benchmark_harness.py task/arm oracle | **NO-DATA**, nothing in the battery runs it |
 | `outgoing_scan` | Pre-push outgoing scan that is a real gate. | `outgoing-scan-self` |
 | `parity_gate` | is Brother yet worth a teammate's time, measured at the level the evidence supports. | `parity-gate-self` |
 | `park_sidecar` | Durable sidecar for parked plan units. | `park-sidecar-self` |
@@ -172,7 +205,7 @@ undocumented corners looks complete and is not.
 | `progress_deadline` | alive is not advancing, and output is not progress. | `progress-deadline-self` |
 | `prove_guide_claude` | S23's real done_check: prove docs/how-to/install-claude-code.md runs | `prove-guide-claude-self` |
 | `provider_adapter` | ONE provider-neutral core, THIN adapters. | `provider-adapter-self` |
-| `public_host_truth` | Check that public host documentation matches shipped host manifests. | `public-host-truth`, `public-host-truth-self` |
+| `publish_reconciliation` | WBS-40.10 Publish Reconciliation: what Brother checks AFTER an external | **NO-DATA**, nothing in the battery runs it |
 | `readiness_gate` | the review's enterprise readiness gate as a checkable surface. | `export-public-self`, `readiness-gate`, `readiness-gate-self` |
 | `readme_receipt_sample` | the README's per-file receipt sample, rendered by | **NO-DATA**, nothing in the battery runs it |
 | `real_logs` | .py: nothing that runs as a test or a battery may grow a real | `real-logs-unchanged` |
@@ -191,14 +224,18 @@ undocumented corners looks complete and is not.
 | `release_note_from_tree` | .py: the release note's checkable claims, measured, never typed. | `refresh-cut-self`, `release-note-self`, `reproduce-export-self` |
 | `release_note_perturb` | every file the release note names really goes red. | `release-note-perturb`, `release-note-perturb-self` |
 | `release_notes_stamped` | .py: refuses while any shipped release note still | `release-notes-stamped` |
+| `release_state_tracker` | Release State Tracker (WBS-30.09): TestFlight / release-state evidence. | **NO-DATA**, nothing in the battery runs it |
 | `repeat_control` | does a shown lesson actually stop the same failure happening again. | `repeat-control-tests` |
 | `repeat_rate_page` | writes docs/benchmarks/REPEAT-RATE.md, the public page | `repeat-rate-page-self` |
+| `report_complexity_gate_experiment` | Reports the treatment-vs-control agreement rate for one complexity-gate | **NO-DATA**, nothing in the battery runs it |
 | `reproduce_export` | prove a released public tag was generated from a pinned | `keep-current-self`, `release-closeout-self`, `reproduce-export-self` |
 | `resource_gate` | refuse admission when the MACHINE is short, not the code. | `resource-gate-self` |
 | `restart_schedule` | R25.3: the dynamic restart scheduler. Generalizes the existing launchd | **NO-DATA**, nothing in the battery runs it |
 | `restore_drill_enterprise` | a real, populated, multi-tenant restore drill | `restore-drill-self` |
+| `reversibility_gate` | WBS-40.08 Reversibility Gate: require evidence a merge CAN be undone | `mutation-gate`, `mutation-gate-self` |
 | `review_pass` | S32, the review pass: one existing reviewer per high-tier unit, and every | `review-depth-self` |
 | `reviewer_brief` | Generate a one-page reviewer brief from a git ref range. SR-09. | `reviewer-brief-self` |
+| `risk_review_orchestrator` | WBS-40.05 Risk-Directed Review Orchestrator. | **NO-DATA**, nothing in the battery runs it |
 | `roadmap_merge` | Three way merge driver for the readiness roadmap JSON, keyed by row id. | `roadmap-merge-self` |
 | `ruling_ledger` | joins a founder ruling to whatever actually landed it. (M7) | `ruling-ledger-self` |
 | `run_evidence` | never destroy the evidence you are about to need. | `run-evidence-self` |
@@ -206,17 +243,20 @@ undocumented corners looks complete and is not.
 | `safe_unwatched_time` | Safe Unwatched Time (SUT) for one run directory, read off the run's own records. | `safe-unwatched-time-self` |
 | `scope_audit` | what a run actually changed, against what it said it would. | `scope-audit-self` |
 | `score_benign_neighbours` | VN5d: the benign near-neighbour pack. Row LL-3's sibling measurement -- | **NO-DATA**, nothing in the battery runs it |
+| `score_vault_recall` | Honest before/after measurement of bm_vault.py's dense/embedding signal, using the | **NO-DATA**, nothing in the battery runs it |
 | `score_vault_retrieval` | retrieval quality for the Brother Vault, measured through | **NO-DATA**, nothing in the battery runs it |
 | `smoke_first` | Run a command over many items only after it succeeds on ONE item first. | `smoke-first-self` |
 | `split_check` | Does a train/test split leak: the same entity in both sides, or a row | `evad-score`, `evad-score-personas`, `evad-score-self`, `fault-lab-self`, `split-check-self` |
 | `surface_budget` | Measure the user-invocable surface and generate bundle/MANIFEST.json. | `surface-budget`, `surface-budget-self` |
-| `system_doc` | a description of this system that cannot drift, because it is generated. | `regen-generated-self`, `system-doc-current`, `system-doc-self` |
+| `survivorship_lineage` | WBS-40.09 Survivorship lineage: produce the per-field winner decision | **NO-DATA**, nothing in the battery runs it |
+| `system_doc` | a description of this system that cannot drift, because it is generated. | `pre-push-gate`, `pre-push-gate-self`, `regen-generated-self`, `system-doc-current`, `system-doc-self` |
 | `task_watchdog` | Task watchdog: per-task drift and block detection with the unlock printed. | `night-tick-selftest`, `task-watchdog-self` |
 | `temp_residue` | Report, and optionally prune, this estate's leftover temp trees. | `temp-residue-self` |
 | `tiny_task_cost` | Tiny-task cost: what a one line change really costs through the door. | `tiny-task-cost-self` |
 | `tmp_sandbox` | One call that makes a test process delete every temporary tree it creates. | **NO-DATA**, nothing in the battery runs it |
 | `tool_bypass_test` | Measure what tool containment ACTUALLY holds, and refuse a claim that exceeds it. | `tool-bypass` |
 | `track_delivery` | Delivery tracking for the readiness roadmap, and the blocker learning behind it. | `delivery-tracker-self`, `delivery-tracking` |
+| `trajectory_eval` | WBS-80.04 Trajectory evaluation: capture the 7 agent process metrics the | **NO-DATA**, nothing in the battery runs it |
 | `unit_trace` | one line per dispatched unit, keyed by the claim that ran it. | `unit-trace-self` |
 | `unseen_set_gate` | Gate a JBEQ-MDM unseen qualification set on its own blind audit. | `unseen-set-gate-self` |
 | `v3_judge` | decide, mechanically, whether one work unit's diff applied a recorded lesson. | `v3-judge-self` |
@@ -226,9 +266,13 @@ undocumented corners looks complete and is not.
 | `vault_benchmark_v2` | Atomic Enterprise Benchmark V2, dimension D: Vault institutional memory. | `benchmark-bundle-self`, `vault-benchmark-v2-self` |
 | `vault_clock_backfill` | VB4-03: backfill verified_at on vault notes that have never declared it. | **NO-DATA**, nothing in the battery runs it |
 | `vault_correct` | Vault correction: fix a wrong vault note with one sentence (row V13, | `vault-correct` |
+| `vault_domain_tags` | WBS-60.01 Vault convergence, One Vault domain tags. | **NO-DATA**, nothing in the battery runs it |
+| `vault_promotion_policy` | WBS-60.04 Vault convergence, Promotion policy. | **NO-DATA**, nothing in the battery runs it |
+| `vault_retrieval_policy` | WBS-60.02 Vault convergence, context retrieval policy. | **NO-DATA**, nothing in the battery runs it |
 | `verify_advisor` | a local page for checking work before a commit. | `verify-advisor-self` |
 | `verify_task_estate` | Run every task's OWN verifyCommand and produce real verdicts. | **NO-DATA**, nothing in the battery runs it |
 | `version_source` | One version and manifest source for this repository's umbrella package. | `version-source-self` |
+| `vertical_to_core` | WBS-60.05 Vault convergence, Vertical-to-Core learning. | **NO-DATA**, nothing in the battery runs it |
 | `virgin_unit_proof` | the gate the v1.0.6 defect proved was missing. | `virgin-unit-proof`, `virgin-unit-proof-self` |
 | `wbs` | The decomposition standard: no node may be dispatched that nobody broke down. | `wbs-granularity`, `wbs-self` |
 | `wiring_audit` | Find capability that exists in the tree but nothing reaches. | `wiring-audit-self` |
@@ -245,8 +289,6 @@ undocumented corners looks complete and is not.
 - `charter-paths-self`: `python3 scripts/test_charter_paths.py -v`
 - `doc-assurance`: `python3 scripts/doc_assurance.py`
 - `doc-assurance-self`: `python3 scripts/doc_assurance.py --selftest`
-- `public-host-truth`: `python3 scripts/public_host_truth.py`
-- `public-host-truth-self`: `python3 scripts/test_public_host_truth.py -v`
 - `key-components`: `python3 scripts/key_components.py`
 - `key-components-self`: `python3 scripts/key_components.py --selftest`
 - `wiring-audit-self`: `python3 scripts/wiring_audit.py --selftest`
@@ -491,7 +533,6 @@ undocumented corners looks complete and is not.
 - `codex-smoke-self`: `python3 scripts/test_codex_smoke.py -v`
 - `cursor-plugin-self`: `python3 scripts/test_cursor_plugin.py`
 - `cursor-hook-run-self`: `python3 scripts/test_cursor_hook_run.py -v`
-- `cursor-deny-chain-self`: `python3 scripts/test_cursor_deny_chain.py -v`
 - `cursor-smoke`: `python3 scripts/cursor_smoke.py`
 - `cursor-smoke-self`: `python3 scripts/test_cursor_smoke.py -v`
 - `client-parity`: `python3 scripts/test_client_parity.py -v`

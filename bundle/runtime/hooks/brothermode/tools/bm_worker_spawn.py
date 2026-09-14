@@ -245,11 +245,18 @@ class SpawningWorker(bm_controller.WorkerAdapter):
         usage = _extract_usage(cost)
         if not isinstance(cost, dict):
             cost = _empty_cost()
+        try:
+            tokens = int(cost.get("tokens") or 0)
+            minutes = int(cost.get("minutes") or 0)
+        except (TypeError, ValueError):
+            # A non-numeric cost field is unreadable, so malformed not a crash.
+            return _result("malformed",
+                           note="cost.tokens/minutes must be numbers, got %r/%r"
+                                % (cost.get("tokens"), cost.get("minutes")))
         return _result("returned",
                        claim=str(answer.get("worker_claim") or ""),
                        artifacts=answer["artifacts"],
-                       cost={"tokens": int(cost.get("tokens") or 0),
-                             "minutes": int(cost.get("minutes") or 0)},
+                       cost={"tokens": tokens, "minutes": minutes},
                        usage=usage)
 
 

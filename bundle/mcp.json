@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "brothermode": {
+      "args": [
+        "mcp/bm_mcp_server.py"
+      ],
+      "command": "python3",
+      "cwd": "${PLUGIN_ROOT}/runtime/hooks/brothermode"
+    }
+  }
+}

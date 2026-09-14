@@ -33,6 +33,15 @@ the installed path, `~/.cursor/plugins/local/brother`.
 
     python3 "${PLUGIN_ROOT}/runtime/brother_run.py" --continue --cwd <repo>
 
+## Agents and modes
+
+Plan mode is a planner. Agent mode is an executor. Ask mode is read-only:
+`status` and `list` only, never a write that claims a result. The shipped
+agents (`brother-planner`, `brother-executor`, `brother-reviewer`) keep the
+same split; merge, push, tag, and release stay the founder's own click on
+every Brother surface, Cursor included. Detail:
+skills/using-brother/references/cursor-native.md.
+
 ## Honest limit
 
 Fence hooks under Cursor are ADVISORY until a live Cursor Agent canary

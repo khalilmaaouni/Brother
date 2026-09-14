@@ -5019,12 +5019,16 @@ def _cited_laws(text):
     """
     pairs = []
     for m in _CITE.finditer(text):
-        nums = [int(n) for n in re.findall(r"\d+", m.group("laws"))]
         span = m.group("laws")
-        # "L7 to L10" and "L17 through L19" name a run; a comma or "and" names
-        # the endpoints only. Both spellings appear in the shipped pages.
-        if len(nums) == 2 and re.search(r"\b(to|through)\b", span):
-            nums = list(range(min(nums), max(nums) + 1))
+        # Expand every "A to B"/"A through B" span, not only a lone pair: a
+        # span can sit beside other cited laws ("L7 to L10 and L16").
+        nums = []
+        for a, b in re.findall(r"L?(\d+)(?:\s*(?:to|through)\s*L?(\d+))?", span):
+            start = int(a)
+            if b:
+                nums.extend(range(min(start, int(b)), max(start, int(b)) + 1))
+            else:
+                nums.append(start)
         for n in nums:
             pairs.append((m.group("file"), n))
     return pairs
@@ -5344,6 +5348,11 @@ def _reader_blocks(text):
             continue
         if _re.match(r"\s*%s" % _MD_BLOCK_START, line):
             flush()
+            if _re.match(r"\s*#{1,6}\s", line):
+                # A heading ends at its own line; the next unblanked line
+                # starts a new block.
+                blocks.append((n, line.strip()))
+                continue
         if not buf:
             start = n
         buf.append(line)
@@ -8936,8 +8945,10 @@ def main():
     only = None
     argv = [a for a in sys.argv[1:]]
     for i, a in enumerate(argv):
-        if a == "--only" and i + 1 < len(argv):
-            only = argv[i + 1]
+        if a == "--only":
+            # A bare --only supplies no pattern; treat it like --only= so the
+            # refusal below fires instead of silently running the whole bed.
+            only = argv[i + 1] if i + 1 < len(argv) else ""
         elif a.startswith("--only="):
             only = a.split("=", 1)[1]
     if only is not None and not only.strip():

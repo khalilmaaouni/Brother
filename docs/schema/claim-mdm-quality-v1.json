@@ -1,0 +1,54 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "claim-mdm-quality-v1",
+  "title": "Golden Master MDM Quality Claim v1",
+  "description": "WBS-50.04 MDM quality claims. The roadmap's own words: 'Golden Master Contract should register claims before publication, for example: precision floor; recall floor; catastrophic false-merge tolerance; segment floor; residual normalization error; reconciliation tolerance. These are frozen before the Golden Master is accepted. Later operational evidence resolves them.' claim-lifecycle-v1 (WBS-50.01) is explicit that a claim's own asserted content is deferred to later WBS-50 units; this is that content for the Golden Master domain. Joined to a claim-lifecycle-v1 record by claim_id + revision_id, the same join shape claim-evidence-v1 and claim-score-v1 already use (scripts/golden_master_quality_claims.py's check_matches_lifecycle), and to a golden-master-contract-v1 record via master_id plus that record's own quality_claim_ids array -- the hook point golden-master-contract-v1 already names ('Claim IDs this master record will feed once published... This contract does not score them itself'), never a second hook invented here. A floor/tolerance shape, not claim-score-v1's probabilistic-forecast shape (interval/probability): these six example claims each state a single numeric threshold and which direction operational evidence must respect it (gte for a floor, lte for a tolerance/ceiling), not a stated interval or probability to be scored for calibration. Only the keyword subset the sibling WBS-50 schemas already enforce is used here: type, required, properties, enum, const, additionalProperties.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "claim_id", "revision_id", "master_id", "quality_dimension", "comparison", "threshold"],
+  "properties": {
+    "schema_version": {
+      "const": "claim-mdm-quality-v1",
+      "description": "Which shape this record follows, so a reader never has to guess."
+    },
+    "claim_id": {
+      "type": "string",
+      "description": "Must match the claim-lifecycle-v1 record's claim_id for the same claim (checked by check_matches_lifecycle) and must appear in the golden-master-contract-v1 record's own quality_claim_ids array (checked by check_matches_master)."
+    },
+    "revision_id": {
+      "type": "string",
+      "description": "Must match the claim-lifecycle-v1 record's revision_id: scoring resolves one exact historical revision, never a rewritten successor (WBS-50.01's own scoring-target rule, reused here rather than re-argued)."
+    },
+    "master_id": {
+      "type": "string",
+      "description": "The golden-master-contract-v1 record's own master_id this claim was registered for."
+    },
+    "quality_dimension": {
+      "enum": [
+        "precision_floor", "recall_floor", "catastrophic_false_merge_tolerance",
+        "segment_floor", "residual_normalization_error", "reconciliation_tolerance"
+      ],
+      "description": "One of the six example dimensions the roadmap names for WBS-50.04. Named as examples in the roadmap's own words, not stated as an exhaustive closed list in principle, but this schema version enumerates exactly those six; a project needing a seventh extends the enum in a later schema version rather than smuggling a new value past additionalProperties:false."
+    },
+    "comparison": {
+      "enum": ["gte", "lte"],
+      "description": "Which direction operational evidence must respect the threshold: gte for a floor (measured_value must be at or above threshold, e.g. precision_floor, recall_floor, segment_floor), lte for a tolerance/ceiling (measured_value must be at or below threshold, e.g. catastrophic_false_merge_tolerance, residual_normalization_error, reconciliation_tolerance)."
+    },
+    "threshold": {
+      "type": "number",
+      "description": "The floor or tolerance value itself. Frozen before the Golden Master is accepted (scripts/claim_lifecycle.py's FROZEN state semantics, reused not reinvented): once the matching claim-lifecycle-v1 revision reaches FROZEN, this value may not change without a correction (a new revision_id)."
+    },
+    "measured_value": {
+      "type": ["number", "null"],
+      "description": "The real operational evidence value once resolved, or null while unresolved. Must be null exactly when resolved_at is null, and non-null exactly when resolved_at is non-null (checked by hand: the enforced keyword subset has no if/then). A claim with no real operational evidence source yet stays null here honestly -- never a fabricated PASS."
+    },
+    "resolved_at": {
+      "type": ["string", "null"],
+      "description": "ISO-8601 timestamp real operational evidence resolved this claim, or null while unresolved."
+    },
+    "evidence_note": {
+      "type": ["string", "null"],
+      "description": "A short, human-readable note naming what operational evidence resolved this claim (or, honestly, why none exists yet to resolve it). May be set even while measured_value/resolved_at stay null, to record the reason for an honest NO-DATA rather than leaving it unexplained."
+    }
+  }
+}

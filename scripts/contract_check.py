@@ -275,11 +275,11 @@ def hand_rules(record, schema):
     # MUST_ANSWER CITED ONCE DELIVERED (F1).
     if (isinstance(must_answer, list) and cur_idx is not None
             and delivered_idx is not None and cur_idx >= delivered_idx):
-        receipt_ids = set()
+        receipts_by_id = {}
         if isinstance(receipts, list):
             for r in receipts:
                 if isinstance(r, dict) and isinstance(r.get("id"), str):
-                    receipt_ids.add(r["id"])
+                    receipts_by_id[r["id"]] = r
         for entry in must_answer:
             if not isinstance(entry, dict):
                 continue
@@ -294,9 +294,21 @@ def hand_rules(record, schema):
                 problems.append("must_answer.%s: receipt_id is required "
                                 "once state is 'delivered' or later"
                                 % field_name)
-            elif receipt_id not in receipt_ids:
+            elif receipt_id not in receipts_by_id:
                 problems.append("must_answer.%s: receipt_id %r names no "
                                 "entry in receipts" % (field_name, receipt_id))
+            else:
+                # RECEIPT ADMISSIBILITY (EV-4, WBS-20.02): a delivered
+                # record may not cite its own FAIL or NO-DATA as the
+                # backing for an answer. A FAIL receipt is honest and
+                # citable elsewhere (as the record of a failure); it is
+                # only inadmissible here, as proof an answer holds.
+                verdict = receipts_by_id[receipt_id].get("verdict")
+                if verdict in ("FAIL", "NO-DATA"):
+                    problems.append(
+                        "must_answer.%s: receipt_id %r carries verdict %r, "
+                        "which cannot back an answer once state is "
+                        "'delivered' or later" % (field_name, receipt_id, verdict))
 
     # RECEIPT REF GRAMMAR (F4).
     if isinstance(receipts, list):

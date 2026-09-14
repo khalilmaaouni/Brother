@@ -406,6 +406,117 @@ def _changed_between(repo, before, after, runner=None):
     return [p for p in (proc.stdout or "").splitlines() if p.strip()]
 
 
+#: bm_store.py loaded by path once and cached as (module_or_None, why_not),
+#: same technique scripts/attempt_hook.py already uses for scripts/setup.py:
+#: tools/ is not a package, this file can run from either the hub dev
+#: checkout or the installed bundle, and a plain `import bm_store` would
+#: resolve against sys.path and could pick up a different checkout. A load
+#: failure is cached too, so a missing or broken bm_store.py prints once per
+#: process, not once per unit integrated.
+_BM_STORE_CACHE = []
+
+
+def _load_bm_store():
+    here = os.path.dirname(os.path.abspath(__file__))
+    for candidate in (
+        # hub dev layout: scripts/integrate.py beside products/brothermode/tools/
+        os.path.join(os.path.dirname(here), "products", "brothermode",
+                     "tools", "bm_store.py"),
+        # installed bundle layout: bundle/runtime/integrate.py beside
+        # bundle/runtime/hooks/brothermode/tools/bm_store.py
+        os.path.join(here, "hooks", "brothermode", "tools", "bm_store.py"),
+    ):
+        if not os.path.isfile(candidate):
+            continue
+        try:
+            import importlib.util
+            spec = importlib.util.spec_from_file_location(
+                "bm_store_for_integrate", candidate)
+            if spec is None or spec.loader is None:
+                continue
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            _BM_STORE_CACHE.append((mod, None))
+            return _BM_STORE_CACHE[0]
+        except Exception as e:  # noqa: BLE001
+            _BM_STORE_CACHE.append((None, "%s: %s" % (type(e).__name__, e)))
+            return _BM_STORE_CACHE[0]
+    _BM_STORE_CACHE.append((None, "no bm_store.py found beside %s" % here))
+    return _BM_STORE_CACHE[0]
+
+
+def _interactive_fence_conflict(repo, before, lane_branch, runner=None):
+    """(conflict_or_None, note). Closes the bypass found live 2026-09-14:
+    a path claimed through bm_store.py's interactive fence (the store
+    products/brothermode/tools/bm_fence_hook.py checks in front of every
+    Cursor/Claude Code edit) was invisible to claim_store.py's own per-unit
+    claims, so the SAME path could be landed through brother_run's
+    autonomous engine while an interactive session still held it. The two
+    stores keep tracking different things (a unit id there, a set of paths
+    here) and stay two stores; this is the one place autonomous integration
+    now also asks the interactive store, right before it would advance
+    canonical, using the exact same query and the exact same
+    bm_store.paths_overlap comparison bm_fence_hook.py's active_claims()
+    already runs for the interactive side, so the two fences can never read
+    a path two different ways.
+
+    `conflict` names the path, the claim's name, lifecycle_uuid and
+    session_id. `note` is a one-line reason the check could not be made
+    (no bm_store.py, no store at this root, store unreadable): NOT a
+    conflict, matching bm_fence_hook.py's own fail-open direction for a
+    store that is absent or unreadable, because the overwhelming majority
+    of repositories (including every existing integrate.py test fixture)
+    never initialize an interactive fence at all, and a transient sqlite
+    hiccup must not halt the whole autonomous loop over a check that is
+    ADDITIONAL to, not a replacement for, canonical's own merge and
+    revalidation gates below."""
+    bs, why = _load_bm_store()
+    if bs is None:
+        return None, "bm_store.py unavailable (%s); interactive fence not checked" % why
+    try:
+        root, _source = bs.resolve_root(repo)
+    except Exception as e:  # noqa: BLE001
+        return None, "interactive fence root could not be resolved (%s: %s)" % (
+            type(e).__name__, e)
+    if root is None:
+        return None, None  # no BrotherMode project anchored at this repo at all
+    store_file = bs.store_path(root)
+    if not os.path.isfile(store_file):
+        return None, None  # nobody ever ran `bm_store.py init` here; no fence to check
+    touched = _changed_between(repo, before, lane_branch, runner)
+    if not touched:
+        return None, None  # nothing to compare, or git could not read the range
+    try:
+        store = bs.ReadOnlyStore(root)
+    except Exception as e:  # noqa: BLE001
+        return None, ("interactive fence store at %s could not be opened "
+                      "read-only (%s: %s)" % (store_file, type(e).__name__, e))
+    try:
+        rows = bs._exec(store,
+            "SELECT c.path AS path, r.name AS name, "
+            "r.lifecycle_uuid AS lifecycle_uuid, r.session_id AS session_id "
+            "FROM claims c JOIN records r ON r.lifecycle_uuid = c.lifecycle_uuid "
+            "WHERE r.state='active'").fetchall()
+    except Exception as e:  # noqa: BLE001
+        return None, ("interactive fence store at %s could not be read "
+                      "(%s: %s)" % (store_file, type(e).__name__, e))
+    finally:
+        store.close()
+    if not rows:
+        return None, None
+    for path in touched:
+        try:
+            candidate = bs.canonicalize_path(root, path)
+        except Exception:  # noqa: BLE001
+            continue  # outside the fenced project; nothing to compare against
+        for row in rows:
+            if bs.paths_overlap(candidate, row["path"]):
+                return {"path": path, "claim_path": row["path"],
+                       "name": row["name"], "lifecycle_uuid": row["lifecycle_uuid"],
+                       "session_id": row["session_id"]}, None
+    return None, None
+
+
 def integrate_one(repo, lane_branch, unit, runner=None, check_runner=None,
                   run_id=None, harness_revision=None):
     """One unit's lane into canonical, or a named reason why not.
@@ -471,6 +582,27 @@ def integrate_one(repo, lane_branch, unit, runner=None, check_runner=None,
         if not before:
             return {"verdict": NODATA, "unit": unit_id, "canonical": None,
                     "reason": "canonical has no readable tip"}
+
+        # THE INTERACTIVE FENCE CHECK, added to close the bypass found live
+        # 2026-09-14 (WBS-70.04's canary): a path an interactive session held
+        # through bm_store.py's fence was invisible to this engine's own
+        # claim_store.py, which tracks unit ids, never paths. Asked HERE,
+        # before the merge touches anything, so a conflict refuses exactly
+        # like the dirty-tree and stop-file checks above rather than landing
+        # a merge that then has to be unwound.
+        fence_conflict, fence_note = _interactive_fence_conflict(
+            repo, before, lane_branch, runner)
+        if fence_conflict is not None:
+            return {"verdict": REFUSED, "unit": unit_id, "canonical": before,
+                    "reason": "%s is inside the active BrotherMode interactive "
+                              "fence '%s' (lifecycle %s, session %s); the "
+                              "autonomous engine refuses to land a write there "
+                              "until that fence releases it"
+                              % (fence_conflict["path"], fence_conflict["name"],
+                                 fence_conflict["lifecycle_uuid"],
+                                 fence_conflict["session_id"] or "(none)")}
+        if fence_note:
+            sys.stderr.write("integrate: %s\n" % fence_note)
 
         # THE APPLY. --no-ff so the integration is its own commit and the
         # unwind is one reset to a recorded tip. The message is written here

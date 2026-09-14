@@ -429,5 +429,23 @@ class CliMain(unittest.TestCase):
             self.assertIn("PASS", verify.stdout)
 
 
+class Night0912PortablePack(unittest.TestCase):
+    def test_verify_pack_json_array_state_is_fail_not_a_crash(self):
+        with tempfile.TemporaryDirectory() as d:
+            zip_path = os.path.join(d, "pack.zip")
+            with zipfile.ZipFile(zip_path, "w") as zf:
+                zf.writestr("01-START-HERE.md", "DONE: 1 OPEN: 0")
+                zf.writestr("02-MEGA-PROMPT.md", "x")
+                zf.writestr("03-BOARD.html",
+                            '<span class="v">1/1</span><span class="l">rows done')
+                zf.writestr("05-STATE.json", "[]")
+
+            verdict, problems = PP.verify_pack(zip_path)
+
+        self.assertEqual(verdict, "FAIL")
+        self.assertTrue(any("05-STATE.json" in p for p in problems),
+                        "expected a problem naming 05-STATE.json: %r" % problems)
+
+
 if __name__ == "__main__":
     unittest.main()

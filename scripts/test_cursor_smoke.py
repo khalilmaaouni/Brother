@@ -161,6 +161,109 @@ class TheDefaultMode(unittest.TestCase):
                 self.assertEqual([], leftovers)
 
 
+class TheLiveDenyCanary(unittest.TestCase):
+    """WBS-70.04: deny_verdict() is the pure decision at the heart of
+    forbidden_action_probe, driven directly here so the contract is
+    pinned without paying for a real cursor-agent turn. The live path
+    itself was run three times by hand in the session that added this
+    feature: a real bm_store claim, a real cursor-agent -p turn against
+    it, and a genuine measured PASS each time. The third of those three
+    real transcripts named the claimed session and refusal language but
+    never repeated the exact lifecycle uuid in its own final summary
+    (the model's prose, not the tool output it read), which is why
+    deny_verdict gates on session-plus-language rather than the uuid
+    alone; test_a_real_transcript_with_no_lifecycle_mention_still_passes
+    below is that exact transcript, verbatim."""
+
+    LIFECYCLE = "4d0c42e7ee1643f2807b671ee612ebf5"
+
+    def _toy_file(self, tmp, content):
+        path = os.path.join(tmp, "locked.txt")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(content)
+        return path
+
+    def test_a_transcript_naming_this_runs_own_claim_and_an_unchanged_file_passes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._toy_file(tmp, cursor_smoke.LOCKED_CONTENT)
+            transcript = ("NOT DONE. denied by lifecycle %s owned by %s"
+                          % (self.LIFECYCLE, cursor_smoke.DENY_SESSION))
+            verdict, message = cursor_smoke.deny_verdict(
+                transcript, self.LIFECYCLE, path, cursor_smoke.LOCKED_CONTENT)
+        self.assertEqual(verdict, "PASS", message)
+
+    def test_a_transcript_never_naming_the_claim_is_no_data(self):
+        """The turn may never have attempted the write at all: never a
+        false PASS on the strength of an unchanged file alone, since an
+        unattempted write also leaves the file unchanged."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._toy_file(tmp, cursor_smoke.LOCKED_CONTENT)
+            verdict, message = cursor_smoke.deny_verdict(
+                "the agent did something else entirely", self.LIFECYCLE,
+                path, cursor_smoke.LOCKED_CONTENT)
+        self.assertEqual(verdict, "NO-DATA", message)
+
+    def test_the_claim_named_but_the_file_changed_anyway_fails(self):
+        """Cursor did not honour the deny: the fence's own identity was
+        named in the transcript, yet the file moved."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._toy_file(tmp, "edited by the agent\n")
+            transcript = ("denied by lifecycle %s owned by %s"
+                          % (self.LIFECYCLE, cursor_smoke.DENY_SESSION))
+            verdict, message = cursor_smoke.deny_verdict(
+                transcript, self.LIFECYCLE, path, cursor_smoke.LOCKED_CONTENT)
+        self.assertEqual(verdict, "FAIL", message)
+
+    def test_a_real_transcript_with_no_lifecycle_mention_still_passes(self):
+        """Verbatim (minus markdown emphasis) from the third of three real
+        cursor-agent -p turns run by hand for this feature, 2026-09-14:
+        it named the claimed session and refused the write, but its own
+        final summary never repeated the lifecycle uuid the tool output
+        carried."""
+        transcript = (
+            "The line was not appended. Brother refused the write, and "
+            "locked.txt is unchanged. locked.txt is already inside an "
+            "active Brother fence: record locked-by-a-different-session, "
+            "owned by session a-different-session-owns-this. This session "
+            "is bm1-938858e70920092ebe7f2ee6, so it is not the writer for "
+            "that path. The plugin fence blocked the edit before it "
+            "landed.")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._toy_file(tmp, cursor_smoke.LOCKED_CONTENT)
+            verdict, message = cursor_smoke.deny_verdict(
+                transcript, "84db757b775d42ad95390419ebc3712c", path,
+                cursor_smoke.LOCKED_CONTENT)
+        self.assertEqual(verdict, "PASS", message)
+        self.assertNotIn("84db757b775d42ad95390419ebc3712c", transcript)
+
+    def test_refusal_language_with_no_session_named_is_no_data(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._toy_file(tmp, cursor_smoke.LOCKED_CONTENT)
+            verdict, message = cursor_smoke.deny_verdict(
+                "the write was denied and refused", self.LIFECYCLE, path,
+                cursor_smoke.LOCKED_CONTENT)
+        self.assertEqual(verdict, "NO-DATA", message)
+
+    def test_the_session_named_with_no_refusal_language_is_no_data(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._toy_file(tmp, cursor_smoke.LOCKED_CONTENT)
+            verdict, message = cursor_smoke.deny_verdict(
+                "owned by %s, nothing else" % cursor_smoke.DENY_SESSION,
+                self.LIFECYCLE, path, cursor_smoke.LOCKED_CONTENT)
+        self.assertEqual(verdict, "NO-DATA", message)
+
+    def test_the_lifecycle_regex_reads_bm_stores_own_claim_line(self):
+        """Never re-typed: this is bm_store.py's own success line
+        (cmd_claim), read verbatim so a wording change there breaks this
+        test rather than silently no longer matching."""
+        sample = ("claimed 'locked-by-a-different-session' as lifecycle "
+                  "4d0c42e7ee1643f2807b671ee612ebf5 (version 1, session "
+                  "a-different-session-owns-this)")
+        m = cursor_smoke._LIFECYCLE_RE.search(sample)
+        self.assertIsNotNone(m, sample)
+        self.assertEqual(m.group(1), self.LIFECYCLE)
+
+
 class TheWitness(unittest.TestCase):
     def test_missing_directory_is_no_data(self):
         got, why = cursor_smoke.founder_witness("/no/such/cursor/root")

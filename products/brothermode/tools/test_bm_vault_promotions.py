@@ -33,10 +33,13 @@ except ImportError:
         % _e100_os.path.basename(__file__))
 
 
-def note(promotion=None, by=None, at=None, no_frontmatter=False, author=None):
+def note(promotion=None, by=None, at=None, no_frontmatter=False, author=None,
+         type_=None, created=None, extra=None):
     if no_frontmatter:
         return "# a note with no frontmatter at all\n"
-    lines = ["---", "type: finding", "status: standing"]
+    lines = ["---", "type: %s" % (type_ or "finding"), "status: standing"]
+    if created:
+        lines.append("created: %s" % created)
     if author:
         lines.append("author: %s" % author)
     if promotion:
@@ -45,6 +48,9 @@ def note(promotion=None, by=None, at=None, no_frontmatter=False, author=None):
         lines.append("promoted_by: %s" % by)
     if at:
         lines.append("promoted_at: %s" % at)
+    if extra:
+        for k, v in extra.items():
+            lines.append("%s: %s" % (k, v))
     lines += ["---", "", "# a note"]
     return "\n".join(lines) + "\n"
 
@@ -326,6 +332,63 @@ class CALIBRATION_the_sod_wiring_actually_bites(VaultFixture):
                               "slip through, proving the real test bites")
         finally:
             lc.check_separation_of_duties = real
+
+
+class DepthFieldsGateValidationOfNewFailureNotes(VaultFixture):
+    """AGENTS.md line 45 (Kay Vault, 3. Note conventions): a `type: failure`
+    note created on or after 2026-09-13 needs evidence_refs,
+    regression_fixture, owner, review_by before it counts as validated
+    wisdom. Wired into cmd_promote's validated-target path."""
+
+    def test_new_failure_note_missing_all_four_fields_is_refused(self):
+        original = note("candidate", author="agent-session", type_="failure",
+                         created="2026-09-14")
+        self._write("a.md", original)
+        rc = promo.cmd_promote(self.vault, "a.md", "validated", "khalil",
+                                "2026-09-14", apply_changes=True)
+        self.assertEqual(rc, 1)
+        state, _record, _problems = lc.read_promotion(self._text("a.md"))
+        self.assertEqual(state, "candidate", "a refused promotion must not change state")
+        self.assertEqual(self._text("a.md"), original,
+                          "a refused promotion must not write")
+
+    def test_new_failure_note_with_all_four_fields_promotes(self):
+        original = note("candidate", author="agent-session", type_="failure",
+                         created="2026-09-14",
+                         extra={"evidence_refs": "tests/test_x.py",
+                                "regression_fixture": "test_x_regression",
+                                "owner": "khalil",
+                                "review_by": "2026-12-01"})
+        self._write("a.md", original)
+        rc = promo.cmd_promote(self.vault, "a.md", "validated", "khalil",
+                                "2026-09-14", apply_changes=True)
+        self.assertEqual(rc, 0)
+        state, record, problems = lc.read_promotion(self._text("a.md"))
+        self.assertEqual(state, "validated")
+        self.assertEqual(record["promoted_by"], "khalil")
+        self.assertEqual(problems, [])
+
+    def test_pre_rule_failure_note_missing_all_four_fields_still_promotes(self):
+        original = note("candidate", author="agent-session", type_="failure",
+                         created="2026-09-01")
+        self._write("a.md", original)
+        rc = promo.cmd_promote(self.vault, "a.md", "validated", "khalil",
+                                "2026-09-14", apply_changes=True)
+        self.assertEqual(rc, 0, "a note created before DEPTH_SINCE is not retroactive")
+        state, _record, problems = lc.read_promotion(self._text("a.md"))
+        self.assertEqual(state, "validated")
+        self.assertEqual(problems, [])
+
+    def test_non_failure_note_missing_all_four_fields_still_promotes(self):
+        original = note("candidate", author="agent-session", type_="finding",
+                         created="2026-09-14")
+        self._write("a.md", original)
+        rc = promo.cmd_promote(self.vault, "a.md", "validated", "khalil",
+                                "2026-09-14", apply_changes=True)
+        self.assertEqual(rc, 0, "the depth rule is failure-type-only")
+        state, _record, problems = lc.read_promotion(self._text("a.md"))
+        self.assertEqual(state, "validated")
+        self.assertEqual(problems, [])
 
 
 if __name__ == "__main__":

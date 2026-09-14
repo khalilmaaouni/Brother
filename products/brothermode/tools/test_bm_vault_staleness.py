@@ -375,5 +375,13 @@ class BrokenSeamIsCaughtByThisSuite(unittest.TestCase):
         self.assertFalse(not_stale)
 
 
+class Night0912BmVaultStaleness(unittest.TestCase):
+    def test_malformed_verified_at_with_whitespace(self):
+        state, verified, age, problem = st.classify(
+            "---\nverified_at: not a date\n---\n", today=TODAY)
+        self.assertEqual(state, "malformed")
+        self.assertIsNotNone(problem)
+
+
 if __name__ == "__main__":
     unittest.main()

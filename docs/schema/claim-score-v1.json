@@ -1,0 +1,67 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "claim-score-v1",
+  "title": "BrotherDS Claim Score Input v1",
+  "description": "WBS-50.03 Verified Claim Rate 2D. The roadmap names six separate scoring dimensions (resolution rate, empirical interval coverage/calibration, sharpness/interval width, proper score where applicable, baseline-relative skill, age of unresolved claims) and says explicitly: 'Keep Verified Claim Rate. Do not replace it... No blended composite.' scripts/claim_score.py computes those dimensions; this record is the content a claim needs to carry, beyond its claim-lifecycle-v1 identity and state, to make that computation possible. It does not invent a fourth evidence vocabulary and does not duplicate the lifecycle record's own state field -- it is joined to the matching claim-lifecycle-v1 record by claim_id + revision_id (scripts/claim_score.py's check_matches_lifecycle), the same join shape claim-evidence-v1 already uses against the lifecycle record. Two claim shapes only, matching exactly the two dimension families the roadmap names: an interval claim (scored for coverage/calibration and sharpness) and a probability claim (scored for the proper score, Brier, and its baseline-relative skill). Domain-specific claim content (MDM quality floors, mobile product claims -- WBS-50.04/50.05) is out of scope here; a third claim_type can extend this enum later without breaking this shape. Only the keyword subset claim-lifecycle-v1 and claim-evidence-v1 already enforce is used here: type, required, properties, enum, const, additionalProperties.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "claim_id", "revision_id", "claim_type", "created_at"],
+  "properties": {
+    "schema_version": {
+      "const": "claim-score-v1",
+      "description": "Which shape this record follows, so a reader never has to guess."
+    },
+    "claim_id": {
+      "type": "string",
+      "description": "Must match the claim-lifecycle-v1 record's claim_id for the same claim (checked by check_matches_lifecycle)."
+    },
+    "revision_id": {
+      "type": "string",
+      "description": "Must match the claim-lifecycle-v1 record's revision_id: scoring resolves one exact historical revision, never a rewritten successor (WBS-50.01's own scoring-target rule, reused here rather than re-argued)."
+    },
+    "claim_type": {
+      "enum": ["interval", "probability"],
+      "description": "Which scoring dimensions apply. interval: stated_interval is scored for coverage/calibration (did the outcome fall inside it) and sharpness (how wide it was). probability: stated_probability is scored with the Brier proper scoring rule and its baseline-relative skill."
+    },
+    "created_at": {
+      "type": "string",
+      "description": "ISO-8601 timestamp the claim was first drafted (claim-lifecycle-v1's DRAFT state). Used for age_of_unresolved while the claim has not yet resolved."
+    },
+    "resolved_at": {
+      "type": ["string", "null"],
+      "description": "ISO-8601 timestamp the realised outcome became known, or null while still unresolved. Must be null exactly when outcome_value is null, and non-null exactly when outcome_value is non-null (checked by hand: the enforced keyword subset has no if/then)."
+    },
+    "stated_interval": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["lower", "upper"],
+      "properties": {
+        "lower": {"type": "number"},
+        "upper": {"type": "number"}
+      },
+      "description": "Required (non-null) when claim_type is interval: the stated uncertainty interval, lower <= upper. Must be null when claim_type is probability."
+    },
+    "stated_probability": {
+      "type": ["number", "null"],
+      "description": "Required (non-null), 0..1, when claim_type is probability. Must be null when claim_type is interval."
+    },
+    "baseline_interval": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["lower", "upper"],
+      "properties": {
+        "lower": {"type": "number"},
+        "upper": {"type": "number"}
+      },
+      "description": "Optional naive-baseline interval, only meaningful when claim_type is interval. Null when no baseline is supplied for this claim (baseline-relative skill is then NO-DATA for it)."
+    },
+    "baseline_probability": {
+      "type": ["number", "null"],
+      "description": "Optional naive-baseline probability, 0..1, only meaningful when claim_type is probability, for the Brier Skill Score. Null when no baseline is supplied for this claim."
+    },
+    "outcome_value": {
+      "type": ["number", "boolean", "null"],
+      "description": "The realised outcome once known. A number for interval claims (checked against [lower, upper]). A boolean for probability claims (scored against stated_probability via Brier: (p - outcome)^2). Null while unresolved (resolved_at is then also null)."
+    }
+  }
+}

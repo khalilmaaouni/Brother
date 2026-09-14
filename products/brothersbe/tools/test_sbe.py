@@ -2035,6 +2035,122 @@ class TestNestedCheckoutPrune(unittest.TestCase):
             shutil.rmtree(d, ignore_errors=True)
 
 
+class TestAgentBriefHygiene(unittest.TestCase):
+    """The per-agent shape of BMAD-METHOD Issue #1343's context-bloat finding:
+    a subagent brief's own `.md` frontmatter is text an orchestrator reloads on
+    every dispatch decision, so a tools list that contradicts the brief's own
+    read-only description, or a description that reads past one sentence, is a
+    mechanical, checkable version of the load the issue names. Calibrated on
+    this repository's own products/brothersbe/agents/*.md shape: a bracket
+    `tools:` list and a `description:` line that opens with "Read-only" for
+    every reviewer agent here."""
+
+    def _agent_line(self, root):
+        r = subprocess.run([sys.executable, os.path.join(HERE, "sbe_score.py")],
+                           env=dict(os.environ, SBE_LINT_ROOT=root, BROTHERSBE_REGISTRIES=""),
+                           capture_output=True, text=True)
+        return next((l for l in r.stdout.splitlines()
+                     if l.startswith("agent-brief-hygiene")), "")
+
+    def test_a_readonly_reviewer_listing_write_is_flagged(self):
+        """The calibration this repo's own agents give: every reviewer agent
+        under products/brothersbe/agents/ opens its description with
+        "Read-only" and lists no write tool. One that does both at once is
+        exactly the mismatch check (a) exists to catch."""
+        with tempfile.TemporaryDirectory() as d:
+            agents = os.path.join(d, "agents")
+            os.makedirs(agents)
+            io.open(os.path.join(agents, "bad-reviewer.md"), "w").write(
+                "---\nname: bad-reviewer\n"
+                "description: Read-only backend change review. Covers contracts and errors.\n"
+                "tools: [Read, Grep, Glob, Write]\n"
+                "model: opus\n---\n\nBody.\n")
+            line = self._agent_line(d)
+            self.assertIn("FAIL", line.split()[:2], line)
+            self.assertIn("carries Write", line, line)
+
+    def test_a_description_over_the_one_sentence_budget_is_flagged(self):
+        """Finding (b): BMAD #1343's failure mode at brief-file scale. The
+        Foundry table's guidance is one sentence per description; this one is
+        four, well past AGENT_DESC_MAX_CHARS."""
+        with tempfile.TemporaryDirectory() as d:
+            agents = os.path.join(d, "agents")
+            os.makedirs(agents)
+            long_desc = ("This agent reviews one narrow surface for correctness problems. "
+                        "It also checks a second, unrelated surface at the same time. "
+                        "Then it drafts a report naming every finding it turned up. "
+                        "Finally it waits for a human to read all of that before moving on.")
+            self.assertGreater(len(long_desc), 200, "fixture must exceed the budget it tests")
+            io.open(os.path.join(agents, "verbose.md"), "w").write(
+                "---\nname: verbose\ndescription: %s\ntools: [Read]\n---\n\nBody.\n" % long_desc)
+            line = self._agent_line(d)
+            self.assertIn("FAIL", line.split()[:2], line)
+            self.assertIn("one-sentence budget", line, line)
+
+    def test_a_clean_brief_mirroring_this_repos_own_style_passes(self):
+        """The negative control: a short read-only description with no write
+        tool, the shape every real agent brief in this repository already
+        has, must not be flagged."""
+        with tempfile.TemporaryDirectory() as d:
+            agents = os.path.join(d, "agents")
+            os.makedirs(agents)
+            io.open(os.path.join(agents, "good-reviewer.md"), "w").write(
+                "---\nname: good-reviewer\n"
+                "description: Read-only review of one narrow surface.\n"
+                "tools: [Read, Grep, Glob, Bash]\nmodel: opus\n---\n\nBody.\n")
+            line = self._agent_line(d)
+            self.assertIn("PASS", line.split()[:2], line)
+            self.assertIn(", clean", line, line)
+
+    def test_an_allow_silent_comment_with_a_real_reason_waives_the_hit(self):
+        """Same convention as LINT_PATTERNS: the marker alone waives nothing,
+        a substantive reason on the offending line does."""
+        with tempfile.TemporaryDirectory() as d:
+            agents = os.path.join(d, "agents")
+            os.makedirs(agents)
+            io.open(os.path.join(agents, "waived.md"), "w").write(
+                "---\nname: waived\n"
+                "description: Read-only review that also files its own trivial fix-up commits.\n"
+                "tools: [Read, Grep, Write]  # sbe: allow-silent this reviewer patches trivial "
+                "lint typos as part of its own review pass\n"
+                "model: opus\n---\n\nBody.\n")
+            line = self._agent_line(d)
+            self.assertIn("PASS", line.split()[:2], line)
+            self.assertIn("suppressed by an inline", line, line)
+
+    def test_a_brief_with_no_tools_list_is_disclosed_not_flagged(self):
+        """products/brothermode/agents/*.md uses `disallowedTools:` and no
+        `tools:` line at all: nothing here to compare against a description,
+        so this must be named in the note and never counted as a hit."""
+        with tempfile.TemporaryDirectory() as d:
+            agents = os.path.join(d, "agents")
+            os.makedirs(agents)
+            io.open(os.path.join(agents, "denylist.md"), "w").write(
+                "---\nname: denylist\n"
+                "description: Read-only review of one narrow surface.\n"
+                "disallowedTools: Write, Edit\n---\n\nBody.\n")
+            line = self._agent_line(d)
+            self.assertIn("PASS", line.split()[:2], line)
+            self.assertIn("no `tools:` list", line, line)
+
+    def test_a_wholly_commented_out_brief_is_not_read_as_real_frontmatter(self):
+        """The rendered-vs-raw defect this file's own docstrings name
+        elsewhere (check_vault_log_per_active_day): a brief whose whole body
+        sits inside an HTML comment must not have its hidden `tools:`/
+        `description:` lines certified as real content, and must not be
+        silently counted as an examined, clean file either."""
+        with tempfile.TemporaryDirectory() as d:
+            agents = os.path.join(d, "agents")
+            os.makedirs(agents)
+            io.open(os.path.join(agents, "hidden.md"), "w").write(
+                "<!--\n---\nname: hidden\n"
+                "description: Read-only review of one narrow surface.\n"
+                "tools: [Read, Grep, Glob, Write]\n---\n-->\n")
+            line = self._agent_line(d)
+            self.assertNotIn("carries Write", line, line)
+            self.assertIn("NO-DATA", line.split()[:2], line)
+
+
 class TestStrictMode(unittest.TestCase):
     def test_severity_decides_what_a_strict_run_blocks_on(self):
         """The severity each check declares at write time is what a FAIL does to
@@ -4302,6 +4418,32 @@ class TestCaptureDefaultsAndAutosaveContentScan(unittest.TestCase):
         self.assertEqual(before, after,
                          "an unrecognized flag changed the vault before refusing")
 
+    def test_category_with_no_value_refuses_instead_of_purging_everything(self):
+        """Night 0912 defect e7569a8f5540. `--category` naming NO value (the
+        flag last on the command line, or followed only by `--yes`) used to
+        fall through to an empty filter, which `not only or c == only` reads
+        as "no filter at all": `data-purge --yes --category` purged every
+        category, the opposite of the one-category scope the flag asks for.
+        This is the missing-value sibling of the mistyped-flag case above:
+        both are the same class of defect (a malformed --category argument
+        must refuse, not silently run as if nothing were asked)."""
+        vault = self._vault()
+        stored = self._fire(vault, "outcomes-append", "/tmp/acme-backend",
+                            BROTHERSBE_TELEMETRY_METRICS="1",
+                            BROTHERSBE_TELEMETRY_CORRECTIONS="1")
+        self.assertEqual(stored.returncode, 0, stored.stderr)
+        before = self._snapshot(vault)
+        out = subprocess.run([sys.executable, self.TEL, "data-purge",
+                              "--yes", "--category"],
+                             capture_output=True, text=True, env=self._env(vault))
+        self.assertNotEqual(out.returncode, 0,
+                            "--category with no value ran as if it named nothing "
+                            "to filter: %s" % out.stdout)
+        self.assertIn("--category requires a value", out.stdout)
+        after = self._snapshot(vault)
+        self.assertEqual(before, after,
+                         "--category with no value purged the vault before refusing")
+
 
 class TestMarketplaceManifest(unittest.TestCase):
     """Wave 10 packages this plugin for `claude plugin marketplace add`, which
@@ -6331,6 +6473,191 @@ class TestTheReadmeVerificationBlockNamesTheVerifierFirst(unittest.TestCase):
         self.assertNotIn(
             "The tool does not approve, merge, release, or deploy.", self.readme,
             "the unevidenced four-verb claim is back on the front page")
+
+
+class Night0912PromotionThresholdCheck(unittest.TestCase):
+    """A night-sweep defect: docs/for-engineers/examples/model-promotion/
+    promotion_threshold_check.py's own docstring documents the space-
+    separated "--margin VALUE" form, but only "--margin=VALUE" was parsed;
+    the space form left the value as a stray positional argument."""
+
+    def test_space_separated_margin_uses_value(self):
+        import importlib.util
+        import tempfile
+
+        spec = importlib.util.spec_from_file_location(
+            "promotion_threshold_check",
+            os.path.join(ROOT, "docs", "for-engineers", "examples", "model-promotion",
+                        "promotion_threshold_check.py"),
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            csv_path = os.path.join(tmpdir, "holdout.csv")
+            with open(csv_path, "w", newline="") as f:
+                f.write("label,challenger_score,baseline_score\n"
+                        "1,0.9,0.5\n"
+                        "1,0.8,0.4\n"
+                        "0,0.2,0.6\n"
+                        "0,0.1,0.3\n")
+            rc = mod.main(["promotion_threshold_check.py", csv_path, "--margin", "0.6"])
+
+        self.assertEqual(1, rc)
+
+
+class Night0912RunEvals(unittest.TestCase):
+    """Three night-sweep defects in evals/run_evals.py: `_cited_laws`'s range
+    expansion only fired when exactly two numbers appeared in the whole
+    citation span, so a law beside a range ("L7 to L10 and L16") disabled
+    expansion entirely; `_reader_blocks` merged a heading into the very next
+    unblanked paragraph line instead of closing the heading's own block; and
+    a bare trailing `--only` with no value silently ran the whole bed
+    instead of refusing."""
+
+    def _load(self):
+        import importlib.util
+        path = os.path.join(ROOT, "evals", "run_evals.py")
+        spec = importlib.util.spec_from_file_location("run_evals_night0912", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_cited_laws_expands_range_beside_another_law(self):
+        mod = self._load()
+        got = mod._cited_laws("SKILL.md L7 to L10 and L16")
+        expected = [("SKILL.md", n) for n in [7, 8, 9, 10, 16]]
+        self.assertEqual(got, expected)
+
+    def test_reader_blocks_keeps_heading_separate_from_the_paragraph(self):
+        mod = self._load()
+        blocks = mod._reader_blocks("# Nothing\nThe gate walks up to the repository root.\n")
+        self.assertEqual(len(blocks), 2)
+        self.assertIsNotNone(mod._widening_claim(blocks[1][1]))
+
+    def test_main_refuses_a_bare_only_with_no_value(self):
+        import io
+        mod = self._load()
+        mod.CASES = [("fake", "guard", "PASS", lambda d: "PASS")]
+        old_argv, old_stdout, old_stderr = sys.argv, sys.stdout, sys.stderr
+        sys.argv = ["run_evals.py", "--only"]
+        out, err = io.StringIO(), io.StringIO()
+        sys.stdout, sys.stderr = out, err
+        try:
+            with self.assertRaises(SystemExit) as cm:
+                mod.main()
+            self.assertEqual(cm.exception.code, 2)
+            self.assertIn("empty pattern", err.getvalue())
+        finally:
+            sys.argv, sys.stdout, sys.stderr = old_argv, old_stdout, old_stderr
+
+
+class Night0912SbeDesign(unittest.TestCase):
+    """Two sbe_design.py defects found in the same file: a gates-only
+    .sbe-exempt with no reason: line was refused as free-text ("names no
+    checks and no reason") instead of being recognized as addressed to
+    tools/sbe_gate.py, and a partial (checks: adr) exemption's waived check
+    was counted twice (once in the per-dossier exempt loop, once again in
+    the per-target skip loop), so "WAIVERS: 1 check(s)" printed as
+    "WAIVERS: 2" for a single waived check."""
+
+    def _module(self):
+        spec = importlib.util.spec_from_file_location(
+            "sbe_design", os.path.join(HERE, "sbe_design.py"))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_gates_only_no_reason_is_addressed_to_gates(self):
+        mod = self._module()
+        _, _, problem = mod.parse_exemption("gates: some_gate\n")
+        self.assertEqual(problem, mod.ADDRESSED_TO_GATES)
+
+    def test_partial_exemption_waiver_counted_once(self):
+        mod = self._module()
+        os.environ.pop("SBE_DOSSIER_ROOT", None)
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        with io.open(os.path.join(tmp, "01-purpose.md"), "w", encoding="utf-8") as fh:
+            fh.write("# Purpose\nx\n")
+        with io.open(os.path.join(tmp, ".sbe-exempt"), "w", encoding="utf-8") as fh:
+            fh.write("checks: adr\nreason: this is a legacy dossier that predates the "
+                     "decision record requirement and is kept only for historical "
+                     "reference\n")
+        old_argv = sys.argv
+        sys.argv = ["sbe_design.py", tmp, "--strict-waivers"]
+        out = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+                with self.assertRaises(SystemExit):
+                    mod.main()
+        finally:
+            sys.argv = old_argv
+        self.assertIn("WAIVERS: 1 check(s) were waived", out.getvalue())
+
+
+class Night0912SbeScore(unittest.TestCase):
+    """Two sbe_score.py defects, both confirmed by the night sweep. _doc_urls
+    truncated a citation URL at its own closing paren (foo_(bar) became
+    foo_(bar, the trailing ')' dropped), so a citation the inventory
+    genuinely covers read as missing. LINT_PATTERNS' except-then-pass
+    pattern required a `$` right after the colon (or its inline comment), so
+    a swallow written all on one line was never flagged while the identical
+    two-line form always was. Neither change alters this repository's own
+    silent-failure-lints or citation-inventory verdict: see the batch's
+    checks.txt for the before/after counts run against the real tree."""
+
+    def _module(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "sbe_score", os.path.join(HERE, "sbe_score.py"))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_doc_urls_balanced_parens(self):
+        mod = self._module()
+        saved = os.environ.get("SBE_CITATION_ROOT")
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                os.makedirs(os.path.join(d, "docs"))
+                with io.open(os.path.join(d, "README.md"), "w", encoding="utf-8") as fh:
+                    fh.write("See https://example.com/foo_(bar)\n")
+                with io.open(os.path.join(d, "docs", "CITATIONS.md"), "w",
+                             encoding="utf-8") as fh:
+                    fh.write("## https://example.com/foo_(bar)\n"
+                             "- claim: c\n- population: p\n- date: 2025-01-01\n"
+                             "- limit: l\n")
+                os.environ["SBE_CITATION_ROOT"] = d
+                verdict, evidence = mod.check_citation_inventory()
+                self.assertEqual(verdict, "PASS", evidence)
+        finally:
+            if saved is None:
+                os.environ.pop("SBE_CITATION_ROOT", None)
+            else:
+                os.environ["SBE_CITATION_ROOT"] = saved
+
+    def test_a_comment_containing_pass_before_a_raise_is_not_a_swallow(self):
+        # Guard for any future widening of the except-then-pass pattern (a
+        # single-line widening was held back in review as class 2): a comment
+        # that merely mentions pass above a raise is not a swallow.
+        mod = self._module()
+        saved_root = os.environ.get("SBE_LINT_ROOT")
+        saved_argv = sys.argv[:]
+        try:
+            sys.argv[:] = [saved_argv[0]] if saved_argv else ["test_sbe.py"]
+            with tempfile.TemporaryDirectory() as d:
+                with io.open(os.path.join(d, "ok.py"), "w", encoding="utf-8") as fh:
+                    fh.write("try:\n    x = 1\nexcept ValueError:" + "  # pass it to the caller\n    raise\n")
+                os.environ["SBE_LINT_ROOT"] = d
+                verdict, evidence = mod.silent_failure_lints()
+                self.assertNotEqual(verdict, "FAIL", evidence)
+        finally:
+            sys.argv[:] = saved_argv
+            if saved_root is None:
+                os.environ.pop("SBE_LINT_ROOT", None)
+            else:
+                os.environ["SBE_LINT_ROOT"] = saved_root
 
 
 if __name__ == "__main__":

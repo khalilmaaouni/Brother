@@ -86,7 +86,10 @@ def parse_records(text):
     dropped in silence."""
     counts = {}
     warnings = []
-    for line in text.splitlines():
+    # split("\n"), not splitlines(): splitlines() also breaks on \x1c-\x1e,
+    # and TRAILER_SEP is \x1e, so a record with more than one Approved-by
+    # trailer was being cut in half before FIELD_SEP ever got to run on it.
+    for line in text.split("\n"):
         if not line.strip():
             continue
         parts = line.split(FIELD_SEP)
@@ -96,19 +99,25 @@ def parse_records(text):
                 % (len(parts), line[:80]))
             continue
         sha, _date, sig, trailer_raw = parts
-        trailer = trailer_raw.split(TRAILER_SEP)[0] if trailer_raw else ""
-        if not trailer.strip():
+        if not trailer_raw.strip():
             continue  # no Approved-by trailer here: not an approval, not a defect
-        identity = answered(trailer)
-        if identity is None:
-            warnings.append(
-                "skipped a malformed approval on commit %s: the Approved-by "
-                "trailer names no usable identity (%r)"
-                % (sha[:12], trailer.strip()))
-            continue
+        identities = []
+        for trailer in trailer_raw.split(TRAILER_SEP):
+            if not trailer.strip():
+                continue
+            identity = answered(trailer)
+            if identity is None:
+                warnings.append(
+                    "skipped a malformed approval on commit %s: the Approved-by "
+                    "trailer names no usable identity (%r)"
+                    % (sha[:12], trailer.strip()))
+                continue
+            identities.append(identity)
         if sig != "G":
             continue  # an unverified claim is not a SIGNED approval; ordinary, not a defect
-        counts[identity] = counts.get(identity, 0) + 1
+        # Count each signed identity once; a commit can carry several Approved-by values.
+        for identity in set(identities):
+            counts[identity] = counts.get(identity, 0) + 1
     return counts, warnings
 
 

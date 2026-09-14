@@ -309,5 +309,32 @@ class RealVaultReadOnlyProof(unittest.TestCase):
             return fh.read()
 
 
+class Night0912BmVaultCite(unittest.TestCase):
+    def test_non_object_citation_reports_malformed_record(self):
+        with tempfile.TemporaryDirectory() as td:
+            vault = os.path.join(td, "vault")
+            os.makedirs(vault)
+            cites = os.path.join(td, "cites.jsonl")
+            with open(cites, "w", encoding="utf-8") as f:
+                f.write('"hello"\n')
+
+            class Args:
+                pass
+
+            args = Args()
+            args.vault = vault
+            args.citations = cites
+
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                rc = cite.cmd_check(args)
+            text = out.getvalue()
+
+        self.assertEqual(rc, 1)
+        self.assertIn("MALFORMED-RECORD", text)
+        self.assertIn("citations: 1", text)
+        self.assertIn("malformed: 1", text)
+
+
 if __name__ == "__main__":
     unittest.main()

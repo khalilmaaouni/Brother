@@ -14,6 +14,16 @@ from pathlib import Path
 MARKER = "<!-- generated-codex-surface: v1 -->"
 PRODUCTS = ("brothermode", "brothersbe")
 
+#: Skills whose bundle alias is a verbatim mirror of the real product skill,
+#: never the generic brother_run.py stub. WBS-70 U4: Cursor and Codex must
+#: read the actual mailbox harness instructions here, not an engine stub
+#: pointing at a Claude-only runtime script. Keyed by the canonical bundle
+#: name (`<product>-<skill dir>`); value is (product, skill_dir_name).
+REAL_CONTENT_SKILLS = {
+    "brothermode-cursor-execute": ("brothermode", "cursor-execute"),
+    "brothermode-cursor-dispatch": ("brothermode", "cursor-dispatch"),
+}
+
 
 def split_frontmatter(text):
     if not text.startswith("---\n"):
@@ -60,6 +70,20 @@ def render(name, description, product, canonical, kind, command_name=None):
     )
 
 
+def mirror_real(root, canonical):
+    """The verbatim source SKILL.md for a REAL_CONTENT_SKILLS entry, with only
+    the frontmatter `name` rewritten to the canonical bundle name. No MARKER:
+    this is real harness content, not a generated stub, so codex_skills.py
+    ships it through unchanged (beyond its own key stripping)."""
+    product, skill_dir = REAL_CONTENT_SKILLS[canonical]
+    source_path = root / "products" / product / "skills" / skill_dir / "SKILL.md"
+    text = source_path.read_text(encoding="utf-8")
+    fields, body = split_frontmatter(text)
+    fields["name"] = canonical
+    frontmatter = "\n".join("%s: %s" % (k, v) for k, v in fields.items())
+    return "---\n%s\n---\n\n%s" % (frontmatter, body)
+
+
 def expected(root):
     files = {}
     for product in PRODUCTS:
@@ -70,6 +94,9 @@ def expected(root):
         for skill_path in sorted(skills.glob("*/SKILL.md")):
             fields, _ = split_frontmatter(skill_path.read_text(encoding="utf-8"))
             canonical = "%s-%s" % (product, skill_path.parent.name)
+            if canonical in REAL_CONTENT_SKILLS:
+                files["%s/SKILL.md" % canonical] = mirror_real(root, canonical)
+                continue
             files["%s/SKILL.md" % canonical] = render(
                 canonical, fields.get("description", canonical), product,
                 canonical, "skill")

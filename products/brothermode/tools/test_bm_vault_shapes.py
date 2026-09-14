@@ -422,5 +422,22 @@ class TestCli(Fixture):
         self.assertIn("not an ISO date", out)
 
 
+class Night0912BmVaultShapes(unittest.TestCase):
+    def test_quoted_parent_value_does_not_dangle(self):
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "child.md"), "w", encoding="utf-8") as fh:
+                fh.write("---\nentity: corp\nhierarchy_edges: [name=legal;parent='parent-corp']\n---\n")
+            with open(os.path.join(d, "parent-corp.md"), "w", encoding="utf-8") as fh:
+                fh.write("---\nentity: corp\n---\n")
+
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = sh.cmd_check(d)
+            out = buf.getvalue()
+
+        self.assertNotIn("DANGLING parent", out)
+        self.assertEqual(0, rc)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,102 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "assurance-graph-v1",
+  "title": "Assurance Graph v1",
+  "description": "WBS-20.04. Per the 1.0.17 roadmap's own edge shape (R7 / WBS-20.04): every externally meaningful claim links CLAIM -> failure mode -> control -> check -> fixture/evidence, plus environment, residual limitation, and last verified revision. This is a VIEW over checks that already ran elsewhere (scripts/assurance_graph.py compose_claim), never a second truth store: every failure_mode.check.verdict here must have been produced by actually calling a real sibling control (scope_audit.py, native_evidence.py, merge_passport.py for the pilot claims), never asserted directly into this record. Only the keyword subset scripts/contract_check.py actually enforces is used here (type, required, properties, enum, const, items, minItems, additionalProperties), matching every other contract schema in this repo so a reader of any of them finds the same account.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "claim_id", "claim_text", "failure_modes",
+    "verdict", "verdict_reason", "last_verified_revision"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "assurance-graph-v1",
+      "description": "Which shape this record follows, so a reader never has to guess."
+    },
+    "claim_id": {
+      "type": "string",
+      "description": "A stable identifier for the externally meaningful claim this graph record covers."
+    },
+    "claim_text": {
+      "type": "string",
+      "description": "The claim in plain words, exactly as it would be marketed or stated publicly."
+    },
+    "failure_modes": {
+      "type": "array",
+      "minItems": 1,
+      "description": "At least one: a claim naming zero failure modes has nothing checked against it. Each entry is one CLAIM -> failure_mode -> control -> check branch of the graph.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "failure_mode", "control", "check", "environment", "residual_limitation"
+        ],
+        "properties": {
+          "failure_mode": {
+            "type": "string",
+            "description": "The concrete way the claim could be false in practice."
+          },
+          "control": {
+            "type": "string",
+            "description": "The real mechanism in this repo that is supposed to prevent or catch the failure mode."
+          },
+          "check": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name", "command_ref", "fixture_ref", "evidence_ref",
+              "verdict", "verdict_reason"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "What this check actually tests, in plain words."
+              },
+              "command_ref": {
+                "type": "string",
+                "description": "Path to the real module/function this check calls (never reimplemented here)."
+              },
+              "fixture_ref": {
+                "type": "string",
+                "description": "What was fed to the control to exercise the failure mode: a test name, a scenario description, or a path."
+              },
+              "evidence_ref": {
+                "type": "string",
+                "description": "Where the raw result of running the check can be found or reproduced."
+              },
+              "verdict": {
+                "enum": ["PASS", "FAIL", "NO-DATA"],
+                "description": "The shared PASS/FAIL/NO-DATA triple (scripts/evidence_obligation.py)."
+              },
+              "verdict_reason": {
+                "type": "string",
+                "description": "Why the check reached this verdict, non-empty."
+              }
+            }
+          },
+          "environment": {
+            "type": "string",
+            "description": "Where this check's verdict is known to hold (e.g. this repo's CI shape, a specific simulator, or a stated NO-DATA on physical hardware)."
+          },
+          "residual_limitation": {
+            "type": "string",
+            "description": "What this check does NOT establish, stated plainly rather than implied. May be an empty string only when there is genuinely none."
+          }
+        }
+      }
+    },
+    "verdict": {
+      "enum": ["PASS", "FAIL", "NO-DATA"],
+      "description": "The worst-of every failure_mode's check verdict (FAIL beats NO-DATA beats PASS), never computed independently of them."
+    },
+    "verdict_reason": {
+      "type": "string",
+      "description": "How the overall verdict was reached from the failure modes above."
+    },
+    "last_verified_revision": {
+      "type": "string",
+      "description": "The git revision this record's checks were last actually run against, or the literal NO-DATA when that revision could not be determined."
+    }
+  }
+}

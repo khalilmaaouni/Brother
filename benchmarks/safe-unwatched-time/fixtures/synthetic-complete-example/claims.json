@@ -1,0 +1,16 @@
+{
+ "u1": {
+  "unit_id": "u1",
+  "state": "done",
+  "claimed_at": 1767225600.0,
+  "released_at": 1767227400.0,
+  "evidence": {"check_command": "python3 -c pass", "exit_code": 0, "files_changed": ["a.py"]}
+ },
+ "u2": {
+  "unit_id": "u2",
+  "state": "done",
+  "claimed_at": 1767225600.0,
+  "released_at": 1767229200.0,
+  "evidence": {"check_command": "python3 -c pass", "exit_code": 0, "files_changed": ["b.py"]}
+ }
+}

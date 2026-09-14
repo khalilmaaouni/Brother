@@ -254,5 +254,22 @@ class SyntheticFixtureCalibration(unittest.TestCase):
         self.assertIn('not on chain and not aliased', out)
 
 
+class Night0912CoverageCheck(unittest.TestCase):
+    def test_load_json_missing_items_key_reports_no_data(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            'coverage_check_night0912', CHECKER)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        with tempfile.TemporaryDirectory() as d:
+            snap = os.path.join(d, 'snap.json')
+            with open(snap, 'w', encoding='utf-8') as f:
+                json.dump({}, f)
+            notes = []
+            result = mod.load_json(snap, notes)
+        self.assertIsNone(result)
+        self.assertEqual(notes, [snap])
+
+
 if __name__ == '__main__':
     unittest.main()

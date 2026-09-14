@@ -2145,6 +2145,8 @@ def _dossier_intake(root, change):
             data = json.load(fh)
     except (OSError, ValueError):
         return None
+    if not isinstance(data, dict):
+        return None
     tier = data.get("tier")
     if tier not in TIERS:
         return None
@@ -2538,11 +2540,13 @@ def _lineage_receipts(top, artifact):
     paths.sort()
     hops = []
     named = 0
+    unreadable = 0
     for full in paths:
         rel = os.path.relpath(full, top)
         try:
             receipt = evidence_mod.load(full)
         except evidence_mod.ReceiptUnreadable as exc:
+            unreadable += 1
             hops.append(_hop(
                 "", "NO-DATA",
                 "NO-DATA: receipt %s could not be read (%s), so whether it covers %s is "
@@ -2576,12 +2580,20 @@ def _lineage_receipts(top, artifact):
                 % (rel, artifact, judged["verdict"], argv_text or "(argv not recorded)",
                    receipt.get("exitCode"), resolved), full))
     if named == 0:
-        hops.append(_hop(
-            "", "NO-DATA",
-            "NO-DATA: %d receipt(s) under %s and none names %s in its coveredFiles, so no "
-            "recorded run is bound to this artifact. `bin/sbe evidence run --covers %s -- "
-            "<command>` would bind one." % (len(paths), rel_store, artifact, artifact),
-            store))
+        if unreadable:
+            # An unreadable receipt leaves coverage unknown; do not claim none names it.
+            hops.append(_hop(
+                "", "NO-DATA",
+                "NO-DATA: %d receipt(s) under %s could not be read, so whether any names %s "
+                "is unknown and this chain may be missing a run."
+                % (unreadable, rel_store, artifact), store))
+        else:
+            hops.append(_hop(
+                "", "NO-DATA",
+                "NO-DATA: %d receipt(s) under %s and none names %s in its coveredFiles, so no "
+                "recorded run is bound to this artifact. `bin/sbe evidence run --covers %s -- "
+                "<command>` would bind one." % (len(paths), rel_store, artifact, artifact),
+                store))
     return {"present": True, "hops": hops}
 
 
@@ -2654,7 +2666,8 @@ def _lineage_notes(top, artifact):
         summary = ("NO-DATA: the notes store %s is absent in this loop by design (notes.py "
                    "ships in Loop 4), so no note on %s was read. That store is what would "
                    "fill this hop." % (rel_store, artifact))
-    return {"present": present, "hops": [_hop("", "notes-NO-DATA", summary, store)]}
+    # No notes reader ships in this loop, so the store is never read here.
+    return {"present": False, "hops": [_hop("", "notes-NO-DATA", summary, store)]}
 
 
 def _lineage_commits(top, artifact):

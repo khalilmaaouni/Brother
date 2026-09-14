@@ -30,6 +30,7 @@ import brother_run as _br  # noqa: E402
 import claim_store  # noqa: E402
 import decide  # noqa: E402
 import door  # noqa: E402
+import host_capability  # noqa: E402
 import integrate  # noqa: E402
 import journal  # noqa: E402
 import loop_bridge  # noqa: E402
@@ -6007,6 +6008,67 @@ class ReceiptIdentityFields(unittest.TestCase):
                       "does not exist in the target", report)
 
 
+class TheHostCapabilityReceiptNamesFourteenFacts(unittest.TestCase):
+    """WBS-70.03 (docs/plan/1.0.17/WBS-VERIFIED-BREAKDOWN-2026-09-13.md item
+    5; the 1.0.17 convergence roadmap's WBS-70.03 section): "Every
+    consequential run can identify" fourteen named facts about the host it
+    ran under. host_capability.py is the one module that computes them;
+    these pin its contract directly, at near-zero cost, rather than paying
+    for a full brother_run subprocess for every case (see
+    TheFirstRunLeavesAReceipt.test_the_receipt_carries_the_hosts_capability
+    below for the one end-to-end pin of the wiring into _write_receipt)."""
+
+    SCHEMA_PATH = os.path.join(os.path.dirname(HERE), "docs", "schema",
+                               "host-capability-receipt-v1.json")
+
+    def test_an_empty_environment_receipt_still_returns_all_fourteen_fields(self):
+        """No client() marker at all: host reads NO-DATA, and every
+        table-sourced field names that rather than raising or silently
+        omitting a key."""
+        row = host_capability.host_capability_receipt(env={})
+        self.assertEqual(set(row), set(host_capability.RECEIPT_FIELDS), row)
+        self.assertEqual(row["host"], host_capability.NODATA)
+        self.assertTrue(row["pre_tool_hook"].startswith(
+            host_capability.NODATA), row)
+
+    def test_a_recognised_hosts_receipt_fills_every_field_from_its_own_row(self):
+        row = host_capability.host_capability_receipt(
+            env={"BROTHER_CLIENT": "cursor"})
+        self.assertEqual(set(row), set(host_capability.RECEIPT_FIELDS), row)
+        self.assertEqual(row["host"], "cursor")
+        # WBS-70.04's own admitted gap, read back through this receipt: the
+        # two rows must never disagree about what Cursor can prove.
+        self.assertTrue(row["enforceable_deny"].startswith(
+            host_capability.NODATA), row)
+        self.assertIn("CURSOR-COMPAT.md", row["enforceable_deny"])
+
+    def test_the_receipt_schema_names_exactly_the_same_fourteen_fields(self):
+        with open(self.SCHEMA_PATH, encoding="utf-8") as fh:
+            schema = json.load(fh)
+        paths = {f["path"] for f in schema["frozen_fields"]}
+        self.assertEqual(paths, set(host_capability.RECEIPT_FIELDS))
+
+    def test_every_known_hosts_receipt_evidence_file_actually_exists(self):
+        """CAPABILITY_TABLE never invents a citation: the file
+        CERT_PATH_TABLE names for each known host is a real, tracked file
+        in this checkout, not a path that only ever existed in a plan."""
+        repo = os.path.dirname(HERE)
+        for host, path in host_capability.CERT_PATH_TABLE.items():
+            self.assertTrue(
+                os.path.isfile(os.path.join(repo, path)),
+                "%s: %s does not exist" % (host, path))
+
+    def test_receipt_certification_freshness_is_an_iso_date_for_a_tracked_file(self):
+        freshness = host_capability._certification_freshness(
+            "claude", repo=os.path.dirname(HERE))
+        self.assertRegex(freshness, r"^\d{4}-\d{2}-\d{2}T")
+
+    def test_receipt_certification_freshness_is_no_data_for_an_unknown_host(self):
+        freshness = host_capability._certification_freshness("nonexistent")
+        self.assertTrue(freshness.startswith(host_capability.NODATA),
+                        freshness)
+
+
 class AFileSourcedCheckIsFencedLikeARewrittenOne(unittest.TestCase):
     """Security review 2026-09-04, Critical: a done_check reaches
     _reexecute_check with shell=True, and door.guard_adopted_check used to
@@ -6159,6 +6221,24 @@ class TheFirstRunLeavesAReceipt(unittest.TestCase):
         # The printed report is inside the file, so the receipt stands
         # alone: a reader who never saw stdout still reads what ran.
         self.assertIn("delivery report", receipt["report"])
+
+    def test_the_receipt_carries_the_hosts_capability(self):
+        """WBS-70.03: the receipt names what this run's own host can
+        prove, not only what this run itself proved. _write_receipt calls
+        host_capability.host_capability_receipt() last, inside the same
+        try/except that writes the rest of the file; this pins that the
+        real written file actually carries all fourteen fields, and that
+        receipt_path is filled in with THIS receipt's own path rather
+        than left at the module's default NO-DATA."""
+        proc, out = self._run()
+        self.assertEqual(proc.returncode, 0, out)
+        path = os.path.join(self._run_dir(), _br.RECEIPT_DIRNAME,
+                            _br.RECEIPT_FILENAME)
+        with open(path, encoding="utf-8") as fh:
+            receipt = json.load(fh)
+        cap = receipt["host_capability"]
+        self.assertEqual(set(cap), set(host_capability.RECEIPT_FIELDS), cap)
+        self.assertEqual(cap["receipt_path"], path)
 
     def test_a_receipt_that_cannot_be_written_exits_nonzero_saying_so(self):
         """The other half: never a silent exit 0 with nothing findable. A

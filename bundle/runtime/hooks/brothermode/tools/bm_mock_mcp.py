@@ -182,6 +182,9 @@ def _reply(rid, result=None, error=None):
 
 
 def handle(req, profile, tools, state):
+    if not isinstance(req, dict):
+        # JSON-RPC requests are objects; ignore any other valid JSON value.
+        return None
     method = req.get("method")
     rid = req.get("id")
     if method == "notifications/initialized":
