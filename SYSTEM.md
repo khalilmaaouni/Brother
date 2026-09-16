@@ -13,10 +13,10 @@ to run the battery.
 
 | | |
 |---|---:|
-| Parts | 254 |
-| Parts with a purpose written in the file | 252 |
-| Parts with a suite wired into the battery | 188 |
-| Checks in the battery | 289 |
+| Parts | 257 |
+| Parts with a purpose written in the file | 255 |
+| Parts with a suite wired into the battery | 199 |
+| Checks in the battery | 301 |
 
 2 part(s) carry no purpose line and are listed as NO-DATA below. They are
 shown rather than omitted, because a system record that hides its
@@ -60,7 +60,7 @@ undocumented corners looks complete and is not.
 | `brother_wastage_census` | .py: a corrected with-Brother vs without-Brother census. | **NO-DATA**, nothing in the battery runs it |
 | `brother_worktree_census` | Read-only worktree and disk census: one row per `git worktree`, per repo. | **NO-DATA**, nothing in the battery runs it |
 | `bundle_runtime` | package brother_run.py's own execution engine into | `bundle-runtime-self`, `regen-generated-self` |
-| `canary_pipeline_smoke` | WBS-30.10 Canary Pipeline Smoke: prove the ten sibling mobile-path modules | **NO-DATA**, nothing in the battery runs it |
+| `canary_pipeline_smoke` | WBS-30.10 Canary Pipeline Smoke: prove the ten sibling mobile-path modules | `canary-pipeline-smoke-self` |
 | `capability_probe` | what this machine can actually do, measured not remembered. | `capability-probe-self` |
 | `changelog_from_commits` | .py: a changelog generated from git history, never | `changelog-commits-self` |
 | `charter_paths` | every repository path docs/CHARTER.md names must exist here. | `charter-paths`, `charter-paths-self` |
@@ -95,7 +95,7 @@ undocumented corners looks complete and is not.
 | `decide_round` | a ROUND of decisions is still a screen, never a wall of popups. | **NO-DATA**, nothing in the battery runs it |
 | `delivery_status` | the ONE goal for this session, as named steps with a | `delivery-status-self` |
 | `dependency_graph_check` | validate a WBS-00.03 release dependency graph | **NO-DATA**, nothing in the battery runs it |
-| `device_matrix` | Device Matrix abstraction, physical-device adapter seam (WBS-30.07/30.08). | **NO-DATA**, nothing in the battery runs it |
+| `device_matrix` | Device Matrix abstraction, physical-device adapter seam (WBS-30.07/30.08). | `device-matrix-self`, `journey-passport-self` |
 | `doc_assurance` | the public documentation corpus is checked against the tree it | `doc-assurance`, `doc-assurance-self` |
 | `door` | a plain English outcome becomes a canonical Work document. | `brother-run-self`, `bundle-runtime-self`, `door-self`, `mutation-gate`, `mutation-gate-self` |
 | `e53_lesson_ab` | does a lesson SHOWN at the moment of action change the action. | **NO-DATA**, nothing in the battery runs it |
@@ -148,7 +148,7 @@ undocumented corners looks complete and is not.
 | `jbeq_regression` | JBEQ-MDM regression harness: re-decide the pinned round 6 fact sheets | `jbeq-regression-round6-self` |
 | `journal` | one append-only causal log per run, fed by the writers that | `journal-self` |
 | `journal_projection` | the delivery report, receipts-bound and a live | `journal-projection-self` |
-| `journey_passport` | WBS-30.06 Journey Passport: a VIEW composing evidence that already exists | `mutation-gate`, `mutation-gate-self` |
+| `journey_passport` | WBS-30.06 Journey Passport: a VIEW composing evidence that already exists | `journey-passport-self`, `mutation-gate`, `mutation-gate-self` |
 | `keep_current` | update a Codex install only after every link reads PASS. | `keep-current-self` |
 | `key_components` | the components this estate built on purpose cannot be lost, | `key-components`, `key-components-self` |
 | `land_queue` | the hub PR lander as a product script, not five loose shell files. | `land-queue-self` |
@@ -173,17 +173,20 @@ undocumented corners looks complete and is not.
 | `memory_lift` | did the memory fix actually change anything, measured on real work. | `memory-lift-self` |
 | `merge_passport` | WBS-40.07 Merge Passport: a VIEW composing evidence that already exists | **NO-DATA**, nothing in the battery runs it |
 | `merge_queue` | conflict-aware batching for the one-integrator merge queue (W8). | `merge-queue`, `merge-queue-self` |
+| `mobile_canonical_action` | EPIC M3.02 Mobile Canonical Action: validate an action record against | `mobile-canonical-action-self` |
 | `mobile_design` | Search a user-curated mobile reference board and inspect creative media. | `bundle-runtime-self`, `mobile-design` |
-| `mobile_journey_contract` | WBS-30.01 Mobile Journey Contract: validate a journey record against | **NO-DATA**, nothing in the battery runs it |
-| `mobile_plan_compiler` | WBS-30.04 Mobile plan compiler. | **NO-DATA**, nothing in the battery runs it |
-| `mobile_product_claims` | WBS-50.05 Mobile product claims. The roadmap's own words (docs/plan, | **NO-DATA**, nothing in the battery runs it |
-| `mobile_reference_lock` | WBS-30.02 Reference Lock v2: the honest partial case. | **NO-DATA**, nothing in the battery runs it |
+| `mobile_journey_contract` | WBS-30.01 Mobile Journey Contract: validate a journey record against | `mobile-journey-contract-self` |
+| `mobile_ownership_resolver` | EPIC M1.05 Mobile Ownership Resolver (per docs/plan/MOBILE-EPIC-M1-UNITS- | `mobile-ownership-resolver-self` |
+| `mobile_plan_compiler` | WBS-30.04 / EPIC M1.04 Mobile plan compiler. | `mobile-plan-compiler-self` |
+| `mobile_product_claims` | WBS-50.05 Mobile product claims. The roadmap's own words (docs/plan, | `mobile-product-claims-self` |
+| `mobile_project_profile` | EPIC M1.01/M1.02 Mobile Project Profile: a read-only detector that | `mobile-project-profile-self` |
+| `mobile_reference_lock` | WBS-30.02 Reference Lock v2: the honest partial case. | `mobile-reference-lock-self` |
 | `mobile_workflow` | Native mobile workflow support for Brother's existing execution engine. | `bundle-runtime-self`, `mobile-workflow` |
 | `model_worker` | NIGHT-01: the real coding-model worker for the graph loop. | `bundle-runtime-self`, `loop-bridge-self`, `model-worker` |
 | `morning_pack` | .py: fills docs/plan/MORNING-STEERING-2026-09-05.md section | `morning-pack-self` |
 | `mutation_gate` | R27.3, the assurance mutation gate. | `mutation-gate`, `mutation-gate-self` |
 | `native_evidence` | record and validate a native build or test evidence bundle. | `bundle-runtime-self`, `native-evidence-self` |
-| `native_evidence_v2` | wrap a scripts/native_evidence.py output record into | **NO-DATA**, nothing in the battery runs it |
+| `native_evidence_v2` | wrap a scripts/native_evidence.py output record into | `native-evidence-v2-self` |
 | `negative_space_audit` | R27.2, the generated negative-space contract audit. | `negative-space-audit`, `negative-space-audit-self` |
 | `next_cut` | Print the next release cut: the date, the version it would be, and the | `next-cut-self` |
 | `night_tick` | The durable half of the night watch. | `night-tick-selftest` |
@@ -224,7 +227,7 @@ undocumented corners looks complete and is not.
 | `release_note_from_tree` | .py: the release note's checkable claims, measured, never typed. | `refresh-cut-self`, `release-note-self`, `reproduce-export-self` |
 | `release_note_perturb` | every file the release note names really goes red. | `release-note-perturb`, `release-note-perturb-self` |
 | `release_notes_stamped` | .py: refuses while any shipped release note still | `release-notes-stamped` |
-| `release_state_tracker` | Release State Tracker (WBS-30.09): TestFlight / release-state evidence. | **NO-DATA**, nothing in the battery runs it |
+| `release_state_tracker` | Release State Tracker (WBS-30.09): TestFlight / release-state evidence. | `release-state-tracker-self` |
 | `repeat_control` | does a shown lesson actually stop the same failure happening again. | `repeat-control-tests` |
 | `repeat_rate_page` | writes docs/benchmarks/REPEAT-RATE.md, the public page | `repeat-rate-page-self` |
 | `report_complexity_gate_experiment` | Reports the treatment-vs-control agreement rate for one complexity-gate | **NO-DATA**, nothing in the battery runs it |
@@ -413,6 +416,18 @@ undocumented corners looks complete and is not.
 - `native-evidence-self`: `python3 scripts/test_native_evidence.py -v`
 - `mobile-workflow`: `python3 scripts/test_mobile_workflow.py -v`
 - `mobile-design`: `python3 scripts/test_mobile_design.py -v`
+- `mobile-journey-contract-self`: `python3 scripts/test_mobile_journey_contract.py -v`
+- `mobile-plan-compiler-self`: `python3 scripts/test_mobile_plan_compiler.py -v`
+- `mobile-reference-lock-self`: `python3 scripts/test_mobile_reference_lock.py -v`
+- `mobile-product-claims-self`: `python3 scripts/test_mobile_product_claims.py -v`
+- `native-evidence-v2-self`: `python3 scripts/test_native_evidence_v2.py -v`
+- `device-matrix-self`: `python3 scripts/test_device_matrix.py -v`
+- `release-state-tracker-self`: `python3 scripts/test_release_state_tracker.py -v`
+- `journey-passport-self`: `python3 scripts/test_journey_passport.py -v`
+- `canary-pipeline-smoke-self`: `python3 scripts/test_canary_pipeline_smoke.py -v`
+- `mobile-canonical-action-self`: `python3 scripts/test_mobile_canonical_action.py -v`
+- `mobile-project-profile-self`: `python3 scripts/test_mobile_project_profile.py -v`
+- `mobile-ownership-resolver-self`: `python3 scripts/test_mobile_ownership_resolver.py -v`
 - `product-acceptance-self`: `python3 scripts/test_product_acceptance.py -v`
 - `clean-install-e2e-self`: `python3 scripts/test_clean_install_e2e.py -v`
 - `fault-lab-self`: `python3 scripts/test_fault_lab.py -v`

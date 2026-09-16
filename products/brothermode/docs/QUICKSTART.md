@@ -116,7 +116,7 @@ not the skill directory itself, and the second line below moves into this
 product's own subdirectory before anything else runs.
 
 ```bash
-git clone --branch v1.0.14 --depth 1 https://github.com/khalilmaaouni/Brother.git ~/.claude/skills/brothermode-src
+git clone --branch v1.0.18 --depth 1 https://github.com/khalilmaaouni/Brother.git ~/.claude/skills/brothermode-src
 cd ~/.claude/skills/brothermode-src/products/brothermode
 ```
 
@@ -284,10 +284,13 @@ the result.
 | 9 | CHECKSUMS.sha256 self-check | A shipped file does not match the release manifest, the signature of an update that did not finish. |
 | 10 | settings.json is valid JSON | Claude Code silently ignores a broken settings file, so every hook, not only the fence, is off. |
 
-Checks 4, 5 and 8 SKIP until setup has run (`python3 scripts/setup.py`); that
-is expected on a machine that just finished Step 3 above and has not yet
-created a vault. Every other check applies from the moment the hooks are
-wired.
+Check 4 reads SKIP until setup has run (`python3 scripts/setup.py`): that is
+expected on a machine that just finished Step 3 above and has not yet created
+a vault, the ordinary shape of a brand new install, not breakage. Checks 5
+and 8 read SKIP in that same state, because both depend on the consent
+config check 4 is still waiting on. Check 4 only reads FAIL when the config
+file exists but will not parse, a genuinely different, broken state. Every
+other check applies from the moment the hooks are wired.
 
 To remove the wiring later:
 
@@ -379,7 +382,7 @@ ls ~/BrotherModeVault/Home.md
 Expected: that path printed back.
 
 That folder existing is not the same as setup being complete. Doctor's check
-4, "Setup has been completed," still reads FAIL until `scripts/setup.py` runs
+4, "Setup has been completed," still reads SKIP until `scripts/setup.py` runs
 and records the consent that names this folder as your vault; check 4's own
 remediation text names this exact command. Run it now, non-interactively,
 with the same path you just created:
@@ -392,8 +395,8 @@ Expected: a line reading `setup: config written to ~/.brotherme/config.json`,
 the vault path and installation mode you just gave it printed back, then
 doctor's own output printed inline (checks 4, 5 and 8 should now read PASS),
 and a closing line naming the next action. This is the one command doctor's
-remediation text points at directly; skipping it is why check 4 fails on an
-otherwise-correct install.
+remediation text points at directly; skipping it is why check 4 stays at
+SKIP, never PASS, on an otherwise-correct install.
 
 ## 5. Verify the installation
 

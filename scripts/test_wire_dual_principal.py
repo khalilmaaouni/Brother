@@ -169,9 +169,11 @@ def run_wire_probe():
 
         port = _tti._free_port()
         server = _start_server(env, port)
-        if not _tti._wait_health(port):
-            out = server.stdout.read().decode("utf-8", "replace") if server.stdout else ""
-            return None, ["NO-DATA: server never became healthy: %s" % out.strip()]
+        budget = _tti.health_timeout()
+        if not _tti._wait_health(port, timeout=budget):
+            out = _tti.server_output(server)
+            return None, ["NO-DATA: server never became healthy within %d s: %s"
+                          % (budget, out.strip())]
 
         baseline_body = dict(query=canary, identity="human1")
         status, raw, _parsed = _tti._recall(port, baseline_body)

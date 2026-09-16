@@ -759,6 +759,11 @@ SUITES = (
     # in the same change that creates the suite; the inventory gate
     # refuses a test_*.py on disk that SUITES does not name.
     "test_bm_vault_seams.py",
+    # EPIC M4.01 (2026-09-15): bm_device_lease.py, the machine-wide per-device
+    # lease store (atomic claim, TTL, stale-lease recovery, dirty quarantine).
+    # Registered in the same change that creates the suite; the inventory
+    # gate refuses a test_*.py on disk that SUITES does not name.
+    "test_bm_device_lease.py",
 )
 
 # unittest writes its summary to stderr. Both shapes appear in real output:

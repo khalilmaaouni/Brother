@@ -1,0 +1,63 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "mobile-canonical-action-v1",
+  "title": "Mobile Canonical Action v1",
+  "description": "EPIC M3.02 of docs/plan/MOBILE-EPIC-M3-UNITS.md: one small, versioned, driver-independent action vocabulary that every later driver adapter (M3.03 native iOS, M3.04 Maestro, M3.05 Appium, M3.06 visual fallback) translates into a real tool call. This record names no driver, tool, or execution backend of its own. FLAT SCHEMA ONLY (no $ref/definitions/oneOf): scripts/contract_check.py's enforced keyword subset is type, required, properties, enum, const, items, minItems, additionalProperties, matching mobile-journey-contract-v1.json's own convention. Because the subset has no oneOf, a per-action typed parameter shape cannot be expressed structurally here; it is documented below and enforced by hand in scripts/mobile_canonical_action.py's hand_rules(), exactly as mobile_journey_contract.py adds hand rules for what its own schema's keywords cannot say. PER-ACTION SHAPES (target = the on-screen element acted on, driver-agnostic; params = action-specific arguments; reason = required only for NEED_HUMAN/IMPOSSIBLE): OPEN_APP needs params.app_id. TAP_TARGET, LONG_PRESS_TARGET, SCROLL_TO, ASSERT_VISIBLE need target. TYPE_TEXT needs params.text. SWIPE needs params.direction. ROTATE needs params.orientation. SET_PERMISSION needs params.permission and params.state. SET_NETWORK needs params.condition. SET_LOCATION needs params.latitude and params.longitude. DEEPLINK needs params.uri. WAIT_FOR needs target or params.duration_ms (at least one). ASSERT_STATE needs params.key and params.expected. FINISH needs params.status. NEED_HUMAN and IMPOSSIBLE need the top-level reason field, non-empty. BACK, HOME, CAPTURE need neither target nor any required params.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "action_id", "action"],
+  "properties": {
+    "schema_version": {
+      "const": "mobile-canonical-action-v1",
+      "description": "Which shape this record follows, so a reader never has to guess."
+    },
+    "action_id": {
+      "type": "string",
+      "description": "A stable identifier for this one action instance within its journey/plan (e.g. so a driver adapter's evidence and a conformance-gauntlet run, M3.08, can both cite the same step)."
+    },
+    "action": {
+      "type": "string",
+      "description": "The canonical verb. Exactly one of the 20 verbs this vocabulary defines; a driver adapter that does not implement a verb refuses the record rather than guessing an equivalent.",
+      "enum": [
+        "OPEN_APP", "TAP_TARGET", "LONG_PRESS_TARGET", "TYPE_TEXT", "SWIPE",
+        "SCROLL_TO", "BACK", "HOME", "ROTATE", "SET_PERMISSION", "SET_NETWORK",
+        "SET_LOCATION", "DEEPLINK", "WAIT_FOR", "ASSERT_VISIBLE",
+        "ASSERT_STATE", "CAPTURE", "FINISH", "NEED_HUMAN", "IMPOSSIBLE"
+      ]
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The on-screen element this action acts on, when the action needs one (see the per-action list above). Driver-agnostic: a selector kind plus a value, never a tool-specific locator object (an XCUIElement query, a Maestro selector map, an Appium By-strategy) -- a driver adapter (M3.03+) is what turns this into its own native locator.",
+      "required": ["selector_type", "value"],
+      "properties": {
+        "selector_type": {
+          "type": "string",
+          "enum": ["accessibility_id", "text", "coordinates", "image", "xpath", "testid"],
+          "description": "How to interpret value: an accessibility identifier, visible text, a literal 'x,y' coordinate pair, an image reference for visual matching (M3.06), an xpath-style tree path, or a test/automation id."
+        },
+        "value": {
+          "type": "string",
+          "description": "The selector value itself, interpreted per selector_type. A coordinates selector_type still carries value as a string (e.g. '120,480') so this schema never needs a second numeric shape for the same field."
+        },
+        "description": {
+          "type": "string",
+          "description": "Optional human-readable description of the target, for evidence and NEED_HUMAN handoffs. Never required."
+        }
+      }
+    },
+    "params": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Action-specific arguments. Deliberately additionalProperties: true -- the keyword subset has no oneOf to pin an exact shape per action, so the per-action required keys listed above are enforced by hand in scripts/mobile_canonical_action.py rather than here. A driver adapter should still reject unknown params keys it does not understand for the given action; this schema only guarantees the record is well-formed JSON, not that every key is meaningful."
+    },
+    "timeout_ms": {
+      "type": "integer",
+      "description": "Optional per-action timeout in milliseconds. When absent, a driver adapter's own default applies; this schema does not name a default so one canonical vocabulary never silently encodes one execution backend's timing assumptions. Must be >= 1 once present (0 and negative values are meaningless and refused by scripts/mobile_canonical_action.py's hand_rules(), the same keyword-subset limitation WAIT_FOR.duration_ms already documents below)."
+    },
+    "reason": {
+      "type": "string",
+      "description": "Required and non-empty for NEED_HUMAN and IMPOSSIBLE (why a human is needed, or why the action cannot be performed); optional free text on any other action (e.g. why FINISH ended the journey here)."
+    }
+  }
+}

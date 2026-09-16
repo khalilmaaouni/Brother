@@ -661,6 +661,31 @@ run_check "bundle-runtime-self" python3 scripts/test_bundle_runtime.py -v
 run_check "native-evidence-self" python3 scripts/test_native_evidence.py -v
 run_check "mobile-workflow" python3 scripts/test_mobile_workflow.py -v
 run_check "mobile-design" python3 scripts/test_mobile_design.py -v
+# M0.03 (mobile spine gate wiring, docs/plan/MOBILE-SPINE-INVENTORY.json):
+# these eight release-critical mobile modules already had a real self-test
+# each, but none of them ran in this battery, so a break in any of them
+# was invisible here. Wiring them in is the fix; the modules themselves
+# are unchanged by this line.
+run_check "mobile-journey-contract-self" python3 scripts/test_mobile_journey_contract.py -v
+run_check "mobile-plan-compiler-self" python3 scripts/test_mobile_plan_compiler.py -v
+run_check "mobile-reference-lock-self" python3 scripts/test_mobile_reference_lock.py -v
+run_check "mobile-product-claims-self" python3 scripts/test_mobile_product_claims.py -v
+run_check "native-evidence-v2-self" python3 scripts/test_native_evidence_v2.py -v
+run_check "device-matrix-self" python3 scripts/test_device_matrix.py -v
+run_check "release-state-tracker-self" python3 scripts/test_release_state_tracker.py -v
+run_check "journey-passport-self" python3 scripts/test_journey_passport.py -v
+run_check "canary-pipeline-smoke-self" python3 scripts/test_canary_pipeline_smoke.py -v
+# EPIC M3.02: the canonical mobile action vocabulary, imported by four
+# downstream driver-adapter PRs; same gap as the eight modules above, wired
+# in for the same reason (a break here was invisible to this battery).
+run_check "mobile-canonical-action-self" python3 scripts/test_mobile_canonical_action.py -v
+# EPIC M1.01/M1.02: the read-only mobile project profile detector.
+run_check "mobile-project-profile-self" python3 scripts/test_mobile_project_profile.py -v
+# EPIC M1.05 (adversarial hardening review, 2026-09-15, MAJOR M2): this
+# module's own test suite never ran in this battery until now, confirmed
+# absent (`grep -c ownership scripts/check_all.sh` was 0) before this line
+# was added.
+run_check "mobile-ownership-resolver-self" python3 scripts/test_mobile_ownership_resolver.py -v
 # P0.4, the same wave: the eleven capability areas re-proven THROUGH the
 # public entry point (a plain outcome sentence into brother_run.py), never
 # through a hand-built Work document or a named internal worker command.

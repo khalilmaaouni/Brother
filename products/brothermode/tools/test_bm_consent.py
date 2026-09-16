@@ -1405,14 +1405,34 @@ class DoctorCheckInventoryCase(unittest.TestCase):
         payload = json.loads(stdout)
         return {c["key"]: c for c in payload["checks"]}
 
-    def test_unconsented_consent_check_fails_and_vault_check_skips(self):
+    def test_fresh_install_consent_check_skips_and_never_fails(self):
+        # Tri-state, mirroring products/brothersbe's project-init check: a
+        # brand new project (no config written yet) is not breakage, so
+        # this must never read FAIL here, only SKIP.
+        r = self.run_doctor()
+        checks = self._checks(r.stdout)
+        self.assertEqual(checks["consent"]["status"], "SKIP",
+                         checks["consent"]["message"])
+        self.assertNotEqual(checks["consent"]["status"], "FAIL")
+        self.assertIn(SETUP_SENTENCE, checks["consent"]["message"])
+        self.assertEqual(checks["vault"]["status"], "SKIP",
+                         checks["vault"]["message"])
+
+    def test_corrupted_config_still_fails_consent_never_masked_as_skip(self):
+        # The other half of the tri-state: genuine breakage (a config file
+        # that exists but will not parse, meaning setup ran once and the
+        # file broke afterward) is not the fresh-install shape, and must
+        # still read FAIL, never be swallowed by the new SKIP branch.
+        config_path = os.path.join(self.home, ".brotherme", "config.json")
+        os.makedirs(os.path.dirname(config_path))
+        with io.open(config_path, "w", encoding="utf-8") as fh:
+            fh.write("{ this is not valid json")
         r = self.run_doctor()
         checks = self._checks(r.stdout)
         self.assertEqual(checks["consent"]["status"], "FAIL",
                          checks["consent"]["message"])
-        self.assertIn(SETUP_SENTENCE, checks["consent"]["message"])
-        self.assertEqual(checks["vault"]["status"], "SKIP",
-                         checks["vault"]["message"])
+        self.assertNotEqual(checks["consent"]["status"], "SKIP")
+        self.assertIn("--reconfigure", checks["consent"]["message"])
 
     def test_consented_with_a_valid_store_reports_verifys_own_verdict(self):
         vault = os.path.join(self.home, "Vault")
