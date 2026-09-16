@@ -78,7 +78,7 @@ the clone lands in a source checkout, not the skill directory itself, and
 this product's own installer (Step 2 below) copies it the rest of the way:
 
 ```bash
-git clone --branch v1.0.14 --depth 1 https://github.com/khalilmaaouni/Brother.git ~/.claude/skills/brothermode-src
+git clone --branch v1.0.18 --depth 1 https://github.com/khalilmaaouni/Brother.git ~/.claude/skills/brothermode-src
 cd ~/.claude/skills/brothermode-src/products/brothermode
 ```
 
@@ -320,10 +320,15 @@ result.
 | 9 | CHECKSUMS.sha256 self-check | A shipped file does not match the checked-in release manifest, the signature of an update that did not finish. |
 | 10 | settings.json is valid JSON | Claude Code silently ignores a broken settings file, so every hook, not only the fence, is off with nothing saying so. |
 
-Checks 4, 5 and 8 read `SKIP` until setup has run (`python3 scripts/setup.py`
-sets up the consent config those three checks read); that is the expected,
-honest state right after Step 2 below, before Step 3 has created a vault.
-Every other check applies from the moment the hooks are wired.
+Check 4 reads `SKIP` until setup has run (`python3 scripts/setup.py` sets up
+the consent config that check reads): that is the expected, honest state
+right after Step 2 below, before Step 3 has created a vault, the ordinary
+shape of a brand new install, not breakage. Checks 5 and 8 read `SKIP` in
+that same state, because both depend on the consent config check 4 is still
+waiting on. Check 4 only reads `FAIL` when the config file exists but will
+not parse (setup ran once and the file broke afterward), a genuinely
+different, broken state. Every other check applies from the moment the
+hooks are wired.
 
 ## Step 3: create the vault
 

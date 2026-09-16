@@ -1110,6 +1110,19 @@ def check_windows_hooks(root):
 
 
 def check_consent():
+    """Tri-state, mirroring products/brothersbe/src/brothersbe/cli.py's own
+    project-init check: FAIL is real breakage (the config exists but could
+    not be read, meaning setup ran and then the file broke), SKIP is a
+    fresh, never-initialized project (no config at all, or one written by
+    hand with setup_complete not literally True), which is the ordinary
+    shape of a brand new install, not damage. _bm_setup.read_config already
+    draws this exact line: a missing file returns ({}, None), a present but
+    broken one returns ({}, "reason"), so this function only has to read
+    which branch it got. Every check below that depends on consent
+    (check_vault, check_hook_wiring_matches_mode) already reads SKIP for
+    the same "setup has not been completed yet" reason; this reuses that
+    same vocabulary instead of inventing a fourth status just for the check
+    that gates them."""
     cfg, err = _bm_setup.read_config()
     cfg_path = _bm_setup.config_path()
     if err:
@@ -1118,10 +1131,11 @@ def check_consent():
                        "python3 scripts/setup.py --reconfigure"
                        % (_mask_home(cfg_path), err))
     if not _bm_setup.is_consented(cfg):
-        return _result("consent", STATUS_FAIL,
-                       "FAIL: setup has not been completed yet, so nothing "
-                       "below that depends on it can be checked either. Run: "
-                       "python3 scripts/setup.py")
+        return _result("consent", STATUS_SKIP,
+                       "SKIP: setup has not been completed yet, so nothing "
+                       "below that depends on it can be checked either. This "
+                       "is the normal state of a brand new install, not "
+                       "breakage. Run: python3 scripts/setup.py")
     return _result("consent", STATUS_PASS,
                    "PASS: setup is complete (config at %s)." % _mask_home(cfg_path))
 

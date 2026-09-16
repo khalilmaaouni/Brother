@@ -1,0 +1,62 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "mobile-project-profile-v1",
+  "title": "Mobile Project Profile v1",
+  "description": "EPIC M1.01 of docs/plan/MOBILE-PLATFORM-ROADMAP-1.0.18.md. A factual, generated-and-reviewed record of what a mobile project actually is, so mobile_plan_compiler.py's semantic plan can be split from framework-specific materialization without guessing the stack. scripts/mobile_project_profile.py is a read-only detector: it never writes project code, and every field it cannot support with real evidence is left NO-DATA rather than guessed. Only the keyword subset scripts/mobile_project_profile.py actually enforces is used here (matching mobile-journey-contract-v1.json's own convention): type, required, properties, enum, const, items, minItems, additionalProperties.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "project_id", "profiled_revision", "platforms",
+    "frameworks", "source_roots", "build_systems", "test_frameworks",
+    "confidence", "evidence_refs"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "mobile-project-profile-v1",
+      "description": "Which shape this record follows, so a reader never has to guess."
+    },
+    "project_id": {
+      "type": "string",
+      "description": "A stable identifier for the profiled project. Names the founder's own priority mobile projects by ROLE ONLY when this record is stored inside Brother, per the standing never-name-the-app rule; never the project's private name."
+    },
+    "profiled_revision": {
+      "type": "string",
+      "description": "The exact git revision the detector ran against. A profile is only valid for this revision under the caller's own staleness policy; the schema does not enforce freshness itself."
+    },
+    "platforms": {
+      "type": "array",
+      "description": "Platforms this project actually has real, detected indicators for. Never a guess: an empty array is honest NO-DATA, not 'none supported'.",
+      "items": {"type": "string", "enum": ["ios", "android", "web", "unknown"]}
+    },
+    "frameworks": {
+      "type": "array",
+      "description": "Detected frameworks (e.g. 'ios-swiftui', 'ios-uikit', 'android-gradle'), each one backed by a real file the detector found, named in evidence_refs.",
+      "items": {"type": "string"}
+    },
+    "source_roots": {
+      "type": "array",
+      "description": "Repository-relative directories the detector found real project files under.",
+      "items": {"type": "string"}
+    },
+    "build_systems": {
+      "type": "array",
+      "description": "Detected build systems (e.g. 'xcodebuild', 'gradle', 'spm'), each backed by a real file named in evidence_refs.",
+      "items": {"type": "string"}
+    },
+    "test_frameworks": {
+      "type": "array",
+      "description": "Detected native test frameworks (e.g. 'xctest'), each backed by a real file named in evidence_refs.",
+      "items": {"type": "string"}
+    },
+    "confidence": {
+      "type": "string",
+      "description": "The detector's own honest confidence in this profile as a whole: 'high' (multiple independent indicators agree), 'low' (exactly one weak indicator), or 'none' (nothing detected at all, every other field is empty/NO-DATA by construction).",
+      "enum": ["high", "low", "none"]
+    },
+    "evidence_refs": {
+      "type": "array",
+      "description": "Repository-relative paths to the real files the detector actually found and read, one per claim above. An empty array means confidence must be 'none'; the detector enforces this by hand rule, not by this schema alone.",
+      "items": {"type": "string"}
+    }
+  }
+}

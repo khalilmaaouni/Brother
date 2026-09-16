@@ -6,6 +6,7 @@ script's own CLI as a subprocess (never by importing internals and calling a
 function), because the contract this tool exists to hold is the CLI's exit
 code and its printed JSON, not an internal helper's return value.
 """
+import datetime
 import json
 import os
 import subprocess
@@ -31,6 +32,19 @@ except ImportError:
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPT = os.path.join(HERE, "battery_verdict.py")
 
+# A review_by the real calendar still finds in the future, recomputed on every
+# run. battery_verdict.main() deliberately runs check_expectations() against
+# the REAL clock rather than --today (so a lapsed exception cannot renew itself
+# silently), which means any absolute date written here eventually walks into
+# the past and fails this suite for calendar reasons rather than contract ones.
+# It did: "2026-09-14" rotted on 2026-09-16 and took 19 tests with it. The
+# window only has to outlive a single run, so 30 days is generous; what the
+# fixture is testing is the SHAPE of an unexpired entry, never a specific date.
+# Tests that need an expired or a sentinel date still write one literally
+# (2020-01-02, 2099-01-01) and pin --today beside it.
+FUTURE_REVIEW_BY = (datetime.date.today()
+                    + datetime.timedelta(days=30)).isoformat()
+
 EXPECTATIONS = {
     "checks": {
         "product-acceptance-self": {
@@ -43,7 +57,7 @@ EXPECTATIONS = {
             "class": "known_no_data",
             "reason": "test fixture: honest open findings by design",
             "recorded": "2026-08-31",
-            "review_by": "2026-09-14"
+            "review_by": FUTURE_REVIEW_BY
         },
         "future-mechanism": {
             "class": "not_applicable",
@@ -54,7 +68,7 @@ EXPECTATIONS = {
             "class": "expected_unavailable",
             "reason": "test fixture: a product battery whose failing tests are declared by name",
             "recorded": "2026-09-03",
-            "review_by": "2026-09-30",
+            "review_by": FUTURE_REVIEW_BY,
             "removal_condition": "test fixture: shared by every declared name",
             "failing_tests": {
                 "test_docs.py": {
@@ -67,7 +81,7 @@ EXPECTATIONS = {
             "class": "expected_unavailable",
             "reason": "test fixture: a suite-level blanket, failures=2 and no names",
             "recorded": "2026-09-03",
-            "review_by": "2026-09-30"
+            "review_by": FUTURE_REVIEW_BY
         }
     }
 }

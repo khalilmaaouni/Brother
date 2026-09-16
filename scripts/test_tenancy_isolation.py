@@ -60,6 +60,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 import uuid
@@ -79,12 +80,63 @@ except ImportError:
         "tmp_sandbox absent: %s leaves its temp trees behind\n"
         % _e100_os.path.basename(__file__))
 
+try:  # noqa: E402
+    from export_public import gate_timeout as _gate_timeout
+except ImportError:
+    # Same reasoning as the tmp_sandbox guard above: a packager can copy this
+    # test without export_public.py beside it. Fall back to the unscaled floor
+    # rather than dying; the budget is plumbing here, never the subject.
+    def _gate_timeout(load15=None, cores=None, floor=None, cap=None):
+        return HEALTH_FLOOR_SECONDS if floor is None else floor
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 SEAM_DIR = os.path.join(HERE, "fixtures", "bmu_vault_seam")
 BM_VAULT = os.path.join(SEAM_DIR, "bm_vault.py")
 BM_VAULT_SERVE = os.path.join(SEAM_DIR, "bm_vault_serve.py")
 
 PASS, FAIL, NODATA = "PASS", "FAIL", "NO-DATA"
+
+#: Seconds the served boundary gets to answer GET /health on an UNLOADED
+#: machine. Measured: this whole file printed PASS exit 0 in under 100 s on an
+#: idle host, health inside a second. The floor is scaled up by 15 minute load
+#: over core count (_gate_timeout, reused from export_public.py) because the
+#: machine this suite runs on routinely carries other lanes: on 2026-09-15 the
+#: readiness gate sat here 49 minutes at load 400, and a fixed 10 seconds is a
+#: budget for an idle host quoted at a busy one.
+HEALTH_FLOOR_SECONDS = 10
+HEALTH_CAP_SECONDS = 300
+#: Seconds to collect a failed server's own output once it has been asked to
+#: die. Only the report path uses it; nothing waits on it to decide a verdict.
+SERVER_OUTPUT_SECONDS = 10
+
+
+def health_timeout():
+    """The seconds _wait_health gets, read at CALL TIME (never bound as a
+    default argument, which would freeze the load at import time)."""
+    return _gate_timeout(floor=HEALTH_FLOOR_SECONDS, cap=HEALTH_CAP_SECONDS)
+
+
+def server_output(server, timeout=SERVER_OUTPUT_SECONDS):
+    """Whatever the server printed, read under a deadline.
+
+    THE DEADLOCK THIS REPLACES: the caller reaches here holding a child that
+    is ALIVE (it just missed its health deadline) and still holds the write
+    end of this pipe open. A bare server.stdout.read() waits for EOF, and EOF
+    on that pipe means "the server exited", which a merely slow server never
+    does. So the read blocks forever, burning no CPU, and the suite reads as a
+    hang instead of the NO-DATA it was trying to report: exactly the 49 minute
+    wedge observed on 2026-09-15 at load 400. Ask the child to die FIRST, then
+    let communicate() enforce a bound on the read that follows."""
+    if server.stdout is None:
+        return ""
+    server.terminate()
+    for _ in range(2):  # terminate, then kill
+        try:
+            out, _unused = server.communicate(timeout=timeout)
+            return out.decode("utf-8", "replace") if out else ""
+        except subprocess.TimeoutExpired:
+            server.kill()
+    return "(server output unreadable: the process outlived both terminate and kill)"
 
 
 def _seam_present():
@@ -135,7 +187,12 @@ def _provision_tenant(tenants_root, name, canary=None, alias_of=None):
     return home
 
 
-def _wait_health(port, timeout=10):
+def _wait_health(port, timeout=None):
+    """True once GET /health answers 200, False once the budget is spent.
+    `timeout` is read at call time when left None so the budget reflects the
+    load at the moment the server is actually started."""
+    if timeout is None:
+        timeout = health_timeout()
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
@@ -196,9 +253,11 @@ def run_leakage_proof(collapse=False):
 
         port = _free_port()
         server = _start_server(tenants_root, port)
-        if not _wait_health(port):
-            out = server.stdout.read().decode("utf-8", "replace") if server.stdout else ""
-            return None, ["NO-DATA: server never became healthy: %s" % out.strip()]
+        budget = health_timeout()
+        if not _wait_health(port, timeout=budget):
+            out = server_output(server)
+            return None, ["NO-DATA: server never became healthy within %d s: %s"
+                          % (budget, out.strip())]
 
         status, raw, parsed = _recall(port, {"query": canary_a, "tenant": "tenant-a",
                                              "identity": "human1", "limit": 10})
@@ -322,6 +381,77 @@ def run_agent_narrower_than_human_proof():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def _slow_server_stub():
+    """A stand-in for a server whose startup was starved of CPU: alive, holding
+    the write end of its stdout open, and never answering health. No fixture
+    needed, so this proof runs even where the vendored seam is absent."""
+    return subprocess.Popen(
+        [sys.executable, "-c",
+         "import sys, time; sys.stdout.write('starting\\n'); "
+         "sys.stdout.flush(); time.sleep(600)"],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+
+def _read_returns_within(reader, server, seconds):
+    """(returned, elapsed) for `reader(server)` run on a side thread that is
+    joined with a deadline. A thread, not a signal or a subprocess: the whole
+    question is whether the CALLING thread can be pinned by a blocking read,
+    and only a second thread can observe that from outside."""
+    box = {}
+
+    def run():
+        try:
+            box["out"] = reader(server)
+        except Exception as exc:  # noqa: BLE001
+            box["out"] = "raised: %s" % exc
+
+    t = threading.Thread(target=run, daemon=True)
+    started = time.time()
+    t.start()
+    t.join(seconds)
+    return not t.is_alive(), time.time() - started
+
+
+def run_slow_server_report_is_bounded_proof():
+    """(ok, lines). The 2026-09-15 wedge as a check.
+
+    Driven backwards first, exactly as TheProofCatchesACollapsedSeam does for
+    leakage: the OLD shape (a bare .read() on a live child's stdout) must be
+    shown to still be pinned after the bound, or this proof is asserting
+    nothing and would stay green if server_output were reverted. Then the
+    shipped server_output must come back inside that same bound."""
+    lines = []
+    bound = 8.0
+    old = _slow_server_stub()
+    try:
+        returned, elapsed = _read_returns_within(
+            lambda s: s.stdout.read().decode("utf-8", "replace"), old, bound)
+        old_hangs = not returned
+        lines.append("%s the old bare stdout.read() is still pinned after %.0f s "
+                     "on a live, slow server (the 2026-09-15 wedge reproduced)"
+                     % ("ok " if old_hangs else "FAIL", bound))
+    finally:
+        old.kill()
+        old.wait(timeout=5)
+        if old.stdout is not None:
+            old.stdout.close()
+
+    new = _slow_server_stub()
+    try:
+        returned, elapsed = _read_returns_within(server_output, new, bound + 20)
+        new_bounded = returned and elapsed < bound + 20
+        lines.append("%s server_output returns in %.1f s instead of hanging, so the "
+                     "health failure reports NO-DATA rather than wedging"
+                     % ("ok " if new_bounded else "FAIL", elapsed))
+    finally:
+        new.kill()
+        new.wait(timeout=5)
+        if new.stdout is not None:
+            new.stdout.close()
+
+    return (old_hangs and new_bounded), lines
+
+
 class TenancyIsolationHolds(unittest.TestCase):
     """The intact seam: two tenants, zero leakage in either direction, an
     agent scoped narrower than its human cannot widen the human's own
@@ -345,6 +475,12 @@ class TheProofCatchesACollapsedSeam(unittest.TestCase):
     directory (never a hand edit to the vendored product code), and the
     SAME leakage check above must now report the leak, not stay green."""
 
+    def test_a_starved_server_is_reported_not_waited_on_forever(self):
+        """No skipUnless: the stub is this file's own, so the wedge stays
+        covered even where the vendored seam is absent."""
+        ok, lines = run_slow_server_report_is_bounded_proof()
+        self.assertTrue(ok, "\n".join(lines))
+
     @unittest.skipUnless(_seam_present(), "bmu_vault_seam fixture is absent")
     def test_collapsed_isolation_is_caught_as_a_leak(self):
         ok, lines = run_leakage_proof(collapse=True)
@@ -354,12 +490,19 @@ class TheProofCatchesACollapsedSeam(unittest.TestCase):
 
 
 def main():
+    # Runs before the seam check: it needs no fixture, and a suite that can
+    # wedge is worth knowing about even when the seam is missing.
+    ok, lines = run_slow_server_report_is_bounded_proof()
+    for line in lines:
+        print(line)
+    wedge_ok = ok
+
     if not _seam_present():
         print("NO-DATA: %s is missing one or more of bm_vault.py, "
               "bm_vault_serve.py, bm_vault_context.py, bm_vault_policy.py; "
               "see PROVENANCE.md in that directory" % SEAM_DIR)
         return 2
-    overall_ok = True
+    overall_ok = wedge_ok
     ok, lines = run_leakage_proof(collapse=False)
     if ok is None:
         print("\n".join(lines))

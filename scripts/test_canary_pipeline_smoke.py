@@ -7,17 +7,31 @@ completeness object is honest about what is real evidence, what is a
 synthetic stand-in, and what is genuine NO-DATA -- including the one
 adjacent-stage shape mismatch this run surfaces (release_state_tracker's
 real output vs. journey_passport's release-dimension expectation)."""
+import subprocess
 import sys
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
 import canary_pipeline_smoke as CPS  # noqa: E402
+import release_state_tracker as RST  # noqa: E402
 
 
 class CanaryPipelineSmokeTests(unittest.TestCase):
 
     def setUp(self):
         self.passport, self.mismatches, self.tmp = CPS.run_pipeline()
+
+    def test_clean_run_reports_zero_mismatches(self):
+        # Direct regression test for the original defect: the mismatch
+        # check used to test for a "state" (singular) key that the real
+        # release_state_tracker output never carries, so it fired on
+        # EVERY clean run, not just a broken one. Nothing above asserted
+        # on `self.mismatches` itself, so a clean suite run stayed green
+        # even with that stale check back in place (confirmed by
+        # reintroducing it in isolation: the other 8 tests still pass
+        # while this one alone catches it).
+        self.assertEqual(self.mismatches, [])
 
     def test_passport_is_well_formed(self):
         self.assertEqual(self.passport["schema_version"], "journey-passport-v1")
@@ -95,6 +109,83 @@ class CanaryPipelineSmokeTests(unittest.TestCase):
         # code and never a false 0.
         import journey_passport as JP
         self.assertEqual(JP.exit_code_for_completeness(self.passport["completeness"]), 2)
+
+
+class CanaryTurnsRedOnAdjacentSchemaBreakTests(unittest.TestCase):
+    """M0.02: prove the canary is a real gate, not a formality. Mutates
+    the one adjacent schema this pipeline is known to depend on
+    (release_state_tracker's real 'states' key) and asserts the break
+    is both reported and turns the script's own exit code non-zero --
+    the exact defect fixed in canary_pipeline_smoke.py: a mismatch used
+    to be printed and then main() still hardcoded `return 0`."""
+
+    def test_dropping_the_states_key_is_reported_as_a_mismatch(self):
+        real_compose = RST.compose_release_record
+
+        def broken_compose_release_record(*args, **kwargs):
+            record = real_compose(*args, **kwargs)
+            record = dict(record)
+            del record["states"]
+            return record
+
+        with patch.object(RST, "compose_release_record",
+                           side_effect=broken_compose_release_record):
+            _passport, mismatches, _tmp = CPS.run_pipeline()
+        self.assertTrue(mismatches, "a dropped 'states' key must be reported")
+        self.assertIn("states", mismatches[0])
+
+    def test_the_script_itself_exits_non_zero_on_that_break(self):
+        # Full subprocess run, not just run_pipeline(): proves main()'s
+        # exit code, the exact place the original defect lived (a
+        # mismatch was printed and `return 0` shipped anyway).
+        script = CPS.__file__
+        script_dir = script.rsplit("/", 1)[0]
+        # runpy.run_path executes the module body, and this script calls
+        # sys.exit(main()) at import time under __main__, so the
+        # SystemExit it raises is what carries the real exit code out.
+        driver = (
+            "import runpy, sys; sys.path.insert(0, %r); "
+            "import release_state_tracker as RST; "
+            "_real = RST.compose_release_record; "
+            "RST.compose_release_record = lambda *a, **k: "
+            "{k2: v for k2, v in _real(*a, **k).items() if k2 != 'states'}; "
+            "runpy.run_path(%r, run_name='__main__')"
+            % (script_dir, script)
+        )
+        result = subprocess.run([sys.executable, "-c", driver],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1,
+                          "stderr: %s" % result.stderr)
+        self.assertIn("INTEGRATION MISMATCH", result.stderr)
+
+    def test_clean_run_exits_with_the_passports_own_completeness_code(self):
+        # A second defect found by an independent qa review: main() used
+        # to hardcode 0 for any run with no mismatch, even though this
+        # canary's own passport is INCOMPLETE (several dimensions have
+        # no sibling module yet) and journey_passport.exit_code_for_
+        # completeness() already says that is exit code 2. A caller
+        # piping this script's exit code into a hard gate was silently
+        # told "clean" for a run that was never complete.
+        script = CPS.__file__
+        result = subprocess.run([sys.executable, script],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2, "stderr: %s" % result.stderr)
+        self.assertNotIn("INTEGRATION MISMATCH", result.stderr)
+
+
+class CanaryStageGuardsAreLiveCodeTests(unittest.TestCase):
+    """The six `raise AssertionError` stage guards inside run_pipeline()
+    exist to catch a break in stages 1-6 (everything upstream of the
+    release/passport seam the mismatches list watches). Nothing proved
+    they actually fire rather than being dead code nobody exercises;
+    this breaks one on purpose and confirms it does."""
+
+    def test_an_invalid_synthetic_journey_fails_the_stage_1_contract_guard(self):
+        broken_journey = dict(CPS.SYNTHETIC_JOURNEY)
+        del broken_journey["human_outcome"]  # a required journey-contract field
+        with patch.object(CPS, "SYNTHETIC_JOURNEY", broken_journey):
+            with self.assertRaisesRegex(AssertionError, "must validate"):
+                CPS.run_pipeline()
 
 
 if __name__ == "__main__":

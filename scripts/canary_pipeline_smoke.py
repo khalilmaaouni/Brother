@@ -3,7 +3,7 @@
 that landed tonight actually connect, end to end, on one synthetic journey.
 
 This is NOT an eleventh domain module. It builds a fake, generic journey
-(journey_id="canary-smoke", no real Tonari data anywhere) and threads it
+(journey_id="canary-smoke", no real product data anywhere) and threads it
 through the REAL functions of every sibling module in the roadmap's own
 pipeline order:
 
@@ -26,8 +26,8 @@ does not fit (see test_release_state_tracker_output_does_not_match_
 journey_passports_release_shape below), that mismatch is asserted on
 directly, not papered over.
 
-Python 3.9, standard library only. No network. Nothing here touches
-~/Documents/Codex/.../TonariSimple; every fixture is synthetic/generic.
+Python 3.9, standard library only. No network. Nothing here touches any
+real project checkout; every fixture is synthetic/generic.
 """
 import datetime
 import json
@@ -68,7 +68,8 @@ SYNTHETIC_OUTCOME = {
 }
 
 # A fake but schema-valid mobile-journey-contract-v1 record. Generic
-# entry/exit states, one real accessibility obligation, nothing Tonari-shaped.
+# entry/exit states, one real accessibility obligation, nothing shaped
+# after any real product.
 SYNTHETIC_JOURNEY = {
     "schema_version": "mobile-journey-contract-v1",
     "journey_id": "canary-smoke",
@@ -124,8 +125,8 @@ def build_native_evidence_v2(tmp):
     test_native_evidence_v2.py uses: a real throwaway git repo, a fake xcrun
     that echoes back a synthetic xcresult test-results.json, a runner that
     writes the result bundle) wrapped through native_evidence_v2.wrap_v2().
-    Nothing here is Tonari-shaped: the test identity, bundle id and repo
-    are all generic/synthetic."""
+    Nothing here is shaped after any real product: the test identity,
+    bundle id and repo are all generic/synthetic."""
     repo = os.path.join(tmp, "repo")
     os.mkdir(repo)
     subprocess.run(["git", "-C", repo, "init", "-q", "-b", "main"], check=True)
@@ -266,24 +267,26 @@ def run_pipeline():
         raise AssertionError("synthetic installed_evidence fixture must PASS: %s" % installed_evidence)
     release_record = RST.compose_release_record({RST.STATE_INSTALLED: installed_evidence})
 
-    # THE FINDING: release_state_tracker.compose_release_record()'s real
-    # output is {"schema", "states", "order", "caveat", "observed_at"} --
-    # there is no top-level "state" key. journey_passport.py's release
-    # dimension (_compose_struct(release_evidence, ("state",), "release"))
-    # was written against the roadmap's bare illustrative sketch
-    # ("state: not_released"), before WBS-30.09 landed its own five-state
-    # "states" (plural) shape. Fed directly, with no reshaping, this is a
-    # genuine adjacent-stage mismatch: the record is present but missing
-    # its required field, which journey_passport.py's own _compose_struct
-    # correctly reports as FAIL rather than a silent PASS or a crash.
-    if "state" not in release_record:
+    # This stage used to flag release_state_tracker's real "states"
+    # (plural) shape as a mismatch against journey_passport's release
+    # dimension, on the theory that the latter still required a bare
+    # "state" (singular) field. That has since been fixed on the
+    # journey_passport.py side (_compose_release() reads "states"
+    # directly, worst-of the five per-state verdicts), so the two
+    # sibling modules now genuinely connect at this seam. The check
+    # below guards that the connection STAYS made: journey_passport's
+    # _compose_release() (WBS-30.06) requires a top-level "states" key
+    # or it reports FAIL, so if a future change to
+    # release_state_tracker.compose_release_record() (WBS-30.09) ever
+    # drops that key again, this is a real adjacent-stage regression,
+    # not a historical footnote, and it must turn this canary red.
+    if "states" not in release_record:
         mismatches.append(
-            "release_state_tracker.compose_release_record() output has no "
-            "top-level 'state' key (it has 'states', the five-state dict) "
-            "but journey_passport.py's release dimension requires "
-            "'state' -- feeding the real WBS-30.09 output into the real "
-            "WBS-30.06 compose_passport() produces FAIL on 'release', not "
-            "a connection.")
+            "release_state_tracker.compose_release_record() output has "
+            "no top-level 'states' key any more; journey_passport.py's "
+            "_compose_release() requires it and will report FAIL on "
+            "'release' -- the two sibling modules have stopped "
+            "connecting at this seam.")
 
     # Stage 7: Journey Passport (WBS-30.06) -- the terminal composer. Every
     # upstream record fed in exactly as its own module produced it.
@@ -313,7 +316,15 @@ def main():
         print("INTEGRATION MISMATCH(ES) FOUND:", file=sys.stderr)
         for m in mismatches:
             print(" - %s" % m, file=sys.stderr)
-    return 0
+    # A mismatch is always the worse news (exit 1), but a clean run must
+    # still surface the Journey Passport's OWN completeness exit code
+    # (journey_passport.exit_code_for_completeness) rather than silently
+    # flattening an honest INCOMPLETE/BLOCKING result to 0. This canary
+    # is expected to be INCOMPLETE (several dimensions have no sibling
+    # module yet), so this is normally 2, not 0; a caller that wants a
+    # hard pass/fail gate on this script should treat any nonzero exit
+    # as "not clean", not compare against a specific code.
+    return 1 if mismatches else JP.exit_code_for_completeness(completeness)
 
 
 if __name__ == "__main__":

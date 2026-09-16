@@ -1,195 +1,188 @@
 {
- "_comment": "A6 / red-team item 6: the declared, reviewed exceptions battery_verdict.py measures every real check_all.sh run against. Every entry names its class, a reason, the date recorded, a review_by date and a removal_condition. An exception PAST its review_by turns blocking (a failure cemetery is not allowed), and one that starts PASSING shows up as 'recovered', so a stale entry rots visibly rather than normalizing a permanent known failure. TEST GRANULARITY, 2026-09-03: an entry for a check whose FAIL output names its failing tests declares them under failing_tests, one reason and removal condition per test name, because an exception keyed on the whole check shelters every future failure in it too. The verdict diffs the log's failing names against the declared set, and its own schema check (battery_verdict.py --check-expectations) refuses an entry that declares only a count or only a suite.",
- "checks": {
-  "negative-space-audit": {
-   "class": "known_no_data",
-   "reason": "R27.2's generated negative-space contract audit reports NO-DATA (exit 2) by design for every cell nobody has answered yet; these are the honest open findings the mechanism exists to surface, not a broken check.",
-   "recorded": "2026-08-31",
-   "review_by": "2026-09-14",
-   "removal_condition": "the open negative-space cells are answered or reviewed-exempt so the audit exits 0; then delete this entry",
-   "last_reverified": "2026-09-05: re-ran python3 scripts/negative_space_audit.py, still exit 2, same open-cells-by-design shape (no new class of failure)."
+  "_comment": "A6 / red-team item 6: the declared, reviewed exceptions battery_verdict.py measures every real check_all.sh run against. Every entry names its class, a reason, the date recorded, a review_by date and a removal_condition. An exception PAST its review_by turns blocking (a failure cemetery is not allowed), and one that starts PASSING shows up as 'recovered', so a stale entry rots visibly rather than normalizing a permanent known failure. TEST GRANULARITY, 2026-09-03: an entry for a check whose FAIL output names its failing tests declares them under failing_tests, one reason and removal condition per test name, because an exception keyed on the whole check shelters every future failure in it too. The verdict diffs the log's failing names against the declared set, and its own schema check (battery_verdict.py --check-expectations) refuses an entry that declares only a count or only a suite.",
+  "checks": {
+    "negative-space-audit": {
+      "class": "known_no_data",
+      "reason": "R27.2's generated negative-space contract audit reports NO-DATA (exit 2) by design for every cell nobody has answered yet; these are the honest open findings the mechanism exists to surface, not a broken check.",
+      "recorded": "2026-08-31",
+      "review_by": "2026-09-28",
+      "removal_condition": "the open negative-space cells are answered or reviewed-exempt so the audit exits 0; then delete this entry",
+      "last_reverified": "2026-09-16: re-ran python3 scripts/negative_space_audit.py, still exit 2, same open-cells-by-design shape (no new class of failure). Real current count on this branch's tree (hub/main plus this file): 799 NO-DATA cell(s) of 1456, answered=657 exempt=0 (grep -c 'NO-DATA:' on the real output), recorded here so a future re-check can compare the real number, not just the exit code. The count is a property of the tree it is measured on: a branch carrying extra product source scans more cells and reports a higher number, so re-measure before comparing. review_by had lapsed on 2026-09-14; re-granted after re-verifying the condition is unchanged, per this file's own stated policy that a lapsed entry turns blocking rather than normalizing silently."
+    },
+    "wire-dual-principal": {
+      "class": "expected_unavailable",
+      "reason": "VAULT-HARDENING-SCOPE-2026-08-31.md V3b: bm_vault_serve.py's served POST /recall reads no agent-shaped field (confirmed both statically, from its own source, and behaviorally, by sending every plausible spelling and observing no change in what is served); the CLI's VB3-04 dual-principal intersection guarantee (bm_vault_policy.decide_dual) is therefore unreachable at the buyer-facing HTTP boundary. scripts/test_wire_dual_principal.py records this as FAIL-BY-DESIGN, a defect record naming the gap, never new capability built to close it.",
+      "recorded": "2026-08-31",
+      "review_by": "2026-09-28",
+      "removal_condition": "the served /recall endpoint gains a second principal field (for example agent_identity) and applies decide_dual's intersection semantics at the wire, proven by scripts/test_wire_dual_principal.py exiting 0; then delete this entry",
+      "failing_tests": "none: the battery runs scripts/test_wire_dual_principal.py's main() probe, which prints one CAN or CANNOT verdict and exits 1 by design (FAIL-BY-DESIGN); its unittest class runs only under --unittest, so the check's output names no failing tests",
+      "last_reverified": "2026-09-16: re-ran python3 scripts/test_wire_dual_principal.py, still exit 1, same FAIL-BY-DESIGN verdict and same real output (do_POST reads only identity, limit, query, tenant; none of agent-identity/agentIdentity/as_agent/agent changed behavior, each tried and confirmed ignored). review_by had lapsed on 2026-09-14; re-granted after re-verifying the condition is unchanged."
+    },
+    "evad-score": {
+      "class": "expected_unavailable",
+      "reason": "the codex series of 2026-09-04 measured t1 FAIL after a Claude-reviewer PASS on 2026-09-01; the regression is real and carried by rows E79 to E81. AMENDED 2026-09-05 (BAT-103), because the entry named only the regression while the score line it shelters reads '1/3 (33%), 4 trial(s) NO-DATA': four of the seven gauntlet trials were never run, and the run record says why in its own words. t5 'codex workspace out of credits after 418 s, two of four steps done, no report', t6 'codex workspace out of credits after 315 s, no report', t7 'codex workspace out of credits at start', and t3 'the sandbox refused the tamper cleanup (rm style commands not permitted) so the one-byte tamper was not completed'. None of the four is a moved document or a broken script: the trials are driven by an external, credit metered agent workspace and a sandbox that refuses part of one trial's own teardown, so no session can re-measure them from this tree, and a score is never asserted by hand. They are recorded here so a reader of this entry cannot mistake 1/3 for a measured three trial series.",
+      "recorded": "2026-09-04",
+      "review_by": "2026-09-18",
+      "removal_condition": "a re-measured series records t1 PASS or the rows close and the next series holds; the four NO-DATA trials need a credited external workspace (t5, t6, t7) and a sandbox that permits t3's own tamper cleanup, and each one that runs is recorded through scripts/evad_score.py --record, never written in by hand",
+      "failing_tests": "none: the check runs scripts/evad_score.py, which is not a unittest suite; its FAIL output names gauntlet trial ids (t1..t7) rather than test names, and exits 1 by design whenever a trial regresses PASS to FAIL against the previous stored run",
+      "last_reverified": "2026-09-05: re-ran python3 scripts/evad_score.py, still 1/3 (33%), t1 FAIL (REGRESSED), same shape as the declared reason; four of seven trials also read NO-DATA this run (codex workspace out of credits), which is separate from and does not change the declared t1 regression."
+    },
+    "release-note-perturb": {
+      "class": "known_no_data",
+      "reason": "PR 260 (row E116) put the real perturbation behind BROTHER_LONG_CHECKS because the run takes about 90 minutes on this tree, so an ordinary battery prints NO-DATA for it by design and says so in its own output line: 'long check (about 90 min) not run: set BROTHER_LONG_CHECKS=1'. The check itself is not broken and its self test (release-note-perturb-self) runs in every battery and reads PASS; what is undeclared here is only the deliberate skip. A real FAIL from scripts/release_note_perturb.py is not covered by this entry and still blocks.",
+      "recorded": "2026-09-05",
+      "review_by": "2026-09-19",
+      "removal_condition": "the battery sets BROTHER_LONG_CHECKS=1 on release cuts and the check reads PASS there",
+      "failing_tests": "none: the check is one script, not a unittest suite, and it is not run at all in the default battery, so its NO-DATA line names no test"
+    },
+    "release-closeout-sign-self": {
+      "class": "known_no_data",
+      "reason": "row S5, the tag signature leg of gate X7: scripts/test_release_closeout_sign.py skips TheTagSignatureLegReadsARealSignature's two cases (a good signature is a PASS, a tampered one is a FAIL) with 'NO-DATA: no gpg or gpg2 on PATH on this machine, so the signed and bad-signature legs of row S5 cannot run here'. check_all.sh's own comment above this row states the design: an unsigned tag must never read FAIL, because the signing key is the founder's alone, so the suite exits 0 with skipped=2 rather than inventing a signature this machine has no gpg binary to verify.",
+      "recorded": "2026-09-05",
+      "review_by": "2026-09-19",
+      "removal_condition": "gpg or gpg2 is installed on the machine that runs the battery, so TheTagSignatureLegReadsARealSignature's two cases run instead of skipping; then delete this entry",
+      "last_reverified": "2026-09-05: `which gpg gpg2` found neither on PATH; re-ran python3 scripts/test_release_closeout_sign.py -v, exit 0, 'OK (skipped=2)', same two tests skipped for the same reason."
+    }
   },
-  "wire-dual-principal": {
-   "class": "expected_unavailable",
-   "reason": "VAULT-HARDENING-SCOPE-2026-08-31.md V3b: bm_vault_serve.py's served POST /recall reads no agent-shaped field (confirmed both statically, from its own source, and behaviorally, by sending every plausible spelling and observing no change in what is served); the CLI's VB3-04 dual-principal intersection guarantee (bm_vault_policy.decide_dual) is therefore unreachable at the buyer-facing HTTP boundary. scripts/test_wire_dual_principal.py records this as FAIL-BY-DESIGN, a defect record naming the gap, never new capability built to close it.",
-   "recorded": "2026-08-31",
-   "review_by": "2026-09-14",
-   "removal_condition": "the served /recall endpoint gains a second principal field (for example agent_identity) and applies decide_dual's intersection semantics at the wire, proven by scripts/test_wire_dual_principal.py exiting 0; then delete this entry",
-   "failing_tests": "none: the battery runs scripts/test_wire_dual_principal.py's main() probe, which prints one CAN or CANNOT verdict and exits 1 by design (FAIL-BY-DESIGN); its unittest class runs only under --unittest, so the check's output names no failing tests",
-   "last_reverified": "2026-09-05: re-ran python3 scripts/test_wire_dual_principal.py, still exit 1, same FAIL-BY-DESIGN verdict (do_POST reads only identity, limit, query, tenant; no candidate agent field changed behavior)."
-  },
-  "evad-score": {
-   "class": "expected_unavailable",
-   "reason": "the codex series of 2026-09-04 measured t1 FAIL after a Claude-reviewer PASS on 2026-09-01; the regression is real and carried by rows E79 to E81. AMENDED 2026-09-05 (BAT-103), because the entry named only the regression while the score line it shelters reads '1/3 (33%), 4 trial(s) NO-DATA': four of the seven gauntlet trials were never run, and the run record says why in its own words. t5 'codex workspace out of credits after 418 s, two of four steps done, no report', t6 'codex workspace out of credits after 315 s, no report', t7 'codex workspace out of credits at start', and t3 'the sandbox refused the tamper cleanup (rm style commands not permitted) so the one-byte tamper was not completed'. None of the four is a moved document or a broken script: the trials are driven by an external, credit metered agent workspace and a sandbox that refuses part of one trial's own teardown, so no session can re-measure them from this tree, and a score is never asserted by hand. They are recorded here so a reader of this entry cannot mistake 1/3 for a measured three trial series.",
-   "recorded": "2026-09-04",
-   "review_by": "2026-09-18",
-   "removal_condition": "a re-measured series records t1 PASS or the rows close and the next series holds; the four NO-DATA trials need a credited external workspace (t5, t6, t7) and a sandbox that permits t3's own tamper cleanup, and each one that runs is recorded through scripts/evad_score.py --record, never written in by hand",
-   "failing_tests": "none: the check runs scripts/evad_score.py, which is not a unittest suite; its FAIL output names gauntlet trial ids (t1..t7) rather than test names, and exits 1 by design whenever a trial regresses PASS to FAIL against the previous stored run",
-   "last_reverified": "2026-09-05: re-ran python3 scripts/evad_score.py, still 1/3 (33%), t1 FAIL (REGRESSED), same shape as the declared reason; four of seven trials also read NO-DATA this run (codex workspace out of credits), which is separate from and does not change the declared t1 regression."
-  },
-  "release-note-perturb": {
-   "class": "known_no_data",
-   "reason": "PR 260 (row E116) put the real perturbation behind BROTHER_LONG_CHECKS because the run takes about 90 minutes on this tree, so an ordinary battery prints NO-DATA for it by design and says so in its own output line: 'long check (about 90 min) not run: set BROTHER_LONG_CHECKS=1'. The check itself is not broken and its self test (release-note-perturb-self) runs in every battery and reads PASS; what is undeclared here is only the deliberate skip. A real FAIL from scripts/release_note_perturb.py is not covered by this entry and still blocks.",
-   "recorded": "2026-09-05",
-   "review_by": "2026-09-19",
-   "removal_condition": "the battery sets BROTHER_LONG_CHECKS=1 on release cuts and the check reads PASS there",
-   "failing_tests": "none: the check is one script, not a unittest suite, and it is not run at all in the default battery, so its NO-DATA line names no test"
-  },
-  "release-closeout-sign-self": {
-   "class": "known_no_data",
-   "reason": "row S5, the tag signature leg of gate X7: scripts/test_release_closeout_sign.py skips TheTagSignatureLegReadsARealSignature's two cases (a good signature is a PASS, a tampered one is a FAIL) with 'NO-DATA: no gpg or gpg2 on PATH on this machine, so the signed and bad-signature legs of row S5 cannot run here'. check_all.sh's own comment above this row states the design: an unsigned tag must never read FAIL, because the signing key is the founder's alone, so the suite exits 0 with skipped=2 rather than inventing a signature this machine has no gpg binary to verify.",
-   "recorded": "2026-09-05",
-   "review_by": "2026-09-19",
-   "removal_condition": "gpg or gpg2 is installed on the machine that runs the battery, so TheTagSignatureLegReadsARealSignature's two cases run instead of skipping; then delete this entry",
-   "last_reverified": "2026-09-05: `which gpg gpg2` found neither on PATH; re-ran python3 scripts/test_release_closeout_sign.py -v, exit 0, 'OK (skipped=2)', same two tests skipped for the same reason."
-  },
-  "release-invariant": {
-   "class": "expected_unavailable",
-   "reason": "readiness_gate.py's own row comment for reproducible-release-artifact states this invariant goes red BY DESIGN when runtime content lands between releases. Tonight's WBS-10 swarm (feature/five-layer-optimisation-1.0.17) regenerated bundle/runtime/ after real code changes (scripts/fable_authority.py, scripts/brother_run.py, and others); the version string still reads 1.0.15 (the last tagged release) because this branch has not merged or released. Two independent generic advisory passes (Codex, read-only, and Muse, hostile review) both recommend against bumping a version solely to clear a pre-merge feature-branch check: SemVer requires released versions stay immutable, it does not require a bump on every commit, and this check's own critical=False classification already treats it as non-blocking drift, not a release defect.",
-   "recorded": "2026-09-13",
-   "review_by": "2026-09-20",
-   "removal_condition": "either this branch merges and the version is bumped at the real release cut (the version string and bundle bytes cross together, closing the drift honestly), or this entry's review_by passes with no release yet, at which point it must be re-dated with a stated reason rather than left stale."
+  "critical": {
+    "brother_install": {
+      "checks": [
+        "brother-install-self"
+      ],
+      "reason": "a wrong or partial Brother install is the first thing every other check on this machine silently trusts",
+      "recorded": "2026-09-08",
+      "self_test_only": true
+    },
+    "brother_paths": {
+      "checks": [
+        "brother-paths-self"
+      ],
+      "reason": "every provider-neutral seam (door.py, model_worker.py, the hooks) resolves its files through this module; a wrong path here is wrong everywhere at once, silently",
+      "recorded": "2026-09-08",
+      "self_test_only": true
+    },
+    "capability_probe": {
+      "checks": [
+        "capability-probe-self"
+      ],
+      "reason": "the mechanism behind never reporting a live capability as retired after checking one path (the founder had to correct that miss by hand once already); the runner itself depends on a file outside this repo, so only the self test is registered",
+      "recorded": "2026-09-08",
+      "self_test_only": true
+    },
+    "adapter_conformance": {
+      "checks": [
+        "adapter-conformance-self"
+      ],
+      "reason": "the contract every provider adapter (Claude Code, Codex) must keep so a caller can trust either one the same way",
+      "recorded": "2026-09-08",
+      "self_test_only": true
+    },
+    "codex_battery": {
+      "checks": [
+        "codex-battery-self"
+      ],
+      "reason": "Codex's own battery-shaped surface; a regression here is invisible to every check that only exercises Claude Code's side of the provider-neutral seam",
+      "recorded": "2026-09-08",
+      "self_test_only": true
+    },
+    "codex_skills": {
+      "checks": [
+        "codex-skills-current"
+      ],
+      "reason": "bundle/codex-skills drifting from bundle/skills ships Codex a stale copy of the skills Claude Code actually has",
+      "recorded": "2026-09-08"
+    },
+    "codex_hooks_install": {
+      "checks": [
+        "codex-hooks-self",
+        "codex-smoke",
+        "codex-smoke-self",
+        "release-closeout-self"
+      ],
+      "reason": "already wired and proven by four checks; declared critical so a future lane cannot quietly drop one without the schema gate refusing",
+      "recorded": "2026-09-08"
+    },
+    "codex_smoke": {
+      "checks": [
+        "codex-smoke",
+        "codex-smoke-self"
+      ],
+      "reason": "a clean install Codex run is the path Brother asks a user to trust",
+      "recorded": "2026-09-08"
+    },
+    "delivery_status": {
+      "checks": [
+        "delivery-status-self"
+      ],
+      "reason": "the founder-facing answer to is this ready to ship; a broken status reads as calm when it should read as blocked",
+      "recorded": "2026-09-08",
+      "self_test_only": true
+    },
+    "land_queue": {
+      "checks": [
+        "land-queue-self",
+        "land-decision-self"
+      ],
+      "reason": "the autonomous merge path (M6, row S5): a lander restart with no pid lock or concurrency ceiling already ran seven gates at once and painted one red for load, not a real defect",
+      "recorded": "2026-09-08",
+      "self_test_only": true
+    },
+    "merge_queue": {
+      "checks": [
+        "merge-queue",
+        "merge-queue-self"
+      ],
+      "reason": "the queue that decides what actually lands on main; already wired and proven, declared critical so it stays that way",
+      "recorded": "2026-09-08"
+    },
+    "keep_current": {
+      "checks": [
+        "keep-current-self"
+      ],
+      "reason": "the currentness contract other generated surfaces (SYSTEM.md, the changelog) lean on",
+      "recorded": "2026-09-08",
+      "self_test_only": true
+    },
+    "release_invariants": {
+      "checks": [
+        "release-invariant",
+        "release-invariant-self"
+      ],
+      "reason": "the release identity gate; already wired and proven, declared critical so a future lane cannot quietly weaken it",
+      "recorded": "2026-09-08"
+    },
+    "gauntlet_memory_poisoning": {
+      "checks": [
+        "memory-poisoning-self",
+        "memory-poisoning"
+      ],
+      "reason": "vault-served memory that can weaken verification is the defect family this gauntlet exists to catch; P0 owns the runner, this lane owns the self test that proves the harness itself",
+      "recorded": "2026-09-08",
+      "self_test_only": false
+    },
+    "gauntlet_memoryagentbench_conflict": {
+      "checks": [
+        "memoryagentbench-self"
+      ],
+      "reason": "conflicting memory recall is a second, distinct memory-trust failure mode from poisoning",
+      "recorded": "2026-09-08",
+      "self_test_only": true
+    },
+    "memory_recurrence": {
+      "checks": [
+        "memory-recurrence-self"
+      ],
+      "reason": "gauntlet_memory_recurrence is proven only by its self check (unlike gauntlet-hostile-ja, which registers both halves); P0 owns the runner, this lane declares only what is actually registered on this branch",
+      "recorded": "2026-09-08",
+      "self_test_only": true
+    },
+    "managed_safety": {
+      "checks": [
+        "managed-safety-self"
+      ],
+      "reason": "a Brother-managed worker must hold its claim and an effective fence before it mutates anything; the capability floor refuses higher autonomy on a machine that cannot enforce it",
+      "recorded": "2026-09-08",
+      "self_test_only": true
+    }
   }
- },
- "critical": {
-  "brother_install": {
-   "checks": [
-    "brother-install-self"
-   ],
-   "reason": "a wrong or partial Brother install is the first thing every other check on this machine silently trusts",
-   "recorded": "2026-09-08",
-   "self_test_only": true
-  },
-  "brother_paths": {
-   "checks": [
-    "brother-paths-self"
-   ],
-   "reason": "every provider-neutral seam (door.py, model_worker.py, the hooks) resolves its files through this module; a wrong path here is wrong everywhere at once, silently",
-   "recorded": "2026-09-08",
-   "self_test_only": true
-  },
-  "capability_probe": {
-   "checks": [
-    "capability-probe-self"
-   ],
-   "reason": "the mechanism behind never reporting a live capability as retired after checking one path (the founder had to correct that miss by hand once already); the runner itself depends on a file outside this repo, so only the self test is registered",
-   "recorded": "2026-09-08",
-   "self_test_only": true
-  },
-  "adapter_conformance": {
-   "checks": [
-    "adapter-conformance-self"
-   ],
-   "reason": "the contract every provider adapter (Claude Code, Codex) must keep so a caller can trust either one the same way",
-   "recorded": "2026-09-08",
-   "self_test_only": true
-  },
-  "codex_battery": {
-   "checks": [
-    "codex-battery-self"
-   ],
-   "reason": "Codex's own battery-shaped surface; a regression here is invisible to every check that only exercises Claude Code's side of the provider-neutral seam",
-   "recorded": "2026-09-08",
-   "self_test_only": true
-  },
-  "codex_skills": {
-   "checks": [
-    "codex-skills-current"
-   ],
-   "reason": "bundle/codex-skills drifting from bundle/skills ships Codex a stale copy of the skills Claude Code actually has",
-   "recorded": "2026-09-08"
-  },
-  "codex_hooks_install": {
-   "checks": [
-    "codex-hooks-self",
-    "codex-smoke",
-    "codex-smoke-self",
-    "release-closeout-self"
-   ],
-   "reason": "already wired and proven by four checks; declared critical so a future lane cannot quietly drop one without the schema gate refusing",
-   "recorded": "2026-09-08"
-  },
-  "codex_smoke": {
-   "checks": [
-    "codex-smoke",
-    "codex-smoke-self"
-   ],
-   "reason": "a clean install Codex run is the path Brother asks a user to trust",
-   "recorded": "2026-09-08"
-  },
-  "delivery_status": {
-   "checks": [
-    "delivery-status-self"
-   ],
-   "reason": "the founder-facing answer to is this ready to ship; a broken status reads as calm when it should read as blocked",
-   "recorded": "2026-09-08",
-   "self_test_only": true
-  },
-  "land_queue": {
-   "checks": [
-    "land-queue-self",
-    "land-decision-self"
-   ],
-   "reason": "the autonomous merge path (M6, row S5): a lander restart with no pid lock or concurrency ceiling already ran seven gates at once and painted one red for load, not a real defect",
-   "recorded": "2026-09-08",
-   "self_test_only": true
-  },
-  "merge_queue": {
-   "checks": [
-    "merge-queue",
-    "merge-queue-self"
-   ],
-   "reason": "the queue that decides what actually lands on main; already wired and proven, declared critical so it stays that way",
-   "recorded": "2026-09-08"
-  },
-  "keep_current": {
-   "checks": [
-    "keep-current-self"
-   ],
-   "reason": "the currentness contract other generated surfaces (SYSTEM.md, the changelog) lean on",
-   "recorded": "2026-09-08",
-   "self_test_only": true
-  },
-  "release_invariants": {
-   "checks": [
-    "release-invariant",
-    "release-invariant-self"
-   ],
-   "reason": "the release identity gate; already wired and proven, declared critical so a future lane cannot quietly weaken it",
-   "recorded": "2026-09-08"
-  },
-  "gauntlet_memory_poisoning": {
-   "checks": [
-    "memory-poisoning-self",
-    "memory-poisoning"
-   ],
-   "reason": "vault-served memory that can weaken verification is the defect family this gauntlet exists to catch; P0 owns the runner, this lane owns the self test that proves the harness itself",
-   "recorded": "2026-09-08",
-   "self_test_only": false
-  },
-  "gauntlet_memoryagentbench_conflict": {
-   "checks": [
-    "memoryagentbench-self"
-   ],
-   "reason": "conflicting memory recall is a second, distinct memory-trust failure mode from poisoning",
-   "recorded": "2026-09-08",
-   "self_test_only": true
-  },
-  "memory_recurrence": {
-   "checks": [
-    "memory-recurrence-self"
-   ],
-   "reason": "gauntlet_memory_recurrence is proven only by its self check (unlike gauntlet-hostile-ja, which registers both halves); P0 owns the runner, this lane declares only what is actually registered on this branch",
-   "recorded": "2026-09-08",
-   "self_test_only": true
-  },
-  "managed_safety": {
-   "checks": [
-    "managed-safety-self"
-   ],
-   "reason": "a Brother-managed worker must hold its claim and an effective fence before it mutates anything; the capability floor refuses higher autonomy on a machine that cannot enforce it",
-   "recorded": "2026-09-08",
-   "self_test_only": true
-  }
- }
 }
