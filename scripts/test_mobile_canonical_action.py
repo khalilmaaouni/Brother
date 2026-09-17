@@ -363,5 +363,119 @@ class MobileCanonicalActionTests(unittest.TestCase):
             self.assertEqual(MCA.main([path]), 1)
 
 
+class SharedValidatorHardeningTests(unittest.TestCase):
+    """Regression tests for the three shared-validator defects found by
+    adversarial review of PR #726 and PR #728 (2026-09-16). Every case below
+    either reached a real driver call or produced a raw traceback before the
+    fix.
+
+    These matter beyond this module: mobile_native_ios_adapter,
+    mobile_appium_adapter, mobile_visual_fallback_adapter and
+    mobile_hybrid_action_router all route through check(), so each defect
+    here was a defect in four adapters at once, and each fix closes it for
+    all four rather than one adapter at a time."""
+
+    def setUp(self):
+        self.schema = CC.load_json(MCA.DEFAULT_SCHEMA, "schema")
+
+    # --- structural validity gate (PR #728's Critical) -------------------
+
+    def test_non_dict_record_fails_cleanly_instead_of_raising(self):
+        # hand_rules() opened with record.get("action"), so a JSON list,
+        # string, number or null raised an uncaught AttributeError. Through
+        # a CLI that surfaced as exit 1 with empty stdout and a raw
+        # traceback on stderr, indistinguishable from a legitimate FAIL.
+        for record in ([1, 2], "a string", None, 42):
+            with self.subTest(record=record):
+                problems = MCA.check(record, self.schema)
+                self.assertTrue(problems, "a non-dict record must never validate clean")
+                self.assertTrue(
+                    any("must be of type 'object'" in p for p in problems),
+                    "a non-dict record must FAIL naming its real type, got %r" % (problems,))
+
+    def test_hand_rules_alone_does_not_raise_on_a_non_dict_record(self):
+        # The guard belongs in hand_rules() itself, not only in check(), so
+        # that a caller reaching hand_rules() directly is safe too.
+        for record in ([1, 2], "a string", None, 42):
+            with self.subTest(record=record):
+                self.assertEqual(MCA.hand_rules(record), [])
+
+    # --- NaN / Infinity (PR #726 Critical 1) -----------------------------
+
+    def test_nan_coordinates_are_refused(self):
+        # NaN passed every range check because `value < lo` and
+        # `value > hi` are both vacuously False for NaN. It then reached
+        # driver.set_location() for real, and json.dumps emitted a bare
+        # `NaN` token, which is not valid RFC 8259 JSON.
+        nan = float("nan")
+        problems = MCA.check(
+            record_for("SET_LOCATION", params={"latitude": nan, "longitude": nan}), self.schema)
+        self.assertIn("params.latitude: must be a finite number, got nan", problems)
+        self.assertIn("params.longitude: must be a finite number, got nan", problems)
+
+    def test_nan_wait_duration_is_refused_as_a_validation_problem(self):
+        # Previously validated clean, then time.sleep(nan) raised, which
+        # surfaced as a generic FAIL rather than the validation error it is.
+        problems = MCA.check(
+            record_for("WAIT_FOR", params={"duration_ms": float("nan")}), self.schema)
+        self.assertIn("params.duration_ms: must be a finite number, got nan", problems)
+
+    def test_infinity_is_refused_even_where_the_range_has_no_ceiling(self):
+        # Infinity was caught only by accident, where a range happened to
+        # carry an upper bound (inf > 90). For a key whose ceiling was None
+        # it passed clean, so that accident was never a guarantee.
+        problems = MCA.check(
+            record_for("WAIT_FOR", params={"duration_ms": float("inf")}), self.schema)
+        self.assertIn("params.duration_ms: must be a finite number, got inf", problems)
+
+    def test_negative_infinity_is_refused(self):
+        problems = MCA.check(
+            record_for("SET_LOCATION", params={"latitude": float("-inf"), "longitude": 0}),
+            self.schema)
+        self.assertIn("params.latitude: must be a finite number, got -inf", problems)
+
+    # --- WAIT_FOR ceiling (PR #726 Critical 2, PR #721's identical Major) -
+
+    def test_wait_for_duration_has_a_real_ceiling(self):
+        # Proven before the fix: duration_ms=604800000 (7 days) validated
+        # clean and a live record genuinely slept the full raw value.
+        problems = MCA.check(
+            record_for("WAIT_FOR", params={"duration_ms": 604800000}), self.schema)
+        self.assertTrue(any("must be between 1 and" in p for p in problems),
+                         "a 7-day WAIT_FOR must be refused, got %r" % (problems,))
+
+    def test_wait_for_duration_at_the_ceiling_is_still_accepted(self):
+        self.assertEqual(
+            MCA.check(record_for("WAIT_FOR",
+                                  params={"duration_ms": MCA.WAIT_FOR_MAX_DURATION_MS}),
+                       self.schema), [])
+
+    def test_wait_for_duration_one_past_the_ceiling_is_refused(self):
+        self.assertTrue(
+            MCA.check(record_for("WAIT_FOR",
+                                  params={"duration_ms": MCA.WAIT_FOR_MAX_DURATION_MS + 1}),
+                       self.schema))
+
+    # --- LONG_PRESS_TARGET bound (PR #726 Major) -------------------------
+
+    def test_long_press_duration_is_bounded_at_the_vocabulary(self):
+        # duration_ms is a param the Appium adapter invented; nothing
+        # bounded it, so 86400000 validated clean and the adapter would
+        # have held a touch down on a real device for 24 hours. Bounded
+        # here, at the vocabulary, so every adapter inherits the bound.
+        record = record_for("LONG_PRESS_TARGET", params={"duration_ms": 86400000})
+        problems = MCA.check(record, self.schema)
+        self.assertTrue(any("must be between 1 and" in p for p in problems),
+                         "a 24-hour long press must be refused, got %r" % (problems,))
+
+    def test_negative_long_press_duration_is_refused(self):
+        record = record_for("LONG_PRESS_TARGET", params={"duration_ms": -5})
+        self.assertTrue(MCA.check(record, self.schema))
+
+    def test_a_normal_long_press_duration_still_validates(self):
+        record = record_for("LONG_PRESS_TARGET", params={"duration_ms": 1200})
+        self.assertEqual(MCA.check(record, self.schema), [])
+
+
 if __name__ == "__main__":
     unittest.main()

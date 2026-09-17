@@ -17,6 +17,7 @@ adapter, no router, and does not talk to any device or tool -- that is
 M3.03+'s scope, not this unit's.
 """
 import argparse
+import math
 import os
 import re
 import sys
@@ -99,12 +100,30 @@ def _missing(record, requirement):
     return False
 
 
+#: Ceiling for a single WAIT_FOR's params.duration_ms. A floor with no
+#: ceiling let duration_ms=604800000 (7 days) validate clean, and an adapter
+#: genuinely slept the raw value. Deliberately a generous sanity bound
+#: rather than any one backend's timing: the schema states that this
+#: vocabulary must not encode one execution backend's timing assumptions, so
+#: an adapter still applies its own, tighter execution deadline on top (see
+#: mobile_native_ios_adapter.DEFAULT_WAIT_TIMEOUT_MS).
+WAIT_FOR_MAX_DURATION_MS = 3600000
+
+#: Ceiling for LONG_PRESS_TARGET's params.duration_ms, a param an adapter
+#: invented rather than one this vocabulary ever bounded: duration_ms=
+#: 86400000 validated clean and would hold a touch down on a real device for
+#: 24 hours, and a negative value passed just as silently. Bounded here, at
+#: the vocabulary, so every adapter implementing LONG_PRESS_TARGET inherits
+#: it rather than each handler re-deriving its own cap.
+LONG_PRESS_MAX_DURATION_MS = 60000
+
 #: (min, max) range for params keys that must be a real number (not bool,
 #: since Python's bool is an int subclass) once present. Checked only when
 #: the key is present -- a missing key is already caught by ACTION_RULES.
 PARAMS_NUMBER_RANGE = {
     "SET_LOCATION": {"latitude": (-90, 90), "longitude": (-180, 180)},
-    "WAIT_FOR": {"duration_ms": (1, None)},
+    "WAIT_FOR": {"duration_ms": (1, WAIT_FOR_MAX_DURATION_MS)},
+    "LONG_PRESS_TARGET": {"duration_ms": (1, LONG_PRESS_MAX_DURATION_MS)},
 }
 
 #: params keys that must be a real string once present (not a number, bool,
@@ -137,6 +156,16 @@ def _check_number_range(container, key, lo, hi, path):
     value = container[key]
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return ["%s: must be a number, got %r" % (path, value)]
+    if not math.isfinite(value):
+        # NaN slipped through every range check below because BOTH
+        # `value < lo` and `value > hi` are vacuously False for NaN, so a
+        # nan latitude validated clean and reached a real driver call, and
+        # json.dumps then emitted a non-RFC-8259 `NaN` token that breaks
+        # any strict JSON reader. Infinity was only caught by accident,
+        # where a range happened to have an upper bound (inf > 90); it
+        # still passed clean for any key whose ceiling was None. isfinite
+        # closes both, for every key and every adapter, in one place.
+        return ["%s: must be a finite number, got %r" % (path, value)]
     if (lo is not None and value < lo) or (hi is not None and value > hi):
         return ["%s: must be between %r and %r, got %r" % (path, lo, hi, value)]
     return []
@@ -155,6 +184,19 @@ def hand_rules(record):
     number's range, a bool masquerading as an int, a coordinates string's
     shape) -- each caught by adversarial review of an earlier draft."""
     problems = []
+    if not isinstance(record, dict):
+        # A non-dict record (a JSON list, string, number or null) reaches
+        # here whenever a caller loads a malformed record file. Every line
+        # below assumes a mapping, so `record.get` previously raised an
+        # uncaught AttributeError, which surfaced as a raw traceback
+        # indistinguishable from a legitimate failure exit. Returning no
+        # problems here is safe and is NOT a silent pass: check() runs
+        # CC.validate first, which already reports the type honestly
+        # ("record: must be of type 'object', got list"), so a non-dict
+        # still FAILs with a real reason. Mirrors the same first line in
+        # mobile_driver_contract.hand_rules(), this module's sister
+        # validator, rather than adding a different shape of guard.
+        return problems
     action = record.get("action")
     rule = ACTION_RULES.get(action)
     if rule is None:

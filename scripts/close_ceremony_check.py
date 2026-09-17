@@ -28,8 +28,8 @@ What a valid close pack is, checked here:
      stale pack from last week cannot green a new close.
 
 Exit codes, this estate's convention: 0 the newest pack satisfies the law,
-1 it does not (each failure named), 2 NO-DATA (no pack root or no pack,
-named, never a pass).
+1 it does not (each failure named), 2 NO-DATA (no pack root, no pack, or a
+newest directory carrying none of the pack markers, named, never a pass).
 """
 import argparse
 import os
@@ -87,19 +87,37 @@ def main(argv=None):
 
     problems = []
     age_h = (time.time() - os.path.getmtime(pack)) / 3600.0
-    if age_h > args.max_age_hours:
+    files = sorted(os.listdir(pack))
+    start = next((f for f in files if f.upper().startswith("01-START-HERE")), None)
+    has_board = any(f.lower().endswith(".html") and "board" in f.lower() for f in files)
+    has_log = any("session-log" in f.lower() or "session_log" in f.lower()
+                  or re.search(r"session.?log", f, re.I) for f in files)
+    zip_path = pack + ".zip"
+    has_zip = os.path.isfile(zip_path)
+    # Measured 2026-09-17: the newest directory under the real root was a
+    # release-cut handoff scratch directory (two markdown files, none of the
+    # four markers, no zip beside it), and this check judged it as a close
+    # pack failing the law, which blocked every merge on the machine. A
+    # directory carrying NONE of the four markers is not a pack the law
+    # applies to: NO-DATA, named, never a pass (a session cannot claim its
+    # close on it, and its owner is told to keep it out of the root). One
+    # marker present is a pack missing the rest, and still fails below.
+    is_pack = bool(start or has_board or has_log or has_zip)
+    not_a_pack_note = (
+        "newest directory %s under the root is not a close pack (no "
+        "01-START-HERE, no board HTML, no session log, no zip beside it): "
+        "nothing for the ceremony law to judge, never a pass; its owner "
+        "should keep it out of the handover root" % os.path.basename(pack))
+
+    if is_pack and age_h > args.max_age_hours:
         problems.append("pack %s is %.1f hours old, over the %.0f hour "
                         "freshness bar: a stale pack cannot green a new close"
                         % (os.path.basename(pack), age_h, args.max_age_hours))
-
-    files = sorted(os.listdir(pack))
-    start = next((f for f in files if f.upper().startswith("01-START-HERE")), None)
-    if start is None:
+    if is_pack and start is None:
         problems.append("no 01-START-HERE.md in the pack")
-    if not any(f.lower().endswith(".html") and "board" in f.lower() for f in files):
+    if is_pack and not has_board:
         problems.append("no readiness board HTML copy in the pack")
-    if not any("session-log" in f.lower() or "session_log" in f.lower()
-               or re.search(r"session.?log", f, re.I) for f in files):
+    if is_pack and not has_log:
         problems.append("no session log in the pack")
 
     if start:
@@ -144,10 +162,9 @@ def main(argv=None):
                 "printed; run scripts/handover_pack_scan.py for detail)"
                 % (masked_name, by_pack[pack_name]))
 
-    zip_path = pack + ".zip"
-    if not os.path.isfile(zip_path):
+    if is_pack and not has_zip:
         problems.append("no zip beside the pack (%s missing)" % zip_path)
-    else:
+    elif has_zip:
         with zipfile.ZipFile(zip_path) as zf:
             inside = {n for n in zf.namelist() if not n.endswith("/")}
         # Full relative paths, not top-level entries, so nested files match zip
@@ -166,10 +183,15 @@ def main(argv=None):
             problems.append("zip is missing pack files: %s" % ", ".join(missing))
 
     if problems:
+        if not is_pack:
+            problems.append(not_a_pack_note)
         print("FAIL: the newest close pack does not satisfy the ceremony law")
         for p in problems:
             print("  - " + p)
         return 1
+    if not is_pack:
+        print("NO-DATA: " + not_a_pack_note)
+        return 2
     print("PASS: pack %s satisfies the closing ceremony law "
           "(start-here with all four sections, board HTML, session log, "
           "complete zip, %.1f hours old, terms clean)"

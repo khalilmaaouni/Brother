@@ -31,11 +31,14 @@ import subprocess
 import sys
 
 TOKEN_SHIELD_SCRIPTS = os.path.expanduser("~/SaveClaudeTokens/scripts")
-REPO = "/Users/khalil.maaouni/Brother"
+#: This script's own repo checkout (scripts/ is one level under the root),
+#: not a hardcoded machine-specific path -- the previous literal only ever
+#: worked on the machine that wrote it.
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 NODATA = "NO-DATA"
 
-#: Claude Code slugifies a session's cwd by replacing "/" with "-", so
-#: /Users/khalil.maaouni/Brother becomes this exact directory name under
+#: Claude Code slugifies a session's cwd by replacing "/" with "-", so a
+#: repo checkout path becomes this exact directory name under
 #: ~/.claude/projects, and a worktree nested under it (Brother/.claude/
 #: worktrees/x) becomes this name plus a suffix. cfg.ROOT is the WHOLE
 #: ~/.claude/projects tree -- every project on this machine (a client mobile

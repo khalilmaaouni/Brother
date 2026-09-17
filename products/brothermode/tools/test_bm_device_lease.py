@@ -4,8 +4,11 @@ Standard library only. Run: python3 tools/test_bm_device_lease.py
 
 Every test runs against its own tempfile.TemporaryDirectory() database path,
 never the real default_db_path(), and never touches this repo's own files."""
+import contextlib
 import datetime
 import importlib.util
+import io
+import json
 import os
 import sqlite3
 import sys
@@ -45,6 +48,14 @@ class StoreTestCase(unittest.TestCase):
     def tearDown(self):
         self.store.close()
         self._tmp.cleanup()
+
+    def _force_expiry(self, device_id):
+        """Back-date expires_at directly (bypassing the API on purpose,
+        this is the one place a test manufactures the passage of time)."""
+        past = dl._add_seconds(dl.now_iso(), -1)
+        self.store.conn.execute(
+            "UPDATE device_leases SET expires_at=? WHERE device_id=?",
+            (past, device_id))
 
 
 class ClaimTests(StoreTestCase):
@@ -89,14 +100,6 @@ class ClaimTests(StoreTestCase):
 
 
 class TTLAndStaleRecoveryTests(StoreTestCase):
-    def _force_expiry(self, device_id):
-        """Back-date expires_at directly (bypassing the API on purpose,
-        this is the one place a test manufactures the passage of time)."""
-        past = dl._add_seconds(dl.now_iso(), -1)
-        self.store.conn.execute(
-            "UPDATE device_leases SET expires_at=? WHERE device_id=?",
-            (past, device_id))
-
     def test_claim_quarantines_expired_lease_instead_of_reclaiming(self):
         """Adversarial-review scenario (M2), reproduced exactly: claim as
         owner A with a short TTL, let it expire with no release() (a
@@ -225,14 +228,61 @@ class DirtyQuarantineTests(StoreTestCase):
             self.store.claim("sim-1", "owner-a", "sess-1", 60)
         self.assertEqual(ctx.exception.reason, "device-dirty")
 
-    def test_mark_dirty_overrides_active_lease(self):
+    def test_mark_dirty_overrides_active_lease_when_forced(self):
+        """force=True is the operator path and still takes the device from
+        its holder. It is the stated, deliberate case, not the default."""
         self.store.claim("sim-1", "owner-a", "sess-1", 3600)
-        r = self.store.mark_dirty("sim-1", "crashed mid-test")
+        r = self.store.mark_dirty("sim-1", "crashed mid-test", force=True)
         self.assertEqual(r["state"], "dirty")
         row = self.store.get("sim-1")
         self.assertEqual(row["state"], "dirty")
         self.assertEqual(row["owner"], "")
         self.assertEqual(row["lease_uuid"], "")
+
+    def test_mark_dirty_unfenced_refuses_over_an_active_lease(self):
+        """The default no longer silently destroys a live lease."""
+        self.store.claim("sim-1", "owner-a", "sess-1", 3600)
+        with self.assertRaises(dl.LeaseRefused) as ctx:
+            self.store.mark_dirty("sim-1", "crashed mid-test")
+        self.assertEqual(ctx.exception.reason, "lease-fence-required")
+        self.assertEqual(self.store.get("sim-1")["state"], "leased")
+
+    def test_mark_dirty_fenced_by_the_holders_uuid_applies(self):
+        lease = self.store.claim("sim-1", "owner-a", "sess-1", 3600)
+        r = self.store.mark_dirty("sim-1", "cleanup failed",
+                                  lease_uuid=lease["lease_uuid"])
+        self.assertEqual(r["state"], "dirty")
+        self.assertEqual(self.store.get("sim-1")["state"], "dirty")
+
+    def test_mark_dirty_fence_refuses_a_lease_already_reclaimed(self):
+        """The real double-hold this fence exists for: A's TTL expires, B
+        legitimately claims the same physical device, then A's late-failing
+        cleanup tries to quarantine it. B's live lease must survive."""
+        a = self.store.claim("phone-1", "owner-a", "sess-a", 3600)
+        self._force_expiry("phone-1")
+        # The store quarantines on the stale claim (M4.01's own behavior),
+        # an operator clears it, and B takes a legitimate fresh lease.
+        with self.assertRaises(dl.LeaseRefused):
+            self.store.claim("phone-1", "owner-b", "sess-b", 3600)
+        self.store.clear_dirty("phone-1")
+        b = self.store.claim("phone-1", "owner-b", "sess-b", 3600)
+        self.assertNotEqual(a["lease_uuid"], b["lease_uuid"])
+        with self.assertRaises(dl.LeaseRefused) as ctx:
+            self.store.mark_dirty("phone-1", "A's cleanup failed late",
+                                  lease_uuid=a["lease_uuid"])
+        self.assertEqual(ctx.exception.reason, "not-lease-holder")
+        row = self.store.get("phone-1")
+        self.assertEqual(row["state"], "leased")
+        self.assertEqual(row["lease_uuid"], b["lease_uuid"])
+        self.assertEqual(row["owner"], "owner-b")
+
+    def test_mark_dirty_unfenced_still_works_on_a_free_device(self):
+        """Quarantining a device nobody holds races with nobody, so the
+        common case keeps working with no ceremony."""
+        r = self.store.mark_dirty("sim-never-seen", "discovered broken")
+        self.assertEqual(r["state"], "dirty")
+        self.store.clear_dirty("sim-never-seen")
+        self.assertEqual(self.store.mark_dirty("sim-never-seen", "again")["state"], "dirty")
 
     def test_clear_dirty_returns_device_to_available(self):
         self.store.mark_dirty("sim-1", "bad state")
@@ -545,6 +595,64 @@ class DefaultPathTests(unittest.TestCase):
         finally:
             if old is not None:
                 os.environ[dl.DB_ENV_OVERRIDE] = old
+
+
+class RemediationCliTests(StoreTestCase):
+    """The CLI is the whole point of the M4.03 finding: claim() and
+    recover_stale() both park a crashed holder's device in 'dirty' on
+    purpose, clear_dirty() was the only way back out, and nothing could
+    call it. These drive main() the way an operator would."""
+
+    def _run(self, *argv):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = dl.main(["--db", self.db_path] + list(argv))
+        return code, out.getvalue()
+
+    def test_clear_dirty_returns_a_quarantined_device_to_the_pool(self):
+        self.store.claim("phone-1", "owner-a", "sess-a", 3600)
+        self._force_expiry("phone-1")
+        with self.assertRaises(dl.LeaseRefused):
+            self.store.claim("phone-1", "owner-b", "sess-b", 3600)
+        self.store.close()  # the CLI opens the same file itself
+
+        code, out = self._run("list", "--dirty-only")
+        self.assertEqual(code, 0)
+        self.assertEqual([d["device_id"] for d in json.loads(out)["devices"]], ["phone-1"])
+
+        code, out = self._run("clear-dirty", "--device", "phone-1")
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out)["state"], "available")
+
+        self.store = dl.DeviceLeaseStore(self.db_path)
+        self.assertEqual(self.store.claim("phone-1", "owner-b", "sess-b", 60)["state"], "leased")
+
+    def test_clear_dirty_refuses_a_device_that_is_not_dirty_without_crashing(self):
+        self.store.close()
+        code, out = self._run("clear-dirty", "--device", "never-seen")
+        self.assertEqual(code, 1)
+        self.assertEqual(json.loads(out)["reason"], "not-found")
+        self.store = dl.DeviceLeaseStore(self.db_path)
+
+    def test_cli_mark_dirty_honors_the_lease_fence(self):
+        lease = self.store.claim("phone-1", "owner-a", "sess-a", 3600)
+        self.store.close()
+        code, out = self._run("mark-dirty", "--device", "phone-1", "--reason", "late cleanup",
+                              "--lease-uuid", "not-the-holder")
+        self.assertEqual(code, 1)
+        self.assertEqual(json.loads(out)["reason"], "not-lease-holder")
+        code, _ = self._run("mark-dirty", "--device", "phone-1", "--reason", "late cleanup",
+                            "--lease-uuid", lease["lease_uuid"])
+        self.assertEqual(code, 0)
+        self.store = dl.DeviceLeaseStore(self.db_path)
+        self.assertEqual(self.store.get("phone-1")["state"], "dirty")
+
+    def test_bare_invocation_prints_help_and_does_not_mutate(self):
+        self.store.close()
+        code, out = self._run()
+        self.assertEqual(code, 2)
+        self.assertIn("clear-dirty", out)
+        self.store = dl.DeviceLeaseStore(self.db_path)
 
 
 if __name__ == "__main__":

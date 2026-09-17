@@ -1,0 +1,130 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "mobile-screen-observation-v1",
+  "title": "Mobile Screen Observation v1",
+  "description": "EPIC M5.01 of docs/plan/MOBILE-EPIC-M5-M12-UNITS.md: the shared shape of ONE look at ONE screen (screenshot, tree, viewport, locale, targets), so every later M5 unit (perceive, decide, act, reflect) reads the same record instead of each inventing its own. This unit supplies only the 'sees it' half of M5's exit criterion: it perceives nothing, decides nothing, acts on nothing, and calls no model. NOTHING HERE IS A CALLER'S CLAIM: a screenshot or a tree is recorded only after the file was really read (identity from scripts/mobile_workflow.py's screenshot_identity()/digest(), the same helper a driver's own CAPTURE evidence uses, so a screenshot a driver captured and one an observer graded are identified the same way); a file that was not opened is recorded as null, never as a present-but-unverified object. VOCABULARY IS BORROWED, NEVER RESPELLED: tree.kind is drawn from mobile-driver-contract-v1.json's own observations enum, targets[].selector_type from mobile-canonical-action-v1.json's selector_type enum, and targets[].geometry from mobile-visual-grounding-v1.json's point/bbox shape. M3.06'S EPHEMERALITY GUARANTEE IS CARRIED FORWARD: a target whose only evidence is pixel geometry read off a screenshot carries stability 'visual_only' and is NOT a stable selector; turning one into a stable selector is EPIC M6 (crystallization and selector governance, docs/plan/MOBILE-PLATFORM-ROADMAP-1.0.18.md), and neither this schema nor its validator ever performs that promotion. Only the keyword subset scripts/contract_check.py actually enforces is used here (type, required, properties, enum, const, items, minItems, additionalProperties), matching every sibling mobile schema; no $ref, no definitions, no oneOf. What that subset cannot say (coordinate finiteness, the unit/scale rule, the stability rule, the screenshot/targets contradiction, the driver cross-check) is enforced by hand in scripts/mobile_screen_observation.py's hand_rules(), exactly as the sibling M3.01/M3.02/M3.06 modules do.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "observed_at", "driver_id", "status",
+    "screenshot", "tree", "viewport", "locale", "targets", "detail"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "mobile-screen-observation-v1",
+      "description": "Which shape this record follows, so a reader never has to guess."
+    },
+    "observed_at": {
+      "type": "string",
+      "description": "When this look at the screen happened, ISO 8601. The observation's own timestamp, not the screenshot file's mtime."
+    },
+    "driver_id": {
+      "type": "string",
+      "description": "Which driver produced this observation, matching that driver's own driver_id in its mobile-driver-contract-v1 record. The cross-check that this driver actually advertises the tree kind recorded below is a hand rule, and is skipped (not failed) when no driver contract record is supplied, following scripts/mobile_driver_contract.py's own stated reasoning about never failing on a sibling unit's absent file."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["OBSERVED", "FAIL", "UNSUPPORTED", "NO-DATA"],
+      "description": "OBSERVED: the screen was really looked at and what is recorded below was really read. FAIL: the input was structurally invalid. UNSUPPORTED: an observation kind the named driver does not advertise. NO-DATA: an honest 'could not find out'. The three refusal spellings are the ones scripts/test_mobile_driver_gauntlet.py already pins for every adapter in this estate, reused rather than respelled; a population of NO-DATA never composes into a pass."
+    },
+    "screenshot": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["path", "size", "sha256", "width", "height", "visual_quality"],
+      "description": "Exactly what scripts/mobile_workflow.py's screenshot_identity() returns for a screenshot that was really read: the file's own hash record plus the PNG header's pixel dimensions. Null when no screenshot was taken, never an empty object, and never a path that was merely named by a caller. A path that is not a PNG, or cannot be read, reaches screenshot_identity()'s own honest refusal; it never becomes a silent null here.",
+      "properties": {
+        "path": {"type": "string", "description": "The screenshot file that was read."},
+        "size": {"type": "integer", "description": "Its size in bytes."},
+        "sha256": {"type": "string", "description": "Its SHA-256, from native_evidence.hash_file()."},
+        "width": {"type": "integer", "description": "Pixel width, from the PNG IHDR header, never a caller's claim."},
+        "height": {"type": "integer", "description": "Pixel height, from the PNG IHDR header."},
+        "visual_quality": {
+          "type": "string",
+          "description": "Always 'NO-DATA' from screenshot_identity(): whether the screenshot LOOKS right is a human or model judgment this unit does not make."
+        }
+      }
+    },
+    "tree": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["kind", "identity"],
+      "description": "The semantic or accessibility tree that was observed, or null when no tree was observed. Null is the only honest record for a tree file that could not be read: a path a caller named is not evidence that a tree exists. The tree's CONTENT is deliberately not embedded, matching mobile-visual-grounding-v1's own convention for the same reason.",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["semantic_tree", "accessibility_tree"],
+          "description": "Which kind of tree this is, spelled exactly as mobile-driver-contract-v1.json's observations enum spells it. Only these two of that enum's six values can name a tree; screenshot, video, log_stream and network_trace are not trees and are not legal here. Adding a seventh observation kind is a change to M3.01's schema, not to this one."
+        },
+        "identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "size", "sha256"],
+          "description": "The tree file's own hash record, from the same digest() helper, produced only after the file was really opened and read.",
+          "properties": {
+            "path": {"type": "string", "description": "The tree file that was read."},
+            "size": {"type": "integer", "description": "Its size in bytes."},
+            "sha256": {"type": "string", "description": "Its SHA-256."}
+          }
+        }
+      }
+    },
+    "viewport": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["width", "height", "unit", "scale"],
+      "description": "The size of the screen that was observed, WITH ITS UNIT STATED. This field exists because pixels and points are not the same measurement and this estate currently records only one of them. screenshot_identity() returns width and height in PIXELS, read from the PNG header. The founder's device matrix (~/.claude/rules/ios-device-matrix.md) is written entirely in POINTS, because layout answers the point size. Pixels are points times a scale factor, and nothing on this branch records that factor. So: A RECORD WHOSE unit IS 'pixels' AND WHOSE scale IS null MUST NOT BE SILENTLY CONVERTED TO POINTS BY ANY READER. There is no conversion to perform, only a conversion to invent. Nothing in this estate produces a point-size viewport today, so the honest value for an observation built from a screenshot alone is unit 'pixels' with scale null. Null viewport means the screen size was not observed at all.",
+      "properties": {
+        "width": {"type": "number", "description": "Width in the unit named below, never in an assumed one."},
+        "height": {"type": "number", "description": "Height in the unit named below."},
+        "unit": {
+          "type": "string",
+          "enum": ["points", "pixels"],
+          "description": "Which measurement width and height are in. Required, never defaulted: an unlabelled number is the whole defect this field prevents."
+        },
+        "scale": {
+          "type": ["number", "null"],
+          "description": "Pixels per point, when it was really observed. Null means unknown, which is legal alongside unit 'pixels' and means the record is unconverted. A hand rule refuses unit 'points' with a null scale, because a point size nobody can trace back to a real measurement is a guess wearing a unit label."
+        }
+      }
+    },
+    "locale": {
+      "type": ["string", "null"],
+      "description": "The OBSERVED locale of the screen in front of the agent, singular, and null when the driver did not report one. Never defaulted to a device default, and never taken from a journey's claim: mobile-journey-contract-v1.json's 'locales' is a list of locales a journey CLAIMS to work in, which is a different fact about a different thing. scripts/mobile_design.py's screen.get('locale', 'NO-DATA') is the observed-locale precedent this field follows."
+    },
+    "detail": {
+      "type": "string",
+      "description": "Human-readable account of what happened, matching the sibling M3.01/M3.03/M3.06 records' own detail field convention. Load-bearing for a refusal: a FAIL whose reason a reader cannot see is not an honest refusal, so the reason a screenshot or a tree was not recorded is stated here rather than left to be inferred from a null."
+    },
+    "targets": {
+      "type": "array",
+      "description": "The elements this observation could see, possibly empty. Empty is an honest result (a screen with nothing the observer could name); it is never a refusal in disguise, which is what status is for. A non-empty list alongside a null screenshot is a contradiction and is refused by hand: targets have to have been seen on something.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["selector_type", "value", "geometry", "stability"],
+        "description": "One element the observer could see, carrying whatever was ACTUALLY read about it and null for the rest. A deterministic selector read from a tree fills selector_type and value; pixel geometry read off a screenshot fills geometry; neither is ever inferred from the other.",
+        "properties": {
+          "selector_type": {
+            "type": ["string", "null"],
+            "enum": ["accessibility_id", "text", "coordinates", "image", "xpath", "testid", null],
+            "description": "How to interpret value, spelled exactly as mobile-canonical-action-v1.json's target.selector_type enum spells it, so an observed target and an action's requested target speak one vocabulary. Null when no deterministic selector was read from a tree (a target seen only in pixels has none)."
+          },
+          "value": {
+            "type": ["string", "null"],
+            "description": "The selector value itself, interpreted per selector_type, and null whenever selector_type is null."
+          },
+          "geometry": {
+            "type": ["object", "null"],
+            "additionalProperties": true,
+            "description": "Where on the SCREENSHOT this element was seen, in screenshot PIXEL coordinates, in mobile-visual-grounding-v1.json's own shape: {\"kind\": \"point\", \"x\": <number>, \"y\": <number>} or {\"kind\": \"bbox\", \"x0\": <number>, \"y0\": <number>, \"x1\": <number>, \"y1\": <number>}. Null when no geometry was observed. The shape is enforced by hand_rules(), not here, because the enforced keyword subset has no oneOf to pin a union, exactly as mobile-visual-grounding-v1.json says of its own target field."
+          },
+          "stability": {
+            "type": "string",
+            "enum": ["visual_only", "tree_selector"],
+            "description": "How much this target may be relied on. 'visual_only': its only evidence is pixel geometry read off a screenshot, so it is exploratory evidence and NOT a stable selector, exactly as mobile-visual-grounding-v1.json pins its own stability field by const. 'tree_selector': a deterministic selector was really read from a tree, so selector_type and value are real (enforced by hand, since the subset cannot make one field's presence depend on another's value). Neither value is a promotion: turning an observed target into a governed, persistent selector is EPIC M6's job, and this unit structurally never does it."
+          }
+        }
+      }
+    }
+  }
+}

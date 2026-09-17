@@ -1,0 +1,93 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "mobile-driver-contract-v1",
+  "title": "Mobile Driver Contract v1",
+  "description": "EPIC M3.01 of docs/plan/MOBILE-EPIC-M3-UNITS.md. What a mobile UI driver adapter (native iOS, Maestro, Appium, visual-fallback -- none built by this unit, schema only) advertises about itself, so the hybrid action router (M3.07) and the conformance gauntlet (M3.08) can pick and check drivers without guessing their capabilities. action_vocabulary_ref and supported_actions name the canonical action vocabulary (M3.02, a sibling unit, possibly not yet landed) BY NAME/VERSION ONLY -- this record never embeds or duplicates that vocabulary's own content. Only the keyword subset scripts/mobile_driver_contract.py actually enforces is used here (matching mobile-project-profile-v1.json and mobile-journey-contract-v1.json's own convention): type, required, properties, enum, const, items, minItems, additionalProperties. No $ref/definitions: scripts/contract_check.py's enforced subset does not resolve them (confirmed by an earlier unit tonight).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "driver_id", "driver_name", "action_vocabulary_ref",
+    "supported_actions", "platforms", "device_modes",
+    "remote_sessions_supported", "observations",
+    "deterministic_selector_support", "visual_grounding_support",
+    "risk_classes"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "mobile-driver-contract-v1",
+      "description": "Which shape this record follows, so a reader never has to guess."
+    },
+    "driver_id": {
+      "type": "string",
+      "description": "A stable identifier for this one driver adapter, e.g. 'native-ios-simctl' or 'maestro-cli'."
+    },
+    "driver_name": {
+      "type": "string",
+      "description": "Human-readable name for this driver."
+    },
+    "action_vocabulary_ref": {
+      "type": "string",
+      "description": "Name/version reference to the canonical action vocabulary this driver's supported_actions are drawn from (e.g. 'mobile-canonical-action-v1'). A reference only: the vocabulary's own schema is not embedded here and may not exist yet when this record is authored, so no cross-file check is enforced by hand the way mobile-journey-contract-v1's outcome_contract_ref is -- that would make a valid driver contract fail whenever the sibling unit has not merged."
+    },
+    "supported_actions": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Canonical action names (by name only, from action_vocabulary_ref) this driver claims to execute. Every entry here must have exactly one matching risk_classes entry (enforced by hand, not by this schema's keyword subset).",
+      "items": {"type": "string"}
+    },
+    "platforms": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Platforms this driver actually drives.",
+      "items": {"type": "string", "enum": ["ios", "android", "web", "cross-platform"]}
+    },
+    "device_modes": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Whether this driver reaches real devices, simulators only, or both.",
+      "items": {"type": "string", "enum": ["simulator", "real_device"]}
+    },
+    "remote_sessions_supported": {
+      "type": "boolean",
+      "description": "Whether this driver can run against a remote/cloud device session, not only a local one."
+    },
+    "observations": {
+      "type": "array",
+      "minItems": 1,
+      "description": "What this driver can produce as evidence of what it did.",
+      "items": {
+        "type": "string",
+        "enum": ["screenshot", "semantic_tree", "accessibility_tree", "video", "log_stream", "network_trace"]
+      }
+    },
+    "deterministic_selector_support": {
+      "type": "boolean",
+      "description": "Whether this driver can target elements via a stable, deterministic selector (id/accessibility-id/testTag), not only coordinates or vision."
+    },
+    "visual_grounding_support": {
+      "type": "boolean",
+      "description": "Whether this driver can ground an action in a screenshot via a vision model when no deterministic selector exists (M3.06's own territory; a driver stating true here is still bound by that unit's crystallization rule, not exempted from it by this field)."
+    },
+    "risk_classes": {
+      "type": "array",
+      "minItems": 1,
+      "description": "One risk classification per entry in supported_actions, both directions enforced by hand (scripts/mobile_driver_contract.py): every supported action needs exactly one entry here, and every entry here must name a supported action.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["action", "risk_class"],
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "A canonical action name from supported_actions."
+          },
+          "risk_class": {
+            "type": "string",
+            "enum": ["safe", "reversible", "destructive", "irreversible"],
+            "description": "How risky this driver's execution of that action is: safe (read-only/observation), reversible (changes state but can be undone), destructive (hard to undo), irreversible (cannot be undone, e.g. a real purchase or account deletion)."
+          }
+        }
+      }
+    }
+  }
+}

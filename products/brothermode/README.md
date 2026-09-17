@@ -1,81 +1,188 @@
 # BrotherMode
 
-**Long work loses trust when decisions, ownership, cost, and proof disappear between sessions. BrotherMode keeps that record until a person accepts the result.**
+BrotherMode keeps long work recoverable and reviewable across sessions. It
+records ownership, decisions, checks, and returned cost data on disk, then
+presents the result for a person's acceptance.
+
+Use the [quick start](docs/QUICKSTART.md) for a first install and task, or the
+[setup reference](docs/SETUP.md) for hook wiring, configuration, diagnostics,
+and removal. [docs/CONTINUITY.md](docs/CONTINUITY.md) explains the resume contract.
+
+## How it works
+
+| Piece | What it does | Implementation |
+|---|---|---|
+| Local store | Records work lifecycles and file claims transactionally; refuses overlapping claims and supports checkpoints and handovers. | `tools/bm_store.py`, `.brothermode/store.sqlite3` in the project |
+| Project and controller | Turns recorded outcomes and plans into resumable work, with authorization and verification states. | `tools/bm_project.py`, `tools/bm_autonomy.py`, `tools/bm_controller.py` |
+| File fence | Checks supported writes against active ownership; reports the reason for a refusal or an unchecked write. | `tools/bm_fence_hook.py` |
+| Decisions and views | Reads the same store to produce status, catch-up briefs, handback records, handover packs, and `PROJECT-VIEW.html`. | `tools/bm_lead.py`, `tools/bm_view.py` |
+| Recovery | Saves local Git snapshots before compaction and records a resume brief. | `tools/bm_autosave.py`, `tools/bm_telemetry.py` |
+| Session records | Parses a qualifying session's transcript into a local JSONL ledger after setup consent. | `scripts/setup.py`, `tools/bm_telemetry.py` |
+| Vault recall | Indexes configured memory and retrieves relevant notes, including recorded failures before an edit. Retrieved text remains untrusted context. | `tools/bm_vault.py`, `tools/vault_recall_hook.py` |
+
+Within Brother, the umbrella router selects this execution capability or
+BrotherSBE's assurance capability. The repository's `scripts/brother_run.py`
+composes the execution and receipt path; the installed bundle carries its
+generated runtime. BrotherMode's project store and the run receipt answer
+different questions: the store tracks work, while the receipt records what a
+particular run can prove. See the [shared charter](../../docs/CHARTER.md).
 
 ## Install through Brother
 
-The root [Brother install](../../README.md#install) is the public route:
+The [Brother install](../../README.md#start-in-sixty-seconds) is the public umbrella route:
 
 ```bash
-claude plugin marketplace add khalilmaaouni/Brother && claude plugin install brother@brother
+claude plugin marketplace add khalilmaaouni/Brother
+claude plugin install brother@brother
 ```
 
-Success looks like this:
+Open a fresh Claude Code session in the target repository and use `/brother`
+with the outcome you want. A bare request follows the routing skill's
+unfinished-work discovery before asking for a new outcome. For Codex, use
+[the repository's install guide](../../docs/how-to/install-codex.md) and the
+installed skill, not a Claude-style slash command.
 
-```text
-Successfully added marketplace
-Successfully installed plugin
-```
+### Standalone product or pinned clone
 
-Then open a repository and use `/brother`. With no unfinished work, it reports `no unfinished run found` and asks what you are trying to do.
-
-## The pain it answers
-
-A long task can outlive the chat that started it. Two workers can reach for the same file. A restart can erase the reason behind a choice. A completion message can omit the command that checked the final bytes. A cost estimate can replace a real number.
-
-BrotherMode keeps the work record on disk. It can resume open work, keep one supported writer per claimed file, record decisions, report real cost fields when returned, and produce a delivery packet from the checks that actually ran.
-
-When work names file paths, the ownership gate refuses it if it cannot read its ownership records.
-
-## Prove the benefits
-
-From this product directory, run:
+To install BrotherMode alone, choose this alternative to the umbrella:
 
 ```bash
+claude plugin marketplace add khalilmaaouni/Brother
+claude plugin install brothermode@brother
+```
+
+The root marketplace's `brothermode` entry names this product and pins its
+source ref. It is distinct from the product-local compatibility marketplace.
+The generated `install_command_plugin` fact still uses that local marketplace
+identity; it is not the hub install command above.
+
+For a pinned source copy, the clone sequence from `bm_project_facts.py` is:
+
+```bash
+git clone --branch v1.0.19 --depth 1 https://github.com/khalilmaaouni/Brother.git ~/.claude/skills/brothermode-src
+cd ~/.claude/skills/brothermode-src/products/brothermode
+python3 scripts/install.py
+```
+
+Before the install line, run `python3 scripts/install.py --dry-run` to inspect
+the proposed copy and settings changes. A clone alone registers no plugin and
+wires no hooks. The installer copies the product to
+`~/.claude/skills/brothermode`; continue with repository opt-in, vault consent,
+and verification in the quick start. Choose one installation method per host
+configuration so duplicate hook chains do not run.
+
+The separate development clone changes over time:
+
+```bash
+# Development branch (changes over time)
+git clone --branch main https://github.com/khalilmaaouni/Brother.git ~/.claude/skills/brothermode-dev-src
+cd ~/.claude/skills/brothermode-dev-src/products/brothermode
+python3 scripts/install.py --target ~/.claude/skills/brothermode-dev
+```
+
+The public clone is useful for examining the exported source. Development in
+the private hub follows [PROJECT.md](../../PROJECT.md). A separate target
+directory does not isolate hook settings; use `--settings` as well when you
+need an isolated install. Read the product identity with `cat VERSION` and
+`python3 tools/bm_project_facts.py`, rather than assuming the checkout carries
+a development suffix or that its product version equals the hub tag.
+
+## Hooks, scope, and limits
+
+Both product install routes cover SessionStart, SessionEnd, Stop, PreCompact,
+PreToolUse, and PostToolUse. Their command lists differ: the plugin's
+`hooks/hooks.json` additionally wires Vault refresh, a session cap, and attempt
+tracking. The clone installer uses `scripts/install.py::hook_groups()`.
+[Setup](docs/SETUP.md#hook-events-and-install-differences) lists both.
+
+- The clone installer writes a scope marker. With no `--repo` arguments it
+  reports `hooks: active in 0 repositories (none yet)`. Opt a repository in
+  through `.brother/config`, or install with `--hooks-everywhere` to remove
+  that machine-level scoping. A plugin install does not create this marker,
+  but hooks honor one that already exists.
+- `hooks: off` in `.brother/config` suppresses reporting and advisory hooks.
+  It does not disable write guards in an opted-in repository. See
+  `tools/bm_repo_scope.py::hooks_off` for that distinction.
+- The fence covers supported write tools and readable `apply_patch` envelopes.
+  The Bash audit detects changes to claimed files after a shell command;
+  arbitrary shell and external writes are not contained by these hooks.
+- Fence errors normally fail open with a diagnostic. `BM_FENCE_MODE=enforced`
+  refuses covered writes when the fence cannot be checked. Host wiring and
+  trust still decide whether a hook runs; package installation alone proves
+  neither. Cursor enforcement remains advisory pending a live canary.
+- Recovery snapshots share the repository's local Git storage. They are not
+  an independent backup. Cost fields are only evidence when returned by the
+  worker; missing fields remain NO-DATA.
+- Native Windows installation is refused by the installer pending a real
+  Windows run. Its hook commands now use Python, so the old POSIX-hook
+  explanation is obsolete. The refusal directs users to WSL.
+- Delivery does not authorize publishing, spending, deletion, merging, or
+  acceptance on a person's behalf. The local store is not a shared account
+  system or a multi-user service.
+
+## Verify the work and the installed bytes
+
+From this product directory, run the relevant checks:
+
+```bash
+python3 tools/test_bm_docs.py
 python3 tools/test_bm_store.py
 python3 tools/test_bm_fence_hook.py
 python3 tools/test_bm_controller.py
 python3 tools/test_bm_consent.py
 ```
 
-These commands check recovery, file ownership, bounded delivery, and consent before telemetry is written.
+For the complete product gate, run `python3 tools/test_all.py`. It executes
+suites serially in separate processes with a checkout lock and timeouts.
+Read its actual result and skipped checks. A public export omits some internal
+evidence; the runner names intentionally absent suites as NO-DATA and runs
+what is available. NO-DATA does not establish the omitted behavior.
 
-For the complete product gate, run:
-
-```bash
-python3 tools/test_all.py
-```
-
-A clone of the public release does not carry every suite the gate names: one is withheld on purpose, and the gate prints a NO-DATA line naming it and runs the rest. NO-DATA is not a pass, so a clone can say what the other suites proved and cannot say anything about that one.
-
-For the installed bytes, run the verifier:
+For an installed copy, compare its bytes to its shipped manifest first:
 
 ```bash
 bash scripts/verify-install.sh
 ```
 
-It compares every file against the `CHECKSUMS.sha256` shipped beside it, and its passing line means those files agree with that manifest. It does not mean the manifest came from a source you trust.
+Agreement proves that files match that manifest, not that the manifest's
+source is trusted. The maintainer command
+`sh scripts/checksums.sh CHECKSUMS.sha256` OVERWRITES the manifest from the
+current files. Do not run it before verification to make a mismatch disappear.
+A working tree edited after the release naturally needs a new manifest when
+it is prepared for release.
 
-There is a second command, and the order matters. `sh scripts/checksums.sh CHECKSUMS.sha256` is the maintainer's generator: it OVERWRITES the manifest with hashes of whatever is on disk right now. Run it before the verifier and the verifier passes by construction, including over files someone changed. Run it only when you meant to publish a new manifest, never as a step on the way to verifying one.
+Run `python3 scripts/doctor.py` from the project being diagnosed. Doctor
+checks wiring, a simulated denied write and allowed owner write, consent,
+versions, data locations, and store health. Its SKIP results are NO-DATA;
+`--strict` makes them nonzero. A local simulation is not a signed-in host
+canary.
 
-## What a person receives
+## Updating and removing an install
 
-The status view answers where the work stands and names one next action. The delivery packet names what changed, what checks ran after the final edit, and what remains unproven. The Vault can return a relevant lesson before a later edit reaches the same area.
+For the standalone plugin, use `/brothermode:update` in Claude Code, or the
+plugin manager for the identity you installed (`brothermode` versus `brother`).
+For a clone, run the reviewed source's installer with `--upgrade --dry-run`,
+then `--upgrade`, preserving the same target and settings path. Restart the
+host and rerun doctor. Upgrades add or overwrite files; they do not remove
+files deleted upstream.
 
-The benefit is not more confidence. It is a record another person can inspect, rerun, and disagree with.
+The clone uninstaller supports `--dry-run` and optional `--remove-files`:
+`python3 ~/.claude/skills/brothermode/scripts/uninstall.py`. It removes owned
+hook entries and the install record. The vault remains, as do project data,
+thread files, any `STATE.md` backups, and local autosave refs. See
+[Setup](docs/SETUP.md#uninstall-and-retained-data) before removing retained data.
 
-## Limits
+## Recorded capability status
 
-- The file fence covers supported write tools. Other shell or external writes may be detected after the fact rather than contained.
-- Which sessions the hooks run in depends on how you installed. The direct product install (`python3 scripts/install.py`, below) is scoped: it prints `hooks: active in 0 repositories (none yet)` and every hook returns at entry in a repository that has no `.brother/config`, so you opt a repository in with `mkdir -p .brother && printf 'hooks: on\n' > .brother/config`. Installing with `--hooks-everywhere` turns that scoping off. The bundle install through the plugin manager writes no scope marker, so its hooks run in every supported session on the machine, and `printf 'hooks: off\n' > .brother/config` is the per-repository opt-out there.
-- Local rescue snapshots are not backups and disappear with the repository data that holds them.
-- Cost is reported only when the worker returns it. Missing fields remain NO-DATA.
-- Recalled Vault lessons are untrusted context, and their measured effect on repeated mistakes remains NO-DATA.
-- BrotherMode does not publish, spend, delete, merge, or accept on a person's behalf.
-
-The detailed capability register below is generated from `capabilities.status.json`. It is retained byte for byte because the product documentation gate compares this page with that register.
-
-## Generated capability status
+The block below is generated from `capabilities.status.json`; edit that
+register and regenerate with `python3 tools/bm_docs.py capability-status
+--write` when updating its evidence. Its dated claims are not a fresh test
+result, and it includes historical descriptions that have since changed in
+code: `decide()` now validates non-string tool names before dispatch, the
+clone installer writes `INSTALLED-FROM`, and SessionStart uses Python.
+The current setup behavior is documented above and in the setup reference.
+External service availability and earlier release runs in this register are
+historical evidence, not observations of this session.
 
 <!-- BEGIN GENERATED CAPABILITY STATUS -->
 <!-- Generated from capabilities.status.json by `bm-docs capability-status --write` (the packaged console script; from a clone, tools/bm_docs.py). Edit the register, not this block. -->
@@ -88,10 +195,10 @@ That date is when the register was last edited, not a check that ran when you op
 
 | Capability | What proves it, or why it is not offered |
 |---|---|
-| Durable local store that survives a crash and can be recovered | tools/bm_store.py holds the state and tools/test_bm_store.py exercises recovery; the store job in .github/workflows/tests.yml runs that suite on Linux, macOS and Windows. |
+| Durable local store that survives a crash and can be recovered | tools/bm_store.py holds the state and tools/test_bm_store.py exercises recovery; the store job in .github/workflows/tests.yml is defined to run that suite on Linux, macOS and Windows, but STALE CLAIM FIXED 2026-09-13: the workflow is workflow_dispatch-only (disarmed 2026-08-17) and GitHub Actions is currently disabled account-wide, so this evidence is historical or on-demand, not continuously running; certification rests on the local suite passing when run directly. |
 | Current pages are held to the facts read out of the tree | tools/test_bm_docs.py refuses a current page carrying a stale count, a stale version, or a dated record that declares no status; docs/ba/QA-GATES.md states the gates. |
 | Guided beginner flow on Claude Code | skills/brotherme/SKILL.md drives the flow, commands/brotherme-start.md is its entry point, and docs/QUICKSTART.md is the install path a beginner follows. |
-| Continuous integration on macOS and Linux | .github/workflows/tests.yml runs the suite job on ubuntu-latest and macos-latest at Python 3.9 and 3.x, with fail-fast disabled so one platform cannot erase another's result. |
+| Continuous integration on macOS and Linux | .github/workflows/tests.yml defines the suite job to run on ubuntu-latest and macos-latest at Python 3.9 and 3.x, with fail-fast disabled so one platform cannot erase another's result. STALE CLAIM FIXED 2026-09-13: the trigger is workflow_dispatch-only (disarmed 2026-08-17, no-self-firing-CI law) and GitHub Actions is currently disabled account-wide, so 'continuous' means available on manual dispatch, not automatically firing on a push or a PR today. |
 | Session telemetry recorded only after the user consents | scripts/setup.py writes the consent record, tools/bm_telemetry.py is the only writer, and tools/test_bm_consent.py refuses a write without consent. |
 | Two-command plugin install through Claude Code's own plugin manager | scripts/release-smoke-install.sh proves the whole path on every release inside a throwaway configuration: marketplace add, install, installed version matched against VERSION, every hook group registered, uninstall leaving settings clean; first PASSED run 2026-08-07 on the release candidate tree, with a live sandboxed end to end run the same night. `claude plugin validate .claude-plugin/plugin.json` and `claude plugin validate .claude-plugin/marketplace.json` both exit 0 (re-run 2026-09-04); the plugin manifest passes with one warning, that a CLAUDE.md at the plugin root is not loaded as project context. The path is required: `claude plugin validate` with no argument exits 1 with the message missing required argument 'path'. SURFACE LIMIT, founder-reproduced 2026-08-06: the desktop app cannot run /plugin itself; the two commands run once in a terminal and the app consumes the installed plugin. The plugin line tracks the repository's default branch by the plugin system's design; the tagged clone remains the immutable option and docs/RELEASE.md states both. |
 
@@ -99,7 +206,7 @@ That date is when the register was last edited, not a check that ran when you op
 
 | Capability | What proves it, or why it is not offered |
 |---|---|
-| Single writer per file for supported write tools, refused by a hook; other writes detected, not contained | Conflicting writes are refused for the Claude Code write tools (Edit, Write, MultiEdit, NotebookEdit) and readable apply_patch envelopes on the Bash leg, wired by hooks/hooks.json and proven by tools/test_bm_fence_hook.py. Other shell and external writes are detected where possible by tools/bm_bash_audit.py but are NOT contained. Hooks are cooperative enforcement: no container or operating system sandbox is provided. MEASURED 2026-08-07 on OpenAI Codex CLI 0.146.0: the fence does NOT fire in the codex exec path. A live run overwrote a file another session had claimed, twice, and a marker probe proved the PreToolUse hook never executed, with config syntax, project trust and hook-trust bypass all ruled out (docs/mistakes/M19-the-codex-fence-does-not-fire-in-exec-mode.md). Under Codex, BrotherMode is an instruction file plus a working command line, not an enforcement layer. Downgraded to beta: proven in this tree with tools/test_bm_fence_hook.py, but not proven on an installed plugin because the install writes no INSTALLED-FROM stamp and the detector scripts/doctor.py check_install_identity can only return SKIP. Since 2026-08-17 the same hook also refuses a write to any git-tracked file while a live tools/test_all.py gate lock covers the checkout (the battery fence), for every session including the one that started the gate; a lock it cannot read is reported and, in advisory mode, never blocks. The battery classes in tools/test_bm_fence_hook.py prove it in this tree, under the same beta caveat as the rest of this row. ENFORCED MODE DRIVEN 2026-09-02 for the first time, by ../../scripts/fence_enforced_drill.py: 20 conditions, each fed to the hook twice, advisory against enforced. RE-RUN 2026-09-04 in this tree: 20 conditions, 19 PASS, 0 FAIL, 1 NO-DATA at exit 0, the one NO-DATA being the tool-name-not-a-string gap named at the end of this row. The 2026-09-02 wording claimed 20 PASS and 0 NO-DATA, which contradicted the gap the same row already recorded. Fifteen conditions that fail OPEN with the mode unset fail CLOSED with BM_FENCE_MODE=enforced, and a properly claimed write still ALLOWS under enforced, so enforcement is selective rather than blanket. The drill was itself driven backwards against a mutant copy of the hook whose enforced_mode() returns False, which produced 15 FAIL at exit 1. GAP CLOSED 2026-09-12 (605e0d4e7): a payload whose tool_name is not a string, or is malformed, now denies under enforced mode via `_FailOpen("bad-payload")` in bm_fence_hook.py rather than reaching the not-a-write-tool branch before any mode check; the fence_enforced_drill.py NO-DATA above is stale as of that fix. |
+| Single writer per file for supported write tools, refused by a hook; other writes detected, not contained | Conflicting writes are refused for the Claude Code write tools (Edit, Write, MultiEdit, NotebookEdit) and readable apply_patch envelopes on the Bash leg, wired by hooks/hooks.json and proven by tools/test_bm_fence_hook.py. Other shell and external writes are detected where possible by tools/bm_bash_audit.py but are NOT contained. Hooks are cooperative enforcement: no container or operating system sandbox is provided. MEASURED 2026-08-07 on OpenAI Codex CLI 0.146.0: the fence does NOT fire in the codex exec path. A live run overwrote a file another session had claimed, twice, and a marker probe proved the PreToolUse hook never executed, with config syntax, project trust and hook-trust bypass all ruled out (docs/mistakes/M19-the-codex-fence-does-not-fire-in-exec-mode.md). Under Codex, BrotherMode is an instruction file plus a working command line, not an enforcement layer. Downgraded to beta: proven in this tree with tools/test_bm_fence_hook.py, but not proven on an installed plugin because the install writes no INSTALLED-FROM stamp and the detector scripts/doctor.py check_install_identity can only return SKIP. Since 2026-08-17 the same hook also refuses a write to any git-tracked file while a live tools/test_all.py gate lock covers the checkout (the battery fence), for every session including the one that started the gate; a lock it cannot read is reported and, in advisory mode, never blocks. The battery classes in tools/test_bm_fence_hook.py prove it in this tree, under the same beta caveat as the rest of this row. ENFORCED MODE DRIVEN 2026-09-02 for the first time, by ../../scripts/fence_enforced_drill.py: 20 conditions, each fed to the hook twice, advisory against enforced. RE-RUN 2026-09-04 in this tree: 20 conditions, 19 PASS, 0 FAIL, 1 NO-DATA at exit 0, the one NO-DATA being the tool-name-not-a-string gap named at the end of this row. The 2026-09-02 wording claimed 20 PASS and 0 NO-DATA, which contradicted the gap the same row already recorded. Fifteen conditions that fail OPEN with the mode unset fail CLOSED with BM_FENCE_MODE=enforced, and a properly claimed write still ALLOWS under enforced, so enforcement is selective rather than blanket. The drill was itself driven backwards against a mutant copy of the hook whose enforced_mode() returns False, which produced 15 FAIL at exit 1. ONE GAP FOUND AND NOT FIXED, recorded here rather than left in a transcript: a payload whose tool_name is not a string leaves decide() at the not-a-write-tool branch BEFORE any mode check, so enforced mode cannot refuse it. That is one of the five shapes of malformed payload this row's C-01 note claims enforcement covers, so the claim is one shape wider than the code until that branch moves. |
 | Windows | Only the store job in .github/workflows/tests.yml runs on windows-latest; the suite and gate jobs run on Linux and macOS only. docs/KNOWN-LIMITS.md records that the installer refuses Windows and that WSL works. There is no native Windows install lifecycle. |
 | The signed authorisation an autonomous session has to work inside | tools/bm_autonomy.py is the command line, tools/test_bm_autonomy.py is its suite, and the store job in .github/workflows/tests.yml runs that suite on Linux, macOS and Windows; docs/AUTONOMY.md is the page. It stays beta because docs/KNOWN-LIMITS.md records open items against this layer and no use outside this project is recorded. |
 | The durable controller that carries a signed outcome to a checked deliverable | tools/bm_controller.py is the engine and its command line, tools/test_bm_controller.py is its suite including an end to end run that is killed and resumed (its transcript is docs/program/absolute-lead/evidence/L03/E4-endtoend.json), the store job in .github/workflows/tests.yml runs that suite on Linux, macOS and Windows, and docs/FULL-AUTO.md is the page. Not experimental, because experimental here means not measured and this is measured. It stays beta because docs/KNOWN-LIMITS.md carries its own list of what the controller does not yet do, and no pilot outside this project exists. |
@@ -135,36 +242,6 @@ That date is when the register was last edited, not a check that ran when you op
 | Changing its own safety rules | not measured |
 
 <!-- END GENERATED CAPABILITY STATUS -->
-
-## Test-pinned standalone compatibility
-
-The root bundle command above is the public install. Current product documentation checks also require the product's own install and clone commands below to remain visible and identical across this product's install pages. They are retained as test-pinned compatibility evidence, not as the recommended Brother route.
-
-```bash
-claude plugin marketplace add khalilmaaouni/Brother
-claude plugin install brothermode@brother
-```
-
-The pinned clone, for anyone who wants the bytes of one release on disk and a checksum they can run themselves:
-
-```bash
-git clone --branch v1.0.18 --depth 1 https://github.com/khalilmaaouni/Brother.git ~/.claude/skills/brothermode-src
-cd ~/.claude/skills/brothermode-src/products/brothermode
-python3 scripts/install.py
-```
-
-The development checkout is separate and changes over time:
-
-```bash
-# Development branch (changes over time)
-git clone --branch main https://github.com/khalilmaaouni/Brother.git ~/.claude/skills/brothermode-dev-src
-cd ~/.claude/skills/brothermode-dev-src/products/brothermode
-python3 scripts/install.py --target ~/.claude/skills/brothermode-dev
-```
-
-The same checks require every installed hook event to be named: SessionStart, SessionEnd, Stop, PreCompact, PreToolUse, and PostToolUse.
-
-For the resume contract those checks pin, read [docs/CONTINUITY.md](docs/CONTINUITY.md).
 
 ## License
 

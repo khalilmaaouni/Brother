@@ -13,7 +13,7 @@
       "id": "durable-store-and-recovery",
       "title": "Durable local store that survives a crash and can be recovered",
       "state": "certified",
-      "evidence": "tools/bm_store.py holds the state and tools/test_bm_store.py exercises recovery; the store job in .github/workflows/tests.yml is defined to run that suite on Linux, macOS and Windows, but STALE CLAIM FIXED 2026-09-13: the workflow is workflow_dispatch-only (disarmed 2026-08-17) and GitHub Actions is currently disabled account-wide, so this evidence is historical/on-demand, not continuously running; certification rests on the local suite passing when run directly."
+      "evidence": "tools/bm_store.py holds the state and tools/test_bm_store.py exercises recovery; the store job in .github/workflows/tests.yml is defined to run that suite on Linux, macOS and Windows, but STALE CLAIM FIXED 2026-09-13: the workflow is workflow_dispatch-only (disarmed 2026-08-17) and GitHub Actions is currently disabled account-wide, so this evidence is historical or on-demand, not continuously running; certification rests on the local suite passing when run directly."
     },
     {
       "id": "evidence-discipline",
@@ -31,7 +31,7 @@
       "id": "ci-macos-and-linux",
       "title": "Continuous integration on macOS and Linux",
       "state": "certified",
-      "evidence": ".github/workflows/tests.yml defines the suite job to run on ubuntu-latest and macos-latest at Python 3.9 and 3.x, with fail-fast disabled so one platform cannot erase another's result. STALE CLAIM FIXED 2026-09-13: the trigger is workflow_dispatch-only (disarmed 2026-08-17, no-self-firing-CI law) and GitHub Actions is currently disabled account-wide, so 'continuous' means available on manual dispatch, not automatically firing on push/PR today."
+      "evidence": ".github/workflows/tests.yml defines the suite job to run on ubuntu-latest and macos-latest at Python 3.9 and 3.x, with fail-fast disabled so one platform cannot erase another's result. STALE CLAIM FIXED 2026-09-13: the trigger is workflow_dispatch-only (disarmed 2026-08-17, no-self-firing-CI law) and GitHub Actions is currently disabled account-wide, so 'continuous' means available on manual dispatch, not automatically firing on a push or a PR today."
     },
     {
       "id": "telemetry-with-consent",

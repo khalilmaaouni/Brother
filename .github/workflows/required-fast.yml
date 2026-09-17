@@ -5,6 +5,8 @@ on:
       - main
 jobs:
   required-fast:
+    # skipped on the private hub (spends no minutes, GitHub Free 2,000/month quota), runs free on the public export
+    if: ${{ !github.event.repository.private }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:

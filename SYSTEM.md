@@ -13,8 +13,8 @@ to run the battery.
 
 | | |
 |---|---:|
-| Parts | 257 |
-| Parts with a purpose written in the file | 255 |
+| Parts | 267 |
+| Parts with a purpose written in the file | 265 |
 | Parts with a suite wired into the battery | 199 |
 | Checks in the battery | 301 |
 
@@ -72,7 +72,7 @@ undocumented corners looks complete and is not.
 | `claim_score` | WBS-50.03 Verified Claim Rate 2D. The roadmap's own words: | **NO-DATA**, nothing in the battery runs it |
 | `claim_store` | no worker starts before its claim exists, and two never own one unit. | `claim-store-self`, `fault-lab-self`, `mutation-gate`, `mutation-gate-self` |
 | `clerical_review_plan` | WBS-40.06 Clerical Review Sampling Plan. | **NO-DATA**, nothing in the battery runs it |
-| `client_parity` | the Cursor adapter must stay at parity with the Codex adapter | `client-parity` |
+| `client_parity` | the Cursor adapter must stay at parity with the Codex adapter | `client-parity`, `export-public-self` |
 | `close_ceremony_check` | The closing ceremony law's enforcer (founder order 2026-08-30 at close). | `close-ceremony`, `close-ceremony-tests` |
 | `codex_battery` | X8/C7.2 Codex battery: proves the public Brother plugin works on a real | `codex-battery-self` |
 | `codex_hooks_install` | C3: wire Brother's hooks into Codex's OWN hooks configuration. | `codex-battery-self`, `codex-hooks-self`, `codex-smoke`, `codex-smoke-self`, `managed-safety-self`, `release-closeout-self` |
@@ -89,6 +89,7 @@ undocumented corners looks complete and is not.
 | `cursor_battery` | Verify a released Cursor adapter in a detached clone and retain its evidence. | `cursor-battery-self` |
 | `cursor_plugin_install` | Install the Brother Cursor plugin to ~/.cursor/plugins/local/brother. | **NO-DATA**, nothing in the battery runs it |
 | `cursor_smoke` | the clean-install Cursor smoke test, run in an isolated home. | `cursor-smoke`, `cursor-smoke-self` |
+| `cut` | The release cut as ONE command: readiness, precedence, the chain, one | **NO-DATA**, nothing in the battery runs it |
 | `cutover_pack` | The 1.0.13 cutover pack: one prompt and one zip a fresh session on another | `cutover-pack-self` |
 | `daybook` | The Daybook: the minimal board over the outcome contract (v2). | `daybook`, `daybook-self` |
 | `decide` | never hand a human a wall, hand them a screen. | `decide-self` |
@@ -173,14 +174,21 @@ undocumented corners looks complete and is not.
 | `memory_lift` | did the memory fix actually change anything, measured on real work. | `memory-lift-self` |
 | `merge_passport` | WBS-40.07 Merge Passport: a VIEW composing evidence that already exists | **NO-DATA**, nothing in the battery runs it |
 | `merge_queue` | conflict-aware batching for the one-integrator merge queue (W8). | `merge-queue`, `merge-queue-self` |
+| `mobile_appium_adapter` | EPIC M3.05 Appium Driver Adapter: translates M3.02's canonical mobile | **NO-DATA**, nothing in the battery runs it |
 | `mobile_canonical_action` | EPIC M3.02 Mobile Canonical Action: validate an action record against | `mobile-canonical-action-self` |
 | `mobile_design` | Search a user-curated mobile reference board and inspect creative media. | `bundle-runtime-self`, `mobile-design` |
+| `mobile_driver_contract` | EPIC M3.01 Mobile Driver Contract: validate a driver advertisement record | **NO-DATA**, nothing in the battery runs it |
+| `mobile_hybrid_action_router` | EPIC M3.07 Hybrid Action Router: given a canonical action record | **NO-DATA**, nothing in the battery runs it |
 | `mobile_journey_contract` | WBS-30.01 Mobile Journey Contract: validate a journey record against | `mobile-journey-contract-self` |
+| `mobile_native_ios_adapter` | EPIC M3.03 Native iOS Driver Adapter: translates M3.02's canonical mobile | **NO-DATA**, nothing in the battery runs it |
 | `mobile_ownership_resolver` | EPIC M1.05 Mobile Ownership Resolver (per docs/plan/MOBILE-EPIC-M1-UNITS- | `mobile-ownership-resolver-self` |
 | `mobile_plan_compiler` | WBS-30.04 / EPIC M1.04 Mobile plan compiler. | `mobile-plan-compiler-self` |
 | `mobile_product_claims` | WBS-50.05 Mobile product claims. The roadmap's own words (docs/plan, | `mobile-product-claims-self` |
 | `mobile_project_profile` | EPIC M1.01/M1.02 Mobile Project Profile: a read-only detector that | `mobile-project-profile-self` |
 | `mobile_reference_lock` | WBS-30.02 Reference Lock v2: the honest partial case. | `mobile-reference-lock-self` |
+| `mobile_screen_observation` | EPIC M5.01 Mobile Screen Observation: build and validate one look at one | **NO-DATA**, nothing in the battery runs it |
+| `mobile_simulator_pool` | EPIC M4.02: simulator/emulator pool, layered over M4.01's real device | **NO-DATA**, nothing in the battery runs it |
+| `mobile_visual_fallback_adapter` | EPIC M3.06 Visual Fallback Adapter: given a screenshot, an optional | **NO-DATA**, nothing in the battery runs it |
 | `mobile_workflow` | Native mobile workflow support for Brother's existing execution engine. | `bundle-runtime-self`, `mobile-workflow` |
 | `model_worker` | NIGHT-01: the real coding-model worker for the graph loop. | `bundle-runtime-self`, `loop-bridge-self`, `model-worker` |
 | `morning_pack` | .py: fills docs/plan/MORNING-STEERING-2026-09-05.md section | `morning-pack-self` |
@@ -232,6 +240,7 @@ undocumented corners looks complete and is not.
 | `repeat_rate_page` | writes docs/benchmarks/REPEAT-RATE.md, the public page | `repeat-rate-page-self` |
 | `report_complexity_gate_experiment` | Reports the treatment-vs-control agreement rate for one complexity-gate | **NO-DATA**, nothing in the battery runs it |
 | `reproduce_export` | prove a released public tag was generated from a pinned | `keep-current-self`, `release-closeout-self`, `reproduce-export-self` |
+| `required_fast_local` | An honest required_fast check mark for a hub PR, from a local run. | **NO-DATA**, nothing in the battery runs it |
 | `resource_gate` | refuse admission when the MACHINE is short, not the code. | `resource-gate-self` |
 | `restart_schedule` | R25.3: the dynamic restart scheduler. Generalizes the existing launchd | **NO-DATA**, nothing in the battery runs it |
 | `restore_drill_enterprise` | a real, populated, multi-tenant restore drill | `restore-drill-self` |
@@ -248,6 +257,7 @@ undocumented corners looks complete and is not.
 | `score_benign_neighbours` | VN5d: the benign near-neighbour pack. Row LL-3's sibling measurement -- | **NO-DATA**, nothing in the battery runs it |
 | `score_vault_recall` | Honest before/after measurement of bm_vault.py's dense/embedding signal, using the | **NO-DATA**, nothing in the battery runs it |
 | `score_vault_retrieval` | retrieval quality for the Brother Vault, measured through | **NO-DATA**, nothing in the battery runs it |
+| `self_check_staged` | catch a new dash or a private term before it is even | **NO-DATA**, nothing in the battery runs it |
 | `smoke_first` | Run a command over many items only after it succeeds on ONE item first. | `smoke-first-self` |
 | `split_check` | Does a train/test split leak: the same entity in both sides, or a row | `evad-score`, `evad-score-personas`, `evad-score-self`, `fault-lab-self`, `split-check-self` |
 | `surface_budget` | Measure the user-invocable surface and generate bundle/MANIFEST.json. | `surface-budget`, `surface-budget-self` |

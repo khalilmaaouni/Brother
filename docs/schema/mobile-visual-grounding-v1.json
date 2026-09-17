@@ -1,0 +1,71 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "mobile-visual-grounding-v1",
+  "title": "Mobile Visual Grounding v1",
+  "description": "EPIC M3.06 of docs/plan/MOBILE-EPIC-M3-UNITS.md: the output shape of the visual fallback adapter (scripts/mobile_visual_fallback_adapter.py) -- a screenshot-grounded target proposal, a confidence score, and an evidence reference, for the target-bearing canonical actions only (TAP_TARGET, LONG_PRESS_TARGET, SCROLL_TO, ASSERT_VISIBLE, WAIT_FOR; see mobile-canonical-action-v1.json). STRUCTURAL EPHEMERAL GUARANTEE: stability is pinned to the single const value 'visual_only' -- no record validating against this schema can claim any other stability, and this schema defines no field for a persistent/stable selector id. A grounded target only becomes a stable selector through EPIC M6, crystallization and selector governance (docs/plan/MOBILE-PLATFORM-ROADMAP-1.0.18.md), a separate, not-yet-built unit; this schema and its adapter never perform that step themselves. Only the keyword subset scripts/contract_check.py actually enforces is used here (matching mobile-driver-contract-v1.json and mobile-canonical-action-v1.json's own convention): type, required, properties, enum, const, items, minItems, additionalProperties. The confidence/target shape rules the subset cannot express (confidence must be null unless a grounding actually happened; a grounded target must carry a real numeric point or bbox) are hand rules in scripts/mobile_visual_fallback_adapter.py's hand_rules(), exactly as the sibling M3.01/M3.02 modules add hand rules for what their own schemas' keywords cannot say.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "action_id", "action", "stability", "status",
+    "confidence", "target", "target_description", "evidence", "detail"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "mobile-visual-grounding-v1",
+      "description": "Which shape this record follows, so a reader never has to guess."
+    },
+    "action_id": {
+      "type": ["string", "null"],
+      "description": "The canonical action record's own action_id, carried through so evidence and a conformance run can cite the same step. Null only for the boundary case of a malformed (non-object) input record."
+    },
+    "action": {
+      "type": ["string", "null"],
+      "description": "The canonical action verb this grounding attempt was for (from mobile-canonical-action-v1's 20-verb enum). Null only for the boundary case of a malformed (non-object) input record."
+    },
+    "stability": {
+      "const": "visual_only",
+      "description": "ALWAYS 'visual_only', structurally: this field can hold no other value in any record that validates against this schema. A visual grounding result is exploratory evidence, never a stable selector -- see EPIC M6 in the schema description above for the only path that may turn one into one."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["GROUNDED", "LOW_CONFIDENCE", "NOT_ATTEMPTED", "UNSUPPORTED", "FAIL"],
+      "description": "GROUNDED: a vision-model call returned a target at or above the caller's confidence threshold. LOW_CONFIDENCE: a call returned a target below threshold -- still evidence, never auto-promoted to GROUNDED. NOT_ATTEMPTED: no vision-model call was made (the normal result tonight: no model is wired into this adapter yet). UNSUPPORTED: the action is not target-bearing, or the record carries no target to ground. FAIL: the input record or screenshot was structurally invalid."
+    },
+    "confidence": {
+      "type": ["number", "null"],
+      "description": "Null unless a vision-model call actually returned a confidence value; never defaulted to a number to fill the field. When present, within [0.0, 1.0] (range enforced by hand_rules(), not by this keyword subset)."
+    },
+    "target": {
+      "type": ["object", "null"],
+      "additionalProperties": true,
+      "description": "Null unless status is GROUNDED or LOW_CONFIDENCE. When present: {\"kind\": \"point\", \"x\": <number>, \"y\": <number>} or {\"kind\": \"bbox\", \"x0\": <number>, \"y0\": <number>, \"x1\": <number>, \"y1\": <number>}, both in screenshot pixel coordinates (shape enforced by hand_rules(), not by this keyword subset, since the subset has no oneOf to pin a union)."
+    },
+    "target_description": {
+      "type": ["string", "null"],
+      "description": "The natural-language or selector-value description this attempt tried to ground (from the canonical action record's target.description or target.value). Null only for the UNSUPPORTED case where the record carried no target at all."
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "What this attempt actually looked at. screenshot is null only when the screenshot path itself could not be read (status FAIL)."
+      ,"properties": {
+        "screenshot": {
+          "type": ["object", "null"],
+          "description": "The screenshot's identity (hash/size/pixel dimensions), from the same screenshot_identity() helper scripts/mobile_native_ios_adapter.py's CAPTURE handler uses -- so a screenshot this adapter graded and one a driver captured are identified the same way."
+        },
+        "semantic_tree_provided": {
+          "type": "boolean",
+          "description": "Whether an optional accessibility/semantic tree was supplied alongside the screenshot for this attempt. The tree's own content is not embedded here."
+        },
+        "model_call": {
+          "type": ["object", "null"],
+          "description": "Which vision model was actually invoked and how (model id, request id, latency) -- null whenever status is NOT_ATTEMPTED, UNSUPPORTED, or FAIL, since no call was made. Always null in this repo tonight: no vision-model call is wired into scripts/mobile_visual_fallback_adapter.py yet (see that module's docstring)."
+        }
+      }
+    },
+    "detail": {
+      "type": "string",
+      "description": "Human-readable account of what happened, matching the sibling M3.01-M3.03 records' own detail field convention."
+    }
+  }
+}
