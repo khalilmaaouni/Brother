@@ -47,11 +47,14 @@ nobody reads.
 Python 3.9, standard library only. No network, no subprocess.
 No em or en dashes anywhere in this file, its comments, or its output.
 """
+import argparse
 import contextlib
 import datetime
+import json
 import os
 import shutil
 import sqlite3
+import sys
 import uuid
 
 SCHEMA_VERSION = 1
@@ -636,19 +639,56 @@ class DeviceLeaseStore(object):
                     "device %r changed under this release; retry" % (device_id,))
             return {"device_id": device_id, "state": "available"}
 
-    def mark_dirty(self, device_id, reason):
-        """Force state to 'dirty' regardless of current state, even
-        overriding an active lease (a device whose cleanup failed mid-run
-        must be quarantined immediately, not after its TTL happens to
-        expire). Upserts: works even for a device_id never seen before."""
+    def mark_dirty(self, device_id, reason, lease_uuid=None, force=False):
+        """Quarantine device_id as 'dirty'. Upserts: works even for a
+        device_id never seen before.
+
+        Destroying an ACTIVE lease held by someone else is the dangerous
+        case, and it is no longer what an ordinary call does
+        (adversarial-review finding: session A's TTL expires, session B
+        legitimately claims the same device, then A's late-failing
+        cleanup called mark_dirty and silently revoked B's live lease).
+        Exactly two ways past an active lease exist now:
+
+        - lease_uuid=<uuid>: fenced. The quarantine lands only while that
+          uuid is still the row's active lease; if the lease was already
+          reclaimed by another holder this raises LeaseRefused
+          'not-lease-holder' instead of overwriting them.
+        - force=True: the operator path, stated at the call site. Takes
+          the device away from whoever holds it, deliberately.
+
+        Unfenced and unforced still works for a device nobody currently
+        holds (available, dirty, or never seen), which is the common
+        case: quarantining a free device races with nobody."""
         _require_device_id(device_id)
         if not isinstance(reason, str) or not reason.strip():
             raise ValueError("reason must be a non-empty string")
+        if lease_uuid is not None and (not isinstance(lease_uuid, str) or not lease_uuid.strip()):
+            raise ValueError("lease_uuid must be None or a non-empty string")
         ts = now_iso()
         with self._transaction():
             row = _exec(self,
                 "SELECT * FROM device_leases WHERE device_id=?",
                 (device_id,)).fetchone()
+            if row is not None and row["state"] == "leased" and not force:
+                if lease_uuid is None:
+                    raise LeaseRefused(
+                        "lease-fence-required",
+                        "device %r is actively leased; quarantining it needs "
+                        "either the holder's lease_uuid as a fence or an "
+                        "explicit force=True" % (device_id,),
+                        details={"device_id": device_id,
+                                 "current_lease_uuid": row["lease_uuid"]})
+                if row["lease_uuid"] != lease_uuid:
+                    raise LeaseRefused(
+                        "not-lease-holder",
+                        "device %r's current lease is %r, not %r; this caller "
+                        "does not hold the active lease (it may have expired "
+                        "and been reclaimed already) and must not quarantine "
+                        "the current holder's device"
+                        % (device_id, row["lease_uuid"], lease_uuid),
+                        details={"device_id": device_id,
+                                 "current_lease_uuid": row["lease_uuid"]})
             if row is None:
                 _exec(self,
                     "INSERT INTO device_leases (device_id, state, "
@@ -656,13 +696,17 @@ class DeviceLeaseStore(object):
                     "VALUES (?, 'dirty', ?, ?, 1, ?, ?)",
                     (device_id, reason, ts, ts, ts))
             else:
-                _exec(self,
+                cur = _exec(self,
                     "UPDATE device_leases SET state='dirty', owner='', "
                     "session_id='', lease_uuid='', leased_at=NULL, "
                     "ttl_seconds=NULL, expires_at=NULL, dirty_reason=?, "
                     "dirty_at=?, version=version+1, updated_at=? "
-                    "WHERE device_id=?",
-                    (reason, ts, ts, device_id))
+                    "WHERE device_id=? AND version=?",
+                    (reason, ts, ts, device_id, row["version"]))
+                if cur.rowcount != 1:
+                    raise LeaseRefused(
+                        "version-conflict",
+                        "device %r changed under this quarantine; retry" % (device_id,))
             return {"device_id": device_id, "state": "dirty", "dirty_reason": reason}
 
     def clear_dirty(self, device_id):
@@ -786,3 +830,123 @@ class DeviceLeaseStore(object):
             "AND expires_at IS NOT NULL AND expires_at<=?",
             (ts,)).fetchall()
         return [_row_to_dict(r) for r in rows]
+
+
+# -- CLI ------------------------------------------------------------------
+#
+# This module had no CLI at all until the M4.03 lifecycle review, which is
+# what made the quarantine one-way in practice: claim() and recover_stale()
+# both park a crashed holder's device in 'dirty' on purpose, clear_dirty()
+# is the only way back out, and nothing anywhere could call it. On an estate
+# whose physical device fleet is one phone, the first crashed run removed
+# that phone from the pool with no command to put it back. These
+# subcommands are that missing hand.
+
+
+def _cli_store(ns):
+    return DeviceLeaseStore(db_path=ns.db)
+
+
+def cmd_list(ns):
+    with _cli_store(ns) as store:
+        rows = store.list_all()
+    if ns.dirty_only:
+        rows = [r for r in rows if r.get("state") == "dirty"]
+    print(json.dumps({"db_path": ns.db or default_db_path(), "devices": rows}, indent=1))
+    return 0
+
+
+def cmd_clear_dirty(ns):
+    """The remediation step: return one quarantined device to the pool.
+    Deliberately one device at a time and never a sweep, because every
+    dirty row means a real device somebody should look at before it is
+    handed to the next claimant."""
+    with _cli_store(ns) as store:
+        try:
+            result = store.clear_dirty(ns.device)
+        except LeaseRefused as exc:
+            print(json.dumps({"verdict": "REFUSED", "reason": exc.reason,
+                              "message": str(exc)}, indent=1))
+            return 1
+    print(json.dumps(dict(result, verdict="OK"), indent=1))
+    return 0
+
+
+def cmd_mark_dirty(ns):
+    with _cli_store(ns) as store:
+        try:
+            result = store.mark_dirty(ns.device, ns.reason,
+                                      lease_uuid=ns.lease_uuid, force=ns.force)
+        except LeaseRefused as exc:
+            print(json.dumps({"verdict": "REFUSED", "reason": exc.reason,
+                              "message": str(exc)}, indent=1))
+            return 1
+    print(json.dumps(dict(result, verdict="OK"), indent=1))
+    return 0
+
+
+def cmd_recover_stale(ns):
+    with _cli_store(ns) as store:
+        if ns.device:
+            try:
+                result = store.recover_stale(ns.device)
+            except LeaseRefused as exc:
+                print(json.dumps({"verdict": "REFUSED", "reason": exc.reason,
+                                  "message": str(exc)}, indent=1))
+                return 1
+            print(json.dumps(dict(result, verdict="OK"), indent=1))
+            return 0
+        stale = store.list_stale()
+    print(json.dumps({"stale": stale,
+                      "note": "read-only listing; pass --device <id> to reclaim one"},
+                     indent=1))
+    return 0
+
+
+def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+    parser = argparse.ArgumentParser(
+        prog="bm_device_lease.py",
+        description="Inspect and remediate the per-device lease store (M4.01).")
+    parser.add_argument("--db", default=None,
+                        help="override the lease store path (default: %s, or $%s)"
+                             % (default_db_path(), DB_ENV_OVERRIDE))
+    sub = parser.add_subparsers(dest="cmd")
+
+    p_list = sub.add_parser("list", help="every device row and its current state")
+    p_list.add_argument("--dirty-only", action="store_true",
+                        help="only the quarantined rows, which is what needs a human")
+
+    p_clear = sub.add_parser(
+        "clear-dirty",
+        help="return one quarantined device to the pool after it has been checked")
+    p_clear.add_argument("--device", required=True)
+
+    p_mark = sub.add_parser("mark-dirty", help="quarantine one device")
+    p_mark.add_argument("--device", required=True)
+    p_mark.add_argument("--reason", required=True)
+    p_mark.add_argument("--lease-uuid", default=None,
+                        help="fence: quarantine only while this uuid still holds the lease")
+    p_mark.add_argument("--force", action="store_true",
+                        help="take the device from whoever holds it, deliberately")
+
+    p_stale = sub.add_parser(
+        "recover-stale",
+        help="list expired leases, or reclaim one to dirty with --device")
+    p_stale.add_argument("--device", default=None)
+
+    ns = parser.parse_args(argv)
+    handlers = {"list": cmd_list, "clear-dirty": cmd_clear_dirty,
+                "mark-dirty": cmd_mark_dirty, "recover-stale": cmd_recover_stale}
+    if ns.cmd in handlers:
+        try:
+            return handlers[ns.cmd](ns)
+        except LeaseError as exc:
+            print(json.dumps({"verdict": "ERROR", "message": str(exc)}, indent=1))
+            return 2
+    parser.print_help()
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

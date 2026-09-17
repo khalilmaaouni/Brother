@@ -1,200 +1,225 @@
-# Setup
+# Setup reference
 
-Ten minutes, three steps: install the skill, wire the hooks, create the vault. Nothing here needs admin rights or third-party packages.
+Use [QUICKSTART.md](QUICKSTART.md) for the first-run sequence. This page
+explains the installed files, configuration, hooks, diagnostics, and removal.
+All unqualified paths and commands are relative to `products/brothermode`.
 
-For a version of this with copy-pasteable commands, expected output at every
-step, and one concrete piece of evidence at the end, see `docs/QUICKSTART.md`.
-This page is the reference: the full hook explanation and the first-week
-checklist that QUICKSTART.md points back to.
+## Requirements and install choices
 
-This whole page describes a Claude Code install. If you drive another runtime,
-read "Other runtimes" near the bottom: the store and the retrieval commands work
-there, the hooks do not, and the install is a file you copy by hand.
+The core package requires Python 3.9 or later and declares no mandatory Python
+dependencies in `pyproject.toml`. Git is needed for the clone route and local
+recovery. Hook installation also requires a supported host with `python3` on
+its process PATH. Optional Vault integrations have their own requirements;
+installing the core does not configure those integrations.
 
-## Prerequisites
+The Claude installer refuses native Windows because its Python hook chain has
+not been verified on a Windows machine. Its former POSIX shell wrappers have
+been replaced. Use WSL for the documented install path; see
+[WINDOWS-CHECK.md](WINDOWS-CHECK.md) for the native verification protocol.
 
-- Claude Code (CLI or desktop app) with skills enabled
-- Python 3 on your PATH (`python3 --version`)
-- git
-
-## Step 1: install the skill
-
-The public default clones an immutable, tagged release, not a moving branch:
-the tag is generated from the same release fact every other page reads
-(`python3 tools/bm_project_facts.py --field install_target_tag`), the last
-tag actually cut and known to resolve, never typed by hand, and
-`tools/test_bm_docs.py` fails this page if it ever disagrees. The
-development tree carries whatever development identity `cat VERSION` prints
-in your checkout, a `.dev` identity rather than a tagged release, and this
-page deliberately does not type that identity by hand; `docs/RELEASE.md`
-explains why.
-
-THE BORING INSTALL, the default: two plain shell commands through Claude
-Code's own plugin manager, proven end to end by
-`scripts/release-smoke-install.sh` on every release. Paste once in any
-terminal.
+The public umbrella route is [Brother's install](../../../README.md#start-in-sixty-seconds).
+For the standalone product, run:
 
 ```bash
 claude plugin marketplace add khalilmaaouni/Brother
 claude plugin install brothermode@brother
 ```
 
-REPOINTED 2026-09-03: this used to name the standalone `BrotherModeUp`
-repository, pinned to its own last tag. That repository is now private and
-archived; BrotherMode ships from the Brother hub, and these two lines are
-byte identical to [`README.md`](../README.md)'s own `## Install` section on
-purpose, so the command never has two independently-typed copies that can
-drift apart (`tools/test_bm_docs.py` checks the two pages agree). The hub
-carries several products, so its marketplace name is `brother`, not this
-product's own name.
+The hub marketplace registers the product from `products/brothermode` at its
+configured ref. The standalone product's local marketplace is a different
+compatibility surface. `scripts/release-smoke-install.sh` defaults to testing
+that local product marketplace in a temporary configuration; it is not proof
+that today's hub install has run. Do not use its legacy `--github` source as
+the hub install instruction.
 
-Already running v2? Uninstall it first (`claude plugin uninstall
-brotherme`). The plugin identity changed at v3.0.0, so the old and new ids
-are different plugins to Claude Code and installing both leaves two hook
-chains wired at once.
-
-Three different things share the word "install" here. Adding this
-repository as a marketplace for the first time is what the command above
-does, and vendor documentation shows that done only from `/plugin
-marketplace add` or the shell command above, both terminal-backed; it does
-not document a desktop-app GUI path for registering a brand new
-marketplace source (https://code.claude.com/docs/en/discover-plugins,
-"Add marketplaces"). Once that marketplace is added, installing FROM it
-can happen either in the terminal (the second command above, or the
-interactive `/plugin install ...` form, since `/plugin` itself opens only
-in the terminal CLI per that same page) or inside the desktop app with no
-terminal at all, through its own **+** button, then **Plugins**, then
-**Add plugin**, which opens a plugin browser over configured marketplaces
-(https://code.claude.com/docs/en/desktop, "Install plugins").
-Founder-reproduced 2026-08-06 confirms the narrow fact behind this: the
-`/plugin` slash form does not run inside the desktop app, not that the
-desktop app cannot install plugins at all. `scripts/release-smoke-install.sh`
-proves the terminal path above end to end; it does not exercise the
-desktop browser, which this project has not separately verified.
-
-THE PINNED CLONE, for auditors and immutable-snapshot installs. The
-repository this clones is the Brother hub, which ships several products, so
-the clone lands in a source checkout, not the skill directory itself, and
-this product's own installer (Step 2 below) copies it the rest of the way:
+For a pinned clone, use the sequence derived from
+`tools/bm_project_facts.py::facts()`:
 
 ```bash
-git clone --branch v1.0.18 --depth 1 https://github.com/khalilmaaouni/Brother.git ~/.claude/skills/brothermode-src
+git clone --branch v1.0.19 --depth 1 https://github.com/khalilmaaouni/Brother.git ~/.claude/skills/brothermode-src
 cd ~/.claude/skills/brothermode-src/products/brothermode
+python3 scripts/install.py
 ```
 
-The path matters: Claude Code discovers skills under `~/.claude/skills/`,
-and the session-start script resolves its own location, so the copy Step 2
-makes is the installation. Verify the clone landed (you are already in
-`products/brothermode` after the `cd` above):
+Run the installer with `--dry-run` before its real invocation. A clone places
+source files on disk; `scripts/install.py` makes the installed copy and edits
+hook settings. It does not register the product with the plugin manager.
 
-```bash
-ls SKILL.md
-```
-
-Same dated fact as the boring install above: `v3.0.0` predates the night
-rename, so an old checkout at that tag carries the old flat
-`commands/brotherme-*.md` surface and the single `skills/brotherme/SKILL.md`
-conductor, not the nine `/brothermode:*` skills this project ships today;
-the tag pinned above is newer than that and does not have this problem. The
-engine underneath (`tools/bm_*.py`, `scripts/install.py`,
-`scripts/doctor.py`) is the same either way; only the command and skill
-names differ. If you want today's tree, use the development clone below
-instead.
-
-Working on BrotherMode's own code instead of just using it? Use the separate
-development command, which tracks the moving `main` branch on purpose and
-installs into its own directory so the two can never be confused:
+A separate exported-source development copy changes over time:
 
 ```bash
 # Development branch (changes over time)
 git clone --branch main https://github.com/khalilmaaouni/Brother.git ~/.claude/skills/brothermode-dev-src
 cd ~/.claude/skills/brothermode-dev-src/products/brothermode
+python3 scripts/install.py --target ~/.claude/skills/brothermode-dev
 ```
 
-Its own Step 2 passes `--target ~/.claude/skills/brothermode-dev` to
-`scripts/install.py`, so the two checkouts can never land in the same place.
+Use `--settings` as well as `--target` to isolate host settings. Different
+source or target directories alone do not prevent duplicate hook chains.
+Private hub development follows [PROJECT.md](../../../PROJECT.md).
 
-Then register the trigger in your global `~/.claude/CLAUDE.md` so every session knows the skill exists:
+Read identity rather than assuming a development suffix or equating a hub tag
+with the product version:
+
+```bash
+cat VERSION
+cat .claude-plugin/plugin.json
+python3 tools/bm_project_facts.py
+```
+
+For a clone, merge the trigger below into `~/.claude/CLAUDE.md`. The installer
+does not edit that file. Adjust the path for a custom target:
 
 ```markdown
-# brothermode
 When the user types /brothermode (any casing), read and follow
 ~/.claude/skills/brothermode/SKILL.md before doing anything else.
 ```
 
-## Step 2: wire the six hooks
+For the standalone plugin, use `/brothermode:help` and `/brothermode:start` in
+a fresh Claude Code session. The umbrella uses `/brother`. These surfaces are
+not interchangeable with a manually copied instruction file.
 
-Hooks make the learning loop mechanical: the model cannot forget to write
-telemetry, because the model is not the one writing it. The plugin route
-above already did this step; skip to Step 3 if that is what you used. The
-pinned clone still needs it, run from inside the `products/brothermode`
-checkout Step 1 left you in (`cd ~/.claude/skills/brothermode-src/products/brothermode`
-first if you left it), and this is also the step that copies the tree into
-`~/.claude/skills/brothermode`:
+## Clone installer
 
 ```bash
 python3 scripts/install.py --dry-run
 python3 scripts/install.py
 ```
 
-`--dry-run` writes nothing and prints every change it would make (including
-what would be copied). Run it first.
+| Option | Effect |
+|---|---|
+| `--target DIR` | Changes the installed product directory from `~/.claude/skills/brothermode`. |
+| `--settings FILE` | Changes the host settings file from `~/.claude/settings.json`. The install record and scope marker sit beside it. |
+| `--upgrade` | Allows replacement of an existing install and owned hook entries. Use with `--dry-run` to inspect an upgrade. |
+| `--no-hooks` | Leaves settings untouched while copying files. Identity, install-record, and scope handling still run. |
+| `--repo PATH` | Opts a repository in by creating `.brother/config` if absent; repeat for multiple repositories. Existing files are preserved. |
+| `--hooks-everywhere` | Removes the scope marker so hooks are not restricted to opted-in repositories. |
 
-Six hooks, not the five earlier versions of this page listed, and not the four
-the version before that listed. The fifth is `PreToolUse`, the fence hook
-(`docs/HOOKS.md`): the only hook that can actually refuse a write across
-another session's claim. It was documented for weeks and was in no install
-instruction, which meant the project's headline promise, one writer per file,
-was off by default on every installation that followed this page. The sixth is
-`PostToolUse`, the second half of the `Bash` audit pair
-(`tools/bm_bash_audit.py`): `PreToolUse` also carries that pair's first half,
-which records the size, mtime and sha256 of every fenced file before a shell
-command runs, and `PostToolUse` re-hashes those same files afterwards and
-raises one alert when a shell write changed a file another session's fence
-covers. That pair detects, it never refuses.
+The installer refuses invalid settings JSON, preserves hook groups it does
+not own, and backs up existing settings before writing. Ownership is checked
+against the installation path and an explicit tool allowlist. A group mixing
+an owned tool with an unrelated command is preserved. The installer records
+`INSTALLED-FROM` and `brothermode-install.json`, rereads settings, checks the
+hook tools exist, and invokes the fence on a harmless Read payload.
 
-Useful flags:
+That smoke invocation proves execution, not write refusal. Doctor's separate
+fence simulation checks a conflicting writer and the permitted owner. An
+upgrade adds and overwrites files but never prunes old files; the verifier can
+report those leftovers as `EXTRA`. Restart the host after wiring changes.
 
-- `--upgrade` is required before the installer will touch an installation that
-  already exists. Without it, a second run refuses and changes nothing.
-- `--target DIR` and `--settings FILE` install somewhere other than
-  `~/.claude/skills/brothermode` and `~/.claude/settings.json`.
-- `--no-hooks` copies the files and leaves your settings alone.
+## Repository scope
 
-What it guarantees, and these are tested rather than asserted
-(`tools/test_install.py`, run by `python3 tools/test_all.py`):
+`tools/bm_repo_scope.py` reads two separate controls:
 
-- It never removes a hook entry it did not write. An entry is BrotherMode's
-  only when every command inside it names this installation's own `tools/bm_*`
-  files, so a group you have added your own hook to is left completely alone.
-- It refuses a `settings.json` that is not valid JSON instead of rewriting it,
-  and reports the parser's own line and column. Rewriting would throw away
-  whatever you were halfway through editing.
-- It backs up `settings.json` before every write, to
-  `settings.json.brothermode-backup-<timestamp>`.
-- It re-reads and re-parses what it wrote, then runs the fence hook end to end
-  from a throwaway directory and requires exit 0, before printing success.
-- Re-running with `--upgrade` is idempotent: no duplicated hook entries.
+| Control | Meaning |
+|---|---|
+| `brother-hook-scope` beside the host configuration, containing `scope: repositories` | The install is scoped. A repository without `.brother/config` is inactive, including its write guards. |
+| Repository `.brother/config` | Presence opts in under a scoped install. `hooks: on` is the documented content. An explicit `hooks: off` suppresses ordinary hooks, while write guards stay active in that opted-in repository. |
 
-Windows: the installer refuses, with a message naming the reason. Two of the
-seven hook commands are POSIX shell (seven commands across six events, because
-`PreToolUse` carries two), so on cmd.exe or PowerShell they would be wired and
-silently dead. Install inside WSL, or wire the five python3-only hook commands
-by hand and accept that `SessionStart` and `PreCompact` are off.
+A default clone installation with no `--repo` options reports
+`hooks: active in 0 repositories (none yet)`. To opt in later, create
+`.brother/config` in the target Git repository with `hooks: on`. Read an
+existing file before editing it; an existing opt-out is a deliberate choice.
+Without the machine scope marker, absent repository configuration means hooks
+are active. A plugin install does not create the marker, but a previous scoped
+installation can leave one that its hooks will honor.
 
-An upgrade adds and overwrites files; it never deletes. A file removed upstream
-since your last install stays behind, and `scripts/verify-install.sh` reports
-exactly those as `EXTRA`.
+An unreadable configuration is diagnosed rather than silently treated as a
+successful opt-out. Scope is resolved from the target repository's Git root,
+not from an arbitrary store location. The write-guard exemption means
+`hooks: off` is not a universal emergency switch for every hook.
 
-### Wiring by hand instead
+## Vault and consent configuration
 
-The installer writes the equivalent of the block below, with absolute and
-shell-quoted paths. All six events are here, fence and `Bash` audit pair
-included: earlier versions of this page listed four and left the `PreToolUse`
-fence to a cross-reference, which in practice meant a hand-wired install ran
-with the one-writer-per-file promise switched off. Add to
-`~/.claude/settings.json` (create the file if it does not exist, or merge into
-your existing `hooks` block):
+The vault is a directory of local notes and records. Any text editor can read
+it. The template supplies a home page, project areas, and its own instructions.
+For a **new** destination on a default clone install:
+
+```bash
+cp -R ~/.claude/skills/brothermode/vault-template ~/BrotherModeVault
+export BROTHERMODE_VAULT="$HOME/BrotherModeVault"
+python3 ~/.claude/skills/brothermode/scripts/setup.py
+```
+
+For a plugin install, run setup from the actual installed product path. Reuse
+an existing vault only after inspecting it; do not copy a template over it.
+Interactive setup shows the notice and asks for the path and installation
+mode. Its mode detection is heuristic: select `clone` for this custom
+installer, `plugin` for the plugin manager, or `cursor` for Cursor.
+
+After accepting the notice, automation can use explicit arguments:
+
+```bash
+python3 scripts/setup.py --vault "$BROTHERMODE_VAULT" --mode clone --accept-notice
+python3 scripts/setup.py --show
+```
+
+Setup creates the consent config only after acceptance and requires
+`--reconfigure` to replace an already consented configuration. Without a TTY,
+the full `--vault`, `--mode`, `--accept-notice` trio is required. Setup records
+a path; it does not create, move, or delete the vault. It runs doctor afterward,
+but a doctor failure is reported separately from successful consent setup.
+
+| Setting or file | Reader and purpose |
+|---|---|
+| `~/.brotherme/config.json` | `scripts/setup.py` owns consent: `setup_complete`, `vault_path`, `privacy_notice_version`, `installation_mode`, and `security_mode`. `standard` is the supported security mode. |
+| `BROTHERME_CONFIG` | Overrides the consent config path, useful for isolated configurations. |
+| `BROTHERMODE_VAULT` | Telemetry's vault location; without it telemetry uses `~/BrotherModeVault`. Recording a different path in consent does not export this variable. |
+| `BM_VAULT_ROOT` | Vault retrieval's higher-priority environment override. Align it with the telemetry path if both are set. |
+| `bm_vault.json` in the resolved host config directory | Retrieval's `vault` setting, used after `BM_VAULT_ROOT` and `BROTHERMODE_VAULT`. No configured retrieval root means NO-DATA. |
+| `BROTHERMODE_REGISTRIES` | Optional globs for older `STATE.md` registry checks. The transactional store remains the authority for active ownership. |
+
+Export variables in the environment that launches the host, or configure its
+settings environment. A shell profile used by one terminal may not reach a
+desktop-launched process. `tools/brother_paths.py` resolves host directories;
+`tools/bm_telemetry.py` and `tools/bm_vault.py` have distinct vault readers, so
+a consent config alone is not evidence that all memory tools use one path.
+
+## Hook events and install differences
+
+The clone installer and the product plugin share event names, but their actual
+command lists differ in this tree. The sources are
+`scripts/install.py::hook_groups()`, `tools/bm_hookchain.py::CHAINS`, and
+`hooks/hooks.json`.
+
+| Event | Clone wiring | Additional product-plugin wiring |
+|---|---|---|
+| SessionStart | `bm_sessionstart.py`: consent-gated context, digest, recovery hints, and checks. | `bm_vault.py refresh` |
+| SessionEnd | `bm_telemetry.py outcomes-append`: consent-gated session ledger and correction-candidate capture. | None |
+| Stop | `bm_hookchain.py stop`: telemetry reminder, lead watchdog, view refresh, and alert tick. | None |
+| PreCompact | `bm_hookchain.py precompact`: local autosave and resume brief. | None |
+| PreToolUse | Fence and Vault recall on `Edit|Write|MultiEdit|NotebookEdit|Bash`; Bash audit pre-phase in a separate Bash group. | `bm_session_cap.py` in the Bash group |
+| PostToolUse | `bm_bash_audit.py post` for Bash-write detection. | `attempt_hook.py` in the Bash group |
+
+The umbrella has its own generated runtime wiring. Inspect that package rather
+than assuming this standalone-product table describes it.
+
+The fence checks supported tool writes and readable `apply_patch` envelopes
+against the store. It communicates a denial through hook JSON; exit 0 alone
+does not mean a write was allowed. With default advisory failure handling, an
+uncheckable write produces a `FAILING OPEN` diagnostic. Setting
+`BM_FENCE_MODE=enforced` makes covered failures refuse the write;
+`BM_FENCE_STRICT` separately controls whether otherwise unclaimed paths are
+refused. Inspect `tools/bm_fence_hook.py` for the decision branches and
+[HOOKS.md](HOOKS.md) for the payload contract. Hook trust and host dispatch
+still determine whether any of this code runs.
+
+The Bash audit detects changes to actively claimed files after the command;
+it cannot contain arbitrary shell writes. Vault recall supplies context, not
+permission to alter policy. A missing SessionEnd invocation loses a session
+record, while a missing PreCompact invocation loses a recovery snapshot and
+brief. Stop is a chain that can refresh records and views, not merely a silent
+reminder. It is inaccurate to describe every hook as write-free or incapable
+of refusal.
+
+### Manual clone wiring
+
+Prefer the installer, which writes absolute shell-quoted paths, backups, an
+identity stamp, and an install record. If wiring manually, merge this object
+with existing settings. Substitute your absolute install path for each `~`
+path and quote it for the shell if it contains spaces. This block describes the
+clone route; it deliberately does not add the plugin-only commands above.
+The documentation suite compares the block against the installer.
 
 ```json
 {
@@ -234,252 +259,130 @@ your existing `hooks` block):
 }
 ```
 
-What each hook does, and honestly, what a FAILED hook costs you. The six
-hooks do not all cost the same thing when they break, and treating them as
-equivalent would be dishonest: losing a data point is not the same class of
-loss as losing your ability to recover from a crash.
+Validate settings JSON after a manual edit:
 
-- **SessionStart** injects `DIGEST.md` (the 12-line law summary) plus any overdue-review nag into every new session's context.
-  If this hook fails: the new session simply starts without the digest and
-  nag text. Nothing is lost, nothing is recorded wrong; the session just
-  begins less informed than it should.
-- **SessionEnd** parses the finished session's transcript and appends one telemetry line to the ledger: tokens, tool calls, agents spawned, duration, models used. It also scans your short messages for correction candidates.
-  If this hook fails: that one session's telemetry line and correction scan
-  never happen. This costs you telemetry, one data point in the learning
-  loop, nothing more. Your work, your files, and your vault notes are
-  unaffected.
-- **Stop** warns (never blocks) when a substantial session ends the day without a vault session log.
-  If this hook fails: you simply do not get reminded to write a session log.
-  It is advisory only; it writes nothing and protects nothing.
-- **PreCompact** snapshots your working tree to a private git ref right before Claude Code compacts context (the token-death moment), so progress survives. Local git only, never pushes; recover with `python3 tools/bm_autosave.py recover`. It also writes a resume brief distilling the dying transcript (the last instruction, recent decisions, recent commands) so a resumed session recovers the thread, not just the files. Before a long or risky action you can log `python3 tools/bm_telemetry.py intent "next: X, because Y"` so a death leaves a forward-looking record. Optional: also add a `PostToolUse` hook running `bm_autosave.py tick` and set `BROTHERMODE_AUTOSAVE=1` for continuous autosave between compactions (costs a hook per tool call).
-  If this hook fails: this is the one that can actually cost you something
-  real. Your committed and already-saved files are never at risk either way;
-  what a failed PreCompact hook costs is the EXTRA safety net: no snapshot of
-  your uncommitted and untracked changes at the exact moment context gets
-  compacted, and no resume brief telling the next session what you were in
-  the middle of. That is recovery information, not telemetry, and it is not
-  the same kind of loss: a missing telemetry line is a gap in a chart; a
-  missing autosave snapshot or resume brief, hit at the wrong moment, can
-  mean redoing work or re-explaining context you would otherwise have gotten
-  back for free.
-- **PreToolUse** is the fence hook (`docs/HOOKS.md`). It runs in front of every
-  `Edit`, `Write`, `MultiEdit` and `NotebookEdit` and denies the write when the
-  target is covered by an active claim another session owns. It is the only
-  hook here that can refuse anything.
-  If this hook fails: it fails OPEN, deliberately, and prints a line starting
-  `bm_fence_hook: FAILING OPEN` to stderr. Nothing is blocked and nothing is
-  lost, but the fence is back to being a ledger rather than a boundary for as
-  long as it stays broken. The cost is not a lost data point, it is a
-  guarantee quietly downgraded to a convention.
-- **PostToolUse** is the second half of the `Bash` audit pair
-  (`tools/bm_bash_audit.py`, described in `docs/HOOKS.md`). `PreToolUse` runs
-  the pair's `pre` phase on every `Bash` call and records the size, mtime and
-  sha256 of every file an active claim covers; `PostToolUse` runs the `post`
-  phase once the shell command finishes, re-hashes those same paths, and raises
-  one high-severity alert naming the path when a file another session's fence
-  covers came back changed or gone. It answers a narrower question than the
-  fence does, and it answers it late: a shell write cannot be refused, only
-  reported after the fact.
-  If this hook fails: nothing is blocked and nothing you wrote is lost, because
-  this hook never had a decision to make. What you lose is the audit trail. A
-  shell write across somebody else's fence goes back to being invisible, which
-  is the state every version before this one shipped in. Both entrypoints exit
-  0 whatever happens and print only to stderr.
+```bash
+python3 -m json.tool ~/.claude/settings.json
+```
 
-Every hook is built to fail silent and exit 0, so a broken hook never blocks
-a session from continuing. But "never blocks" is not the same claim as "never
-costs you anything": a broken `SessionEnd` costs a telemetry line; a broken
-`PreCompact` can cost you recovery information at the one moment you needed
-it most. Treat the two claims separately, because they are not the same
-thing.
+Then complete scope and consent setup, restart the host, and run doctor.
+Manual wiring does not create the install record or `INSTALLED-FROM` stamp.
 
-## Doctor: check the whole install
+## Doctor and troubleshooting
+
+Run the installed product's doctor from the target project so its store check
+examines the intended working directory:
 
 ```bash
 python3 ~/.claude/skills/brothermode/scripts/doctor.py
 ```
 
-Run this any time you are unsure whether an install, an update, or a hand
-edit to `settings.json` left something broken. It runs eleven checks, each
-printing `PASS`, `FAIL` with a one-sentence fix a non-engineer can follow, or
-`SKIP` with the reason nothing could be checked yet (`SKIP` is not a
-failure). Exit code 0 only when every check is `PASS` or `SKIP`. Add
-`--json` instead of reading the plain text if a script needs to consume the
-result.
+Use the actual product path for a plugin or custom target. `--settings FILE`
+selects alternate Claude settings, `--json` emits structured results, and
+`--strict` treats SKIP as nonzero. `--status` is a separate read-only host
+status view and cannot be combined with `--json` or `--strict`.
 
-| # | Check | A FAIL means, in plain words |
-|---|-------|-------------------------------|
-| 1 | The write-protection check (fence hook) wired and live | A blocked-write simulation (builds a throwaway project, claims one file under one session, then asks the wired hook to approve an edit of that file from a different session; a healthy fence refuses, then allows the same write when the owner asks) found the fence dead: not wired, wired at a path that does not exist, a matcher that leaves a write tool ungated, or a hook that runs but refuses nothing. |
-| 2 | VERSION matches the plugin manifest | `VERSION` and `.claude-plugin/plugin.json` disagree about which release this install is. |
-| 3 | python3 3.9+ and git on PATH | One of those two is missing from this machine. |
-| 4 | Setup has been completed | Run `python3 scripts/setup.py`; nothing below this line can be checked before that. |
-| 5 | Vault path exists and is writable | Create it (`cp -R vault-template <your vault path>`, Step 3 below) or fix its permissions. |
-| 6 | Only one install method is wired | Both a plugin install and a clone install are wiring hooks into the same `settings.json`, so every hook fires twice. Remove one: `/plugin uninstall <name>` or `python3 scripts/uninstall.py`. |
-| 7 | Project store health | A `.brothermode/store.sqlite3` under the current directory failed its own `verify`; this is a SKIP, not a FAIL, when there is no store here yet. |
-| 8 | Hook wiring matches installation_mode | The consent config recorded by `scripts/setup.py` says `plugin` or `clone`, and the hooks actually wired in `settings.json` disagree with it. |
-| 9 | CHECKSUMS.sha256 self-check | A shipped file does not match the checked-in release manifest, the signature of an update that did not finish. |
-| 10 | settings.json is valid JSON | Claude Code silently ignores a broken settings file, so every hook, not only the fence, is off with nothing saying so. |
+`run_all_checks()` currently covers the following concerns, without promising
+that every check can obtain evidence on every installation:
 
-Check 4 reads `SKIP` until setup has run (`python3 scripts/setup.py` sets up
-the consent config that check reads): that is the expected, honest state
-right after Step 2 below, before Step 3 has created a vault, the ordinary
-shape of a brand new install, not breakage. Checks 5 and 8 read `SKIP` in
-that same state, because both depend on the consent config check 4 is still
-waiting on. Check 4 only reads `FAIL` when the config file exists but will
-not parse (setup ran once and the file broke afterward), a genuinely
-different, broken state. Every other check applies from the moment the
-hooks are wired.
+| Concern | What doctor examines |
+|---|---|
+| Fence | Wiring, matchers, and a temporary conflicting-writer/owner simulation. |
+| Version and runtime | `VERSION` against the product manifest, Python, Git, and Windows hook limitations. |
+| Consent and vault | Whether setup is complete and the recorded vault is usable. |
+| Install shape | Duplicate installs, complete wiring, and agreement with the recorded install mode. |
+| Project store | `.brothermode/store.sqlite3` under the current directory, using store verification when present. |
+| Files and settings | Checksums and valid settings JSON. |
+| Provenance and location | `INSTALLED-FROM`, stranded installations, and retained data locations. |
 
-## Step 3: create the vault
+PASS means the named check supports its claim. FAIL names a problem to fix.
+SKIP is the tool's spelling for NO-DATA, such as a missing project store or an
+unavailable source identity; the default exit code permits it, `--strict`
+does not. Neither the installer smoke nor doctor proves a signed-in host
+invoked its hooks in a real session.
 
-The vault is a plain folder of markdown notes, and the repo ships a ready-made
-template with the full layout, a Home dashboard, and a one-page constitution
-(AGENTS.md) that tells every session how to read and write memory:
+| Symptom | First inspection |
+|---|---|
+| Hooks appear installed but do nothing | Check the scope marker, target `.brother/config`, consent, host restart, and the Python executable visible to the host. |
+| No telemetry row | Check consent, transcript availability, and activity floor: at least five API messages and one tool call. Then verify the host actually invoked SessionEnd. |
+| Notes land in an unexpected vault | Compare `BROTHERMODE_VAULT`, `BM_VAULT_ROOT`, consent's path, and `bm_vault.json`. |
+| Repeated hook output | Check for simultaneous bundle, standalone, and clone installations. Use the removal path belonging to the unwanted install. |
+| Fence allows an unchecked write | Read the diagnostic, confirm a project store and active claims exist, and inspect the effective fence mode and host trust. |
+| Checksum mismatch | Compare with the shipped manifest and intended revision. Do not overwrite the manifest to hide the mismatch. |
 
-```bash
-cp -R ~/.claude/skills/brothermode/vault-template ~/BrotherModeVault
-```
-
-Open `~/BrotherModeVault` as a vault in [Obsidian](https://obsidian.md) (free).
-The notes link to each other with [[wiki-links]], so Obsidian's graph view shows
-how projects, failures, and decisions connect; any plain editor works too, the
-links just stay as text.
-
-To put it somewhere else, set the environment variable where Claude Code can see it (your shell profile, or the `env` block of `~/.claude/settings.json`):
-
-```bash
-export BROTHERMODE_VAULT="$HOME/path/to/your/vault"
-```
-
-Optional: if you keep per-project `STATE.md` fence registries, tell the weekly checks where they live:
-
-```bash
-export BROTHERMODE_REGISTRIES="$HOME/work/*/STATE.md"
-```
-
-Unset, those checks report NO-DATA instead of guessing.
-
-## Verify the installation
-
-```bash
-python3 ~/.claude/skills/brothermode/tools/bm_score.py
-```
-
-Expected on a fresh machine: 10 checks, mostly NO-DATA, and the closing line
-"LLM judge scores only the residue." NO-DATA is correct for a system with no
-history: the tools never invent numbers. You may also see one FAIL named
-`budget-vs-tier` that points at `STATE.md`: this checks the skill repository's
-OWN internal working file (the one its authors use to track building it), not
-anything in your vault or your project, and a FAIL there does not mean your
-install is broken. It is a real, checked-in inconsistency (that file's fence
-lines are not all written in the single-line, tier-tagged format the checker
-looks for), reported here rather than hidden.
-
-```bash
-python3 ~/.claude/skills/brothermode/tools/bm_sessionstart.py
-```
-
-Expected: the 12-line digest, plus a nag that the weekly review has never run. That nag is your first to-do, not an error.
-
-Then start a real session, type `/brothermode`, and give it a task. After the session ends, check that telemetry landed:
-
-```bash
-tail -1 ~/BrotherModeVault/99-System/telemetry/outcomes.jsonl
-```
-
-## Your first week
-
-1. Copy `STATE.template.md` into your main project as `STATE.md`.
-2. Read `RUBRIC.md` with whoever plays the founder role, adjust the baselines to your reality, then freeze it. A rubric that drifts cannot measure drift.
-3. Work normally for a week. Let the ledger fill.
-4. Run the weekly review (`tools/WEEKLY-REVIEW.md`). Your first review will be mostly NO-DATA. The second one is where the loop starts to pay.
+For the checksum comparison itself, run `bash scripts/verify-install.sh` from
+the product. A match establishes agreement with the supplied manifest, not
+its authenticity. For source checks, run `python3 tools/test_bm_docs.py` or
+`python3 tools/test_all.py` and report their actual output, including skips.
 
 ## Other runtimes
 
-BrotherMode's engine is standard library Python driven from a shell, so it runs
-in any runtime that can run a shell command: OpenAI Codex CLI, GitHub Copilot,
-Qwen Code, iFlow, Antigravity, or a plain terminal with no agent at all. The
-hooks are the part that does not travel. They parse Claude Code's hook JSON
-contract, and Claude Code is the only runtime where BrotherMode's own hooks are
-verified to run.
+Codex has a repository-level installer and managed hook configuration:
+[scripts/brother_install.py](../../../scripts/brother_install.py) and
+[scripts/codex_hooks_install.py](../../../scripts/codex_hooks_install.py).
+Follow [the Codex guide](../../../docs/how-to/install-codex.md), then verify
+installed skill discovery, hook trust, and the active host's behavior. The
+older instruction adapter is not a substitute for that lifecycle.
 
-What ships for the others is a generated instruction file per runtime, committed
-under `docs/runtimes/`, plus the generator that produced them:
-
-```bash
-python3 tools/bm_runtimes.py list                    # what is supported, and how far
-python3 tools/bm_runtimes.py emit --runtime codex    # regenerate one adapter
-```
-
-`emit` stages the file and prints where it goes. It does not install it. The
-copy is yours to make, because the destination (`AGENTS.md` at a repository
-root, for example) usually already has content in it and a generator that
-overwrote it would be a data loss bug:
+Cursor has an independent product install, management tool, and uninstall:
 
 ```bash
-cp docs/runtimes/codex.AGENTS.md /path/to/your/project/AGENTS.md
-cp docs/runtimes/codex.AGENTS.md "${CODEX_HOME:-$HOME/.codex}/AGENTS.md"
-```
-
-Two things to know before you rely on it, both measured on 2026-08-05 against
-codex-cli 0.146.0:
-
-- The commands need the ABSOLUTE path to this checkout when your project is not
-  this repository, and Codex needs a writable sandbox (`-s workspace-write`) for
-  the store to be created at all. Run `bm_store.py init` in the project first.
-- The one-writer fence does not transfer. Codex reports file writes as Bash
-  commands running `apply_patch`, so the matcher that guards writes in Claude
-  Code never fires. The enforcement primitive exists there (a PreToolUse deny
-  really does block a command), but BrotherMode does not ship a Codex hook
-  adapter and you should not hand wire one: a fence that fails open while
-  looking installed is worse than no fence.
-
-`RUNTIMES.md` carries the full capability table, the vendor documentation URL
-behind every claim, and the measured findings per runtime.
-
-### Cursor compatibility mode
-
-Cursor has a full lifecycle of its own, separate from the instruction-file
-path above: install, manage, uninstall, and a local harness so Claude Code
-(Fable or Opus) can dispatch execution into Cursor.
-
-```bash
+python3 scripts/install_cursor.py --dry-run
 python3 scripts/install_cursor.py
 python3 ~/.cursor/brothermode/tools/bm_cursor.py doctor
 python3 scripts/uninstall_cursor.py
 ```
 
-Fence enforcement under Cursor stays ADVISORY until a live canary is
-recorded. The harness uses git worktrees for isolation. Full page:
-`docs/CURSOR-COMPAT.md`.
+These are lifecycle alternatives, not steps to run on an existing Claude
+installation. Cursor dispatch uses Git worktrees, but fence enforcement remains
+advisory until a live signed-in canary demonstrates a deny. See
+[CURSOR-COMPAT.md](CURSOR-COMPAT.md).
 
-## Sharing with a teammate
+For other instruction-file adapters:
 
-Working mostly alone but need to hand a project to someone occasionally? `python3 tools/bm_telemetry.py handoff <project>` assembles one shareable markdown (overview, open items, latest session, recent outcomes) from your vault, secret-redacted, so you can send context without sending your whole vault. Review it before sharing; redaction is best-effort.
+```bash
+python3 tools/bm_runtimes.py list
+python3 tools/bm_runtimes.py emit --runtime codex
+```
 
-## Uninstall
+`emit` writes a generated adapter under `docs/runtimes/`; it does not install
+it into a project or stage it in Git. Merge instructions into an existing host
+file instead of overwriting it. In another project, invoke tools by absolute
+path and run `bm_store.py init` there before relying on its store. See
+[RUNTIMES.md](RUNTIMES.md) for the adapter boundaries.
+
+## Ongoing use and handover
+
+Keep the deciding command with each completed change. Run the weekly review
+in [tools/WEEKLY-REVIEW.md](../tools/WEEKLY-REVIEW.md) once there is real history
+to inspect; absent history stays NO-DATA. The local store owns file claims;
+copying a `STATE.md` template alone does not establish transactional ownership.
+
+`python3 tools/bm_telemetry.py handoff <project>` assembles a local handoff from
+vault notes and outcomes. Review it before sharing: redaction is best effort.
+A handoff file, the project store, and an engine delivery receipt are different
+artifacts and should be named accurately when handing work to a reviewer.
+
+## Uninstall and retained data
+
+For a standalone plugin, use `claude plugin uninstall brothermode`. For the
+umbrella, remove the `brother` registration using its own host lifecycle.
+For a clone, inspect then remove its owned wiring:
 
 ```bash
 python3 ~/.claude/skills/brothermode/scripts/uninstall.py --dry-run
 python3 ~/.claude/skills/brothermode/scripts/uninstall.py
 ```
 
-It removes the six hook entries it installed and the install record, and
-nothing else. Every other hook and every other key in `settings.json` stays
-where it was, in order. Add `--remove-files` to also delete the skill
-directory, which it refuses to do unless the directory really looks like a
-BrotherMode checkout.
+Use the original `--settings` and `--target` for a custom install. The
+uninstaller preserves unrelated hook groups, removes its install record, and
+attempts to remove the scope marker. Because that marker is shared, removing
+it can change the scoping of another Brother installation on the same host.
+`--remove-files` also removes a recognized product directory;
+`--remove-consent` removes the consent config. Neither deletes the vault.
 
-Your vault is never deleted, with or without a flag. There is no code path in
-the uninstaller that removes one; it prints the path and leaves the decision to
-you.
-
-Doing it by hand instead: remove the six hook entries from
-`~/.claude/settings.json` and delete
-`~/.claude/skills/brothermode`. Either way, that removes the skill but not what it wrote
-inside each project you used it in: a per-project sqlite store, thread
-files, `STATE.md` and its backups, local autosave git refs, and three lines
-in `.git/info/exclude`. `../README.md`'s Uninstall section lists exactly
-what is left and the commands to remove it, measured 2026-07-26 by actually
-doing it in a scratch project. Your vault is yours either way; nothing
-inside this repository ever writes to it except the files it holds.
+The tool prints the data it leaves behind. This can include the vault,
+per-project `.brothermode/` stores, `threads/`, `STATE.md` and backups, local
+`refs/brothermode` autosave refs, and exclusions in `.git/info/exclude`.
+Review and back up needed data before deliberately removing any of it.
+For retained-data reporting, see `scripts/uninstall.py::data_locations()`.

@@ -95,9 +95,29 @@ def _write_lines(path, lines):
 
 
 def _run_cli(args, env):
+    """Drive the exporter CLI on the SAME load-scaled budget the exporter
+    gives its own gates (EP.gate_timeout: floor 120 s, scaled by the 15 minute
+    load average over cores, capped at 1800 s).
+
+    This used to hardcode timeout=60, which is half the exporter's own floor:
+    a wrapper smaller than the thing it wraps, the exact defect
+    TheRequiredFastGateGetsMoreTimeThanItNeeds below was written about after
+    check_required_fast's hardcoded 600 s refused every export on
+    2026-09-10. That guard inspects export_public.py only, so it never saw
+    this helper, and the test file quotes the reason itself: a guard that
+    covers only the first instance stops guarding the moment the capability
+    is used again. Measured 2026-09-16 at a 15 minute load average of 356 on
+    an 8 core machine, a --dry-run run overran 60 s and raised
+    TimeoutExpired, which reads as an ERROR in a suite whose subject is the
+    exporter's verdicts, never as the machine being busy.
+
+    gate_timeout() is called HERE, per call, not bound as a default argument:
+    a default binds at definition time and would freeze the load reading at
+    import, which is the same reason EP.run_gate reads it at call time.
+    """
     return subprocess.run([sys.executable, EXPORTER_CLI] + args,
                            capture_output=True, text=True, env=env,
-                           timeout=60)
+                           timeout=EP.gate_timeout())
 
 
 def _seed_bare_remote(remote_dir):
@@ -3489,6 +3509,26 @@ class TheRequiredFastGateGetsMoreTimeThanItNeeds(unittest.TestCase):
             "REQUIRED_FAST_FLOOR_SECONDS", src,
             "check_required_fast should take its budget from the measured "
             "floor, so the number moves when the measurement does")
+
+    def test_this_files_own_cli_helper_is_not_smaller_than_the_exporter(self):
+        # The guard above reads export_public.py and nothing else, so it
+        # never saw _run_cli in THIS file sitting at a hardcoded 60 s, half
+        # the exporter's own 120 s floor. On 2026-09-16, at a 15 minute load
+        # average of 356 on 8 cores, that wrapper raised TimeoutExpired and
+        # the suite reported ERROR on tests whose subject is the exporter's
+        # verdicts. Same lesson the docstring above already states: a guard
+        # that covers only the first instance stops guarding the moment the
+        # capability is used again.
+        src = inspect.getsource(_run_cli)
+        self.assertIn(
+            "EP.gate_timeout()", src,
+            "_run_cli must take the same load-scaled budget the exporter "
+            "gives its own gates, read at call time")
+        self.assertNotIn(
+            "timeout=60)", src,
+            "_run_cli is back on a fixed budget smaller than "
+            "GATE_TIMEOUT_FLOOR_SECONDS, so a busy machine reads as an "
+            "exporter defect")
 
 
 class ACaseOnlyRenameShipsUnderItsNewName(unittest.TestCase):

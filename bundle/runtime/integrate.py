@@ -768,8 +768,8 @@ def _transcript_slug(path):
     """The exact directory name the `claude` CLI's own session-transcript
     convention derives from an absolute path: every character that is not
     a letter, digit, underscore or hyphen becomes a hyphen, one for one,
-    never collapsed (observed real form: .../projects/-Users-khalil-
-    maaouni-Brother/... from /Users/khalil.maaouni/Brother, where both
+    never collapsed (observed real form: .../projects/-Users-example-
+    user-Brother/... from /Users/example-user/Brother, where both
     '/' and '.' became a single '-' each)."""
     # realpath, not abspath: tempfile.mkdtemp() (and this platform's own
     # /var -> /private/var symlink) can hand back a path that resolves to

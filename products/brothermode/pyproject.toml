@@ -37,7 +37,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "brothermode"
-version = "3.4.4"
+version = "3.4.5"
 description = "A Claude Code skill and toolchain that makes an AI coding session behave like a colleague: durable memory, single-writer fences, honest reporting."
 readme = "README.md"
 requires-python = ">=3.9"

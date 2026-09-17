@@ -5,7 +5,7 @@
   },
   "checks": [
     {
-      "detail": "NO-DATA dense signal: the embed machine /Users/khalil.maaouni/brother-hub/products/brothermode/tools/bm-embed-bge exited 126, so no note was embedded and retrieval stays lexical only; it said: /Users/khalil.maaouni/brother-hub/products/brothermode/tools/bm-embed-bge: line 5: /Users/khalil.maaouni/brother-hub/products/brothermode/tools/../.venv-embed/bin/python: No such file or directory\nNO-DATA dense signal: no embed machine present; 8 note(s) stay lexical only\nindexed 8 note(s): 8 new, 0 refreshed, 0 gone, 0 touched (content hash unchanged, mtime only)",
+      "detail": "NO-DATA dense signal: the embed machine /Users/example-user/brother-hub/products/brothermode/tools/bm-embed-bge exited 126, so no note was embedded and retrieval stays lexical only; it said: /Users/example-user/brother-hub/products/brothermode/tools/bm-embed-bge: line 5: /Users/example-user/brother-hub/products/brothermode/tools/../.venv-embed/bin/python: No such file or directory\nNO-DATA dense signal: no embed machine present; 8 note(s) stay lexical only\nindexed 8 note(s): 8 new, 0 refreshed, 0 gone, 0 touched (content hash unchanged, mtime only)",
       "name": "index",
       "passed": true,
       "tenant": "tenant-alpha"
@@ -59,7 +59,7 @@
       "tenant": "tenant-alpha"
     },
     {
-      "detail": "NO-DATA dense signal: the embed machine /Users/khalil.maaouni/brother-hub/products/brothermode/tools/bm-embed-bge exited 126, so no note was embedded and retrieval stays lexical only; it said: /Users/khalil.maaouni/brother-hub/products/brothermode/tools/bm-embed-bge: line 5: /Users/khalil.maaouni/brother-hub/products/brothermode/tools/../.venv-embed/bin/python: No such file or directory\nNO-DATA dense signal: no embed machine present; 8 note(s) stay lexical only\nindexed 8 note(s): 1 new, 1 refreshed, 0 gone, 0 touched (content hash unchanged, mtime only)",
+      "detail": "NO-DATA dense signal: the embed machine /Users/example-user/brother-hub/products/brothermode/tools/bm-embed-bge exited 126, so no note was embedded and retrieval stays lexical only; it said: /Users/example-user/brother-hub/products/brothermode/tools/bm-embed-bge: line 5: /Users/example-user/brother-hub/products/brothermode/tools/../.venv-embed/bin/python: No such file or directory\nNO-DATA dense signal: no embed machine present; 8 note(s) stay lexical only\nindexed 8 note(s): 1 new, 1 refreshed, 0 gone, 0 touched (content hash unchanged, mtime only)",
       "name": "reindex after derive+forget",
       "passed": true,
       "tenant": "tenant-alpha"
@@ -95,7 +95,7 @@
       "tenant": "tenant-alpha"
     },
     {
-      "detail": "NO-DATA dense signal: the embed machine /Users/khalil.maaouni/brother-hub/products/brothermode/tools/bm-embed-bge exited 126, so no note was embedded and retrieval stays lexical only; it said: /Users/khalil.maaouni/brother-hub/products/brothermode/tools/bm-embed-bge: line 5: /Users/khalil.maaouni/brother-hub/products/brothermode/tools/../.venv-embed/bin/python: No such file or directory\nNO-DATA dense signal: no embed machine present; 8 note(s) stay lexical only\nindexed 8 note(s): 8 new, 0 refreshed, 0 gone, 0 touched (content hash unchanged, mtime only)",
+      "detail": "NO-DATA dense signal: the embed machine /Users/example-user/brother-hub/products/brothermode/tools/bm-embed-bge exited 126, so no note was embedded and retrieval stays lexical only; it said: /Users/example-user/brother-hub/products/brothermode/tools/bm-embed-bge: line 5: /Users/example-user/brother-hub/products/brothermode/tools/../.venv-embed/bin/python: No such file or directory\nNO-DATA dense signal: no embed machine present; 8 note(s) stay lexical only\nindexed 8 note(s): 8 new, 0 refreshed, 0 gone, 0 touched (content hash unchanged, mtime only)",
       "name": "reindex the restored copy from scratch",
       "passed": true,
       "tenant": "tenant-alpha"
@@ -257,7 +257,7 @@
       "tenant": "tenant-alpha"
     },
     {
-      "detail": "NO-DATA dense signal: the embed machine /Users/khalil.maaouni/brother-hub/products/brothermode/tools/bm-embed-bge exited 126, so no note was embedded and retrieval stays lexical only; it said: /Users/khalil.maaouni/brother-hub/products/brothermode/tools/bm-embed-bge: line 5: /Users/khalil.maaouni/brother-hub/products/brothermode/tools/../.venv-embed/bin/python: No such file or directory\nNO-DATA dense signal: no embed machine present; 8 note(s) stay lexical only\nindexed 8 note(s): 8 new, 0 refreshed, 0 gone, 0 touched (content hash unchanged, mtime only)",
+      "detail": "NO-DATA dense signal: the embed machine /Users/example-user/brother-hub/products/brothermode/tools/bm-embed-bge exited 126, so no note was embedded and retrieval stays lexical only; it said: /Users/example-user/brother-hub/products/brothermode/tools/bm-embed-bge: line 5: /Users/example-user/brother-hub/products/brothermode/tools/../.venv-embed/bin/python: No such file or directory\nNO-DATA dense signal: no embed machine present; 8 note(s) stay lexical only\nindexed 8 note(s): 8 new, 0 refreshed, 0 gone, 0 touched (content hash unchanged, mtime only)",
       "name": "index",
       "passed": true,
       "tenant": "tenant-beta"
@@ -311,7 +311,7 @@
       "tenant": "tenant-beta"
     },
     {
-      "detail": "NO-DATA dense signal: the embed machine /Users/khalil.maaouni/brother-hub/products/brothermode/tools/bm-embed-bge exited 126, so no note was embedded and retrieval stays lexical only; it said: /Users/khalil.maaouni/brother-hub/products/brothermode/tools/bm-embed-bge: line 5: /Users/khalil.maaouni/brother-hub/products/brothermode/tools/../.venv-embed/bin/python: No such file or directory\nNO-DATA dense signal: no embed machine present; 8 note(s) stay lexical only\nindexed 8 note(s): 1 new, 1 refreshed, 0 gone, 0 touched (content hash unchanged, mtime only)",
+      "detail": "NO-DATA dense signal: the embed machine /Users/example-user/brother-hub/products/brothermode/tools/bm-embed-bge exited 126, so no note was embedded and retrieval stays lexical only; it said: /Users/example-user/brother-hub/products/brothermode/tools/bm-embed-bge: line 5: /Users/example-user/brother-hub/products/brothermode/tools/../.venv-embed/bin/python: No such file or directory\nNO-DATA dense signal: no embed machine present; 8 note(s) stay lexical only\nindexed 8 note(s): 1 new, 1 refreshed, 0 gone, 0 touched (content hash unchanged, mtime only)",
       "name": "reindex after derive+forget",
       "passed": true,
       "tenant": "tenant-beta"
@@ -347,7 +347,7 @@
       "tenant": "tenant-beta"
     },
     {
-      "detail": "NO-DATA dense signal: the embed machine /Users/khalil.maaouni/brother-hub/products/brothermode/tools/bm-embed-bge exited 126, so no note was embedded and retrieval stays lexical only; it said: /Users/khalil.maaouni/brother-hub/products/brothermode/tools/bm-embed-bge: line 5: /Users/khalil.maaouni/brother-hub/products/brothermode/tools/../.venv-embed/bin/python: No such file or directory\nNO-DATA dense signal: no embed machine present; 8 note(s) stay lexical only\nindexed 8 note(s): 8 new, 0 refreshed, 0 gone, 0 touched (content hash unchanged, mtime only)",
+      "detail": "NO-DATA dense signal: the embed machine /Users/example-user/brother-hub/products/brothermode/tools/bm-embed-bge exited 126, so no note was embedded and retrieval stays lexical only; it said: /Users/example-user/brother-hub/products/brothermode/tools/bm-embed-bge: line 5: /Users/example-user/brother-hub/products/brothermode/tools/../.venv-embed/bin/python: No such file or directory\nNO-DATA dense signal: no embed machine present; 8 note(s) stay lexical only\nindexed 8 note(s): 8 new, 0 refreshed, 0 gone, 0 touched (content hash unchanged, mtime only)",
       "name": "reindex the restored copy from scratch",
       "passed": true,
       "tenant": "tenant-beta"

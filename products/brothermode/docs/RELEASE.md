@@ -53,7 +53,7 @@ now reads `2.0.0-rc.12.dev1`, a DEVELOPMENT identity, not a release candidate.
 tag at all. The public install target stays pinned at the last tag actually
 known to resolve, `install_target_tag`. That was `v2.0.0-rc.9` when this
 paragraph was written 2026-08-01; it has moved since. The live value is
-`PUBLIC_INSTALL_TAG` in `tools/bm_project_facts.py`, currently `v1.0.18`,
+`PUBLIC_INSTALL_TAG` in `tools/bm_project_facts.py`, currently `v1.0.19`,
 independent of whatever VERSION says. See "The version law" below for the
 rule this follows.
 
@@ -172,12 +172,12 @@ installer copies it the rest of the way (`README.md`, "Install and
 preflight" explains why):
 
 ```bash
-git clone --branch v1.0.18 --depth 1 https://github.com/khalilmaaouni/Brother.git ~/.claude/skills/brothermode-src
+git clone --branch v1.0.19 --depth 1 https://github.com/khalilmaaouni/Brother.git ~/.claude/skills/brothermode-src
 cd ~/.claude/skills/brothermode-src/products/brothermode
 python3 scripts/install.py
 ```
 
-`--branch v1.0.18` checks out that exact tag, not a moving branch head. It
+`--branch v1.0.19` checks out that exact tag, not a moving branch head. It
 is the public install target, not necessarily the identity the tree on `main`
 currently carries: `python3 tools/bm_project_facts.py --field
 install_target_tag` prints the tag every onboarding page pins, and `python3
@@ -702,6 +702,16 @@ the install pages pin once the hub cuts one that carries this product.
 SUPERSEDED 2026-09-03 by the section below: the open question in the
 paragraph above is answered, not by the v1.0 crossing deciding it on its own
 terms but by an event that made the old answer impossible.
+
+## 3.4.5 (2026-09-12)
+
+`VERSION` reads `3.4.5`, cut by commit `a14b464e2` ("unit
+PRODUCT_PATCH_VERSION: model worker"), a mechanical patch bump with no
+feature narrative recorded in its own message. Stated here only for what
+is actually known: this is the current identity the release-truth checks
+compare every manifest against, same as every version above. No richer
+account of what changed between 3.4.4 and 3.4.5 is on record; a fuller
+entry should replace this one if that account is ever reconstructed.
 
 ## v1.0.0: the standalone repository goes private and archived, the two repository facts collapse back into one (2026-09-03)
 

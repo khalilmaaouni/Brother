@@ -71,7 +71,7 @@
   },
   {
    "path": "integrate.py",
-   "sha256": "25d681b64129cb588e3e220097ee510c22c94638472a56f5caa43806f97ae613"
+   "sha256": "4162e7c96c9beb6529ce070eb0bd095d3979f4db989a9c59046a8b45ae40bf6e"
   },
   {
    "path": "journal.py",
@@ -207,6 +207,6 @@
   }
  ],
  "generated_by": "scripts/bundle_runtime.py",
- "source_describe": "v1.0.17-23-g3c65d21e",
- "source_revision": "3c65d21ebe11e1484e0f853fa989ece4ab60e699"
+ "source_describe": "v1.0.17-110-gc0b9b9d4f",
+ "source_revision": "c0b9b9d4f9a8bca36bae07a25cd845460f0f224f"
 }

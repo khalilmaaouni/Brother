@@ -186,8 +186,10 @@ class BatteryVerdictTest(unittest.TestCase):
                 "--expectations", expectations_path or self.expectations_path,
                 "--check-all", check_all or self.check_all_clean]
         if not extra_args or "--today" not in extra_args:
-            # a stable clock: keeps product-acceptance-self's review_by
-            # (2026-09-07) from expiring out from under an unrelated test
+            # A stable clock for classify(), so no unrelated test sees an
+            # entry expire. It does NOT protect the schema gate in front of
+            # classify(): that one reads the real calendar by design, which is
+            # why every review_by in EXPECTATIONS is a 2999 sentinel.
             args += ["--today", "2026-09-01"]
         if extra_args:
             args += extra_args
