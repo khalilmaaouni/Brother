@@ -432,5 +432,62 @@ class ABrotherTreeScopedTermIsNotEnforcedOnHandoverPacks(unittest.TestCase):
             shutil.rmtree(os.path.dirname(terms_path), ignore_errors=True)
 
 
+class ANewestDirectoryThatIsNotAPackIsNoDataNeverAFail(unittest.TestCase):
+    """Measured 2026-09-17: the newest directory under the real handover
+    root was a release-cut handoff scratch directory (two markdown files,
+    none of the ceremony's markers, no zip beside it), and the check judged
+    it as a close pack that fails the law ("no 01-START-HERE", "no board",
+    "no session log", "no zip"), blocking every merge on the machine. A
+    directory carrying none of the four pack markers is not a pack the law
+    applies to: it is NO-DATA (exit 2, never a pass), named so its owner
+    can move it. A directory carrying even ONE marker is a pack that is
+    missing the rest, and still FAILS."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="ceremony-root-")
+        self.terms_path = _make_terms_file([SHORT_TERM, LONG_TERM])
+
+    def tearDown(self):
+        shutil.rmtree(self.root, ignore_errors=True)
+        shutil.rmtree(os.path.dirname(self.terms_path), ignore_errors=True)
+
+    def _run(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = C.main(["--root", self.root, "--terms", self.terms_path])
+        return code, buf.getvalue()
+
+    def test_a_scratch_directory_newer_than_the_last_pack_is_no_data_naming_it(self):
+        _make_valid_pack(self.root, "2026-09-16-clean-pack")
+        _backdate(os.path.join(self.root, "2026-09-16-clean-pack"), hours_ago=2)
+        scratch = os.path.join(self.root, "2026-09-17-release-cut-scratch")
+        _write(os.path.join(scratch, "HANDOVER.md"), "# Handover notes\n")
+        _write(os.path.join(scratch, "pr-body.md"), "## Summary\n")
+        code, out = self._run()
+        self.assertEqual(code, 2, msg=out)
+        self.assertTrue(out.startswith("NO-DATA:"), out)
+        self.assertIn("2026-09-17-release-cut-scratch", out)
+        self.assertIn("not a close pack", out)
+
+    def test_a_directory_with_one_marker_is_a_broken_pack_and_still_fails(self):
+        partial = os.path.join(self.root, "2026-09-17-half-pack")
+        _write(os.path.join(partial, "01-START-HERE.md"), VALID_START_HERE)
+        code, out = self._run()
+        self.assertEqual(code, 1, msg=out)
+        self.assertIn("no readiness board HTML copy", out)
+        self.assertIn("no zip beside the pack", out)
+
+    def test_a_scratch_directory_never_hides_a_term_hit_in_another_pack(self):
+        dirty = os.path.join(self.root, "2026-08-01-dirty-pack")
+        _write(os.path.join(dirty, "notes.md"), "mentions %s here\n" % LONG_TERM)
+        _backdate(dirty, hours_ago=48)
+        scratch = os.path.join(self.root, "2026-09-17-release-cut-scratch")
+        _write(os.path.join(scratch, "HANDOVER.md"), "# Handover notes\n")
+        code, out = self._run()
+        self.assertEqual(code, 1, msg=out)
+        self.assertIn("private-term hit", out)
+        self.assertIn("not a close pack", out)
+
+
 if __name__ == "__main__":
     unittest.main()

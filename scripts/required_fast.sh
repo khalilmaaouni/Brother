@@ -112,6 +112,12 @@ run_check "readme-honesty"      python3 scripts/test_readme_honesty.py
 # charter names. 0.09s on this machine, so it belongs in the fast slice.
 run_check "charter-paths"       python3 scripts/charter_paths.py
 run_check "export-public"       python3 scripts/test_export_public.py -v
+# The release cut orchestrator. Registered 2026-09-17 after three real-store
+# defects stopped the 1.0.19 cut one attempt at a time (park-only precedence,
+# refusing its own fence, releasing under a different session): its tests
+# existed but gated nothing. Includes real temporary-store lifecycle tests
+# (claim, precedence, decline, gate failure, release). About 6 s here.
+run_check "release-cut"         python3 scripts/test_cut.py
 # The Cursor package: the manifest, the Cursor marketplace, the hooks file
 # routed through the Cursor adapter, the rules, and a local install into a
 # temp dir. No binary is needed, so it earns the fast slice.

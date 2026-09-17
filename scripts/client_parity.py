@@ -54,6 +54,8 @@ PAIRS = {
     "products/brothermode/.codex-plugin/plugin.json": "products/brothermode/.cursor-plugin/plugin.json",
     "docs/how-to/install-codex.md": "docs/how-to/install-cursor.md",
     "docs/codex/SMOKE-RUNBOOK.md": "docs/cursor/SMOKE-RUNBOOK.md",
+    "docs/codex/HOOKS-MAPPING.md": "docs/cursor/HOOKS-MAPPING.md",
+    "docs/codex/PACKAGE-SHAPE.md": "docs/cursor/PACKAGE-SHAPE.md",
     "products/brothermode/docs/runtimes/codex.AGENTS.md": "products/brothermode/docs/runtimes/cursor.AGENTS.md",
     "scripts/codex_smoke.py": "scripts/cursor_smoke.py",
     "scripts/test_codex_smoke.py": "scripts/test_cursor_smoke.py",

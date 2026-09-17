@@ -1146,6 +1146,15 @@ def check_secrets(export_dir, baseline_dir=None):
     return True, ["secrets: 0 hit(s) over %d file(s)" % count]
 
 
+def wants_required_fast(args):
+    """required_fast.sh runs inside the candidate export tree on an explicit
+    --prove-required-fast, and on every --push unless --skip-required-fast:
+    the hand-picked gates below cannot see every tree-shape check, and the
+    public PR is otherwise the first place the export shape meets them."""
+    return bool(args.prove_required_fast
+                or (args.push and not args.skip_required_fast))
+
+
 def run_gates(export_dir, identity_dir, baseline_dir=None):
     """cleanse.sh and private_terms_scan.py against the CANDIDATE EXPORT
     TREE (the orphan commit in `export_dir`); identity_guard.py against its
@@ -1195,6 +1204,19 @@ def run_gates(export_dir, identity_dir, baseline_dir=None):
                      "--terms", terms_file, "--range", "HEAD"],
                     export_dir))
 
+    # client_parity against the EXPORT tree, never only the hub's: public
+    # PR 37 (2026-09-17) failed because docs/codex/ shipped whole while two
+    # of its Cursor twins were not allowlisted, and the hub-tree run passed.
+    # A tree with no Codex surface has nothing to pair, so it is skipped
+    # with a named line, the same way a tree with no battery is.
+    has_codex = os.path.isdir(os.path.join(export_dir, "docs", "codex"))
+    if has_codex:
+        checks.append(("client_parity",
+                        [sys.executable, os.path.join(
+                            ROOT, "scripts", "client_parity.py"),
+                         "--root", export_dir],
+                        export_dir))
+
     batteries = sorted(glob.glob(os.path.join(export_dir, BATTERY_GLOB)))
     for battery in batteries:
         product_dir = os.path.dirname(os.path.dirname(battery))
@@ -1213,6 +1235,9 @@ def run_gates(export_dir, identity_dir, baseline_dir=None):
     if not batteries:
         lines.append("battery_inventory: no %s in the candidate tree, "
                      "nothing to check" % BATTERY_GLOB)
+    if not has_codex:
+        lines.append("client_parity: no docs/codex in the candidate tree, "
+                     "nothing to pair")
 
     secrets_ok, secrets_lines = check_secrets(export_dir, baseline_dir)
     lines.extend(secrets_lines)
@@ -2166,7 +2191,13 @@ def main(argv=None):
                           "(required_fast.sh is itself a multi-minute "
                           "battery); a release cut passes this so the "
                           "public repository's own required check cannot "
-                          "regress unnoticed. Works with or without --push.")
+                          "regress unnoticed. Works with or without --push; "
+                          "--push implies it unless --skip-required-fast.")
+    ap.add_argument("--skip-required-fast", action="store_true",
+                     help="with --push, do NOT run required_fast.sh inside "
+                          "the candidate export tree. Every tree-shape check "
+                          "then meets the export shape first in public CI, "
+                          "which is how public PR 37 went red on 2026-09-17.")
     ap.add_argument("--tag-time-checks", action="store_true",
                      help="in a dry run (no --push), build the candidate "
                           "export tree as usual, then run tag_time_checks "
@@ -2256,7 +2287,11 @@ def main(argv=None):
               "(%d file/path entr%s)"
               % (len(copied), "y" if len(copied) == 1 else "ies"))
 
-        if args.prove_required_fast:
+        if args.push and args.skip_required_fast:
+            print("WARNING: --skip-required-fast: this push does not run "
+                  "required_fast.sh on the export tree; a tree-shape break "
+                  "will first show in public CI")
+        if wants_required_fast(args):
             # required_fast.sh expects a real git tree under it (several of
             # its own checks shell out to git); the orphan candidate above
             # was only ever committed for the secret/identity gates, so

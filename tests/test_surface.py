@@ -124,13 +124,40 @@ class TestNoSelfFiringCI(unittest.TestCase):
             return [x.strip().strip("'\"") for x in raw.strip("[]").split(",") if x.strip()]
         return [ln.split("-", 1)[1].strip().strip("'\"") for ln in raw.strip().splitlines()]
 
+    # FOUNDER LAW 2026-09-17, after the private hub spent its whole 2,000
+    # free minutes because this file fired on every PR with no repository
+    # condition: the named exception now also requires a JOB-LEVEL guard
+    # that skips the job on a private repository, so the trigger existing
+    # is never enough by itself, the job also has to refuse to run there.
+    PRIVATE_GUARD_CONDITION = "!github.event.repository.private"
+
+    @classmethod
+    def _job_level_private_guard_holds(cls, text):
+        """True only when `if: ${{ !github.event.repository.private }}`
+        (whitespace-flexible) sits at the SAME indentation as `runs-on:`,
+        i.e. a job-level key sibling of runs-on. A guard indented deeper
+        (a step's own `if:`, nested under `steps:`/`- name:`), a missing
+        `if:`, or an `if:` with any other condition all fail this."""
+        m = re.search(r"^([ 	]*)runs-on:", text, re.MULTILINE)
+        if not m:
+            return False
+        job_indent = m.group(1)
+        pattern = re.compile(
+            r"^%sif:\s*\$\{\{\s*%s\s*\}\}\s*$"
+            % (re.escape(job_indent), re.escape(cls.PRIVATE_GUARD_CONDITION)),
+            re.MULTILINE,
+        )
+        return bool(pattern.search(text))
+
     @classmethod
     def _named_exception_holds(cls, text):
         """True only when the file at EXEMPT_PR_FILE meets every clause of
         the 2026-09-06 ruling: `on:` carries pull_request and no other auto
         trigger, branches is main only, every runs-on is ubuntu-latest,
-        timeout-minutes is present and at most 20, and no strategy/matrix
-        appears anywhere. Anything else and the trigger stays refused."""
+        timeout-minutes is present and at most 20, no strategy/matrix
+        appears anywhere, AND (2026-09-17) the job carries the job-level
+        private-repository guard so it spends no minutes on the private
+        hub. Anything else and the trigger stays refused."""
         if any(t in text for t in ("push:", "pull_request_target:", "schedule:")):
             return False
         if "pull_request:" not in text:
@@ -144,6 +171,8 @@ class TestNoSelfFiringCI(unittest.TestCase):
         if not timeouts or any(int(t) > cls.EXEMPT_PR_MAX_TIMEOUT for t in timeouts):
             return False
         if "strategy:" in text or "matrix:" in text:
+            return False
+        if not cls._job_level_private_guard_holds(text):
             return False
         return True
 
@@ -223,6 +252,7 @@ on:
 
 jobs:
   gate:
+    if: ${{ !github.event.repository.private }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -280,6 +310,44 @@ jobs:
 
     def test_exception_file_with_timeout_over_20_fails(self):
         bad = self.ACCEPTED.replace("timeout-minutes: 20", "timeout-minutes: 60")
+        self._assert_fails("required-fast.yml", bad)
+
+    def test_missing_private_guard_fails(self):
+        """2026-09-17: the private-repository guard is now a required
+        clause, not decoration. An otherwise-accepted copy with no `if:`
+        at all (the unguarded shape that spent the hub's whole monthly
+        minute quota) stays refused."""
+        bad = self.ACCEPTED.replace(
+            "    if: ${{ !github.event.repository.private }}\n", ""
+        )
+        self.assertNotIn("if:", bad, "fixture setup: guard line must be fully removed")
+        self._assert_fails("required-fast.yml", bad)
+
+    def test_step_level_private_guard_fails(self):
+        """The guard moved onto the step instead of the job: the job is
+        still scheduled and billed, only the step's own command is
+        skipped. That is not the clause the founder ruled on."""
+        bad = self.ACCEPTED.replace(
+            "    if: ${{ !github.event.repository.private }}\n    runs-on: ubuntu-latest",
+            "    runs-on: ubuntu-latest",
+        ).replace(
+            "    steps:\n      - run: sh scripts/required_fast.sh",
+            "    steps:\n      - if: ${{ !github.event.repository.private }}\n        run: sh scripts/required_fast.sh",
+        )
+        self.assertNotIn(
+            "    if: ${{ !github.event.repository.private }}\n    runs-on:", bad,
+            "fixture setup: guard must no longer sit at job level",
+        )
+        self._assert_fails("required-fast.yml", bad)
+
+    def test_different_condition_fails(self):
+        """A condition that is not exactly the named private-repository
+        guard, even one that reads similarly, was never the clause ruled
+        on: it stays refused."""
+        bad = self.ACCEPTED.replace(
+            "if: ${{ !github.event.repository.private }}",
+            "if: ${{ github.repository == 'khalilmaaouni/Brother' }}",
+        )
         self._assert_fails("required-fast.yml", bad)
 
 

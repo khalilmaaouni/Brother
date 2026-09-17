@@ -53,6 +53,12 @@ API_ROOT = "https://api.github.com"
 TIMEOUT_SECONDS = 10
 GOOD_CONCLUSIONS = ("success", "neutral", "skipped")
 
+#: The phrase GitHub's own check-run annotation carries when a job never ran
+#: because of a billing failure or a spending-limit block (the host refused
+#: to start it, never the code under test failing). Matched lowercase
+#: against an annotation's own message; a real test failure never says this.
+JOB_NOT_STARTED_MARKER = "job was not started"
+
 #: owner/name, each side [A-Za-z0-9_.-]+ and NOTHING else: no extra slashes,
 #: no stray "/" inside either side (a stray "/" breaks the match, since the
 #: pattern is anchored end to end). The character class allows periods
@@ -306,6 +312,95 @@ def _freshness(store, head_sha):
         detail += "; unreadable and counted as nothing: " + "; ".join(unreadable)
         return "NO-DATA", detail
     return "PASS", detail
+
+
+def _billing_refusal(run, repo, fetch, token):
+    """(is_refusal, message_or_None, fetch_problem_or_None) for one
+    non-passing required check run. Only a run carrying at least one
+    annotation is worth a fetch at all (`output.annotations_count`); its
+    annotations are read through the same GET-only transport as every other
+    control (`output.annotations_url` when GitHub supplied one, else the
+    documented /repos/{repo}/check-runs/{id}/annotations path) and searched
+    for JOB_NOT_STARTED_MARKER, the shape GitHub uses when a job never ran
+    because of a billing or spending-limit block. No annotation, or none
+    matching, is (False, None, None): the caller's FAIL stands. An
+    unreadable fetch is (False, None, <problem>): still FAIL, never upgraded
+    to NO-DATA without an annotation actually read."""
+    output = run.get("output") or {}
+    if not output.get("annotations_count"):
+        return False, None, None
+    url = output.get("annotations_url")
+    if not url:
+        run_id = run.get("id")
+        if run_id is None:
+            return False, None, ("%r carries annotations but no id or annotations_url to "
+                                 "fetch them from" % run.get("name"))
+        url = "%s/repos/%s/check-runs/%s/annotations" % (API_ROOT, repo, run_id)
+    a_status, a_body, a_err = fetch("GET", url, token)
+    if a_status != 200 or not isinstance(a_body, list):
+        return False, None, ("annotations for %r could not be read: HTTP %s%s"
+                             % (run.get("name"), a_status,
+                                (" (%s)" % a_err) if a_err else ""))
+    for ann in a_body:
+        message = (ann.get("message") or "") if isinstance(ann, dict) else ""
+        if JOB_NOT_STARTED_MARKER in message.lower():
+            return True, message[:120], None
+    return False, None, None
+
+
+def _required_checks_verdict(required, run_by_name, checkruns_readable, base_ref,
+                             first_sha, advisory, repo, fetch, token):
+    """(verdict, detail) for REQUIRED CHECKS once the list of required
+    context names is in hand, whichever endpoint supplied it (classic branch
+    protection's required_status_checks.contexts, or a ruleset's
+    required_status_checks[].context). A required context that failed is
+    checked with `_billing_refusal` before it counts against the verdict: a
+    host-refused job (billing or spending limit) is NO-DATA, never FAIL,
+    unless a real failure or a missing context is present too, in which case
+    FAIL dominates -- a billing refusal never launders a real failure."""
+    if not required:
+        return "PASS", ("branch protection for %s requires no status checks (nothing "
+                        "required); %s" % (base_ref, advisory))
+    if not checkruns_readable:
+        return "UNVERIFIABLE", ("branch protection for %s requires context(s) %s, but their "
+                                "status on %s could not be read: %s"
+                                % (base_ref, ", ".join(required), first_sha, advisory))
+    missing = [name for name in required if name not in run_by_name]
+    failing = [name for name in required if name in run_by_name
+              and (run_by_name[name].get("status") != "completed"
+                   or run_by_name[name].get("conclusion") not in GOOD_CONCLUSIONS)]
+    billing_refused, real_failing, real_failing_notes = [], [], []
+    for name in failing:
+        is_refusal, msg, fetch_problem = _billing_refusal(run_by_name[name], repo, fetch, token)
+        if is_refusal:
+            billing_refused.append((name, msg))
+        else:
+            real_failing.append(name)
+            if fetch_problem:
+                real_failing_notes.append("%s: %s" % (name, fetch_problem))
+    if missing or real_failing:
+        reasons = []
+        if missing:
+            reasons.append("required context(s) missing on %s: %s"
+                          % (first_sha, ", ".join(missing)))
+        if real_failing:
+            reasons.append("required context(s) not passing on %s: %s"
+                          % (first_sha, ", ".join(real_failing)))
+        if real_failing_notes:
+            reasons.append("; ".join(real_failing_notes))
+        if billing_refused:
+            reasons.append("; ".join(
+                "%s: host refused to start the job (billing or spending limit): %s"
+                % (n, m) for n, m in billing_refused))
+        reasons.append(advisory)
+        return "FAIL", "; ".join(reasons)
+    if billing_refused:
+        detail = "; ".join(
+            "%s: host refused to start the job (billing or spending limit): %s"
+            % (n, m) for n, m in billing_refused)
+        return "NO-DATA", detail + "; " + advisory
+    return "PASS", ("all %d required context(s) for %s passed on %s; %s"
+                    % (len(required), base_ref, first_sha, advisory))
 
 
 def evaluate(repo, number, token, fetch=None, cwd=None, head=None, policy=None,
@@ -629,43 +724,63 @@ def evaluate(repo, number, token, fetch=None, cwd=None, head=None, policy=None,
                 advisory = ("ADVISORY (not verdict-determining): the check-runs endpoint "
                            "answered HTTP %s" % k_status)
 
-        if p_status in (403, 404):
+        if p_status == 403:
             msg = ("branch protection for %s is not readable by this token (HTTP %d at "
                   "%s); REQUIRED CHECKS and CODEOWNERS are never guessed from the "
                   "check-runs scan or a raw CODEOWNERS file alone" % (base_ref, p_status, p_url))
             control("REQUIRED CHECKS", "UNVERIFIABLE", msg)
             control("CODEOWNERS", "UNVERIFIABLE", msg)
+        elif p_status == 404:
+            # Classic branch protection answers 404 "Branch not protected" on
+            # a repo governed by a RULESET instead (GitHub's newer, parallel
+            # mechanism): before giving up, ask the one endpoint that speaks
+            # for a ruleset's required contexts. A rule of type
+            # "required_status_checks" carries parameters.required_status_
+            # checks[].context, the ruleset's equivalent of classic
+            # protection's required_status_checks.contexts above.
+            rules_url = "%s/repos/%s/rules/branches/%s" % (
+                API_ROOT, repo, urllib.parse.quote(base_ref, safe=""))
+            rules_status, rules_body, rules_err = fetch("GET", rules_url, token)
+            ruleset_required = []
+            if rules_status == 200 and isinstance(rules_body, list):
+                for rule in rules_body:
+                    if not isinstance(rule, dict) or rule.get("type") != "required_status_checks":
+                        continue
+                    params = rule.get("parameters") or {}
+                    for chk in params.get("required_status_checks") or []:
+                        if isinstance(chk, dict) and chk.get("context"):
+                            ruleset_required.append(chk["context"])
+            if not ruleset_required:
+                # Both sources are absent: today's behaviour, unchanged.
+                msg = ("branch protection for %s is not readable by this token (HTTP %d "
+                      "at %s), and no repository ruleset at %s names a required status "
+                      "check either; REQUIRED CHECKS and CODEOWNERS are never guessed "
+                      "from the check-runs scan or a raw CODEOWNERS file alone"
+                      % (base_ref, p_status, p_url, rules_url))
+                control("REQUIRED CHECKS", "UNVERIFIABLE", msg)
+                control("CODEOWNERS", "UNVERIFIABLE", msg)
+            else:
+                checkruns_readable = k_status == 200 and isinstance(runs, list)
+                verdict, detail = _required_checks_verdict(
+                    ruleset_required, run_by_name, checkruns_readable, base_ref,
+                    first_sha, advisory, repo, fetch, token)
+                control("REQUIRED CHECKS", verdict,
+                        "(required contexts from a repository ruleset at %s; classic "
+                        "branch protection answered 404) %s" % (rules_url, detail))
+                # A ruleset's required_status_checks rule carries no code-owner
+                # field in this shape: CODEOWNERS has nothing to read from it,
+                # so it stays UNVERIFIABLE rather than a guess.
+                control("CODEOWNERS", "UNVERIFIABLE",
+                        "branch protection for %s answered 404; the repository ruleset "
+                        "that supplied REQUIRED CHECKS carries no code-owner rule this "
+                        "pass reads, so CODEOWNERS is not evaluated" % base_ref)
         elif p_status == 200 and isinstance(p_body, dict):
             required = ((p_body.get("required_status_checks") or {}).get("contexts")) or []
             checkruns_readable = k_status == 200 and isinstance(runs, list)
-            if not required:
-                control("REQUIRED CHECKS", "PASS",
-                        "branch protection for %s requires no status checks (nothing "
-                        "required); %s" % (base_ref, advisory))
-            elif not checkruns_readable:
-                control("REQUIRED CHECKS", "UNVERIFIABLE",
-                        "branch protection for %s requires context(s) %s, but their "
-                        "status on %s could not be read: %s"
-                        % (base_ref, ", ".join(required), first_sha, advisory))
-            else:
-                missing = [name for name in required if name not in run_by_name]
-                failing = [name for name in required if name in run_by_name
-                          and (run_by_name[name].get("status") != "completed"
-                               or run_by_name[name].get("conclusion") not in GOOD_CONCLUSIONS)]
-                if missing or failing:
-                    reasons = []
-                    if missing:
-                        reasons.append("required context(s) missing on %s: %s"
-                                      % (first_sha, ", ".join(missing)))
-                    if failing:
-                        reasons.append("required context(s) not passing on %s: %s"
-                                      % (first_sha, ", ".join(failing)))
-                    reasons.append(advisory)
-                    control("REQUIRED CHECKS", "FAIL", "; ".join(reasons))
-                else:
-                    control("REQUIRED CHECKS", "PASS",
-                            "all %d required context(s) for %s passed on %s; %s"
-                            % (len(required), base_ref, first_sha, advisory))
+            verdict, detail = _required_checks_verdict(
+                required, run_by_name, checkruns_readable, base_ref, first_sha,
+                advisory, repo, fetch, token)
+            control("REQUIRED CHECKS", verdict, detail)
 
             reviews_policy = p_body.get("required_pull_request_reviews") or {}
             require_code_owner = bool(reviews_policy.get("require_code_owner_reviews"))

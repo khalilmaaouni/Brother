@@ -554,6 +554,11 @@ docs/onboarding/README.md
 # The official Cursor adapter needs its discovery file and signed-in runbook.
 .cursor-plugin/marketplace.json
 docs/cursor/SMOKE-RUNBOOK.md
+# client_parity.py pairs each Codex doc with its Cursor twin; docs/codex/ ships
+# whole, so these two must ship too or the public client-parity check fails
+# (public PR 37 run 35181846916, 2026-09-17).
+docs/cursor/HOOKS-MAPPING.md
+docs/cursor/PACKAGE-SHAPE.md
 
 # Public mobile workflow guides and the implemented claim verification product.
 docs/how-to/native-mobile-workflow.md

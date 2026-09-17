@@ -95,9 +95,29 @@ def _write_lines(path, lines):
 
 
 def _run_cli(args, env):
+    """Drive the exporter CLI on the SAME load-scaled budget the exporter
+    gives its own gates (EP.gate_timeout: floor 120 s, scaled by the 15 minute
+    load average over cores, capped at 1800 s).
+
+    This used to hardcode timeout=60, which is half the exporter's own floor:
+    a wrapper smaller than the thing it wraps, the exact defect
+    TheRequiredFastGateGetsMoreTimeThanItNeeds below was written about after
+    check_required_fast's hardcoded 600 s refused every export on
+    2026-09-10. That guard inspects export_public.py only, so it never saw
+    this helper, and the test file quotes the reason itself: a guard that
+    covers only the first instance stops guarding the moment the capability
+    is used again. Measured 2026-09-16 at a 15 minute load average of 356 on
+    an 8 core machine, a --dry-run run overran 60 s and raised
+    TimeoutExpired, which reads as an ERROR in a suite whose subject is the
+    exporter's verdicts, never as the machine being busy.
+
+    gate_timeout() is called HERE, per call, not bound as a default argument:
+    a default binds at definition time and would freeze the load reading at
+    import, which is the same reason EP.run_gate reads it at call time.
+    """
     return subprocess.run([sys.executable, EXPORTER_CLI] + args,
                            capture_output=True, text=True, env=env,
-                           timeout=60)
+                           timeout=EP.gate_timeout())
 
 
 def _seed_bare_remote(remote_dir):
@@ -1800,7 +1820,7 @@ class TheExportersOwnInvocationPasses(unittest.TestCase):
 
             pushed = _run_cli(["--allowlist", allowlist_path, "--root", root,
                                 "--remote", remote_dir, "--branch", "main",
-                                "--push"], env)
+                                "--push", "--skip-required-fast"], env)
             self.assertEqual(pushed.returncode, EP.EXIT_OK,
                               pushed.stdout + pushed.stderr)
             self.assertIn(
@@ -1863,7 +1883,7 @@ class TheExportersOwnInvocationPasses(unittest.TestCase):
 
             first = _run_cli(["--allowlist", allowlist_path, "--root", root,
                                "--remote", remote_dir, "--branch", "main",
-                               "--push"], env)
+                               "--push", "--skip-required-fast"], env)
             self.assertEqual(first.returncode, EP.EXIT_OK,
                               first.stdout + first.stderr)
             first_log = subprocess.run(
@@ -1877,7 +1897,7 @@ class TheExportersOwnInvocationPasses(unittest.TestCase):
                 fh.write("second export, changed\n")
             second = _run_cli(["--allowlist", allowlist_path, "--root", root,
                                 "--remote", remote_dir, "--branch", "main",
-                                "--push"], env)
+                                "--push", "--skip-required-fast"], env)
             self.assertEqual(second.returncode, EP.EXIT_OK,
                               second.stdout + second.stderr)
             second_log = subprocess.run(
@@ -2063,7 +2083,7 @@ class ABrandNewRemoteIsStartedOnlyWithBootstrap(unittest.TestCase):
             self.assertIn("REFUSED: --require-signed only means something "
                           "with --tag and --push", dry.stdout)
             pushed_no_tag = _run_cli(
-                common + ["--push", "--require-signed"], env)
+                common + ["--push", "--skip-required-fast", "--require-signed"], env)
             self.assertEqual(pushed_no_tag.returncode, EP.EXIT_REFUSED,
                               pushed_no_tag.stdout + pushed_no_tag.stderr)
             self.assertIn("REFUSED: --require-signed only means something "
@@ -2094,7 +2114,7 @@ class ABrandNewRemoteIsStartedOnlyWithBootstrap(unittest.TestCase):
                             check=True)
             self._export_root(root)
             env, common = self._cli(root, remote_dir)
-            proc = _run_cli(common + ["--push", "--bootstrap",
+            proc = _run_cli(common + ["--push", "--skip-required-fast", "--bootstrap",
                                       "--tag", "v9.9.9"], env)
             out = proc.stdout + proc.stderr
             self.assertEqual(proc.returncode, EP.EXIT_OK, out)
@@ -2129,7 +2149,7 @@ class ABrandNewRemoteIsStartedOnlyWithBootstrap(unittest.TestCase):
                             check=True)
             self._export_root(root)
             env, common = self._cli(root, remote_dir)
-            proc = _run_cli(common + ["--push", "--tag", "v9.9.9"], env)
+            proc = _run_cli(common + ["--push", "--skip-required-fast", "--tag", "v9.9.9"], env)
             out = proc.stdout + proc.stderr
             self.assertEqual(proc.returncode, EP.EXIT_REFUSED, out)
             self.assertEqual(_gate_exit(proc.stdout, "identity_guard"), 0,
@@ -3490,6 +3510,26 @@ class TheRequiredFastGateGetsMoreTimeThanItNeeds(unittest.TestCase):
             "check_required_fast should take its budget from the measured "
             "floor, so the number moves when the measurement does")
 
+    def test_this_files_own_cli_helper_is_not_smaller_than_the_exporter(self):
+        # The guard above reads export_public.py and nothing else, so it
+        # never saw _run_cli in THIS file sitting at a hardcoded 60 s, half
+        # the exporter's own 120 s floor. On 2026-09-16, at a 15 minute load
+        # average of 356 on 8 cores, that wrapper raised TimeoutExpired and
+        # the suite reported ERROR on tests whose subject is the exporter's
+        # verdicts. Same lesson the docstring above already states: a guard
+        # that covers only the first instance stops guarding the moment the
+        # capability is used again.
+        src = inspect.getsource(_run_cli)
+        self.assertIn(
+            "EP.gate_timeout()", src,
+            "_run_cli must take the same load-scaled budget the exporter "
+            "gives its own gates, read at call time")
+        self.assertNotIn(
+            "timeout=60)", src,
+            "_run_cli is back on a fixed budget smaller than "
+            "GATE_TIMEOUT_FLOOR_SECONDS, so a busy machine reads as an "
+            "exporter defect")
+
 
 class ACaseOnlyRenameShipsUnderItsNewName(unittest.TestCase):
     """Gauntlet t3 on the 1.0.13 export, 2026-09-11: docs/how-to/USE-THE-VAULT.md
@@ -3518,6 +3558,64 @@ class ACaseOnlyRenameShipsUnderItsNewName(unittest.TestCase):
             EP._stage_all_from_disk(d, EP._run)
             self.assertEqual(g("ls-files").stdout.split(),
                              ["docs/use-the-vault.md"])
+
+
+class ClientParityRunsOnTheExportTree(unittest.TestCase):
+    """Public PR 37 (2026-09-17) failed client-parity because docs/codex/
+    shipped whole while two Cursor twins were not allowlisted; the hub-tree
+    run passed. run_gates must ask client_parity about the EXPORT tree, and
+    a push must prove required_fast.sh there unless explicitly skipped."""
+
+    def _gates(self, files, verdicts):
+        calls = []
+
+        def fake_gate(cmd, cwd, name, env=None, **kw):
+            calls.append((name, cmd, cwd))
+            ok = verdicts.get(name, True)
+            return ok, "%s: exit %d, stub" % (name, 0 if ok else 1)
+
+        with tempfile.TemporaryDirectory() as export_dir, \
+             tempfile.TemporaryDirectory() as identity_dir, \
+             tempfile.TemporaryDirectory() as root:
+            _make_fake_root(root, files)
+            EP.build_orphan_commit(export_dir, sorted({f.split("/")[0]
+                                                       for f in files}),
+                                    root=root)
+            with mock.patch.object(EP, "run_gate", fake_gate):
+                all_ok, lines = EP.run_gates(export_dir, identity_dir)
+            return all_ok, lines, calls, export_dir
+
+    def test_a_codex_surface_runs_client_parity_against_the_export_tree(self):
+        all_ok, lines, calls, export_dir = self._gates(
+            {"docs/codex/HOOKS-MAPPING.md": "x\n"}, {})
+        parity = [c for c in calls if c[0] == "client_parity"]
+        self.assertEqual(len(parity), 1, calls)
+        cmd = parity[0][1]
+        self.assertTrue(cmd[1].endswith("client_parity.py"), cmd)
+        self.assertEqual(cmd[2:], ["--root", export_dir], cmd)
+
+    def test_a_client_parity_failure_refuses_the_export(self):
+        all_ok, lines, calls, _ = self._gates(
+            {"docs/codex/HOOKS-MAPPING.md": "x\n"}, {"client_parity": False})
+        self.assertFalse(all_ok, lines)
+
+    def test_no_codex_surface_skips_with_a_named_line(self):
+        all_ok, lines, calls, _ = self._gates({"README.md": "x\n"}, {})
+        self.assertFalse([c for c in calls if c[0] == "client_parity"], calls)
+        self.assertIn("client_parity: no docs/codex in the candidate tree, "
+                      "nothing to pair", lines)
+
+    def test_push_proves_required_fast_unless_skipped(self):
+        def args(**kw):
+            base = dict(push=False, prove_required_fast=False,
+                        skip_required_fast=False)
+            base.update(kw)
+            return mock.Mock(**base)
+        self.assertFalse(EP.wants_required_fast(args()))
+        self.assertTrue(EP.wants_required_fast(args(push=True)))
+        self.assertFalse(EP.wants_required_fast(
+            args(push=True, skip_required_fast=True)))
+        self.assertTrue(EP.wants_required_fast(args(prove_required_fast=True)))
 
 
 if __name__ == "__main__":

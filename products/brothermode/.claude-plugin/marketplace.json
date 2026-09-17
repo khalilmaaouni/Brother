@@ -5,14 +5,14 @@
   },
   "metadata": {
     "description": "Repository-hosted marketplace for the BrotherMode plugin. Add it with claude plugin marketplace add khalilmaaouni/BrotherModeUp@<released-tag> to pin the marketplace add to that tag instead of the repository's moving default branch (docs/RELEASE.md names the re-pin step at every release); the git-clone install described in the repository README remains the most-proven path.",
-    "version": "3.4.4"
+    "version": "3.4.5"
   },
   "plugins": [
     {
       "name": "brothermode",
       "source": "./",
       "description": "Turn an idea into a verified result with a guided start, honest forecasts, clear status, and a checked delivery. Verified on Claude Code.",
-      "version": "3.4.4",
+      "version": "3.4.5",
       "author": {
         "name": "Khalil Maaouni"
       },

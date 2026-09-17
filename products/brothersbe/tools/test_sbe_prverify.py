@@ -140,6 +140,38 @@ def check_runs(conclusion="success", name="ci/build"):
     return {"check_runs": [{"name": name, "status": "completed", "conclusion": conclusion}]}
 
 
+def check_run(name, conclusion="failure", annotations_count=0, run_id=1):
+    """One check-runs entry, prebuilt so check_runs_list() below can compose
+    more than one, and carrying the `output.annotations_count`/
+    `annotations_url` shape the billing-refusal fetch reads (see
+    prverify._billing_refusal)."""
+    run = {"name": name, "status": "completed", "conclusion": conclusion, "id": run_id}
+    if annotations_count:
+        run["output"] = {"annotations_count": annotations_count,
+                         "annotations_url": "%s/repos/octo/demo/check-runs/%d/annotations"
+                                            % ("https://api.github.com", run_id)}
+    return run
+
+
+def check_runs_list(*runs):
+    """A canned check-runs body from prebuilt run dicts (check_run()), for
+    scenarios needing more than one run or the annotation fields the plain
+    check_runs() helper above does not carry."""
+    return {"check_runs": list(runs)}
+
+
+#: The exact wording GitHub's own annotation carries when a job never ran
+#: because of a billing failure or a spending-limit block.
+BILLING_MESSAGE = ("The job was not started because recent account payments have "
+                   "failed or your spending limit needs to be increased. Please check "
+                   "the 'Billing & plans' section in your settings")
+
+
+def annotations(message):
+    return [{"path": "unknown", "start_line": 0, "end_line": 0,
+             "annotation_level": "failure", "message": message}]
+
+
 def protection(required_contexts=None, require_code_owner=False):
     """A canned branches/<base>/protection body: only the two fields F6+F7
     actually read, required_status_checks.contexts and required_pull_request_
@@ -147,6 +179,14 @@ def protection(required_contexts=None, require_code_owner=False):
     return {"required_status_checks": {"contexts": list(required_contexts or [])},
             "required_pull_request_reviews":
                 {"require_code_owner_reviews": bool(require_code_owner)}}
+
+
+def rules_branches(context, rule_type="required_status_checks"):
+    """A canned rules/branches/<ref> body: one rule naming `context` the way
+    a repository RULESET does, the shape prverify reads when classic branch
+    protection answers 404."""
+    return [{"type": rule_type,
+             "parameters": {"required_status_checks": [{"context": context}]}}]
 
 
 class FakeFetch(object):
@@ -445,6 +485,65 @@ class TestRequiredChecksEmptyIsPass(PrverifyCase):
         self.assertIn("nothing required", control["detail"], control)
 
 
+class TestBillingRefusedRequiredCheck(PrverifyCase):
+    """brother-hub PR 751, 2026-09-17: a required check run's conclusion is
+    `failure` but the job never ran -- GitHub refused to start it over a
+    billing or spending-limit block, named in its one annotation. That is
+    never a real code failure, so REQUIRED CHECKS must read NO-DATA, not
+    FAIL, unless a real failure or a missing context is present too."""
+
+    def test_a_billing_refused_check_alone_is_no_data_never_fail_or_pass(self):
+        fetch = FakeFetch(
+            routes={"/check-runs": (200, check_runs_list(
+                        check_run("required-fast", annotations_count=1, run_id=1)), None),
+                   "/check-runs/1/annotations": (200, annotations(BILLING_MESSAGE), None),
+                   "/protection": (200, protection(required_contexts=["required-fast"]), None),
+                   "/pulls/7/reviews": (200, [], None)},
+            sequences={"/pulls/7": [(200, pr_body(sha=SHA_A), None),
+                                    (200, pr_body(sha=SHA_A), None)]})
+        report = self.evaluate(fetch)
+        control = self.control(report, "REQUIRED CHECKS")
+        self.assertEqual(control["verdict"], "NO-DATA", control)
+        self.assertIn("host refused to start the job", control["detail"], control)
+        self.assertIn("billing", control["detail"].lower(), control)
+        self.assertNotEqual(report["final"], "PASS", report)
+
+    def test_the_same_failure_with_no_annotation_stays_fail(self):
+        """Same conclusion, same missing job, but this time GitHub gave no
+        annotation at all -- there is no evidence of a billing refusal, so
+        this stays a real FAIL, never upgraded on a guess."""
+        fetch = FakeFetch(
+            routes={"/check-runs": (200, check_runs_list(
+                        check_run("required-fast", annotations_count=0, run_id=1)), None),
+                   "/protection": (200, protection(required_contexts=["required-fast"]), None),
+                   "/pulls/7/reviews": (200, [], None)},
+            sequences={"/pulls/7": [(200, pr_body(sha=SHA_A), None),
+                                    (200, pr_body(sha=SHA_A), None)]})
+        report = self.evaluate(fetch)
+        control = self.control(report, "REQUIRED CHECKS")
+        self.assertEqual(control["verdict"], "FAIL", control)
+        self.assertIn("required-fast", control["detail"], control)
+
+    def test_one_billing_refusal_plus_one_real_failure_is_fail(self):
+        """Two required contexts: one refused by the host (billing), one
+        genuinely failing. FAIL dominates -- a billing refusal on one
+        context never launders a real failure on another."""
+        fetch = FakeFetch(
+            routes={"/check-runs": (200, check_runs_list(
+                        check_run("billing-check", annotations_count=1, run_id=1),
+                        check_run("real-fail-check", annotations_count=0, run_id=2)), None),
+                   "/check-runs/1/annotations": (200, annotations(BILLING_MESSAGE), None),
+                   "/protection": (200, protection(
+                       required_contexts=["billing-check", "real-fail-check"]), None),
+                   "/pulls/7/reviews": (200, [], None)},
+            sequences={"/pulls/7": [(200, pr_body(sha=SHA_A), None),
+                                    (200, pr_body(sha=SHA_A), None)]})
+        report = self.evaluate(fetch)
+        control = self.control(report, "REQUIRED CHECKS")
+        self.assertEqual(control["verdict"], "FAIL", control)
+        self.assertIn("real-fail-check", control["detail"], control)
+
+
 class TestForbiddenWithToken(PrverifyCase):
     def test_403_with_a_token_present_is_unverifiable_never_pass(self):
         fetch = FakeFetch(
@@ -492,6 +591,27 @@ class TestBranchProtectionForbidden(PrverifyCase):
         codeowners = self.control(report, "CODEOWNERS")
         self.assertEqual(required["verdict"], "UNVERIFIABLE", required)
         self.assertEqual(codeowners["verdict"], "UNVERIFIABLE", codeowners)
+
+
+class TestRequiredChecksFromRuleset(PrverifyCase):
+    """khalilmaaouni/Brother, 2026-09-17: classic branch protection answers
+    404 "Branch not protected" on a repo governed by a RULESET instead;
+    GET /repos/{repo}/rules/branches/{ref} answers with the same required
+    contexts. REQUIRED CHECKS must find them there rather than reading
+    UNVERIFIABLE just because classic protection has nothing."""
+
+    def test_a_context_required_by_a_ruleset_and_passing_is_pass(self):
+        fetch = FakeFetch(
+            routes={"/check-runs": (200, check_runs("success", name="required-fast"), None),
+                   "/protection": (404, None, None),
+                   "/rules/branches/main": (200, rules_branches("required-fast"), None),
+                   "/pulls/7/reviews": (200, [], None)},
+            sequences={"/pulls/7": [(200, pr_body(sha=SHA_A), None),
+                                    (200, pr_body(sha=SHA_A), None)]})
+        report = self.evaluate(fetch)
+        control = self.control(report, "REQUIRED CHECKS")
+        self.assertEqual(control["verdict"], "PASS", control)
+        self.assertIn("required-fast", control["detail"], control)
 
 
 class TestCodeownersRequiredWithApproval(PrverifyCase):

@@ -96,14 +96,14 @@ no row above never silently becomes `start`: name the closest cell in one
 sentence, in the language they wrote in, and ask the one thing that would settle
 it. Bare, with nothing in flight, goes to `start`; with work begun, to `next`.
 
-## handover and board
+## handover, board and cut
 
-**handover** ("wrap up", "close the session") runs
-`scripts/handover_ceremony.py`; **board** ("the gantt", "when will this
-land", "what slipped") runs `scripts/gen_readiness_board.py` and
-`scripts/track_delivery.py`. Both are this repository's own scripts: fired
-from inside it, read `docs/maintainer/BROTHER-MAINTAINER-VERBS.md` and
-follow it; from anywhere else, say so plainly rather than routing anywhere.
+**handover** ("wrap up", "close the session") runs `scripts/handover_ceremony.py`;
+**board** ("the gantt", "what slipped") runs `scripts/gen_readiness_board.py` and
+`scripts/track_delivery.py`; **cut** ("cut 1.0.19", "ship the release", "is the
+release ready") runs `scripts/cut.py` for the person, who never types a command.
+All are this repository's own: inside it, read and follow
+`docs/maintainer/BROTHER-MAINTAINER-VERBS.md`; elsewhere, say so plainly.
 
 ## What this never does
 
