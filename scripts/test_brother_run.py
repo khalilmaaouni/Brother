@@ -56,6 +56,77 @@ except ImportError:
         % _e100_os.path.basename(__file__))
 
 
+# LOAD-02 INCIDENT, 2026-09-18: a run of this whole file (not any test in
+# MachineReservationAcquiredAndReleasedAroundTheDrain, which already isolated
+# itself per-class from the start) wrote real refusal lines, unit names
+# "A1"/"A2", to the real docs/plan/LOAD-REFUSALS.jsonl, and left a live
+# holder briefly in the real docs/plan/MACHINE-RESERVATION.json. TRACED TO
+# ITS SOURCE, not assumed: `ps` during a second run caught the exact
+# offending process, a REAL SUBPROCESS this file spawns (product_
+# acceptance.py's stub_env() and its callers here launch brother_run.py via
+# sys.executable, e.g. test_no_repository_change_between_kill_and_resume_
+# claims_no_drift), never anything running inside this test process itself.
+# An in-process mock.patch of loop_bridge.LOAD_REFUSALS_LOG or brother_run.
+# MACHINE_RESERVATION_PATH cannot reach a separate process; only something
+# the subprocess reads AFTER it starts can, which is why both constants now
+# also take an environment-variable override (see brother_run.py and
+# loop_bridge.py), set here for the whole module rather than patched per
+# affected class one at a time (there is no reliable way to enumerate every
+# such class by reading, only by having already been bitten). A test that
+# wants a specific reading or reservation overrides these same targets
+# itself (MachineReservationAcquiredAndReleasedAroundTheDrain already does,
+# for the in-process half; a subprocess test that needs this would override
+# the env vars instead, though none in this file currently does).
+_LOAD02_MODULE_PATCHES = []
+_LOAD02_ENV_VARS = ("BROTHER_MACHINE_RESERVATION_PATH", "BROTHER_LOAD_REFUSALS_LOG")
+
+
+def setUpModule():
+    _sandbox = tempfile.mkdtemp(prefix="load-02-module-sandbox-")
+    _LOAD02_MODULE_PATCHES.append(_sandbox)
+    reservation_path = os.path.join(_sandbox, "machine-reservation.json")
+    refusals_path = os.path.join(_sandbox, "load-refusals.jsonl")
+    patches = [
+        mock.patch.object(loop_bridge, "LOAD_REFUSALS_LOG", refusals_path),
+        mock.patch.object(loop_bridge.resource_gate, "read",
+                          lambda *a, **k: {"disk_free_gib": 500.0}),
+        mock.patch.object(_br, "MACHINE_RESERVATION_PATH", reservation_path),
+    ]
+    for p in patches:
+        p.start()
+    _LOAD02_MODULE_PATCHES.extend(patches)
+    # THE SUBPROCESS HALF: an in-process mock.patch above never reaches a
+    # brother_run.py launched as a real subprocess (product_acceptance.py's
+    # stub_env() and its callers here do exactly this, confirmed live:
+    # a run of this file wrote real refusal lines and held the real
+    # machine-wide reservation, both from a subprocess this file spawned,
+    # not from anything running in this process). A subprocess re-imports
+    # brother_run.py/loop_bridge.py fresh and re-reads these two
+    # environment variables at THAT later point, by which time they are
+    # already set here; stub_env() builds its own subprocess environment as
+    # dict(os.environ), so this reaches it without stub_env() needing to
+    # know anything about LOAD-02. Restored in tearDownModule, never left
+    # set for a caller outside this file's own test run.
+    _LOAD02_MODULE_PATCHES.append(dict(
+        (name, os.environ.get(name)) for name in _LOAD02_ENV_VARS))
+    os.environ["BROTHER_MACHINE_RESERVATION_PATH"] = reservation_path
+    os.environ["BROTHER_LOAD_REFUSALS_LOG"] = refusals_path
+
+
+def tearDownModule():
+    saved_env = _LOAD02_MODULE_PATCHES[-1]
+    for name, value in saved_env.items():
+        if value is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = value
+    for p in reversed(_LOAD02_MODULE_PATCHES[1:-1]):
+        p.stop()
+    sandbox = _LOAD02_MODULE_PATCHES[0]
+    shutil.rmtree(sandbox, ignore_errors=True)
+    del _LOAD02_MODULE_PATCHES[:]
+
+
 class DeliveryReportProvesItself(unittest.TestCase):
     """The harsh EVAD 2026-08-31 finding: the report named units and revisions
     but never the files that changed nor what verified each unit. A skeptic
@@ -1816,6 +1887,140 @@ class TheIntentScreenShowsTheAssumedLensAndCanBeCorrected(unittest.TestCase):
         with open(self._work_doc_path(), encoding="utf-8") as fh:
             doc = json.load(fh)
         self.assertIsNone(doc["lens_inferred"])
+
+
+class MachineReservationAcquiredAndReleasedAroundTheDrain(unittest.TestCase):
+    """LOAD-02 round 2: brother_run.main() acquires the ONE machine-wide
+    reservation once before its round loop (never per unit) and releases it
+    in a finally that also runs when a round raises, using the SAME
+    stubbed-run_loop harness TheIntentScreenShowsTheAssumedLensAndCanBe
+    Corrected already established (mirrored here, per the closest-sibling
+    instruction).
+
+    MACHINE_RESERVATION_PATH IS PATCHED TO A TEMP FILE FOR EVERY TEST IN
+    THIS CLASS, in setUp, never per-test: the exact same class of incident
+    the round-2 pollution fix in test_loop_bridge.py (LOAD_REFUSALS_LOG)
+    exists to prevent would otherwise let one of these tests acquire the
+    REAL machine-wide reservation and, on a raising test, potentially leave
+    it held against the real store until MACHINE_RESERVATION_TTL_SECONDS
+    expires."""
+
+    def setUp(self):
+        import machine_reservation
+        self.repo = tempfile.mkdtemp(prefix="load-02-repo-")
+        for args in (["init", "-q", "-b", "main"],
+                    ["config", "user.email", "a@b.c"],
+                    ["config", "user.name", "t"]):
+            sh(["git"] + args, self.repo)
+        with open(os.path.join(self.repo, "base.txt"), "w",
+                 encoding="utf-8") as fh:
+            fh.write("base\n")
+        sh(["git", "add", "-A"], self.repo)
+        sh(["git", "commit", "-q", "-m", "R0"], self.repo)
+
+        self.run_dir = tempfile.mkdtemp(prefix="load-02-run-")
+        rec, problems = WR.create(
+            "one plain piece of work", [{"id": "A1", "title": "create a1",
+                                        "done_check": "true",
+                                        "owns": ["A1.txt"]}],
+            store=self.run_dir)
+        self.assertEqual(problems, [])
+
+        self.machine_reservation = machine_reservation
+        # NEVER inside self.run_dir: main() scans that directory for
+        # "exactly one" Work-document .json (see _work_doc_path above), and
+        # a reservation file pre-created there before main() runs (the
+        # contention test does exactly this) is counted as a second one,
+        # refusing the whole run for a reason that has nothing to do with
+        # what this class tests. A dedicated temp directory avoids it
+        # regardless of ordering, not just for the tests that happen not to
+        # collide today.
+        self.reservation_dir = tempfile.mkdtemp(prefix="load-02-reservation-")
+        self.addCleanup(shutil.rmtree, self.reservation_dir, ignore_errors=True)
+        self.reservation_path = os.path.join(self.reservation_dir,
+                                             "machine-reservation.json")
+        self._path_patch = mock.patch.object(
+            _br, "MACHINE_RESERVATION_PATH", self.reservation_path)
+        self._path_patch.start()
+        self.addCleanup(self._path_patch.stop)
+        self._orig_run_loop = _br.run_loop
+        self.addCleanup(self._restore_run_loop)
+
+    def _restore_run_loop(self):
+        _br.run_loop = self._orig_run_loop
+
+    def _one_unit_done_loop(self, plan_path, claims_path, cwd, slots):
+        claim_store.acquire(claims_path, "A1", "t")
+        claim_store.release(
+            claims_path, "A1", "t", state="done",
+            evidence={"check_command": "true", "exit_code": 0,
+                     "output": "ok", "output_truncated": False,
+                     "canonical_rev": _br._head(self.repo),
+                     "files_changed": []})
+        return 0, "A1 done scope=CLEAN integrated=True"
+
+    def _held_reservation(self):
+        data, problem = self.machine_reservation._read(self.reservation_path)
+        self.assertIsNotNone(data, problem)
+        return data.get("holder")
+
+    def test_a_normal_drain_acquires_and_releases_the_reservation(self):
+        _br.run_loop = self._one_unit_done_loop
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            _br.main(["ignored", "--resume", self.run_dir, "--cwd",
+                     self.repo])
+        # PROOF THAT IT WAS ACTUALLY ACQUIRED, not merely absent: the store
+        # exists and carries a last_released record naming the SAME holder
+        # this run's own pid would have used, never a record that was
+        # simply never written.
+        data, problem = self.machine_reservation._read(self.reservation_path)
+        self.assertIsNotNone(data, problem)
+        self.assertIsNone(self._held_reservation(),
+                          "reservation was still held after a normal drain")
+        last = data.get("last_released") or {}
+        self.assertTrue(str(last.get("holder", "")).startswith("brother-run-"),
+                        data)
+
+    def test_the_reservation_is_released_even_when_a_round_raises(self):
+        def _raising_loop(plan_path, claims_path, cwd, slots):
+            raise RuntimeError("a unit's own worker raised mid-round")
+        _br.run_loop = _raising_loop
+        out, err = io.StringIO(), io.StringIO()
+        raised = False
+        try:
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                _br.main(["ignored", "--resume", self.run_dir, "--cwd",
+                         self.repo])
+        except RuntimeError:
+            raised = True
+        # Whichever way main() surfaces the failure (propagated, or caught
+        # and turned into a return code somewhere above the round loop),
+        # the one property this test exists for is that the reservation is
+        # not left held: a leaked reservation blocks every OTHER run on
+        # this machine until MACHINE_RESERVATION_TTL_SECONDS expires.
+        self.assertIsNone(self._held_reservation(),
+                          "reservation was still held after a round raised "
+                          "(main() raised: %s)" % raised)
+
+    def test_a_contended_reservation_still_lets_this_run_proceed(self):
+        """acquire() failing because another LIVE run holds it must never
+        abort this run: it proceeds, its OWN dispatches under the band are
+        just refused, exactly as documented for LaneWorker."""
+        granted, problem = self.machine_reservation.acquire(
+            self.reservation_path, "some-other-run", 300)
+        self.assertIsNotNone(granted, problem)
+        _br.run_loop = self._one_unit_done_loop
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = _br.main(["ignored", "--resume", self.run_dir, "--cwd",
+                            self.repo])
+        text = out.getvalue() + err.getvalue()
+        self.assertIn("machine reservation not acquired", text, text)
+        # THE OTHER RUN'S RESERVATION IS UNTOUCHED: this run never released
+        # a reservation it does not hold.
+        self.assertEqual(self._held_reservation().get("holder"),
+                         "some-other-run")
 
 
 class TheIntentScreenAsksOneProfessionAwareQuestion(unittest.TestCase):

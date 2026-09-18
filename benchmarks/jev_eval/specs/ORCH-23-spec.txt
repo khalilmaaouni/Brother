@@ -1,0 +1,118 @@
+Write one Python 3 standard-library-only module named reclaim_wiring.py plus a
+plain unittest test file test_reclaim_wiring.py, for a storage reclaim tool in
+an automation estate. Standard library only, no new dependency. Never use an em
+dash or en dash anywhere in code, comments, or docstrings; use commas, colons,
+or parentheses instead.
+
+CONTEXT. Two existing tools already live in a "scripts" directory of a larger
+repository, and must be reused, never reimplemented:
+
+1. reclaim_worktrees.py: reports git worktrees whose work is already safe (no
+   uncommitted files, HEAD contained in a remote branch, not in use by a live
+   process, not the invoking checkout). It only REPORTS by default; a
+   "--apply" flag makes it actually run "git worktree remove" on each
+   candidate. It supports "--roots PATH..." and "--skip PATH..." (paths to
+   leave alone even though they qualify).
+
+2. orchestrator_dependents.py: before any destructive action on a path, scans
+   given root directories (and optionally a repository's registered git
+   worktrees) for anything that depends on that path: a file naming the
+   absolute path, a Python import of a module the path provides, a symlink
+   pointing into it, or a worktree registered under it. It exits 0 (CLEAR,
+   nothing depends on it) when the scan completes and finds nothing, 1
+   (REFUSED) when it finds a consumer, and 2 (NO-DATA) when the scan itself
+   could not complete (an unreadable file, a missing root, a git command that
+   failed). NO-DATA must never be treated as safe: it means "refuse", exactly
+   like REFUSED.
+
+NEW MODULE TO WRITE (reclaim_wiring.py). Its job is to wire the first tool up
+operationally (nothing currently calls it with "--apply"), gated by the
+second tool, and to add three things neither existing tool covers:
+
+A. Worktree wiring. A function that:
+   - runs reclaim_worktrees.py as a subprocess WITHOUT --apply to get its
+     list of "WOULD RELEASE" candidate paths (parse its stdout; do not
+     reimplement its logic),
+   - for each candidate, runs orchestrator_dependents.py as a subprocess
+     with that path and returns whether it exited 0 (clear) or not,
+   - splits candidates into "eligible" (dependents scan exited 0) and
+     "blocked" (exited 1 or 2, or the subprocess call itself failed to run
+     at all, e.g. OSError) with a reason string for each blocked one,
+   - only when a caller explicitly asks to apply, invokes
+     reclaim_worktrees.py's own "--apply" (never a second deletion
+     implementation) with "--skip" set to every blocked path, so only
+     eligible ones are actually released,
+   - never applies anything when there are zero eligible candidates,
+   - make every subprocess call go through a small injectable "run" callable
+     (default real subprocess.run wrapped to catch OSError/TimeoutError and
+     raise a custom exception "ScanIncomplete") so tests can substitute a
+     fake without mocking library internals directly, mirroring the existing
+     estate's style of building small real git fixtures in temp directories
+     rather than mocking git itself. Only lsof-style liveness calls or the
+     two named external scripts should go through the injectable run.
+
+B. Evidence and transcript retention. A function that walks a given directory
+   and returns files that should be pruned, for two independent reasons that
+   can both apply to the same file: (1) the file's modification time is
+   older than a given retention-days threshold, (2) sorting files newest
+   first and accumulating their sizes, the running total has already passed
+   a given max-bytes budget by the time this file is reached (so the newest,
+   most-recent-first files are always kept until the budget is exceeded).
+   A file that cannot be stat'd must raise ScanIncomplete rather than being
+   silently skipped as if it were clean; a directory scan that failed partway
+   through must never read as "nothing left to prune". A companion apply
+   function actually deletes only the files in a given prunable list, but
+   for each one first calls an injectable "is file in use" check (default:
+   an lsof-based check on that exact path, matching the existing estate's
+   own lsof-based liveness check style: lsof exit 1 with empty output means
+   free, exit 0 with output means in use, anything else, including a failed
+   subprocess call, must be treated as in use, the fail-closed direction).
+   A file whose owner cannot be determined is never deleted: unknown blocks.
+   Only symlinks and directories are skipped as never-a-target; regular
+   files are the only delete target.
+
+C. Unregistered clone inventory. A function that, given one or more scan
+   root directories and one or more "known repository" paths, first asks
+   git (via "git -C REPO worktree list --porcelain") for every path each
+   known repository already has registered as a worktree, then walks the
+   scan roots looking for directories that contain a ".git" SUBDIRECTORY
+   (a full clone with its own object store, not a worktree's small ".git"
+   FILE pointer, which should never be treated as a clone by itself and
+   should stop the walk from descending further in either case). Any such
+   clone directory whose real path is not already in the registered-worktree
+   set from any known repository is "unregistered": report its path and
+   total size in bytes (sum of all regular file sizes under it). A git
+   command that fails, or a scan root that does not exist, must raise
+   ScanIncomplete rather than silently reporting fewer results.
+
+All three surfaces (A, B, C) default to report-only: nothing is deleted
+unless a caller explicitly opts into applying, and applying always goes
+through the extra checks above (dependents clear for worktrees, not-in-use
+for files). Provide a small command-line interface with three subcommands
+(name them "worktrees", "evidence", "clones") that print a human-readable
+report and take an optional "--apply" flag, plus whatever paths each
+subcommand needs. Exit 0 on a completed report or apply, and a nonzero exit
+when a scan could not complete (never silently succeed).
+
+TESTS (test_reclaim_wiring.py, plain unittest, runnable directly as
+"python3 test_reclaim_wiring.py -v", a unittest.main() block, no pytest, no
+fixtures package). Use real temporary directories (tempfile) for every case;
+never touch a real path outside the temp directory. For the worktree
+function, either build a real temporary git repository (git init, a commit,
+a real "git worktree add") and run the two named scripts for real as
+subprocesses against that temp repo, or substitute the injectable "run"
+callable with a fake that returns canned stdout/returncode objects; cover
+both a fully clear case (apply is allowed) and a case where the dependents
+scan returns exit 1 or exit 2 for one candidate (that candidate ends up
+blocked, and, when applying, is passed to "--skip", never removed). Cover:
+an lsof-equivalent failure reading as in-use (fail closed) for evidence
+pruning; a file older than retention being listed; a file within retention
+but past the byte budget being listed; a file within both retention and
+budget never being listed; a stat failure raising ScanIncomplete rather than
+being skipped; an unregistered clone being found; a clone whose path is
+already a registered worktree NOT being listed; a missing scan root raising
+ScanIncomplete. Also include one deliberate mutation-style case: a test
+whose assertion would fail if the "unknown owner blocks" rule in the evidence
+apply function were removed or inverted (for example, calling apply with no
+liveness check override still refuses to delete when the default check
+cannot run).

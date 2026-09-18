@@ -16,11 +16,40 @@ dry run the founder reads before that sweep runs, never the sweep itself.
 
 WHAT IT SCANS, under --root (default the handovers directory above):
   * every file and directory NAME, whatever its extension;
-  * the CONTENT of every file whose extension is one of .md .txt .json
-    .html .csv .yml .yaml .py .sh .jsonl;
-  * every ZIP archive's member NAMES, and the CONTENT of every member whose
-    own name carries one of those same extensions. Members are read with
-    zipfile's in-memory read(), never extracted to disk.
+  * the raw BYTES of every file, whatever its extension, decoded as UTF-8
+    with undecodable bytes replaced (a replaced byte is a non-word
+    character, so it bounds a short term like any other separator);
+  * every ZIP archive's member NAMES and the raw bytes of EVERY member, and
+    a zip nested inside a zip the same way, up to MAX_ZIP_DEPTH levels.
+    A file is read as a zip when its name ends in .zip OR its bytes say it
+    is one (zipfile.is_zipfile), so .xlsx and .docx, whose members are
+    deflated and invisible to a raw byte search, have their members read.
+    Members are streamed from zipfile, never extracted to disk.
+
+WHY EVERY FILE (decided 2026-09-18): the old rule read content only for
+an allowlist of text extensions, and a 25 MiB .duckdb inside a pack
+carried a term a byte search found while this scanner reported 0 hits,
+so close_ceremony_check.py printed PASS over it. The alternative, calling
+every non-allowlisted file NO-DATA, was rejected: 1,690 files in the root
+that day sat outside the allowlist (738 with no extension, 117 .patch, 52
+.log, most of them plain text), so the ceremony could never PASS again
+and a gate that can never pass gets bypassed. Reading every byte keeps the
+gate able to pass while making it see everything it passes over.
+
+COMPRESSED MEDIA: a file or member whose first bytes say image or audio
+(PNG, JPEG, GIF, WebP, MP3, MP4/M4A) is checked for terms over
+SHORT_TERM_MAX_LEN characters only. Its payload is compressed noise, and
+measured on the real root 2026-09-18 the 832 MiB of PNG members gave 5
+chance matches of a 4 letter term (mixed case, random bytes around each),
+the rate (2/256)^4 per byte predicts; a longer term's chance rate there
+is about 1 in 5,000 per GiB. A gate that fails on noise forever gets
+bypassed like one that can never pass. Cost: a short term written into
+an image's or a recording's metadata is not caught.
+
+KNOWN LIMIT: a term inside a compressed stream that is NOT a zip (a PDF's
+deflated page, a gzip, a git .pack, image pixel data) is not decoded, and
+neither is UTF-16 text. Those bytes are read, but a compressed term does
+not appear in them.
 
 THE RULE, same one this estate's other scanners use (bm_private_scan.py):
 the term's LENGTH decides its strictness, never its stored spelling. A term
@@ -95,21 +124,41 @@ correctness depends on the cache existing.
 Python 3, standard library only. No network.
 """
 import argparse
+import codecs
 import hashlib
+import io
 import json
 import os
 import re
 import sys
 import tempfile
 import zipfile
+import zlib
 
 CACHE_BASENAME = ".handover-pack-scan-cache.json"
 
 ROOT = os.path.expanduser("~/Documents/BrotherModeUp-handovers")
 TERMS_FILE = os.path.expanduser("~/.brothersbe-private-names")
 SHORT_TERM_MAX_LEN = 5
-TEXT_EXTENSIONS = {".md", ".txt", ".json", ".html", ".csv", ".yml", ".yaml",
-                    ".py", ".sh", ".jsonl"}
+# Bytes read per step. The overlap carried between steps (the longest
+# term plus one character) means a term split across two reads is found.
+CHUNK_BYTES = 1 << 20
+# A zip inside a zip is opened in memory; deeper than this is counted
+# unreadable (NO-DATA), never skipped as clean.
+MAX_ZIP_DEPTH = 4
+ZIP_MAGIC = b"PK\x03\x04"
+# Folded into the cache hash: a cache written under an older scan rule
+# (which read less) must never answer for this one.
+SCAN_RULE = "every-file-raw-bytes-media-long-only-2026-09-18"
+
+
+def _is_media(head):
+    """True when head (a stream's first bytes) opens an image or audio
+    payload: PNG, JPEG, GIF, WebP, MP3 (ID3 tag or frame sync), MP4/M4A."""
+    return (head.startswith((b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF8", b"ID3",
+                             b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"))
+            or (head[:4] == b"RIFF" and head[8:12] == b"WEBP")
+            or head[4:8] == b"ftyp")
 
 EXIT_CLEAN = 0
 EXIT_FOUND = 1
@@ -173,7 +222,8 @@ def load_terms(path):
 def build_patterns(terms):
     """(short_patterns, long_patterns), each a list of (term, compiled). A
     term of SHORT_TERM_MAX_LEN characters or fewer matches only as a whole
-    word (bounded by a non-word character or the string edge); a longer
+    word (bounded by anything but a letter or digit, so an underscore IS a
+    boundary, or the string edge); a longer
     term matches as a plain substring. Both arms are case insensitive."""
     short_patterns, long_patterns = [], []
     for term in terms:
@@ -185,9 +235,12 @@ def build_patterns(terms):
             # that also matches CJK ideographs, which would stop a short
             # private term (an all-capitals client code) from being caught when written
             # directly against Japanese text with no space, loosening a gate
-            # that must only ever get stricter.
-            pat = re.compile(r"(?<![A-Za-z0-9_À-ɏ])" + escaped +
-                              r"(?![A-Za-z0-9_À-ɏ])",
+            # that must only ever get stricter. The underscore is NOT in the
+            # class: a client code written as an identifier prefix
+            # (CODE_APP_DEV, CODE_master.csv) must be a hit (2026-09-18; the
+            # sibling bm_private_scan.py fixed the same bound as E37).
+            pat = re.compile(r"(?<![A-Za-z0-9À-ɏ])" + escaped +
+                              r"(?![A-Za-z0-9À-ɏ])",
                               re.IGNORECASE)
             short_patterns.append((term, pat))
         else:
@@ -220,35 +273,66 @@ def mask_path(path, short_patterns, long_patterns):
     return path
 
 
-def _read_text(path):
-    """(text, reason). reason is None on success (text holds the file's
-    content, possibly empty). On failure, text is None and reason is a short
-    string the caller must record: a permission error or a binary file
-    wearing a text extension must be counted as UNREADABLE, never silently
-    treated the same as a file this tool actually read and found clean
-    (SBE law L11: the old except-then-return-None shape dropped this record
-    with no trace). Never raises."""
-    try:
-        with open(path, "r", encoding="utf-8", errors="replace") as fh:
-            text = fh.read()
-    except OSError:
-        return (None, "could not be opened or read")
-    return (text, None)
+def _first_hit(text, short_patterns, long_patterns, final):
+    """first_match_len, except that when more bytes are still to come
+    (final False) a match touching the END of text is not trusted yet: a
+    short term's "no word character follows" check would read the end of
+    this read as the end of the word. That match sits inside the overlap
+    carried into the next read and is judged there, with its real next
+    character in view."""
+    for term, pat in short_patterns + long_patterns:
+        m = pat.search(text)
+        if m and (final or m.end() < len(text)):
+            return len(term)
+    return None
 
 
-def _scan_zip(full_path, relpath, short_patterns, long_patterns):
-    """(hits, member_count, unreadable). hits is a list of ("zip-member",
-    path, n). unreadable is a list of relpaths (the zip itself, or one of its
-    members) this tool could not open, read or decode: that is a DIFFERENT
-    outcome from reading something and finding it clean, and SBE law L11
+def _scan_stream(fh, short_patterns, long_patterns, head=b""):
+    """The character length of the first term found in the bytes of fh
+    (after head, bytes the caller already read from it), or None. Every
+    file and every zip member goes through here, whatever its extension.
+    Reads CHUNK_BYTES at a time, so memory never grows with the file.
+    Read errors propagate: the caller records the path as unreadable.
+    A media payload (_is_media) is checked for long terms only."""
+    chunk = head or fh.read(CHUNK_BYTES)
+    if _is_media(chunk):
+        short_patterns = []
+    overlap = max((len(t) for t, _p in short_patterns + long_patterns), default=0) + 1
+    decoder = codecs.getincrementaldecoder("utf-8")("replace")
+    tail = ""
+    while chunk:
+        text = tail + decoder.decode(chunk)
+        n = _first_hit(text, short_patterns, long_patterns, final=False)
+        if n:
+            return n
+        tail = text[-overlap:]
+        chunk = fh.read(CHUNK_BYTES)
+    return _first_hit(tail + decoder.decode(b"", final=True),
+                      short_patterns, long_patterns, final=True)
+
+
+# Everything zipfile and zlib raise on a member it cannot give back: a
+# missing entry, encryption, an unsupported method, a bad CRC, a truncated
+# or corrupt deflate stream.
+_MEMBER_ERRORS = (KeyError, RuntimeError, NotImplementedError, EOFError,
+                  zipfile.BadZipFile, zlib.error, OSError)
+
+
+def _scan_zip(source, relpath, short_patterns, long_patterns, depth=0):
+    """(hits, member_count, unreadable). source is a path or a seekable
+    file object. hits is a list of ("zip-member", path, n). unreadable is a
+    list of relpaths (the zip itself, or one of its members) this tool
+    could not open, read or decode: that is a DIFFERENT outcome from
+    reading something and finding it clean, and SBE law L11
     (silent-failure-lints) is exactly the rule that a swallowed record here
-    must not disappear with no trace. Never extracts to disk: member bytes
-    come from ZipFile.read(), which decompresses in memory only."""
+    must not disappear with no trace. Never extracts to disk. A member that
+    is itself a zip is opened the same way, its members named
+    outer::inner::member."""
     hits = []
     member_count = 0
     unreadable = []
     try:
-        zf = zipfile.ZipFile(full_path)
+        zf = zipfile.ZipFile(source)
     except (zipfile.BadZipFile, OSError):
         unreadable.append(relpath)
         return hits, member_count, unreadable
@@ -261,28 +345,44 @@ def _scan_zip(full_path, relpath, short_patterns, long_patterns):
             n = first_match_len(info.filename, short_patterns, long_patterns)
             if n:
                 hits.append(("zip-member", member_path, n))
-            ext = os.path.splitext(info.filename)[1].lower()
-            if ext in TEXT_EXTENSIONS:
-                try:
-                    raw = zf.read(info)
-                except (KeyError, RuntimeError, zipfile.BadZipFile, OSError):
-                    unreadable.append(member_path)
-                    continue
-                n = first_match_len(raw.decode("utf-8", "replace"),
-                                     short_patterns, long_patterns)
-                if n:
-                    hits.append(("zip-member", member_path, n))
+            try:
+                with zf.open(info) as fh:
+                    head = fh.read(CHUNK_BYTES)
+                    nested = (head.startswith(ZIP_MAGIC)
+                              or info.filename.lower().endswith(".zip"))
+                    if not nested:
+                        n = _scan_stream(fh, short_patterns, long_patterns, head)
+                    elif depth + 1 < MAX_ZIP_DEPTH:
+                        # ponytail: a nested zip is held in memory whole
+                        # (largest member in the root 2026-09-18: 25 MiB);
+                        # spool to a temp file if one ever outgrows memory.
+                        inner = io.BytesIO(head + fh.read())
+                    else:
+                        unreadable.append(member_path)
+                        continue
+            except _MEMBER_ERRORS:
+                unreadable.append(member_path)
+                continue
+            if nested:
+                sub_hits, sub_count, sub_unreadable = _scan_zip(
+                    inner, member_path, short_patterns, long_patterns, depth + 1)
+                hits.extend(sub_hits)
+                member_count += sub_count
+                unreadable.extend(sub_unreadable)
+            elif n:
+                hits.append(("zip-member", member_path, n))
     finally:
         zf.close()
     return hits, member_count, unreadable
 
 
 def _terms_hash(terms):
-    """sha256 of the loaded, already-scope-filtered term list, joined by a
-    byte no term can itself contain (newline), so the hash changes exactly
-    when the enforced set changes -- adding, removing or editing a term,
-    or a term moving in/out of a brother-tree scope block."""
-    return hashlib.sha256("\n".join(terms).encode("utf-8")).hexdigest()
+    """sha256 of SCAN_RULE plus the loaded, already-scope-filtered term
+    list, joined by a byte no term can itself contain (newline), so the
+    hash changes exactly when the enforced set changes -- adding, removing
+    or editing a term, or a term moving in/out of a brother-tree scope
+    block -- or when the scan rule itself changes."""
+    return hashlib.sha256("\n".join([SCAN_RULE] + list(terms)).encode("utf-8")).hexdigest()
 
 
 def _load_cache(cache_path, terms_hash):
@@ -370,8 +470,14 @@ def scan_root(root, short_patterns, long_patterns, cache=None):
             except OSError:
                 stat_key = None
 
-            ext = os.path.splitext(name)[1].lower()
-            if ext in TEXT_EXTENSIONS:
+            if not os.path.isfile(full):
+                # A FIFO would block the read forever and a device (or a
+                # symlink to one) never ends; a broken symlink has nothing to
+                # read. Never opened, never clean: counted unreadable.
+                unreadable.append(relpath)
+                continue
+            is_zip = name.lower().endswith(".zip") or zipfile.is_zipfile(full)
+            if not is_zip:
                 cached = cache["files"].get(relpath) if cache is not None else None
                 if cached is not None and stat_key is not None and cached.get("stat") == stat_key:
                     if cached.get("unreadable"):
@@ -379,12 +485,14 @@ def scan_root(root, short_patterns, long_patterns, cache=None):
                     elif cached.get("hit_len"):
                         hits.append(("content", relpath, cached["hit_len"]))
                 else:
-                    text, reason = _read_text(full)
-                    if reason is not None:
+                    try:
+                        with open(full, "rb") as fh:
+                            n = _scan_stream(fh, short_patterns, long_patterns)
+                    except OSError:
+                        n = None
                         unreadable.append(relpath)
                         entry = {"unreadable": True}
                     else:
-                        n = first_match_len(text, short_patterns, long_patterns)
                         if n:
                             hits.append(("content", relpath, n))
                         entry = {"hit_len": n}
@@ -392,7 +500,7 @@ def scan_root(root, short_patterns, long_patterns, cache=None):
                         entry["stat"] = stat_key
                         cache["files"][relpath] = entry
 
-            if ext == ".zip":
+            if is_zip:
                 stats["zips"] += 1
                 cached = cache["zips"].get(relpath) if cache is not None else None
                 if cached is not None and stat_key is not None and cached.get("stat") == stat_key:

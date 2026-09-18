@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "orchestrator-task-v1",
+  "title": "Brother 1.0.20 orchestrator task",
+  "description": "ORCH-01. One executable unit inside a night run: what it is, what it may touch, how it is checked, and who may work and review it. task_class and evidence_obligation are enum-constrained to exactly the sets scripts/orchestrator_invariants.py holds (TASK_CLASSES, EVIDENCE_OBLIGATIONS); scripts/test_orchestrator_protocol.py asserts this schema's enums equal those sets, so the two can never drift apart silently. scripts/orchestrator_protocol.py enforces this file generically over type, required, properties, enum, const, additionalProperties, items, minItems and minimum.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "title",
+    "objective",
+    "depends_on",
+    "owns",
+    "done_check",
+    "task_class",
+    "risk_class",
+    "evidence_obligation",
+    "worker_profile",
+    "review_profile",
+    "max_outer_attempts",
+    "max_repair_attempts",
+    "leaf_worker_only"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Stable identifier for this unit, unique within its run. Names the same join key orchestrator-event-v1.json's action envelope calls task_id; the two schemas spell it differently because the reference is cross-document, not because they mean different things (adversarial review finding 5)."
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Short human title."
+    },
+    "objective": {
+      "type": "string",
+      "minLength": 1,
+      "description": "What this unit must be true of the world when it is done."
+    },
+    "depends_on": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Ids of units this one may not start ahead of. May be empty for a unit with no prerequisite."
+    },
+    "owns": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "The exhaustive list of paths this unit may write. A write to any other path quarantines the result even when the unit's own check passes, so this list can never be empty."
+    },
+    "done_check": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The exact runnable command that decides whether this unit passed. Never empty: a unit with no runnable check has no way to be told apart from one that was never tried."
+    },
+    "task_class": {
+      "enum": [
+        "planning",
+        "architecture",
+        "research",
+        "implementation",
+        "test",
+        "verification",
+        "review",
+        "repair",
+        "fault-injection",
+        "documentation",
+        "packaging",
+        "benchmark",
+        "integration-prep"
+      ],
+      "description": "Must equal scripts/orchestrator_invariants.py's TASK_CLASSES. An unrecognised value is refused, never silently read as implementation."
+    },
+    "risk_class": {
+      "enum": ["low", "medium", "high", "critical"],
+      "description": "How costly a wrong result would be, which decides review depth and retry policy."
+    },
+    "evidence_obligation": {
+      "enum": [
+        "OPTIONAL",
+        "REQUIRED_FOR_MERGE",
+        "REQUIRED_FOR_RELEASE"
+      ],
+      "description": "Exactly three levels, matching scripts/evidence_obligation.py's LEVELS, the estate's one frozen definition site for this vocabulary (docs/decisions/evidence-vocabulary-2026-09-13.json, decision EV-3) and the set scripts/orchestrator_invariants.py's EVIDENCE_OBLIGATIONS derives from. There is no REQUIRED_FOR_DELIVERY: an earlier draft of this schema carried a fourth level that scripts/evidence_obligation.py's own validate_obligations refuses as an unknown level, which would have made a task schema-valid and ungateable at once. An unrecognised value is refused, never silently read as OPTIONAL."
+    },
+    "worker_profile": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Which worker tier and effort this unit is dispatched at, for example sonnet-high."
+    },
+    "review_profile": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Which reviewer tier and effort checks this unit, for example opus-high."
+    },
+    "max_outer_attempts": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "How many outer attempts this unit gets before it is parked."
+    },
+    "max_repair_attempts": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "How many repair attempts a REPAIRABLE verdict on this unit gets. Zero is valid: some units go straight to replan with no repair step."
+    },
+    "leaf_worker_only": {
+      "type": "boolean",
+      "description": "True when this unit must be executed by a leaf worker that cannot itself spawn another coding agent."
+    },
+    "orchestrator_preference": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional preferred orchestrator identity for this unit, when one orchestrator is better positioned to hold it."
+    },
+    "allow_cross_orchestrator_takeover": {
+      "type": "boolean",
+      "description": "Optional. Whether a different orchestrator than the preferred or claiming one may take this unit over, for example after the claiming orchestrator's lease expires."
+    }
+  }
+}

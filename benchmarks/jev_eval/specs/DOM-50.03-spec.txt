@@ -1,0 +1,110 @@
+Write one Python 3 module, standard library only, no third party imports,
+no network, no filesystem access. Target Python 3.9+.
+
+CONTEXT (generic, no proprietary names): a task dispatcher must pick an
+execution route for a job based only on which capabilities a worker
+actually has, never by asking the worker's brand or product name. There is
+an existing helper function elsewhere in the codebase with this exact
+signature and behavior, which the new module must import and reuse rather
+than reimplement:
+
+    def precheck(required, reported):
+        """(verdict, reason). verdict is the string "DISPATCH" or "REFUSE".
+
+        required: an iterable of capability-name strings the caller needs
+        the worker to hold at level "ENFORCED". An empty iterable always
+        returns DISPATCH.
+
+        reported: a mapping of capability-name string to a level string,
+        normally "ENFORCED" or "ADVISORY". Any other value (missing key,
+        unmapped type such as None/list/str, or a level string outside
+        ENFORCED/ADVISORY) is treated as unknown and never satisfies a
+        requirement. If `reported` itself is not a dict, every requirement
+        is unsatisfied (REFUSE).
+
+        Rule: every name in `required` must map to exactly "ENFORCED" in
+        `reported` for the verdict to be DISPATCH; otherwise REFUSE.
+        """
+
+Assume this function lives in a sibling module and is imported by name,
+e.g. `import capability_precheck` then call `capability_precheck.precheck(...)`,
+and reuse its two verdict constants `capability_precheck.DISPATCH` and
+`capability_precheck.REFUSE`, plus its dedupe helper if one is public
+(`capability_precheck._dedupe`, which takes any one-pass iterable of names
+and returns a list with duplicates removed, first-seen order preserved).
+Do not redefine ENFORCED/ADVISORY/DISPATCH/REFUSE string literals yourself;
+reference the sibling module's constants.
+
+TASK: write a function
+
+    def negotiate(routes, reported):
+
+`routes` is an ordered sequence of `(route_name, required_capabilities)`
+two-tuples, most-capable route first, most-restrictive route last.
+`required_capabilities` is an iterable of capability-name strings (same
+shape `precheck`'s `required` argument takes).
+
+`reported` is passed straight through to `precheck` for each candidate
+route, unchanged, as the actual measured capability levels. This function
+NEVER looks at any worker/brand/product name field, only at `reported`,
+so that two different callers with the same `reported` mapping always get
+the same route name back, regardless of anything else about them.
+
+Behavior:
+
+1. Validate `routes` is non-empty; if empty, raise ValueError with a
+   message explaining there is no fallback to refuse into.
+2. Validate route names are unique; if two tuples share a route_name,
+   raise ValueError naming the duplicate.
+3. Validate the LAST route in the sequence requires zero capabilities
+   (after dedup). If it requires at least one, raise ValueError explaining
+   that the last route is the guaranteed fallback and must require
+   nothing, since without an unconditional fallback there may be no route
+   left once every real requirement fails.
+4. Walk `routes` in order. For each `(route_name, required)`, call
+   `capability_precheck.precheck(required, reported)`. Return
+   `(route_name, reason)` for the first route whose verdict is DISPATCH.
+5. Because the last route requires nothing, `precheck` always returns
+   DISPATCH for it (empty requirement iterable is an unconditional
+   DISPATCH per `precheck`'s own contract), so the loop always returns
+   before falling off the end. If it somehow does not (defensive-only),
+   raise AssertionError with a message saying this should be unreachable.
+
+Also write a matching test file for this module using Python's built-in
+`unittest` module only (no pytest, no third-party test libraries), with a
+`if __name__ == "__main__": unittest.main()` block, runnable directly.
+Since the real sibling module is not available to the test file at draft
+time, the test file should implement a tiny local stand-in module or
+in-file fake with the same `precheck`, `DISPATCH`, `REFUSE`, and `_dedupe`
+names/behavior described above (a module-level object or a small local
+module substitute is fine; use whatever is simplest and self-contained),
+so the test file can run standalone. Cover at least:
+
+- A route in the middle of the list is chosen when it is the first whose
+  requirements are fully satisfied at ENFORCED, and no earlier, more
+  capable route is chosen even though it is not satisfied.
+- Two calls with identical `reported` mappings always return the identical
+  route name, even when called with routes lists built independently (i.e.
+  demonstrate the "same measured capability, same route" property using
+  two structurally-equal but separately-constructed inputs).
+- A capability missing from `reported` entirely (never measured) causes
+  the route requiring it to be skipped, falling through to a more
+  restrictive route.
+- Every capability requirement failing at all falls all the way through to
+  the last, unconditional route.
+- Passing an empty `routes` sequence raises ValueError.
+- Passing two routes with the same route_name raises ValueError.
+- Passing a routes sequence whose last route has a nonempty requirement
+  raises ValueError.
+- A `reported` value that is not a dict at all (e.g. None) still resolves
+  correctly to the fallback route, without crashing.
+
+Do not use any em dash or en dash characters anywhere in the code, comments
+or docstrings; use commas, colons or parentheses instead. Do not add any
+authorship, generated-by, or AI-attribution comments or footers anywhere.
+Keep docstrings but keep them concise and functional.
+
+Output: print the two full files, module first then test file, each
+clearly delimited with a filename header comment line before it, e.g.
+"# file: capability_negotiation.py" and "# file: test_capability_negotiation.py",
+so they can be mechanically split apart.

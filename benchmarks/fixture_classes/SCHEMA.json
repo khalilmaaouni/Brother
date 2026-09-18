@@ -1,0 +1,36 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Brother acceptance fixture manifest (fixture.json)",
+  "description": "One fixture.json lives beside the real fixture files, inside its own directory under corpus/. scripts/fixture_classes.py is the only reader of this schema: it loads this file at import time and builds its allowed class set and required fields from it, so the class list is typed once and never restated in the Python source.",
+  "type": "object",
+  "required": ["class", "seeded_defect"],
+  "properties": {
+    "class": {
+      "type": "string",
+      "enum": [
+        "frontend",
+        "mobile",
+        "api_contract",
+        "data_pipeline",
+        "dependency_update",
+        "refactor",
+        "matching_logic"
+      ],
+      "description": "Which of the seven acceptance fixture classes this fixture belongs to. A value outside this list is a corpus defect and the harness raises rather than skipping it, per the worker contract rule that an unrecognised value stops the machine rather than being read as the safe case."
+    },
+    "seeded_defect": {
+      "type": "string",
+      "minLength": 1,
+      "description": "A human-readable description of the real defect deliberately planted in this fixture, the thing an acceptance run is supposed to catch. Must be non-empty after trimming whitespace: a present-but-blank field is treated the same as a missing one, both are corpus defects."
+    },
+    "description": {
+      "type": "string",
+      "description": "Optional: what the fixture otherwise looks like, for a human skimming the corpus."
+    },
+    "added": {
+      "type": "string",
+      "description": "Optional: the date this fixture was added, free text."
+    }
+  },
+  "additionalProperties": true
+}

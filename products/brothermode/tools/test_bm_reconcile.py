@@ -20,6 +20,7 @@ import datetime
 import hashlib
 import importlib.util as _ilu
 import io
+import json
 import os
 import shutil
 import sqlite3
@@ -597,6 +598,345 @@ class TestCase8Skipped(unittest.TestCase):
             "claim was made against, so there is nowhere to source a real "
             "value from for this fixture; see docs/RECOVERY-TRUTH.md, "
             "cases 2 and 8")
+
+
+# ---------------------------------------------------------------------------
+# Owner, liveness, route and lineage (2026-09-17), against a REAL temporary
+# store driven through the real CLI: `git init` in a fresh directory,
+# `bm_store.py init` there, never the estate's own store. The same pattern
+# scripts/test_cut.py's PrecedenceAgainstARealTemporaryStore uses: a
+# far-future --now makes every owner's heartbeat DEAD for bm_stall.
+# ---------------------------------------------------------------------------
+
+class OwnerRouteAgainstARealTemporaryStore(unittest.TestCase):
+    FUTURE = "2030-01-01T00:00:00Z"
+    HARNESS = "harness-session-for-reconcile-test"
+
+    def setUp(self):
+        if shutil.which("git") is None:
+            self.skipTest("git is not installed on this machine")
+        # realpath: macOS's /var is a symlink to /private/var and the
+        # fence hook refuses a token directory reached through one.
+        self.tmp = os.path.realpath(
+            tempfile.mkdtemp(prefix="bm_reconcile_realstore_"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        subprocess.run(["git", "init", "-q"], cwd=self.tmp, check=True)
+        os.makedirs(os.path.join(self.tmp, "scripts"))
+        self.store_cli = os.path.join(HERE, "bm_store.py")
+        self.reconcile_cli = os.path.join(HERE, "bm_reconcile.py")
+        self._store(["init"])
+        # The session's OWN label, derived from a real token file at
+        # token_path(root, harness id); the test may create it (this is
+        # a throwaway root), bm_reconcile itself never does.
+        self.fh = _load("bm_fence_hook")
+        self.my_label = self.fh.session_label(self.tmp, self.HARNESS)
+        self._store(["claim", "my-lane", "--session", self.my_label,
+                     "--lifetime", "ephemeral", "--objective", "mine",
+                     "--files", "scripts/mine.py"])
+        self._store(["claim", "their-lane", "--session", "cli-someone-else",
+                     "--lifetime", "ephemeral", "--objective", "theirs",
+                     "--files", "scripts/theirs.py"])
+
+    def _store(self, args):
+        p = subprocess.run([_e100_sys.executable, self.store_cli] + args,
+                           cwd=self.tmp, capture_output=True, text=True)
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        return p.stdout
+
+    def _rows(self, *extra):
+        p = subprocess.run([_e100_sys.executable, self.reconcile_cli,
+                            "--root", self.tmp, "--json"] + list(extra),
+                           cwd=self.tmp, capture_output=True, text=True)
+        self.assertIn(p.returncode, (0, 1), p.stdout + p.stderr)
+        return {r["subject"].split(" (")[0]: r
+                for r in json.loads(p.stdout)["rows"] if r["kind"] == "record"}
+
+    def test_my_derived_label_routes_mine_and_a_dead_foreign_owner_founder(self):
+        rows = self._rows("--session-id", self.HARNESS, "--now", self.FUTURE)
+        mine = rows["my-lane"]
+        self.assertEqual(mine["owner_session"], self.my_label)
+        self.assertEqual(mine["owner_confidence"], RC.CONF_DERIVED)
+        self.assertEqual(mine["route"], RC.ROUTE_MINE)
+        self.assertEqual(mine["decision_class"], 1)
+        theirs = rows["their-lane"]
+        self.assertEqual(theirs["class"], RC.STALE)
+        self.assertEqual(theirs["owner_session"], "cli-someone-else")
+        self.assertEqual(theirs["owner_confidence"], RC.CONF_DECLARED)
+        self.assertEqual(theirs["owner_liveness"], st.DEAD)
+        self.assertEqual(theirs["route"], RC.ROUTE_FOUNDER)
+        self.assertEqual(theirs["decision_class"], 2)
+        for r in (mine, theirs):
+            self.assertTrue(r["lineage"], "lineage must not be empty: %r" % r)
+            self.assertEqual(r["lineage"][0]["kind"], "transition")
+            self.assertTrue(r["anchor"].startswith("record:"), r["anchor"])
+            self.assertTrue(r["observed_ref"] == "" or len(r["observed_ref"]) == 40)
+            self.assertEqual(len(r["fingerprint"]), 16)
+        self.assertNotEqual(mine["fingerprint"], theirs["fingerprint"])
+
+    def test_a_cli_style_id_with_no_token_is_declared_never_mine(self):
+        # Asking as the very id the foreign record carries: no token file
+        # exists for it, so no label derives, so it is still not mine.
+        rows = self._rows("--session-id", "cli-someone-else")
+        theirs = rows["their-lane"]
+        self.assertEqual(theirs["owner_confidence"], RC.CONF_DECLARED)
+        self.assertNotEqual(theirs["route"], RC.ROUTE_MINE)
+
+    def test_a_live_foreign_owner_routes_owner_and_is_left_alone(self):
+        rows = self._rows("--session-id", self.HARNESS)
+        theirs = rows["their-lane"]
+        self.assertEqual(theirs["class"], RC.VALID)
+        self.assertEqual(theirs["owner_liveness"], st.LIVE)
+        self.assertEqual(theirs["route"], RC.ROUTE_OWNER)
+
+    def test_no_session_id_means_nothing_is_mine(self):
+        rows = self._rows()
+        self.assertNotEqual(rows["my-lane"]["route"], RC.ROUTE_MINE)
+
+    def test_a_hand_typed_bm1_label_is_declared_not_derived(self):
+        # Checker finding 1 (2026-09-17): a bm1- prefix alone proves
+        # nothing; derived means THIS sweep recomputed the label from a
+        # token file it read. Only the calling session's own label can be.
+        self._store(["claim", "lane-hand", "--session",
+                     "bm1-0000000000000000000000ab", "--lifetime",
+                     "ephemeral", "--objective", "typed", "--files",
+                     "scripts/hand.py"])
+        rows = self._rows("--session-id", self.HARNESS)
+        self.assertEqual(rows["lane-hand"]["owner_confidence"],
+                         RC.CONF_DECLARED)
+        self.assertNotEqual(rows["lane-hand"]["route"], RC.ROUTE_MINE)
+        self.assertEqual(rows["my-lane"]["owner_confidence"], RC.CONF_DERIVED)
+        # Without a session id nothing was recomputed, so even my own
+        # label is only declared.
+        self.assertEqual(self._rows()["my-lane"]["owner_confidence"],
+                         RC.CONF_DECLARED)
+
+
+# ---------------------------------------------------------------------------
+# Unpushed hook dependency (2026-09-17): a commit touching a path an
+# installed hook reads, on no remote branch, is a CONFLICT owned by its git
+# author; the same commit reachable from a remote-tracking ref is not.
+# ---------------------------------------------------------------------------
+
+class UnpushedHookDependency(unittest.TestCase):
+    def setUp(self):
+        if shutil.which("git") is None:
+            self.skipTest("git is not installed on this machine")
+        self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="bm_reconcile_unpushed_"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self._git("init", "-q")
+        self._git("config", "user.email", "test@example.com")
+        self._git("config", "user.name", "Test Author")
+        os.makedirs(os.path.join(self.tmp, "scripts"))
+        with io.open(os.path.join(self.tmp, "scripts", "decide.py"), "w",
+                     encoding="utf-8") as fh:
+            fh.write("# stamps the screen intake_gate.py reads\n")
+        self._git("add", "-A")
+        self._git("commit", "-q", "-m", "decide.py checkpoint")
+
+    def _git(self, *args):
+        p = subprocess.run(["git"] + list(args), cwd=self.tmp,
+                           capture_output=True, text=True, timeout=15)
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        return p.stdout
+
+    def test_unpushed_commit_touching_a_hook_read_path_is_conflict(self):
+        rows = RC.classify_unpushed_hook_deps(self.tmp, ref="abc")
+        self.assertEqual(len(rows), 1, rows)
+        row = rows[0]
+        self.assertEqual(row["class"], RC.CONFLICT)
+        self.assertEqual(row["kind"], "unpushed-hook-dependency")
+        self.assertEqual(row["subject"], "scripts/decide.py")
+        self.assertIn("intake_gate.py", row["reason"])
+        self.assertEqual(row["owner_session"], "Test Author")
+        self.assertEqual(row["owner_confidence"], RC.CONF_DECLARED)
+        self.assertEqual(row["route"], RC.ROUTE_FOUNDER)
+        self.assertEqual(row["anchor"], "file:scripts/decide.py")
+        self.assertEqual([c["kind"] for c in row["lineage"]], ["commit"])
+        self.assertEqual(row["observed_ref"], "abc")
+
+    def test_same_commit_on_a_remote_branch_is_not_a_finding(self):
+        head = self._git("rev-parse", "HEAD").strip()
+        self._git("update-ref", "refs/remotes/origin/main", head)
+        self.assertEqual(RC.classify_unpushed_hook_deps(self.tmp), [])
+
+    def test_same_patch_upstream_under_another_sha_is_not_a_finding(self):
+        # Checker finding 3: a squash or cherry-pick puts the identical
+        # change on the remote under a different sha; the hook then
+        # depends on nothing unpushed. Patch-equivalence, not sha identity.
+        head = self._git("rev-parse", "HEAD").strip()
+        # Rebuild HEAD's tree on the same (empty) ancestry with another
+        # message: a different sha carrying the identical patch.
+        tree = self._git("rev-parse", "HEAD^{tree}").strip()
+        other = self._git("commit-tree", tree, "-m", "squashed elsewhere").strip()
+        self.assertNotEqual(other, head)
+        self._git("update-ref", "refs/remotes/origin/main", other)
+        self.assertEqual(RC.classify_unpushed_hook_deps(self.tmp), [],
+                         "identical patch upstream under another sha")
+        # And a genuinely new change on top is still one finding.
+        with io.open(os.path.join(self.tmp, "scripts", "decide.py"), "a",
+                     encoding="utf-8") as fh:
+            fh.write("# newer\n")
+        self._git("add", "-A")
+        self._git("commit", "-q", "-m", "decide.py again")
+        rows = RC.classify_unpushed_hook_deps(self.tmp)
+        self.assertEqual(len(rows), 1, rows)
+        self.assertEqual(len(rows[0]["lineage"]), 1, rows[0]["lineage"])
+
+    def test_root_below_the_toplevel_still_finds_the_commit(self):
+        # Checker finding 4: a --root inside a subdirectory made the
+        # pathspec relative to that directory and the detector went blind.
+        sub = os.path.join(self.tmp, "scripts")
+        rows = RC.classify_unpushed_hook_deps(sub)
+        self.assertEqual(len(rows), 1, rows)
+        self.assertEqual(rows[0]["subject"], "scripts/decide.py")
+
+    def test_unrelated_unpushed_commit_is_not_a_finding(self):
+        head = self._git("rev-parse", "HEAD").strip()
+        self._git("update-ref", "refs/remotes/origin/main", head)
+        with io.open(os.path.join(self.tmp, "other.txt"), "w",
+                     encoding="utf-8") as fh:
+            fh.write("unrelated\n")
+        self._git("add", "-A")
+        self._git("commit", "-q", "-m", "unrelated")
+        self.assertEqual(RC.classify_unpushed_hook_deps(self.tmp), [])
+
+
+# ---------------------------------------------------------------------------
+# file, the one write (2026-09-17), against a REAL temporary store: filed
+# once per fingerprint, a resolved note stays filed, records untouched.
+# ---------------------------------------------------------------------------
+
+class FileVerbAgainstARealTemporaryStore(unittest.TestCase):
+    FUTURE = "2030-01-01T00:00:00Z"
+
+    def setUp(self):
+        if shutil.which("git") is None:
+            self.skipTest("git is not installed on this machine")
+        self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="bm_reconcile_file_"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        subprocess.run(["git", "init", "-q"], cwd=self.tmp, check=True)
+        os.makedirs(os.path.join(self.tmp, "scripts"))
+        self.store_cli = os.path.join(HERE, "bm_store.py")
+        self.learn_cli = os.path.join(HERE, "bm_learn.py")
+        self.reconcile_cli = os.path.join(HERE, "bm_reconcile.py")
+        self._cli(self.store_cli, "init")
+        self._cli(self.store_cli, "claim", "dead-lane", "--session",
+                  "cli-dead-owner", "--lifetime", "ephemeral", "--objective",
+                  "old work", "--files", "scripts/old.py")
+
+    def _cli(self, tool, *args):
+        p = subprocess.run([_e100_sys.executable, tool] + list(args),
+                           cwd=self.tmp, capture_output=True, text=True)
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        return p.stdout
+
+    def _file(self):
+        out = json.loads(self._cli(self.reconcile_cli, "file", "--root",
+                                   self.tmp, "--now", self.FUTURE, "--json"))
+        return out["filed"], out["already_filed"], out["unfileable"]
+
+    def _alerts(self, state="active"):
+        # --raw: an ordinary dump withholds note bodies (default-deny
+        # redaction), and the fingerprint this test reads lives in the body.
+        d = json.loads(self._cli(self.store_cli, "dump", "--raw"))
+        self.assertEqual([r["state"] for r in d["records"]], [state],
+                         "file must never touch a record")
+        return [n for n in d["notes"] if n["kind"] == "alert"]
+
+    def test_file_twice_writes_once_per_fingerprint_and_a_resolved_note_stays_filed(self):
+        filed, already, unfileable = self._file()
+        self.assertGreaterEqual(filed, 1, (filed, already, unfileable))
+        self.assertEqual((already, unfileable), (0, []))
+        first = self._alerts()
+        self.assertEqual(len(first), filed)
+        self.assertTrue(all(n["resolved_at"] is None for n in first))
+        fps = [json.loads(n["body"])["fingerprint"] for n in first]
+        self.assertEqual(len(fps), len(set(fps)), "one open alert per fingerprint")
+        record_notes = [n for n in first if n["anchor_type"] == "record"]
+        self.assertEqual(len(record_notes), 1, first)
+        self.assertEqual(record_notes[0]["session_id"], "")
+        self.assertEqual(record_notes[0]["severity"], "warning")
+
+        self.assertEqual(self._file(), (0, filed, []))
+        self.assertEqual(len(self._alerts()), filed, "second file wrote zero")
+
+        # Resolve through the store's existing resolve path (bm_learn
+        # resolve-note), with a real receipt minted for that note.
+        note_id = record_notes[0]["note_uuid"][:8]
+        because = "founder parked the dead lane"
+        rec = json.loads(self._cli(
+            self.learn_cli, "grant-state-receipt", "resolve-note", note_id,
+            "--answer", "parked it by hand", "--because", because, "--json"))
+        self._cli(self.learn_cli, "resolve-note", note_id, "--because",
+                  because, "--receipt", rec["token"])
+        # Checker finding 2 (2026-09-17): a resolved note is an answered
+        # question; the SAME finding occurring again is a new question,
+        # so it files again. Dedupe is against OPEN notes only.
+        self.assertEqual(self._file(), (1, filed - 1, []),
+                         "a new occurrence after resolution files again")
+        after = self._alerts()
+        self.assertEqual(len(after), filed + 1)
+        self.assertEqual(len([n for n in after if n["resolved_at"]]), 1)
+
+    def _git(self, *args):
+        p = subprocess.run(["git"] + list(args), cwd=self.tmp,
+                           capture_output=True, text=True, timeout=15)
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        return p.stdout
+
+    def test_fingerprint_is_stable_across_commits_and_changes_with_the_finding(self):
+        # Checker finding 2: the id must survive a new commit (observed_ref
+        # moves, the finding does not) and must change when the finding's
+        # class or reason category changes, or a later distinct finding
+        # on the same record and owner is silently never filed.
+        self._git("config", "user.email", "t@example.com")
+        self._git("config", "user.name", "T")
+        with io.open(os.path.join(self.tmp, "scripts", "old.py"), "w",
+                     encoding="utf-8") as fh:
+            fh.write("v1\n")
+        self._git("add", "-A")
+        self._git("commit", "-q", "-m", "one")
+        filed, _already, _un = self._file()
+        record_notes = [n for n in self._alerts() if n["anchor_type"] == "record"]
+        self.assertEqual(len(record_notes), 1)
+        first = json.loads(record_notes[0]["body"])
+        self.assertEqual(first["class"], RC.STALE)
+
+        # Same finding, new commit: files nothing new.
+        with io.open(os.path.join(self.tmp, "README"), "w",
+                     encoding="utf-8") as fh:
+            fh.write("two\n")
+        self._git("add", "-A")
+        self._git("commit", "-q", "-m", "two")
+        self.assertEqual(self._file()[0], 0, "unchanged finding across commits")
+
+        # Same record, same owner, a different reason category: the dead
+        # fence is completed, then its claimed file is edited afterward
+        # (case 5), a distinct STALE finding that must file as a new note.
+        d = json.loads(self._cli(self.store_cli, "dump"))
+        rec = [r for r in d["records"] if r["name"] == "dead-lane"][0]
+        self._cli(self.store_cli, "complete", rec["lifecycle_uuid"],
+                  "--session", "cli-dead-owner", "--version",
+                  str(rec["version"]), "--evidence", "done")
+        future = datetime.datetime.now().timestamp() + 3600
+        os.utime(os.path.join(self.tmp, "scripts", "old.py"), (future, future))
+        self.assertEqual(self._file()[0], 1, "a changed reason files anew")
+        notes = [json.loads(n["body"]) for n in self._alerts(state="complete")
+                 if n["anchor_type"] == "record"]
+        self.assertEqual(len(notes), 2)
+        self.assertNotEqual(notes[0]["fingerprint"], notes[1]["fingerprint"])
+        self.assertNotEqual(notes[0]["category"], notes[1]["category"])
+        self.assertEqual(self._file()[0], 0, "and only once")
+
+    def test_file_refuses_without_a_store_and_writes_nothing(self):
+        empty = os.path.realpath(tempfile.mkdtemp(prefix="bm_reconcile_nostore_"))
+        self.addCleanup(shutil.rmtree, empty, True)
+        p = subprocess.run([_e100_sys.executable, self.reconcile_cli, "file",
+                            "--root", empty], capture_output=True, text=True)
+        self.assertEqual(p.returncode, 2, p.stdout + p.stderr)
+        self.assertIn("NO-DATA", p.stdout)
+        self.assertFalse(os.path.exists(os.path.join(empty, ".brothermode")),
+                         "file must never create a store")
 
 
 class Night0912BmReconcile(unittest.TestCase):

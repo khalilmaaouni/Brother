@@ -126,6 +126,7 @@ import decide  # noqa: E402
 import door  # noqa: E402
 import fable_authority  # noqa: E402
 import fast_path  # noqa: E402
+import graph_loop  # noqa: E402
 import host_capability  # noqa: E402
 import integrate  # noqa: E402
 import journal  # noqa: E402
@@ -137,6 +138,18 @@ import receipt_door  # noqa: E402
 import run_heartbeat  # noqa: E402
 import work_record  # noqa: E402
 import worktree_lane  # noqa: E402
+
+# LOAD-02: guarded, unlike every sibling import above. bundle/runtime
+# mirrors this file, and machine_reservation.py is not yet copied into that
+# mirror (the orchestrator regenerates the bundle at the cut, not this
+# unit); a bundled main() importing it unconditionally would crash on
+# start for everyone before that regeneration lands. A missing module here
+# means the round loop below never acquires a reservation and dispatch
+# keeps its pre-wiring behaviour, never a crash.
+try:
+    import machine_reservation
+except Exception:  # noqa: BLE001
+    machine_reservation = None
 
 NODATA = "NO-DATA"
 DOOR = os.path.join(HERE, "door.py")
@@ -267,6 +280,33 @@ RETRY_BACKOFF_JITTER_FRACTION = 0.20
 #: will actually happen and names any disagreement with this constant
 #: rather than hiding it behind a number spelled twice.
 WORKER_TIME_LIMIT_SECONDS = 900
+
+#: LOAD-02: the ONE machine-wide reservation this run's own drain holds for
+#: its whole round loop. Fixed, shared, __file__-derived path so every
+#: brother_run process on this machine contends for the SAME record (a
+#: run-scoped path, like claims_path below, would let two concurrent runs
+#: each get their own and never actually contend, which defeats the point
+#: of a MACHINE reservation). Mirrors loop_bridge.LOAD_REFUSALS_LOG's own
+#: __file__-based resolution for the same reason: never the caller's own
+#: relative idea of "docs/plan".
+#:
+#: BROTHER_MACHINE_RESERVATION_PATH overrides it, read once here at import.
+#: This exists for exactly one reason, found the hard way: some of this
+#: repo's own tests launch brother_run.py as a REAL SUBPROCESS (product_
+#: acceptance.py's stub_env() and its callers in test_brother_run.py), and
+#: an in-process test patch of this module's own attribute never reaches a
+#: separate process; only an inherited environment variable does. Real
+#: production use never sets it and gets the real, fixed path unchanged.
+MACHINE_RESERVATION_PATH = os.environ.get(
+    "BROTHER_MACHINE_RESERVATION_PATH") or os.path.join(
+        REPO_ROOT, "docs", "plan", "MACHINE-RESERVATION.json")
+#: ponytail: one generous TTL, renewed once per round (see the round loop
+#: below) rather than a background renewal thread. A drain that somehow
+#: outruns a per-round renew loses the reservation and simply falls back to
+#: refuse-under-the-band for this run, the same as never having acquired
+#: one; upgrade to claim_store.BackgroundRenewal's pattern if that is ever
+#: measured to happen.
+MACHINE_RESERVATION_TTL_SECONDS = 30 * 60
 
 #: Shared by _reexecute_check and _check_passes_now: the SAME budget for a
 #: check run before any work (does it already pass?) and after (did the
@@ -1347,6 +1387,17 @@ def run_loop(plan_path, claims_path, cwd, slots):
             "--owner", owner]
     if slots is not None:
         args += ["--slots", str(slots)]
+    # LOAD-02: NOT a new parameter (the signature above stays exactly the
+    # load-bearing four arguments the docstring names). `owner` is already
+    # this same process's identity string; main() below acquires the
+    # machine reservation under the SAME "brother-run-%d" % os.getpid()
+    # name, in the same process, so the two agree without anything being
+    # passed between them. A missing machine_reservation module (bundle lag,
+    # see the module-level try/except) simply omits both flags, and
+    # loop_bridge.main() resolves no reservation, exactly as before.
+    if machine_reservation is not None:
+        args += ["--reservation-path", MACHINE_RESERVATION_PATH,
+                "--reservation-holder", owner]
     tools_dir = _source_tools_dir()
     if tools_dir:
         args += ["--tools", tools_dir]
@@ -1380,6 +1431,72 @@ def run_loop(plan_path, claims_path, cwd, slots):
             % (unit_id or "(store)", why) for unit_id, why in failures)
     return code, text
 
+
+def run_rolling(plan_path, claims_path, cwd, slots, owner=None, work_id="",
+                max_attempts=3, isolate=True, run_id=None,
+                harness_revision=None, parts=None, worker=None,
+                live_view=None):
+    """ORCH-10: the overnight route, a ROLLING FRONT rather than run_loop()'s
+    fixed rounds. Composition only, exactly as run_loop() is composition
+    around loop_bridge.main(): every piece here (the scheduler, the durable
+    claim store, worktree lanes, the spawned worker, serial integration) is
+    loop_bridge.rolling_run()'s own, wired here and called unchanged.
+
+    THE GAP THIS CLOSES. run_loop() is called once per OUTER ROUND inside
+    main()'s drain loop: one batch is claimed, dispatched and awaited in
+    full before the next batch is even computed, so a unit whose only
+    blocker sits inside that same batch waits for every sibling in it to
+    finish first, whether or not it ever touches their files. That is a
+    wave. loop_bridge.rolling_run() re-plans the instant any one live unit
+    completes, so a dependent starts the moment its dependency lands beside
+    unrelated siblings still running. This function is the seam that reaches
+    it: it is not called from main() or run_loop() today, so the ordinary
+    drain (every existing caller, every existing test of run_loop() and
+    main()) is unchanged. It runs the WHOLE graph to a standstill in one
+    call, unlike run_loop() which returns after one round: rolling_run()
+    itself keeps re-planning until nothing is left to start.
+
+    CAPACITY IS DERIVED, NEVER GUESSED HERE: with `slots` omitted, the cap
+    fed to rolling_run() is graph_loop.machine_capacity()'s own reading,
+    reused rather than reimplemented, so resource pressure this machine is
+    already under lowers concurrency the same way it would for the ordinary
+    path. `slots`, when given, overrides it, the same contract run_loop()
+    already has.
+
+    `parts` and `worker` are accepted for injection (tests stand in a real
+    spawn/verify/repair adapter and a worker script without touching
+    environment or argv) and default to the real ones: loop_bridge's own
+    sibling-tools adapter and a LaneWorker running scripts/model_worker.py,
+    the same default loop_bridge.main() uses.
+
+    Returns loop_bridge.rolling_run()'s own result dict. A missing adapter
+    is NO-DATA, named, never a crash or a silent empty success: {"records":
+    [], "error": "..."}. The Work document is written back to `plan_path`
+    after the run, the same durable write-back run_loop()'s own caller
+    performs round by round (_mark_integrated), because rolling_run() marks
+    rows DONE on the in-memory doc as it goes and nothing else here persists
+    that."""
+    doc = graph_loop.load(plan_path)
+    if parts is None:
+        parts, problem = loop_bridge.load_parts(_source_tools_dir())
+        if parts is None:
+            return {"records": [], "error": "NO-DATA: %s" % problem}
+    if worker is None:
+        default_worker_cmd = [sys.executable,
+                              os.path.join(HERE, "model_worker.py")]
+        worker = loop_bridge.LaneWorker(parts["spawn"], default_worker_cmd)
+    if slots is None:
+        cap, _notes = graph_loop.machine_capacity()
+    else:
+        cap = slots
+    owner = owner or ("brother-run-%d" % os.getpid())
+    result = loop_bridge.rolling_run(
+        doc, parts, worker, cwd, cap, claims_path, owner=owner,
+        work_id=work_id, max_attempts=max_attempts, isolate=isolate,
+        live_view=live_view, run_id=run_id,
+        harness_revision=harness_revision)
+    work_record.write_record(plan_path, doc)
+    return result
 
 
 def session_units_are_yours(env=None):
@@ -6254,235 +6371,280 @@ def main(argv=None):
     # so an unhandled exception here ends the process and takes it with it,
     # and wrapping 150 lines in a try purely to stop a daemon thread would
     # reindent the whole drain for nothing.
+    # LOAD-02: the ONE machine-wide reservation this run's own drain holds,
+    # acquired once here (never per unit, never per round) so a busy machine
+    # in the reservation-gated disk band admits THIS run's own dispatches
+    # the same way it always could before load_reservation existed, while a
+    # second, uncoordinated brother_run process in the same band is refused
+    # rather than silently free-riding on this one's reservation. Contention
+    # (another LIVE run already holds it) and an unreadable store both leave
+    # `reservation` None: this run still proceeds, its dispatches under the
+    # band are refused exactly as they are for any run holding nothing,
+    # which is the designed behaviour, never a reason to abort the drain.
+    reservation_holder = "brother-run-%d" % os.getpid()
+    reservation = None
+    if machine_reservation is not None:
+        reservation, reservation_problem = machine_reservation.acquire(
+            MACHINE_RESERVATION_PATH, reservation_holder,
+            MACHINE_RESERVATION_TTL_SECONDS)
+        if reservation is None:
+            log.say("brother_run: machine reservation not acquired (%s); "
+                    "this run's own dispatch under the disk cleanup band is "
+                    "refused until it clears" % reservation_problem)
     beat = run_heartbeat.Heartbeat(interval=heartbeat_seconds,
                                    bound_seconds=limit_seconds).start()
-    for round_no in range(1, 1 if skip_drain else 26):
-        # T2: the two revisions THIS ROUND ran between, for the attempt
-        # trace's tree-state summary below; _head is cheap (git rev-parse)
-        # and this run already pays for it once per whole run, so paying it
-        # twice per round as well costs nothing a maintainer would notice.
-        round_head_before = _head(cwd)
-        loop_code, loop_text = run_loop(record["path"], claims_path, cwd,
-                                        args.slots)
-        round_head_after = _head(cwd)
-        loop_texts.append(loop_text)
-        # VERBATIM TO THE LOG, NOT AT THE PERSON. loop_bridge's own output is
-        # the engine talking to its maintainer (claimed lanes, isolation
-        # mode, scope audits); an engineer debugging a run needs every word of
-        # it and a person who asked for an outcome needs none of them.
-        log.note(loop_text.rstrip())
-        log.note("brother_run: loop_bridge round %d exited %s"
-                 % (round_no, loop_code))
-        # FX-A: THE ONE NEW WAY A ROUND CAN END. Inside a coding session no
-        # worker is spawned, so this round claimed the batch, opened a
-        # worktree for each unit and stopped; the block names them and the
-        # command that verifies them. The run is unfinished by construction
-        # and --continue finds it, which is what the block's own last line
-        # says. Nothing else in this loop applies: no unit was verified, so
-        # there is no integration to write back and no progress to measure.
-        if loop_code == EXIT_UNITS_ARE_YOURS:
-            block = session_handover_block(run_dir, cwd, runs_root)
-            log.note(block)
-            print(block)
-            return EXIT_UNITS_ARE_YOURS
-        claims = _read_claims(claims_path)
-        done_now = {uid for uid, c in (claims or {}).items()
-                    if str(c.get("state", "")) in ("done", "integrated")}
-        attempts_now = {uid: int(c.get("attempt") or 0)
-                        for uid, c in (claims or {}).items()}
-        # W2 (SR-3): classify this round's failures by the worker's own
-        # failure_class marker and handle rate_limit/overloaded/timeout/
-        # empty before the MAX_UNIT_ATTEMPTS bookkeeping below reads
-        # attempts_now. A claim with no marker (today's every existing
-        # caller) classifies "other" and changes nothing: the refund dict
-        # comes back empty and this is a no-op.
-        w2_refund = _apply_w2_retry(record["path"], claims_path, claims,
-                                    loop_text, done_now, unit_ids, w2_state,
-                                    log)
-        for uid, delta in w2_refund.items():
-            attempts_now[uid] = max(0, attempts_now.get(uid, 0) - delta)
-        # T2: EVERY ATTEMPT LEAVES ITS OWN TRACE, beside any earlier one for
-        # the same unit, never over it. claims.json holds only the LATEST
-        # attempt per unit (claim_store.release documents this: "never
-        # deletes the record" but acquire() on a reclaim overwrites it in
-        # place), so a failed attempt's evidence, including its check's real
-        # output, is gone the moment the unit is reclaimed next round unless
-        # it is copied out here, now, while this round's claims are still on
-        # disk. _write_attempt_trace is keyed by attempt number and never
-        # overwrites a directory that already exists, so this call is safe
-        # to make for every unit every round.
-        tree_state = _round_tree_state(cwd, round_head_before, round_head_after)
-        for uid, claim in (claims or {}).items():
-            attempt = claim.get("attempt") if isinstance(claim, dict) else None
-            if isinstance(attempt, int) and attempt > 0:
-                _write_attempt_trace(run_dir, uid, attempt, claim, loop_text,
-                                     tree_state)
-        # FEED INTEGRATION BACK INTO THE PLAN. The scheduler computes the
-        # ready set from the Work document, and nothing else updates it, so
-        # without this write-back a finished unit is re-offered forever and
-        # its dependents never become claimable (measured live: round two
-        # re-claimed the done unit as attempt 2 and starved its two
-        # dependents). DONE plus real, independently-checked evidence is the
-        # board's own contract: a claim whose evidence does not check out is
-        # REFUSED here rather than stamped, so `verified_now` (not `done_now`,
-        # which is only the claim store's own unverified say-so) is what
-        # actually drives the rest of this round.
-        #
-        # ZERO-CHANGE UNITS (the toy-repo finding, then E41, 2026-09-03):
-        # _mark_integrated stamps each row it marks DONE with the file list
-        # ITS OWN merge changed, read from the claim's evidence (integrate_one
-        # measured it at the merge), never this round's diff, which stamped a
-        # sibling's files on a unit that changed nothing; receipt_door's
-        # receipts_for() refuses to call a unit delivered when that stamp is
-        # empty, whatever its check says.
-        _changed, refusals = _mark_integrated(record["path"], done_now, claims,
-                                              cwd)
-        for uid, reason in refusals.items():
-            # The reason itself is not lost: it reaches the person as that
-            # unit's own receipt at the end, in the report's plain sentence.
-            log.note("brother_run: REFUSED to mark %s integrated: %s"
-                     % (uid, reason))
-        verified_now = done_now - set(refusals)
-        remaining = [u.get("id")
-                     for u in (record.get("rows") or record.get("units") or [])
-                     if u.get("id") not in verified_now]
-        # THE GOVERNOR LINE AT EVERY ROUND BOUNDARY. Counts, never a forecast.
-        log.say("brother_run: round %d done, %d of %d piece(s) finished, %d "
-                "to go" % (round_no, total_units - len(remaining), total_units,
-                           len(remaining)))
-        if not remaining:
-            break
-        # REPAIR-ELIGIBLE: a remaining unit whose claim attempt count has not
-        # yet reached the bound, so giving it another claim next round is a
-        # legitimate bounded repair, not a spin. This is what makes counting
-        # attempt growth as progress still terminate: each unit can only
-        # supply it MAX_UNIT_ATTEMPTS times.
-        repairable = [uid for uid in remaining
-                     if attempts_now.get(uid, 0) < MAX_UNIT_ATTEMPTS]
-        # A round makes repair progress only when a unit whose attempt count
-        # ACTUALLY GREW this round is still under its bound. The old test
-        # ("attempts changed anywhere AND some unit is under the bound") let a
-        # never-claimed unit BLOCKED behind a failure (attempt 0, forever
-        # counted "repairable") keep the drain alive while a failing unit's
-        # attempts climbed, so the loop spun to its 25-round ceiling: the harsh
-        # EVAD 2026-08-31 measured 20 rounds on a graph that could never
-        # converge.
-        grew = [uid for uid in remaining
-                if attempts_now.get(uid, 0) > attempts_before.get(uid, 0)]
-        repair_progress = any(attempts_now.get(uid, 0) < MAX_UNIT_ATTEMPTS
-                             for uid in grew)
-        progressed = (verified_now != done_before) or repair_progress
-        held_now = [uid for uid in remaining if uid in loom.parked_ids(record)]
-        if not progressed:
-            if held_now:
-                log.say("brother_run: %d piece(s) are parked and waiting for "
-                        "your decision, so this run stops here rather than "
-                        "running them: %s"
-                        % (len(held_now), ", ".join(held_now)))
-            elif remaining and not repairable:
-                log.say("brother_run: %d piece(s) were retried %d times each "
-                        "and never finished (%s); the retry budget is "
-                        "exhausted, so this run stops trying them"
-                        % (len(remaining), MAX_UNIT_ATTEMPTS,
-                           ", ".join(remaining)))
-                # I3, THE SECOND HUMAN MOMENT: a forcing condition. Every
-                # stuck piece has spent its bounded outer retries; guessing
-                # again is the danger a forcing condition names
-                # (products/brothermode/tools/bm_escalate.py's own words),
-                # so the drain does not guess a fourth time, it stops and
-                # poses this. The mark is the real, measured share of the
-                # retry budget the stuck piece(s) actually spent, not a
-                # typed number.
-                avg_attempts = (sum(attempts_now.get(uid, 0)
-                                    for uid in remaining) / len(remaining))
-                forcing_spec = _fact_spec(
-                    title="Stop retrying, or keep guessing",
-                    eyebrow="Forcing condition",
-                    plain_summary="%d piece(s) of this run (%s) never "
-                                  "passed their own check after %d "
-                                  "attempts each." % (len(remaining),
-                                  ", ".join(remaining), MAX_UNIT_ATTEMPTS),
-                    question="Guessing again is the risk this stops for: "
-                             "does this run stop here?",
-                    option_id="stop-here",
-                    option_name="Stop, as the engine already does",
-                    one_liner="the bounded repair budget is spent; this "
-                              "run stops trying %s rather than guess a "
-                              "fourth time" % ", ".join(remaining),
-                    marks={"retry_budget_spent": (
-                        1.0, round(10.0 * avg_attempts / MAX_UNIT_ATTEMPTS, 2),
-                        "the stuck piece(s) used %.1f of %d allowed outer "
-                        "attempts on average, measured from this run's own "
-                        "claim store" % (avg_attempts, MAX_UNIT_ATTEMPTS))},
-                    would_change=[
-                        "The stuck piece(s) pass their own check first: this "
-                        "screen never renders at all, since the drain only "
-                        "reaches here once a round moves nothing forward.",
-                        "The average attempts spent differs from %.1f (read "
-                        "live from this run's own claim store): the "
-                        "retry_budget_spent mark moves with it."
-                        % avg_attempts,
-                    ])
-                # RS-1's own evidence (docs/decisions/ruling-not-stall-
-                # 2026-09-13.json) named this call's return as discarded
-                # entirely; it no longer is, so a ruling can be built from
-                # what the screen actually resolved to.
-                forcing_choice = _human_moment(log, "forcing-condition",
-                                               forcing_spec,
-                                               resolver=live_resolver)
-                # RS-6: record-only, fire-and-forget, same rule as the
-                # intent site in _auto_resolver above. record_ruling()
-                # almost always refuses here too (a stop/keep-guessing call
-                # spans every remaining stuck piece, not one unit's own
-                # check, so no single check_passed_before applies, RS-4:
-                # NO-DATA is passed honestly). A refusal, or any exception
-                # raised inside the call, changes nothing about
-                # forcing_choice or this run's own control flow below.
-                try:
-                    fable_authority.record_ruling(
-                        question=forcing_spec.get("question") or NODATA,
-                        choice=(forcing_choice.get("name")
-                               or forcing_choice.get("choice") or NODATA),
-                        reason=("recorded default: %d piece(s) (%s) spent "
-                                "%.1f of %d allowed outer attempts on "
-                                "average; the engine's own rule is to stop "
-                                "rather than guess a fourth time"
-                                % (len(remaining), ", ".join(remaining),
-                                   avg_attempts, MAX_UNIT_ATTEMPTS)),
-                        evidence=("retry_budget_spent scored %.2f/10 "
-                                  "across %s, measured from this run's own "
-                                  "claim store"
-                                  % (round(10.0 * avg_attempts
-                                           / MAX_UNIT_ATTEMPTS, 2),
-                                     ", ".join(remaining))),
-                        cost_if_wrong="stopping when another attempt would "
-                                      "have passed costs a person's time to "
-                                      "resume the run by hand; guessing "
-                                      "again when the budget is truly spent "
-                                      "costs a further unverified attempt "
-                                      "against the same stuck piece(s)",
-                        deciding_check="each stuck piece's own done_check, "
-                                       "already run %d times without "
-                                       "passing (brother_run's own retry "
-                                       "budget)" % MAX_UNIT_ATTEMPTS,
-                        reversibility="reversible: a person can resume "
-                                      "this run and let it try again",
-                        human_override_path="resume this run and keep "
-                                            "retrying the named piece(s) "
-                                            "instead of stopping",
-                        observables={"single_file_or_named_target": False,
-                                    "contract_change": "none",
-                                    "crosses_boundary": False,
-                                    "reversible_under_hour": True},
-                        check_passed_before=None)
-                except Exception:  # sbe: allow-silent a ruling-record failure must never change this screen's own resolution (RS-6, record-only)
-                    pass
-            else:
-                log.say("brother_run: the last round moved nothing forward, "
-                        "so this run stops rather than repeating itself; %d "
-                        "piece(s) are unfinished" % len(remaining))
-            break
-        done_before, attempts_before = verified_now, attempts_now
+    try:
+        for round_no in range(1, 1 if skip_drain else 26):
+            # LOAD-02: renewed once per round rather than acquired once and
+            # left to expire mid-drain (this estate's own overnight runs
+            # span hours). A renewal that fails (lease already gone, store
+            # unreadable) sets reservation back to None: this run keeps
+            # going, its dispatches under the band are refused from here on
+            # exactly as if it had never held one, never a reason to stop.
+            if machine_reservation is not None and reservation is not None:
+                reservation, renew_problem = machine_reservation.renew(
+                    MACHINE_RESERVATION_PATH, reservation_holder,
+                    MACHINE_RESERVATION_TTL_SECONDS)
+                if reservation is None:
+                    log.say("brother_run: machine reservation renewal "
+                            "refused: %s" % renew_problem)
+            # T2: the two revisions THIS ROUND ran between, for the attempt
+            # trace's tree-state summary below; _head is cheap (git rev-parse)
+            # and this run already pays for it once per whole run, so paying it
+            # twice per round as well costs nothing a maintainer would notice.
+            round_head_before = _head(cwd)
+            loop_code, loop_text = run_loop(record["path"], claims_path, cwd,
+                                            args.slots)
+            round_head_after = _head(cwd)
+            loop_texts.append(loop_text)
+            # VERBATIM TO THE LOG, NOT AT THE PERSON. loop_bridge's own output is
+            # the engine talking to its maintainer (claimed lanes, isolation
+            # mode, scope audits); an engineer debugging a run needs every word of
+            # it and a person who asked for an outcome needs none of them.
+            log.note(loop_text.rstrip())
+            log.note("brother_run: loop_bridge round %d exited %s"
+                     % (round_no, loop_code))
+            # FX-A: THE ONE NEW WAY A ROUND CAN END. Inside a coding session no
+            # worker is spawned, so this round claimed the batch, opened a
+            # worktree for each unit and stopped; the block names them and the
+            # command that verifies them. The run is unfinished by construction
+            # and --continue finds it, which is what the block's own last line
+            # says. Nothing else in this loop applies: no unit was verified, so
+            # there is no integration to write back and no progress to measure.
+            if loop_code == EXIT_UNITS_ARE_YOURS:
+                block = session_handover_block(run_dir, cwd, runs_root)
+                log.note(block)
+                print(block)
+                return EXIT_UNITS_ARE_YOURS
+            claims = _read_claims(claims_path)
+            done_now = {uid for uid, c in (claims or {}).items()
+                        if str(c.get("state", "")) in ("done", "integrated")}
+            attempts_now = {uid: int(c.get("attempt") or 0)
+                            for uid, c in (claims or {}).items()}
+            # W2 (SR-3): classify this round's failures by the worker's own
+            # failure_class marker and handle rate_limit/overloaded/timeout/
+            # empty before the MAX_UNIT_ATTEMPTS bookkeeping below reads
+            # attempts_now. A claim with no marker (today's every existing
+            # caller) classifies "other" and changes nothing: the refund dict
+            # comes back empty and this is a no-op.
+            w2_refund = _apply_w2_retry(record["path"], claims_path, claims,
+                                        loop_text, done_now, unit_ids, w2_state,
+                                        log)
+            for uid, delta in w2_refund.items():
+                attempts_now[uid] = max(0, attempts_now.get(uid, 0) - delta)
+            # T2: EVERY ATTEMPT LEAVES ITS OWN TRACE, beside any earlier one for
+            # the same unit, never over it. claims.json holds only the LATEST
+            # attempt per unit (claim_store.release documents this: "never
+            # deletes the record" but acquire() on a reclaim overwrites it in
+            # place), so a failed attempt's evidence, including its check's real
+            # output, is gone the moment the unit is reclaimed next round unless
+            # it is copied out here, now, while this round's claims are still on
+            # disk. _write_attempt_trace is keyed by attempt number and never
+            # overwrites a directory that already exists, so this call is safe
+            # to make for every unit every round.
+            tree_state = _round_tree_state(cwd, round_head_before, round_head_after)
+            for uid, claim in (claims or {}).items():
+                attempt = claim.get("attempt") if isinstance(claim, dict) else None
+                if isinstance(attempt, int) and attempt > 0:
+                    _write_attempt_trace(run_dir, uid, attempt, claim, loop_text,
+                                         tree_state)
+            # FEED INTEGRATION BACK INTO THE PLAN. The scheduler computes the
+            # ready set from the Work document, and nothing else updates it, so
+            # without this write-back a finished unit is re-offered forever and
+            # its dependents never become claimable (measured live: round two
+            # re-claimed the done unit as attempt 2 and starved its two
+            # dependents). DONE plus real, independently-checked evidence is the
+            # board's own contract: a claim whose evidence does not check out is
+            # REFUSED here rather than stamped, so `verified_now` (not `done_now`,
+            # which is only the claim store's own unverified say-so) is what
+            # actually drives the rest of this round.
+            #
+            # ZERO-CHANGE UNITS (the toy-repo finding, then E41, 2026-09-03):
+            # _mark_integrated stamps each row it marks DONE with the file list
+            # ITS OWN merge changed, read from the claim's evidence (integrate_one
+            # measured it at the merge), never this round's diff, which stamped a
+            # sibling's files on a unit that changed nothing; receipt_door's
+            # receipts_for() refuses to call a unit delivered when that stamp is
+            # empty, whatever its check says.
+            _changed, refusals = _mark_integrated(record["path"], done_now, claims,
+                                                  cwd)
+            for uid, reason in refusals.items():
+                # The reason itself is not lost: it reaches the person as that
+                # unit's own receipt at the end, in the report's plain sentence.
+                log.note("brother_run: REFUSED to mark %s integrated: %s"
+                         % (uid, reason))
+            verified_now = done_now - set(refusals)
+            remaining = [u.get("id")
+                         for u in (record.get("rows") or record.get("units") or [])
+                         if u.get("id") not in verified_now]
+            # THE GOVERNOR LINE AT EVERY ROUND BOUNDARY. Counts, never a forecast.
+            log.say("brother_run: round %d done, %d of %d piece(s) finished, %d "
+                    "to go" % (round_no, total_units - len(remaining), total_units,
+                               len(remaining)))
+            if not remaining:
+                break
+            # REPAIR-ELIGIBLE: a remaining unit whose claim attempt count has not
+            # yet reached the bound, so giving it another claim next round is a
+            # legitimate bounded repair, not a spin. This is what makes counting
+            # attempt growth as progress still terminate: each unit can only
+            # supply it MAX_UNIT_ATTEMPTS times.
+            repairable = [uid for uid in remaining
+                         if attempts_now.get(uid, 0) < MAX_UNIT_ATTEMPTS]
+            # A round makes repair progress only when a unit whose attempt count
+            # ACTUALLY GREW this round is still under its bound. The old test
+            # ("attempts changed anywhere AND some unit is under the bound") let a
+            # never-claimed unit BLOCKED behind a failure (attempt 0, forever
+            # counted "repairable") keep the drain alive while a failing unit's
+            # attempts climbed, so the loop spun to its 25-round ceiling: the harsh
+            # EVAD 2026-08-31 measured 20 rounds on a graph that could never
+            # converge.
+            grew = [uid for uid in remaining
+                    if attempts_now.get(uid, 0) > attempts_before.get(uid, 0)]
+            repair_progress = any(attempts_now.get(uid, 0) < MAX_UNIT_ATTEMPTS
+                                 for uid in grew)
+            progressed = (verified_now != done_before) or repair_progress
+            held_now = [uid for uid in remaining if uid in loom.parked_ids(record)]
+            if not progressed:
+                if held_now:
+                    log.say("brother_run: %d piece(s) are parked and waiting for "
+                            "your decision, so this run stops here rather than "
+                            "running them: %s"
+                            % (len(held_now), ", ".join(held_now)))
+                elif remaining and not repairable:
+                    log.say("brother_run: %d piece(s) were retried %d times each "
+                            "and never finished (%s); the retry budget is "
+                            "exhausted, so this run stops trying them"
+                            % (len(remaining), MAX_UNIT_ATTEMPTS,
+                               ", ".join(remaining)))
+                    # I3, THE SECOND HUMAN MOMENT: a forcing condition. Every
+                    # stuck piece has spent its bounded outer retries; guessing
+                    # again is the danger a forcing condition names
+                    # (products/brothermode/tools/bm_escalate.py's own words),
+                    # so the drain does not guess a fourth time, it stops and
+                    # poses this. The mark is the real, measured share of the
+                    # retry budget the stuck piece(s) actually spent, not a
+                    # typed number.
+                    avg_attempts = (sum(attempts_now.get(uid, 0)
+                                        for uid in remaining) / len(remaining))
+                    forcing_spec = _fact_spec(
+                        title="Stop retrying, or keep guessing",
+                        eyebrow="Forcing condition",
+                        plain_summary="%d piece(s) of this run (%s) never "
+                                      "passed their own check after %d "
+                                      "attempts each." % (len(remaining),
+                                      ", ".join(remaining), MAX_UNIT_ATTEMPTS),
+                        question="Guessing again is the risk this stops for: "
+                                 "does this run stop here?",
+                        option_id="stop-here",
+                        option_name="Stop, as the engine already does",
+                        one_liner="the bounded repair budget is spent; this "
+                                  "run stops trying %s rather than guess a "
+                                  "fourth time" % ", ".join(remaining),
+                        marks={"retry_budget_spent": (
+                            1.0, round(10.0 * avg_attempts / MAX_UNIT_ATTEMPTS, 2),
+                            "the stuck piece(s) used %.1f of %d allowed outer "
+                            "attempts on average, measured from this run's own "
+                            "claim store" % (avg_attempts, MAX_UNIT_ATTEMPTS))},
+                        would_change=[
+                            "The stuck piece(s) pass their own check first: this "
+                            "screen never renders at all, since the drain only "
+                            "reaches here once a round moves nothing forward.",
+                            "The average attempts spent differs from %.1f (read "
+                            "live from this run's own claim store): the "
+                            "retry_budget_spent mark moves with it."
+                            % avg_attempts,
+                        ])
+                    # RS-1's own evidence (docs/decisions/ruling-not-stall-
+                    # 2026-09-13.json) named this call's return as discarded
+                    # entirely; it no longer is, so a ruling can be built from
+                    # what the screen actually resolved to.
+                    forcing_choice = _human_moment(log, "forcing-condition",
+                                                   forcing_spec,
+                                                   resolver=live_resolver)
+                    # RS-6: record-only, fire-and-forget, same rule as the
+                    # intent site in _auto_resolver above. record_ruling()
+                    # almost always refuses here too (a stop/keep-guessing call
+                    # spans every remaining stuck piece, not one unit's own
+                    # check, so no single check_passed_before applies, RS-4:
+                    # NO-DATA is passed honestly). A refusal, or any exception
+                    # raised inside the call, changes nothing about
+                    # forcing_choice or this run's own control flow below.
+                    try:
+                        fable_authority.record_ruling(
+                            question=forcing_spec.get("question") or NODATA,
+                            choice=(forcing_choice.get("name")
+                                   or forcing_choice.get("choice") or NODATA),
+                            reason=("recorded default: %d piece(s) (%s) spent "
+                                    "%.1f of %d allowed outer attempts on "
+                                    "average; the engine's own rule is to stop "
+                                    "rather than guess a fourth time"
+                                    % (len(remaining), ", ".join(remaining),
+                                       avg_attempts, MAX_UNIT_ATTEMPTS)),
+                            evidence=("retry_budget_spent scored %.2f/10 "
+                                      "across %s, measured from this run's own "
+                                      "claim store"
+                                      % (round(10.0 * avg_attempts
+                                               / MAX_UNIT_ATTEMPTS, 2),
+                                         ", ".join(remaining))),
+                            cost_if_wrong="stopping when another attempt would "
+                                          "have passed costs a person's time to "
+                                          "resume the run by hand; guessing "
+                                          "again when the budget is truly spent "
+                                          "costs a further unverified attempt "
+                                          "against the same stuck piece(s)",
+                            deciding_check="each stuck piece's own done_check, "
+                                           "already run %d times without "
+                                           "passing (brother_run's own retry "
+                                           "budget)" % MAX_UNIT_ATTEMPTS,
+                            reversibility="reversible: a person can resume "
+                                          "this run and let it try again",
+                            human_override_path="resume this run and keep "
+                                                "retrying the named piece(s) "
+                                                "instead of stopping",
+                            observables={"single_file_or_named_target": False,
+                                        "contract_change": "none",
+                                        "crosses_boundary": False,
+                                        "reversible_under_hour": True},
+                            check_passed_before=None)
+                    except Exception:  # sbe: allow-silent a ruling-record failure must never change this screen's own resolution (RS-6, record-only)
+                        pass
+                else:
+                    log.say("brother_run: the last round moved nothing forward, "
+                            "so this run stops rather than repeating itself; %d "
+                            "piece(s) are unfinished" % len(remaining))
+                break
+            done_before, attempts_before = verified_now, attempts_now
+    finally:
+        # Released even when a unit raises: whatever propagates out of the
+        # try above reaches this before it reaches beat.stop() below, so a
+        # crashed round never leaves the machine reserved for the rest of
+        # this estate until MACHINE_RESERVATION_TTL_SECONDS expires.
+        if machine_reservation is not None and reservation is not None:
+            released, release_problem = machine_reservation.release(
+                MACHINE_RESERVATION_PATH, reservation_holder)
+            if released is None:
+                log.say("brother_run: machine reservation release refused: "
+                        "%s" % release_problem)
     beat.stop()
     if wait_start is not None:
         _governor_wait_close(log, wait_start)

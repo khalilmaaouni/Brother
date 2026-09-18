@@ -1,0 +1,118 @@
+Write one Python 3.9, standard-library-only module plus one plain unittest
+test file for an internal automation tool. No network calls, no third party
+packages.
+
+CONTEXT (generalized). A small command line bridge script calls an outside
+text generation API. That bridge script lives on a workstation, outside any
+version controlled repository, and it declares its "default model id" as a
+plain module level string constant, for example:
+
+    DEFAULT_MODEL = "some-provider/some-model-name"
+
+Because the bridge file is not tracked by any repository, its default model
+id has changed more than once with no commit history recording the change.
+Nobody noticed until later. The fix must live in a small, separate,
+version-controlled module that can prove whether the bridge's live default
+still matches an intentionally pinned value.
+
+MODULE TO WRITE: scripts/bridge_default_model.py
+
+Requirements:
+1. Declare one module level constant, PINNED_DEFAULT_MODEL, a plain string,
+   as the single source of truth for what the bridge's default model id is
+   SUPPOSED to be. Comment that changing this line, in a commit, is the
+   intended way to record a deliberate change.
+2. Declare BRIDGE_PATH, the expected filesystem path to the external bridge
+   script (a path under the user's home directory is fine as a placeholder,
+   e.g. an expanduser'd path).
+3. A function read_bridge_default_model(path=None) that:
+   - opens the file at `path` (or BRIDGE_PATH if path is None) as UTF-8 text
+   - never imports or executes the file (it is untrusted, external, and
+     outside this module's own package)
+   - searches the source text for a line shaped like
+     `DEFAULT_MODEL = "..."` (a plain assignment to a quoted string,
+     anchored per line, using a regular expression)
+   - if the file cannot be opened (missing, permissions, any OSError),
+     raises a custom exception class BridgeUnreadable with a clear message
+     naming the path and the underlying error
+   - if zero such assignments are found, raises BridgeUnreadable naming the
+     path (never returns None or an empty string as if that were a value)
+   - if more than one DISTINCT such assignment is found in the file, raises
+     BridgeUnreadable naming how many distinct values were found and what
+     they are (never silently picks the first or last match)
+   - otherwise returns the single matched string exactly as found
+4. A function check_pinned(path=None, pinned=PINNED_DEFAULT_MODEL) that:
+   - calls read_bridge_default_model(path)
+   - if the live value differs from `pinned`, raises a custom exception
+     class DefaultModelDrift carrying both values and the path, with a
+     clear str() message
+   - if they match, returns the matching value
+5. A small main(argv=None) CLI using argparse with one optional flag
+   `--bridge PATH` to override the path (default: None, meaning use
+   BRIDGE_PATH). Behavior:
+   - on success (values match): print a line starting with "PASS:" naming
+     the matching value, return 0
+   - on BridgeUnreadable: print a line starting with "NO-DATA:" with the
+     exception message to stderr, return 2 (an unreadable bridge is never
+     treated as a pass and never treated as a definite failure either,
+     because nothing was actually compared)
+   - on DefaultModelDrift: print a line starting with "DRIFT:" with the
+     exception message to stderr, return 1
+   - guard with `if __name__ == "__main__": sys.exit(main())`
+6. No permissive defaults anywhere: an unparseable or ambiguous file must
+   raise, never silently proceed with a guessed value.
+7. Include a module docstring explaining why this module exists (a default
+   value that changed with no commit because the source file lives outside
+   every repository) and what NO-DATA means here (a bridge that could not
+   be read proves nothing about whether the pin still holds, so it is
+   reported distinctly from both a match and a mismatch).
+8. Use commas, colons or parentheses instead of em dashes or en dashes
+   anywhere in code, comments or strings.
+9. No "Generated with" footer, no AI/model attribution of any kind in the
+   file.
+
+TEST FILE TO WRITE: scripts/test_bridge_default_model.py
+
+Requirements:
+1. Plain `unittest`, runnable directly as
+   `python3 scripts/test_bridge_default_model.py -v`, ending with a
+   `unittest.main()` block. No pytest, no fixtures package.
+2. Use tempfile to create small fixture files on disk for each scenario
+   below (never touch any real file outside a temp directory, never read
+   any real API key or environment credential, no network calls):
+   - a fixture file containing `DEFAULT_MODEL = "provider/model-a"` and a
+     lot of surrounding unrelated Python source (comments, other constants,
+     a function or two) proves read_bridge_default_model finds it correctly
+     among noise
+   - a fixture file with NO DEFAULT_MODEL assignment at all proves
+     BridgeUnreadable is raised
+   - a fixture file with TWO DIFFERENT DEFAULT_MODEL assignments (for
+     example one inside a comment-adjacent duplicate, or two real
+     assignments) proves BridgeUnreadable is raised for ambiguity; if your
+     regex is line-anchored and a value only appears once as a real
+     assignment, construct the duplicate as a second real assignment
+     later in the file with a different value, to make the ambiguity real
+   - a path that does not exist on disk at all proves BridgeUnreadable is
+     raised for a missing file
+   - check_pinned() with a fixture whose live value equals the `pinned`
+     argument returns that value with no exception
+   - check_pinned() with a fixture whose live value differs from the
+     `pinned` argument raises DefaultModelDrift, and the exception's
+     message contains both the pinned and the live value
+   - a test that calls check_pinned() with pinned equal to the fixture's
+     own value but changes ONE CHARACTER of that fixture's live value (a
+     mutation of the exact case a real drift would look like) and asserts
+     the call raises DefaultModelDrift, not BridgeUnreadable and not a
+     silent pass: this is the test that must go red if the
+     comparison inside check_pinned is ever deleted or weakened (for
+     example changed to always return without comparing)
+   - a smoke test for main(): call main(["--bridge", <path to a matching
+     fixture>]) and assert it returns 0; call main(["--bridge", <path to a
+     mismatched fixture>]) and assert it returns 1; call
+     main(["--bridge", <path that does not exist>]) and assert it returns 2
+3. Clean up temp files (tempfile context managers or explicit cleanup in
+   tearDown) so the suite leaves nothing behind.
+4. No dashes (em or en) anywhere in the file.
+
+Return the two files as full source code, each clearly labeled with its
+path, ready to save directly.

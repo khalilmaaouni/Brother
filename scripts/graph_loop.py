@@ -98,6 +98,20 @@ FOUNDER_OWNERS = ('FOUNDER', 'founder')
 #: Found when a cleared disk raised capacity and the scheduler batched two nodes
 #: whose write sets nobody had declared.
 
+#: ORCH-02 (routing metadata survives the whole spine, 2026-09-18): the
+#: orchestrator-task-v1.json fields nodes() used to rebuild from a fixed
+#: twelve-key dictionary that held none of them. Kept as its own literal
+#: here rather than imported from work_record.py, because this module
+#: builds nodes from roadmap rows (docs/plan/READINESS-ROADMAP-*.json) as
+#: often as from a Work document, and a roadmap row is not required to
+#: carry any of them; importing a work_record-owned list would wire a
+#: dependency this module does not otherwise have for a list this short.
+ROUTING_METADATA_FIELDS = (
+    "task_class", "worker_profile", "review_profile", "risk_class",
+    "evidence_obligation", "max_outer_attempts", "max_repair_attempts",
+    "leaf_worker_only",
+)
+
 
 def load(path=None):
     if path is None:
@@ -136,6 +150,14 @@ def nodes(doc):
             # because no amount of session effort produces it.
             'event': r.get('event') or None,
         })
+        # ORCH-02: carried through only when the source row actually gave
+        # one, exactly the None/[] discipline 'declared' above already
+        # uses for 'owns'. A row that never named a risk_class gets no
+        # risk_class key here, and downstream code's own fallback (never
+        # this function's) decides what an absent key means.
+        for field in ROUTING_METADATA_FIELDS:
+            if field in r:
+                out[-1][field] = r[field]
     return out
 
 

@@ -1,0 +1,496 @@
+{
+ "about": "Ground truth measured in session 50a7c16b on 2026-09-18 (ORCH-1020). Role-worded: no repository source, no paths, no names. Labels are facts from the orchestrator's own mutation runs and verification outcomes, fixed before any model was asked.",
+ "A_mutation_triage": {
+  "instructions": "Given a rule a function enforces, the names of its tests, and a described mutation of the function, decide whether at least one listed test would fail under the mutation. Judge only from the test names and what each plausibly checks.",
+  "true": "at least one listed test directly exercises the behaviour the mutation changes, so it would fail",
+  "false": "no listed test exercises the changed behaviour, or the mutation changes nothing observable, so every test still passes",
+  "items": [
+   {
+    "id": "A1",
+    "caught": true,
+    "rule": "verify() raises KeyError when the binding lacks any pinned field",
+    "tests": [
+     "test_verify_raises_on_a_binding_missing_a_field",
+     "test_verify_raises_on_an_empty_dict",
+     "test_pythonpath_pointing_elsewhere_is_caught_as_a_mismatch"
+    ],
+    "mutation": "the missing-field check is disabled and a missing field reads as unchanged"
+   },
+   {
+    "id": "A2",
+    "caught": false,
+    "rule": "retry_budget refuses when previous >= ceiling, and separately refuses when the computed retry equals the previous budget",
+    "tests": [
+     "test_retry_doubles",
+     "test_retry_capped_at_ceiling",
+     "test_retry_at_ceiling_is_exhausted",
+     "test_retry_never_identical"
+    ],
+    "mutation": "the first check changes from >= to >; the second check still refuses the equal case with the same exception"
+   },
+   {
+    "id": "A3",
+    "caught": true,
+    "rule": "a model profile must contain context_tokens and reasoning, else UnknownModel",
+    "tests": [
+     "test_profile_missing_context_tokens_refuses",
+     "test_profile_missing_reasoning_refuses",
+     "test_reasoning_model_doubles_the_answer_floor"
+    ],
+    "mutation": "the profile check only verifies the profile is a dict"
+   },
+   {
+    "id": "A4",
+    "caught": true,
+    "rule": "acquire is all or nothing: keys taken earlier in a failed call are released",
+    "tests": [
+     "test_a_target_acquired_this_call_is_released_when_a_later_one_fails",
+     "test_two_different_directories_of_one_repository_still_collide",
+     "test_corrupt_lease_file_blocks"
+    ],
+    "mutation": "the rollback is handed an empty set, releasing nothing"
+   },
+   {
+    "id": "A5",
+    "caught": true,
+    "rule": "a policy entry given as a bare string is one model id, never iterated character by character",
+    "tests": [
+     "test_policy_entry_as_bare_string_is_one_id_not_a_char_sequence",
+     "test_substitute_not_in_policy_refused",
+     "test_missing_answering_model_is_no_data"
+    ],
+    "mutation": "the bare-string guard is removed and matching becomes substring"
+   },
+   {
+    "id": "A6",
+    "caught": true,
+    "rule": "a grant whose expiry equals now is expired",
+    "tests": [
+     "test_until_equal_to_now_is_expired_not_live",
+     "test_self_authored_refused_even_when_otherwise_valid",
+     "test_at_cap_needs_no_grant"
+    ],
+    "mutation": "the expiry comparison changes from <= to <"
+   },
+   {
+    "id": "A7",
+    "caught": false,
+    "rule": "a run id is refused if it is empty, contains whitespace, or contains a path separator",
+    "tests": [
+     "test_missing_run_id_refuses_and_writes_nothing",
+     "test_invalid_run_id_refuses_without_writing (uses the id 'has space')",
+     "test_two_run_ids_get_two_slots_neither_clobbers_the_other"
+    ],
+    "mutation": "the path-separator check is deleted"
+   },
+   {
+    "id": "A8",
+    "caught": false,
+    "rule": "a feature record is refused if any of eight required fields is missing: measurable_outcome, baseline, expected_mechanism, exact_files, done_check, negative_done_check, evidence_artifact, rollback",
+    "tests": [
+     "test_missing_done_check_refused",
+     "test_missing_baseline_refused",
+     "test_missing_rollback_refused",
+     "test_exact_files_as_empty_list_refused",
+     "test_valid_record_admits"
+    ],
+    "mutation": "evidence_artifact is no longer required (still accepted when present)"
+   },
+   {
+    "id": "A9",
+    "caught": false,
+    "rule": "the boundary's network call treats an undeclared autonomy as high autonomy",
+    "tests": [
+     "test_unrestricted_high_autonomy_without_ack_refused (passes high autonomy explicitly)",
+     "test_denied_mode_refused_through_boundary",
+     "test_allowlisted_host_allowed_through_boundary"
+    ],
+    "mutation": "the boundary's default for undeclared autonomy becomes supervised"
+   },
+   {
+    "id": "A10",
+    "caught": false,
+    "rule": "the unknown risk bucket must never share a name with a real risk class (real classes include low, normal, medium, high, critical)",
+    "tests": [
+     "test_a_unit_with_no_risk_class_gets_its_own_nodata_bucket",
+     "test_two_clean_classes_each_span_the_whole_run (classes critical and medium)",
+     "test_literal_unknown_class_collides"
+    ],
+    "mutation": "the unknown bucket is renamed low"
+   },
+   {
+    "id": "A11",
+    "caught": false,
+    "rule": "an identity may not contain a path separator; checked by a character pattern and again by an explicit separator check",
+    "tests": [
+     "test_verify_refuses_path_traversal_identity",
+     "test_build_refuses_path_traversal_identity",
+     "test_build_refuses_empty_identity"
+    ],
+    "mutation": "the character pattern starts allowing '/', the explicit separator check is unchanged"
+   },
+   {
+    "id": "A12",
+    "caught": true,
+    "rule": "an unknown change type raises, never maps to the weakest obligation",
+    "tests": [
+     "test_unknown_change_type_raises_never_accepts",
+     "test_unknown_change_type_exits_one",
+     "test_unhashable_type_raises_valueerror_not_typeerror"
+    ],
+    "mutation": "an unknown change type returns the weakest registered obligation"
+   },
+   {
+    "id": "A13",
+    "caught": true,
+    "rule": "a digest mismatch in a fresh clone is FAIL, not NO-DATA",
+    "tests": [
+     "test_digest_mismatch_is_fail",
+     "test_missing_tag_is_nodata",
+     "test_empty_manifest_is_never_a_pass"
+    ],
+    "mutation": "a failed verification returns NO-DATA instead of FAIL"
+   },
+   {
+    "id": "A14",
+    "caught": true,
+    "rule": "a credential whose expiry equals now is refused",
+    "tests": [
+     "test_expired_at_exact_boundary",
+     "test_scope_wider_than_declared",
+     "test_secret_absent_from_every_refusal_reason"
+    ],
+    "mutation": "the expiry comparison changes from >= to >"
+   },
+   {
+    "id": "A15",
+    "caught": true,
+    "rule": "an unreadable process table reports containment unverified",
+    "tests": [
+     "test_enumeration_failure_is_never_reported_as_contained",
+     "test_cancel_kills_detached_setsid_grandchild",
+     "test_survivor_reported_by_pid"
+    ],
+    "mutation": "an unreadable table reports contained and verified"
+   },
+   {
+    "id": "A16",
+    "caught": true,
+    "rule": "a claim of enforced needs non-blank evidence, else it is downgraded to advisory",
+    "tests": [
+     "test_enforced_claim_with_whitespace_only_evidence_downgrades",
+     "test_enforced_claim_without_evidence_downgrades",
+     "test_unknown_level_is_unsupported"
+    ],
+    "mutation": "whitespace-only evidence counts as evidence"
+   },
+   {
+    "id": "A17",
+    "caught": true,
+    "rule": "the first route whose required capabilities are all enforced is chosen, else the restrictive fallback",
+    "tests": [
+     "test_all_requirements_unmet_falls_to_restricted",
+     "test_full_route_selected_when_everything_enforced",
+     "test_renamed_host_routes_identically"
+    ],
+    "mutation": "every route's requirements are ignored"
+   },
+   {
+    "id": "A18",
+    "caught": true,
+    "rule": "an intervention with an unknown category is refused before writing",
+    "tests": [
+     "test_unknown_category_is_refused",
+     "test_empty_category_is_refused",
+     "test_record_read_round_trip"
+    ],
+    "mutation": "the category check is disabled"
+   },
+   {
+    "id": "A19",
+    "caught": true,
+    "rule": "a dependents scan that could not complete counts as not clear",
+    "tests": [
+     "test_dependents_clear_reflects_a_real_no_data",
+     "test_wire_worktrees_applies_only_eligible_and_skips_the_rest",
+     "test_free_file_is_deleted"
+    ],
+    "mutation": "an incomplete scan (NO-DATA) counts as clear"
+   },
+   {
+    "id": "A20",
+    "caught": true,
+    "rule": "a high-autonomy caller in unrestricted mode needs an acknowledgement",
+    "tests": [
+     "test_high_autonomy_never_silently_unrestricted",
+     "test_high_autonomy_with_truthy_ack_allowed",
+     "test_unknown_mode_refused"
+    ],
+    "mutation": "the acknowledgement requirement is skipped for high autonomy"
+   },
+   {
+    "id": "A21",
+    "caught": true,
+    "rule": "a metric record may not demote itself out of the registry's mandatory set",
+    "tests": [
+     "test_self_demoted_mandatory_metric_is_refused",
+     "test_omitted_mandatory_metric_blocks_the_composite",
+     "test_value_present_evidence_missing_is_unmeasured"
+    ],
+    "mutation": "the self-demotion refusal is removed"
+   },
+   {
+    "id": "A22",
+    "caught": true,
+    "rule": "two units owning the same path are both flagged",
+    "tests": [
+     "test_two_units_owning_the_same_path_are_both_flagged",
+     "test_done_check_present_and_nonempty_but_copy_pasted_is_still_caught",
+     "test_empty_owns_flagged"
+    ],
+    "mutation": "a collision is flagged only when three units share a path"
+   },
+   {
+    "id": "A23",
+    "caught": true,
+    "rule": "an unknown autonomy level refuses",
+    "tests": [
+     "test_none_refuses",
+     "test_empty_string_refuses",
+     "test_lowercase_is_not_normalised_and_refuses"
+    ],
+    "mutation": "an unknown level is treated as requiring no capabilities"
+   },
+   {
+    "id": "A24",
+    "caught": true,
+    "rule": "zero accepted units yields zero useful minutes",
+    "tests": [
+     "test_zero_accepted_units_yields_zero_useful_minutes_on_a_long_clean_span",
+     "test_an_empty_claims_object_is_a_real_computed_zero",
+     "test_one_accepted_unit_credits_the_span"
+    ],
+    "mutation": "the gate changes from accepted > 0 to accepted >= 0"
+   }
+  ]
+ },
+ "B_unknown_reads_safe": {
+  "instructions": "Read the rule. Decide whether a missing, unknown, undeclared or unreadable input ends up treated as the passing, permitted or safe outcome.",
+  "true": "some missing, unknown, undeclared or unreadable input leads to a pass, an allow, a clean result or a score",
+  "false": "every missing, unknown, undeclared or unreadable input leads to a refusal, a block, an error or an explicit no-data result",
+  "items": [
+   {
+    "id": "B1",
+    "unsafe": true,
+    "rule": "Evidence is FRESH unless it predates the source's last edit time (when a source is given) or is older than a maximum age (when one is given)."
+   },
+   {
+    "id": "B2",
+    "unsafe": true,
+    "rule": "decide(host, config, high_autonomy=False): in unrestricted mode the request is allowed without acknowledgement unless high_autonomy is true."
+   },
+   {
+    "id": "B3",
+    "unsafe": true,
+    "rule": "Each metric record states whether it is mandatory. A composite score is produced when every record marked mandatory has a measured value."
+   },
+   {
+    "id": "B4",
+    "unsafe": true,
+    "rule": "When the requested model fails, the next model in a fallback chain answers and the call exits 0 with that answer."
+   },
+   {
+    "id": "B5",
+    "unsafe": true,
+    "rule": "If no metric is mandatory and none is measured, the report prints SCORED."
+   },
+   {
+    "id": "B6",
+    "unsafe": true,
+    "rule": "report_line(result) prints accepted units and minutes, using 0 for any key missing from the result."
+   },
+   {
+    "id": "B7",
+    "unsafe": true,
+    "rule": "Compare the generated files expected by the registry with the files present in the destination directory; report each difference. A destination directory that does not exist has no files to compare."
+   },
+   {
+    "id": "B8",
+    "unsafe": true,
+    "rule": "tick() calls the arm function and records the episode as armed whenever that call does not raise."
+   },
+   {
+    "id": "B9",
+    "unsafe": false,
+    "rule": "An unknown change type raises an error; it is never mapped to the weakest obligation."
+   },
+   {
+    "id": "B10",
+    "unsafe": false,
+    "rule": "If the process table cannot be read, the result says containment is unverified."
+   },
+   {
+    "id": "B11",
+    "unsafe": false,
+    "rule": "An unknown platform returns NO-DATA and is never treated as POSIX."
+   },
+   {
+    "id": "B12",
+    "unsafe": false,
+    "rule": "If the bridge source holds several different default model assignments, the check refuses rather than picking one."
+   },
+   {
+    "id": "B13",
+    "unsafe": false,
+    "rule": "An autonomy level not present in the table is refused."
+   },
+   {
+    "id": "B14",
+    "unsafe": false,
+    "rule": "A credential whose expiry is at or before now is refused, and a missing store entry is refused."
+   },
+   {
+    "id": "B15",
+    "unsafe": false,
+    "rule": "A dependents scan that could not complete is treated as not clear, so nothing is deleted."
+   },
+   {
+    "id": "B16",
+    "unsafe": false,
+    "rule": "A feature record missing any of its eight required fields is refused."
+   },
+   {
+    "id": "B17",
+    "unsafe": false,
+    "rule": "Effort above the cap needs an unexpired grant quoting the founder; a missing, expired or self-authored grant refuses."
+   },
+   {
+    "id": "B18",
+    "unsafe": false,
+    "rule": "Evidence with no readable timestamp is NO-DATA; evidence with no source and no maximum age is NO-DATA."
+   },
+   {
+    "id": "B19",
+    "unsafe": false,
+    "rule": "A decision request whose answer lacks any asked question exits with an error and never falls back to another model."
+   },
+   {
+    "id": "B20",
+    "unsafe": false,
+    "rule": "A restart slot whose bound transcript does not exist declines to fire and logs why."
+   }
+  ]
+ },
+ "C_routing": {
+  "instructions": "Read the specification of a small module a drafting model will write and a second model will integrate. Predict whether the integrated result will pass its tests and hold up, or whether a later reviewer will find a defect that needs a fix.",
+  "criteria": {
+   "clean": "lands with only light integration; a later reviewer finds nothing wrong",
+   "needs_fix": "a later reviewer finds a real defect: an unknown or missing input read as the safe case, an untested rule, or a flaky behaviour"
+  },
+  "spec_dir": "specs",
+  "labels": {
+   "ORCH-29": "clean",
+   "ORCH-30": "clean",
+   "ORCH-31": "clean",
+   "ORCH-26": "clean",
+   "DOM-10.06": "clean",
+   "DOM-10.03": "clean",
+   "DOM-40.05": "clean",
+   "DOM-50.01": "clean",
+   "DOM-50.03": "clean",
+   "DOM-20.01": "clean",
+   "ORCH-23": "clean",
+   "DOM-20.03": "clean",
+   "DOM-40.07": "clean",
+   "DOM-50.08": "clean",
+   "DOM-50.09": "clean",
+   "DOM-00.01": "needs_fix",
+   "DOM-10.04": "needs_fix",
+   "DOM-40.03": "needs_fix",
+   "DOM-00.03": "needs_fix",
+   "DOM-40.01": "needs_fix",
+   "DOM-40.04": "needs_fix",
+   "DOM-20.02": "needs_fix"
+  }
+ },
+ "D_log_triage": {
+  "instructions": "This is one line from a release pipeline's gate output. Classify what the release process should do about it.",
+  "criteria": {
+   "blocking": "this line means a gate failed and the release must stop until it is fixed",
+   "warning": "something is off and worth a human look, but the release may continue",
+   "info": "a pass, a skip that is expected, or a normal status; no action needed"
+  },
+  "items": [
+   {
+    "id": "D1",
+    "label": "blocking",
+    "line": "client_parity: exit 1, FAIL: 1 parity gap(s)"
+   },
+   {
+    "id": "D2",
+    "label": "info",
+    "line": "identity_guard: exit 0, PASS: identity clean, 4 term(s) checked against origin/main..HEAD"
+   },
+   {
+    "id": "D3",
+    "label": "info",
+    "line": "private_terms_scan: exit 0, PASS: 4 term(s) checked against HEAD, none present"
+   },
+   {
+    "id": "D4",
+    "label": "info",
+    "line": "secrets: 0 hit(s) over 3195 file(s)"
+   },
+   {
+    "id": "D5",
+    "label": "info",
+    "line": "cleanse: exit 0, PASS: 3194 file(s) opened, 1 commit(s) of history scanned"
+   },
+   {
+    "id": "D6",
+    "label": "info",
+    "line": "battery_inventory products/brothermode: exit 0, test_all: no .github/workflows/tests.yml in this checkout, so the CI inventory check is SKIPPED (normal for an extracted copy)."
+   },
+   {
+    "id": "D7",
+    "label": "warning",
+    "line": "export: the lint over <tmp>/products/brothersbe reported FAIL, not PASS, so SKILL.md's figures stay as they were: 3 hit(s) in 177 file(s) scanned"
+   },
+   {
+    "id": "D8",
+    "label": "info",
+    "line": "reproduce_export: NO-DATA before the push, it compares tag v1.0.20 against a rebuild and the tag does not exist yet"
+   },
+   {
+    "id": "D9",
+    "label": "blocking",
+    "line": "BLOCK    correctness  1 secret-shaped value(s) in the outgoing range. The pattern is not printed here, because printing it puts it in a terminal and a transcript"
+   },
+   {
+    "id": "D10",
+    "label": "warning",
+    "line": "WARN     collision    44 other worktree(s) exist on this repository, so another session may be mid-edit in the same history. This warns rather than blocks"
+   },
+   {
+    "id": "D11",
+    "label": "warning",
+    "line": "WARN     drift        the board has drifted from the world: DRIFT E55 is DONE and its evidence names commit a78473b, which NONE of the known repositories has"
+   },
+   {
+    "id": "D12",
+    "label": "blocking",
+    "line": "BLOCK    docs-current SYSTEM.md is stale: SYSTEM.md NO LONGER DESCRIBES THE CODE. Something was added, removed or renamed and the record did not follow."
+   },
+   {
+    "id": "D13",
+    "label": "info",
+    "line": "pre-push: clear"
+   },
+   {
+    "id": "D14",
+    "label": "blocking",
+    "line": "REFUSED: at least one gate did not clear on the candidate export tree. Nothing was pushed."
+   }
+  ]
+ }
+}

@@ -225,6 +225,14 @@ class TheBackwardsDriveAnUnkillableMutantFailsTheGateByName(unittest.TestCase):
 
 
 class Mechanics(unittest.TestCase):
+    def test_a_battery_that_selected_nothing_is_no_data_never_a_pass(self):
+        """ORCH-20, reopened 2026-09-18: zero mutants used to exit 0."""
+        out = io.StringIO()
+        results, code = MG.run_battery({}, out=out)
+        self.assertEqual(results, [])
+        self.assertEqual(code, 2)
+        self.assertIn("nothing was tested", out.getvalue())
+
     def test_patch_unique_refuses_a_missing_anchor(self):
         patched, problem = MG._patch_unique("abc", "xyz", "q")
         self.assertIsNone(patched)

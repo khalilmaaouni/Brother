@@ -651,6 +651,22 @@ REGISTRY = {
         "sweep": PURE_READ,
     },
 
+    # -- bm_reconcile.py --------------------------------------------------
+    # Startup reconciliation (docs/RECOVERY-TRUTH.md). sweep opens only
+    # bm_store.ReadOnlyStore, but it spawns git (rev-parse, log, read-only
+    # questions about the checkout), and THE FIVE EFFECT CLASSES above
+    # define any subprocess spawn as external_write, so sweep is
+    # external_write, not the pure_read its store posture alone would earn.
+    # file (2026-09-17) is the module's one store write: it persists each
+    # finding as a note row, deduplicated by fingerprint inside one BEGIN
+    # IMMEDIATE, never resolving anything; ledger_write, the class this
+    # registry gives every other alert/note-writing verb. It spawns the
+    # same git calls sweep does; ledger_write is what it is FOR.
+    "bm_reconcile.py": {
+        "sweep": EXTERNAL_WRITE,
+        "file": LEDGER_WRITE,
+    },
+
     # -- bm_escalate.py -----------------------------------------------------
     # The last of the six registration deltas listed at the end of
     # docs/ESCALATION.md, applied 2026-08-17. The other five were already in

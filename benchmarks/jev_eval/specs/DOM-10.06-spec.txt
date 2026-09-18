@@ -1,0 +1,103 @@
+Write a single Python 3 standard-library-only module plus its unittest test
+file implementing a "receipt attestation" checker.
+
+CONTEXT (generalized): a software pipeline produces a "receipt" file (any
+bytes) that records the outcome of some work. Separately, an "attestation"
+record is produced that vouches for that receipt: it names the identity that
+produced the work, the identity that is attesting to it, a timestamp, the
+sha256 content hash of the receipt at attestation time, and a symmetric
+message authentication code (HMAC-SHA256) binding those fields together,
+keyed by a secret that belongs only to the attesting identity (never a
+shared secret; each identity has its own key file on disk, named
+"<identity>.key" inside a keys directory).
+
+REQUIRED MODULE API (module name: receipt_attestation):
+
+1. A function that builds and returns an attestation record (a plain dict)
+   for a given receipt file path, given a producing identity string, an
+   attesting identity string, and a keys directory path. It must:
+   - read the receipt file and hash its bytes with sha256
+   - look up the attesting identity's own secret key file in the keys
+     directory (file name "<identity>.key"); if it is missing or empty,
+     raise a custom exception (do not return a fake record)
+   - refuse (raise the same custom exception) if the producing identity and
+     the attesting identity are the same string: an actor may never attest
+     to its own work
+   - compute an HMAC-SHA256 over a canonical (sorted-key, compact) JSON
+     encoding of the record's other fields, keyed by the attesting
+     identity's secret bytes, and store the hex digest as a "hmac_sha256"
+     field
+   - accept an optional injected timestamp so tests do not depend on the
+     real clock
+
+2. A function that verifies an attestation record against a receipt file
+   path and a keys directory, and returns a two-part result: one of the
+   three strings "PASS", "FAIL", "NO-DATA", plus a short human-readable
+   reason string. It must never return PASS unless ALL of the following
+   hold, and must return NO-DATA (never FAIL, never PASS) when the fact
+   cannot be established at all (unreadable receipt, unreadable or
+   malformed attestation record, missing required field, missing attesting
+   key file):
+   - the attestation record is a JSON object containing all five required
+     string fields (receipt_sha256, producing_identity, attesting_identity,
+     attested_at, hmac_sha256)
+   - the receipt file can be read, and its recomputed sha256 matches the
+     recorded receipt_sha256 exactly (a content mismatch is FAIL, described
+     as tampering, not NO-DATA, since the fact IS established: it is
+     established to be false)
+   - the producing_identity and attesting_identity fields differ (equal
+     values is FAIL, self-attestation, not NO-DATA)
+   - the attesting identity's own key file can be read from the keys
+     directory (missing file is NO-DATA)
+   - recomputing the HMAC-SHA256 over the same canonical encoding of the
+     other four fields, keyed by that key, using a constant-time comparison
+     (hmac.compare_digest), matches the recorded hmac_sha256 exactly (a
+     mismatch is FAIL, described as an invalid or forged signature, not
+     NO-DATA)
+
+3. A small CLI (argparse, two subcommands "attest" and "verify") wiring the
+   two functions above to file arguments: --receipt, --producing-identity,
+   --attesting-identity, --keys-dir, --out for "attest"; --receipt,
+   --attestation, --keys-dir for "verify". Exit code 0 for PASS, 1 for FAIL,
+   2 for NO-DATA, matching the three-way verdict above. All file I/O and
+   JSON decoding must have an explicit try/except around OSError and
+   ValueError, never a bare except, never a silently discarded error.
+
+Standard library only: hashlib, hmac, json, argparse, os, sys, datetime.
+No third-party dependency, no network call, no subprocess call.
+
+REQUIRED TEST FILE (plain unittest.TestCase, runnable as
+"python3 test_receipt_attestation.py -v", ending in a
+"if __name__ == '__main__': unittest.main()" block; use tempfile.TemporaryDirectory
+for all fixtures, never touch real files outside the temp dir):
+
+- round trip: attest a receipt, then verify it, expect PASS.
+- tampering: attest a receipt, then modify the receipt's bytes on disk,
+  then verify, expect FAIL (not NO-DATA), with a reason mentioning the
+  content hash or tampering.
+- self-attestation: call the attest function with the same string for both
+  producing and attesting identity, and assert it raises the custom
+  exception rather than returning a record.
+- self-attestation bypass attempt: hand-construct a syntactically valid
+  attestation record whose producing_identity equals its attesting_identity
+  (bypassing the attest function entirely) and verify it directly, expect
+  FAIL, not NO-DATA and not PASS, proving verify() enforces this itself and
+  does not merely rely on attest() refusing to build one.
+- missing attestation fields: verify a record missing one required field,
+  expect NO-DATA.
+- unreadable receipt: verify against a receipt path that does not exist,
+  expect NO-DATA.
+- missing key: verify a well-formed record whose attesting identity has no
+  key file in the keys directory, expect NO-DATA.
+- forged signature: attest a receipt, then flip a character in the
+  recorded hmac_sha256 field, then verify, expect FAIL.
+- key isolation: build two identities with two different keys; prove that
+  an attestation record whose hmac_sha256 was computed with one identity's
+  key does not verify successfully when the record claims a different
+  attesting_identity whose own (different) key is the one looked up and
+  used to check it, expect FAIL.
+
+Do not use pytest, do not use any fixtures package, do not use any mocking
+library. Every test must be able to fail: at least one test mutates a fact
+the code depends on and checks the code refuses it, not just that the happy
+path returns PASS.

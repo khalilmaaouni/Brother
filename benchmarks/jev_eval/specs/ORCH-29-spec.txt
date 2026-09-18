@@ -1,0 +1,97 @@
+Write one Python 3.9+ module, standard library only, no third party imports,
+no network calls. Also write its unittest test file (plain unittest, a
+unittest.main() block, runnable directly).
+
+CONTEXT: a caller sends a chat completion request naming a "requested"
+model id to a routing API. The API can silently substitute a different
+model and answer anyway. The API's JSON response object already carries a
+"model" field naming the model that actually produced the answer (this is
+a normal field on OpenAI-compatible and OpenRouter-compatible chat
+completion responses; it is NOT something to parse out of a human readable
+log line, only out of the parsed JSON object itself, because the field is
+already structured data). The module's job is to read that field and to
+apply a policy that decides whether the caller may treat that answer as
+valid, given which model actually answered versus which one was
+requested.
+
+MODULE CONTENTS:
+
+1. A function `extract_answering_model(payload)`.
+   - `payload` is the parsed JSON response object (a Python dict).
+   - Returns the value of payload["model"] when it is present and is a
+     non-empty string after stripping whitespace.
+   - Returns None in every other case: key missing, value is None, value
+     is an empty or whitespace-only string, or value is not a string at
+     all (for example a number, a list, a dict). Never raises on any of
+     these cases; None is the signal that no usable answering model was
+     recorded.
+   - Raises TypeError if `payload` itself is not a dict (for example if a
+     caller passes a string, a list, or None).
+
+2. A function `evaluate(requested_model, payload, policy=None)`.
+   - `requested_model` is the model id string the caller asked for. Raises
+     ValueError if it is not a string, or is an empty or whitespace-only
+     string.
+   - `payload` is the same structured response object described above.
+     Raises TypeError if it is not a dict.
+   - `policy` is either None, or a dict mapping a requested model id
+     string to an iterable of model id strings that are an acceptable
+     substitute for that requested model. A requested model with no entry
+     in `policy` has no acceptable substitutes at all (fail closed: no
+     policy for a model means only an exact match is acceptable for it).
+     Raises TypeError if `policy` is given and is not a dict.
+   - Internally calls `extract_answering_model(payload)`.
+   - Returns a namedtuple with four fields, in this order: requested_model,
+     answering_model, verdict, reason.
+     - If no answering model could be extracted (None): verdict is the
+       string "NO-DATA", answering_model is None, reason is a short string
+       explaining that the response carried no usable structured model
+       field and that this is never to be read as the requested model
+       having answered.
+     - If the answering model exactly equals the requested model: verdict
+       is "PASS", reason says the requested model answered.
+     - If the answering model differs from the requested model but is
+       listed as a permitted substitute for that requested model in
+       `policy` (or in the empty set if `policy` is None or the requested
+       model has no entry): verdict is "PASS", reason says which model
+       substituted for which, and that it is permitted by policy.
+     - Otherwise (the answering model differs and is not a permitted
+       substitute): verdict is "FAIL", reason says which model substituted
+       for which, and that it is not permitted by the caller's policy.
+   - The three verdict strings are exactly "PASS", "FAIL", "NO-DATA".
+     Nothing else is ever returned as a verdict.
+
+EDGE CASES THE TESTS MUST COVER (each as its own test method):
+- payload has no "model" key at all -> NO-DATA.
+- payload["model"] is None -> NO-DATA.
+- payload["model"] is an empty string or only whitespace -> NO-DATA.
+- payload["model"] is a non-string (an int, for example) -> NO-DATA.
+- payload is not a dict at all, passed to extract_answering_model directly
+  -> raises TypeError.
+- answering model equals requested model exactly -> PASS.
+- answering model differs, and policy has no entry at all for the
+  requested model -> FAIL (fail closed, not a free pass).
+- answering model differs, and policy is None -> FAIL (fail closed).
+- answering model differs, and policy lists that exact substitute for that
+  exact requested model -> PASS.
+- answering model differs, and policy lists a substitute for a different
+  requested model (not this one) -> FAIL, the entry for another model
+  never leaks over.
+- requested_model is an empty string -> evaluate raises ValueError.
+- requested_model is not a string (for example None or a number) ->
+  evaluate raises ValueError.
+- payload passed to evaluate is not a dict -> evaluate raises TypeError.
+- one deliberate mutation test: pick one condition in the module whose
+  removal would make a real defect pass silently (for example, the check
+  that the answering model must be an exact case sensitive match to count
+  as the same model, or the fail-closed default when policy has no entry
+  for the requested model), and write a test specifically aimed at that
+  condition so that a broken version of the code fails that one test.
+
+Keep the module and the test file each self contained, with a short module
+level docstring explaining the purpose in plain language. Do not add a
+command line interface, argparse, or a main() function beyond the test
+file's own unittest.main() block. Do not invent any additional public
+functions beyond the two named above (a private helper function is fine if
+it helps readability). Do not add logging, print statements, or file I/O
+anywhere in the module.

@@ -1,0 +1,75 @@
+You are drafting one small Python 3.9, standard-library-only module for a
+task orchestration system that can run on macOS, Linux, or Windows.
+
+GOAL: a module named os_matrix.py that answers, for a named platform and a
+named operating-system-level operation, whether that operation is
+supported, unsupported, or unmeasured (NO-DATA) on that platform. It is a
+lookup against a pinned table, not a live probe: it never actually calls
+the operations it describes.
+
+OPERATIONS to cover (these are real gaps found by grepping an existing
+codebase for POSIX-only calls that are used without checking platform
+first):
+  - process_group_kill   (POSIX process-group signaling, e.g. os.killpg /
+                          os.setsid; no native Windows equivalent)
+  - advisory_file_lock   (POSIX advisory locking, e.g. fcntl.flock; not
+                          available on native Windows, which has its own
+                          locking API)
+  - hardcoded_tmp_path   (code that assumes a literal "/tmp/..." path is
+                          writable; not guaranteed on Windows, which uses
+                          TEMP/TMP instead)
+  - which_lookup         (looking up an executable on PATH, e.g.
+                          shutil.which; supported the same way on every
+                          platform, kept as a contrast case)
+
+PLATFORMS to cover: the real values Python's sys.platform returns for
+these operating systems: "darwin" (macOS), "linux", "win32" (Windows),
+"cygwin" (POSIX emulation layer on top of Windows).
+
+REQUIREMENTS:
+1. A module-level table (dict of dict) mapping platform -> operation ->
+   one of the exact strings "yes", "no", or a string starting with
+   "NO-DATA" that names why (e.g. an operation this codebase has never
+   actually measured on that platform).
+2. macOS and Linux: all four operations are "yes".
+3. Windows (win32): process_group_kill, advisory_file_lock, and
+   hardcoded_tmp_path are "no" (not supported); which_lookup is "yes".
+4. cygwin: process_group_kill, advisory_file_lock, and hardcoded_tmp_path
+   are NO-DATA (this codebase has never measured them under Cygwin's
+   POSIX emulation, so it must not guess "yes" just because Cygwin looks
+   POSIX-like); which_lookup is "yes".
+5. A function capability(platform, operation) that returns the fact for
+   that pair. An unrecognised platform must return a NO-DATA string
+   naming the platform, NEVER a guessed "yes" and never raise. Same for
+   an unrecognised operation: NO-DATA naming the operation, never raise.
+   THE KEY RULE: an unknown platform must never be silently treated as
+   POSIX-compatible (i.e. must never map to "yes").
+6. A function report(platform, operations=<the four ops above>) that
+   returns {operation: fact} for every operation given.
+7. A function assumption_is_safe(platform, operation) that returns True
+   only when capability(platform, operation) is exactly the string "yes".
+   It must return False for "no" AND for any NO-DATA fact (an unknown
+   platform, an unknown operation, or a known platform with an unmeasured
+   cell) -- "we do not know" must never be read as permission to proceed.
+8. A function findings(platform, operations=<the four ops>) that returns
+   a list of short human-readable strings, one per operation that is NOT
+   safely "yes" on that platform (per assumption_is_safe), each naming
+   the operation, the platform, and the fact behind it. Operations that
+   are "yes" produce no finding. This is the report a caller uses to
+   surface "a POSIX assumption on a platform that does not support it"
+   as a finding instead of finding out at a crash.
+9. A function current_platform() that returns sys.platform of the
+   running process (the one function allowed to read the live machine;
+   everything else takes platform as a plain string argument so it can
+   be tested without depending on which machine runs the test).
+10. A main(argv) usable as a CLI: optional single argument is the
+    platform to report on (default: current_platform()); prints a JSON
+    object with "platform" and "capabilities" keys, returns 0.
+
+STYLE: match the tone of a codebase that writes long, plain-English
+module and function docstrings explaining WHY a rule exists, not just
+what the code does. No em dashes or en dashes anywhere (use commas,
+colons, or parentheses instead). Standard library only: json, sys. No
+network calls, no subprocess, no file I/O beyond argv parsing.
+
+Please write the complete Python source for scripts/os_matrix.py.

@@ -1,0 +1,63 @@
+You are drafting a small Python 3 standard-library module for an internal developer tool.
+
+CONTEXT (generalized, no proprietary names): a software project ships a set of small
+"skill" packages as Markdown files with YAML-style frontmatter (a block between two
+"---" lines at the top of the file, containing simple "key: value" pairs, followed by a
+Markdown body). The project has three client integrations that read these packages:
+
+- Client A reads the source files directly, unmodified, and accepts any frontmatter key.
+- Client B reads the source files directly, unmodified, and accepts any frontmatter key.
+- Client C has a stricter validator: it only accepts two frontmatter keys, "name" and
+  "description". Any other key must be stripped before Client C will accept the file.
+  A generator script already exists for Client C: it strips unaccepted keys and writes
+  the result to a separate output directory, leaving the Markdown body untouched.
+
+THE PROBLEM TO SOLVE: the fact "which frontmatter keys does each client accept" is at
+risk of being duplicated by hand in more than one place as more clients are added later.
+The task is to write ONE small module holding a single registry (a plain dict) mapping
+each client name to either `None` (meaning: reads the source unmodified, no stripping)
+or a tuple of accepted frontmatter key names (meaning: strip every other key before
+that client will accept the file). The existing Client C generator already exposes its
+own accepted-keys tuple as a module-level constant with a `build(source_dir, accepted)`
+function that takes an `accepted` tuple and returns `(files, problems)` where `files`
+maps relative output path to file bytes and `problems` is a list of human-readable
+strings describing anything that could not be read or generated (never silently
+returning an empty result to mean "everything is fine" when something could not be
+read).
+
+WRITE, in plain Python 3 (standard library only, no third-party imports beyond the
+existing generator module described above, which you should assume is importable as
+`codex_skills` with `ACCEPTED_KEYS`, `build(source_dir=None, accepted=ACCEPTED_KEYS)`):
+
+1. A module-level dict `CAPABILITY_REGISTRY` mapping three client names ("claude",
+   "cursor", "codex") to their entry: "claude" -> None, "cursor" -> None, "codex" ->
+   the SAME tuple object already exposed by the existing generator module (import it,
+   do not retype the two strings "name" and "description" as a new tuple, since a
+   retyped copy is exactly the kind of drift this module exists to prevent).
+
+2. A function `build_for_host(host, source_dir=None)` that: raises `ValueError` naming
+   the host if `host` is not a key of `CAPABILITY_REGISTRY` (never guesses a default
+   for an unrecognized host); returns `({}, [])` if that host's registry entry is
+   `None` (nothing to generate); otherwise calls the existing generator's `build`
+   function with that host's accepted-keys tuple and returns its result unchanged.
+
+3. A function `check_for_host(host, source_dir=None, dest_dir=None)` that: raises
+   `ValueError` the same way for an unrecognized host; computes the expected files via
+   `build_for_host`; if `build_for_host` reported problems, returns those problems
+   unchanged with a checked-count of 0 (never treats an unreadable source as zero
+   drift); otherwise compares each expected file's bytes against the same relative
+   path under `dest_dir` on disk, reporting one line per missing file, one line per
+   byte-mismatch ("drift"), and one line per extra file found on disk that the
+   registry did not produce ("stale"); returns `(list_of_problem_lines, checked_count)`.
+   An empty problem list means every file matched exactly.
+
+4. Handle the "no generated directory to compare" case for a host whose registry entry
+   is `None`: `check_for_host` should return a single explanatory line (not an empty
+   list, since there is nothing to check, and empty must never look like "verified
+   clean") saying that host has no projection to check because it reads the source
+   unmodified.
+
+Keep it under about 120 lines. No em dashes or en dashes anywhere in the code or
+comments. Standard library only (os, sys). Write the code only, with short comments
+explaining the non-obvious parts (why the codex tuple is imported rather than retyped,
+why an unreadable source is never treated as zero drift).

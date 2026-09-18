@@ -1,0 +1,68 @@
+Write one Python 3.9+ standard-library-only module plus its unittest test file
+for a software build pipeline's evidence registry.
+
+CONTEXT (generic, no proprietary names): a build pipeline classifies every
+change it processes into one of a fixed set of CHANGE TYPES (example set:
+planning, architecture, research, implementation, test, verification, review,
+repair, fault-injection, documentation, packaging, benchmark,
+integration-prep). Separately, the pipeline already has a fixed set of
+EVIDENCE KINDS that count as "discriminating" proof a check would actually
+fail if the claimed property were false (example set: red_before,
+implementation_revert, mutation, negative_fixture, dependency_perturbation,
+configuration_perturbation, permission_withdrawal, malformed_input,
+induced_failure). It also already has a fixed three-level OBLIGATION
+vocabulary: OPTIONAL, REQUIRED_FOR_MERGE, REQUIRED_FOR_RELEASE.
+
+TASK: write a new module, evidence_obligation_registry.py, that maps each
+change type to (a) its obligation level and (b) the exact subset of evidence
+kinds a change of that type must carry before it can be accepted. Treat the
+change-type set, the evidence-kind set and the obligation-level set as
+already defined elsewhere and imported, not redefined in this module (write
+them as plain Python constants at the top of the file standing in for the
+import, since you do not have the real modules, but comment that in the real
+codebase they are imported, never re-declared).
+
+DECIDING PROPERTY (the one behavior this module exists to enforce): a change
+of an UNKNOWN type must be refused outright (raise ValueError), never
+silently treated as carrying the weakest (OPTIONAL) obligation. A change of a
+KNOWN type whose required evidence kinds are not all present among the
+evidence it offers must be reported as not-accepted, with the missing kinds
+named. A change type whose required evidence kinds are empty (documentation,
+planning, research, review, architecture are reasonable examples) is always
+accepted regardless of what evidence it carries. Evidence consisting only of
+"the check exited 0 / passed" with no named discriminating kind must never by
+itself satisfy a non-empty requirement.
+
+REQUIRED SHAPE:
+1. A frozen dict/registry: change_type -> (obligation_level, frozenset of
+   required evidence kind strings).
+2. A function that looks up a change type's requirement, raising ValueError
+   on an unrecognised change type.
+3. A function that takes (change_type, list_of_evidence_items) where each
+   evidence item is a dict with at least a "kind" key, and returns
+   (accepted: bool, reason: str). It must raise ValueError for an unknown
+   change type and return (False, reason naming the missing kinds) when
+   required evidence is absent, and (True, reason) otherwise. A malformed
+   evidence item (not a dict, or a kind not in the known evidence-kind set)
+   must simply not count toward satisfying the requirement; it must never
+   raise on its own.
+4. A small argparse-based main(argv) that reads a JSON file shaped
+   {"change_type": str, "evidence": [...]}, prints "ACCEPTED: <reason>" and
+   exits 0, or "BLOCKED: <reason>" and exits 1 for a rejected or unknown
+   type, or "NO-DATA: <reason>" to stderr and exits 2 if the file is
+   missing, unreadable, or not the right shape. Guard every file read and
+   json.load with an explicit except clause; never a bare except.
+
+TEST FILE: plain unittest (no pytest, no fixtures package), a
+unittest.main() block, runnable directly. Cover: a known type with empty
+requirements always accepts; a known type with non-empty requirements
+rejects when the required evidence kind is missing; the same type accepts
+once the required evidence kind is present; an unknown change type raises
+ValueError from both the lookup function and the accept function; evidence
+whose only item has kind "exit-code-only" (not a member of the known
+evidence-kind set) does not satisfy a non-empty requirement; a malformed
+evidence item (a plain string instead of a dict) does not crash the accept
+function and does not count toward satisfying the requirement.
+
+Style: no em dash or en dash anywhere, in code, comments or output strings.
+Use commas, colons or parentheses instead. No third-party dependencies.

@@ -1,0 +1,96 @@
+You are writing one small Python 3 module, standard library only, no
+third party packages, no network access, no real subprocess calls.
+
+CONTEXT (generalized, no proprietary names). A long running automated
+workflow already writes an append only event log for one run: a helper
+function append(run_dir, event_type, payload) writes one JSON line to a
+file and returns a generated event id string, or returns None and prints
+one line to stderr if the write failed for any reason (it never raises).
+A companion function read(run_dir) returns a list of every parsed JSON
+line in that run's log, oldest first, or returns None if the run directory
+holds no log at all (as opposed to an empty list, which means the log
+exists but currently holds zero lines). Malformed lines are skipped by
+read(), not fatal. Treat these two functions as already implemented and
+already imported into your module under the name `eventlog`, so you can
+call `eventlog.append(...)` and `eventlog.read(...)` directly. Do not
+reimplement them.
+
+TASK. Add a small layer on top of that existing log for recording human
+interventions during an otherwise unattended run: a case where a person
+had to step in.
+
+Define a fixed, closed set of intervention categories as a Python
+frozenset of short lowercase strings with underscores, covering exactly
+these six kinds, each with a one sentence docstring comment explaining
+when it applies:
+
+1. credential: a person had to supply or unlock a secret, password, key
+   or token that the automation does not and should not hold itself.
+2. authorization: a person had to make a call that policy reserves for a
+   human (an irreversible action, a purchase, publishing something
+   publicly, raising a spending limit, deleting data, or changing a
+   standing rule).
+3. clarification: the automation hit a genuine ambiguity in its own
+   instructions that it could not resolve on its own and a person had to
+   answer a question before it could proceed.
+4. correction: a person fixed a mistake the automation made, or was about
+   to make, before it went further.
+5. manual_continuation: a person had to re-issue, resume, or re-run the
+   work after it stopped, for any reason.
+6. external_action: a step required a human hand for something the
+   automation cannot perform itself (a physical action, a click a policy
+   requires a human to make, a browser action gated to human control).
+
+Write one function, record_intervention(run_dir, category, reason,
+could_continue_without_it, **extra_fields), with this contract:
+
+- category must be one of the six fixed strings above. Any other value,
+  including an empty string, missing value, or a value with different
+  case or extra whitespace, must be refused by raising ValueError naming
+  the bad category. Never silently substitute a default category.
+- reason must be a non-empty string after stripping whitespace. A
+  missing, empty, or whitespace-only reason must be refused by raising
+  ValueError. Never record an intervention with no reason and never
+  invent a placeholder reason.
+- could_continue_without_it must be an actual bool (True or False), not a
+  truthy/falsy stand-in like 1, 0, "yes", or None. Any other type must be
+  refused by raising ValueError.
+- extra_fields are optional additional JSON-serializable details the
+  caller wants attached (for example, which unit of work was running).
+  They are merged into the payload but must never be allowed to overwrite
+  the three required fields above; if a caller passes an extra field
+  whose name collides with category, reason, or could_continue_without_it,
+  raise ValueError rather than silently letting one clobber the other.
+- On success, call eventlog.append(run_dir, "human.intervention", payload)
+  where payload is a dict holding category, reason (the stripped string),
+  could_continue_without_it, and the merged extra fields. Return whatever
+  eventlog.append returned (the event id, or None if the underlying write
+  failed). Do not swallow or reinterpret that return value.
+- All the validation above (category, reason, type of
+  could_continue_without_it, field collisions) must happen and raise
+  BEFORE eventlog.append is ever called, so a refused call never appends
+  a partial or invalid record.
+
+Write a second function, read_interventions(run_dir), with this
+contract:
+
+- Call eventlog.read(run_dir).
+- If that returns None (no log exists at all for this run), return None.
+- Otherwise return a list containing only the entries whose event_type
+  field equals "human.intervention", in the same order eventlog.read()
+  returned them, each as the full event dict (not just the payload).
+  An empty list is a valid, meaningful result (the run has a log, but no
+  intervention was ever recorded in it).
+
+Do not add a class, a config object, a caching layer, or any dependency
+beyond the standard library and the two eventlog functions described
+above. Keep the module to the two functions plus the category frozenset
+and any small private helper you need for validation. No em dash or en
+dash anywhere in code, comments, or docstrings; use commas, colons, or
+parentheses instead.
+
+OUTPUT FORMAT. Reply with one Python code block containing the complete
+module (the frozenset of categories, record_intervention, and
+read_interventions), nothing else. Assume the module already has
+"import eventlog" at the top; do not repeat that import or invent a
+different name for it.

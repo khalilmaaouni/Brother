@@ -6,9 +6,12 @@ reset time plus a safety margin, so the same mechanism serves the five_hour
 and seven_day classes alike.
 
 Keeps the existing flag-file-inert design unchanged: the plist always calls
-~/.claude/brother-restart/restart.sh, which does nothing unless
-armed.flag exists (see limit_watch.py's arm()). This module only ever
-rewrites WHEN the plist fires, never what it does when it fires.
+~/.claude/brother-restart/restart.sh, which does nothing unless an armed
+flag exists. UPDATED 2026-09-18: that flag is now, by default, the per-run
+slot armed.d/<run_id>.flag rather than one shared armed.flag (see
+limit_watch.py's arm(), which also refuses to arm when no run id is
+known, rather than falling back to the old shared flag). This module only
+ever rewrites WHEN the plist fires, never what it does when it fires.
 
 launchd's StartCalendarInterval has no Year key, so Month+Day+Hour+Minute
 is the closest to a true one-shot: it fires on that calendar date this

@@ -69,6 +69,29 @@ class DoneCheckIsOnePlainCommand(unittest.TestCase):
             self.assertNotIn(sep, AC.DONE_CHECK)
 
 
+class NoHostSpecificEasing(unittest.TestCase):
+    """Added by the orchestrator after its own mutation SURVIVED (DOM-50.02):
+    reporting a missing Claude CLI as PASS instead of NO-DATA left this
+    suite and both parity suites green. Every host missing both the
+    installer and its own CLI must read NO-DATA for every lifecycle verb."""
+
+    def test_missing_installer_and_cli_is_no_data_for_every_host_and_verb(self):
+        from unittest import mock
+
+        class Willing(object):
+            def __getattr__(self, name):
+                return lambda: None     # any capability: not a Refusal
+
+        for provider in ("claude", "codex", "cursor"):
+            for verb in ("install", "upgrade", "uninstall"):
+                with self.subTest(provider=provider, verb=verb), \
+                        mock.patch.object(AC, "BROTHER_INSTALL", "/nonexistent/brother_install.py"), \
+                        mock.patch.object(AC.shutil, "which", return_value=None):
+                    ctx = {"adapter": Willing(), "provider": provider, "offline": False}
+                    verdict, _reason = AC._lifecycle_verb(ctx, verb)
+                    self.assertEqual(verdict, AC.NODATA)
+
+
 class Refusal(unittest.TestCase):
     def test_lifecycle_verb_no_data_on_refusal(self):
         ctx = {"adapter": PA.CortexAdapter(env={}), "provider": "cortex", "offline": True}

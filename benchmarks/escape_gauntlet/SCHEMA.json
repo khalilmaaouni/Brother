@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Brother escape gauntlet attempt manifest",
+  "description": "One JSON file per hostile attempt, under corpus/<id>.json. scripts/escape_gauntlet.py loads this file at import time and builds its allowed boundary set from properties.boundary.enum, the same way scripts/fixture_classes.py reads its own class list from its schema rather than retyping it.",
+  "type": "object",
+  "required": ["id", "boundary", "technique", "call"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Unique within the corpus. Must match the JSON file's own basename (without .json), so a listing of the directory and a listing of ids never disagree."
+    },
+    "boundary": {
+      "type": "string",
+      "enum": ["filesystem", "network", "process"],
+      "description": "Which real boundary module this attempt is run against: scripts/filesystem_enforcement.py, scripts/network_policy.py, or scripts/process_containment.py. Chosen to match the row's own reuse list; execution_boundary.py composes the same three (plus credentials, out of scope here) rather than deciding anything of its own."
+    },
+    "technique": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Plain-language name of the hostile technique this attempt performs, for a human reading the corpus."
+    },
+    "call": {
+      "type": "object",
+      "description": "Boundary-specific parameters. See benchmarks/escape_gauntlet/README.md for the exact shape per boundary. For \"process\", call.technique_id must name an entry in escape_gauntlet.PROCESS_TECHNIQUES: corpus entries never supply a raw command to execute, only a name selecting a fixed, already-sandboxed implementation, so a corpus file can never inject an arbitrary command into a real run."
+    },
+    "note": {
+      "type": "string",
+      "description": "Optional: context, provenance, or why this case is kept permanently (see README, \"one that ever succeeded is a permanent case\")."
+    }
+  },
+  "additionalProperties": true
+}
