@@ -1,0 +1,123 @@
+Write one Python 3.9-compatible, standard-library-only module named
+useful_unwatched_work.py, plus a short design note in your reply explaining
+edge cases. No third-party dependencies of any kind.
+
+CONTEXT (generic, no proprietary names)
+
+An autonomous overnight software agent writes three files while it runs, all
+inside one "run directory":
+
+1. journal.jsonl: one JSON object per line, oldest first, each carrying an
+   "at" field (an ISO 8601 timestamp string with a UTC offset) and a "type"
+   field naming the event kind.
+2. claims.json: a JSON object mapping a unit id to a record with fields
+   "state" (a string), "claimed_at" and "released_at" (both UNIX epoch
+   floats), and "evidence" (an object that may carry "exit_code", an int).
+3. receipt/receipt.json or a receipt.issued journal event: proof that some
+   number of claimed results were checked, and how many of those checks were
+   left unproven.
+
+A sibling function you may assume already exists and is safe to import,
+called measure(run_dir), returns a two-tuple (report, exit_code):
+
+  - On success (exit_code 0): report is a dict with at least these keys:
+    "nodata" (empty string), "minutes" (float, wall-clock span length),
+    "units" (int, count of finished-unit events inside the span), "broken_by"
+    (a string naming why the span ended, or the literal string "none"),
+    "started" and "ended" (both ISO 8601 strings with a UTC offset, the
+    span's boundaries), "receipts" (int), "unproven" (int), "skipped_lines"
+    (int).
+  - On failure to compute anything (exit_code 2 or 3): report is a dict with
+    only one key, "nodata", a non-empty string explaining what was missing
+    (for example, no directory, no timestamped events, or no receipts).
+
+TASK
+
+Write a NEW function useful_unwatched_work(run_dir) that answers a stricter
+question than the sibling function: not just "how long did the run go
+unsupervised", but "how much of that unsupervised time was backed by units
+that were BOTH finished AND independently verified as accepted", where
+"accepted" here means: a claims.json entry exists for that unit, its "state"
+is one of "done", "released", or "closed", its "evidence.exit_code" is
+present and equals exactly integer 0 (not merely truthy, not a string "0",
+not a bool), and its timestamp (released_at, falling back to claimed_at)
+falls inside the span reported by measure() (between "started" and "ended"
+inclusive).
+
+THE DECIDING PROPERTY, which any correct implementation and any correct test
+suite must enforce: unwatched time only counts as USEFUL alongside at least
+one such verified-and-accepted unit. A run that sat quietly for a long time
+without finishing and verifying any accepted unit must score exactly zero
+useful minutes, never a positive number, no matter how long the underlying
+unwatched span was. Doing nothing, slowly, must never look identical to
+doing something proven.
+
+THREE OUTCOMES TO DISTINGUISH, precisely, not conflated:
+
+(a) The underlying measure() call itself could not compute a span at all
+    (returned exit_code 2 or 3). Propagate that as NO-DATA verbatim: the
+    reason string, unchanged in meaning.
+
+(b) The underlying span computed fine, but the claims store itself could not
+    be read: the file is missing, unreadable, or not a JSON object at its
+    top level. This must ALSO be NO-DATA, with its own distinct reason
+    string naming that acceptance could not be verified for this run. Do NOT
+    treat a missing or corrupt claims file as "zero accepted units": a run
+    nobody recorded acceptance for is not a run known to have zero
+    acceptances, it is a run nothing can be said about, exactly the same
+    reasoning the sibling function already applies to a missing journal.
+
+(c) The underlying span computed fine, and the claims store was read fine
+    (even if it is legitimately an empty object, meaning zero claims), but
+    zero entries in it meet the full "verified and accepted, inside the
+    span" test above. This is a real, computed answer of zero useful
+    minutes, NOT a NO-DATA. It must be reported as a definite 0.0, distinct
+    in shape from case (b)'s NO-DATA.
+
+When at least one entry meets the test, the useful minutes equal the full
+span minutes from measure() (do not invent a different sub-span; the whole
+safe span counts once at least one unit backs it), and the function also
+reports how many entries met the test.
+
+Return a dict from useful_unwatched_work(run_dir), something like:
+  on NO-DATA: {"nodata": "<reason>"}  (and nothing else)
+  otherwise: {"nodata": "", "minutes": <float, from measure()>,
+              "useful_minutes": <float, either the same value or 0.0>,
+              "accepted_units": <int, count of entries meeting the test>,
+              "broken_by": <str, passed through from measure()>}
+
+Also write a one-line formatter function report_line(result) returning a
+human-readable string of roughly this shape:
+  "useful unwatched work: 0.0 min NO-DATA: <reason>"  (NO-DATA case)
+  "useful unwatched work: 42.0 min over 3 accepted unit(s) (raw span 42.0
+   min, broken by none)"  (the normal case, using useful_minutes and
+   accepted_units)
+
+EDGE CASES YOUR IMPLEMENTATION MUST HANDLE EXPLICITLY, not by accident:
+  - claims.json entry whose evidence.exit_code is a bool (True/False in
+    Python, which is a subclass of int): must NOT count as a verified 0,
+    since a bool is not an int for this purpose.
+  - claims.json entry whose evidence is missing entirely, or is not an
+    object: does not count, does not raise.
+  - claims.json entry whose state is a value outside the three named states
+    (for example "cancelled" or an unrecognised string): does not count.
+  - claims.json entry whose timestamp cannot be parsed (missing, wrong
+    type, or a non-numeric value in released_at/claimed_at): does not
+    count, does not raise.
+  - claims.json entry whose timestamp is BEFORE the span's "started" or
+    AFTER its "ended": does not count.
+  - claims.json is present and parses to valid JSON but that JSON is a
+    list or a string rather than an object: this is the corrupt/unreadable
+    case (b) above, NO-DATA, not an empty accepted set.
+  - claims.json is present and is a valid empty JSON object {}: this is
+    case (c), a real, computed zero, not NO-DATA.
+  - Multiple accepted units: report the correct count, not just 1 or 0.
+  - Never raise an unhandled exception for any malformed input above; every
+    boundary read (file open, JSON decode) has an explicit try/except
+    around only the specific expected exception types (OSError, ValueError
+    for JSON decode errors), never a bare except.
+
+Do not implement measure() itself, assume it exists and is correct; focus
+only on useful_unwatched_work() and report_line(). Standard library only
+(os, json, datetime are fine). No em dashes or en dashes anywhere in code,
+comments, or your reply; use commas, colons, or parentheses instead.

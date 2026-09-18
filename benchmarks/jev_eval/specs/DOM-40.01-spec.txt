@@ -1,0 +1,100 @@
+You are drafting one Python 3 module, standard library only, no third-party
+dependencies, no network calls of its own.
+
+GOAL: a single "execution boundary" class that gives calling code ONE
+provider-neutral interface for four separate capabilities: filesystem
+writes, outbound network requests, credential issuance, and process
+containment (spawning a tracked subprocess and forcibly cancelling its
+whole descendant tree). The class must never re-implement the decision
+logic for any capability. It only composes four already-built, independent
+modules, each exposing a small pure function or two, described below. If a
+capability's underlying module was not supplied to the boundary at
+construction time, calling that capability must raise a dedicated
+exception naming which capability is missing, rather than silently
+returning a permissive result or doing nothing.
+
+THE FOUR UNDERLYING MODULES (already built and tested; you are NOT writing
+these, only importing and calling them):
+
+1. filesystem module. Function `decide(path, roots, action="write")` where
+   `roots` is a dict with keys "read", "write", "immutable", "temporary"
+   (each an iterable of absolute directory paths) and `action` is "read"
+   or "write". Returns a Verdict object with attributes `.decision`
+   ("ALLOW" or "REFUSE"), `.rule` (a short string), `.reason` (a longer
+   string), and a boolean property `.allowed`. Pure decision only, this
+   module never touches the filesystem beyond reading path metadata to
+   decide; it performs no writes itself.
+
+2. network module. Function `decide(host, config, high_autonomy=None)`
+   where `config` is a dict with a "mode" key ("denied", "allowlisted", or
+   "unrestricted") and, for allowlisted mode, an "allowlist" key (a list
+   of hostname strings, optionally with a leading "*." wildcard). Returns
+   the same Verdict shape as the filesystem module. Pure decision only,
+   makes no real network call.
+
+3. credential module. Function `request_credential(store, name, scope,
+   purpose, now)` where `store` is a dict of credential name to a dict
+   with keys "value" (str secret), "scopes" (iterable of str), and
+   "expires_at" (a unix timestamp number, or None for never). Returns a
+   3-tuple `(verdict, reason, grant)` where verdict is the string
+   "GRANTED" or "REFUSED". On GRANTED, `grant` is an object with a
+   `.value` attribute holding the real secret; on REFUSED, `grant` is
+   None and `reason` is a short string naming why. This function has no
+   side effects of its own; the actual secret only ever leaves the module
+   through a successful `grant.value`.
+
+4. process module. Two functions:
+   - `spawn_contained(args, **kwargs)`: wraps subprocess.Popen(args,
+     **kwargs), forcing the child onto its own new session so it becomes
+     the leader of its own process group. Returns the Popen object. This
+     one actually spawns a real OS process; it is not a pure decision.
+   - `cancel_process_tree(root_pid, root_pgid=None, grace=2.0,
+     kill_grace=0.5, poll_interval=0.05)`: terminates root_pid and every
+     process descended from it or sharing its process group, first with a
+     graceful signal and then, after a grace period, forcibly. Returns a
+     named tuple with fields `verified` (bool: could containment actually
+     be checked), `all_dead` (bool), `signalled` (list of pids),
+     `alive` (list of pids still alive), `error` (string or None). This
+     one actually sends real signals to real processes; it is not a pure
+     decision either.
+
+WHAT TO BUILD: a class, call it ExecutionBoundary, constructed with four
+optional keyword arguments, one per capability (filesystem, network,
+credential, process), each defaulting to the real module described above
+but overridable by the caller (for example, with None, to represent a
+runtime that cannot supply that capability at all, or with a stand-in
+object for testing). Give the class one method per capability that simply
+calls straight through to the underlying module's own function with the
+same argument names, changing nothing about the arguments or the return
+value. If the capability's provider is None, raise a dedicated exception
+(name it something like CapabilityUnsupported) carrying the capability's
+name and a plain-language reason, instead of returning any kind of default
+value.
+
+ALSO BUILD a `capability_report()` method returning a dict with exactly
+the four capability names as keys. For each capability: report the string
+"unsupported" when no provider was supplied; otherwise report "advisory"
+for a capability whose provider only decides and never itself performs
+the real-world effect (this is true of the filesystem and network
+providers described above), "enforced" for a capability whose provider's
+own call performs the real, irreversible effect (this is true of the
+process and credential providers described above, since a real signal is
+sent, or the real secret value is actually released, only through that
+call), or "supported" as an honest fallback when a caller has substituted
+a provider this class has no documented basis for calling advisory or
+enforced (an unrecognized custom provider object, for instance).
+
+RULES: standard library only. Never silently default an unknown value:
+an unrecognized capability name, wherever one is checked, always raises
+rather than returning a default. Never let a provider mismatch surface
+as a plain AttributeError from a missing method: check explicitly and
+raise the dedicated exception with a clear message.
+
+Write the whole thing as one Python module: imports, the exception class,
+any small constant tables you need, and the ExecutionBoundary class.
+Assume the four modules above are importable as plain top-level module
+names of your choosing (state clearly, in a comment at the top, exactly
+which module name you assume holds which of the four functions above, so
+the integrator can adjust the import lines to match the real module names
+in the target tree). Do not include any test code; a separate step will
+write tests.

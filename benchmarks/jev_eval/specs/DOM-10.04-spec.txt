@@ -1,0 +1,139 @@
+Write one Python 3.9+ standard-library-only module named evidence_freshness.py
+plus a matching plain unittest file test_evidence_freshness.py. No third
+party packages, no network calls.
+
+PURPOSE: decide whether a piece of recorded evidence (a test result, a
+verdict, a receipt) is still trustworthy right now, based on TIME, not on
+file content. This is a companion to a separate content-hash staleness
+checker that already exists elsewhere in the project; do not re-implement
+content hashing here, only time-based freshness.
+
+THE DECIDING PROPERTY (must match exactly):
+- Evidence older than the last edit to the thing it proves is STALE.
+- Evidence older than a caller-supplied maximum age (in seconds) is also
+  STALE, independent of the first rule.
+- Evidence with no readable timestamp is NO-DATA. NO-DATA must never be
+  read or reported as fresh.
+- A future timestamp, or any timestamp ahead of the current clock reading
+  (clock skew), causes the check to REFUSE rather than pass or silently
+  correct itself.
+- Otherwise the evidence is FRESH.
+
+So the result of the main classification function is one of exactly four
+strings: "FRESH", "STALE", "NO-DATA", "REFUSED", paired with a short human
+readable reason string, e.g. return a (status, reason) tuple.
+
+REQUIRED FUNCTIONS in evidence_freshness.py:
+
+1. parse_timestamp(value) -> float epoch seconds.
+   Accepts either a bare number (epoch seconds, int/float or numeric
+   string) or an ISO 8601 datetime string. Raises ValueError on anything
+   else (never returns a default like 0 or "now").
+
+2. git_last_edit_time(path, cwd=None) -> float epoch seconds, or None.
+   Runs `git log -1 --format=%ct -- <path>` as a subprocess (with a
+   timeout, e.g. 10 seconds) to get the epoch seconds of the last commit
+   that touched that path, in the git repository rooted at `cwd` (or the
+   current directory if cwd is None). Returns None, never raises, when:
+   the path has no commit history (never committed, or git returns empty
+   output), the subprocess fails or times out, or git itself is not
+   available. IMPORTANT: this function must never fall back to the
+   filesystem's mtime (os.path.getmtime) as a substitute, because in a
+   freshly checked out working copy every file's mtime is the checkout
+   time, not the time it was actually last edited, which would make every
+   file look "just edited" regardless of its real history. Git history is
+   the only trustworthy source of "when was this thing last edited" here.
+
+3. classify(evidence_at, source_at, now, max_age_s=None) -> (status, reason)
+   Pure function, no I/O, implementing THE DECIDING PROPERTY above.
+   - evidence_at: float epoch seconds of when the evidence was produced,
+     or None if unreadable.
+   - source_at: float epoch seconds of the source's last edit, or None if
+     there is nothing to compare against (skip that rule only, still apply
+     the other rules).
+   - now: float epoch seconds, the current clock reading. Must be passed
+     in by the caller (never call time.time() inside this pure function,
+     so tests can inject a fixed value). Raise ValueError if now is None.
+   - max_age_s: optional float, maximum allowed age in seconds. Raise
+     ValueError if it is negative.
+   Rules, in order:
+     a. evidence_at is None -> ("NO-DATA", reason)
+     b. evidence_at > now -> ("REFUSED", reason mentioning clock skew or a
+        future timestamp)
+     c. source_at is not None and source_at > now -> ("REFUSED", similar
+        reason)
+     d. source_at is not None and evidence_at < source_at (strictly older
+        than the source's last edit) -> ("STALE", reason)
+     e. max_age_s is not None and (now - evidence_at) > max_age_s ->
+        ("STALE", reason)
+     f. otherwise -> ("FRESH", reason)
+   Note: evidence_at exactly equal to source_at is NOT stale (only
+   strictly older counts).
+
+4. A small CLI (argparse, one subcommand "check") usable as:
+     python3 evidence_freshness.py check --evidence-at <timestamp>
+       [--evidence-record <json file> --evidence-field <field name, default "at">]
+       [--source <path>] [--max-age-seconds <N>] [--now <timestamp>]
+   Behavior:
+   - If --evidence-record is given, read that JSON file, pull the given
+     field, and parse it as the evidence timestamp with parse_timestamp.
+     A missing file, invalid JSON, or missing field is NO-DATA, printed to
+     stderr, never a stack trace.
+   - Else if --evidence-at is given, parse it directly.
+   - Else evidence_at is None (NO-DATA case).
+   - If --source is given, call git_last_edit_time on it; if that returns
+     None, the whole check is NO-DATA (cannot establish freshness against
+     an unknown source time), printed to stderr.
+   - --now defaults to the real current time if omitted, otherwise parses
+     the given value.
+   - Print one line to stdout: "evidence_freshness check: STATUS (reason)"
+     and exit with a DIFFERENT code per status: FRESH=0, STALE=1,
+     NO-DATA=2, REFUSED=3. NO-DATA and REFUSED cases detected before
+     calling classify (bad record file, bad source) should also print to
+     stderr and use the matching exit code (2 for NO-DATA situations).
+
+STYLE RULES (must follow):
+- No em dashes or en dashes anywhere, in code, comments, or docstrings.
+  Use commas, colons, or parentheses instead.
+- No bare except, no except: pass, no discarded subprocess return codes,
+  no force-unwrapped external input (always check for None / missing
+  keys / parse errors explicitly and handle them).
+- An unrecognised value should raise rather than silently default (for
+  example, an unknown status string, a negative max_age_s, an unparsable
+  timestamp).
+- Give the module a short module-level docstring explaining what it
+  refuses (NO-DATA is never fresh, a future timestamp is refused, never
+  falls back to filesystem mtime) and why, not just what it does.
+
+TEST FILE test_evidence_freshness.py requirements:
+- Plain unittest, importable and runnable directly as
+  `python3 test_evidence_freshness.py -v`, with a `if __name__ == "__main__":
+  unittest.main()` block at the bottom. No pytest, no fixtures library.
+- Cover: parse_timestamp with a bare number, an ISO string, and an invalid
+  string (expect ValueError).
+- Cover classify(): FRESH case, STALE because evidence predates source
+  edit, STALE because max_age_s exceeded, NO-DATA because evidence_at is
+  None, REFUSED because evidence_at is in the future relative to now,
+  REFUSED because source_at is in the future relative to now, the edge
+  case where evidence_at equals source_at exactly (must be FRESH, not
+  STALE), and classify(now=None) raising ValueError.
+- Cover git_last_edit_time() against a REAL temporary git repository you
+  create in the test using subprocess (git init, git config user.email
+  and user.name locally in that temp repo, add and commit a file with a
+  controlled commit timestamp using the GIT_AUTHOR_DATE and
+  GIT_COMMITTER_DATE environment variables set to a known epoch value so
+  the test can assert the exact returned timestamp), plus the case of a
+  path that was never committed (expect None) and a path in a directory
+  that is not a git repository at all (expect None, not an exception).
+  Clean up the temporary directory after the test.
+- Include at least one CLI-level test that runs the script as a
+  subprocess (`sys.executable`, the script's own path) and checks stdout
+  text and the exit code for at least the FRESH and STALE and NO-DATA
+  paths.
+- Every test must be one that can actually fail: do not write a test whose
+  assertion is trivially true regardless of the implementation.
+
+Do not write anything about what larger system this belongs to, no
+repository paths outside this one module and its test file, no company or
+product names, no author names, no file paths outside the current working
+directory.

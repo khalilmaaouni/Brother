@@ -1,0 +1,111 @@
+Write a single-file Python 3.9 module (standard library only, no third
+party dependencies, no network calls) plus a matching unittest test file,
+for a generic orchestration control plane.
+
+BACKGROUND. In this control plane, worker agents run at a named "effort"
+level (an enum-like string). There is a standing cap ("high") on the
+effort any dispatch may use. A small number of agent definitions want to
+run above that cap. That is only allowed when an authorisation record
+exists proving a human authoriser explicitly raised the cap for that
+specific case. The record must not be something the requesting agent
+manufactured for itself.
+
+REQUIREMENTS for scripts/effort_authorisation.py:
+
+1. A fixed, ordered tuple of known effort levels, from lowest to highest:
+   "minimal", "low", "medium", "high", "xhigh", "max". Constant name:
+   EFFORT_ORDER. A second constant, STANDING_CAP = "high".
+
+2. A function `is_above_cap(effort, cap=STANDING_CAP)` returning True when
+   `effort` sits strictly above `cap` in EFFORT_ORDER, False otherwise.
+   Raises ValueError (not a silent default) if `effort` or `cap` is not
+   one of the known EFFORT_ORDER values. An unrecognised effort string
+   must never be treated as "below the cap" or as any other safe default;
+   it always raises.
+
+3. A function `check_authorisation(effort, record, requested_by, cap=STANDING_CAP, now=None)`
+   returning a tuple `(allowed: bool, reason: str)`:
+   - Raises ValueError if `effort` is not a known EFFORT_ORDER value
+     (reuse is_above_cap's own check, do not duplicate the list).
+   - If the effort is at or below `cap`: returns (True, some reason
+     string saying no authorisation was needed), regardless of what
+     `record` is (None is fine).
+   - If the effort is above `cap`, an authorisation is required. `record`
+     is either None or a dict which may contain the keys: "words" (the
+     authoriser's own verbatim words granting the raise), "granted_by"
+     (identifier of who granted it, e.g. a human's name or role), "until"
+     (an ISO-8601 date or datetime string naming when the grant expires),
+     and "session" (identifier of the session the grant was given in).
+     Refuse (return False, reason) in every one of these cases, each with
+     a distinct, human-readable reason string naming what was wrong:
+       a. record is None or empty -> missing authorisation.
+       b. "words" is missing, empty, or whitespace-only -> malformed,
+          no verbatim words.
+       c. "granted_by" is missing, empty, or whitespace-only ->
+          malformed, no named authoriser.
+       d. "session" is missing, empty, or whitespace-only -> malformed,
+          no session recorded.
+       e. "granted_by" (after stripping whitespace) equals `requested_by`
+          (after stripping whitespace) -> self-authored, the requesting
+          agent is quoting itself as its own authoriser, refused
+          regardless of any other field.
+       f. "until" is missing, or cannot be parsed as a date/datetime, ->
+          malformed, no parsable expiry. Reuse Python's
+          `datetime.datetime.fromisoformat` for parsing (accept a
+          trailing "Z" by converting it to "+00:00" first, matching the
+          common ISO-8601-with-Z shape); do not write a second bespoke
+          date parser if `fromisoformat` (with that one adjustment)
+          already covers the required inputs.
+       g. the parsed "until" is at or before `now` (default
+          datetime.datetime.now(timezone.utc) when `now` is not passed
+          in) -> expired, refused.
+     Only when record exists, and all of "words", "granted_by",
+     "session", "until" are present and non-blank, and "granted_by" does
+     not equal `requested_by`, and "until" parses to a moment strictly
+     after `now`: return (True, a reason string quoting who granted it
+     and that it is still live).
+
+4. No bare `except:`. Any parsing failure is caught narrowly (e.g.
+   `except ValueError`) and treated as case (f) above, never silently
+   swallowed into a different outcome.
+
+5. Keep the module small: two functions plus their constants and module
+   docstring. No CLI is required for this module. No file I/O, no
+   subprocess, no global mutable state.
+
+6. Module docstring: explain briefly (a paragraph or two) why an
+   authorisation must name the granter, the session, and an expiry, and
+   why a self-quoted authorisation must never pass, and why an unknown
+   effort value must raise rather than default. Do not use an em dash or
+   en dash anywhere in the file; use commas, colons, or parentheses
+   instead.
+
+REQUIREMENTS for scripts/test_effort_authorisation.py (plain `unittest`,
+runnable directly as `python3 scripts/test_effort_authorisation.py -v`,
+ending in a `unittest.main()` block, no pytest, no fixtures package):
+
+Cover at least these cases, each as its own test method:
+ - An effort at the cap (e.g. "high") is allowed with no record at all.
+ - An effort below the cap (e.g. "medium") is allowed with no record.
+ - An effort above the cap ("xhigh") with no record is refused.
+ - An effort above the cap with a complete, valid, not-yet-expired,
+   not-self-authored record is allowed.
+ - An effort above the cap whose record is missing "words" is refused.
+ - An effort above the cap whose record is missing "granted_by" is
+   refused.
+ - An effort above the cap whose record is missing "session" is refused.
+ - An effort above the cap whose record's "granted_by" equals
+   `requested_by` is refused (the self-authorship case), even when every
+   other field is otherwise valid.
+ - An effort above the cap whose record's "until" is in the past
+   (relative to a `now` passed into the function) is refused.
+ - An effort above the cap whose record's "until" cannot be parsed at all
+   (e.g. the string "soon") is refused.
+ - Calling either function with an effort string outside EFFORT_ORDER
+   (e.g. "ultra") raises ValueError.
+ - `is_above_cap` returns False for an effort equal to the cap, and True
+   for an effort above it, and False for an effort below it.
+
+Write the two files as plain text, ready to save directly, one clearly
+labelled scripts/effort_authorisation.py and the other clearly labelled
+scripts/test_effort_authorisation.py.

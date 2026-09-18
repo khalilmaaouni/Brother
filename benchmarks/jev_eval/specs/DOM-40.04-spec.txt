@@ -1,0 +1,59 @@
+You are drafting one Python 3 standard-library-only module for a task
+orchestration platform. Do not include any explanation, only the code,
+as a single file, starting with a module docstring.
+
+GOAL: a pure, stateless "credential broker" decision function. It never
+touches a real secret store, a real keychain, environment variables, or
+any filesystem or network resource. All inputs are passed in by the
+caller as plain Python data structures. Nothing here has side effects.
+
+INPUTS to a function named request_credential(store, name, scope, purpose, now):
+  store   a plain dict: credential name (str) -> a dict with keys
+          "value" (str, the secret), "scopes" (an iterable of str, the
+          scopes this credential may ever be granted for), and
+          "expires_at" (a unix timestamp number, or None meaning the
+          credential itself never expires).
+  name    the credential name being requested (str).
+  scope   the single scope being requested for this call (str).
+  purpose a short human-readable string saying why the credential is
+          needed. Empty string or None means "no purpose stated".
+  now     the current unix timestamp (number), passed in by the caller,
+          never read from a real clock inside this module.
+
+DECIDING PROPERTY: the caller receives the minimum credential, for one
+declared scope and one stated purpose, never the whole store. Refuse
+(never grant) when any of these hold:
+  - the credential name is not in the store at all (unknown credential)
+  - purpose is empty, None, or not a string
+  - the requested scope is not one of the credential's declared scopes
+  - the credential's expires_at is not None and now is at or past it
+    (treat the boundary itself, now == expires_at, as expired)
+  - the store entry is malformed: missing "value", "scopes", or
+    "expires_at", or "scopes" is not iterable of strings, or "value" is
+    not a non-empty string, or "expires_at" is present but not a number
+    or None
+  - store itself is not a dict, or name/scope are not non-empty strings
+
+On success, return a small immutable-ish result object (for example a
+class with __slots__) carrying name, scope, purpose, the granted value,
+and expires_at. On refusal, return a reason string. Design the function
+to return a tuple of (verdict, reason_or_None, grant_or_None), where
+verdict is one of two module-level string constants you define,
+GRANTED or REFUSED.
+
+HARD SAFETY REQUIREMENT: the secret value must NEVER appear inside the
+reason string, inside any exception message, inside any log or print
+statement, or inside the result object's __repr__/__str__. The __repr__
+of the success object must redact the value (print something like
+<redacted> in its place). Nothing in this module ever calls print() or
+logging; it only returns values, and never raises for a malformed or
+adversarial input, it always returns a REFUSED verdict with a reason
+instead of raising an exception outward (any error during evaluation is
+also caught internally and turned into a REFUSED verdict).
+
+Name every distinct refusal reason clearly so a caller can tell which
+rule fired (unknown credential vs no purpose vs wrong scope vs expired
+vs malformed store entry vs malformed request). Keep the whole file
+self-contained, no third-party imports, no relative imports beyond the
+standard library. Do not use em dashes or en dashes anywhere, use
+commas, colons, or parentheses instead.

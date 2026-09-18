@@ -97,6 +97,24 @@ ORACLE_SOURCES = frozenset((
 #: and ORACLE_SOURCES above.
 CHANGE_KINDS = frozenset(("behaviour", "documentation", "generated"))
 
+#: ORCH-02 (routing metadata survives the whole spine, 2026-09-18): the
+#: orchestrator-task-v1.json fields that decide which model runs a unit,
+#: who reviews it, and whether a NO-DATA blocks a merge (task_class,
+#: worker_profile, review_profile, risk_class, evidence_obligation, the
+#: two retry counts, leaf_worker_only). This module does not validate
+#: them against the schema's enums, the same way it does not validate
+#: `owns` against a path allowlist: it is the CONTRACT gate, not the
+#: schema gate, and door.py already validates the schema before calling
+#: create(). Carried through unvalidated and only when the caller
+#: actually supplied one, never defaulted here: a unit that never
+#: declared risk_class must still produce a row with no risk_class key,
+#: not a row claiming "normal" on this module's own invented authority.
+ROUTING_METADATA_FIELDS = (
+    "task_class", "worker_profile", "review_profile", "risk_class",
+    "evidence_obligation", "max_outer_attempts", "max_repair_attempts",
+    "leaf_worker_only",
+)
+
 
 def write_record(path, doc):
     """The ONE way a Work document reaches disk: temp file beside the
@@ -251,7 +269,13 @@ def _row_from_unit(u):
     caller actually gave one, a dict, never invented and never defaulted:
     an absent key is the honest fact that no witness was ever recorded,
     and receipt_door.red_check_evidence already reads that absence as
-    NO-DATA rather than needing an empty placeholder here."""
+    NO-DATA rather than needing an empty placeholder here. The
+    ROUTING_METADATA_FIELDS (ORCH-02) get the same treatment: passed
+    through verbatim, whatever type the caller gave, only when present,
+    because this is the first place in the whole spine those fields
+    could be lost, and a sentinel injected here must reach the row
+    exactly as given, not coerced through a str() that would turn a
+    non-string sentinel into evidence of a bug that never happened."""
     row = {"id": str(u["id"]),
            "title": u.get("title") or u.get("name") or str(u["id"]),
            "status": u.get("status") or "SCHEDULED",
@@ -265,6 +289,9 @@ def _row_from_unit(u):
            "change_kind": str(u.get("change_kind") or "")}
     if isinstance(u.get("red_check"), dict):
         row["red_check"] = u["red_check"]
+    for field in ROUTING_METADATA_FIELDS:
+        if field in u:
+            row[field] = u[field]
     return row
 
 

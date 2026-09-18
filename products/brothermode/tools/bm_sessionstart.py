@@ -41,6 +41,7 @@ file, its comments, or its output.
 
 import glob
 import io
+import json
 import os
 import re
 import subprocess
@@ -327,8 +328,21 @@ def main():
     # that: this block's own contract is "never block session start," so
     # any unexpected exception here (not just a bad exit code) degrades to
     # one NO-DATA line instead of taking the hook down with it.
+    # The harness session id rides along so the pass can tell which
+    # findings are THIS session's own (route mine, via the label its
+    # fence token derives to) rather than another session's or the
+    # founder's. Read from the same payload the fence hook reads it from;
+    # absent or unparsable means no id, and nothing routes mine.
     try:
-        code, reconciled = _run([_tool("tools", "bm_reconcile.py")],
+        session_id = json.loads(payload).get("session_id") if payload else ""
+    except (ValueError, AttributeError):  # sbe: allow-silent an unparsable payload means no session id, the fail-closed answer (nothing is mine)
+        session_id = ""
+    session_args = (["--session-id", session_id.strip()]
+                    if isinstance(session_id, str) and session_id.strip()
+                    else [])
+    try:
+        code, reconciled = _run([_tool("tools", "bm_reconcile.py")]
+                                + session_args,
                                 capture=True, keep_stderr=True)
         reconciled = (reconciled or "").rstrip("\n")
         if code not in (0, 127) and reconciled and first_run:

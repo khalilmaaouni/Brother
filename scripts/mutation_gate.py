@@ -313,7 +313,16 @@ def run_mutant(mutant_id, entry):
 def run_battery(mutants, out=sys.stdout):
     """Runs every mutant in `mutants` (a dict shaped like MUTANTS), printing
     to `out` as it goes. Returns (results, exit_code): exit_code is 1 if any
-    mutant SURVIVED (named), else 2 if any read NO-DATA (named), else 0."""
+    mutant SURVIVED (named), else 2 if any read NO-DATA (named), else 0.
+
+    An EMPTY selection is NO-DATA (exit 2), never 0 (ORCH-20, reopened
+    2026-09-18: it had been folded into this gate on paper, and a run with
+    zero mutants still printed "0 mutant(s)" and exited 0, a pass that
+    tested nothing)."""
+    if not mutants:
+        print("%s: no mutants selected, so nothing was tested; a gate that "
+              "selected nothing is not a pass" % NODATA, file=out)
+        return [], 2
     results = []
     for mutant_id in sorted(mutants):
         entry = mutants[mutant_id]

@@ -1,0 +1,92 @@
+Write a small Python 3.9, standard-library-only module named brief_lint.py
+plus its test file test_brief_lint.py, for a generic multi-agent task
+orchestrator.
+
+BACKGROUND. In this orchestrator, a "brief" is a plain JSON object describing
+one unit of dispatchable work. Each brief has fields such as: an id, a title
+or objective string, an "owns" list of file paths the unit is allowed to
+write, a "done_check" string naming the shell command that proves the unit is
+finished, a "task_class" string drawn from a fixed small set of known values
+(for example "implementation", "test", "documentation", "review"), an
+"evidence_obligation" string drawn from a fixed small set of known values
+(for example "REQUIRED_FOR_MERGE", "REQUIRED_FOR_RELEASE", "OPTIONAL"), a
+"risk_class" free-text string, and a "depends_on" list of other unit ids.
+Briefs live inside a JSON file that has a top-level "units" list containing
+many such objects.
+
+THE DESIGN CONSTRAINT (important, read carefully). An earlier design for this
+linter would have BLOCKED dispatch of any brief that failed it. Two
+independent reviewers rejected that design with the same objection: a linter
+that only checks whether fields are PRESENT is trivial to satisfy by copying
+boilerplate into every field, so a brief can look complete while still being
+useless, and a mechanical presence check proves nothing about whether the
+brief is any good. So the linter must be DEMOTED to advisory: it must never
+block or fail the pipeline by itself (it should exit 0 in ordinary use, it
+never raises SystemExit with a nonzero code as its normal behavior), it only
+PRINTS findings as warnings. More importantly, most of its checks must be
+SEMANTIC, not just "is this key present", because presence checks alone were
+judged worthless. Two required semantic checks:
+
+1. Scope-emptiness versus intent: a brief whose "owns" list is empty or
+   missing is a real defect (nothing declares what it may write), so flag it
+   even though this is close to a presence check, because it is checking
+   emptiness of a mechanism, not merely existence of a key.
+
+2. Done-check relevance: the "done_check" command string should mention, as
+   a substring, at least one of the paths (or the basename of one of the
+   paths) listed in "owns". A brief can have a perfectly well-formed,
+   non-empty done_check string that is copy-pasted from a different unit and
+   proves nothing about the actual owned files; catching that requires
+   comparing done_check against owns, not just checking that both fields
+   exist.
+
+3. Cross-brief scope collision: given a whole WBS file with many units, flag
+   any pair of units whose "owns" lists share a path, since two units
+   claiming to write the same file is a real conflict that a per-brief
+   presence check can never see (it only shows up when comparing across
+   units).
+
+4. Enum membership: task_class and evidence_obligation should be checked
+   against caller-supplied allowed sets (pass these in as function
+   parameters or optional arguments, do not hardcode a duplicate list of
+   allowed values inside this module, since the allowed sets already exist
+   elsewhere in the codebase and must be imported/passed rather than
+   retyped).
+
+FUNCTIONS NEEDED (design these as plain functions operating on plain dicts
+and lists, no classes needed):
+  - a function that lints one brief dict and returns a list of finding
+    strings (empty list means no findings for that brief)
+  - a function that lints a whole WBS-shaped dict (with a "units" list) and
+    returns findings, including the cross-brief collision check
+  - a small main()/CLI entry point using argparse, reading a JSON file path
+    from a --plan argument, printing every finding grouped by unit id, and
+    always exiting 0 (advisory, never blocks), except exit 2 if the file
+    cannot be read or parsed (a "could not check" state is distinct from "no
+    findings"), printed clearly as such.
+
+Handle read errors and JSON parse errors explicitly (no bare except, no
+swallowed exceptions). No third-party dependencies.
+
+TESTS NEEDED in test_brief_lint.py (plain unittest, a unittest.main() block,
+runnable directly): the most important property to prove is that the linter
+actually DISCRIMINATES rather than always passing everything. So write at
+least:
+  - one test with a deliberately GOOD brief (empty owns is non-empty,
+    done_check mentions one of the owned paths, valid enum values) that
+    produces zero findings
+  - one test with a deliberately BAD brief whose done_check does NOT mention
+    any owned path, and assert the finding list is non-empty and names the
+    mismatch
+  - one test with an empty "owns" list and assert it is flagged
+  - one test with two units in one WBS file sharing an owned path, and
+    assert the collision is flagged for both, or at least reported once
+    naming both unit ids
+  - one test asserting the CLI/main function's exit code is 0 even when
+    findings exist (advisory, never blocks), by capturing stdout or calling
+    the linting function directly and checking the process exit code
+    separately
+  - one test asserting NO-DATA/exit-2 behavior on an unreadable or malformed
+    JSON file
+
+Please write complete, runnable code for both files.

@@ -1,0 +1,121 @@
+You are drafting one Python 3 module, standard library only, no third-party
+dependencies, no network calls, no filesystem access, no subprocess, no
+clock reads. Every function is pure: it only reads the arguments it is
+given.
+
+BACKGROUND: an orchestration system lets an operator set an "autonomy
+level" that controls how much ceremony gates an automated action before it
+runs. There are exactly four levels, in ascending order of ceremony:
+
+  level "A0"  the action executes immediately, then is checked afterward.
+              No human sees it before or during.
+  level "A1"  the system states its interpretation of the action out loud,
+              then continues automatically. Still no blocking human step.
+  level "A2"  the system asks one blocking question and waits for an
+              answer before the action runs.
+  level "A3"  the action is refused until a human explicitly approves it.
+
+This four-level vocabulary already exists in another module as a plain
+list of the four strings in that order, importable as a top-level name
+(assume it is called `LEVEL_ORDER`, a list `["A0", "A1", "A2", "A3"]`, in a
+module you may import as `approval_policy`).
+
+SEPARATELY, a different module already exists that composes four runtime
+"resource guarantees" a host may or may not actually provide:
+filesystem, network, credential, and process. Assume it is importable as
+`resource_boundary` and exposes a tuple `resource_boundary.RESOURCES`
+holding exactly those four strings.
+
+A host describes what it actually guarantees as a "self-report": a mapping
+from resource name to a small dict with a "claim" key (expected to be one
+of four words: "unsupported", "supported", "advisory", or "guaranteed")
+and, only when the claim is "guaranteed", an optional "evidence" key (a
+non-empty string naming the proof). A THIRD existing module, assume
+importable as `claim_grading`, exposes a function:
+
+    claim_grading.grade_claim(name, report) -> (level, reason)
+
+`report` is one resource's raw self-report dict as above (or something
+that is not a dict at all, meaning the host could not be probed for that
+resource). `level` is always one of the four words above. Critically: a
+claim of "guaranteed" with no non-empty "evidence" string is DOWNGRADED by
+this function to "advisory" before it is returned; you do not need to
+reimplement that rule, only call the function and trust its answer.
+`claim_grading` also exposes `claim_grading.grade_claims(reports)` which
+takes a mapping of {resource_name: raw_report} and returns a mapping of
+{resource_name: (level, reason)}, grading each independently; if `reports`
+itself is not a mapping, it returns a single sentinel entry under the key
+"reports" rather than raising or returning an empty dict.
+
+A FOURTH existing module, assume importable as `requirement_check`,
+exposes:
+
+    requirement_check.check(required, satisfied) -> (verdict, reason)
+
+`required` is an iterable of resource names that must each be satisfied at
+the strongest level, "GUARANTEED" (note: upper case here, a different,
+smaller two-valued vocabulary of "GUARANTEED" and "PARTIAL" only, not the
+four lower case words above). `satisfied` is a mapping of resource name to
+one of those two upper-case words (or any other string, or simply absent,
+both of which this function treats as not satisfying the requirement).
+`verdict` is the string "PROCEED" or "BLOCK". If `required` is empty,
+this always returns PROCEED, even when `satisfied` is garbage: a
+requirement of nothing has nothing to fail.
+
+YOUR TASK: write a module that decides, for one autonomy level and one
+host self-report, whether that level may run or must be refused, given a
+FIXED table of which resources each of the four levels requires at the
+"guaranteed" strength:
+
+  "A0" requires all four resources.
+  "A1" requires only "credential" and "process".
+  "A2" requires none.
+  "A3" requires none.
+
+Write this table as a plain dict at module level, and, right after
+defining it, add two runtime sanity checks that raise ValueError
+immediately at import time if the table ever drifts: (1) the table's keys
+must be exactly the four level strings from `approval_policy.LEVEL_ORDER`,
+no more, no fewer; (2) every resource name appearing anywhere in the
+table's values must be one of `resource_boundary.RESOURCES`.
+
+Write one main function, call it `floor_verdict(level, host_report)`,
+returning a 2-tuple `(verdict, reason)` where verdict is one of two
+constants you define, call them `RUN` and `REFUSE`:
+
+- If `level` is not one of the table's keys (including None, an empty
+  string, wrong case, or a level string nobody defined), return REFUSE
+  immediately, without looking at `host_report` at all, naming the
+  unrecognized level in the reason.
+- If the level's required resource set is empty, return RUN immediately,
+  regardless of what `host_report` contains, even if it is None or a
+  string instead of a mapping.
+- Otherwise, if `host_report` is not a dict, return REFUSE, naming that
+  the report could not be read, and naming the level.
+- Otherwise, grade the raw report with `claim_grading.grade_claims`,
+  translate the required resources' graded four-word levels into the
+  two-word vocabulary `requirement_check.check` expects (map
+  "guaranteed" to "GUARANTEED", map "advisory" to "PARTIAL", and pass any
+  other word straight through unchanged rather than dropping it, so a
+  refusal can quote the true word the host actually claimed), then call
+  `requirement_check.check` with the required resource names and that
+  translated mapping, and return RUN if it says PROCEED, REFUSE (with the
+  same reason, prefixed by which level it was for) if it says BLOCK.
+
+Also write a small helper function that does just the translation step
+described above (required resource names, and the graded mapping from
+grade_claims, in; the two-word translated mapping out), as its own
+separate, independently callable function, not inlined only inside
+floor_verdict.
+
+RULES: standard library only, besides the three assumed imports named
+above. Never silently accept an unrecognized value anywhere: an
+unrecognized level, an unrecognized claim word, or an unreadable report
+must always be visible in the returned reason string, never swallowed.
+State clearly, in a short comment near your imports, exactly which module
+names you assumed for the three dependencies, so an integrator can adjust
+them to the real module names in the target tree if they differ.
+
+Do not include any test code; a separate step writes tests. Do not invent
+a command-line interface unless it is trivial; the core deliverable is the
+pure `floor_verdict` function and the small translation helper.

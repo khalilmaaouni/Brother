@@ -1,0 +1,87 @@
+You are drafting a small piece of Python 3 standard-library-only logic for
+a generic automation platform. Do not use any web framework, database
+driver, or third-party package. No network calls, no filesystem access, no
+subprocess calls: this module is pure and takes all its facts as plain
+Python arguments.
+
+PROBLEM
+
+The platform runs the same automated job across several different host
+runtimes (think: several different vendors' command-line agent tools).
+Each host can offer a capability such as "blocks a disallowed action
+before it runs" or "isolates one job's file writes from another's". For
+every capability, a host's own self-report names a claimed level. Exactly
+four claimed levels are meaningful:
+
+  "unsupported"  the host does not offer this capability at all.
+  "supported"    the host offers the capability as a plain feature, with
+                 no claim about how strictly it holds.
+  "advisory"     the host offers the capability as guidance or a
+                 best-effort behavior only; it does not mechanically stop
+                 anything.
+  "enforced"     the host offers the capability as a hard mechanical
+                 guarantee.
+
+THE RULE TO IMPLEMENT
+
+Write a pure function that takes one capability's raw self-report and
+returns the level the platform is willing to believe, plus a short reason
+string. The raw self-report is a small mapping with two entries:
+
+  "claim":    a string, meant to be one of the four levels above.
+  "evidence": a string naming the proof behind the claim (for example, a
+              reference to a test name or a measurement), or empty/None
+              when there is no such proof.
+
+Rules the function must enforce, in this order:
+
+1. A missing report (None, or not a mapping at all) is never a pass: it
+   is read as the "unsupported" level, with a reason string that starts
+   with "NO-DATA" and names what was wrong with the input.
+2. A "claim" value that is not exactly one of the four known level
+   strings (wrong case, a typo, an empty string, a made-up word, or the
+   key missing entirely) is also read as "unsupported", with a reason
+   starting with "NO-DATA" that quotes the bad value.
+3. A claim of "enforced" is only believed when "evidence" is a non-empty,
+   non-whitespace string. When the claim is "enforced" but the evidence
+   is missing, empty, or only whitespace, the function does not return
+   "enforced": it downgrades the result to "advisory" and says so in the
+   reason (a claimed guarantee with nothing behind it is not a guarantee,
+   but it is not nothing either, since the host is still claiming some
+   behavior).
+4. Any other claim ("unsupported", "supported", "advisory", each with
+   evidence present or absent) passes through unchanged, evidence is not
+   required for those three.
+5. The reason string must always name the capability by the name the
+   caller passed in, so a caller checking several capabilities can tell
+   which one a given reason is about.
+
+Also write a second pure function that takes a mapping of capability name
+to raw self-report (as described above) and returns a mapping of
+capability name to (level, reason), applying the first function to each
+entry. An empty input mapping returns an empty output mapping. Duplicate
+keys are impossible in a Python dict, so there is nothing to deduplicate
+there, but note in a comment that the caller is responsible for merging
+multiple sources into one mapping before calling this, and that this
+function does not do any merging itself.
+
+Requirements for the code you write:
+
+- Python 3, standard library only, no I/O, no randomness, no wall clock.
+- Define the four level strings and an ordered tuple of them as
+  module-level constants, plus a constant for the "NO-DATA" marker text
+  used in the reason strings.
+- Give each function a clear docstring stating its contract, including
+  what it does with an empty mapping, a mapping with exactly one entry, a
+  mapping with many entries, and an unknown or malformed claim value.
+- No use of assert for input validation (asserts can be compiled away);
+  use ordinary conditional logic and return values instead.
+- Never raise an exception for a bad input from the caller; always return
+  a value describing what was wrong.
+- Do not use bare except; do not use except: pass.
+- Do not use an em dash or an en dash anywhere in code, comments, or
+  strings; use a comma, a colon, or parentheses instead.
+- Keep the whole thing under 120 lines including docstrings and comments.
+
+Output ONLY the Python source code for this module, nothing else: no
+explanation before or after, no markdown code fences.

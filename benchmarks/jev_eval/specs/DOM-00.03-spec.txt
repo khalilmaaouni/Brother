@@ -1,0 +1,55 @@
+You are writing a small Python 3.9, standard-library-only module for a
+generic engineering-metrics tool. No third-party dependencies.
+
+GOAL: a "scoreboard" function that combines several named metrics into one
+composite percentage score, with one hard rule: if any metric marked
+MANDATORY has not actually been measured, the function must refuse to
+produce a composite number at all. It must instead report which mandatory
+metrics are missing, and never silently treat a missing mandatory metric as
+zero or drop it from the average (both of those would let an incomplete
+sweep read as a finished one, which is the exact bug this tool exists to
+prevent).
+
+Each metric is a small record (a dict) with these fields:
+  metric_id: short unique string identifier
+  decision: a short string naming the real decision this metric's reading
+    would change (required and non-empty for every metric, even an
+    unmeasured one; a metric with no named decision should be rejected as
+    malformed, not silently accepted)
+  mandatory: bool, whether this metric blocks the composite when missing
+  weight: optional positive number, default 1.0, used for a weighted average
+  value: optional number from 0.0 to 1.0, the measured reading; absent or
+    None means "not yet measured"
+  evidence: optional short string pointing at what produced the value; a
+    metric whose value is present but whose evidence string is missing or
+    empty should be treated exactly like an unmeasured metric (a number
+    with no cited evidence is not trustworthy as a measurement)
+
+Please sketch, in plain Python (functions only, no classes needed):
+
+1. A validation function that checks one metric record's shape and raises a
+   clear exception naming exactly what is wrong (unrecognized field, missing
+   field, wrong type, out-of-range value, non-positive weight). Reject
+   unknown fields outright, do not silently ignore them.
+
+2. A function that decides whether one metric record counts as "measured"
+   under the value+evidence rule above.
+
+3. The main scoring function taking a list of metric records and returning:
+   whether a composite could be produced at all, the composite percentage
+   when it could, the full per-metric detail, the list of unmeasured
+   mandatory metrics (the blocking gap, each with its metric_id and its
+   decision string so a reader knows what is still undecidable), and the
+   list of unmeasured optional metrics (informational only, never blocking).
+   Raise a clear exception if the metric list is empty, or if two records
+   share the same metric_id.
+
+4. Sketch how you would write one or two unit tests (plain unittest, no
+   fixtures library) that prove the mandatory-metric gating actually holds:
+   in particular a test that would fail red if someone "fixed" a failing
+   composite by quietly treating a missing mandatory metric as a zero
+   instead of refusing to score at all.
+
+Keep this generic and self-contained: no references to any specific
+company, product, repository, file path, or person. Plain code and short
+comments are fine; no need for a polished module docstring.

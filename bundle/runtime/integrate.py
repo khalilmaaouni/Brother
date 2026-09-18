@@ -651,6 +651,22 @@ def integrate_one(repo, lane_branch, unit, runner=None, check_runner=None,
                    "output_truncated": truncated,
                    "canonical_rev": after if passed else None,
                    "files_changed": files_changed}
+        # ORCH-02: the fourth and fifth of the five real drop points this
+        # run's advisory pass found. This dict and the INTEGRATED result
+        # below it were both a fixed shape carrying none of the routing
+        # metadata a unit can carry (task_class, worker_profile,
+        # review_profile, risk_class, evidence_obligation, the two retry
+        # counts, leaf_worker_only), so a reviewer or a merge gate reading
+        # the integration record could not see what the unit was even
+        # supposed to be. Carried through only when the unit actually has
+        # the field: a unit without this metadata still produces the
+        # exact evidence and result shape this module produced before.
+        for field in ("task_class", "worker_profile", "review_profile",
+                     "risk_class", "evidence_obligation",
+                     "max_outer_attempts", "max_repair_attempts",
+                     "leaf_worker_only"):
+            if field in unit:
+                evidence[field] = unit[field]
 
         if passed:
             # E59: the ONE place canonical actually advanced for this unit.
@@ -667,10 +683,20 @@ def integrate_one(repo, lane_branch, unit, runner=None, check_runner=None,
                                     "files_changed": (len(files_changed)
                                                       if files_changed
                                                       is not None else None)})
-            return {"verdict": INTEGRATED, "unit": unit_id, "canonical": after,
-                    "reason": "applied to %s and its own check passed ON "
-                              "canonical at %s" % (before[:9], (after or "")[:9]),
-                    "check_detail": detail, "evidence": evidence}
+            result = {"verdict": INTEGRATED, "unit": unit_id, "canonical": after,
+                     "reason": "applied to %s and its own check passed ON "
+                               "canonical at %s" % (before[:9], (after or "")[:9]),
+                     "check_detail": detail, "evidence": evidence}
+            # ORCH-02: the result itself, not only the nested evidence dict,
+            # so a caller reading the integration record directly (never
+            # descending into evidence) still sees what the unit carried.
+            for field in ("task_class", "worker_profile", "review_profile",
+                         "risk_class", "evidence_obligation",
+                         "max_outer_attempts", "max_repair_attempts",
+                         "leaf_worker_only"):
+                if field in unit:
+                    result[field] = unit[field]
+            return result
 
         # THE UNWIND. Safe because the tree was proven clean at entry, the lock
         # is held, and canonical is integration-only ground.

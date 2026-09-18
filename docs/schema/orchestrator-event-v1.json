@@ -1,0 +1,340 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "orchestrator-event-v1",
+  "title": "Brother 1.0.20 orchestrator event",
+  "description": "ORCH-01. One line of an orchestrator's append-only record, one of four shapes: a journal event (what happened), a task-scoped action envelope (an action naming one task: DISPATCH, REQUEST-REVIEW, REQUEST-REPAIR, REQUEST-REPLAN, PROPOSE-DECOMPOSITION, HANDOFF or PARK), a no-task action envelope (NOOP or CLOSEOUT, which name no task at all), or a QUEUE-HUMAN envelope, which sits apart from both because a founder-facing escalation can be about a specific unit OR about the run as a whole (a RED publication decision, a credential, a plan or billing change, a human acceptance step: the steering document's own acceptance scenario names exactly this class), so QUEUE-HUMAN itself further splits into a run-level shape (no task_id) and a task-scoped shape (task_id required, carrying the same staleness fields the other task-scoped actions carry). Forcing a bogus task_id onto any action that has no task trains people to stop reading the field; this is why NOOP, CLOSEOUT and now the run-level half of QUEUE-HUMAN all forbid it outright via additionalProperties rather than merely leaving it optional. All four top-level shapes carry the same identity fields (schema_version, run_id, orchestrator, instance, epoch, at) so no shape can validate with an unroutable event, missing the run_id or orchestrator it belongs to. action is enum- or const-constrained so that, across every branch, the values used are exactly scripts/orchestrator_invariants.py's ACTIONS with no name shared between two DIFFERENT top-level shapes (QUEUE-HUMAN's own two sub-shapes intentionally share the same action value, distinguished by task_id's presence, not by action name); observed_task_state is enum-constrained to exactly TASK_STATES. scripts/test_orchestrator_protocol.py asserts all of this, and asserts no document can ever satisfy two of the four top-level shapes, or both of QUEUE-HUMAN's own two sub-shapes, at once. scripts/orchestrator_protocol.py enforces this file generically over type, required, properties, enum, const, additionalProperties, items, minimum, pattern and oneOf (here nested: QUEUE-HUMAN's entry in the top oneOf is itself a schema whose only keyword is a further oneOf).",
+  "oneOf": [
+    {
+      "title": "journal event",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "run_id", "orchestrator", "instance", "epoch", "at", "event"],
+      "properties": {
+        "schema_version": {
+          "const": "orchestrator-event-v1",
+          "description": "Which shape this record follows."
+        },
+        "run_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The night run this event belongs to."
+        },
+        "orchestrator": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Which orchestrator identity produced this line."
+        },
+        "instance": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Which running instance of that orchestrator identity produced this line, so a restarted process is distinguishable from the one it replaced."
+        },
+        "epoch": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "This orchestrator instance's own epoch counter at the time this line was written."
+        },
+        "at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,9})?(Z|[+-]\\d{2}:\\d{2})$",
+          "description": "When this line was written, an ISO 8601 timestamp read from a real clock, never estimated or narrated. Checked against this explicit pattern, not the JSON Schema 'format' keyword: format is annotation-only in draft 2020-12 and a hand-written stdlib validator that trusted it would accept 'not-a-date-time' as a timestamp (adversarial review finding 1)."
+        },
+        "event": {
+          "type": "string",
+          "minLength": 1,
+          "description": "What happened, for example a heartbeat, a handoff, a lease change, or a task's dispatch, verdict, integration or parking."
+        }
+      }
+    },
+    {
+      "title": "action envelope (task-scoped)",
+      "description": "For an action that names exactly one task: DISPATCH, REQUEST-REVIEW, REQUEST-REPAIR, REQUEST-REPLAN, PROPOSE-DECOMPOSITION, HANDOFF or PARK. QUEUE-HUMAN is deliberately NOT a member of this enum: it has its own branch below, because a queued human decision can be run-level (no task at all) as well as task-scoped, and folding it into this always-task-required branch would force a bogus task_id onto a run-level escalation such as a RED publication decision.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "run_id", "orchestrator", "instance", "epoch", "at",
+        "action", "task_id", "reason", "observed_revision",
+        "observed_journal_seq", "observed_task_state", "observed_attempt"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "orchestrator-event-v1",
+          "description": "Which shape this record follows."
+        },
+        "run_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The night run this action belongs to."
+        },
+        "orchestrator": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Which orchestrator identity is taking this action."
+        },
+        "instance": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Which running instance of that orchestrator identity is taking this action."
+        },
+        "epoch": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "This orchestrator instance's own epoch counter at the time this action was decided."
+        },
+        "at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,9})?(Z|[+-]\\d{2}:\\d{2})$",
+          "description": "When this action was decided, an ISO 8601 timestamp read from a real clock, checked against this explicit pattern rather than the annotation-only 'format' keyword (finding 1)."
+        },
+        "action": {
+          "enum": [
+            "DISPATCH", "REQUEST-REVIEW", "REQUEST-REPAIR", "REQUEST-REPLAN",
+            "PROPOSE-DECOMPOSITION", "HANDOFF", "PARK"
+          ],
+          "description": "The always-task-scoped subset of scripts/orchestrator_invariants.py's ACTIONS. NOOP and CLOSEOUT never validate here (they belong to the no-task branch); QUEUE-HUMAN never validates here either (it has its own branch, since it can be run-level or task-scoped)."
+        },
+        "task_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Which task this action concerns. Names the same join key orchestrator-task-v1.json's 'id' field holds; the two schemas spell it differently because the reference is cross-document and JSON Schema has no foreign-key keyword, not because they mean different things (adversarial review finding 5). scripts/test_orchestrator_protocol.py asserts a task's id and an action's task_id accept the same value."
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Why this action, in plain language, never left blank: an action nobody can explain is exactly the kind a later audit cannot tell apart from a mistake."
+        },
+        "observed_revision": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The canonical revision the orchestrator believed was current when it decided this action."
+        },
+        "observed_journal_seq": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The journal sequence number the orchestrator had last read when it decided this action."
+        },
+        "observed_task_state": {
+          "enum": [
+            "PLANNED", "READY", "ORCHESTRATOR-CLAIMED", "WORKER-CLAIMED",
+            "RUNNING", "WORKER-PASS", "WORKER-FAIL", "VERIFYING", "REVIEW",
+            "REPAIRABLE", "NEEDS-REPLAN", "INTEGRATING", "INTEGRATED",
+            "NEEDS-REPAIR-ON-NEW-BASE", "CANONICAL-VERIFY", "DONE", "PARKED",
+            "EXHAUSTED", "AWAITING-HUMAN", "CANCELLED"
+          ],
+          "description": "The state this task was believed to hold when this action was decided. Must equal scripts/orchestrator_invariants.py's TASK_STATES. Required because observed_revision, observed_journal_seq and epoch together are NOT sufficient to catch two reasoners racing on the same task: none of the three describes the TASK's own lifecycle, only the run's and the orchestrator's (adversarial review design finding). The apply step compares this against the task's real current state and refuses the action on a mismatch, the same compare-and-swap discipline scripts/claim_store.py already uses for claims; this schema can only require the field and its shape, it cannot itself judge staleness against a live store."
+        },
+        "observed_attempt": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The task's own attempt counter as the orchestrator last observed it, compared and swapped alongside observed_task_state at apply time for the same reason."
+        }
+      }
+    },
+    {
+      "title": "action envelope (no task)",
+      "description": "For an action that names no task: NOOP or CLOSEOUT. task_id, observed_task_state and observed_attempt are absent from this branch's properties, and additionalProperties is false, so any of the three appearing on a NOOP or CLOSEOUT is refused as an unexpected field rather than silently accepted (finding 4b: forbidden, not merely optional).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "run_id", "orchestrator", "instance", "epoch", "at",
+        "action", "reason", "observed_revision", "observed_journal_seq"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "orchestrator-event-v1",
+          "description": "Which shape this record follows."
+        },
+        "run_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The night run this action belongs to."
+        },
+        "orchestrator": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Which orchestrator identity is taking this action."
+        },
+        "instance": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Which running instance of that orchestrator identity is taking this action."
+        },
+        "epoch": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "This orchestrator instance's own epoch counter at the time this action was decided."
+        },
+        "at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,9})?(Z|[+-]\\d{2}:\\d{2})$",
+          "description": "When this action was decided, an ISO 8601 timestamp read from a real clock, checked against this explicit pattern rather than the annotation-only 'format' keyword (finding 1)."
+        },
+        "action": {
+          "enum": ["NOOP", "CLOSEOUT"],
+          "description": "The no-task subset of scripts/orchestrator_invariants.py's ACTIONS. Every other member of that set is either always task-scoped or has its own branch (QUEUE-HUMAN) and never validates here."
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Why this action, in plain language, never left blank."
+        },
+        "observed_revision": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The canonical revision the orchestrator believed was current when it decided this action."
+        },
+        "observed_journal_seq": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The journal sequence number the orchestrator had last read when it decided this action."
+        }
+      }
+    },
+    {
+      "title": "action envelope (QUEUE-HUMAN)",
+      "description": "QUEUE-HUMAN alone gets its own branch, itself split in two: a run-level shape (task_id absent) for a founder-facing decision that belongs to the run as a whole, for example the steering document's own acceptance scenario, 'a RED publication decision appears, Fable refuses and queues it, all unrelated engineering work continues'; and a task-scoped shape (task_id required, carrying the same observed_task_state and observed_attempt every other task-scoped action carries) for an escalation about one specific blocked unit. task_id is therefore OPTIONAL at the level of this action as a whole, never forced, and reason is the load-bearing field in the run-level shape: a queued human decision with no stated reason is useless to the person who wakes up to it.",
+      "oneOf": [
+        {
+          "title": "QUEUE-HUMAN, run-level",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "schema_version", "run_id", "orchestrator", "instance", "epoch",
+            "at", "action", "reason", "observed_revision",
+            "observed_journal_seq"
+          ],
+          "properties": {
+            "schema_version": {
+              "const": "orchestrator-event-v1",
+              "description": "Which shape this record follows."
+            },
+            "run_id": {
+              "type": "string",
+              "minLength": 1,
+              "description": "The night run this action belongs to."
+            },
+            "orchestrator": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Which orchestrator identity is taking this action."
+            },
+            "instance": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Which running instance of that orchestrator identity is taking this action."
+            },
+            "epoch": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "This orchestrator instance's own epoch counter at the time this action was decided."
+            },
+            "at": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,9})?(Z|[+-]\\d{2}:\\d{2})$",
+              "description": "When this action was decided, an ISO 8601 timestamp read from a real clock, checked against this explicit pattern rather than the annotation-only 'format' keyword (finding 1)."
+            },
+            "action": {
+              "const": "QUEUE-HUMAN",
+              "description": "The only action this branch, or its task-scoped sibling below, ever carries."
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Why this run-level decision needs the founder, in plain language. The load-bearing field of this shape: task_id is absent by design (no task owns a run-level decision such as a RED publication), so reason is the only thing telling the person who wakes up to this what it is actually about."
+            },
+            "observed_revision": {
+              "type": "string",
+              "minLength": 1,
+              "description": "The canonical revision the orchestrator believed was current when it decided this action."
+            },
+            "observed_journal_seq": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "The journal sequence number the orchestrator had last read when it decided this action."
+            }
+          }
+        },
+        {
+          "title": "QUEUE-HUMAN, task-scoped",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "schema_version", "run_id", "orchestrator", "instance", "epoch",
+            "at", "action", "task_id", "reason", "observed_revision",
+            "observed_journal_seq", "observed_task_state", "observed_attempt"
+          ],
+          "properties": {
+            "schema_version": {
+              "const": "orchestrator-event-v1",
+              "description": "Which shape this record follows."
+            },
+            "run_id": {
+              "type": "string",
+              "minLength": 1,
+              "description": "The night run this action belongs to."
+            },
+            "orchestrator": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Which orchestrator identity is taking this action."
+            },
+            "instance": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Which running instance of that orchestrator identity is taking this action."
+            },
+            "epoch": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "This orchestrator instance's own epoch counter at the time this action was decided."
+            },
+            "at": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,9})?(Z|[+-]\\d{2}:\\d{2})$",
+              "description": "When this action was decided, an ISO 8601 timestamp read from a real clock, checked against this explicit pattern rather than the annotation-only 'format' keyword (finding 1)."
+            },
+            "action": {
+              "const": "QUEUE-HUMAN",
+              "description": "The only action this branch, or its run-level sibling above, ever carries."
+            },
+            "task_id": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Which task this escalation concerns. Present only in this task-scoped shape; the run-level sibling above forbids it outright."
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Why this task needs the founder, in plain language."
+            },
+            "observed_revision": {
+              "type": "string",
+              "minLength": 1,
+              "description": "The canonical revision the orchestrator believed was current when it decided this action."
+            },
+            "observed_journal_seq": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "The journal sequence number the orchestrator had last read when it decided this action."
+            },
+            "observed_task_state": {
+              "enum": [
+                "PLANNED", "READY", "ORCHESTRATOR-CLAIMED", "WORKER-CLAIMED",
+                "RUNNING", "WORKER-PASS", "WORKER-FAIL", "VERIFYING", "REVIEW",
+                "REPAIRABLE", "NEEDS-REPLAN", "INTEGRATING", "INTEGRATED",
+                "NEEDS-REPAIR-ON-NEW-BASE", "CANONICAL-VERIFY", "DONE",
+                "PARKED", "EXHAUSTED", "AWAITING-HUMAN", "CANCELLED"
+              ],
+              "description": "The state this task was believed to hold when this escalation was decided, required for the same compare-and-swap reason every other task-scoped action requires it: naming a task_id without it would leave the apply step nothing to check staleness against."
+            },
+            "observed_attempt": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "The task's own attempt counter as the orchestrator last observed it, required alongside observed_task_state whenever task_id is present."
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

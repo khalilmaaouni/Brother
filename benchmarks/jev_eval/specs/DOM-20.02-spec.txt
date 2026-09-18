@@ -1,0 +1,63 @@
+You are a senior backend engineer. Design (in plain pseudocode plus short
+Python-style snippets, no need for a full working module) an algorithm with
+this contract:
+
+CONTEXT: An unattended automation run writes an append-only event log for
+itself. Each event has a timestamp, a type, and optionally a "unit id"
+naming the piece of work it concerns. Separately, a small key-value record
+store holds one entry per finished piece of work, each entry carrying a
+"risk class" label (a free-text string chosen by whoever defined that piece
+of work, for example "low", "medium", "high", "critical", or it may be
+missing entirely).
+
+GOAL: Compute, per risk class, "the longest span of wall-clock time this run
+went before something proved untrue for that risk class's own units", NOT
+one pooled number for the whole run. The reason: thirty minutes of
+low-stakes work should never be compared against thirty minutes of
+high-stakes work as if they were the same thing.
+
+RULES TO DESIGN AROUND:
+1. A risk class is discovered from the data, not from a fixed list: report
+   one figure per distinct risk class label actually present.
+2. A unit whose record carries NO risk class label (missing, blank, or the
+   entry itself absent) must be put in its own separate bucket, clearly
+   marked "unknown". This bucket must NEVER be silently merged into
+   whichever named class sorts first, sorts last, or looks like the lowest
+   severity. It must never receive a computed number: the correct output
+   for the unknown bucket is an explicit "no data" marker, not a number,
+   because reporting a number under an unnamed class would misleadingly
+   imply a class was declared.
+3. Four kinds of events end a class's safe span early: (a) a check result
+   event reporting nonzero for a unit in that class, (b) a "refused"
+   engine event whose reason blames that unit, (c) a work record closed
+   with no check result recorded at all for a unit in that class, (d) an
+   aggregate "receipts issued, N left unproven" event that names NO
+   specific unit at all (it is run-wide, not per unit). For case (d),
+   because it cannot be pinned to one class, the design must apply it to
+   EVERY class present in the run rather than dropping it or guessing
+   which class it belongs to.
+4. The span for a class starts at the run's first recorded event and ends
+   at the EARLIEST break belonging to that class (or case d), or at the
+   run's last recorded event if nothing broke for that class.
+5. Only count finished units of that class whose finish event falls at or
+   before the class's own closing time.
+6. No event log at all, or no finished-work records at all, is "no data"
+   for the whole run, not zero. A break happening exactly at the very
+   first recorded event is still a valid (zero-length) break, not an
+   error.
+7. An event with a malformed or missing timestamp should be skipped, not
+   treated as fatal to the whole computation.
+8. A record apparently carried over from a previous run (timestamped
+   before this run's own first event) must not be allowed to retroactively
+   shorten this run's span.
+
+Please: (1) name the data structures you would use to hold "which unit
+belongs to which risk class" and "which break belongs to which unit",
+(2) walk through, in words, how you would avoid double-counting or
+misattributing the run-wide unproven-receipts break, (3) list the edge
+cases you would test: empty log, a class with only one unit, a class
+whose only break is the run-wide one, a unit with an empty-string risk
+class label, a unit that appears in the event log but never got a
+finished-work record at all, and a record timestamped before the run
+started. Keep the answer under 400 lines, pseudocode is fine, a partial
+Python sketch is fine, a full runnable module is not required.

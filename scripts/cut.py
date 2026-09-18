@@ -623,7 +623,7 @@ def readiness(root, version, bm, paths, force, runner=None,
     return reasons
 
 
-def chain(root, version, runner=None, stop_early=True):
+def chain(root, version, runner=None, stop_early=True, resume=False):
     """The release chain in the order it can be true: cut_v1.0.0.sh first
     (bump, regenerate, commit, manifest and note, all LOCAL: it pushes
     nothing), then required_fast.sh on that bumped tree, then
@@ -635,13 +635,18 @@ def chain(root, version, runner=None, stop_early=True):
     one irreversible step, now against the exact tree that ships. Returns
     (passed_labels, failed_labels)."""
     passed, failed = [], []
-    ok, lines = step("cut_v1.0.0.sh",
-                     ["sh", os.path.join(root, "scripts", "cut_v1.0.0.sh"),
-                      version], root, runner)
-    _print(lines)
-    if not ok:
-        return passed, ["cut_v1.0.0.sh"]
-    passed.append("cut_v1.0.0.sh")
+    if resume:
+        # --resume: cut_v1.0.0.sh already ran and its two commits are the
+        # checked HEAD the caller verified; every gate below still runs.
+        print("resume: cut_v1.0.0.sh skipped, its commits are the checked HEAD")
+    else:
+        ok, lines = step("cut_v1.0.0.sh",
+                         ["sh", os.path.join(root, "scripts", "cut_v1.0.0.sh"),
+                          version], root, runner)
+        _print(lines)
+        if not ok:
+            return passed, ["cut_v1.0.0.sh"]
+        passed.append("cut_v1.0.0.sh")
     ok, lines = required_fast(root, version, runner)
     _print(lines)
     if ok:
@@ -710,7 +715,7 @@ def check_mode(root, version, bm, paths, force, runner=None):
 
 
 def run_chain(root, version, bm, paths, force, yes, ask, runner=None,
-              own_uuid=None):
+              own_uuid=None, resume_sha=None):
     """Everything between the claim and the release of the fence. Returns
     (exit_code, evidence_or_None, park_note): evidence only when the tag
     was pushed and reproduced."""
@@ -720,9 +725,20 @@ def run_chain(root, version, bm, paths, force, yes, ask, runner=None,
         return EXIT_REFUSED, None, ("refused before any write: %s"
                                     % "; ".join(reasons))
     start = _run(["git", "rev-parse", "HEAD"], root, runner)
-    print("cut starts from %s; the chain's commits stay local until the "
-          "push" % ((start.stdout or "?").strip()))
-    passed, failed = chain(root, version, runner)
+    head = (start.stdout or "").strip()
+    if resume_sha is not None:
+        # The checked candidate, exactly: a moved HEAD is a different tree
+        # that nothing checked, so resume refuses rather than guesses.
+        if start.returncode != 0 or not head or head != resume_sha:
+            return EXIT_REFUSED, None, (
+                "resume refused: HEAD is %s, not the checked commit %s"
+                % (head or "unreadable", resume_sha))
+        print("resume from the checked commit %s" % head)
+    else:
+        print("cut starts from %s; the chain's commits stay local until the "
+              "push" % (head or "?"))
+    passed, failed = chain(root, version, runner,
+                           resume=resume_sha is not None)
     if failed:
         return EXIT_REFUSED, None, "%s failed" % failed[0]
     print()
@@ -764,7 +780,8 @@ def run_chain(root, version, bm, paths, force, yes, ask, runner=None,
     return EXIT_OK, evidence, None
 
 
-def cut_mode(root, version, bm, paths, force, yes, ask, runner=None):
+def cut_mode(root, version, bm, paths, force, yes, ask, runner=None,
+             resume_sha=None):
     bm_mod, bm_path, why = bm
     if bm_mod is None:
         print("NO-DATA: bm_store.py could not be loaded (%s); a cut without "
@@ -812,7 +829,8 @@ def cut_mode(root, version, bm, paths, force, yes, ask, runner=None):
     note = "cut.py left without recording why (crash)"
     try:
         code, evidence, note = run_chain(root, version, bm, paths, force,
-                                         yes, ask, runner, own_uuid=uuid)
+                                         yes, ask, runner, own_uuid=uuid,
+                                         resume_sha=resume_sha)
     except KeyboardInterrupt:
         code, evidence, note = 130, None, "interrupted mid-chain"
         print("interrupted")
@@ -842,6 +860,13 @@ def main(argv=None, root=None, runner=None, ask=None):
                           "untouched, only the claim is released) before "
                           "claiming; requires a one-line reason, written "
                           "into each park note and the fence's evidence")
+    ap.add_argument("--resume", metavar="SHA", default=None,
+                     help="resume a cut whose cut_v1.0.0.sh already ran and "
+                          "passed: requires HEAD to be exactly this full "
+                          "commit and a clean tree, skips only cut_v1.0.0.sh, "
+                          "and still runs required_fast.sh, refresh_cut "
+                          "--check, release_invariant, the approve question, "
+                          "the push and the reproduction")
     ap.add_argument("--answer-file", metavar="PATH", default=None,
                      help="answer the approve prompt by writing y or n into "
                           "PATH instead of typing it (how a Claude Code "
@@ -876,11 +901,17 @@ def main(argv=None, root=None, runner=None, ask=None):
             return EXIT_NODATA
     paths = release_paths(root)
     bm = _load_bm_store(root)
+    if args.resume is not None and (args.check or
+                                    not re.match(r"^[0-9a-f]{40}$",
+                                                 args.resume)):
+        print("NO-DATA: --resume needs the full 40-hex commit the checked "
+              "cut left at HEAD, and cannot be combined with --check")
+        return EXIT_NODATA
     if args.check:
         return check_mode(root, version, bm, paths, args.force_conflicts,
                           runner)
     return cut_mode(root, version, bm, paths, args.force_conflicts,
-                    args.yes, ask, runner)
+                    args.yes, ask, runner, resume_sha=args.resume)
 
 
 if __name__ == "__main__":

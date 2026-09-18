@@ -1,0 +1,94 @@
+Write a single-file Python 3 standard-library-only module named
+feature_admission.py, plus a plain unittest test file
+test_feature_admission.py, runnable as "python3 test_feature_admission.py -v".
+No third-party dependencies, no network, no filesystem writes except to
+paths the caller explicitly passes in (never a hardcoded default path).
+
+CONTEXT (generalized): a team once admitted forty proposed features onto a
+roadmap without checking whether each one already existed in the product;
+fourteen of the next fifteen checked turned out to be duplicates. The fix is
+a policy function that decides whether a single proposed feature record may
+be ADMITTED onto the roadmap, called before anything is scheduled.
+
+DECIDING PROPERTY: a feature is admitted only when its record names the
+concrete evidence that will prove it worked (a runnable check command) and
+states the gap or problem it closes. Additionally, treat the record as a
+structured proposal that must carry ALL of these fields, each a non-empty
+string (or in the case of exact_files, a non-empty list of non-empty
+strings), or the record is refused rather than admitted by default:
+
+  - measurable_outcome: the concrete, checkable result the feature produces
+  - baseline: the current state before the feature exists (what is measured
+    against)
+  - expected_mechanism: how the feature is expected to produce the outcome
+  - exact_files: a list of the file paths the feature will touch (list of
+    strings, at least one entry)
+  - done_check: a runnable command or command description that proves the
+    feature works
+  - negative_done_check: a runnable command or description that proves the
+    feature's absence or failure is detectable (a check that can go red)
+  - evidence_artifact: where the proof of the done_check's result will be
+    recorded (a path, log name, or report identifier)
+  - rollback: how the feature is reversed if it turns out to be wrong
+
+FUNCTION SHAPE: a function admit(record, existing=None) -> (verdict, reason)
+where verdict is one of the strings "ADMIT" or "REFUSE" (never anything
+else), and reason is a short human-readable string naming exactly which
+field was missing, empty, wrong type, or otherwise invalid, OR (when the
+record is a full duplicate of one already known) naming the duplicate.
+
+INPUT VALIDATION RULES (trust boundary, be strict):
+  - record must be a dict (mapping). Anything else (None, a string, a list,
+    an int) is REFUSE, reason names that the record could not be read as a
+    mapping.
+  - Each of the eight required fields above must be present as a KEY in the
+    dict. A missing key is REFUSE, reason names the missing field.
+  - An unknown key (a key that is not one of the eight expected fields, plus
+    an optional "id" field used for dedupe) is REFUSE, reason names the
+    unrecognized field. Do not silently ignore or accept unexpected fields.
+  - A field that is present but not a non-empty string (empty string,
+    whitespace-only string, None, a number, a list where a string was
+    expected) is REFUSE, reason names the field and what was wrong with it.
+  - exact_files must be a list of at least one non-empty string; anything
+    else (a string instead of a list, an empty list, a list containing a
+    non-string or an empty string) is REFUSE.
+  - existing is an optional iterable of previously admitted records (or
+    None, meaning no prior records to check against). When existing is
+    given and a record in it has the same measurable_outcome AND the same
+    exact_files (as a set comparison, order-independent) as the incoming
+    record, REFUSE it as a duplicate, naming what it duplicates. Only exact
+    match on both fields counts as duplicate; a partial overlap is not by
+    itself a refusal reason (only the missing/invalid-field checks above
+    apply otherwise).
+  - Only when every field validates AND no duplicate is found does admit()
+    return ("ADMIT", reason) where reason briefly restates the evidence
+    (for example naming the done_check).
+
+EDGE CASES TO HANDLE EXPLICITLY, each with its own test:
+  - empty dict
+  - dict with exactly one field missing (test at least two different
+    missing fields, not just the first one alphabetically, to prove the
+    check does not stop after checking only one field type)
+  - dict with an extra, unrecognized key alongside all eight valid fields
+  - exact_files given as a plain string instead of a list
+  - exact_files given as an empty list
+  - exact_files given as a list containing one empty string
+  - a fully valid record with no existing records (admits)
+  - a fully valid record that exactly duplicates one entry in existing
+    (refuses, naming the duplicate)
+  - a fully valid record that shares only some fields with an existing
+    record (still admits, since only exact match on outcome and files counts)
+  - existing given as None (treated as no prior records; the function must
+    not raise)
+  - record given as None, a string, and a list (each refused, not raised)
+
+Write plain, direct code and comments. Do not use an em dash or an en dash
+anywhere in the code, comments, or docstrings; use commas, colons, or
+parentheses instead. Do not add any author attribution, credit line, or
+mention of what tool or model produced the file. Include a module docstring
+explaining why the strict-refusal policy exists (to stop features being
+admitted without named evidence) in two or three sentences.
+
+Provide the test file using Python's built-in unittest module only (no
+pytest, no third-party test libraries), with a unittest.main() block at the
+bottom, covering every edge case listed above as a separate test method.

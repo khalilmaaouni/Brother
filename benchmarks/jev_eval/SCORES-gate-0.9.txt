@@ -1,0 +1,55 @@
+gate for autonomous use: confidence >= 0.90
+
+TASK A  items=24  base rate (always the majority answer)= 75%
+  system        n    acc bal_acc  cover  acc@gate     $/success  $/gated-succ  p50 s
+  jev          24    88%     75%    54%       92%     $0.000022     $0.000038    0.4
+  jev2         23    87%     75%    48%       91%     $0.000022     $0.000044    0.4  NO-DATA rows=1
+  jev_para     24    92%     83%    50%       92%     $0.000019     $0.000038    0.4
+  muse         24    96%     92%    96%       96%     $0.000253     $0.000265    7.6
+  deepseek     24    92%     89%    96%       96%     $0.000710     $0.000710    3.8
+  calibration jev      0.5-0.7:  50% of 2 | 0.7-0.9:  89% of 9 | 0.9-1.0:  92% of 13
+  calibration muse     0.5-0.7:   - of 0 | 0.7-0.9: 100% of 1 | 0.9-1.0:  96% of 23
+  calibration deepseek 0.5-0.7:   - of 0 | 0.7-0.9:   0% of 1 | 0.9-1.0:  96% of 23
+  jev agreement with its repeat:    23 of 23
+  jev agreement with its paraphrase: 23 of 24
+
+TASK B  items=20  base rate (always the majority answer)= 60%
+  system        n    acc bal_acc  cover  acc@gate     $/success  $/gated-succ  p50 s
+  jev          20    90%     88%    35%      100%     $0.000018     $0.000047    0.6
+  jev2         20    95%     94%    35%      100%     $0.000017     $0.000047    0.5
+  jev_para     20   100%    100%    15%      100%     $0.000016     $0.000107    0.5
+  jev_batch    20    90%     88%    20%      100%     $0.000008     $0.000034    0.0
+  muse         20    85%     88%    90%       89%     $0.000437     $0.000465   15.8
+  deepseek     20    95%     96%    85%       94%     $0.001397     $0.001659    6.0
+  calibration jev      0.5-0.7:  60% of 5 | 0.7-0.9: 100% of 8 | 0.9-1.0: 100% of 7
+  calibration muse     0.5-0.7:   - of 0 | 0.7-0.9:  50% of 2 | 0.9-1.0:  89% of 18
+  calibration deepseek 0.5-0.7:   - of 0 | 0.7-0.9: 100% of 3 | 0.9-1.0:  94% of 17
+  jev agreement with its repeat:    19 of 20
+  jev agreement with its paraphrase: 18 of 20
+  jev agreement with its batched:   18 of 20
+
+TASK C  items=22  base rate (always the majority answer)= 68%
+  system        n    acc bal_acc  cover  acc@gate     $/success  $/gated-succ  p50 s
+  jev          22    55%     51%     5%        0%     $0.000133       NO-DATA    0.8
+  jev2         22    64%     66%     5%        0%     $0.000114       NO-DATA    0.7
+  muse         22    64%     70%     0%   NO-DATA     $0.002395       NO-DATA   63.5
+  deepseek     13    38%     50%    15%       50%     $0.026773     $0.133866  290.6  NO-DATA rows=5
+  calibration jev      0.5-0.7: 100% of 1 | 0.7-0.9:   0% of 1 | 0.9-1.0:   0% of 1
+  calibration muse     0.5-0.7:   - of 0 | 0.7-0.9:  64% of 22 | 0.9-1.0:   - of 0
+  calibration deepseek 0.5-0.7:   0% of 1 | 0.7-0.9:  40% of 10 | 0.9-1.0:  50% of 2
+  jev agreement with its repeat:    20 of 22
+
+TASK D  items=14  base rate (always the majority answer)= 50%
+  system        n    acc bal_acc  cover  acc@gate     $/success  $/gated-succ  p50 s
+  jev          14    79%     73%    64%      100%     $0.000022     $0.000027    0.6
+  jev2         14    79%     73%    71%      100%     $0.000022     $0.000024    0.5
+  jev_batch    14   100%    100%    79%      100%     $0.000008     $0.000010    0.0
+  muse         14    93%     89%   100%       93%     $0.000177     $0.000177    7.1
+  deepseek     14    86%     84%    93%       92%     $0.000839     $0.000839    3.2
+  calibration jev      0.5-0.7:   0% of 1 | 0.7-0.9: 100% of 2 | 0.9-1.0: 100% of 9
+  calibration muse     0.5-0.7:   - of 0 | 0.7-0.9:   - of 0 | 0.9-1.0:  93% of 14
+  calibration deepseek 0.5-0.7:   0% of 1 | 0.7-0.9:   - of 0 | 0.9-1.0:  92% of 13
+  jev agreement with its repeat:    14 of 14
+  jev agreement with its batched:   11 of 14
+
+spend this eval by system: deepseek $0.1861, jev $0.0026, jev2 $0.0026, jev_batch $0.0002, jev_para $0.0007, muse $0.0491

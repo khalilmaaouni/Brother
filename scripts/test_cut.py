@@ -994,6 +994,31 @@ class ARealStoreCutLifecycle(unittest.TestCase):
         self.assertNotIn("FENCE NOT RELEASED", out, out)
         self.assertEqual(self.records()["release-cut-9.9.9"]["state"], "parked")
 
+    def test_a_resumed_decline_skips_the_cut_script_and_releases(self):
+        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.tmp,
+                              capture_output=True, text=True).stdout.strip()
+        calls = []
+        real_runner = self.runner
+
+        def recording(cmd, **kw):
+            calls.append(os.path.basename(cmd[1]) if len(cmd) > 1 else cmd[0])
+            return real_runner(cmd, **kw)
+
+        import contextlib
+        import io
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = C.cut_mode(self.tmp, "9.9.9", self.bm, self.PATHS, None,
+                              False, lambda prompt: "n", recording,
+                              resume_sha=head)
+        out = buf.getvalue()
+        self.assertEqual(code, C.EXIT_OK, out)
+        self.assertIn("resume from the checked commit %s" % head, out)
+        self.assertNotIn("cut_v1.0.0.sh", calls)
+        self.assertIn("required_fast.sh", calls)
+        self.assertIn("declined, nothing pushed", out)
+        self.assertEqual(self.records()["release-cut-9.9.9"]["state"], "parked")
+
     def test_a_failed_gate_releases_the_fence(self):
         self.stubs["required_fast.sh"] = (1, FAST_RED)
         code, out = self.cut()
@@ -1020,6 +1045,45 @@ class ARealStoreCutLifecycle(unittest.TestCase):
         self.assertEqual(code, C.EXIT_REFUSED, out)
         self.assertIn("not judged DEAD", out)
         self.assertEqual(self.records()["foreign-lane"]["state"], "active")
+
+
+class ResumeFromTheCheckedCommit(unittest.TestCase):
+    """2026-09-17: the 1.0.19 cut passed every gate, then its answer window
+    expired and it declined with nothing pushed. Re-running would repeat the
+    66 minute cut_v1.0.0.sh; --resume <sha> skips only that script, only when
+    HEAD is exactly the checked commit, and keeps every gate."""
+
+    SHA = "c56e19c308f74ffd57a13575bfb05a71f41c10c7"
+
+    def test_matching_head_skips_only_the_cut_script(self):
+        r = Runner(dict(GREEN, **{"git rev-parse HEAD": (0, self.SHA + "\n")}))
+        code, _ = _main(["--yes", "--resume", self.SHA], r)
+        self.assertEqual(code, C.EXIT_OK, r.calls)
+        self.assertNotIn("cut_v1.0.0.sh", r.calls)
+        for gate in ("required_fast.sh", "refresh_cut.py",
+                     "release_invariant.py", "export_public.py",
+                     "reproduce_export.py", "bm_store complete"):
+            self.assertIn(gate, r.calls)
+        self.assertLess(r.calls.index("required_fast.sh"),
+                        r.calls.index("export_public.py"))
+
+    def test_a_moved_head_refuses_before_any_gate_and_parks(self):
+        r = Runner(dict(GREEN, **{"git rev-parse HEAD": (0, "f" * 40 + "\n")}))
+        code, _ = _main(["--yes", "--resume", self.SHA], r)
+        self.assertEqual(code, C.EXIT_REFUSED)
+        for never in ("cut_v1.0.0.sh", "required_fast.sh", "export_public.py"):
+            self.assertNotIn(never, r.calls)
+        parks = [c for c in r.cmds if _key(c) == "bm_store park"]
+        self.assertEqual(len(parks), 1, r.calls)
+        self.assertIn("not the checked commit", parks[0][parks[0].index("--note") + 1])
+
+    def test_a_short_sha_or_check_mode_is_no_data(self):
+        for argv in (["--resume", "c56e19c30"],
+                     ["--check", "--resume", self.SHA]):
+            r = Runner(GREEN)
+            code, _ = _main(argv, r)
+            self.assertEqual(code, C.EXIT_NODATA, argv)
+            self.assertNotIn("bm_store claim", r.calls)
 
 
 class TheHelpPrints(unittest.TestCase):

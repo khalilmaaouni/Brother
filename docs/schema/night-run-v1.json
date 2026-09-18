@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "night-run-v1",
+  "title": "Brother 1.0.20 night run manifest",
+  "description": "ORCH-01. The IMMUTABLE run manifest a night run is launched from. This record holds NO volatile state: no task list, no current epoch, no progress. Those live in the journal (orchestrator-event-v1) and the task records (orchestrator-task-v1); a manifest that grew a mutable field would let a running orchestrator quietly rewrite the terms it was launched under. scripts/orchestrator_protocol.py enforces this file generically over type, required, properties, enum, const, additionalProperties, items, minItems, minimum and pattern; hard_stop_jst is checked against this schema's own pattern rather than a second copy of the clock format living in code.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "run_id",
+    "goal",
+    "canonical_repo",
+    "base_revision",
+    "hard_stop_jst",
+    "orchestrators",
+    "builder_cap_policy",
+    "default_builder_cap",
+    "integration_cap",
+    "max_outer_attempts",
+    "max_same_strategy_attempts",
+    "red_actions",
+    "mandatory_evidence",
+    "cross_review_risk_classes"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "night-run-v1",
+      "description": "Which shape this record follows, so a reader never has to guess."
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Stable identifier for this one night run."
+    },
+    "goal": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The north star this run serves, plain language."
+    },
+    "canonical_repo": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The repository of record this run integrates into, never a lane's own worktree."
+    },
+    "base_revision": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The canonical revision this run started from."
+    },
+    "hard_stop_jst": {
+      "type": "string",
+      "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+      "description": "24 hour clock, JST, HH:MM. Never defaulted from an assumed value: a manifest with no hard stop is refused outright, not read as never-stop."
+    },
+    "orchestrators": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "The orchestrator identities authorized to run this manifest. At least one, so a run can never launch with nobody named to hold it."
+    },
+    "builder_cap_policy": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Name of the policy that turns machine and account limits into a live builder cap, for example a fixed cap or a load-adaptive one. The number itself is default_builder_cap; this names how it may be revised."
+    },
+    "default_builder_cap": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "The starting cap on concurrent builders, before builder_cap_policy adjusts it."
+    },
+    "integration_cap": {
+      "const": 1,
+      "description": "Exactly one integrator at a time, always. Not a policy knob: a manifest naming any other value is malformed, because two integrators writing canonical truth at once is the exact defect this run exists to prevent."
+    },
+    "max_outer_attempts": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "How many outer attempts a unit gets before it is parked rather than retried again."
+    },
+    "max_same_strategy_attempts": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "How many times the same strategy may be retried unchanged before the run must try something else or stop."
+    },
+    "red_actions": {
+      "const": "refuse-and-queue",
+      "description": "What happens to an action classified RED (irreversible, credentialed, or otherwise founder-only): it is refused and queued for the founder, never taken automatically. Fixed by law, not a per-run choice."
+    },
+    "mandatory_evidence": {
+      "type": "boolean",
+      "description": "Whether every unit in this run must clear its evidence_obligation before being read as done. False here does not lower any single unit's own evidence_obligation; it only says this run adds no blanket requirement beyond what each unit already carries."
+    },
+    "cross_review_risk_classes": {
+      "type": "array",
+      "items": {
+        "enum": ["low", "medium", "high", "critical"]
+      },
+      "description": "Which risk classes require a second, independent reviewer before merge in this run. An empty array means this run names none beyond what each task's own review_profile already requires."
+    }
+  }
+}

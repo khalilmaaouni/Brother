@@ -1,0 +1,66 @@
+You are helping design a small, standard-library-only Python 3.9+ module for
+POSIX systems (Linux and macOS). Task: write a process containment utility.
+
+REQUIREMENT: a caller spawns a root subprocess. That subprocess may itself
+spawn children, and any of those descendants may call os.setsid() to start a
+brand new session and process group (detaching itself from the original
+process group), or may "double fork" (fork a grandchild and let the
+immediate child exit, so the grandchild gets reparented to the init/reaper
+process). Both are classic Unix daemonization tricks used to escape a
+parent's process group.
+
+Design a function that, given the root subprocess's pid (captured at spawn
+time, when it was started with start_new_session=True so it is its own
+process group leader), can later be told "cancel now" and must:
+
+1. Enumerate the current descendant tree as completely as possible using
+   only the "ps" command (e.g. "ps -eo pid,ppid,pgid") parsed by hand with
+   the standard library (no psutil, no third-party package). Combine two
+   strategies: (a) walk the pid -> ppid parent/child chain starting from the
+   root pid, breadth first, to catch children and grandchildren that are
+   still parented normally; (b) also collect every process that currently
+   shares the root's original process group id, to catch a child that only
+   changed its group but is still discoverable that way. Union both sets.
+
+2. Send SIGTERM to every pid found, wait a short grace period, then send
+   SIGKILL to anything still alive, in both the pid set from step 1 and via
+   os.killpg on the original process group id (belt and suspenders).
+
+3. Re-snapshot the process table afterward and check whether any of the
+   originally discovered pids (or, if possible, any process whose parent
+   chain still traces back to the root) is still alive.
+
+4. Return a small result object or dict with three things: whether every
+   known descendant was confirmed dead (true/false), the list of pids that
+   were found and signalled, and the list of pids (if any) that are still
+   alive after the kill attempt (never silently call it clean if the list is
+   non-empty).
+
+5. Handle failure to enumerate honestly: if the "ps" command itself cannot
+   be run, or its output cannot be parsed, the function must NOT claim
+   success. It should report that containment could not be verified,
+   distinct from "verified and some processes survived." Never treat an
+   enumeration failure as a pass.
+
+6. Every boundary call (subprocess invocation, process signalling) needs an
+   explicit, narrow exception handler: a process that already exited between
+   discovery and signalling is an expected race (not an error), but any
+   other OS error should not be silently swallowed as a whole.
+
+7. No busy-waiting with a bare sleep loop with no bound; use a small bounded
+   number of polls with a deadline.
+
+8. Provide a second, simpler helper that just launches a subprocess.Popen
+   configured so it becomes its own process group leader (the
+   start_new_session=True pattern), for callers who want to opt into this
+   containment scheme.
+
+Please write the complete Python module (imports, docstrings, the ps-parsing
+helper, the pid/ppid tree walker, the kill routine, and the public
+functions), plus a short __main__ self-check block using assert statements
+that: (a) spawns a small shell subprocess tree where one grandchild calls
+`setsid` (via `setsid sleep 50` or an equivalent shell trick) to detach
+itself, (b) calls the cancel/containment function, (c) asserts the detached
+grandchild is actually dead afterward (checked independently via os.kill(pid,
+0) raising ProcessLookupError), not merely that the top-level process exited.
+Keep the code portable between Linux and macOS "ps" output columns.

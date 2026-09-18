@@ -70,7 +70,7 @@
   },
   {
    "path": "brothermode/tools/bm_effects.py",
-   "sha256": "30e6243a42ff083d1422aba605476020e15b7580225b3eb6b2b8c57136efe5a2"
+   "sha256": "542766085dc8d8cc591d22299b6ed8997ae86ac6260d42c45a8f9f3df33cb733"
   },
   {
    "path": "brothermode/tools/bm_embed_bge.py",
@@ -190,7 +190,7 @@
   },
   {
    "path": "brothermode/tools/bm_project_facts.py",
-   "sha256": "a33994e31b9dc084b97222875846a2539bbba5dae8a3d52a8b8d8b9e5f186c81"
+   "sha256": "763293fe63a4155629522310886d19b8b795a83f2e4e4218b2d2c58fa1ea50a0"
   },
   {
    "path": "brothermode/tools/bm_queue_numbers.py",
@@ -202,7 +202,7 @@
   },
   {
    "path": "brothermode/tools/bm_reconcile.py",
-   "sha256": "b67e0bcad9436cc383d0efde9eb2c5c865c730067ff406b4432ea758e237f901"
+   "sha256": "533d0088c8905371b980c5ed11be9b8f4e1be22c0b03a2ecdacc979dbeb1d54e"
   },
   {
    "path": "brothermode/tools/bm_reconcile_worktrees.py",
@@ -246,7 +246,7 @@
   },
   {
    "path": "brothermode/tools/bm_sessionstart.py",
-   "sha256": "9679b1c64353b7a77d3b335d51eb0692fd0c4a2eebc6eafe54cd1d57b351ef02"
+   "sha256": "94172a58d0fce0d9480d75a958b15eb2b53efa8f19b649e2e127930769d542ea"
   },
   {
    "path": "brothermode/tools/bm_stall.py",

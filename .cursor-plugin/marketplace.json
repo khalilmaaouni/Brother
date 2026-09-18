@@ -5,14 +5,14 @@
   },
   "metadata": {
     "description": "Brother turns a plain-language outcome into checked work, a rerunnable receipt, useful local memory, and a human acceptance decision.",
-    "version": "1.0.19"
+    "version": "1.0.20"
   },
   "plugins": [
     {
       "name": "brother",
       "source": "bundle",
       "description": "Turn a plain-language outcome into checked work, a rerunnable receipt, useful local memory, and a human acceptance decision.",
-      "version": "1.0.19",
+      "version": "1.0.20",
       "author": {
         "name": "Khalil Maaouni"
       },

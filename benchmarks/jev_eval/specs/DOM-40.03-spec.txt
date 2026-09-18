@@ -1,0 +1,139 @@
+You are drafting one Python 3 module plus its unittest file for an internal
+policy-decision library. Standard library only, no third-party packages, no
+real network calls anywhere (this is a pure decision function, never a
+network client). Style: plain functions and a small immutable-ish Verdict
+class, similar in spirit to a filesystem access-decision module that already
+exists in this codebase (not shown here) with a `decide(path, roots, action)`
+pure function returning a Verdict(decision, rule, reason), an ALLOW/REFUSE
+pair of constants, and a CLI entry point using argparse. Mirror that shape
+for a network policy instead of a filesystem one.
+
+GOAL: a pure function `decide(host, config, high_autonomy=False)` that
+answers whether an outbound network request to `host` is permitted under a
+declared policy `config`, without making any real network call. It returns a
+Verdict object with fields: decision ("ALLOW" or "REFUSE"), rule (a short
+machine-readable string naming which rule fired), reason (a human-readable
+sentence).
+
+DOMAIN RULES (the deciding property):
+
+1. There are exactly three network modes, and they are distinct, never
+   conflated: "denied" (no outbound network at all), "allowlisted" (only
+   specifically named hosts are reachable), "unrestricted" (any host is
+   reachable). `config` is expected to be a mapping with at least a "mode"
+   key, and for "allowlisted" mode an "allowlist" key holding an iterable of
+   host strings.
+
+2. Fail closed on anything the function cannot positively recognize. An
+   unknown mode string (anything other than exactly "denied", "allowlisted",
+   or "unrestricted"), a config that is not a mapping at all (None, a list, a
+   string, an int), a config missing the "mode" key entirely, or any error
+   raised while inspecting the config, must all resolve to REFUSE, with a
+   rule name that distinguishes "unknown mode value" from "config unreadable
+   or malformed" from "mode key missing". None of these may ever resolve to
+   ALLOW, and specifically an unrecognized mode must never be treated the
+   same as "unrestricted": the safe default for anything unrecognized is
+   always the most restrictive outcome, never the most permissive one.
+
+3. High-autonomy callers and unrestricted mode. The function takes a second
+   parameter, `high_autonomy` (a bool, default False), representing whether
+   the caller is an unattended or high-autonomy worker rather than a
+   human-supervised interactive session. When `high_autonomy` is True and
+   the resolved mode is "unrestricted", the request must still be REFUSED
+   unless the config carries an explicit, separate acknowledgement of that
+   combination: a key such as "unrestricted_ack" (or a similarly named
+   explicit boolean/string field you choose and document clearly in a
+   docstring) that must be present and truthy for a high-autonomy caller to
+   be granted unrestricted access. Absent that explicit acknowledgement, a
+   high-autonomy caller under "unrestricted" mode is refused with a rule
+   name that clearly says "unrestricted mode requires explicit
+   acknowledgement for high-autonomy callers", not silently downgraded to
+   allowlisted or denied behavior and not silently allowed. A
+   non-high-autonomy (interactively supervised) caller under "unrestricted"
+   mode with no such acknowledgement present is allowed normally: the
+   acknowledgement requirement binds only the high-autonomy case, because a
+   human present in an interactive session is the supervision that
+   unattended work lacks.
+
+4. "denied" mode always refuses every host, regardless of `high_autonomy`
+   and regardless of anything else in `config`.
+
+5. "allowlisted" mode allows `host` only when it matches an entry in
+   `config["allowlist"]`, and refuses otherwise, including when the
+   allowlist is missing, not iterable, or empty (an empty or absent
+   allowlist under allowlisted mode refuses everything, it never falls back
+   to permissive). Matching should be case-insensitive on the host string
+   (normalize both sides), should tolerate surrounding whitespace in
+   allowlist entries, and should treat an exact host match. Also support one
+   simple, clearly documented form of wildcard subdomain entry: an allowlist
+   entry written as "*.example.com" matches "anything.example.com" and
+   "deeper.anything.example.com" but does not match "example.com" itself
+   unless "example.com" is also listed separately. Document this matching
+   rule precisely in the module docstring so it is unambiguous. Do not
+   implement any richer glob or regex matching than this one wildcard-prefix
+   form.
+
+6. The `host` argument itself needs validation: None, an empty string, a
+   non-string, or a string containing only whitespace must all be refused
+   (a rule such as "invalid-host"), under every mode, even "unrestricted",
+   since there is nothing meaningful to allow or deny about a host that was
+   never actually named. This check should happen before the acknowledgement
+   check in rule 3 and before mode-specific matching.
+
+7. The function must never raise for any input shape, including a `config`
+   that raises when indexed, a non-iterable "allowlist" value, or a `host`
+   that is some unexpected type like a list or dict. Every code path that
+   could raise should be wrapped so the function always returns a Verdict,
+   and an unanticipated internal error should still resolve to REFUSE (a
+   last-resort catch-all), never to ALLOW and never to an actual exception
+   propagating to the caller.
+
+8. Order of checks matters for which `rule` name comes back when multiple
+   problems exist at once (for example, an invalid host AND an unknown
+   mode). Pick and clearly document a deterministic order in the docstring
+   (a reasonable choice: validate `host` first, then validate/parse
+   `config` and its mode, then apply mode-specific logic, then apply the
+   high-autonomy/unrestricted-acknowledgement rule last, only once mode is
+   confirmed to be "unrestricted"). Whatever order you pick, name it
+   explicitly in a comment or docstring so a caller can predict which rule
+   name wins when two problems are present simultaneously.
+
+DELIVERABLE SHAPE:
+
+- One Python module defining: two string constants ALLOW = "ALLOW" and
+  REFUSE = "REFUSE"; a small Verdict class or namedtuple with fields
+  decision, rule, reason, plus a convenience `.allowed` boolean property;
+  the `decide(host, config, high_autonomy=False)` function implementing all
+  rules above with a thorough module-level and function-level docstring
+  explaining the deciding property, the three modes, the fail-closed
+  default, the high-autonomy acknowledgement rule, the wildcard matching
+  rule, and the check ordering; and a small `if __name__ == "__main__":`
+  CLI (argparse) that takes --host, --config-json (a path to a JSON file
+  holding the config mapping), and an optional --high-autonomy flag, prints
+  the verdict, and exits 0 on ALLOW and 1 on REFUSE, with a distinct exit
+  code (for example 2) if the config file cannot be read or parsed at all.
+
+- One companion unittest file (plain `unittest`, a `TestCase` subclass, a
+  `unittest.main()` block, runnable directly) covering at minimum: each of
+  the three modes allowing and refusing correctly; an unknown mode string;
+  a config that is not a mapping (try at least None, a list, and a string);
+  a config missing the "mode" key; an empty allowlist under allowlisted
+  mode; a non-iterable allowlist value; exact-match and wildcard-subdomain
+  allowlist matching, including a case that should NOT match the wildcard
+  (bare parent domain without a separate explicit entry); case-insensitive
+  and whitespace-tolerant matching; an invalid host (None, empty string,
+  whitespace-only, non-string) under every one of the three modes;
+  unrestricted mode with high_autonomy=False and no acknowledgement
+  (allowed); unrestricted mode with high_autonomy=True and no
+  acknowledgement (refused); unrestricted mode with high_autonomy=True and
+  the acknowledgement present and truthy (allowed); unrestricted mode with
+  high_autonomy=True and the acknowledgement present but falsy (refused);
+  and denied mode always refusing regardless of high_autonomy or allowlist
+  content. Assert on both `.decision` and `.rule` (not just decision) so a
+  test cannot pass for the wrong reason. Do not perform any real network
+  I/O anywhere in the tests.
+
+Please produce the module code first, then the test file, each in its own
+fenced code block, with a one-line label above each block naming which file
+it is (module or test). No explanatory essay needed beyond brief inline
+comments and the docstrings requested above.

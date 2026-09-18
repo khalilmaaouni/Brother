@@ -1458,14 +1458,75 @@ class TheBreakerAlsoGatesRollingDispatch(unittest.TestCase):
 class WholeUnitWorkerSafety(unittest.TestCase):
     """Exercise the production LaneWorker and run_node entry points."""
 
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        # LOAD-01 INCIDENT, 2026-09-18: before this class isolated itself
+        # from the real disk (see setUp below), a run of this exact suite
+        # wrote 87 real REFUSE lines to the real observable this capability
+        # is supposed to prove activation through, because the class-wide
+        # patch did not yet exist and this machine's own free disk was
+        # genuinely in the refuse-gated band at the time. The fix is the
+        # setUp patches below; this is the check that the fix holds: the
+        # real file's size (or absence) is snapshotted once here, before
+        # any test in this class runs, and compared once more after every
+        # test in the class has finished, whatever their outcomes, via
+        # addClassCleanup rather than trusting any one test's position or
+        # ordering. This reads the constant's value ONLY BEFORE setUp ever
+        # patches it, which is exactly why it belongs in setUpClass and not
+        # in setUp (setUp runs per-test, after this class's own patch is
+        # already what B.LOAD_REFUSALS_LOG resolves to).
+        cls._real_log_path = B.LOAD_REFUSALS_LOG
+        cls._real_log_size_before = (
+            os.path.getsize(cls._real_log_path)
+            if os.path.exists(cls._real_log_path) else None)
+        cls.addClassCleanup(cls._assert_real_load_refusals_log_untouched)
+
+    @classmethod
+    def _assert_real_load_refusals_log_untouched(cls):
+        size_after = (os.path.getsize(cls._real_log_path)
+                     if os.path.exists(cls._real_log_path) else None)
+        if size_after != cls._real_log_size_before:
+            raise AssertionError(
+                "the real observable %s changed (size %r -> %r) while this "
+                "suite ran: a test in this class wrote to it instead of a "
+                "temp path" % (cls._real_log_path, cls._real_log_size_before,
+                               size_after))
+
     def setUp(self):
         from unittest.mock import patch
         self.root = tempfile.TemporaryDirectory()
         self.addCleanup(self.root.cleanup)
         self.clock = [100.0]
+        # LOAD-01: this class's tests are about budget/attempt/timeout
+        # bookkeeping in LaneWorker.run(), not about the real machine's
+        # disk, and the whole class ran through that method before the
+        # load_reservation gate existed. Without this, every test here
+        # reads the REAL disk of whatever machine runs the suite, and this
+        # one went from 16.15 GiB free to 13.2 GiB free (into the
+        # reservation-gated band, no reservation ever held) during this
+        # very session, turning five unrelated tests red for a reason that
+        # had nothing to do with what they check. A healthy fixed reading
+        # here is the hermetic baseline every other test in this class
+        # already gets for the clock and the run directory; tests that
+        # want a specific disk reading override this patch themselves
+        # (see the LOAD-01 tests below).
+        #
+        # LOAD_REFUSALS_LOG is ALSO patched here, unconditionally, to a
+        # fresh per-test temp file: the incident above happened precisely
+        # because only individual tests patched it, never the whole class,
+        # so a test that forgets to (or a future test nobody has written
+        # yet) silently falls back to the real path. A test that wants to
+        # assert something about the log path overrides this same target
+        # again inside its own `with`, which nests correctly on top of this.
         self.patches = [patch.object(B.time, "monotonic", lambda: self.clock[0]),
                         patch.object(B.journal, "run_dir_from_env",
-                                     lambda: self.root.name)]
+                                     lambda: self.root.name),
+                        patch.object(B.resource_gate, "read",
+                                     lambda *a, **k: {"disk_free_gib": 500.0}),
+                        patch.object(B, "LOAD_REFUSALS_LOG",
+                                     os.path.join(self.root.name,
+                                                  "load-refusals-default.jsonl"))]
         for item in self.patches:
             item.start()
             self.addCleanup(item.stop)
@@ -1486,7 +1547,7 @@ class WholeUnitWorkerSafety(unittest.TestCase):
 
     def test_remaining_time_survives_new_worker_instance(self):
         spawn = self.spawn()
-        unit = {"unit_id": "A", "write_scope": ["out"]}
+        unit = {"unit_id": "A", "write_scope": ["out"], "task_class": "implementation"}
         B.LaneWorker(spawn, ["stub"]).run(unit)
         B.LaneWorker(spawn, ["stub"]).run(unit)
         self.assertEqual(spawn.calls, [10, 6])
@@ -1494,7 +1555,7 @@ class WholeUnitWorkerSafety(unittest.TestCase):
     def test_allowance_is_shared_by_repairs_and_new_rounds(self):
         spawn = self.spawn()
         spawn.DEFAULT_TIMEOUT_SECONDS = 100
-        unit = {"unit_id": "A", "write_scope": ["out"]}
+        unit = {"unit_id": "A", "write_scope": ["out"], "task_class": "implementation"}
         for _ in range(5):
             B.LaneWorker(spawn, ["stub"]).run(unit)
         self.assertEqual(len(spawn.calls), 3)
@@ -1502,7 +1563,7 @@ class WholeUnitWorkerSafety(unittest.TestCase):
     def test_timeout_without_mutation_metadata_never_replays(self):
         spawn = self.spawn({"status": "unavailable",
                             "note": "no answer within 10s; the process was stopped"})
-        unit = {"unit_id": "A", "write_scope": ["out"]}
+        unit = {"unit_id": "A", "write_scope": ["out"], "task_class": "implementation"}
         first = B.LaneWorker(spawn, ["stub"]).run(unit)
         second = B.LaneWorker(spawn, ["stub"]).run(unit)
         self.assertEqual(len(spawn.calls), 1)
@@ -1550,7 +1611,7 @@ class WholeUnitWorkerSafety(unittest.TestCase):
                    "import pathlib,time; p=pathlib.Path(%r); "
                    "p.write_text(p.read_text()+'x' if p.exists() else 'x'); "
                    "time.sleep(10)" % str(target)]
-        unit = {"unit_id": "real", "write_scope": [str(target)]}
+        unit = {"unit_id": "real", "write_scope": [str(target)], "task_class": "implementation"}
         with patch.object(bm_worker_spawn, "DEFAULT_TIMEOUT_SECONDS", 1):
             first = B.LaneWorker(bm_worker_spawn, command).run(unit)
             second = B.LaneWorker(bm_worker_spawn, command).run(unit)
@@ -1561,7 +1622,7 @@ class WholeUnitWorkerSafety(unittest.TestCase):
 
     def test_interrupted_dispatch_marker_prevents_resume(self):
         spawn = self.spawn()
-        unit = {"unit_id": "A", "write_scope": ["out"]}
+        unit = {"unit_id": "A", "write_scope": ["out"], "task_class": "implementation"}
         original = spawn.SpawningWorker
         def crash(*args, **kwargs):
             child = original(*args, **kwargs)
@@ -1607,6 +1668,239 @@ class WholeUnitWorkerSafety(unittest.TestCase):
         B.run_node(node("A", owns=["out"]), p,
                    B.LaneWorker(spawn, ["stub"]))
         self.assertEqual(p["repair"].called, [])
+
+    def test_a_low_disk_reading_holds_before_any_spawn_and_logs_the_refusal(self):
+        """LOAD-01: the real gate, driven through LaneWorker.run() itself
+        (not only through load_reservation.admit() directly), proving the
+        wiring and not just the module it wires. A low disk_free_gib with
+        no reservation must hold the unit before self._run ever spawns
+        anything, and must write exactly one line to the log path this
+        module resolves LOAD_REFUSALS_LOG to, never the real
+        docs/plan/LOAD-REFUSALS.jsonl (log_path is patched to a temp file
+        for the whole test)."""
+        from unittest.mock import patch
+        import json
+        import load_reservation as lr
+        spawn = self.spawn()
+        unit = {"unit_id": "A", "write_scope": ["out"], "task_class": "implementation"}
+        log_path = os.path.join(self.root.name, "load-refusals.jsonl")
+        with patch.object(B.resource_gate, "read",
+                          return_value={"disk_free_gib": 3.0}), \
+             patch.object(B, "LOAD_REFUSALS_LOG", log_path):
+            result = B.LaneWorker(spawn, ["stub"]).run(unit)
+        self.assertEqual(result["status"], "held")
+        self.assertEqual(spawn.calls, [])
+        self.assertIn("disk_free_gib", result["note"])
+        with open(log_path, encoding="utf-8") as fh:
+            lines = [json.loads(line) for line in fh if line.strip()]
+        self.assertEqual(len(lines), 1)
+        self.assertEqual(lines[0]["verdict"], lr.REFUSE)
+        self.assertEqual(lines[0]["work"]["name"], "A")
+
+    def test_a_healthy_disk_reading_still_reaches_the_real_spawn(self):
+        """The other half of the same proof: an ADMIT verdict must not hold
+        the unit, and nothing is logged (record_refusal only ever writes on
+        REFUSE), and the worker still runs exactly as before this gate
+        existed."""
+        from unittest.mock import patch
+        spawn = self.spawn()
+        unit = {"unit_id": "A", "write_scope": ["out"], "task_class": "implementation"}
+        log_path = os.path.join(self.root.name, "load-refusals.jsonl")
+        with patch.object(B.resource_gate, "read",
+                          return_value={"disk_free_gib": 500.0}), \
+             patch.object(B, "LOAD_REFUSALS_LOG", log_path):
+            result = B.LaneWorker(spawn, ["stub"]).run(unit)
+        self.assertEqual(result.get("status"), "returned")
+        self.assertEqual(spawn.calls, [10])
+        self.assertFalse(os.path.exists(log_path))
+
+    def test_a_missing_load_reservation_module_keeps_the_old_behaviour(self):
+        """Contract requirement: an unimportable load_reservation must never
+        crash the caller and must never silently refuse either; the caller
+        keeps exactly its pre-wiring behaviour (dispatch proceeds)."""
+        from unittest.mock import patch
+        spawn = self.spawn()
+        unit = {"unit_id": "A", "write_scope": ["out"], "task_class": "implementation"}
+        with patch.object(B, "load_reservation", None):
+            result = B.LaneWorker(spawn, ["stub"]).run(unit)
+        self.assertEqual(result.get("status"), "returned")
+        self.assertEqual(spawn.calls, [10])
+
+    # LOAD-02, round 2: the ONE machine-wide reservation, resolved fresh by
+    # resolve_own_reservation() and honoured only by the run that actually
+    # holds it under its own name.
+
+    def test_resolve_own_reservation_finds_a_live_record_under_its_own_name(self):
+        import machine_reservation
+        path = os.path.join(self.root.name, "reservation.json")
+        granted, problem = machine_reservation.acquire(path, "holder-X", 300)
+        self.assertIsNotNone(granted, problem)
+        found = B.resolve_own_reservation(path, "holder-X")
+        self.assertEqual(found, granted)
+
+    def test_resolve_own_reservation_never_honours_a_different_holders_lease(self):
+        """THE SECOND-RUN CASE: a live reservation exists, but under a
+        DIFFERENT holder name than the one asking. resolve_own_reservation
+        must never hand that record to a caller that did not earn it."""
+        import machine_reservation
+        path = os.path.join(self.root.name, "reservation.json")
+        machine_reservation.acquire(path, "holder-X", 300)
+        self.assertIsNone(B.resolve_own_reservation(path, "holder-Y"))
+
+    def test_resolve_own_reservation_is_none_with_no_path_or_no_holder(self):
+        self.assertIsNone(B.resolve_own_reservation(None, "holder-X"))
+        self.assertIsNone(B.resolve_own_reservation(
+            os.path.join(self.root.name, "missing.json"), None))
+
+    def test_resolve_own_reservation_is_none_when_the_module_is_missing(self):
+        from unittest.mock import patch
+        with patch.object(B, "machine_reservation", None):
+            self.assertIsNone(B.resolve_own_reservation(
+                os.path.join(self.root.name, "reservation.json"), "holder-X"))
+
+    def test_holding_the_reservation_admits_dispatch_under_the_band(self):
+        """A run holding the reservation is ADMITTED under the cleanup band:
+        the positive half of the same property test_a_low_disk_reading_...
+        proves the negative half of (round 1)."""
+        import machine_reservation
+        from unittest.mock import patch
+        path = os.path.join(self.root.name, "reservation.json")
+        granted, problem = machine_reservation.acquire(path, "holder-X", 300)
+        self.assertIsNotNone(granted, problem)
+        spawn = self.spawn()
+        unit = {"unit_id": "A", "write_scope": ["out"], "task_class": "implementation"}
+        log_path = os.path.join(self.root.name, "load-refusals.jsonl")
+        with patch.object(B.resource_gate, "read",
+                          return_value={"disk_free_gib": 10.0}), \
+             patch.object(B, "LOAD_REFUSALS_LOG", log_path):
+            result = B.LaneWorker(spawn, ["stub"],
+                                  reservation=B.resolve_own_reservation(
+                                      path, "holder-X")).run(unit)
+        self.assertEqual(result.get("status"), "returned")
+        self.assertEqual(spawn.calls, [10])
+        self.assertFalse(os.path.exists(log_path))
+
+    def test_a_second_uncoordinated_run_is_refused_under_the_band_and_logged(self):
+        """The other half: holder-X holds the machine-wide reservation;
+        holder-Y (a second, uncoordinated run) resolves no reservation of
+        its own and is refused under the same band, exactly like holding
+        none at all, with the refusal logged to the observable."""
+        import json
+        import machine_reservation
+        import load_reservation as lr
+        from unittest.mock import patch
+        path = os.path.join(self.root.name, "reservation.json")
+        machine_reservation.acquire(path, "holder-X", 300)
+        spawn = self.spawn()
+        unit = {"unit_id": "A", "write_scope": ["out"], "task_class": "implementation"}
+        log_path = os.path.join(self.root.name, "load-refusals.jsonl")
+        with patch.object(B.resource_gate, "read",
+                          return_value={"disk_free_gib": 10.0}), \
+             patch.object(B, "LOAD_REFUSALS_LOG", log_path):
+            reservation = B.resolve_own_reservation(path, "holder-Y")
+            self.assertIsNone(reservation)
+            result = B.LaneWorker(spawn, ["stub"],
+                                  reservation=reservation).run(unit)
+        self.assertEqual(result["status"], "held")
+        self.assertEqual(spawn.calls, [])
+        with open(log_path, encoding="utf-8") as fh:
+            lines = [json.loads(line) for line in fh if line.strip()]
+        self.assertEqual(len(lines), 1)
+        self.assertEqual(lines[0]["verdict"], lr.REFUSE)
+
+    def test_above_the_cleanup_band_a_mismatched_reservation_is_irrelevant(self):
+        """The third required case: above 15 GiB, both a run with no
+        reservation and a run holding someone else's are admitted, because
+        load_reservation's healthy-disk band never even looks at the
+        reservation argument."""
+        import machine_reservation
+        from unittest.mock import patch
+        path = os.path.join(self.root.name, "reservation.json")
+        machine_reservation.acquire(path, "holder-X", 300)
+        spawn = self.spawn()
+        unit = {"unit_id": "A", "write_scope": ["out"], "task_class": "implementation"}
+        with patch.object(B.resource_gate, "read",
+                          return_value={"disk_free_gib": 500.0}):
+            reservation = B.resolve_own_reservation(path, "holder-Y")
+            self.assertIsNone(reservation)
+            result = B.LaneWorker(spawn, ["stub"],
+                                  reservation=reservation).run(unit)
+        self.assertEqual(result.get("status"), "returned")
+        self.assertEqual(spawn.calls, [10])
+
+    # --- ORCH-25 (reopened): no dispatch without a declared lane, model,
+    # effort. lane_router.route_lane() is asked before any spawn; a unit
+    # with no declared task_class, an unknown class, or a route result
+    # naming no model is refused the same way a load_reservation refusal
+    # is: a "held" result, no spawn, the reason on replay_refusal(). ---
+
+    def test_no_task_class_runs_on_the_run_level_worker_command(self):
+        # A unit from the product's own planner (door.py) or a roadmap row
+        # declares no task_class: its lane is the worker command the
+        # operator named for the run. Refusing it refused every real run
+        # (30 of 279 brother_run tests red), so it spawns, unrouted by
+        # guesswork, exactly as before ORCH-25.
+        spawn = self.spawn()
+        unit = {"unit_id": "A", "write_scope": ["out"]}
+        worker = B.LaneWorker(spawn, ["stub"])
+        result = worker.run(unit)
+        self.assertEqual(result["status"], "returned")
+        self.assertEqual(spawn.calls, [10])
+        self.assertIsNone(worker.replay_refusal("A"))
+
+    def test_a_declared_task_class_without_the_router_is_never_spawned(self):
+        spawn = self.spawn()
+        unit = {"unit_id": "A", "write_scope": ["out"], "task_class": "implementation"}
+        saved = B.lane_router
+        B.lane_router = None
+        try:
+            worker = B.LaneWorker(spawn, ["stub"])
+            result = worker.run(unit)
+        finally:
+            B.lane_router = saved
+        self.assertEqual(result["status"], "held")
+        self.assertEqual(spawn.calls, [])
+        self.assertIn("lane_router", worker.replay_refusal("A")["note"])
+
+    def test_unknown_task_class_is_never_spawned(self):
+        spawn = self.spawn()
+        unit = {"unit_id": "A", "write_scope": ["out"], "task_class": "vibes"}
+        worker = B.LaneWorker(spawn, ["stub"])
+        result = worker.run(unit)
+        self.assertEqual(result["status"], "held")
+        self.assertEqual(spawn.calls, [])
+        self.assertIn("vibes", worker.replay_refusal("A")["note"])
+
+    def test_a_declared_task_class_still_spawns_exactly_as_before(self):
+        spawn = self.spawn()
+        unit = {"unit_id": "A", "write_scope": ["out"], "task_class": "implementation"}
+        result = B.LaneWorker(spawn, ["stub"]).run(unit)
+        self.assertEqual(result["status"], "returned")
+        self.assertEqual(spawn.calls, [10])
+
+    def test_a_task_class_lane_router_names_no_model_for_is_never_spawned(self):
+        """'verification' is the one task class lane_router itself routes
+        to no draft model at all (a deterministic check, never a spawned
+        worker): route_lane("verification", ...).draft is None by design.
+        LaneWorker spawns a worker for exactly one unit, so this is the
+        same 'missing model' fact ORCH-25 names, not a special case."""
+        spawn = self.spawn()
+        unit = {"unit_id": "A", "write_scope": ["out"], "task_class": "verification"}
+        result = B.LaneWorker(spawn, ["stub"]).run(unit)
+        self.assertEqual(result["status"], "held")
+        self.assertEqual(spawn.calls, [])
+
+    def test_missing_lane_router_import_is_refused_not_permissive(self):
+        """Unlike claim_store/worktree_lane/scope_audit/unit_trace/
+        load_reservation, a missing lane_router is never read as 'the
+        gate cannot run, keep the old behaviour': it blocks."""
+        from unittest.mock import patch
+        spawn = self.spawn()
+        unit = {"unit_id": "A", "write_scope": ["out"], "task_class": "implementation"}
+        with patch.object(B, "lane_router", None):
+            result = B.LaneWorker(spawn, ["stub"]).run(unit)
+        self.assertEqual(result["status"], "held")
+        self.assertEqual(spawn.calls, [])
 
 
 class ConflictIsNamedNotFoldedIntoFailed(unittest.TestCase):

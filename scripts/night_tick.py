@@ -127,9 +127,30 @@ def _iso(dt=None):
     return (dt or datetime.now(timezone.utc)).isoformat()
 
 
-def next_hard_stop(now=None):
-    """The next 07:00 JST strictly after now."""
+def next_hard_stop(now=None, plan=None):
+    """The run plan's hard_stop when BROTHER_RUN_PLAN names one still ahead,
+    else the next 07:00 JST strictly after now.
+
+    LIMIT-05, 2026-09-18: a fixed 07:00 is a copy of a fact, and a copy goes
+    stale: the founder moved a run's stop to 16:00 and every watcher carrying
+    its own time was wrong. The plan's window is read through run_window, the
+    one parser of it. An unreadable plan falls back to 07:00 and says so."""
     now = now or datetime.now(JST)
+    plan = plan if plan is not None else os.environ.get("BROTHER_RUN_PLAN")
+    if plan:
+        try:
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            import run_window
+            with open(plan, encoding="utf-8") as fh:
+                window = json.load(fh)["window"]
+            run_window.phase(window, now)  # validates drain <= stop
+            stop = datetime.fromisoformat(window["hard_stop"])
+            if stop > now:
+                return stop
+            print("night-tick: plan %s hard_stop %s has passed; using 07:00" % (plan, stop))
+        except (OSError, ValueError, KeyError, TypeError, ImportError) as exc:
+            print("night-tick: NO-DATA reading run window from %s (%r); using 07:00"
+                  % (plan, exc))
     stop = now.astimezone(JST).replace(hour=7, minute=0, second=0,
                                        microsecond=0)
     if stop <= now.astimezone(JST):
@@ -541,7 +562,22 @@ def selftest():
     at = datetime(2026, 8, 28, 7, 0, tzinfo=JST)
     assert next_hard_stop(at) == datetime(2026, 8, 29, 7, 0, tzinfo=JST)
 
-    print("night_tick selftest: OK, 15 cases, every condition proven to fire "
+    # 13-15. LIMIT-05: a named run plan's stop wins; a past or unreadable
+    # one falls back to 07:00, never to "no stop".
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        plan = os.path.join(d, "wbs.json")
+        with open(plan, "w", encoding="utf-8") as fh:
+            json.dump({"window": {"drain_start": "2026-08-28T15:00:00+09:00",
+                                  "hard_stop": "2026-08-28T16:00:00+09:00"}}, fh)
+        assert next_hard_stop(after, plan=plan) == datetime(2026, 8, 28, 16, 0, tzinfo=JST)
+        late = datetime(2026, 8, 28, 17, 0, tzinfo=JST)
+        assert next_hard_stop(late, plan=plan) == datetime(2026, 8, 29, 7, 0, tzinfo=JST)
+        with open(plan, "w", encoding="utf-8") as fh:
+            fh.write("{broken")
+        assert next_hard_stop(after, plan=plan) == datetime(2026, 8, 28, 7, 0, tzinfo=JST)
+
+    print("night_tick selftest: OK, 18 cases, every condition proven to fire "
           "and proven to stay quiet")
     return 0
 

@@ -72,6 +72,7 @@ import brother_paths  # noqa: E402
 import fault_barrier  # noqa: E402
 import graph_loop  # noqa: E402
 import journal  # noqa: E402
+import resource_gate  # noqa: E402  (sibling module, scripts/resource_gate.py; graph_loop.py already relies on it unconditionally)
 import run_heartbeat  # noqa: E402
 
 
@@ -428,8 +429,25 @@ def run_node(node, parts, worker, cwd=None, max_attempts=3):
             "objective": node.get("name") or node.get("title") or node["id"],
             "done_check": node.get("done_check") or "",
             "write_scope": node.get("owns") or [],
-            "read_scope": [], "role": "builder", "risk_class": "normal",
-            "attempt": 1, "prior_failure_note": ""}
+            # ORCH-02: this used to write "normal" and 1 unconditionally,
+            # erasing a real risk_class or a real attempt count even when
+            # the node carried one (the second of the five real drop
+            # points this run's advisory pass found). A node without
+            # these keys keeps today's fallback exactly as before; a node
+            # that DOES carry them is no longer overwritten.
+            "read_scope": [], "role": "builder",
+            "risk_class": node.get("risk_class") or "normal",
+            "attempt": node.get("attempt") or 1, "prior_failure_note": ""}
+    # ORCH-02: the remaining routing metadata (task_class, worker_profile,
+    # review_profile, evidence_obligation, the two retry counts,
+    # leaf_worker_only), carried through only when the node actually has
+    # it, so a caller that spawns a node without any of this still gets
+    # the exact unit shape it got before this change.
+    for field in ("task_class", "worker_profile", "review_profile",
+                 "evidence_obligation", "max_outer_attempts",
+                 "max_repair_attempts", "leaf_worker_only"):
+        if field in node:
+            unit[field] = node[field]
 
     # PARITY BLOCKER P0.3, and the directive is explicit that this is a WIRING
     # job rather than a building one: the mechanism already existed with its own
@@ -726,6 +744,87 @@ try:
 except Exception:  # noqa: BLE001
     unit_trace = None
 
+# ORCH-25: optional import, UNLIKE every sibling above. claim_store,
+# worktree_lane, scope_audit, unit_trace and load_reservation all read a
+# failed import as "keep the old behaviour" because each is an added safety
+# net on top of a dispatch path that already worked without it. lane_router
+# is not a net, it IS "no dispatch without a declared lane, model and
+# effort" (ORCH-25's own law, carried into this build by TOKEN-01/JEV-06):
+# a run that cannot import the one thing enforcing that law must not fall
+# back to dispatching anyway, so LaneWorker.run() below reads
+# lane_router is None as an immediate refusal, never as permission to spawn
+# unrouted the way it used to.
+try:
+    import lane_router
+except Exception:  # noqa: BLE001
+    lane_router = None
+
+# LOAD-01: optional, exactly like claim_store/worktree_lane/scope_audit/
+# unit_trace above. load_reservation.py (ORCH-34) is not yet copied into
+# bundle/runtime, so a bundled copy of this file imports it and gets None;
+# LaneWorker.run() below reads that as "keep the old behaviour", never a
+# crash. See LaneWorker.run()'s own comment at the call site for why this
+# is the one caller: it is the only place in this estate that starts a
+# process for exactly one unit (see _run()'s own docstring).
+try:
+    import load_reservation
+except Exception:  # noqa: BLE001
+    load_reservation = None
+
+# LOAD-02: same optional treatment, same reason. load_reservation.py already
+# imports machine_reservation itself, but this module reads the reservation
+# STORE directly (main() below, before constructing LaneWorker) to confirm
+# THIS run's own holder name is the one currently live, so a second,
+# uncoordinated run never free-rides on the first run's reservation. A
+# missing module here means main() below never resolves a reservation, and
+# LaneWorker defaults to None exactly as it did before this round of wiring.
+try:
+    import machine_reservation
+except Exception:  # noqa: BLE001
+    machine_reservation = None
+
+#: The observable CAPABILITY-DECLARATIONS.json names for load-reservation:
+#: "docs/plan/LOAD-REFUSALS.jsonl". Built from __file__ so it resolves to
+#: the same file regardless of a lane worker's own cwd, never the caller's
+#: relative idea of "docs/plan".
+#:
+#: BROTHER_LOAD_REFUSALS_LOG overrides it, read once here at import, for the
+#: same reason MACHINE_RESERVATION_PATH in brother_run.py takes the same
+#: kind of override: this module runs in-process inside a real, subprocess-
+#: spawned brother_run.py (see that constant's own comment), where an
+#: in-process test patch of this attribute never applies. Real production
+#: use never sets it and gets the real, fixed path unchanged.
+LOAD_REFUSALS_LOG = os.environ.get(
+    "BROTHER_LOAD_REFUSALS_LOG") or os.path.join(
+        HERE, "..", "docs", "plan", "LOAD-REFUSALS.jsonl")
+
+
+def resolve_own_reservation(reservation_path, reservation_holder):
+    """The raw reservation record (the same dict machine_reservation stores
+    under data["holder"]) that THIS process's own --reservation-holder
+    currently, genuinely holds, or None.
+
+    Read FRESH on every call, never trusted from a caller's own claim: the
+    lease could have expired or been reclaimed between brother_run.py's
+    acquire() and whichever round calls this. `held` is honoured ONLY when
+    its own holder name matches `reservation_holder` exactly, so a live
+    reservation belonging to a DIFFERENT run (a second, uncoordinated
+    brother_run process contending for the same machine-wide record) is
+    never mistaken for this run's own and never admits that run's dispatch.
+
+    None on any of: reservation_path or reservation_holder not given,
+    machine_reservation not importable, the store missing/unreadable, or a
+    live holder whose name does not match. All of these are the same
+    outcome for a caller: "this run holds no reservation right now"."""
+    if machine_reservation is None or not reservation_path or not reservation_holder:
+        return None
+    data, _problem = machine_reservation._read(reservation_path)
+    held = data.get("holder") if isinstance(data, dict) else None
+    if held and held.get("holder") == reservation_holder:
+        return held
+    return None
+
+
 MAX_IN_FLIGHT = 3
 
 
@@ -774,10 +873,18 @@ class LaneWorker(object):
     cycle; importing it lazily inside the one method that needs it is the
     standard way out of that without inventing a third module."""
 
-    def __init__(self, spawn_module, argv, environ=None):
+    def __init__(self, spawn_module, argv, environ=None, reservation=None):
         self._spawn, self._argv, self._environ = spawn_module, list(argv), environ
         self._budgets = {}
         self._refusals = {}
+        # LOAD-02: the raw reservation record (the same shape machine_
+        # reservation stores under data["holder"]), or None when this run
+        # holds none. Resolved ONCE per round by main() below (never
+        # per-unit) and handed in here unchanged; load_reservation.admit()
+        # reads its liveness against the real clock on every call, so a
+        # reservation whose lease has since expired is read as not-held
+        # without this object ever needing to be refreshed mid-round.
+        self._reservation = reservation
 
     def replay_refusal(self, unit_id):
         return self._refusals.get(unit_id)
@@ -789,6 +896,16 @@ class LaneWorker(object):
         interrupted process did not write, so it must not replay that unit.
         Rate-limit parking spends no attempt; only worker execution consumes
         the time allowance, not time parked waiting for a provider reset.
+
+        LOAD-01: this is the one place in this estate that starts a process
+        for exactly one unit (see _run()'s own docstring below), so it is
+        where load_reservation.admit() (ORCH-34) is asked before anything
+        else runs, never after: a refusal here costs no budget, no attempt
+        and no worker spawn. A missing load_reservation or resource_gate
+        (either failed to import, see the module-level try/except above)
+        is read as "the gate cannot run", never as "admit": the old
+        behaviour (no gate) is what runs in that case, not a crash and not
+        a silent admit dressed up as the old behaviour being something else.
         """
         uid = str(unit.get("unit_id") or "")
         root = journal.run_dir_from_env()
@@ -801,6 +918,58 @@ class LaneWorker(object):
                       "note": "failure_class=%s; %s" % (failure, why)}
             self._refusals[uid] = result
             return result
+        # ORCH-25: checked first, before load_reservation and before any
+        # budget/attempt is spent, because a unit with no declared lane has
+        # nothing to admit a resource reservation FOR. Unlike the resource
+        # gate below, a missing lane_router import is refused rather than
+        # read as "the gate cannot run" (see the module-level import above):
+        # an unknown blocks here, it is never read as permission to spawn.
+        # WHERE THE DECLARATION LIVES (orchestrator, 2026-09-18): a unit
+        # from a WBS declares its lane through task_class; a unit from the
+        # product's own planner (door.py) or a roadmap row carries none, and
+        # its lane is the run-level worker command the operator named
+        # explicitly. Refusing those would refuse every real user run
+        # (measured: 30 of 279 brother_run tests went red), so a class-less
+        # unit runs on that declared command and is never re-routed by
+        # guesswork. A DECLARED class must route cleanly or the unit holds.
+        task_class = unit.get("task_class")
+        if task_class and lane_router is None:
+            return held("lane_router (ORCH-25) could not be imported; refusing rather "
+                        "than dispatching a declared task_class unrouted")
+        if task_class:
+            try:
+                lane = lane_router.route_lane(
+                    task_class, unit.get("risk_class", "medium"),
+                    unit.get("content_class"), checker=unit.get("checker"))
+            except ValueError as exc:
+                return held("lane_router refused task_class %r: %s" % (task_class, exc))
+            if not lane.draft:
+                # The one task class lane_router itself names no draft model
+                # for is "verification" (deterministic check only, by design:
+                # see lane_router's own VERIFY constant). LaneWorker spawns a
+                # model worker for exactly one unit, so a route result naming
+                # no model here is the same fact ORCH-25 names as "a missing
+                # model/effort in the route result": there is nothing for this
+                # spawner to run.
+                return held("lane_router named no model for task_class %r (route reason: %s)"
+                            % (task_class, lane.reason))
+        if load_reservation is not None:
+            # LOAD-02: self._reservation is the raw record main() (brother_
+            # run.py) acquired for THIS run and handed down through
+            # loop_bridge.main()'s --reservation-path/--reservation-holder,
+            # already confirmed there to be live and to name THIS run's own
+            # holder (never another run's), or None when this run holds
+            # none (never acquired, lost a contention race, or the store
+            # was unreadable). Passing anything else here would let a
+            # second, uncoordinated run free-ride on a reservation it never
+            # earned.
+            reading = resource_gate.read()
+            verdict = load_reservation.admit(
+                {"kind": "battery", "name": uid}, reading, self._reservation,
+                log_path=LOAD_REFUSALS_LOG)
+            if verdict["verdict"] == load_reservation.REFUSE:
+                return held("; ".join(verdict["reasons"]) or
+                            "load_reservation refused this dispatch")
         def save(state):
             if path:
                 os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -1761,6 +1930,18 @@ def main(argv=None):
     ap.add_argument("--null-worker", action="store_true",
                     help="claim and release without doing work, for proving the "
                          "claim path itself")
+    # LOAD-02: the caller (brother_run.main) already acquired the ONE
+    # machine-wide reservation for this whole run, once, outside this call.
+    # Both are required together to resolve a reservation; either alone
+    # (or neither) leaves LaneWorker with reservation=None, the same as
+    # before this round of wiring existed.
+    ap.add_argument("--reservation-path", dest="reservation_path",
+                    help="the machine-wide reservation store this run's own "
+                         "reservation, if any, lives in")
+    ap.add_argument("--reservation-holder", dest="reservation_holder",
+                    help="the holder name this run acquired the reservation "
+                         "under; only a live record under THIS name is ever "
+                         "honoured, never another run's")
     # FX-A, the two halves of the session route. --handoff claims the batch,
     # opens its lanes and STOPS, writing the file that names them; --lanes
     # reads that file back in a later process and runs the round over the
@@ -1911,14 +2092,18 @@ def main(argv=None):
             return 2
 
     default_worker_cmd = [sys.executable, os.path.join(HERE, "model_worker.py")]
+    reservation = resolve_own_reservation(args.reservation_path,
+                                          args.reservation_holder)
     if args.lanes:
         # The session already did the work; this commits it and nothing else.
         worker = SessionWorker()
     elif args.null_worker:
-        worker = LaneWorker(parts["spawn"], [sys.executable, "-c", "pass"])
+        worker = LaneWorker(parts["spawn"], [sys.executable, "-c", "pass"],
+                            reservation=reservation)
     else:
         worker = LaneWorker(parts["spawn"],
-                            args.worker_cmd or default_worker_cmd)
+                            args.worker_cmd or default_worker_cmd,
+                            reservation=reservation)
 
     # D5: nothing renewed this bridge's own claims on the standalone path.
     # brother_run.run_loop guards its ONE blocking call into loop_bridge.main()

@@ -19,7 +19,7 @@
   },
   {
    "path": "brother_run.py",
-   "sha256": "ba966914c437d4e99582fcc5951dff191a250e9bbc5855aca3d5eac57a12764a"
+   "sha256": "370ad9a2cadcfbc9bf35c7a7a8cc4898815aa006f4b0a7bef57cf02a446f64f5"
   },
   {
    "path": "claim_store.py",
@@ -46,6 +46,10 @@
    "sha256": "a28ba56599474f0c3c144069353b7a57ac961a8cac00d0b1c57f2f6011578204"
   },
   {
+   "path": "evidence_obligation.py",
+   "sha256": "c2f931bda0297c69823906074250454da92fc16b1e740e59f32ecc449d9d3168"
+  },
+  {
    "path": "fable_authority.py",
    "sha256": "f10077ad0aa68223a76dc198140e7c07883bd4ea31c991a9b255a7e6b2a04e73"
   },
@@ -63,7 +67,7 @@
   },
   {
    "path": "graph_loop.py",
-   "sha256": "db4956602b3557ea1541d913caedfadc72d6c9a6f29191f473bc12c2c1b7d715"
+   "sha256": "7f49af748e04ed1281a0b0631e79a5830ea91deeaae5c798d018c4c7439381b8"
   },
   {
    "path": "host_capability.py",
@@ -71,7 +75,15 @@
   },
   {
    "path": "integrate.py",
-   "sha256": "4162e7c96c9beb6529ce070eb0bd095d3979f4db989a9c59046a8b45ae40bf6e"
+   "sha256": "7948620f5f637a77d7592e6b1c2c764f89d8ae1a18ae05eb5faf744b84086514"
+  },
+  {
+   "path": "jev_calibration.py",
+   "sha256": "44228822f1a433e4802b29f45c80d20378cd863452751b2846dea91eeca28490"
+  },
+  {
+   "path": "jev_cascade.py",
+   "sha256": "1893b91a6d1e7b6d611a9ca7aebf629834adb645f80d946e60e12293a7c076cd"
   },
   {
    "path": "journal.py",
@@ -82,12 +94,24 @@
    "sha256": "d4b84bbc6ffb93405c9fc3cd7e7f780701a18922f3093628adbc43efcbf710b4"
   },
   {
+   "path": "lane_router.py",
+   "sha256": "cc2646d89928dd3d3880fa446f64d500980dc11f4b708bcbf2634b85b01ca106"
+  },
+  {
+   "path": "load_reservation.py",
+   "sha256": "4dc22e12850d9f7e3f9fa62991814cd4f8ba276c8f13b47aeb04f79d12c8a51f"
+  },
+  {
    "path": "loom.py",
    "sha256": "a140645772cc9c8f5011e08bcbd4eb593ca1871c139813b0b05579a813c284da"
   },
   {
    "path": "loop_bridge.py",
-   "sha256": "efcc848aa10b1b707a5b259c7d9f147d6934c84846bef226ed6cc14af3bb7bbc"
+   "sha256": "fedf6c9e6868e1b8b609eae0703b456df47776c065053226bdb2aa133b7eed06"
+  },
+  {
+   "path": "machine_reservation.py",
+   "sha256": "dd5329971c6da01cd9b3fcda0f8d2c890cbe2692b5e1a7800f6dc1fae50be5b7"
   },
   {
    "path": "managed_safety.py",
@@ -103,11 +127,15 @@
   },
   {
    "path": "model_worker.py",
-   "sha256": "3410833ac7962e18bac783fff55b99de49fba99290656e5de0661fd884505520"
+   "sha256": "f81239f4a44cb9de133e818f1d0f454828f993d1a5ac7a427f6d1be1a100523a"
   },
   {
    "path": "native_evidence.py",
    "sha256": "33304685b0ae23226f2b152f5447bcb9e5ded92b7fcfa48d487e8c871bd3dc4e"
+  },
+  {
+   "path": "orchestrator_invariants.py",
+   "sha256": "3616cdfceeefaa90b9262f68336440454a5e88d97a3ad45e54d89efd2a15568a"
   },
   {
    "path": "outcome-contract-v1.json",
@@ -199,7 +227,7 @@
   },
   {
    "path": "work_record.py",
-   "sha256": "d36c6e56c0f4f5feda92710c5e18f73d35fe4c8bc2449f2c7ef9254c6a912625"
+   "sha256": "9b4ea5a55de961721fa287fbc0f9c4cee7e6018d6a9788b6f3bcf8df0d6283eb"
   },
   {
    "path": "worktree_lane.py",
@@ -207,6 +235,6 @@
   }
  ],
  "generated_by": "scripts/bundle_runtime.py",
- "source_describe": "v1.0.17-110-gc0b9b9d4f",
- "source_revision": "c0b9b9d4f9a8bca36bae07a25cd845460f0f224f"
+ "source_describe": "v1.0.17-162-g8c37c6f7d-dirty",
+ "source_revision": "8c37c6f7dbf043d67af39d65949704ff8893abc5"
 }

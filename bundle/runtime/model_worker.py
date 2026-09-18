@@ -131,6 +131,23 @@ def build_prompt(brief):
         attempt_n = 1
     prior_note = brief.get("prior_failure_note") or ""
     recalled = brief.get("recalled_lesson") or ""
+    # ORCH-02: RECEIVING a routing field and EXPRESSING it in the prompt are
+    # two different things. A brief can carry risk_class, task_class, and
+    # the rest all the way from work_record through graph_loop and
+    # loop_bridge and still never reach the model, because nothing here
+    # ever rendered them: they arrived on this function's own `brief`
+    # argument and were simply never read. Read the same defensive way as
+    # every other field above (a missing key costs a blank, not a crash),
+    # and rendered only when present so a brief without them produces the
+    # exact prompt this function produced before this change.
+    risk_class = brief.get("risk_class") or ""
+    task_class = brief.get("task_class") or ""
+    worker_profile = brief.get("worker_profile") or ""
+    review_profile = brief.get("review_profile") or ""
+    evidence_obligation = brief.get("evidence_obligation") or ""
+    max_outer_attempts = brief.get("max_outer_attempts")
+    max_repair_attempts = brief.get("max_repair_attempts")
+    leaf_worker_only = brief.get("leaf_worker_only")
 
     lines = [
         "You are the worker for one unit of a graph-loop run.",
@@ -153,6 +170,25 @@ def build_prompt(brief):
         lines.append("Done check (must pass when you are finished): %s" % done_check)
     if notes:
         lines.append("Notes: %s" % notes)
+    if task_class:
+        lines.append("Task class: %s" % task_class)
+    if risk_class:
+        lines.append("Risk class: %s" % risk_class)
+    if evidence_obligation:
+        lines.append("Evidence obligation: %s" % evidence_obligation)
+    if worker_profile:
+        lines.append("Worker profile: %s" % worker_profile)
+    if review_profile:
+        lines.append("Review profile: %s" % review_profile)
+    if max_outer_attempts is not None:
+        lines.append("Max outer attempts for this unit: %s" % max_outer_attempts)
+    if max_repair_attempts is not None:
+        lines.append("Max repair attempts for this unit: %s" % max_repair_attempts)
+    if leaf_worker_only:
+        lines.append(
+            "This unit is leaf-worker-only: do not spawn another coding "
+            "agent to do any part of it."
+        )
     if attempt_n > 1 or prior_note:
         lines.append("")
         lines.append("This is attempt %d. A previous attempt on this exact "

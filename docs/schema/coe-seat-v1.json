@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "coe-seat-v1",
+  "title": "Brother 1.0.20 Council of Experts seat",
+  "description": "COE-01. One declared expert profile in the Council of Experts seat registry (docs/plan/COE-SEATS.json): what problem attributes it owns, what it costs to dispatch, and which of the twelve scoring criteria it is authoritative on (docs/plan/COE-SUBSYSTEM-WBS.md section 2). Seats are DATA, never code, so a seat can be added later without editing scripts/coe_nominate.py's (COE-02) nomination logic. owns_attributes is deliberately NOT enum-constrained here: the closed set of attributes a seat may own (scripts/coe_registry.py's KNOWN_ATTRIBUTES) is checked by that module at load time instead, because a new attribute can be taught to the registry there without bumping this schema. authoritative_on and effort ARE enum-constrained here, because the twelve criteria and the effort tiers are fixed vocabulary this estate already owns; scripts/test_coe_registry.py asserts these two enums equal scripts/coe_registry.py's own KNOWN_CRITERIA and KNOWN_EFFORTS, so the schema and the module can never drift apart silently, mirroring docs/schema/orchestrator-task-v1.json's TestEnumsMatchInvariants pattern. scripts/orchestrator_protocol.py enforces this file generically, exactly as it already enforces orchestrator-task-v1.json: it is reused here, never reimplemented.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "owns_attributes",
+    "model",
+    "effort",
+    "outside",
+    "cost_class",
+    "authoritative_on"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Stable identifier for this seat, unique within the registry, for example architect or bulk-classifier. Duplicate ids across the registry are refused by scripts/coe_registry.py at load time, not by this schema: the keyword subset scripts/orchestrator_protocol.py implements has no cross-item uniqueness check."
+    },
+    "owns_attributes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "The problem attributes this seat is nominated for, for example privacy or theatre-resistance. Never empty: a seat owning nothing is nominated for nothing and nobody would notice (COE-SUBSYSTEM-WBS.md rule D2). Checked against scripts/coe_registry.py's KNOWN_ATTRIBUTES closed set at load time; an attribute outside that set fails the whole registry to load, and the error names the attribute and the seat."
+    },
+    "model": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The model this seat is dispatched on: opus, sonnet, or an outside model's catalog id, or the literal placeholder 'an outside model' for a seat whose exact outside model is chosen at nomination time. Deliberately NOT an enum: an outside model's id comes from a catalog that changes (CLAUDE.md's OpenRouter section notes model availability and prices can change), so a fixed enum here would need editing every time a provider renames or retires a model, which is exactly the coupling this registry exists to avoid. An empty model string is refused by minLength, which is how the 'a seat whose model field is empty' edge case is handled: as an ordinary schema violation, not a special case."
+    },
+    "effort": {
+      "enum": ["minimal", "low", "medium", "high", "xhigh"],
+      "description": "Must equal scripts/coe_registry.py's KNOWN_EFFORTS: this estate's effort tiers (CLAUDE.md's model consumption cap, and the --effort values scripts/or_ask.py's bridge accepts). An unrecognised value is refused, never silently read as the estate's usual default of high."
+    },
+    "outside": {
+      "type": "boolean",
+      "description": "True when this seat runs on a model outside this vendor. An outside seat may only be nominated once its content has passed the privacy scan in the same process, before the call (COE-03, not this unit); this field only records the fact of being outside, it does not itself gate anything."
+    },
+    "cost_class": {
+      "enum": ["low", "medium", "high"],
+      "description": "This seat's relative per-call dispatch cost tier, read by this subsystem's own C7 (observability, measured cost) criterion and by COE-06/COE-07 later. An unrecognised value is refused rather than defaulted, matching this schema's other enums."
+    },
+    "authoritative_on": {
+      "type": "array",
+      "items": {
+        "enum": ["C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9", "C10", "C11", "C12"]
+      },
+      "description": "The criteria this seat's score cannot be outvoted on (COE-SUBSYSTEM-WBS.md rule A3). May be empty: a seat such as adversary-outside is nominated for model-family diversity rather than for fixed authority over one criterion, and holds no entry here. A typo such as C13, or a value carrying stray whitespace such as 'C5 ', is refused by the enum match, never matched loosely."
+    },
+    "notes": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional free text for a power or nuance the fixed fields above cannot carry: for example security's veto over content leaving the machine, or bulk-classifier's population-count capability, which is outside the twelve criteria. Never load-bearing for any check in this build: a check that needed to read notes to pass would mean the fact belonged in a typed field instead."
+    }
+  }
+}
