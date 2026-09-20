@@ -6,6 +6,12 @@ A typed answer can still be wrong. In Brother, use Jev only for the work assigne
 
 Jev is TypeSafe's decision model. Give it a state and questions with defined answer types; it returns decisions and probabilities. The vendor documentation describes text input, including strings, JSON objects and arrays. Jev does not write code, replies or explanations. It is not an agent: your software keeps control of actions and side effects.
 
+The current registry is `data/jev-registry.json`. It has 117 use cases. `scripts/jev_registry.py` is the only registry loader and lint path: `jev_registry.callable()` refuses an unknown id, a `MUST_NOT` row, a `must_stay_on_machine` row, or any row with lint findings before a call can proceed. Treat a clean registry row as a prerequisite for every seam, not as a check a call site may reproduce locally.
+
+Every seam calls `scripts/jev_seam.py`'s `consult()` helper. Its modes are `off`, `shadow`, `advise` and `act`. An entry not present in `data/jev-seams.json` is `off`, and the checked-in `modes` object is empty, so Jev is off by default. The helper reads risk only from the resolved registry row. It never accepts a caller-supplied risk override.
+
+The decision and outcome ledger is stored at `<state>/ledger`, where `<state>` is `BROTHER_JEV_STATE_DIR` when set and otherwise `~/.brother/jev`; the canary reset marker and run history are `<state>/canary-reset.json` and `<state>/canary-state.json`. Runtime state lives there so it never dirties a checkout. The seam writes a unique decision id only when a usable decision is actually appended to `<state>/ledger/decisions.jsonl`. It samples 0.05 of eligible confident decisions for audit. A choice close to its calibrated threshold, within 0.1, is asked again with the option order reversed; disagreement is `NO-DATA`. A choice or score answer named `unknown`, or a noul probability in `[0.2, 0.8]`, is an abstain and never acts. The seams configuration is cached in-process per path for 1.0 seconds, then refreshed when its file modification time changes.
+
 Brother's decision record specifies OpenRouter's decisions endpoint. The chat endpoint refuses Jev, and a chat bridge can silently substitute another model. Brother's decision path must never accept that substitution as a Jev answer. The vendor digest documents the native API but does not establish the OpenRouter request contract, so do not treat the examples below as complete OpenRouter requests.
 
 ## The three question types
@@ -44,7 +50,7 @@ Use `score` for an ordered scale. Its answer is a probability-weighted position 
 ```json
 {
   "type": "score",
-  "instructions": "How frustrated is the customer?",
+  "instructions": "How urgent is the request?",
   "criteria": ["Calm", "Frustrated", "Very angry"]
 }
 ```
@@ -66,6 +72,38 @@ Follow the assignments in DECISION.md. The measured reasons below come from EVAL
 **Do not predict routing from a specification (task C).** No judge beat the always-majority baseline of 68% (n=22). Jev scored 55% (n=22), its repeat 64% (n=22), Muse 64% (n=22), and DeepSeek 38% (n=13 answered). Verify the work after it is built.
 
 Batch questions about a shared state into a call. The gate-line result above supports that assignment, and the cost figures below show the measured cost difference. Record the question type and framing: the vendor reports different probabilities for equivalent `noul` and `choice` questions. Never pool their calibration records or transfer a threshold between them.
+
+## How to add a seam
+
+Add one row to `data/jev-registry.json` with the question, role, risk, privacy and wave fields required by `scripts/jev_registry.py`. Give a `choice` or `score` row an option named `unknown`; keep the row's question type and options aligned with the registry loader. The registry has one source of truth for lint findings, and that lint gates every call.
+
+Add one guarded call site that passes the registry, state, current answer, seam configuration and ledger directory to `scripts/jev_seam.py`'s `consult()`. The call site must use `SeamResult.answer`, which remains the current answer unless the effective mode is `act` and the cascade returns `ACT`. Leave the new id absent from the `modes` object in `data/jev-seams.json`, so it is `off` by default.
+
+A shadow or advise call runs on a background thread and does not wait for its own ledger write. In an ordinary long-running process this costs nothing: the thread finishes before the process ever exits, and `jev_seam.py` also registers one `atexit` hook (`_atexit_drain()`) that catches an in-flight call automatically, sized to how long that call could still legitimately take, not a fixed instant. A call site in a process that exits right after its own calls, such as a short CLI whose whole job is to dispatch a few calls and print an answer, does not need to call `drain()` itself for this reason alone: the `atexit` hook already covers it. Call `jev_seam.drain()` directly only when the call site wants its own calls' ledger rows to be visible before it does something else that depends on the ledger, such as reading back a row it just wrote.
+
+The four tests for a new seam are: the row is lint-clean and callable; `off` makes no Jev call; `shadow` leaves the current answer unchanged; and `act` changes the answer only when the cascade returns `ACT`. Keep these tests beside the existing seam tests in `scripts/test_jev_seam.py`.
+
+## How to switch a seam to shadow
+
+After the guarded call site and its tests exist, add the exact registry id to the `modes` object in `data/jev-seams.json` with the value `shadow`. In shadow, Jev is asked and its record is written when usable, but the caller still receives its current answer. `advise` also leaves the answer unchanged, while allowing the caller's own interface to display the Jev record.
+
+The enablement gate unit A0.8 (a bounded, non-blocking call with a hard deadline; a daily call budget and a consecutive-failure breaker; ledger rotation; and canary-fail-means-off for every mode, not only shadow) has landed. Switching any seam on, including to `shadow`, is still a separate, later decision made through the `modes` object in `data/jev-seams.json`; until that decision is made, every seam stays `off`.
+
+## How a family earns acting alone
+
+Acting alone is a two-key decision. `scripts/jev_cascade.py` first needs a Wilson lower bound from `scripts/jev_calibration.py` that meets the risk target with at least 20 joined decision and outcome pairs. The targets are 0.90 for `low`, 0.95 for `medium` and 0.98 for `high`; `critical` never acts automatically.
+
+The family also needs a founder-signed record in `data/jev-promotions.jsonl` for the exact `family`, `qtype`, `risk_class` and model. This file stays in the repository on purpose so founder-signed promotions remain reviewable in git. The latest matching record by append order wins, not the `signed_at` timestamp. Every promotion record also carries a `review_by` date: once that date has passed, the promotion stops being active on its own, with no revoke needed, so a signed promotion can never be forgotten and silently keep authorizing action forever. A revoke, an expired `review_by`, a model mismatch, a missing record or a stale bound escalates. A corrupt promotion record, including one missing `review_by` entirely, escalates as well. A ledger anomaly makes the calibration threshold unavailable, so it withholds acting even if the clean-looking rows would otherwise qualify.
+
+Ledger reliability itself is checkable on its own, independent of any one family: `scripts/jev_calibration.ledger_reliability(decisions_path, outcomes_path)` returns whether the ledger is currently readable and free of corrupt lines, and `python3 scripts/jev_canary.py --ledger-status` runs it as a PASS or FAIL check against the real ledger path, writing the same reset marker the drift canary uses on FAIL.
+
+An abstain never acts. Answers outside the declared options are refused by `scripts/jev_decide.py`; the option order is preserved in the request sent to the model, including the reversed order used by the near-threshold probe. If the cascade does not return `ACT`, the seam returns the existing answer.
+
+## What the canary does
+
+`scripts/jev_canary.py` selects a fixed golden set of 40 items from tasks A, B and D, sends them through the pinned model `typesafe/jev-1.13-20260917`, and checks accuracy and Brier score against the recorded baseline. The default tolerances are 0.05 for accuracy and 0.05 for Brier score. A model id change fails immediately. Accuracy or Brier degradation must occur for 2 consecutive runs to fail; persistent `NO-DATA` fails after 3 consecutive runs. A too-small scored sample, below 0.9 of the baseline count, is `NO-DATA`.
+
+On drift failure, the canary writes `<state>/canary-reset.json`. While that marker exists, every seam behaves as `off` on the next call, for every configured mode including `shadow` -- no call to Jev at all, since even watching still means calling. The canary run history is stored at `<state>/canary-state.json`. A normal pass does not clear the marker. Only `--record-baseline` clears the marker after recording a fresh baseline.
 
 ## When never to use it
 
@@ -125,7 +163,7 @@ Batch costs are amortized across the answered items. Accounting also differs: Je
 
 DECISION.md requires every payload to pass the content gate before leaving the machine. Send only generalized content. The evaluation used role-worded prompts without repository source, file paths, product names or company names.
 
-DOCS-DIGEST.md records TypeSafe's statements that customer requests and responses are not used to train Jev, and that customer data is not used for fine-tuning or LoRA adaptation. It describes zero data retention as available to enterprise customers by arrangement.
+DOCS-DIGEST.md records TypeSafe's statements that submitted requests and responses are not used to train Jev, and that submitted data is not used for fine-tuning or LoRA adaptation. It describes zero data retention as available by enterprise arrangement.
 
 Non-enterprise retention is unstated. The fetched documentation is also silent on processing and storage regions and on other internal uses of logged traffic, including product improvement apart from training. The digest did not fetch or verify the linked legal agreements. It does not establish that native API data-handling terms apply unchanged through OpenRouter. Keep those gaps visible when deciding what may leave the machine.
 
@@ -147,6 +185,6 @@ INDEPENDENT-EVIDENCE.md rates the outside evidence as moderate. It records shipp
 
 ## Verify the result
 
-Observe the outcome after the work runs. Join it back to the decision, confidence and framing in the ledger. Use that evidence to review the authorized band; prior results cannot prove behavior on work that has not happened yet.
+Observe the outcome after the work runs. Join it back to the decision, confidence and framing in the ledger. Use that evidence to review the authorized band; prior results cannot prove behavior on work that has not happened yet. Naming the decisions ledger when the outcome is recorded (`jev_calibration.append_outcome(..., decisions_path=...)`) is required: it refuses to label an id that was never written, which keeps a mislabel from disabling calibration for the whole family.
 
-Evidence: docs/decisions/jev-calibrated-decisions-2026-09-18.md; benchmarks/jev_eval/README.md; benchmarks/jev_eval/SCORES-gate-0.9.txt; benchmarks/jev_eval/SCORES-gate-0.8.txt; benchmarks/jev_eval/research/DOCS-DIGEST.md; benchmarks/jev_eval/research/INDEPENDENT-EVIDENCE.md.
+Evidence: docs/decisions/jev-calibrated-decisions-2026-09-18.md; benchmarks/jev_eval/README.md; benchmarks/jev_eval/SCORES-gate-0.9.txt; benchmarks/jev_eval/SCORES-gate-0.8.txt; benchmarks/jev_eval/research/DOCS-DIGEST.md; benchmarks/jev_eval/research/INDEPENDENT-EVIDENCE.md; scripts/jev_registry.py; data/jev-registry.json; scripts/jev_seam.py; scripts/jev_cascade.py; scripts/jev_calibration.py; scripts/jev_decide.py; scripts/jev_canary.py.

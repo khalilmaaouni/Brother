@@ -64,6 +64,8 @@ PAIRS = {
     "scripts/test_codex_hooks_install.py": "scripts/test_cursor_plugin.py",
     "scripts/codex_product_skills.py": "scripts/cursor_plugin_install.py",
     "scripts/test_codex_product_skills.py": "scripts/test_cursor_plugin.py",
+    "scripts/codex_parity.py": "scripts/cursor_parity.py",
+    "scripts/test_codex_parity.py": "scripts/test_cursor_parity.py",
 }
 
 EXEMPT = {
@@ -76,10 +78,7 @@ EXEMPT = {
     "scripts/test_orchestrator_codex.py": "tests the ORCH-06 orchestrator adapter, where Codex is an outside model the orchestrator calls for its execution role, not a client install surface; Cursor has no counterpart role to be at parity with",
 }
 
-DEBT = {
-    "scripts/codex_parity.py": ("DOM-50.05 reports Codex portability gaps through adapter_conformance; the suite has no cursor provider yet, so the Cursor twin waits on DOM-50.06 (a Cursor adapter plus the founder's signed-in canary)", "1.0.21"),
-    "scripts/test_codex_parity.py": ("tests for DOM-50.05; its Cursor twin arrives with the same DOM-50.06 adapter", "1.0.21"),
-}
+DEBT = {}
 
 BATTERY_PAIRS = {
     "codex-battery-self": "cursor-battery-self",

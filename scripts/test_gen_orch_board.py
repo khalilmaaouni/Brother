@@ -4,6 +4,7 @@ The whole point of this board is that a DONE with no evidence never counts as
 finished. Every test here is written so it would fail if tick_class collapsed
 to a constant, or if counts() folded a claim into the done bucket.
 """
+import contextlib
 import io
 import json
 import os
@@ -303,6 +304,174 @@ class SpendLineNeverReadsAsFree(unittest.TestCase):
         self.assertIn('NO-DATA', G.spend_line({'tokens': 'lots'}))
         self.assertEqual(G.spend_line({'tokens': 0, 'worker': 'x'}), '0 tokens, x')
         self.assertIn('lane not recorded', G.spend_line({}))
+
+
+class CliFlagHandling(unittest.TestCase):
+    """--help must not fall through to the default write path (it used to:
+    the old flag() lookup never recognized --help, so it silently rendered
+    and wrote the default board). An unknown flag must refuse, not run."""
+
+    def _mtime_and_hash(self, path):
+        import hashlib
+        with open(path, 'rb') as fh:
+            data = fh.read()
+        return os.path.getmtime(path), hashlib.sha256(data).hexdigest()
+
+    def test_help_writes_nothing_to_the_real_default_output(self):
+        # Uses the real module-level OUTPUT/BACKLOG paths (the committed
+        # board), since that is exactly the file the unfixed CLI clobbered.
+        before_out = self._mtime_and_hash(G.OUTPUT)
+        before_backlog = self._mtime_and_hash(G.BACKLOG)
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = G.main(['--help'])
+        self.assertEqual(rc, 0)
+        self.assertIn('usage:', buf.getvalue())
+        self.assertEqual(self._mtime_and_hash(G.OUTPUT), before_out)
+        self.assertEqual(self._mtime_and_hash(G.BACKLOG), before_backlog)
+
+    def test_short_help_flag_also_writes_nothing(self):
+        before_out = self._mtime_and_hash(G.OUTPUT)
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = G.main(['-h'])
+        self.assertEqual(rc, 0)
+        self.assertEqual(self._mtime_and_hash(G.OUTPUT), before_out)
+
+    def test_unknown_flag_exits_nonzero_and_writes_nothing(self):
+        before_out = self._mtime_and_hash(G.OUTPUT)
+        before_backlog = self._mtime_and_hash(G.BACKLOG)
+        buf, errbuf = io.StringIO(), io.StringIO()
+        with redirect_stdout(buf):
+            with contextlib.redirect_stderr(errbuf):
+                rc = G.main(['--bogus'])
+        self.assertNotEqual(rc, 0)
+        self.assertIn('unknown flag', errbuf.getvalue())
+        self.assertEqual(self._mtime_and_hash(G.OUTPUT), before_out)
+        self.assertEqual(self._mtime_and_hash(G.BACKLOG), before_backlog)
+
+    def test_red_before_fix_help_used_to_write_the_default_board(self):
+        """Red proof: the pre-fix flag() lookup has no --help case, so
+        --help fell through and wrote OUTPUT/BACKLOG like a normal run.
+        Reproduces that old behavior inline (not by editing the live file)
+        and shows it would have produced a write, which the fixed main()
+        above proves it no longer does."""
+        argv = ['--help']
+
+        def old_flag(name, default):
+            return argv[argv.index(name) + 1] if name in argv and argv.index(name) + 1 < len(argv) else default
+        # The old code had no '--help' in argv short-circuit at all: it went
+        # straight to computing paths and would have opened OUTPUT for
+        # writing. Confirm the flag lookup used to yield the real default
+        # paths for a --help invocation, i.e. nothing stopped the write.
+        self.assertEqual(old_flag('--wbs', G.WBS), G.WBS)
+        self.assertEqual(old_flag('--out', G.OUTPUT), G.OUTPUT)
+        # Meanwhile the fixed main() refuses to reach that code at all.
+        before_out = self._mtime_and_hash(G.OUTPUT)
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = G.main(['--help'])
+        self.assertEqual(rc, 0)
+        self.assertEqual(self._mtime_and_hash(G.OUTPUT), before_out)
+
+
+class TrailingValueFlagWritesNothing(unittest.TestCase):
+    """A value flag with nothing after it (argv ends right there) must exit 2
+    and write nothing. Before the fix, the validation loop advanced i += 2
+    with no bounds check, so the trailing flag was accepted as valid and
+    flag() then silently fell back to the default OUTPUT/BACKLOG paths,
+    overwriting the committed board with whatever the defaults happened to
+    point at."""
+
+    def _mtime_and_hash(self, path):
+        import hashlib
+        with open(path, 'rb') as fh:
+            data = fh.read()
+        return os.path.getmtime(path), hashlib.sha256(data).hexdigest()
+
+    def test_trailing_out_with_no_value_exits_2_and_writes_nothing(self):
+        before_out = self._mtime_and_hash(G.OUTPUT)
+        before_backlog = self._mtime_and_hash(G.BACKLOG)
+        buf, errbuf = io.StringIO(), io.StringIO()
+        with redirect_stdout(buf):
+            with contextlib.redirect_stderr(errbuf):
+                rc = G.main(['--out'])
+        self.assertEqual(rc, 2)
+        self.assertIn('needs a value', errbuf.getvalue())
+        self.assertEqual(self._mtime_and_hash(G.OUTPUT), before_out)
+        self.assertEqual(self._mtime_and_hash(G.BACKLOG), before_backlog)
+
+    def test_trailing_backlog_after_a_valid_flag_also_refuses(self):
+        before_out = self._mtime_and_hash(G.OUTPUT)
+        buf, errbuf = io.StringIO(), io.StringIO()
+        with redirect_stdout(buf):
+            with contextlib.redirect_stderr(errbuf):
+                rc = G.main(['--check', '--backlog'])
+        self.assertEqual(rc, 2)
+        self.assertEqual(self._mtime_and_hash(G.OUTPUT), before_out)
+
+
+class AllAcceptedFlagsStayAccepted(unittest.TestCase):
+    """Every one of --wbs/--status/--out/--backlog/--check must still be
+    accepted. Dropping any one from VALUE_FLAGS or BOOL_FLAGS makes main()
+    refuse it as an unknown flag (exit 2), which this test catches on the
+    real flags rather than through a side effect."""
+
+    def _write_min_sources(self, tmpdir):
+        wbs_path = os.path.join(tmpdir, 'wbs.json')
+        status_path = os.path.join(tmpdir, 'status.json')
+        wbs = {
+            'units': [unit('a', wave=1)],
+            'window': MIN_WBS['window'],
+            'role_map_tonight': MIN_WBS['role_map_tonight'],
+        }
+        status = min_status(units={'a': st('DONE', 'ran it, ok')})
+        with open(wbs_path, 'w', encoding='utf-8') as fh:
+            json.dump(wbs, fh)
+        with open(status_path, 'w', encoding='utf-8') as fh:
+            json.dump(status, fh)
+        return wbs_path, status_path
+
+    def test_wbs_status_out_backlog_and_check_all_still_accepted(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            wbs_path, status_path = self._write_min_sources(tmpdir)
+            out_path = os.path.join(tmpdir, 'out.html')
+            backlog_path = os.path.join(tmpdir, 'backlog.json')
+            argv = ['--wbs', wbs_path, '--status', status_path,
+                    '--out', out_path, '--backlog', backlog_path, '--check']
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = G.main(argv)
+            self.assertNotEqual(rc, 2, 'a real flag was refused as unknown: %r' % buf.getvalue())
+            self.assertFalse(os.path.exists(out_path), '--check must write nothing')
+
+    def test_wbs_status_out_backlog_write_a_real_board_without_check(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            wbs_path, status_path = self._write_min_sources(tmpdir)
+            out_path = os.path.join(tmpdir, 'out.html')
+            backlog_path = os.path.join(tmpdir, 'backlog.json')
+            argv = ['--wbs', wbs_path, '--status', status_path,
+                    '--out', out_path, '--backlog', backlog_path]
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = G.main(argv)
+            self.assertEqual(rc, 0)
+            self.assertTrue(os.path.exists(out_path))
+            self.assertTrue(os.path.exists(backlog_path))
+
+
+class NormalCallMatchesCommittedBoard(unittest.TestCase):
+    """The normal (no-flag) call must still render byte-identical to the
+    board already committed on hub main, proving --wbs/--status/--out/
+    --backlog keep working exactly as before this CLI change."""
+
+    def test_build_from_real_defaults_matches_the_committed_file(self):
+        wbs = G.load(G.WBS)
+        status = G.load(G.STATUS)
+        page = G.build(wbs, status)
+        with open(G.OUTPUT, 'r', encoding='utf-8') as fh:
+            committed = fh.read()
+        self.assertEqual(page, committed)
 
 
 if __name__ == '__main__':

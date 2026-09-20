@@ -246,6 +246,7 @@ PLUGIN_REPOS = {
     'brother': 'Brother',
     'brothermode': 'BrotherModeUp',
     'brothersbe': 'BrotherSBE',
+    'brotherds': 'BrotherDS',
 }
 
 

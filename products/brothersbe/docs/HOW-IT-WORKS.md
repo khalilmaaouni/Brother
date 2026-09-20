@@ -76,6 +76,20 @@ Five completeness rules are mechanical. Four are stated as laws L2 to L5 in
    the artifacts. Without it, the fastest route to a green run was copying seven
    files describing someone else's system and changing nothing.
 
+Before any of the above, `skills/start/SKILL.md` reads the shared vault profile for
+this person and project, `10-Projects/<slug>/Profile.md` under the vault root
+(default the founder's own vault, or the `BROTHERMODE_VAULT` environment variable
+when it is set): a plain text file of dated lines holding role, level, and any
+preference that has been promoted to a default after three repeats, with a hand
+written `correct: <key>: <value>` line always winning. The file itself is owned and
+written by the companion product's own `start` flow (see
+`docs/adr/2026-08-12-where-the-shared-machinery-lives.md`); this product never
+writes it and never calls the companion's tool to read it. Its own standalone
+reader, `tools/bm_profile_reader.py` (`read`, `promoted`), reproduces that file's
+format and precedence rules from its own source, so a fact or a promoted preference
+from a prior BrotherMode session answers a question `start` would otherwise ask,
+and `start` says in one line which question it skipped and why.
+
 ## 2. `tools/sbe_intake.py`: five questions, one tier
 
 Asks the five questions, writes `00-intake.json`, prints the tier and the artifact

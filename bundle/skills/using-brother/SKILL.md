@@ -95,7 +95,9 @@ reaching a decision. Absent evidence is NO-DATA, never a pass.
 
 **Claim verification, BrotherDS.** A decision-grade number is about to be
 stated; the claim registers BEFORE the outcome is known, then scores against
-reality. Experimental, not in the bundle.
+reality. Experimental, in the bundle since 1.0.13; explicit ask only, never
+on a number in ordinary work; the receipt prints Vault context as NO-DATA
+in this release. Routing phrases: verify this claim, claim receipt, can I trust this number, score <claim id> <actual>, show my claims, show the claim ledger.
 
 ## Native mobile and creative work
 

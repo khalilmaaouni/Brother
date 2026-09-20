@@ -46,6 +46,16 @@ silently treated as either fresh or absent.
 
 Exit 0 clean, 1 on stale or malformed findings, 2 NO-DATA on an unreadable
 vault. Stdlib only, writes nothing anywhere. Python 3.9 floor.
+
+THE ONE DOCUMENTED EXCEPTION: _note_type_second_opinion() below (J089, wave-1
+Jev seam, "Vault note type classify") lazily mounts scripts/ (via _jevpath.py,
+since this file lives in products/brothermode/tools/, a different directory)
+and imports jev_checks/jev_seam only inside that one function, only when
+classify() below runs, only for its side effect (a calibration ledger row).
+Every other function in this file stays exactly as free of network,
+subprocess and filesystem writes as always; a caller that never reaches
+classify() pays nothing, and classify() itself pays nothing when jev_checks
+cannot be reached or J089's own mode is off (jev_seam.py's own OFF branch).
 """
 import argparse
 import datetime
@@ -79,6 +89,45 @@ def _frontmatter(text):
 def _note_type(text):
     m = TYPE_RE.search(_frontmatter(text))
     return m.group(1).strip().strip('"').strip("'").lower() if m else ""
+
+
+def _note_type_second_opinion(text, runner=None, rng=None):
+    """J089, wave-1 Jev seam ("Vault note type classify"). Registry:
+    given a note's text, second-opinions its type (lesson, checklist,
+    pattern, gotcha, decision-record, unknown), for the calibration
+    ledger only, immediately after _note_type()'s own regex read of the
+    frontmatter `type:` field directly above -- never before.
+
+    C1: `current_answer` is _note_type(text)'s own real answer, verbatim
+    (registry fail_direction: "unknown keeps the regex's own type
+    guess"); this function never changes it, computes it once, and
+    always returns it unchanged, whatever mode says. Anchor:
+    products/brothermode/tools/bm_vault_staleness.py:84 (this function).
+
+    Fail-open like every other wave-1/2/3 seam call site in this estate:
+    jev_checks/jev_seam live in scripts/, mounted lazily here via
+    _jevpath.mount() (this file lives in products/brothermode/tools/, a
+    different directory) only inside this one function -- see the
+    module docstring's "ONE DOCUMENTED EXCEPTION" note."""
+    current_answer = _note_type(text)
+    try:
+        here = os.path.dirname(os.path.abspath(__file__))
+        if here not in sys.path:
+            sys.path.insert(0, here)
+        import _jevpath
+        if _jevpath.mount():
+            import jev_checks
+            import jev_seam
+            jev_checks.check_vault_note_type(
+                text, current_answer,
+                seams_config=jev_seam.load_seams_config(),
+                registry=jev_seam.load_registry(),
+                ledger_dir=jev_seam.DEFAULT_LEDGER_DIR,
+                runner=runner, rng=rng,
+            )  # C1: return value intentionally discarded, shadow-only by contract
+    except Exception:  # noqa: BLE001  # this seam is advisory only, never worth breaking a real staleness scan
+        pass
+    return current_answer
 
 
 def _parse_date(raw):
@@ -162,7 +211,11 @@ def classify(text, today=None, horizons=None):
     verified, problem = read_verified_at(text)
     if problem:
         return "malformed", None, None, problem
-    days = horizon_days(_note_type(text), horizons)
+    # J089 fires here, once per note classified (real staleness-scan moment,
+    # "per release / per staleness scan"): _note_type_second_opinion()
+    # returns _note_type(text)'s own real answer unchanged, so horizon_days
+    # below sees exactly what it always saw.
+    days = horizon_days(_note_type_second_opinion(text), horizons)
     if days is None:
         return "exempt", verified, None, None
     if verified == NO_DERIVABLE_DATE:

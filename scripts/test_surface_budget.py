@@ -224,7 +224,7 @@ class WhatOneInstallMustProduce(unittest.TestCase):
         m, problem = sb.build_manifest()
         self.assertIsNotNone(m, problem)
         self.assertEqual(m["shipped_plugins"],
-                         ["brother", "brothermode", "brothersbe"])
+                         ["brother", "brotherds", "brothermode", "brothersbe"])
 
     def test_the_manifest_total_is_the_sum_of_its_own_entries(self):
         """A total that is not derivable from the parts it lists is a number

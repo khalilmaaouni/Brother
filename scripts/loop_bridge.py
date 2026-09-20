@@ -402,7 +402,18 @@ def _audit_scope(unit, before, cwd):
 
     NO-DATA when there is no baseline, which is the honest reading of "I could
     not tell" and is deliberately NOT integrable: an unauditable change reaching
-    canonical is the failure this exists to prevent."""
+    canonical is the failure this exists to prevent.
+
+    RESTORED to its pre-Jev shape (opus review, item 1, 2026-09-19): this
+    function used to also pass through detail["changed"] for J117's own
+    use, which meant `record["scope"]` (run_node()'s own output) gained a
+    new key on every unit that changed a file, REGARDLESS of whether any
+    Jev seam was even on -- silently breaking the "byte-identical with
+    every mode off" guarantee this file's own tests prove. The changed-path
+    list J117 needs is now computed separately, only when a mode that
+    needs it is actually live: see _jev_changed_paths() below, which reuses
+    scope_audit.changed_paths() directly rather than reading it back out of
+    this function's return value."""
     if scope_audit is None:
         return {"verdict": "NO-DATA",
                 "reason": "the scope audit module could not be loaded, so nothing "
@@ -413,12 +424,257 @@ def _audit_scope(unit, before, cwd):
                           "not be compared with what was declared"}
     try:
         verdict, detail = scope_audit.audit(unit, before, None, cwd=cwd)
-    except Exception as exc:  # noqa: BLE001  # sbe: allow-silent NO-DATA, not a pass
+    except Exception as exc:  # noqa: BLE001  # sbe: allow-silent the raise becomes the NO-DATA verdict returned below, never a crash
         return {"verdict": "NO-DATA",
                 "reason": "the scope audit raised %s: %s" % (type(exc).__name__, exc)}
     out = {"verdict": verdict, "reason": detail.get("reason", "")}
     if detail.get("undeclared"):
         out["undeclared"] = detail["undeclared"]
+    return out
+
+
+# JEV WAVE-1 SEAMS (J063, J102, J117). The registry is loaded once per
+# process and cached below: a ~120-entry parse-plus-validate is real work,
+# and the registry is tree content that never changes without a restart
+# anyway (jev_seam.load_registry() itself carries no cache of its own for
+# exactly this reason -- a caller is expected to load it once and keep
+# it). The SEAMS CONFIG is a different story: see _jev_seams_config()'s own
+# docstring for the M2 fix (opus review, item 2, 2026-09-19).
+_jev_registry_cache = {"loaded": False, "registry": None}
+
+
+def _jev_registry():
+    """The wave-1 registry, loaded once and cached for the life of this
+    process. None when jev_seam is unavailable or the file failed to
+    load -- never raises."""
+    if _jev_registry_cache["loaded"]:
+        return _jev_registry_cache["registry"]
+    _jev_registry_cache["loaded"] = True
+    if jev_seam is None:
+        return None
+    try:
+        registry = jev_seam.load_registry(jev_seam.DEFAULT_REGISTRY_PATH)
+    except Exception:  # noqa: BLE001  # sbe: allow-silent an unreadable registry leaves every seam unreachable, which is the safe direction
+        return None
+    _jev_registry_cache["registry"] = registry
+    return registry
+
+
+#: Wave-1 entries (J063/J102/J117) and the modes this file is allowed to
+#: actually run them in (the G3 cap removal follow-up). This file is a
+#: long-lived per-unit dispatch loop with no per-unit drain step, so a
+#: blocking mode (advise/act: synchronous, up to
+#: _hard_deadline(seams_config) per call, default 2s, once per changed
+#: path for J117 plus one each for J063/J102) could accumulate blocking
+#: waits across many dispatched units. shadow is async fire-and-forget
+#: (jev_seam.consult() dispatches a background thread and returns
+#: immediately without waiting -- A0.8, m3 fix, Opus rereview4,
+#: 2026-09-19), so it is safe here and is passed through live. A
+#: configured advise/act is DOWNGRADED to shadow here, never silently
+#: honored and never forced all the way to off: the second opinion still
+#: lands in the ledger, and the operator gets a one-time warning that the
+#: blocking mode they asked for was not honored by this file. Any other
+#: value (including "off" and an unrecognised string) resolves to off.
+#: resolve_mode() can therefore only ever see off or shadow for these
+#: three ids, no matter what data/jev-seams.json says.
+_JEV_WAVE1_ENTRY_IDS = ("J063", "J102", "J117")
+_JEV_WAVE1_BLOCKING_MODES = ("advise", "act")
+_jev_enablement_warned = {"done": False}
+
+
+def _jev_seams_config():
+    """The wave-1 seams config for J063/J102/J117, with any configured
+    blocking mode (advise/act) downgraded to shadow (see the module-level
+    comment above for why). Refreshed on every call through jev_seam's
+    own load_seams_config() (M2 fix, opus review, item 2, 2026-09-19): the
+    previous version of this file cached the loaded config once, forever,
+    for the life of the process, so flipping a mode back to off in
+    data/jev-seams.json needed a full loop restart to take effect --
+    exactly the one case a kill switch exists for. load_seams_config()'s
+    own mtime-aware cache (re-stat at most once per second, re-parse only
+    when the mtime actually moved) means this call costs at most one
+    os.stat() -- called once per run_node(), never in a hot inner loop, so
+    that cost is negligible next to spawning a worker (rule 9's own
+    concern is a call site invoked thousands of times a second; this one
+    runs once per unit dispatched). {"modes": {"J063": "off", ...}}
+    whenever jev_seam is unavailable or the file cannot be read -- never
+    raises. Logs once (never once per unit) the first time the real file
+    names one of these ids advise/act, so the downgrade is never silent.
+
+    KNOWN BENIGN RACE (Muse attack, 2026-09-19): the warn-once check
+    (`if downgraded and not _jev_enablement_warned["done"]`) is
+    check-then-act on a plain dict, not a lock. If two run_node() calls
+    ever run this concurrently on the same downgrading config, both could
+    print the warning once each before either sets "done". Effect is a
+    duplicate stderr line only; the fail-safe direction (advise/act never
+    reaching consult() live) is unaffected either way, so this is left
+    unlocked rather than adding synchronization for a cosmetic risk."""
+    resolved = {eid: "off" for eid in _JEV_WAVE1_ENTRY_IDS}
+    if jev_seam is None:
+        return {"modes": dict(resolved)}
+    try:
+        cfg = jev_seam.load_seams_config(jev_seam.DEFAULT_SEAMS_CONFIG_PATH)
+    except Exception:  # noqa: BLE001  # sbe: allow-silent an unreadable config reads as every entry off below, the same safe default as always
+        cfg = {}
+    modes = cfg.get("modes") if isinstance(cfg, dict) else None
+    modes = modes if isinstance(modes, dict) else {}
+    downgraded = []
+    for eid in _JEV_WAVE1_ENTRY_IDS:
+        configured = modes.get(eid, "off")
+        if configured in _JEV_WAVE1_BLOCKING_MODES:
+            downgraded.append((eid, configured))
+            resolved[eid] = "shadow"
+        elif configured == "shadow":
+            resolved[eid] = "shadow"
+        # anything else (including "off" and any typo/unrecognised or
+        # non-string value) resolves to off, the safe default above.
+    if downgraded and not _jev_enablement_warned["done"]:
+        _jev_enablement_warned["done"] = True
+        print("loop_bridge: JEV WAVE-1 SEAMS configured blocking %s, but this "
+              "file is a long-lived dispatch loop with no per-unit drain step, "
+              "so those modes are downgraded to shadow here (async, "
+              "fire-and-forget); set them to shadow explicitly in "
+              "data/jev-seams.json to silence this" % downgraded,
+              file=sys.stderr)
+    capped = dict(cfg) if isinstance(cfg, dict) else {}
+    capped["modes"] = resolved
+    return capped
+
+
+def _jev_changed_paths(before, cwd, seams_config):
+    """The real changed-path list (git diff, never the worker's own
+    account), computed at most ONCE per run_node() call and shared by
+    J117 (a per-path second opinion) and J063 (a whole-list argument) --
+    never sourced from _audit_scope()'s own returned dict, which must stay
+    byte-identical to this file's pre-Jev output regardless of any seam's
+    mode (see _audit_scope()'s own docstring, opus review item 1). Reuses
+    scope_audit.changed_paths() directly, the SAME function
+    scope_audit.audit() itself calls, rather than a second copy of that
+    diff logic. Returns [] -- WITHOUT ever shelling out to git a second
+    time -- whenever jev_seam or scope_audit is unavailable, there is no
+    baseline/cwd to diff, or NEITHER J117 nor J063 resolves to anything but
+    off in `seams_config` (the common case while data/jev-seams.json
+    leaves these ids at off, per the estate's own rule that a seam's mode
+    is set only in the same change that adds its call site)."""
+    if jev_seam is None or scope_audit is None or not before or not cwd:
+        return []
+    live = (jev_seam.resolve_mode(seams_config, "J117") != jev_seam.OFF
+            or jev_seam.resolve_mode(seams_config, "J063") != jev_seam.OFF)
+    if not live:
+        return []
+    paths, _problem = scope_audit.changed_paths(before, None, cwd=cwd)
+    return paths or []
+
+
+def _jev_scope_audit(unit, changed_paths, registry, seams_config):
+    """J117 (wave-1 Jev seam): a recorded second opinion on whether each
+    changed path really belongs to the unit's stated objective, beside the
+    deterministic declared-scope audit (_audit_scope(), above) -- which
+    alone still decides QUARANTINE at run_node()'s own call site,
+    unchanged by anything returned here. Off by default; returns []
+    whenever jev_checks or `registry` is unavailable, `changed_paths` is
+    empty (which it always is when this entry is off -- see
+    _jev_changed_paths()), or J117's own resolved mode is off. Never
+    raises."""
+    if jev_checks is None or registry is None or not changed_paths:
+        return []
+    objective = unit.get("objective") or unit.get("unit_id") or ""
+    out = []
+    for path in changed_paths:
+        try:
+            result = jev_checks.check_scope_audit(
+                objective, path, None, seams_config=seams_config,
+                registry=registry, ledger_dir=jev_checks.DEFAULT_LEDGER_DIR)
+        except Exception:  # noqa: BLE001  # sbe: allow-silent a check that could not run contributes no second opinion, never blocks run_node()
+            continue
+        if result.mode != "off":
+            out.append({"path": path, "mode": result.mode, "reason": result.reason,
+                        "jev_answer": result.jev.get("answer") if result.jev else None})
+    return out
+
+
+#: A rough, deliberately cheap reading of "does this note already quote a
+#: verification run": a command prompt line, a passing/failing test-runner
+#: summary, or the word "exit code". This is the caller's OWN deterministic
+#: read handed to J102 as `quotes_verification` (see jev_checks.py's own
+#: docstring for that entry): it is not Jev's job to guess this, and this
+#: module never claims it is exhaustive.
+# ponytail: a fixed regex is a known ceiling (a verification quote in an
+# unrecognised shape reads as "no quote"); tighten if J102's own shadow
+# ledger shows this pattern under- or over-flagging in practice.
+_VERIFICATION_QUOTE_RE = re.compile(
+    r"^\s*\$\s|\bexit code\b|\bpassed\b|\bPASS\b|\bOK\s*\(|\d+\s+passed\b",
+    re.IGNORECASE | re.MULTILINE)
+
+#: J102 is tagged `public_or_own_text` in data/jev-registry.json, but this
+#: file hands it the worker's own free-text completion note, which can
+#: carry anything a worker wrote, including a path under the founder's own
+#: home directory (opus review, item 4, 2026-09-19). That tag looks wrong
+#: for what this call site actually sends -- reported here rather than
+#: changed, since the wave-1 seam brief refuses a call-site edit to
+#: data/jev-registry.json, and jev_registry's own lint is the one place
+#: that value is meant to be reviewed. Until the tag is corrected, this
+#: call site treats the note as needs_content_gate on its own: bounded to
+#: _NOTE_CHAR_LIMIT characters. Applied to BOTH J063 and J102 (M2's own
+#: finding named "the full worker note goes to J063 and J102" as one
+#: problem): J063 is already tagged needs_content_gate correctly, but an
+#: unbounded note is not "only what the question needs" either way, per
+#: the common brief's rule 3.
+#:
+#: HOME-PATH MASKING MOVED (A2 fix; item 5, A0.8 round 6): this function
+#: used to also replace the real home directory with "~" itself. That is
+#: now done centrally, once, in jev_decide.decide() -- the one helper
+#: every seam call's payload (this note included, once it reaches
+#: consult()'s own `state`) passes through before the content gate and
+#: before it can reach the bridge -- so it is redundant here and removed:
+#: a caller-side mask that only ever knew about os.path.expanduser("~")
+#: (the current $HOME, not the real passwd-database home an isolated-HOME
+#: test harness overrides) was weaker than the central fix anyway. See
+#: jev_decide._mask_home_paths()/_real_home_candidates() for what is
+#: actually masked now.
+_NOTE_CHAR_LIMIT = 2000
+
+
+def _bounded_note(note):
+    """`note`, capped at _NOTE_CHAR_LIMIT characters. Never raises; ""
+    in, "" out. Home-path masking is no longer this function's job -- see
+    the comment above _NOTE_CHAR_LIMIT."""
+    text = note or ""
+    if len(text) > _NOTE_CHAR_LIMIT:
+        text = text[:_NOTE_CHAR_LIMIT] + " ...[truncated]"
+    return text
+
+
+def _jev_completion_second_opinions(worker_result, changed_paths, registry, seams_config):
+    """J063/J102 (wave-1 Jev seams): a recorded second opinion on the
+    worker's own completion note, beside the verification run() already
+    performs -- never a vote in it (verify.verify()'s own verdict, at
+    run_node()'s own call site, keeps sole authority over PASS/FAIL). Off
+    by default; returns {} whenever jev_checks or `registry` is
+    unavailable, or both entries' modes are off. Never raises."""
+    if jev_checks is None or registry is None:
+        return {}
+    note = _bounded_note(worker_result.get("note") or "")
+    out = {}
+    try:
+        r063 = jev_checks.check_worker_completion_claim(
+            note, changed_paths, None, seams_config=seams_config, registry=registry,
+            ledger_dir=jev_checks.DEFAULT_LEDGER_DIR)
+        if r063.mode != "off":
+            out["j063"] = {"mode": r063.mode, "reason": r063.reason,
+                           "jev_answer": r063.jev.get("answer") if r063.jev else None}
+    except Exception:  # noqa: BLE001  # sbe: allow-silent a check that could not run contributes no second opinion, never blocks run_node()
+        pass
+    try:
+        quotes = bool(_VERIFICATION_QUOTE_RE.search(note))
+        r102 = jev_checks.check_done_claim_verification(
+            note, quotes, None, seams_config=seams_config, registry=registry,
+            ledger_dir=jev_checks.DEFAULT_LEDGER_DIR)
+        if r102.mode != "off":
+            out["j102"] = {"mode": r102.mode, "reason": r102.reason,
+                           "jev_answer": r102.jev.get("answer") if r102.jev else None}
+    except Exception:  # noqa: BLE001  # sbe: allow-silent a check that could not run contributes no second opinion, never blocks run_node()
+        pass
     return out
 
 
@@ -501,10 +757,29 @@ def run_node(node, parts, worker, cwd=None, max_attempts=3):
     # A worker reporting "I only touched X" is a claim; the diff is evidence.
     beat.phase(node["id"], "reading what actually changed")
     scope = _audit_scope(unit, before, cwd)
+    # JEV WAVE-1 SEAMS (J063, J102, J117): registry and seams config
+    # resolved ONCE here (not once per helper) and the changed-path list
+    # computed at most once, shared by J117 and J063 below -- never sourced
+    # from `scope` itself, which stays byte-identical to this file's
+    # pre-Jev output regardless of any seam's mode (opus review, item 1,
+    # 2026-09-19; see _audit_scope()'s own docstring).
+    jev_registry_ = _jev_registry()
+    jev_seams_cfg = _jev_seams_config()
+    jev_changed = _jev_changed_paths(before, cwd, jev_seams_cfg)
+    # J117: a recorded second opinion, beside the deterministic
+    # declared-scope audit just above -- which alone still decides
+    # QUARANTINE a few lines down, unchanged by anything computed here.
+    # See _jev_scope_audit()'s own docstring.
+    scope_jev = _jev_scope_audit(unit, jev_changed, jev_registry_, jev_seams_cfg)
 
     beat.phase(node["id"], "running the done check")
     _fault_barrier("after_edit_before_check")
     verdict = verify.verify(unit, cwd=cwd)
+    # JEV WAVE-1 SEAMS J063/J102: a recorded second opinion on the worker's
+    # own completion note, beside the verification just run above -- never
+    # a vote in it. See _jev_completion_second_opinions()'s own docstring.
+    completion_jev = _jev_completion_second_opinions(
+        worker_result, jev_changed, jev_registry_, jev_seams_cfg)
     # SR-4: the breaker reads ONLY this token, from the worker's own failure
     # text, never from status or verdict. See failure_class_of() below.
     record = {"id": node["id"], "worker_status": worker_result.get("status"),
@@ -522,6 +797,24 @@ def run_node(node, parts, worker, cwd=None, max_attempts=3):
     worker_usage = worker_result.get("usage")
     if isinstance(worker_usage, dict) and worker_usage:
         record["usage"] = worker_usage
+
+    # JEV WAVE-1 SEAMS, recorded only: every entry here is forced off until
+    # A0.8 lands (see _jev_seams_config()'s own docstring, opus review item
+    # 3), so scope_jev and completion_jev are always [] and {} in practice
+    # today; when a mode IS live, jev_notes is the only key this whole
+    # section ever touches, and record["scope"] above already came back
+    # from _audit_scope() alone with no Jev involvement at all (item 1). So
+    # with every mode off, jev_notes is {}, this key is absent, and
+    # record is BYTE-IDENTICAL to this function's output before these
+    # seams existed -- not merely usually so. Nothing below this point ever
+    # reads jev_notes: it changes no verdict, no integrability, no repair
+    # decision -- "recorded only", per the wave-1 seam brief.
+    jev_notes = {}
+    if scope_jev:
+        jev_notes["j117"] = scope_jev
+    jev_notes.update(completion_jev)
+    if jev_notes:
+        record["jev"] = jev_notes
 
     # A UNIT THAT WROTE OUTSIDE ITS DECLARED SCOPE IS NOT INTEGRABLE, whatever
     # its own check says. The verdict below can be a clean PASS and the change
@@ -601,10 +894,31 @@ _BREAKER_CLASSES = ("rate_limit", "overloaded")
 
 def failure_class_of(worker_result):
     """The failure_class token from a worker result's own 'note', or
-    'other' when none is present."""
+    'other' when none is present.
+
+    J035 (wave-3 Jev seam): 'other' is the one class _BREAKER_CLASSES
+    never counts, so a genuine rate_limit/overloaded failure whose note
+    lost its token currently opens no breaker at all. When the
+    deterministic scan finds no token, this shadow-consults a second
+    opinion on the SAME note text for the calibration ledger only -- the
+    return value here is always the deterministic 'other', whatever the
+    seam says, exactly like every other wave-1/wave-2/wave-3 seam call
+    site in this file."""
     text = (worker_result or {}).get("note") or ""
     m = _FAILURE_CLASS_RE.search(text)
-    return m.group(1) if m else "other"
+    if m:
+        return m.group(1)
+    if jev_checks is not None and jev_seam is not None:
+        try:
+            jev_checks.check_worker_failure_classification(
+                text, "other",
+                seams_config=jev_seam.load_seams_config(),
+                registry=jev_seam.load_registry(),
+                ledger_dir=jev_seam.DEFAULT_LEDGER_DIR,
+            )  # C1: return value intentionally discarded, shadow-only by contract
+        except Exception:  # noqa: BLE001  # sbe: allow-silent this seam is advisory only, never worth breaking the breaker's own read
+            pass
+    return "other"
 
 
 class Breaker(object):
@@ -734,6 +1048,32 @@ try:
 except Exception:  # noqa: BLE001  # sbe: allow-silent absence becomes NO-DATA
     scope_audit = None
 
+# JEV WAVE-1 SEAMS (J063, J102, J117): optional exactly like scope_audit
+# above. jev_checks.py wraps jev_seam.consult(), which never raises for a
+# documented failure and is caught again at every call site below anyway
+# (belt and suspenders, per the wave-1 seam brief's own rule 2); this
+# import guard covers the one thing a call-site try/except cannot: the
+# module failing to import in the first place. A missing or broken
+# jev_checks means every wave-1 seam call below becomes a no-op, never a
+# crash, and this file's behaviour is unchanged from before these seams
+# existed.
+try:
+    import jev_checks
+except Exception:  # noqa: BLE001
+    jev_checks = None
+
+# jev_seam itself, imported directly (not only through jev_checks), for the
+# foundation-level utilities this file needs beside the check_* calls:
+# resolve_mode()/OFF (a pure dict lookup, no filesystem cost -- rule 9) and
+# the mtime-aware load_seams_config()/load_registry() (opus review, item 2,
+# 2026-09-19; see _jev_seams_config() below for why). Same optional
+# treatment as jev_checks above: a missing or broken jev_seam means every
+# wave-1 seam call below reads as unavailable, never a crash.
+try:
+    import jev_seam
+except Exception:  # noqa: BLE001
+    jev_seam = None
+
 try:
     import worktree_lane
 except Exception:  # noqa: BLE001
@@ -743,6 +1083,11 @@ try:
     import unit_trace
 except Exception:  # noqa: BLE001
     unit_trace = None
+
+try:
+    import preflight_snapshot
+except Exception:  # noqa: BLE001
+    preflight_snapshot = None
 
 # ORCH-25: optional import, UNLIKE every sibling above. claim_store,
 # worktree_lane, scope_audit, unit_trace and load_reservation all read a
@@ -2067,6 +2412,20 @@ def main(argv=None):
     print("CLAIMED (%d): %s" % (len(claimed),
                                 ", ".join(c["worker_id"] for _n, c in claimed)))
 
+    # MD-1 (2026-09-19 autonomy epic): a real batch is about to be worked,
+    # either by a spawned worker below or, on --handoff, by this session's
+    # own edits. Tag the canonical repo's current HEAD now, before any of
+    # that, so a bad autonomous change in this round has a named revert
+    # point. Best-effort only: never refuses the round over a tagging
+    # failure (a dirty tag namespace or an unwritable repo is not a reason
+    # to withhold real work), and skipped entirely with no cwd to tag.
+    if preflight_snapshot is not None and args.cwd:
+        try:
+            tag, _sha = preflight_snapshot.snapshot(args.cwd)
+            print("PREFLIGHT SNAPSHOT: %s" % tag)
+        except Exception as exc:  # noqa: BLE001  # sbe: allow-silent a snapshot failure never blocks real work
+            print("PREFLIGHT SNAPSHOT: skipped (%s)" % exc, file=sys.stderr)
+
     # P0.2, the composition wave: the real coding-model worker is the DEFAULT,
     # not an opt-in a caller has to remember. Until now an omitted --worker-cmd
     # silently fell back to ["true"], which claims and releases every unit
@@ -2206,10 +2565,32 @@ def main(argv=None):
                  (rec.get("scope") or {}).get("verdict"), merged))
 
     print("isolation: %s%s" % ("per-writer worktrees" if iso.get("isolated")
-                               else "NOT established", 
+                               else "NOT established",
                                (", " + iso["note"]) if iso.get("note") else ""))
     failed = [r for r in outcome.get("dispatched", []) if r.get("verdict") != "PASS"]
     _fault_barrier("after_integration_before_receipt")
+
+    # END-OF-PLAN DRAIN (m4, A0.8 round 6): this process is about to exit,
+    # exactly the "a call site in a process that exits after its calls
+    # must call jev_seam.drain() first" case docs/how-to/use-calibrated-
+    # decisions.md now names. jev_seam.py's own atexit hook already covers
+    # an abandoned call, but this is the one place in this file that KNOWS
+    # the plan is finished, so draining here (rather than only at atexit)
+    # gives the last unit's J063/J102/J117 calls -- the ones run_node()
+    # made for the very last node in `claimed`, which have had the least
+    # time of any call in this run to finish on their own -- the most
+    # possible time to land before this process starts shutting down.
+    # jev_seam is only ever imported here, never required: this file must
+    # still work (and drain nothing) when it is unavailable. drain() is
+    # cheap when nothing was dispatched (every J063/J102/J117 call is
+    # forced to off today by _jev_seams_config() -- see its own docstring
+    # -- so _ACTIVE_WORKERS is empty and this call returns immediately);
+    # calling it unconditionally rather than tracking a separate
+    # "did anything actually dispatch" flag is the whole point of drain()
+    # already doing that bookkeeping itself.
+    if jev_seam is not None:
+        jev_seam.drain()
+
     return 1 if failed else 0
 
 

@@ -4,19 +4,32 @@ nothing. Fixtures are built inline as temp files, no external fixture dir.
 """
 import contextlib
 import io
+import json
 import os
 import re
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPTS_DIR = os.path.join(REPO_ROOT, 'scripts')
 SCORER = os.path.join(SCRIPTS_DIR, 'intake_score.py')
 
+# Minor fix (opus-review-seams-g1-g3.md): redirect jev_seam's own
+# machine-level state root to a throwaway temp dir BEFORE jev_seam is
+# ever imported in this process, so no test here reads (or could ever
+# write) the real ~/.brother/jev -- must happen before the `import
+# jev_seam` line below: JEV_STATE_DIR is a module-level constant
+# jev_seam.py computes once, at its own import time.
+os.environ.setdefault("BROTHER_JEV_STATE_DIR",
+                       tempfile.mkdtemp(prefix="brother-jev-state-test-"))
+
 sys.path.insert(0, SCRIPTS_DIR)
 import intake_score  # noqa: E402  (import after sys.path edit, by necessity)
+import jev_seam  # noqa: E402
+import jev_g1_seam_cache  # noqa: E402
 
 # E100: one sandbox for every temp tree this process makes, removed at exit.
 import os as _e100_os, sys as _e100_sys  # noqa: E402
@@ -1288,6 +1301,373 @@ class Night0912IntakeScore(unittest.TestCase):
                 "Do the migration.\n\n## Confirmation checklist\n- tests pass\n")
         result = by_name(intake_score.score_record(text, 'dev', root=REPO_ROOT))['sequencing']
         self.assertEqual(result.score, 0.0)
+
+
+def _choice_entry(entry_id):
+    return {
+        "id": entry_id, "role": "second_opinion", "risk": "low", "wave": "W1",
+        "privacy": "public_or_own_text",
+        "question": {
+            "type": "choice", "instructions": "classify this line",
+            "options": ["is-approval-prompt", "not-approval-prompt", "unclear", "unknown"],
+        },
+    }
+
+
+def _score_entry(entry_id):
+    return {
+        "id": entry_id, "role": "second_opinion", "risk": "low", "wave": "W1",
+        "privacy": "public_or_own_text",
+        "question": {
+            "type": "score", "instructions": "score this rubric dimension",
+            "options": [str(n) for n in range(2, 11)] + ["unknown"],
+        },
+    }
+
+
+def _choice_runner(choice, prob=0.9):
+    """A scripted bridge runner that always answers `choice`, no network
+    or subprocess: the shape ScriptedRunner in test_jev_seam.py uses,
+    reimplemented here so this file needs no import of that test module."""
+    def fn(argv, stdin_text):
+        payload = json.loads(stdin_text)
+        answers = {}
+        for qid, q in payload["questions"].items():
+            keys = list(q["criteria"].keys())
+            others = [k for k in keys if k != choice]
+            probs = {choice: prob}
+            if others:
+                rest = (1.0 - prob) / len(others)
+                for k in others:
+                    probs[k] = rest
+            answers[qid] = {"choice": choice, "probabilities": probs, "confidence": prob}
+        response = {"model": "typesafe/jev-1.13-test", "answers": answers,
+                    "usage": {"cost": 0.001}}
+        return 0, json.dumps(response), ""
+    return fn
+
+
+class JevSeamJ096SecondOpinion(unittest.TestCase):
+    """J096 (approval-prompt phrasing detector), wired into
+    score_sequencing() via jev_seam.consult() -- ONE call per document,
+    on a bounded excerpt (M1 fix, opus-review-seams-g1-g3.md:
+    _looks_like_an_approval_prompt() used to carry this seam and fire
+    once per LINE, so a document with no prompt at all made one bridge
+    call per line). Mode ships off in the real data/jev-seams.json, so
+    (a) needs no mocking; (b)-(d) mock
+    jev_seam.load_seams_config/load_registry to force shadow mode for
+    this one test only."""
+
+    LINES = ["# Intake Record", "", "Please confirm to proceed.", "",
+             "## Plan", "Do the migration."]
+
+    def setUp(self):
+        # jev_g1_seam_cache caches the resolved mode per entry_id
+        # (module docstring: at most one jev_seam.load_seams_config()
+        # call per second) -- a call in an EARLIER test could still be
+        # "fresh" here, so reset before every test rather than rely on
+        # the freshness window happening to have elapsed.
+        jev_g1_seam_cache.reset()
+
+    def test_a_mode_off_makes_zero_calls_and_output_is_byte_identical(self):
+        def boom(argv, stdin_text):
+            raise AssertionError("mode off must never invoke the runner")
+
+        before = intake_score.score_sequencing(self.LINES)
+        after = intake_score.score_sequencing(self.LINES, jev_runner=boom)
+        self.assertEqual(before[0], 0.0)  # approval precedes the Plan heading
+        self.assertEqual(before, after)
+
+    def test_b_shadow_mode_output_identical_and_one_ledger_row_written(self):
+        expected = intake_score.score_sequencing(self.LINES)  # off
+        ledger_dir = tempfile.mkdtemp()
+        self.addCleanup(__import__('shutil').rmtree, ledger_dir, ignore_errors=True)
+        cfg = {"modes": {"J096": "shadow"}}
+        jev_g1_seam_cache.reset()  # the baseline call above may have cached this entry as off
+        with mock.patch.object(jev_seam, "load_seams_config", return_value=cfg), \
+                mock.patch.object(jev_seam, "load_registry", return_value=[_choice_entry("J096")]), \
+                mock.patch.object(jev_seam, "DEFAULT_LEDGER_DIR", ledger_dir):
+            after = intake_score.score_sequencing(
+                self.LINES, jev_runner=_choice_runner("not-approval-prompt"))
+        self.assertEqual(after, expected)
+        # A0.8: shadow hands the call to a background worker and returns
+        # at once, before the ledger row exists. drain() waits for the
+        # worker to finish so the row is actually there to count.
+        jev_seam.drain(timeout=5)
+        decisions_path = os.path.join(ledger_dir, "decisions.jsonl")
+        self.assertTrue(os.path.isfile(decisions_path))
+        with open(decisions_path, encoding="utf-8") as fh:
+            rows = [ln for ln in fh if ln.strip()]
+        self.assertEqual(len(rows), 1)
+
+    def test_c_seam_path_exception_leaves_output_identical(self):
+        expected = intake_score.score_sequencing(self.LINES)
+        cfg = {"modes": {"J096": "shadow"}}
+        jev_g1_seam_cache.reset()  # the baseline call above may have cached this entry as off
+        with mock.patch.object(jev_seam, "load_seams_config", return_value=cfg), \
+                mock.patch.object(jev_seam, "load_registry",
+                                   side_effect=RuntimeError("registry unreadable")):
+            after = intake_score.score_sequencing(
+                self.LINES, jev_runner=_choice_runner("not-approval-prompt"))
+        self.assertEqual(after, expected)
+
+    def test_d_red_proof_wiring_that_trusts_jevs_raw_answer_breaks_test_b(self):
+        current_score, current_evidence = intake_score.score_sequencing(self.LINES)  # 0.0
+        ledger_dir = tempfile.mkdtemp()
+        self.addCleanup(__import__('shutil').rmtree, ledger_dir, ignore_errors=True)
+        cfg = {"modes": {"J096": "shadow"}}
+        jev_g1_seam_cache.reset()  # the baseline call above may have cached this entry as off
+        excerpt = "\n".join(self.LINES)[:intake_score.J096_EXCERPT_CAP]
+        with mock.patch.object(jev_seam, "load_seams_config", return_value=cfg), \
+                mock.patch.object(jev_seam, "load_registry", return_value=[_choice_entry("J096")]), \
+                mock.patch.object(jev_seam, "DEFAULT_LEDGER_DIR", ledger_dir):
+            result = jev_seam.consult(
+                "J096", {"excerpt": excerpt}, True,  # this document's own heuristic found a prompt
+                seams_config=jev_seam.load_seams_config(),
+                registry=jev_seam.load_registry(),
+                ledger_dir=jev_seam.DEFAULT_LEDGER_DIR,
+                runner=_choice_runner("not-approval-prompt"),
+            )
+            # A0.8: shadow never returns Jev's answer (result.jev is
+            # always None); the eventual answer only lands in the
+            # ledger, once the background worker finishes. drain() first,
+            # then read it there.
+            jev_seam.drain(timeout=5)
+            decisions_path = os.path.join(ledger_dir, "decisions.jsonl")
+            with open(decisions_path, encoding="utf-8") as fh:
+                rows = [json.loads(ln) for ln in fh if ln.strip()]
+            self.assertEqual(len(rows), 1)
+            wrongly_wired = rows[0]["answer"]  # raw jev choice, bypasses mode-safety
+            safely_wired = result.answer          # what the real code uses
+        self.assertEqual(wrongly_wired, "not-approval-prompt")
+        self.assertNotEqual(wrongly_wired, True)
+        self.assertTrue(safely_wired)
+        # And the real call site's own score is untouched either way:
+        after_score, after_evidence = intake_score.score_sequencing(self.LINES)
+        self.assertEqual((after_score, after_evidence), (current_score, current_evidence))
+
+    def test_e_a1_call_site_never_reads_a_patched_consults_return(self):
+        """A1 (opus-review-g1-round2-pkg-decide.md): test_d proves
+        consult()'s two fields disagree, but it never touches the CALL
+        SITE's own wiring -- score_sequencing() is never invoked inside
+        the mocked block there. This one does: jev_seam.consult ITSELF
+        is patched to return an ACT-mode SeamResult whose .answer is
+        0.05 (a float, the wrong TYPE for this call site's own bool
+        answer), mode live via a patched config, and asserts
+        score_sequencing() still returns its own local (score, evidence)
+        verdict, unaffected by 0.05."""
+        expected = intake_score.score_sequencing(self.LINES)  # off, real config
+        cfg = {"modes": {"J096": "shadow"}}
+        jev_g1_seam_cache.reset()
+        wrong = jev_seam.SeamResult(0.05, {"answer": 0.05}, jev_seam.ACT,
+                                    None, False, "mutation-probe")
+        with mock.patch.object(jev_seam, "load_seams_config", return_value=cfg), \
+                mock.patch.object(jev_seam, "load_registry", return_value=[_choice_entry("J096")]), \
+                mock.patch.object(jev_seam, "DEFAULT_LEDGER_DIR", tempfile.mkdtemp()), \
+                mock.patch.object(jev_seam, "consult", return_value=wrong):
+            after = intake_score.score_sequencing(self.LINES)
+        self.assertEqual(after, expected)
+
+
+class JevSeamJ114SecondOpinion(unittest.TestCase):
+    """J114 (intake-doc mechanical rubric second opinion), wired as ONE
+    seam in score_record() covering score_grounded_assumptions/
+    score_options/score_level_adaptation together. Mode ships off in the
+    real data/jev-seams.json, so (a) needs no mocking."""
+
+    TEXT = ("# Intake Record\n\n## Assumptions\n- The API is stable "
+            "(`scripts/intake_score.py`)\n\n## Options\n1. Option one "
+            "approach\n2. Option two approach\n\nRecommended: option 1.\n")
+
+
+    def setUp(self):
+        # jev_g1_seam_cache caches the resolved mode per entry_id
+        # (module docstring: at most one jev_seam.load_seams_config()
+        # call per second) -- a call in an EARLIER test could still be
+        # "fresh" here, so reset before every test rather than rely on
+        # the freshness window happening to have elapsed.
+        jev_g1_seam_cache.reset()
+    def test_a_mode_off_makes_zero_calls_and_output_is_byte_identical(self):
+        def boom(argv, stdin_text):
+            raise AssertionError("mode off must never invoke the runner")
+
+        before = intake_score.score_record(self.TEXT, 'dev', root=REPO_ROOT)
+        after = intake_score.score_record(self.TEXT, 'dev', root=REPO_ROOT, jev_runner=boom)
+        self.assertEqual(before, after)
+
+    def test_b_shadow_mode_output_identical_and_one_ledger_row_written(self):
+        expected = intake_score.score_record(self.TEXT, 'dev', root=REPO_ROOT)  # off
+        ledger_dir = tempfile.mkdtemp()
+        self.addCleanup(__import__('shutil').rmtree, ledger_dir, ignore_errors=True)
+        cfg = {"modes": {"J114": "shadow"}}
+        jev_g1_seam_cache.reset()  # the baseline call above may have cached this entry as off
+        with mock.patch.object(jev_seam, "load_seams_config", return_value=cfg), \
+                mock.patch.object(jev_seam, "load_registry", return_value=[_score_entry("J114")]), \
+                mock.patch.object(jev_seam, "DEFAULT_LEDGER_DIR", ledger_dir):
+            after = intake_score.score_record(
+                self.TEXT, 'dev', root=REPO_ROOT,
+                jev_runner=self._score_runner("2"))  # a confident, opposite low score
+        self.assertEqual(after, expected)
+        # A0.8: shadow hands the call to a background worker and returns
+        # at once, before the ledger row exists. drain() waits for the
+        # worker to finish so the row is actually there to count.
+        jev_seam.drain(timeout=5)
+        decisions_path = os.path.join(ledger_dir, "decisions.jsonl")
+        self.assertTrue(os.path.isfile(decisions_path))
+        with open(decisions_path, encoding="utf-8") as fh:
+            rows = [ln for ln in fh if ln.strip()]
+        self.assertEqual(len(rows), 1)
+
+    def test_c_seam_path_exception_leaves_output_identical(self):
+        expected = intake_score.score_record(self.TEXT, 'dev', root=REPO_ROOT)
+        cfg = {"modes": {"J114": "shadow"}}
+        jev_g1_seam_cache.reset()  # the baseline call above may have cached this entry as off
+        with mock.patch.object(jev_seam, "load_seams_config", return_value=cfg), \
+                mock.patch.object(jev_seam, "load_registry",
+                                   side_effect=RuntimeError("registry unreadable")):
+            after = intake_score.score_record(
+                self.TEXT, 'dev', root=REPO_ROOT, jev_runner=self._score_runner("2"))
+        self.assertEqual(after, expected)
+
+    def test_d_red_proof_a_wiring_that_folded_jevs_answer_into_results_would_differ(self):
+        """Same proof shape as the other wave-1 seams: show that if a
+        call site folded consult()'s raw jev answer back into `results`
+        (instead of leaving `results` untouched, as the real code does),
+        a test_b-shaped byte-identical assertion would fail. Never edits
+        intake_score.py itself."""
+        results = intake_score.score_record(self.TEXT, 'dev', root=REPO_ROOT)
+        by = {r.name: r.score for r in results}
+        mechanical = round(
+            sum(v for v in (by.get('grounded_assumptions'), by.get('level_adaptation'),
+                             by.get('options_with_recommendation')) if v is not None)
+            / len([v for v in (by.get('grounded_assumptions'), by.get('level_adaptation'),
+                                by.get('options_with_recommendation')) if v is not None]), 2)
+        ledger_dir = tempfile.mkdtemp()
+        self.addCleanup(__import__('shutil').rmtree, ledger_dir, ignore_errors=True)
+        cfg = {"modes": {"J114": "shadow"}}
+        jev_g1_seam_cache.reset()  # the baseline call above may have cached this entry as off
+        with mock.patch.object(jev_seam, "load_seams_config", return_value=cfg), \
+                mock.patch.object(jev_seam, "load_registry", return_value=[_score_entry("J114")]), \
+                mock.patch.object(jev_seam, "DEFAULT_LEDGER_DIR", ledger_dir):
+            result = jev_seam.consult(
+                "J114", {"text": self.TEXT}, mechanical,
+                seams_config=jev_seam.load_seams_config(),
+                registry=jev_seam.load_registry(),
+                ledger_dir=jev_seam.DEFAULT_LEDGER_DIR,
+                runner=self._score_runner("2"),
+            )
+            # A0.8: shadow never returns Jev's answer (result.jev is
+            # always None); the eventual answer only lands in the
+            # ledger, once the background worker finishes. drain() first,
+            # then read it there.
+            jev_seam.drain(timeout=5)
+            decisions_path = os.path.join(ledger_dir, "decisions.jsonl")
+            with open(decisions_path, encoding="utf-8") as fh:
+                rows = [json.loads(ln) for ln in fh if ln.strip()]
+            self.assertEqual(len(rows), 1)
+            wrongly_wired_score = float(rows[0]["answer"])  # raw jev score
+            safely_wired_score = result.answer                 # what the real code computed with
+        self.assertNotEqual(wrongly_wired_score, mechanical)
+        self.assertEqual(safely_wired_score, mechanical)
+
+    def test_e_a1_call_site_never_reads_a_patched_consults_return(self):
+        """A1 (opus-review-g1-round2-pkg-decide.md): test_d proves
+        consult()'s two fields disagree, but it never touches the CALL
+        SITE's own wiring -- score_record() is never invoked inside the
+        mocked block there. This one does: jev_seam.consult ITSELF is
+        patched to return an ACT-mode SeamResult whose .answer is
+        "in-progress" (a string, the wrong TYPE for this call site's own
+        numeric mechanical score), mode live via a patched config, and
+        asserts score_record() still returns the same `results` the
+        mechanical rubric alone computed, unaffected by "in-progress"."""
+        expected = intake_score.score_record(self.TEXT, 'dev', root=REPO_ROOT)  # off
+        cfg = {"modes": {"J114": "shadow"}}
+        jev_g1_seam_cache.reset()
+        wrong = jev_seam.SeamResult("in-progress", {"answer": "in-progress"},
+                                    jev_seam.ACT, None, False, "mutation-probe")
+        with mock.patch.object(jev_seam, "load_seams_config", return_value=cfg), \
+                mock.patch.object(jev_seam, "load_registry", return_value=[_score_entry("J114")]), \
+                mock.patch.object(jev_seam, "DEFAULT_LEDGER_DIR", tempfile.mkdtemp()), \
+                mock.patch.object(jev_seam, "consult", return_value=wrong):
+            after = intake_score.score_record(self.TEXT, 'dev', root=REPO_ROOT)
+        self.assertEqual(after, expected)
+
+    @staticmethod
+    def _score_runner(choice, prob=0.9):
+        def fn(argv, stdin_text):
+            payload = json.loads(stdin_text)
+            answers = {}
+            for qid, q in payload["questions"].items():
+                options = list(q["criteria"])
+                others = [o for o in options if o != choice]
+                probs = {choice: prob}
+                if others:
+                    rest = (1.0 - prob) / len(others)
+                    for o in others:
+                        probs[o] = rest
+                answers[qid] = {"score": choice, "probabilities": probs, "confidence": prob}
+            response = {"model": "typesafe/jev-1.13-test", "answers": answers,
+                        "usage": {"cost": 0.001}}
+            return 0, json.dumps(response), ""
+        return fn
+
+
+class JevSeamPerfCacheNeverHitsDiskAfterWarmup(unittest.TestCase):
+    """Coordinator directive (measured regression in another wave-1
+    group: a seam in OFF mode made a hot call site 52x slower by
+    re-reading data/jev-seams.json on every call): after a first call
+    warms jev_seam's in-process cache, 1,000 further OFF-mode calls to
+    _looks_like_an_approval_prompt()/score_record() must touch the
+    filesystem zero times and return the identical answer every time.
+    root=None so score_grounded_assumptions() (a NO-DATA abstain with no
+    --root) contributes no citation-path I/O of its own to the count."""
+
+    LINE = "Please confirm to proceed."
+    TEXT = "# Intake Record\n\nSome text with no citations or options.\n"
+
+
+    def setUp(self):
+        # jev_g1_seam_cache caches the resolved mode per entry_id
+        # (module docstring: at most one jev_seam.load_seams_config()
+        # call per second) -- a call in an EARLIER test could still be
+        # "fresh" here, so reset before every test rather than rely on
+        # the freshness window happening to have elapsed.
+        jev_g1_seam_cache.reset()
+    def test_1000_off_mode_calls_after_warmup_touch_no_filesystem(self):
+        first_prompt = intake_score._looks_like_an_approval_prompt(self.LINE)
+        first_record = intake_score.score_record(self.TEXT, 'dev', root=None)
+        self.assertTrue(first_prompt)
+        self.assertIsInstance(first_record, list)
+
+        calls = {"stat": 0, "exists": 0, "open": 0}
+        real_stat, real_exists, real_open = os.stat, os.path.exists, open
+
+        def counting_stat(*a, **kw):
+            calls["stat"] += 1
+            return real_stat(*a, **kw)
+
+        def counting_exists(*a, **kw):
+            calls["exists"] += 1
+            return real_exists(*a, **kw)
+
+        def counting_open(*a, **kw):
+            calls["open"] += 1
+            return real_open(*a, **kw)
+
+        prompt_outputs = set()
+        record_lengths = set()
+        with mock.patch("os.stat", counting_stat), \
+                mock.patch("os.path.exists", counting_exists), \
+                mock.patch("builtins.open", counting_open):
+            for _ in range(1000):
+                prompt_outputs.add(intake_score._looks_like_an_approval_prompt(self.LINE))
+                record_lengths.add(len(intake_score.score_record(self.TEXT, 'dev', root=None)))
+
+        self.assertEqual(calls, {"stat": 0, "exists": 0, "open": 0},
+                         "an off-mode call must never touch the filesystem "
+                         "once jev_seam's config cache is warm")
+        self.assertEqual(prompt_outputs, {True})
+        self.assertEqual(record_lengths, {len(first_record)})
 
 
 if __name__ == '__main__':

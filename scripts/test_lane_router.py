@@ -2,6 +2,7 @@
 never leaves, and an undeclared content class is private. JEV-06 (absorbs
 TOKEN-03) adds: adversarial review defaults to muse, and the decision lane
 routes a typed screen through jev_cascade's ACT/ESCALATE/NO-DATA cascade."""
+import json
 import os
 import sys
 import tempfile
@@ -167,37 +168,84 @@ class LaneRouter(unittest.TestCase):
 
     # --- JEV-06: the decision lane ---
 
-    def _calibrated_handle(self, tmpdir, family="f", qtype="noul", confidence=0.95, n=40):
+    def _calibrated_handle(self, tmpdir, family="f", qtype="noul", risk_class="low",
+                            confidence=0.95, n=40, model="m", promoted=True):
+        """Seeds n correct (decision, outcome) pairs and returns a handle
+        pointing at them. promoted=True (the default) also signs a valid
+        promotion record for this exact (family, qtype, risk_class, model)
+        -- A0.7 (2026-09-18): calibration evidence alone no longer ACTs,
+        so a fixture claiming to exercise the ACT path must carry one, the
+        same way it must already carry seeded evidence. promoted=False
+        returns a handle with no promotions_path at all, for proving the
+        escalate-without-a-promotion-store path (see
+        test_decision_without_a_promotion_store_still_escalates)."""
         dp = os.path.join(tmpdir, "decisions.jsonl")
         op = os.path.join(tmpdir, "outcomes.jsonl")
         for i in range(n):
             did = "seed%d" % i
             jev_calibration.append_decision(dp, {
                 "id": did, "family": family, "qtype": qtype, "framing": "h",
-                "answer": True, "prob": confidence, "confidence": confidence, "model": "m",
+                "answer": True, "prob": confidence, "confidence": confidence, "model": model,
                 "cost": 0.0, "at": "2026-09-18T00:00:00Z",
             })
             jev_calibration.append_outcome(op, {"id": did, "correct": True, "source": "t",
-                                                "at": "2026-09-18T00:01:00Z"})
-        return jev_cascade.CalibrationHandle(dp, op)
+                                                "at": "2026-09-18T00:01:00Z"}, decisions_path=dp)
+        if not promoted:
+            # Explicit promotions_path=None (coordinator re-review,
+            # MINOR, 2026-09-18): CalibrationHandle's own default is now
+            # a real repo-root path (M3), so "no promotion store at all"
+            # must be said explicitly here rather than accidentally
+            # depending on whatever, if anything, is signed there.
+            return jev_cascade.CalibrationHandle(dp, op, promotions_path=None)
+        pp = os.path.join(tmpdir, "promotions.jsonl")
+        with open(pp, "w", encoding="utf-8") as f:
+            f.write(json.dumps({
+                "family": family, "qtype": qtype, "risk_class": risk_class, "model": model,
+                "signed_by": "founder", "signed_at": "2026-09-18T00:00:00Z",
+                "bound_at_signing": 0.0, "n_at_signing": n,
+                "flip_condition": "precision drops below target for two consecutive weeks",
+                "review_by": "2099-01-01",
+            }) + "\n")
+        return jev_cascade.CalibrationHandle(dp, op, promotions_path=pp)
 
     def test_decision_act_routes_to_jev(self):
         with tempfile.TemporaryDirectory() as d:
             handle = self._calibrated_handle(d)
             lane = R.route_decision(
-                {"id": "new1", "family": "f", "qtype": "noul", "confidence": 0.95},
+                {"id": "new1", "family": "f", "qtype": "noul", "confidence": 0.95, "model": "m"},
                 "low", handle,
             )
             self.assertEqual((lane.draft, lane.review, lane.requires_scan),
                              (R.DECISION_LANE, None, True))
             self.assertEqual(lane.draft, "jev")
 
+    def test_decision_without_a_promotion_store_still_escalates(self):
+        """A0.7: the SAME calibrated evidence that ACTs once promoted
+        (test_decision_act_routes_to_jev above) escalates to muse when the
+        handle carries no promotions_path at all -- proving route_decision,
+        and lane_router generally, inherits jev_cascade's new promotion
+        rule for free rather than needing its own copy of the check."""
+        with tempfile.TemporaryDirectory() as d:
+            handle = self._calibrated_handle(d, promoted=False)
+            lane = R.route_decision(
+                {"id": "new2", "family": "f", "qtype": "noul", "confidence": 0.95, "model": "m"},
+                "low", handle,
+            )
+            self.assertEqual((lane.draft, lane.requires_scan), ("muse", True))
+            self.assertIn("no_promotion", lane.reason)
+
     def test_decision_escalates_to_muse_first_then_opus(self):
         with tempfile.TemporaryDirectory() as d:
             # No calibration recorded for this family: threshold() has no
             # data, so the cascade escalates rather than acting.
+            # promotions_path=None (coordinator re-review, MINOR,
+            # 2026-09-18): explicit, hermetic against CalibrationHandle's
+            # real repo-root default (M3) -- these tests never reach the
+            # promotion gate anyway, but must not depend on the real
+            # store's contents to prove that.
             handle = jev_cascade.CalibrationHandle(
-                os.path.join(d, "decisions.jsonl"), os.path.join(d, "outcomes.jsonl"))
+                os.path.join(d, "decisions.jsonl"), os.path.join(d, "outcomes.jsonl"),
+                promotions_path=None)
             rung0 = R.route_decision(
                 {"id": "e1", "family": "uncalibrated", "qtype": "noul", "confidence": 0.99},
                 "low", handle,
@@ -212,8 +260,14 @@ class LaneRouter(unittest.TestCase):
 
     def test_decision_no_data_when_escalation_ladder_is_exhausted(self):
         with tempfile.TemporaryDirectory() as d:
+            # promotions_path=None (coordinator re-review, MINOR,
+            # 2026-09-18): explicit, hermetic against CalibrationHandle's
+            # real repo-root default (M3) -- these tests never reach the
+            # promotion gate anyway, but must not depend on the real
+            # store's contents to prove that.
             handle = jev_cascade.CalibrationHandle(
-                os.path.join(d, "decisions.jsonl"), os.path.join(d, "outcomes.jsonl"))
+                os.path.join(d, "decisions.jsonl"), os.path.join(d, "outcomes.jsonl"),
+                promotions_path=None)
             # critical never acts; already on rung 2 (both muse and opus
             # have already reviewed it) means nowhere further to go.
             lane = R.route_decision(
@@ -226,8 +280,14 @@ class LaneRouter(unittest.TestCase):
 
     def test_decision_raises_on_structurally_invalid_decision(self):
         with tempfile.TemporaryDirectory() as d:
+            # promotions_path=None (coordinator re-review, MINOR,
+            # 2026-09-18): explicit, hermetic against CalibrationHandle's
+            # real repo-root default (M3) -- these tests never reach the
+            # promotion gate anyway, but must not depend on the real
+            # store's contents to prove that.
             handle = jev_cascade.CalibrationHandle(
-                os.path.join(d, "decisions.jsonl"), os.path.join(d, "outcomes.jsonl"))
+                os.path.join(d, "decisions.jsonl"), os.path.join(d, "outcomes.jsonl"),
+                promotions_path=None)
             with self.assertRaises(ValueError):
                 R.route_decision({"id": "", "family": "f", "qtype": "noul", "confidence": 0.9},
                                  "low", handle)
@@ -240,8 +300,12 @@ class LaneRouter(unittest.TestCase):
                                return_value={"outcome": "ESCALATE", "id": "x",
                                             "next_lane": "deepseek", "reason": "r"}):
             with tempfile.TemporaryDirectory() as d:
+                # promotions_path=None (coordinator re-review, MINOR,
+                # 2026-09-18): explicit, hermetic against
+                # CalibrationHandle's real repo-root default (M3).
                 handle = jev_cascade.CalibrationHandle(
-                    os.path.join(d, "decisions.jsonl"), os.path.join(d, "outcomes.jsonl"))
+                    os.path.join(d, "decisions.jsonl"), os.path.join(d, "outcomes.jsonl"),
+                    promotions_path=None)
                 with self.assertRaises(ValueError):
                     R.route_decision({"id": "x", "family": "f", "qtype": "noul",
                                       "confidence": 0.9}, "low", handle)
@@ -254,11 +318,167 @@ class LaneRouter(unittest.TestCase):
         with mock.patch.object(R.jev_cascade, "route",
                                return_value={"outcome": "MAYBE", "id": "x"}):
             with tempfile.TemporaryDirectory() as d:
+                # promotions_path=None (coordinator re-review, MINOR,
+                # 2026-09-18): explicit, hermetic against
+                # CalibrationHandle's real repo-root default (M3).
                 handle = jev_cascade.CalibrationHandle(
-                    os.path.join(d, "decisions.jsonl"), os.path.join(d, "outcomes.jsonl"))
+                    os.path.join(d, "decisions.jsonl"), os.path.join(d, "outcomes.jsonl"),
+                    promotions_path=None)
                 with self.assertRaises(ValueError):
                     R.route_decision({"id": "x", "family": "f", "qtype": "noul",
                                       "confidence": 0.9}, "low", handle)
+
+
+class J033NeverChangesTheRoutedLane(unittest.TestCase):
+    """J033, wave-2: second-opinions the task_class/risk_class table for
+    the calibration ledger only. C1: whatever Jev says, route_lane()'s
+    own real Lane is unchanged."""
+
+    def test_a_normal_route_consults_the_seam_and_keeps_the_lane(self):
+        real_check = R.jev_checks.check_lane_routing
+        seen = {}
+        def fake(spec_text, current_answer, **k):
+            seen["spec_text"] = spec_text
+            seen["current_answer"] = current_answer
+            return None
+        R.jev_checks.check_lane_routing = fake
+        try:
+            lane = R.route_lane("implementation", "medium", "public")
+        finally:
+            R.jev_checks.check_lane_routing = real_check
+        self.assertEqual(lane.draft, "deepseek")
+        self.assertEqual(seen["current_answer"], "deepseek")
+        self.assertIn("implementation", seen["spec_text"])
+
+    def test_an_invalid_task_class_still_raises_before_any_consult(self):
+        real_check = R.jev_checks.check_lane_routing
+        called = []
+        R.jev_checks.check_lane_routing = lambda *a, **k: called.append(1)
+        try:
+            with self.assertRaises(ValueError):
+                R.route_lane("not-a-real-task-class")
+        finally:
+            R.jev_checks.check_lane_routing = real_check
+        self.assertEqual(called, [])
+
+    def test_a_raising_seam_never_loses_the_real_lane(self):
+        real_check = R.jev_checks.check_lane_routing
+        R.jev_checks.check_lane_routing = \
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
+        try:
+            lane = R.route_lane("implementation", "medium", "public")
+        finally:
+            R.jev_checks.check_lane_routing = real_check
+        self.assertEqual(lane.draft, "deepseek")
+
+    def test_an_adversarial_seam_answer_never_reroutes_the_unit(self):
+        """Rigged the opposite of the real routed lane: Jev answers
+        'claude-opus' for a unit the table routed to deepseek. The
+        returned lane must still be deepseek."""
+        real_check = R.jev_checks.check_lane_routing
+        R.jev_checks.check_lane_routing = lambda *a, **k: "claude-opus"
+        try:
+            lane = R.route_lane("implementation", "medium", "public")
+        finally:
+            R.jev_checks.check_lane_routing = real_check
+        self.assertEqual(lane.draft, "deepseek")
+
+    def test_jev_checks_unavailable_still_routes_correctly(self):
+        real_jev_checks = R.jev_checks
+        R.jev_checks = None
+        try:
+            lane = R.route_lane("implementation", "medium", "public")
+        finally:
+            R.jev_checks = real_jev_checks
+        self.assertEqual(lane.draft, "deepseek")
+
+
+class J051OnlyConsultsOnAnAmbiguousCheckerAndNeverReroutes(unittest.TestCase):
+    """J051, wave-2: fires only when the checker field names neither opus
+    nor muse, or both -- the two cases _names_opus_gate cannot resolve on
+    its own. C1: whatever Jev says, the real routed lane is unchanged."""
+
+    def test_opus_only_is_unambiguous_and_never_consults(self):
+        real_check = R.jev_checks.check_adversarial_review_tier
+        called = []
+        R.jev_checks.check_adversarial_review_tier = lambda *a, **k: called.append(1)
+        try:
+            lane = R.route_lane("review", "high", "public", checker="opus-high")
+        finally:
+            R.jev_checks.check_adversarial_review_tier = real_check
+        self.assertEqual(lane.draft, "claude-opus")
+        self.assertEqual(called, [])
+
+    def test_muse_only_is_unambiguous_and_never_consults(self):
+        real_check = R.jev_checks.check_adversarial_review_tier
+        called = []
+        R.jev_checks.check_adversarial_review_tier = lambda *a, **k: called.append(1)
+        try:
+            lane = R.route_lane("review", "high", "public", checker="muse-default")
+        finally:
+            R.jev_checks.check_adversarial_review_tier = real_check
+        self.assertEqual(lane.draft, "muse")
+        self.assertEqual(called, [])
+
+    def test_neither_named_is_ambiguous_and_consults(self):
+        real_check = R.jev_checks.check_adversarial_review_tier
+        seen = {}
+        def fake(checker_text, current_answer, **k):
+            seen["checker_text"] = checker_text
+            seen["current_answer"] = current_answer
+            return None
+        R.jev_checks.check_adversarial_review_tier = fake
+        try:
+            lane = R.route_lane("review", "high", "public", checker=None)
+        finally:
+            R.jev_checks.check_adversarial_review_tier = real_check
+        self.assertEqual(lane.draft, "muse")
+        self.assertEqual(seen["current_answer"], "muse")
+
+    def test_both_named_is_ambiguous_and_consults(self):
+        """JEV-06's own real checker string: 'muse then opus (orchestrator
+        mutation)' names both words, is routed to muse today, and is
+        exactly the case J051 exists to flag for calibration."""
+        real_check = R.jev_checks.check_adversarial_review_tier
+        called = []
+        R.jev_checks.check_adversarial_review_tier = lambda *a, **k: called.append(1)
+        try:
+            lane = R.route_lane("review", "high", "public",
+                                checker="muse then opus (orchestrator mutation)")
+        finally:
+            R.jev_checks.check_adversarial_review_tier = real_check
+        self.assertEqual(lane.draft, "muse")
+        self.assertEqual(len(called), 1)
+
+    def test_privacy_gated_case_can_still_be_ambiguous_and_consults(self):
+        real_check = R.jev_checks.check_adversarial_review_tier
+        called = []
+        R.jev_checks.check_adversarial_review_tier = lambda *a, **k: called.append(1)
+        try:
+            lane = R.route_lane("review", "high", "private", checker=None)
+        finally:
+            R.jev_checks.check_adversarial_review_tier = real_check
+        self.assertEqual(lane.draft, "claude-opus")
+        self.assertEqual(len(called), 1)
+
+    def test_an_adversarial_seam_answer_never_reroutes_the_review(self):
+        real_check = R.jev_checks.check_adversarial_review_tier
+        R.jev_checks.check_adversarial_review_tier = lambda *a, **k: "claude-opus"
+        try:
+            lane = R.route_lane("review", "high", "public", checker=None)
+        finally:
+            R.jev_checks.check_adversarial_review_tier = real_check
+        self.assertEqual(lane.draft, "muse")
+
+    def test_a_raising_seam_never_loses_the_real_lane(self):
+        real_check = R.jev_checks.check_adversarial_review_tier
+        R.jev_checks.check_adversarial_review_tier = \
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
+        try:
+            lane = R.route_lane("review", "high", "public", checker=None)
+        finally:
+            R.jev_checks.check_adversarial_review_tier = real_check
+        self.assertEqual(lane.draft, "muse")
 
 
 if __name__ == "__main__":

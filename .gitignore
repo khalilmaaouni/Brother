@@ -29,3 +29,17 @@ STATE.md.bak-*
 
 # JBEQ fixtures and run outputs are data, not residue (2026-09-05)
 !benchmarks/jbeq/**/*.csv
+
+# Machine reservation state written by brother_run on every acquire and release
+# (2026-09-18): tracked, it made the tree dirty after every run, which cut.py
+# refuses; it also carries the host name and a pid.
+docs/plan/MACHINE-RESERVATION.json
+docs/plan/LOAD-REFUSALS.jsonl
+
+# Jev runtime state (2026-09-18): the decision/outcome ledger, the canary's
+# run history and its reset marker live under JEV_STATE_DIR
+# (BROTHER_JEV_STATE_DIR, default ~/.brother/jev), never in a checkout, so a
+# live run cannot dirty this tree. The marker path stays ignored here in case
+# someone points a config at the old in-tree location. data/jev-promotions.jsonl
+# is NOT ignored: founder-signed promotions are meant to be reviewable in git.
+data/jev-canary-reset.json

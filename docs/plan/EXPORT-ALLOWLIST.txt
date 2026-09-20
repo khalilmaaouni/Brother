@@ -470,11 +470,20 @@ products/brothersbe/docs/guides/01-quickstart.md
 products/brothersbe/docs/guides/02-the-gates-in-practice.md
 products/brothersbe/docs/guides/04-teams-and-evolution.md
 
-# products/brotherds excluded entirely, 2026-08-31: not in marketplace.json
-# today, and its own PROJECT.md says "scope defined by the founder; nothing
-# built". The tree is almost all private planning (docs/HANDOVER-*, docs/
-# COORDINATED-PLAN, docs/PLAN-*, docs/SCOPE-*, research/A1-B2). Revisit once
-# it ships as an actual installable plugin.
+# products/brotherds, added 2026-09-10: it is now listed in
+# .claude-plugin/marketplace.json (EXPERIMENTAL) and ships as an actual
+# installable plugin, so only its shippable surface is allowed through,
+# never the private planning trees (docs/, research/, GANTT.html,
+# PROJECT.md, OPTIONS.md) that surround it.
+products/brotherds/.claude-plugin
+products/brotherds/.codex-plugin
+products/brotherds/bds.py
+products/brotherds/skills
+products/brotherds/examples
+products/brotherds/README.md
+products/brotherds/SPEC.md
+products/brotherds/LICENSE
+products/brotherds/EXTRACTION-NOTE.md
 
 # Added 2026-09-04, the 1.0.2 tag-time link check (scripts/export_public.py
 # check_markdown_links). Over a freshly built export tree that check refused
@@ -563,9 +572,6 @@ docs/cursor/PACKAGE-SHAPE.md
 # Public mobile workflow guides and the implemented claim verification product.
 docs/how-to/native-mobile-workflow.md
 docs/how-to/native-evidence.md
-products/brotherds/README.md
-products/brotherds/LICENSE
-products/brotherds/SPEC.md
 products/brotherds/mdm_validate.py
 products/brotherds/audit_provenance.py
 products/brotherds/mdm_derive.py
@@ -582,15 +588,12 @@ products/brotherds/pack_mdm_calibration.py
 products/brotherds/pack_mdm.py
 products/brotherds/pack_mdm_science.py
 products/brotherds/forecast_score.py
-products/brotherds/bds.py
 products/brotherds/vault_bridge.py
 products/brotherds/mdm_eval.py
 products/brotherds/packs.py
 products/brotherds/pack_mdm_audit.py
 products/brotherds/pack_mdm_identity.py
 products/brotherds/tests
-products/brotherds/examples
-products/brotherds/skills
 products/brotherds/docs/PERSONA-JOURNEYS.md
 products/brotherds/docs/MDM-SCIENCE.md
 products/brotherds/docs/MDM-AUDIT.md
@@ -601,4 +604,3 @@ products/brotherds/docs/plan/QUEUE.json
 products/brotherds/research/C1-mdm-data-science-best-practice-2026-09-12.md
 products/brotherds/research/C2-harness-and-market-practice-2026-09-12.md
 products/brotherds/docs/PLAYBOOK-LOCATION-ANCHORED-MASTER.md
-products/brotherds/.claude-plugin

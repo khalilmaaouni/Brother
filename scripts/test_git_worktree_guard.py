@@ -148,6 +148,42 @@ class GitWorktreeGuardTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stderr, '')
 
+    def test_worktree_remove_force_on_dirty_worktree_is_blocked(self):
+        """The real 2026-09-19 incident: a worktree carrying real
+        uncommitted source changes (beyond an already-merged base) was
+        force-removed in a batch of otherwise-safe cleanups, with no
+        per-item check in that same command. This is that exact shape,
+        proven to actually go red before this guard existed."""
+        repo = self.make_repo()
+        wt = self.add_worktree(repo)
+        self.modify_file(wt, 'uncommitted change\n')
+        result = run_guard(bash_payload(
+            'git -C %s worktree remove %s --force' % (repo, wt), repo))
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('uncommitted working tree changes', result.stderr)
+
+    def test_worktree_remove_force_on_clean_worktree_is_allowed(self):
+        repo = self.make_repo()
+        wt = self.add_worktree(repo)
+        result = run_guard(bash_payload(
+            'git -C %s worktree remove %s --force' % (repo, wt), repo))
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_worktree_remove_dirty_without_force_is_not_this_guards_business(self):
+        """No --force: git's own built-in refusal already protects this
+        path, so the guard stays out of the way (exit 0) and lets git make
+        that call itself."""
+        repo = self.make_repo()
+        wt = self.add_worktree(repo)
+        self.modify_file(wt, 'uncommitted change\n')
+        result = run_guard(bash_payload('git -C %s worktree remove %s' % (repo, wt), repo))
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_unrelated_worktree_subcommand_is_allowed(self):
+        repo = self.make_repo()
+        result = run_guard(bash_payload('git -C %s worktree list' % repo, repo))
+        self.assertEqual(result.returncode, 0, result.stderr)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -40,6 +40,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 
@@ -441,11 +442,16 @@ def _anchor_resolves(anchor, tree):
         return True
     if shutil.which(anchor):
         return True
+    # The timeout below lives in this process; a host that kills the hook mid grep takes it along
+    # and the grep walks the whole tree for nobody (seen 2026-09-11 in bm_freshness's twin). An
+    # alarm set before exec survives exec, so the grep ends itself. No alarm on Windows.
+    secs = ANCHOR_GREP_TIMEOUT_S + 2
+    expire = (lambda: signal.alarm(secs)) if hasattr(signal, "alarm") else None
     try:
         out = subprocess.run(
             ["grep", "-rlF", "-m", "1", "--exclude-dir=.git", "--", anchor, tree],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            timeout=ANCHOR_GREP_TIMEOUT_S)
+            timeout=ANCHOR_GREP_TIMEOUT_S, preexec_fn=expire)
         return out.returncode == 0
     except Exception:  # sbe: allow-silent a broken or slow grep reads as "not resolved", never a crash
         return False

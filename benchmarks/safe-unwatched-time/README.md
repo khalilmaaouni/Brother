@@ -61,15 +61,20 @@ conditions (they overlap but are not the same list). Each is implemented in
 |---|---|---|
 | **false_greens** | Yes | `claims.json` gives a complete census of every closed unit's own exit code, and a receipt tally gives a complete proven/unproven count. Both are full counts, not samples, so their presence really does mean the whole record was checked. Maps to break kinds 1 (REFUTED) and 2 (UNPROVEN) of `SAFE-UNWATCHED-TIME.md`. |
 | **scope_drift** | Only when it fires | `integrate.refused` records a REAL violation when one happens (break kind 3, SCOPE). But zero such events is silence, not proof: no event kind in this journal vocabulary records "scope was checked and stayed clean", so an unviolated run cannot be told apart from one where scope tracking never engaged. Confirmed empirically: `decomposition-adversity-2026-09-04` has zero `integrate.refused` events in its journal, and nothing in the record says whether that is because nothing was checked or because everything passed. |
-| **unrecoverable_state** | No | `benchmarks/gauntlets/long-horizon-recovery.json` states this directly, in its own entries: RECOVERY TIME reads `"status": "partial"`, and HUMAN INTERVENTIONS reads `"instrument": "NO INSTRUMENT YET"`. No journal event kind or claim field carries a recoverability verdict anywhere in this repo. |
-| **repeated_mistakes** | No | REPEATED FAILURE is named as a raw metric in `docs/plan/SWITCHING-STRATEGY-2026-09-04.md` section 19, but no script, journal event kind, or claim field on this estate computes it per run. Grepped for and not found in `scripts/journal.py`'s event vocabulary. |
+| **unrecoverable_state** | Yes (2026-09-19) | `check_unrecoverable_state()` reuses `scripts/continuity.py`'s own `capsule()`, never reimplemented: it already classifies every unit into integrated/active/pending/abandoned/unclear for the same reason this check exists. A unit landing in "abandoned" (claim died mid-flight, unresolved) or "unclear" (continuity.py itself could not tell) is exactly the state this check exists to catch. Measured whenever a capsule can be built at all (needs only the journal every other check here already required); unmeasured only in the one case `continuity.py`'s own `capsule()` documents: no `journal.jsonl`. No real run on this machine has an abandoned or unclear unit today (verified against all 6 real adversity run directories), so every real run currently reads `ok=True`; the positive detection path is proven with a synthetic case in `test_run_benchmark.py`. `benchmarks/gauntlets/long-horizon-recovery.json` still shows RECOVERY TIME as `"status": "partial"` and HUMAN INTERVENTIONS as `"instrument": "NO INSTRUMENT YET"` -- those are separate, still-open metrics this check does not close. |
+| **repeated_mistakes** | Yes (2026-09-19) | `check_repeated_mistakes()` reads the run's own COMPLETE breaks list (`safe_unwatched_time.find_breaks()`, every event and every claim, not just the one that closes the span) and reuses `tools/repeat-guard/repeat_guard.py`'s own `VOLATILE` normalization (the matcher is not reimplemented). A mistake REPEATS when two or more breaks share the same kind and the same VOLATILE-masked detail text. Unlike scope_drift, zero repeats is a real positive finding here, not silence, because the census covers every break either way, so this check is measured on any run with a real journal. Real-run evidence, from `python3 run_benchmark.py`'s own printed output: `docs/plan/runs/i3-loom-2026-09-04/run` reads `ok=False`, the same claim-refuted-by-its-own-check failure recurring 5 times in that run's own record -- a real positive case, not only the synthetic fixture in `test_run_benchmark.py`. |
 
-Because at least one of the four is always unmeasured for every real run on
-this machine today, **every family this harness can reach reports NO-DATA**,
-never a duration. That is the honest state of the instrumentation on
-2026-09-13, not a bug in the harness: closing the gap means building a
-recoverability instrument and a repeated-mistake counter first, and giving
-scope tracking a positive "checked and clean" event, none of which exist yet.
+As of 2026-09-19, three of the four checks (false_greens, unrecoverable_state,
+repeated_mistakes) are real, always-on instruments. Only **scope_drift**
+still cannot be measured on silence (zero `integrate.refused` events proves
+nothing without a positive "checked and clean" event this journal vocabulary
+does not carry). That means **most families still report NO-DATA**, but not
+all: `scope-auditing-adversity-2026-09-04` -- the one real run on this
+machine whose scope violation actually fired -- now reports a genuine
+duration (`13.9 min over 0 units`, `all_preserved: false`), because a fired
+violation is itself a real, measured `scope_drift` reading. Closing the row
+for every family still needs scope tracking given a positive "checked and
+clean" event; that is the one remaining gap.
 
 ## The fixture
 

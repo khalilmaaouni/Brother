@@ -63,6 +63,23 @@ from ._toolspath import mount
 mount()
 from sbe_telemetry import SECRET_PATTERNS  # noqa: E402
 
+# J049/J050, wave-2 Jev seams: optional, fail-open, same discipline as every
+# other jev_checks/jev_seam import in this estate. See _jevpath.py's own
+# docstring for why this is a real cross-package bridge, not a plain
+# relative import: this product is installed standalone, decoupled from
+# the main repo's scripts/ directory, in its real deployed location.
+from ._jevpath import mount as _mount_jev
+if _mount_jev():
+    try:
+        import jev_checks
+        import jev_seam
+    except Exception:  # noqa: BLE001
+        jev_checks = None
+        jev_seam = None
+else:
+    jev_checks = None
+    jev_seam = None
+
 SCHEMA_VERSION = "1.0"
 
 #: The seven reviewer agents this router may name, exactly the seven files
@@ -872,12 +889,20 @@ def route(target, base=None, head="HEAD", work_profile=None):
         mapped_impact_hits.append(_hit(h["detector"], h["file"], h["why"], trigger))
 
     evidence_hits = _evidence_hits(cwd)
+    # Named individually (rather than summed inline) so J052/J053/J054/J055 below
+    # can read each detector's own real hits after they are computed, never
+    # before: the value of `local_hits` itself is unchanged by this renaming.
+    migration_content_hits = _migration_content_hits(cwd, base_sha, head_ref, files)
+    embedded_sql_hits = _embedded_sql_hits(cwd, base_sha, head_ref, files)
+    secret_like_hits = _secret_like_hits(cwd, base_sha, head_ref, files)
+    doc_control_promise_hits = _doc_control_promise_hits(cwd, base_sha, head_ref, files)
+    qa_detector_hits = _qa_hits(cwd, base_sha, head_ref, files)
     local_hits = (
-        _migration_content_hits(cwd, base_sha, head_ref, files)
-        + _embedded_sql_hits(cwd, base_sha, head_ref, files)
-        + _secret_like_hits(cwd, base_sha, head_ref, files)
-        + _doc_control_promise_hits(cwd, base_sha, head_ref, files)
-        + _qa_hits(cwd, base_sha, head_ref, files)
+        migration_content_hits
+        + embedded_sql_hits
+        + secret_like_hits
+        + doc_control_promise_hits
+        + qa_detector_hits
         + evidence_hits
     )
     all_hits = mapped_impact_hits + local_hits
@@ -944,8 +969,11 @@ def route(target, base=None, head="HEAD", work_profile=None):
     intent_value = _read_raw_intent(intake_path)
     required_proof_value = unmeasured if unmeasured else "NO-DATA"
     evidence_summaries_value = evidence_hits if evidence_hits else "NO-DATA"
+    # Named individually so J056 below can read this real boolean after it is
+    # computed, never before: the value used in `result` is unchanged.
+    low_risk_fast_path = _is_low_risk_fast_path(tier, selected)
 
-    return {
+    result = {
         "schemaVersion": SCHEMA_VERSION,
         "scope": "git diff %s..%s over %d changed file(s)" % (base_sha[:12], head_ref,
                                                               len(files)),
@@ -958,11 +986,92 @@ def route(target, base=None, head="HEAD", work_profile=None):
         "mechanicalOnly": not selected,
         "unmeasured": unmeasured,
         "verdict": "ROUTED",
-        "lowRiskFastPath": _is_low_risk_fast_path(tier, selected),
+        "lowRiskFastPath": low_risk_fast_path,
         "freshContextReview": _fresh_context_review(
             primary, intent_value, tier, diff_value, required_proof_value,
             evidence_summaries_value),
     }
+
+    # J049/J050/J052/J053/J054/J055/J056: fired AFTER the real, deterministic
+    # result above (and the detectors it was built from) is fully computed, as
+    # a pure side effect -- never before, never read back into `result`, never
+    # allowed to affect this function's byte-identical-on-the-same-diff
+    # contract (TestDeterminismAndRegistry). C1: `result` is returned exactly
+    # as computed, whatever mode says.
+    if jev_checks is not None and jev_seam is not None:
+        _route_summary = ("tier=%s primary=%s secondary=%s mechanicalOnly=%s"
+                          % (tier, primary, secondary, not selected))
+        _seams_cfg = jev_seam.load_seams_config()
+        _registry = jev_seam.load_registry()
+        try:
+            jev_checks.check_review_route_disposition(
+                _route_summary, (tier, primary, secondary),
+                seams_config=_seams_cfg, registry=_registry,
+                ledger_dir=jev_seam.DEFAULT_LEDGER_DIR,
+            )  # C1: return value intentionally discarded, shadow-only by contract
+        except Exception:  # noqa: BLE001  # sbe: allow-silent this seam is advisory only, never worth risking route()'s own determinism contract
+            pass
+        try:
+            jev_checks.check_review_route_reviewer(
+                _route_summary, (primary, secondary),
+                seams_config=_seams_cfg, registry=_registry,
+                ledger_dir=jev_seam.DEFAULT_LEDGER_DIR,
+            )  # C1: return value intentionally discarded, shadow-only by contract
+        except Exception:  # noqa: BLE001  # sbe: allow-silent this seam is advisory only, never worth risking route()'s own determinism contract
+            pass
+        try:
+            _fastpath_summary = "tier=%s selected=%s" % (tier, ",".join(selected) or "none")
+            jev_checks.check_fast_path_eligibility(
+                _fastpath_summary, low_risk_fast_path,
+                seams_config=_seams_cfg, registry=_registry,
+                ledger_dir=jev_seam.DEFAULT_LEDGER_DIR,
+            )  # C1: return value intentionally discarded, shadow-only by contract
+        except Exception:  # noqa: BLE001  # sbe: allow-silent this seam is advisory only, never worth risking route()'s own determinism contract
+            pass
+        try:
+            _migration_summary = "; ".join(h["why"] for h in migration_content_hits) or (
+                "no migration-content hit in this diff")
+            jev_checks.check_migration_content_detector(
+                _migration_summary, bool(migration_content_hits),
+                seams_config=_seams_cfg, registry=_registry,
+                ledger_dir=jev_seam.DEFAULT_LEDGER_DIR,
+            )  # C1: return value intentionally discarded, shadow-only by contract
+        except Exception:  # noqa: BLE001  # sbe: allow-silent this seam is advisory only, never worth risking route()'s own determinism contract
+            pass
+        try:
+            _sql_summary = "; ".join(h["why"] for h in embedded_sql_hits) or (
+                "no embedded-sql hit in this diff")
+            jev_checks.check_embedded_sql_detector(
+                _sql_summary, bool(embedded_sql_hits),
+                seams_config=_seams_cfg, registry=_registry,
+                ledger_dir=jev_seam.DEFAULT_LEDGER_DIR,
+            )  # C1: return value intentionally discarded, shadow-only by contract
+        except Exception:  # noqa: BLE001  # sbe: allow-silent this seam is advisory only, never worth risking route()'s own determinism contract
+            pass
+        try:
+            _doc_promise_summary = "; ".join(h["why"] for h in doc_control_promise_hits) or (
+                "no control-promise removal hit in this diff")
+            jev_checks.check_doc_control_promise_detector(
+                _doc_promise_summary, bool(doc_control_promise_hits),
+                seams_config=_seams_cfg, registry=_registry,
+                ledger_dir=jev_seam.DEFAULT_LEDGER_DIR,
+            )  # C1: return value intentionally discarded, shadow-only by contract
+        except Exception:  # noqa: BLE001  # sbe: allow-silent this seam is advisory only, never worth risking route()'s own determinism contract
+            pass
+        try:
+            _tampering_hits = [h for h in qa_detector_hits
+                                if h["detector"] == "test-weakened-assertion"]
+            _tampering_summary = "; ".join(h["why"] for h in _tampering_hits) or (
+                "no test-tampering hit in this diff")
+            jev_checks.check_test_tampering_detector(
+                _tampering_summary, bool(_tampering_hits),
+                seams_config=_seams_cfg, registry=_registry,
+                ledger_dir=jev_seam.DEFAULT_LEDGER_DIR,
+            )  # C1: return value intentionally discarded, shadow-only by contract
+        except Exception:  # noqa: BLE001  # sbe: allow-silent this seam is advisory only, never worth risking route()'s own determinism contract
+            pass
+
+    return result
 
 
 def no_data_report(target, exc):

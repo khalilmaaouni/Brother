@@ -19,6 +19,15 @@ import textwrap
 import unittest
 from unittest import mock
 
+# Minor fix (opus-review-seams-g1-g3.md): redirect jev_seam's own
+# machine-level state root to a throwaway temp dir BEFORE jev_seam is
+# ever imported in this process, so no test here reads (or could ever
+# write) the real ~/.brother/jev -- must happen before any import below
+# that could reach jev_seam.py: JEV_STATE_DIR is a module-level constant
+# jev_seam.py computes once, at its own import time.
+os.environ.setdefault("BROTHER_JEV_STATE_DIR",
+                       tempfile.mkdtemp(prefix="brother-jev-state-test-"))
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 BROTHER_RUN = os.path.join(HERE, "brother_run.py")
@@ -29,6 +38,9 @@ import journal  # noqa: E402
 import journal_projection  # noqa: E402
 import decide  # noqa: E402
 import receipt_door as RD  # noqa: E402
+import jev_seam  # noqa: E402
+import jev_g1_seam_cache  # noqa: E402
+import jev_checks  # noqa: E402
 
 # E100: one sandbox for every temp tree this process makes, removed at exit.
 import os as _e100_os, sys as _e100_sys  # noqa: E402
@@ -3325,6 +3337,292 @@ class RepairA7AHollowVerifiedEntryNeverReadsProceed(unittest.TestCase):
         self.assertIn("Suggested decision: PROCEED", spec["footer"])
         self.assertIn("has a check that actually verified it",
                       spec["footer"])
+
+
+def _j100_entry():
+    return {
+        "id": "J100", "role": "second_opinion", "risk": "low", "wave": "W1",
+        "privacy": "public_or_own_text",
+        "question": {
+            "type": "noul",
+            "instructions": "did this revert break something else?",
+        },
+    }
+
+
+def _noul_runner(prob):
+    """A scripted bridge runner answering a noul question at `prob`, no
+    network or subprocess: the same shape ScriptedRunner in
+    test_jev_seam.py uses, reimplemented here so this file needs no
+    import of that test module."""
+    def fn(argv, stdin_text):
+        payload = json.loads(stdin_text)
+        answers = {qid: {"noul": prob, "confidence": prob}
+                   for qid in payload["questions"]}
+        response = {"model": "typesafe/jev-1.13-test", "answers": answers,
+                    "usage": {"cost": 0.001}}
+        return 0, json.dumps(response), ""
+    return fn
+
+
+class JevSeamJ100SecondOpinion(unittest.TestCase):
+    """J100 (revert-broke-something check), wired into
+    revert_broke_check() via jev_seam.consult(). Mode ships off in the
+    real data/jev-seams.json, so (a) needs no mocking; (b)-(d) mock
+    jev_seam.load_seams_config/load_registry to force shadow mode for
+    this one test only."""
+
+    STDERR = "Traceback (most recent call last):\nImportError: no module named x"
+
+
+    def setUp(self):
+        # jev_g1_seam_cache caches the resolved mode per entry_id
+        # (module docstring: at most one jev_seam.load_seams_config()
+        # call per second) -- a call in an EARLIER test could still be
+        # "fresh" here, so reset before every test rather than rely on
+        # the freshness window happening to have elapsed.
+        jev_g1_seam_cache.reset()
+        # The consult runs bridge_content_gate, which FAILS CLOSED when its
+        # forbidden-terms list is missing, and the default list lives outside
+        # every repository, in the operator's home. Tests b and d therefore
+        # passed on the machine that wrote them and failed on any clean one:
+        # measured 2026-09-20, the public release pull request's required-fast
+        # run read fail 2 (receipt-door, export-public) on these four tests
+        # while the same tree read fail 0 locally. The fixture list below
+        # makes the gate's input part of the test instead of the machine.
+        import json as _json
+        import shutil as _shutil
+        import tempfile as _tempfile
+        import coe_outside_gate as _coe_gate
+        _terms_dir = _tempfile.mkdtemp()
+        self.addCleanup(_shutil.rmtree, _terms_dir, ignore_errors=True)
+        _terms = os.path.join(_terms_dir, "terms.json")
+        with open(_terms, "w", encoding="utf-8") as _fh:
+            _json.dump({"vendor-fixture": ["ACMEWIDGET"]}, _fh)
+        _patch = mock.patch.object(_coe_gate, "DEFAULT_TERMS_PATH", _terms)
+        _patch.start()
+        self.addCleanup(_patch.stop)
+    def test_a_mode_off_makes_zero_calls_and_output_is_byte_identical(self):
+        def boom(argv, stdin_text):
+            raise AssertionError("mode off must never invoke the runner")
+
+        before = RD.revert_broke_check(self.STDERR)
+        after = RD.revert_broke_check(self.STDERR, jev_runner=boom)
+        self.assertTrue(before)
+        self.assertEqual(before, after)
+
+    def test_b_shadow_mode_output_identical_and_one_ledger_row_written(self):
+        expected = RD.revert_broke_check(self.STDERR)  # real config: off
+        ledger_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, ledger_dir, ignore_errors=True)
+        cfg = {"modes": {"J100": "shadow"}}
+        jev_g1_seam_cache.reset()  # the baseline call above may have cached this entry as off
+        with mock.patch.object(jev_seam, "load_seams_config", return_value=cfg), \
+                mock.patch.object(jev_seam, "load_registry", return_value=[_j100_entry()]), \
+                mock.patch.object(jev_seam, "DEFAULT_LEDGER_DIR", ledger_dir):
+            after = RD.revert_broke_check(self.STDERR, jev_runner=_noul_runner(0.05))
+        self.assertEqual(after, expected)
+        # A0.8: shadow hands the call to a background worker and returns
+        # at once, before the ledger row exists. drain() waits for the
+        # worker to finish so the row is actually there to count.
+        jev_seam.drain(timeout=5)
+        decisions_path = os.path.join(ledger_dir, "decisions.jsonl")
+        self.assertTrue(os.path.isfile(decisions_path))
+        with open(decisions_path, encoding="utf-8") as fh:
+            rows = [ln for ln in fh if ln.strip()]
+        self.assertEqual(len(rows), 1)
+
+    def test_c_seam_path_exception_leaves_output_identical(self):
+        expected = RD.revert_broke_check(self.STDERR)
+        cfg = {"modes": {"J100": "shadow"}}
+        jev_g1_seam_cache.reset()  # the baseline call above may have cached this entry as off
+        with mock.patch.object(jev_seam, "load_seams_config", return_value=cfg), \
+                mock.patch.object(jev_seam, "load_registry",
+                                   side_effect=RuntimeError("registry unreadable")):
+            after = RD.revert_broke_check(self.STDERR, jev_runner=_noul_runner(0.05))
+        self.assertEqual(after, expected)
+
+    def test_d_red_proof_wiring_that_trusts_jevs_raw_answer_breaks_test_b(self):
+        current_answer = RD.revert_broke_check(self.STDERR)  # True
+        ledger_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, ledger_dir, ignore_errors=True)
+        cfg = {"modes": {"J100": "shadow"}}
+        jev_g1_seam_cache.reset()  # the baseline call above may have cached this entry as off
+        with mock.patch.object(jev_seam, "load_seams_config", return_value=cfg), \
+                mock.patch.object(jev_seam, "load_registry", return_value=[_j100_entry()]), \
+                mock.patch.object(jev_seam, "DEFAULT_LEDGER_DIR", ledger_dir):
+            result = jev_seam.consult(
+                "J100", {"stderr": self.STDERR}, current_answer,
+                seams_config=jev_seam.load_seams_config(),
+                registry=jev_seam.load_registry(),
+                ledger_dir=jev_seam.DEFAULT_LEDGER_DIR,
+                runner=_noul_runner(0.05),
+            )
+            # A0.8: shadow never returns Jev's answer (result.jev is
+            # always None); the eventual answer only lands in the
+            # ledger, once the background worker finishes. drain() first,
+            # then read it there.
+            jev_seam.drain(timeout=5)
+            decisions_path = os.path.join(ledger_dir, "decisions.jsonl")
+            with open(decisions_path, encoding="utf-8") as fh:
+                rows = [json.loads(ln) for ln in fh if ln.strip()]
+            self.assertEqual(len(rows), 1)
+            wrongly_wired = bool(rows[0]["answer"] >= 0.5)
+            safely_wired = result.answer
+        self.assertFalse(wrongly_wired)
+        self.assertNotEqual(wrongly_wired, current_answer)
+        self.assertEqual(safely_wired, current_answer)
+
+    def test_e_a1_call_site_never_reads_a_patched_consults_return(self):
+        """A1 (opus-review-g1-round2-pkg-decide.md): test_d proves
+        consult()'s two fields disagree, but it never touches the CALL
+        SITE's own wiring -- revert_broke_check() is never invoked inside
+        the mocked block there. This one does: jev_seam.consult ITSELF
+        is patched to return an ACT-mode SeamResult whose .answer is
+        0.05 (a float, the wrong TYPE for this call site's own bool
+        answer), mode live via a patched config, and asserts
+        revert_broke_check() still returns its own local verdict, never
+        0.05."""
+        cfg = {"modes": {"J100": "shadow"}}
+        jev_g1_seam_cache.reset()
+        wrong = jev_seam.SeamResult(0.05, {"answer": 0.05}, jev_seam.ACT,
+                                    None, False, "mutation-probe")
+        with mock.patch.object(jev_seam, "load_seams_config", return_value=cfg), \
+                mock.patch.object(jev_seam, "load_registry", return_value=[_j100_entry()]), \
+                mock.patch.object(jev_seam, "DEFAULT_LEDGER_DIR", tempfile.mkdtemp()), \
+                mock.patch.object(jev_seam, "consult", return_value=wrong):
+            after = RD.revert_broke_check(self.STDERR)
+        self.assertTrue(after)
+        self.assertNotEqual(after, wrong.answer)
+
+
+class TestJ099ReceiptRiskTriggerNeverChangesTheHits(unittest.TestCase):
+    """J099, wave-2 ('Receipt risk-trigger phrase scan'): risk_triggers()'s
+    own real regex matches are what the caller always receives -- see
+    receipt_door.py's risk_triggers() docstring and _consult_j099()'s own
+    docstring. C1: whatever the seam says, risk_triggers() keeps returning
+    its own real hits."""
+
+    #: The consult loads data/jev-registry.json before it calls the check.
+    #: The public export ships scripts/ whole and data/ not at all (the
+    #: registry names machine level hooks, which stay private), so in an
+    #: export tree the load raises, the advisory except swallows it and the
+    #: check is never reached. Tests a and b assert the check WAS reached;
+    #: without the registry they cannot run, and they say so as NO-DATA
+    #: instead of failing. Measured 2026-09-20: this refused the 1.0.21 push
+    #: on the export tree's own fast gate (pass 33, fail 1, receipt-door).
+    #: Tests c onward need no registry and run everywhere.
+    _REGISTRY = os.path.join(os.path.dirname(HERE), "data", "jev-registry.json")
+    _needs_registry = unittest.skipUnless(
+        os.path.isfile(_REGISTRY),
+        "NO-DATA: data/jev-registry.json is not in this tree (the public "
+        "export does not ship data/), so the J099 consult cannot be reached "
+        "here")
+
+    def setUp(self):
+        self._real_check = jev_checks.check_receipt_risk_trigger
+
+    def tearDown(self):
+        jev_checks.check_receipt_risk_trigger = self._real_check
+
+    @_needs_registry
+    def test_a_normal_call_consults_the_seam_and_keeps_the_real_hits(self):
+        seen = []
+        def fake(unit_text, current_answer, **k):
+            seen.append((unit_text, current_answer))
+            return "false"  # an adversarial-looking Jev answer, still discarded
+        jev_checks.check_receipt_risk_trigger = fake
+        rows = [{"id": "u1", "objective": "delete the old backup table"}]
+        hits = RD.risk_triggers(rows)
+        self.assertTrue(hits)  # the real regex DOES fire ("delete"/"table")
+        self.assertEqual(len(seen), 1)
+        self.assertEqual(seen[0][1], True)  # current_answer: this row DID hit
+
+    @_needs_registry
+    def test_b_a_clean_row_reports_false_as_current_answer(self):
+        seen = []
+        def fake(unit_text, current_answer, **k):
+            seen.append(current_answer)
+            return "true"  # an adversarial-looking Jev answer, still discarded
+        jev_checks.check_receipt_risk_trigger = fake
+        rows = [{"id": "u1", "objective": "rename a local variable"}]
+        hits = RD.risk_triggers(rows)
+        self.assertEqual(hits, [])
+        self.assertEqual(seen, [False])
+
+    def test_c_jev_checks_unreachable_still_returns_the_real_hits(self):
+        """Simulates jev_checks being unimportable (an installed copy of
+        scripts/ with jev_checks.py missing or broken): risk_triggers()
+        must still return its own real hits. Setting sys.modules['jev_checks']
+        to None is the standard way to force the next `import jev_checks`
+        to raise ImportError without touching the real file on disk."""
+        real_module = sys.modules.get("jev_checks")
+        sys.modules["jev_checks"] = None
+        try:
+            rows = [{"id": "u1", "objective": "delete the old backup table"}]
+            hits = RD.risk_triggers(rows)
+        finally:
+            if real_module is not None:
+                sys.modules["jev_checks"] = real_module
+            else:
+                del sys.modules["jev_checks"]
+        self.assertTrue(hits)
+
+    def test_d_a_raising_seam_never_loses_the_real_hits(self):
+        jev_checks.check_receipt_risk_trigger = \
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
+        rows = [{"id": "u1", "objective": "delete the old backup table"}]
+        hits = RD.risk_triggers(rows)
+        self.assertTrue(hits)
+
+
+class JevSeamPerfCacheNeverHitsDiskAfterWarmup(unittest.TestCase):
+    """Coordinator directive (measured regression in another wave-1
+    group: a seam in OFF mode made a hot call site 52x slower by
+    re-reading data/jev-seams.json on every call): after a first call
+    warms jev_seam's in-process cache, 1,000 further OFF-mode calls to
+    revert_broke_check() must touch the filesystem zero times and return
+    the identical answer every time."""
+
+
+    def setUp(self):
+        # jev_g1_seam_cache caches the resolved mode per entry_id
+        # (module docstring: at most one jev_seam.load_seams_config()
+        # call per second) -- a call in an EARLIER test could still be
+        # "fresh" here, so reset before every test rather than rely on
+        # the freshness window happening to have elapsed.
+        jev_g1_seam_cache.reset()
+    def test_1000_off_mode_calls_after_warmup_touch_no_filesystem(self):
+        stderr_text = "clean re-run, nothing broke"
+        first = RD.revert_broke_check(stderr_text)  # warms jev_seam's config cache
+        self.assertFalse(first)
+
+        calls = {"stat": 0, "exists": 0, "open": 0}
+        real_stat, real_exists, real_open = os.stat, os.path.exists, open
+
+        def counting_stat(*a, **kw):
+            calls["stat"] += 1
+            return real_stat(*a, **kw)
+
+        def counting_exists(*a, **kw):
+            calls["exists"] += 1
+            return real_exists(*a, **kw)
+
+        def counting_open(*a, **kw):
+            calls["open"] += 1
+            return real_open(*a, **kw)
+
+        outputs = set()
+        with mock.patch("os.stat", counting_stat), \
+                mock.patch("os.path.exists", counting_exists), \
+                mock.patch("builtins.open", counting_open):
+            for _ in range(1000):
+                outputs.add(RD.revert_broke_check(stderr_text))
+
+        self.assertEqual(calls, {"stat": 0, "exists": 0, "open": 0},
+                         "an off-mode call must never touch the filesystem "
+                         "once jev_seam's config cache is warm")
+        self.assertEqual(outputs, {False})
 
 
 if __name__ == "__main__":

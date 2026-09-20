@@ -13,10 +13,10 @@ to run the battery.
 
 | | |
 |---|---:|
-| Parts | 351 |
-| Parts with a purpose written in the file | 349 |
-| Parts with a suite wired into the battery | 332 |
-| Checks in the battery | 442 |
+| Parts | 362 |
+| Parts with a purpose written in the file | 360 |
+| Parts with a suite wired into the battery | 339 |
+| Checks in the battery | 451 |
 
 2 part(s) carry no purpose line and are listed as NO-DATA below. They are
 shown rather than omitted, because a system record that hides its
@@ -42,7 +42,7 @@ undocumented corners looks complete and is not.
 | `acceptance_time` | The Acceptance Time benchmark harness (S11, roadmap row S11; protocol | `acceptance`, `acceptance-self`, `acceptance-time`, `system-doc-current`, `system-doc-self` |
 | `acceptance_trial_assign` | Acceptance Compression trial: reviewer assignment and results validation | `acceptance-trial-assign-self` |
 | `activation_audit` | UNIT TRIGGER-07: registration is not activation. | `activation-audit-self` |
-| `adapter_conformance` | ONE ordered suite, unchanged across every provider. | `adapter-conformance-self`, `codex_parity-self` |
+| `adapter_conformance` | ONE ordered suite, unchanged across every provider. | `adapter-conformance-self`, `codex_parity-self`, `cursor_parity-self` |
 | `air_gapped_install` | DOM-50.10: does Brother's own install path need a network, and when it | `air_gapped_install-self` |
 | `annotations_store` | a correction made once is a fact from then on. | `annotations-self` |
 | `answering_model_record` | ORCH-29 of the 1.0.20 control plane: which model actually answered, and | `answering_model_record-self` |
@@ -65,7 +65,7 @@ undocumented corners looks complete and is not.
 | `bridge_default_model` | the outside model bridge's default model, pinned to | `bridge_default_model-self` |
 | `brief_lint` | ORCH-26: an advisory linter over a dispatch brief, demoted on purpose. | `brief_lint-self` |
 | `brief_optimizer_score` | Mechanically score baseline + candidate_a + candidate_b of gen_briefs.py | **NO-DATA**, nothing in the battery runs it |
-| `brother_install` | A2: one tool that takes a Codex home from an unknown state to Brother's | `adapter-conformance-self`, `brother-install-self`, `keep-current-self` |
+| `brother_install` | A2: one tool that takes a Codex home from an unknown state to Brother's | `adapter-conformance-self`, `brother-install-self`, `keep-current-self`, `provider-adapter-self` |
 | `brother_paths` | C3: the one place Brother resolves its plugin root, its config directory, | `brother-paths-self` |
 | `brother_run` | a plain outcome in, a verified delivery report out. | `adapter-conformance-self`, `brother-run-self`, `bundle-runtime-self`, `codex-smoke`, `codex-smoke-self`, `e80-release-reproduction-self`, `fault-lab-self`, `limit-watch-self`, `product-acceptance-self`, `release-closeout-self`, `release-invariant`, `release-invariant-self`, `tiny-task-cost-self`, `virgin-unit-proof`, `virgin-unit-proof-self` |
 | `brother_wastage_census` | .py: a corrected with-Brother vs without-Brother census. | **NO-DATA**, nothing in the battery runs it |
@@ -114,6 +114,7 @@ undocumented corners looks complete and is not.
 | `coverage_check` | Coverage checker for the unified WBS (docs/plan/UNIFIED-WBS.md), task 0. | `coverage`, `coverage-self` |
 | `credential_broker` | hand a caller the minimum credential for one stated | `credential_broker-self` |
 | `cursor_battery` | Verify a released Cursor adapter in a detached clone and retain its evidence. | `cursor-battery-self` |
+| `cursor_parity` | DOM-50.06. Names every outstanding Cursor portability gap | `cursor_parity-self` |
 | `cursor_plugin_install` | Install the Brother Cursor plugin to ~/.cursor/plugins/local/brother. | `air_gapped_install-self` |
 | `cursor_smoke` | the clean-install Cursor smoke test, run in an isolated home. | `cursor-smoke`, `cursor-smoke-self` |
 | `cut` | The release cut as ONE command: readiness, precedence, the chain, one | `cut-self` |
@@ -129,6 +130,7 @@ undocumented corners looks complete and is not.
 | `doc_numbers_check` | .py: every number a document claims is checked against | `doc_numbers_check-self` |
 | `dominance_scoreboard` | DOM-00.03: the one composite the Dominance rows (DOM-10 through DOM-50) | `dominance_scoreboard-self` |
 | `door` | a plain English outcome becomes a canonical Work document. | `brother-run-self`, `bundle-runtime-self`, `door-self`, `mutation-gate`, `mutation-gate-self` |
+| `drift_gate` | Brother's own version of a Stop-hook drift/finishing-claim | **NO-DATA**, nothing in the battery runs it |
 | `e53_lesson_ab` | does a lesson SHOWN at the moment of action change the action. | `e53-lesson-ab-self` |
 | `e80_release_reproduction_drive` | E80's done check, run end to end against a fixture release. | `e80-release-reproduction-self` |
 | `earn_first` | is a switching or positioning claim allowed to publish yet. | `earn-first-self` |
@@ -192,9 +194,16 @@ undocumented corners looks complete and is not.
 | `jbeq_mdm` | JBEQ-MDM seed suite: write the blind prompts, score a blind answer file. | `jbeq-mdm-seed` |
 | `jbeq_regression` | JBEQ-MDM regression harness: re-decide the pinned round 6 fact sheets | `jbeq-regression-round6-self` |
 | `jev_calibration` | JEV-02 of the 1.0.20 orchestration control plane: the calibration ledger. | `jev_calibration-self` |
+| `jev_canary` | JEV-05, the golden-set drift canary for Jev (TypeSafe's | `jev_canary-self` |
 | `jev_cascade` | JEV-03 of the 1.0.20 orchestration control plane: the confidence-gated | `jev_cascade-self` |
+| `jev_checks` | the six Jev wave-1 seams named in the wave-1 seam brief | `jev_checks-self` |
 | `jev_decide` | the one place this estate asks Jev (TypeSafe's decision | `jev_decide-self` |
 | `jev_eval` | JEV-04 of the 1.0.20 orchestration control plane: Jev (TypeSafe) versus | `jev_eval-self` |
+| `jev_frontdoor_classify` | A1.03 (J014) and A2.03 (J119), wave-1/wave-2 Jev seams: PostToolUse | **NO-DATA**, nothing in the battery runs it |
+| `jev_frontdoor_sidecar` | A1.03 (J014, wave-1 Jev seam): UserPromptSubmit half of the front-door | **NO-DATA**, nothing in the battery runs it |
+| `jev_g1_seam_cache` | NOT a foundation module. Owned only by this wave's | `jev_g1_seam_cache-self` |
+| `jev_registry` | the one place this estate reads data/jev-registry.json, | `jev_registry-lint`, `jev_registry-self` |
+| `jev_seam` | A0.2/A0.6 of the 1.0.20 orchestration control plane, the one | `jev_seam-self` |
 | `journal` | one append-only causal log per run, fed by the writers that | `journal-self` |
 | `journal_projection` | the delivery report, receipts-bound and a live | `journal-projection-self` |
 | `journey_passport` | WBS-30.06 Journey Passport: a VIEW composing evidence that already exists | `journey-passport-self`, `mutation-gate`, `mutation-gate-self` |
@@ -274,6 +283,7 @@ undocumented corners looks complete and is not.
 | `pattern_note` | write down what WORKED, and make it findable by the problem. | `pattern-note-self` |
 | `portable_pack` | Portable pack: R25.2's weekly half (docs/plan/READINESS-ROADMAP-2026-08-29.json, | `portable-pack-self` |
 | `pre_push_gate` | catch it at the boundary, not after somebody asks. | `pre-push-gate`, `pre-push-gate-self` |
+| `preflight_snapshot` | MD-1 of the MULTIDAY-SESSIONS epic (2026-09-19). | **NO-DATA**, nothing in the battery runs it |
 | `preserve_wip` | Preserve uncommitted work in every git worktree by pushing it to an archive ref. | `preserve-wip-self` |
 | `prevented_word_gate` | the word "prevented" stays off every surface until a real | `prevented-word-gate`, `prevented-word-gate-self` |
 | `priority` | order the board by what a real person actually asked for. | `priority`, `priority-self` |
@@ -282,6 +292,7 @@ undocumented corners looks complete and is not.
 | `process_containment` | DOM-40.05: cancellation must terminate the whole owned descendant tree. | `process_containment-self` |
 | `product_acceptance` | P0.4 of docs/plan/P0-COMPOSITION-WAVE-2026-08-30.md. | `product-acceptance-self` |
 | `progress_deadline` | alive is not advancing, and output is not progress. | `progress-deadline-self` |
+| `proof_card` | the customer-facing Proof Card, projected from one run's own | `proof-card-self` |
 | `prove_guide_claude` | S23's real done_check: prove docs/how-to/install-claude-code.md runs | `prove-guide-claude-self` |
 | `provider_adapter` | ONE provider-neutral core, THIN adapters. | `provider-adapter-self` |
 | `publish_reconciliation` | WBS-40.10 Publish Reconciliation: what Brother checks AFTER an external | `publish-reconciliation-self` |
@@ -418,6 +429,7 @@ undocumented corners looks complete and is not.
 - `roadmap-merge-self`: `python3 scripts/test_roadmap_merge.py -v`
 - `fence-expiry-self`: `python3 scripts/test_fence_expiry.py -v`
 - `safe-unwatched-time-self`: `python3 scripts/test_safe_unwatched_time.py -v`
+- `proof-card-self`: `python3 scripts/test_proof_card.py -v`
 - `fence-expiry`: `python3 scripts/fence_expiry.py`
 - `graph-loop-self`: `python3 scripts/test_graph_loop.py -v`
 - `graph-loop`: `python3 scripts/graph_loop.py`
@@ -703,12 +715,20 @@ undocumented corners looks complete and is not.
 - `jev_cascade-self`: `python3 scripts/test_jev_cascade.py -v`
 - `jev_calibration-self`: `python3 scripts/test_jev_calibration.py -v`
 - `jev_decide-self`: `python3 scripts/test_jev_decide.py -v`
+- `jev_registry-self`: `python3 scripts/test_jev_registry.py -v`
+- `jev_registry-lint`: `python3 scripts/jev_registry.py lint data/jev-registry.json`
+- `jev_canary-self`: `python3 scripts/test_jev_canary.py -v`
+- `jev_seam-self`: `python3 scripts/test_jev_seam.py -v`
+- `jev_checks-self`: `python3 scripts/test_jev_checks.py -v`
+- `jev_g1_seam_cache-self`: `python3 scripts/test_jev_g1_seam_cache.py -v`
+- `jev_seam-doc_assurance-self`: `python3 scripts/test_doc_assurance_jev_seam.py -v`
 - `endurance_classes-self`: `python3 scripts/test_endurance_classes.py -v`
 - `autonomy_corpus-self`: `python3 scripts/test_autonomy_corpus.py -v`
 - `escape_gauntlet-self`: `python3 scripts/test_escape_gauntlet.py -v`
 - `fixture_classes-self`: `python3 scripts/test_fixture_classes.py -v`
 - `claude_parity-self`: `python3 scripts/test_claude_parity.py -v`
 - `codex_parity-self`: `python3 scripts/test_codex_parity.py -v`
+- `cursor_parity-self`: `python3 scripts/test_cursor_parity.py -v`
 - `os_matrix-self`: `python3 scripts/test_os_matrix.py -v`
 - `generic_skills_adapter-self`: `python3 scripts/test_generic_skills_adapter.py -v`
 - `autonomy_floor-self`: `python3 scripts/test_autonomy_floor.py -v`

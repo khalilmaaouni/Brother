@@ -3,12 +3,14 @@
 
 Run: python3 tools/test_bm_vault_catalog.py      (unittest output, exit 0 or 1)
 """
+import importlib.util
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
 import time
+import types
 import unittest
 
 # E100: one sandbox for every temp tree this process makes, removed at exit.
@@ -481,6 +483,92 @@ class BakePreservesStableId(unittest.TestCase):
         self.assertEqual(code, 0, out[:300])
         self.assertIn("id: n-abc def", read(self.alpha_path),
                       "rebake silently dropped a malformed id value")
+
+
+class EnrichIndexLoadsOnceRegardlessOfNoteCount(unittest.TestCase):
+    """Regression for the 2026-09-13 finding: the per-note suffix lookup called
+    _load_enrich_index() once per note, and that loader re-execs a 404-line
+    module from source every time (a by-path load carries no bytecode cache),
+    while the old per-note read path also walked and read the WHOLE vault on
+    every call. Measured on the founder's real vault: 274.9s real over about
+    1600 notes across 13 projects, versus 1.06-1.35s for sibling tools doing
+    a comparable full-vault walk. The fix caches the loaded module for the
+    life of the process and reads the vault's promoted-suffix map once
+    instead of once per note.
+
+    Asserting the rendered output is unchanged (BakedCatalog above already
+    does) would not catch a regression back to a load-per-note: the output
+    is byte-identical either way. Only a spy on the real loader tells a
+    cache HIT apart from a cache that was simply never exercised, the same
+    way a stale-cache test asserts a hit count rather than only a value."""
+
+    def setUp(self):
+        # 2 projects, 3 notes each: enough that "once per note" (6) reads
+        # differently from "once per process" (1); a single note or a
+        # single project could not tell the two apart.
+        files = {}
+        for proj in ("alpha", "beta"):
+            for i in range(3):
+                files["10-Projects/%s/note-%d.md" % (proj, i)] = (
+                    "---\ntype: note\nstatus: open\ncreated: 2026-08-0%d\n---\n"
+                    "Body %d.\n" % (i + 1, i))
+        self.tmp, self.vault = make_vault(files)
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+
+    def _load_catalog_module(self, name):
+        # By path, the same technique this file's own precommit-hook and
+        # sibling-id tests already use to load a tool module in-process
+        # (see test_all_three_readers_agree_on_who_this_session_is above):
+        # a subprocess run cannot be spied on from here.
+        spec = importlib.util.spec_from_file_location(name, TOOL)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def _spy(self, mod):
+        calls = []
+        real_loader = mod._load_enrich_index
+
+        def counting_loader():
+            calls.append(1)
+            return real_loader()
+        mod._load_enrich_index = counting_loader
+        return calls
+
+    def _note_count(self, mod):
+        return sum(len(mod._project_notes(self.vault, s))
+                   for s in mod._project_slugs(self.vault))
+
+    def test_bake_loads_the_enrich_index_module_exactly_once(self):
+        cat = self._load_catalog_module("bm_vault_catalog_spy_bake")
+        calls = self._spy(cat)
+        note_count = self._note_count(cat)
+        self.assertGreaterEqual(note_count, 6,
+                                "fixture too small to tell a per-note load apart "
+                                "from a per-process one: %d notes" % note_count)
+        code = cat._bake(self.vault)
+        self.assertEqual(code, 0, "bake did not exit 0")
+        self.assertEqual(len(calls), 1,
+                         "bake loaded bm_vault_enrich_index %d time(s) across %d "
+                         "notes, want exactly 1 (a load per note is the 274.9s "
+                         "regression this test guards against)" % (len(calls), note_count))
+
+    def test_check_loads_the_enrich_index_module_exactly_once(self):
+        # A real check run needs a fresh bake first (an unbaked vault is
+        # itself "stale", not the property under test here).
+        baker = self._load_catalog_module("bm_vault_catalog_spy_check_bake")
+        self.assertEqual(baker._bake(self.vault), 0, "setup bake did not exit 0")
+        cat = self._load_catalog_module("bm_vault_catalog_spy_check")
+        calls = self._spy(cat)
+        note_count = self._note_count(cat)
+        self.assertGreaterEqual(note_count, 6,
+                                "fixture too small to tell a per-note load apart "
+                                "from a per-process one: %d notes" % note_count)
+        code = cat.cmd_check(types.SimpleNamespace(vault=self.vault))
+        self.assertEqual(code, 0, "check did not exit 0 on a freshly baked vault")
+        self.assertEqual(len(calls), 1,
+                         "check loaded bm_vault_enrich_index %d time(s) across %d "
+                         "notes, want exactly 1" % (len(calls), note_count))
 
 
 if __name__ == "__main__":

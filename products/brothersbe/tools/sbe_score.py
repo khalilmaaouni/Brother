@@ -673,14 +673,18 @@ def check_review_cadence(ctx):
 # reads the SQL wherever it is written and in whatever host language, and stops
 # at the statement's semicolon so that a legitimate on-conflict clause that
 # updates the row instead of silently discarding it is not swept in with it.
+_EXCEPT_THEN_PASS = re.compile(r"except\s+\w[\w.]*\s*:\s*(#.*)?$\s*pass", re.M)
 LINT_PATTERNS = [
     (re.compile(r"except\s*:"), "bare except (catches everything, hides the real error)", None),
-    (re.compile(r"except\s+\w[\w.]*\s*:\s*(#.*)?$\s*pass", re.M), "except-then-pass (swallows the error)", None),
+    (_EXCEPT_THEN_PASS, "except-then-pass (swallows the error)", None),
     # The swallow shape that actually destroyed data in this repository:
     # `except X:` then `continue` or `return None` dropped ledger lines from a
     # REWRITER, and the two patterns above could not see it. Legal only in a
     # reader that never rewrites, which is what the inline waiver must say.
-    (re.compile(r"except\s+\w[\w.]*\s*:\s*(#.*)?$\s*(?:continue|return\s+None)\b", re.M),
+    # `(?!\s*,)`: `return None, "reason"` is a (value, error) return that hands
+    # the error to the caller rather than dropping it; 8 of 41 hits over
+    # products/brotherds on 2026-09-18 were that idiom, each waived by hand.
+    (re.compile(r"except\s+\w[\w.]*\s*:\s*(#.*)?$\s*(?:continue|return\s+None)\b(?!\s*,)", re.M),
      "except-then-continue/return-None (drops the record, hides the error)", None),
     # Two patterns for one class, because the single pattern that shipped needed a
     # Python `.execute(` on the same line, and `.sql` is the FIRST non-Python
@@ -719,6 +723,40 @@ LINT_PATTERNS = [
     # patterns: a lint firing on correct code is how a gate gets switched off.
     (re.compile(r"try\s*!"), "force-try (Swift try! discards the error)", (".swift",)),
 ]
+
+# An expected-raise test: `try: f(); check(False, "should raise")` then
+# `except ValueError: pass`. The raise IS the outcome under test, and reaching
+# the fail line records the failure, so nothing is swallowed. 27 of 41 hits
+# over products/brotherds on 2026-09-18 were this shape, each waived by hand.
+# Narrow on purpose: the fail marker must be the last statement before the
+# except, indented inside the try, on one line (a marker split over lines
+# stays a hit). A handler for Exception, BaseException or AssertionError also
+# catches the AssertionError that `assert False` or `self.fail(` raises, so it
+# would swallow the test's own failure: those stay hits too.
+_EXPECTED_RAISE_FAIL = re.compile(
+    r"(?:check\(\s*False\b|bad\.append\(|self\.fail\(|assert\s+False\b|raise\s+AssertionError\b)")
+_CATCHES_ASSERTION = {"Exception", "BaseException", "AssertionError"}
+
+
+def _expected_raise(lines, at):
+    """True when lines[at] is `except X:` closing a try whose last statement records a test failure."""
+    m = re.match(r"\s*except\s+(\w[\w.]*)\s*:", lines[at])
+    if not m or m.group(1).rsplit(".", 1)[-1] in _CATCHES_ASSERTION:
+        return False
+    indent = len(lines[at]) - len(lines[at].lstrip())
+    for prev in reversed(lines[:at]):
+        s = prev.strip()
+        if s and not s.startswith("#"):
+            # The compound one-liner `fn(); bad.append("must raise")` is how six
+            # of this estate's own expected-raise tests are written, and reading
+            # only the start of the line left every one of them a hit. The LAST
+            # statement on the line is the one that runs before the handler. A
+            # semicolon inside a string mis-splits and the line stays a hit,
+            # which is the direction this must fail in.
+            last = s.rsplit(";", 1)[-1].strip()
+            return len(prev) - len(prev.lstrip()) > indent and bool(_EXPECTED_RAISE_FAIL.match(last))
+    return False
+
 
 SCANNABLE = (".py", ".sql", ".swift", ".rb", ".js", ".ts", ".go")
 EXEMPTION = "sbe: allow-silent"
@@ -915,6 +953,8 @@ def silent_failure_lints(ctx=None):
                     # this to apply, so a match that starts in a comment and
                     # reaches real code is still a hit.
                     if all(l.lstrip().startswith("#") for l in span):
+                        continue
+                    if pat is _EXCEPT_THEN_PASS and _expected_raise(lines, first):
                         continue
                     # The reason is the exemption. L11 writes the marker as
                     # `# sbe: allow-silent <reason>` and the reason was

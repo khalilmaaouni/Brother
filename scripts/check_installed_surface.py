@@ -27,6 +27,15 @@ NO-DATA IS NEVER A PASS. A details log that could not be parsed, or a plugin the
 manifest names with no log at all, is NO-DATA and exits non-zero: reading an
 unparseable log as an empty set would turn a broken install into a clean one.
 
+A PLUGIN CAN BE EXCLUDED FROM THE COMPARISON with --skip (repeatable), for a
+leaf the caller has already proven is not yet installable (not published at
+its declared ref). This is different from NO-DATA above: it is a known,
+named exclusion, not an unmeasured stage, so it never turns a clean run into
+a failure. --skip removes that plugin from BOTH sides of the comparison and
+from the details-log requirement; the manifest's own "total" still counts its
+entries, so the printed verdict states how many of that total were actually
+compared, never claiming a skipped plugin's entries as proven.
+
 Python 3, standard library only. No network.
 """
 import argparse
@@ -65,10 +74,15 @@ def parse_details(text):
     return set(names), ""
 
 
-def compare(manifest, installed):
-    """Set arithmetic per plugin. Returns (missing, extra) as dicts."""
+def compare(manifest, installed, skip=frozenset()):
+    """Set arithmetic per plugin. Returns (missing, extra) as dicts.
+
+    A plugin named in `skip` is left out of the comparison entirely: it is a
+    known exclusion (not yet installable), not a gap in the install."""
     missing, extra = {}, {}
     for plugin, promised in sorted((manifest.get("entries") or {}).items()):
+        if plugin in skip:
+            continue
         have = installed.get(plugin, set())
         gap = sorted(set(promised) - have)
         surplus = sorted(have - set(promised))
@@ -84,7 +98,12 @@ def main(argv=None):
     ap.add_argument("--manifest", required=True)
     ap.add_argument("--details-dir", required=True,
                     help="directory holding details-<plugin>.log per plugin")
+    ap.add_argument("--skip", action="append", default=[],
+                    help="plugin name to exclude from the comparison "
+                         "(repeatable); for a leaf already proven not yet "
+                         "installable, never for one that simply failed")
     args = ap.parse_args(list(sys.argv[1:] if argv is None else argv))
+    skip = set(args.skip or [])
 
     try:
         with open(args.manifest, encoding="utf-8") as fh:
@@ -95,7 +114,13 @@ def main(argv=None):
         return EXIT_NO_DATA
 
     installed = {}
+    skipped = []
     for plugin in manifest.get("shipped_plugins") or []:
+        if plugin in skip:
+            skipped.append(plugin)
+            print("NO-DATA: %s excluded, not installable before publish"
+                  % plugin, file=sys.stderr)
+            continue
         path = os.path.join(args.details_dir, "details-%s.log" % plugin)
         if not os.path.isfile(path):
             print("NO-DATA: the manifest ships %s but there is no %s, so the "
@@ -108,7 +133,7 @@ def main(argv=None):
             return EXIT_NO_DATA
         installed[plugin] = names
 
-    missing, extra = compare(manifest, installed)
+    missing, extra = compare(manifest, installed, skip)
     if missing:
         for plugin, gap in sorted(missing.items()):
             print("MISSING from the install, %s: %s" % (plugin, ", ".join(gap)),
@@ -132,9 +157,24 @@ def main(argv=None):
                 "surface, so an entry that registers without being typeable is "
                 "expected here and is not a failure"
                 % (len(flat), ", ".join(flat)))
+
+    skip_note = ""
+    total = manifest.get("total", 0)
+    effective_total = total
+    if skipped:
+        excluded_entries = sum(len(v) for k, v in
+                                (manifest.get("entries") or {}).items()
+                                if k in skip)
+        effective_total = total - excluded_entries
+        skip_note = ("; %d plugin(s) excluded as not yet installable (%s), so "
+                     "%d of the manifest's %d total entries were compared, "
+                     "never counted as proven"
+                     % (len(skipped), ", ".join(sorted(skipped)),
+                        effective_total, total))
+
     print("clause two: a clean install delivers every one of the %d entry(ies) "
-          "bundle/MANIFEST.json promises, matched BY NAME across %d plugin(s)%s"
-          % (manifest.get("total", 0), len(installed), note))
+          "bundle/MANIFEST.json promises, matched BY NAME across %d plugin(s)%s%s"
+          % (effective_total, len(installed), note, skip_note))
     return EXIT_MATCH
 
 

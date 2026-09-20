@@ -382,7 +382,7 @@ class TestMarketplace(unittest.TestCase):
         names = [str(e.get("name", "")).lower() for e in self.mp.get("plugins", [])]
         if "brotherds" in names:
             self.assertTrue(
-                os.path.isdir(_p("plugins", "brotherds")),
+                os.path.isdir(_p("products", "brotherds")),
                 "the claims product may be listed only once it is present here, "
                 "which happens after its clean extraction, never before",
             )

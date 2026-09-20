@@ -201,10 +201,22 @@ def check_schema_prose(root, files):
     return bad
 
 
-def check_generated_not_authored(root, files):
+def check_generated_not_authored(root, files, *, jev_runner=None):
     """No page tells a reader to hand-edit a generated file. SYSTEM.md is
     written by scripts/system_doc.py and checked by it; a page inviting an edit
-    there teaches somebody to produce a diff the battery will refuse."""
+    there teaches somebody to produce a diff the battery will refuse.
+
+    JEV-G1 wave-1 seam J095 (registry: doc-assurance 'generated not
+    authored' phrasing check): second-opinions each regex hit via
+    jev_seam.consult(), off by default in data/jev-seams.json, called
+    for its side effect only (the calibration ledger row and A0.6 audit
+    sample) -- WAVE 1 IS SHADOW-ONLY BY CONTRACT
+    (opus-review-seams-g1-g3.md, C1): a real regex hit is ALWAYS flagged
+    below, whatever mode says, including "act": there is no promoted,
+    calibrated evidence for this entry yet to make "act" a real path
+    today, and a raw noul probability is the wrong type to gate a
+    doc-assurance finding on regardless. `jev_runner` exists only so a
+    test can inject a scripted bridge."""
     bad = []
     invite = re.compile(r"(edit|update|change|write)[^.\n]{0,40}`?SYSTEM\.md`?", re.I)
     for rel in files:
@@ -212,6 +224,19 @@ def check_generated_not_authored(root, files):
             for n, line in enumerate(fh, 1):
                 if invite.search(line) and "not" not in line.lower() \
                         and "never" not in line.lower():
+                    try:
+                        import jev_g1_seam_cache
+                        if not jev_g1_seam_cache.is_off("J095"):
+                            import jev_seam
+                            jev_seam.consult(
+                                "J095", {"line": line}, True,
+                                seams_config=jev_seam.load_seams_config(),
+                                registry=jev_seam.load_registry(),
+                                ledger_dir=jev_seam.DEFAULT_LEDGER_DIR,
+                                runner=jev_runner,
+                            )  # C1: return value intentionally discarded, see docstring above
+                    except Exception:
+                        pass  # sbe: allow-silent the seam is advisory only, the hit below is always flagged
                     bad.append("%s:%d invites a hand edit of the generated "
                                "SYSTEM.md" % (rel, n))
     return bad

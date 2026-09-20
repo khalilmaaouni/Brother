@@ -268,5 +268,79 @@ class DrivenBackwards(unittest.TestCase):
             triage.classify = real_classify
 
 
+class TestJ082VaultTriageRelationshipNeverChangesTheRealVerdict(unittest.TestCase):
+    """J082, wave-2 ("Vault note/claim duplicate & contradiction check"):
+    classify()'s own dimension-equality compare is `current_answer` for a
+    shadow consult() fired by _consult_j082(), called from classify()
+    immediately after. C1: whatever the seam says, classify()'s own
+    caller (scan(), pair_claims()'s consumers, cmd_scan()) still sees
+    exactly what the dimension-equality compare itself computed."""
+
+    def setUp(self):
+        # scripts/ is already on sys.path (module-level _e100 setup above
+        # only appends it for tmp_sandbox; _jevpath.mount() does the real
+        # work lazily inside _consult_j082 itself, exactly as it runs for
+        # real). Importing jev_checks/jev_seam here, after priming the
+        # path the same way _consult_j082 does, returns the SAME cached
+        # module objects that function's own lazy import will use.
+        here = os.path.dirname(os.path.abspath(__file__))
+        if here not in sys.path:
+            sys.path.insert(0, here)
+        import _jevpath
+        self.assertTrue(_jevpath.mount(), "scripts/ must be reachable for this test")
+        import jev_checks as real_jev_checks
+        self.jev_checks = real_jev_checks
+        self._real_check = real_jev_checks.check_vault_triage_relationship
+
+    def tearDown(self):
+        self.jev_checks.check_vault_triage_relationship = self._real_check
+
+    def _pair(self):
+        a = {"path": "old.md", "text": "the rate is 5 percent",
+             "subject": "the rate", "value": "5 percent", "dims": {"date": "2025-01-01"}}
+        b = {"path": "new.md", "text": "the rate is 7 percent",
+             "subject": "the rate", "value": "7 percent", "dims": {"date": "2026-01-01"}}
+        return a, b
+
+    def test_a_a_normal_call_consults_the_seam_and_keeps_the_real_verdict(self):
+        seen = {}
+
+        def fake(claim_a_text, claim_b_text, current_answer, **k):
+            seen["claim_a"] = claim_a_text
+            seen["claim_b"] = claim_b_text
+            seen["current_answer"] = current_answer
+            return "duplicate"  # an adversarial-looking Jev answer, still discarded
+
+        self.jev_checks.check_vault_triage_relationship = fake
+        a, b = self._pair()
+        verdict = triage.classify(a, b)
+        self.assertEqual(verdict, ("SCOPED", "date"))
+        self.assertEqual(seen["current_answer"], ("SCOPED", "date"))
+        self.assertEqual(seen["claim_a"], a["text"])
+        self.assertEqual(seen["claim_b"], b["text"])
+
+    def test_b_jev_checks_unreachable_still_returns_the_real_verdict(self):
+        """Simulates _jevpath.mount() finding no scripts/ sibling (the real
+        failure this fail-open path defends against)."""
+        import _jevpath
+        real_mount = _jevpath.mount
+        _jevpath.mount = lambda: False
+        try:
+            a, b = self._pair()
+            a["dims"] = {}
+            b["dims"] = {}  # no shared dimension declared: real verdict is CONTRADICTION
+            verdict = triage.classify(a, b)
+        finally:
+            _jevpath.mount = real_mount
+        self.assertEqual(verdict, ("CONTRADICTION", None))
+
+    def test_c_a_raising_seam_never_loses_the_real_verdict(self):
+        self.jev_checks.check_vault_triage_relationship = \
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
+        a, b = self._pair()
+        verdict = triage.classify(a, b)
+        self.assertEqual(verdict, ("SCOPED", "date"))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -25,11 +25,26 @@ second implementation that drifts.
 
 Python 3.9, standard library only. No network. No subprocess. Writes no files.
 
+TWO DOCUMENTED EXCEPTIONS: lexical_overlap() below fires a J083 (wave-1
+Jev seam, "Vault recall rerank") shadow consult as a side effect, and
+atomicity_problems() below fires a J093 (wave-2 Jev seam, "Learned-rule
+atomicity check") shadow consult the same way. Both lazily mount scripts/
+(via _jevpath.py, since this file lives in products/brothermode/tools/, a
+different directory) and import jev_checks/jev_seam only inside that one
+call, only for their side effect (a calibration ledger row). Every other
+function in this file stays exactly as free of network, subprocess and
+filesystem writes as before; each shadow call itself pays nothing when
+jev_checks cannot be reached or its own entry's mode is off (jev_seam.py's
+own OFF branch), and neither lexical_overlap() nor atomicity_problems()
+ever has its own return value changed by it, whatever mode says.
+
 No em or en dashes anywhere in this file, its comments, or its output.
 """
 
 import hashlib
+import os
 import re
+import sys
 import unicodedata
 
 SCOPE_TYPES = ("global", "project", "domain", "artifact", "relationship", "tool")
@@ -132,11 +147,57 @@ def atomicity_problems(action_text):
     Advisory at capture and blocking at approval, because a compound rule can
     never be graded: when the outcome is bad you cannot tell which half was
     wrong. The founder can override at approval with a stated reason, and that
-    override is recorded as evidence rather than swallowed as a silent bypass."""
+    override is recorded as evidence rather than swallowed as a silent bypass.
+
+    J093 (wave-2 Jev seam, "Learned-rule atomicity check"): fires
+    immediately after the reasons list below is computed, as a pure side
+    effect, using bool(reasons) as current_answer -- see the module
+    docstring's "TWO DOCUMENTED EXCEPTIONS" note. Never fired on the
+    empty-text early return: an empty action has no heuristic scan to
+    second-opinion."""
     text = normalize_text(action_text)
     if not text:
         return ["action is empty"]
-    return [why for pattern, why in _COMPOUND_PATTERNS if pattern.search(text)]
+    reasons = [why for pattern, why in _COMPOUND_PATTERNS if pattern.search(text)]
+    _consult_j093(action_text, bool(reasons))
+    return reasons
+
+
+def _consult_j093(action_text, has_atomicity_problem, runner=None, rng=None):
+    """The one place atomicity_problems() above reaches jev_checks/jev_seam
+    (scripts/, mounted lazily via _jevpath.py, since this file lives in
+    products/brothermode/tools/, a different directory).
+
+    C1: `has_atomicity_problem` -- atomicity_problems()'s own real verdict
+    (whether its heuristic scan found any reason) -- is always what this
+    reports as current_answer, and atomicity_problems() itself always
+    returns its own real reasons list unchanged, whatever mode says
+    (registry fail_direction: "abstain flags the capture for human review
+    anyway (safer default)").
+    Anchor: products/brothermode/tools/bm_learning.py:141
+    (atomicity_problems(), immediately above).
+
+    Fail-open like every other wave-1/2/3 seam call site in this estate:
+    an import failure, a missing scripts/ sibling, or consult() itself
+    raising something undocumented never reaches atomicity_problems()'s
+    own caller."""
+    try:
+        here = os.path.dirname(os.path.abspath(__file__))
+        if here not in sys.path:
+            sys.path.insert(0, here)
+        import _jevpath
+        if _jevpath.mount():
+            import jev_checks
+            import jev_seam
+            jev_checks.check_learned_rule_atomicity(
+                action_text, has_atomicity_problem,
+                seams_config=jev_seam.load_seams_config(),
+                registry=jev_seam.load_registry(),
+                ledger_dir=jev_seam.DEFAULT_LEDGER_DIR,
+                runner=runner, rng=rng,
+            )  # C1: return value intentionally discarded, shadow-only by contract
+    except Exception:  # noqa: BLE001  # this seam is advisory only, never worth breaking a real atomicity verdict
+        pass
 
 
 def validate_scope(scope_type, scope_key):
@@ -183,14 +244,57 @@ def lexical_overlap(query, *fields):
 
     Plain overlap rather than a tuned score on purpose: an unexplainable number
     is exactly what invariant L9 forbids. This is the only relevance signal that
-    exists today; see the module docstring on FTS5."""
+    exists today; see the module docstring on FTS5.
+
+    J083 (wave-1 Jev seam, "Vault recall rerank"): fires immediately after
+    the score below is computed, as a pure side effect, using it as
+    current_answer -- see the module docstring's "ONE DOCUMENTED EXCEPTION"
+    note. Never fired on the empty-query early return: an empty query has
+    no lexical signal to second-opinion."""
     q = set(tokenize(query))
     if not q:
         return 0.0
     haystack = set()
     for f in fields:
         haystack.update(tokenize(f))
-    return len(q & haystack) / float(len(q))
+    score = len(q & haystack) / float(len(q))
+    _consult_j083(query, fields, score)
+    return score
+
+
+def _consult_j083(query, fields, score, runner=None, rng=None):
+    """The one place lexical_overlap() above reaches jev_checks/jev_seam
+    (scripts/, mounted lazily via _jevpath.py, since this file lives in
+    products/brothermode/tools/, a different directory).
+
+    C1: `score` -- lexical_overlap()'s own real return value -- is always
+    what this reports as current_answer, and lexical_overlap() itself
+    always returns it unchanged, whatever mode says (registry
+    fail_direction: "unknown keeps the lexical ranking's own order").
+    Anchor: products/brothermode/tools/bm_learning.py:181
+    (lexical_overlap(), immediately above).
+
+    Fail-open like every other wave-1/2/3 seam call site in this estate:
+    an import failure, a missing scripts/ sibling, or consult() itself
+    raising something undocumented never reaches lexical_overlap()'s own
+    caller."""
+    try:
+        here = os.path.dirname(os.path.abspath(__file__))
+        if here not in sys.path:
+            sys.path.insert(0, here)
+        import _jevpath
+        if _jevpath.mount():
+            import jev_checks
+            import jev_seam
+            jev_checks.check_vault_recall_rerank(
+                query, " ".join(f for f in fields if f), score,
+                seams_config=jev_seam.load_seams_config(),
+                registry=jev_seam.load_registry(),
+                ledger_dir=jev_seam.DEFAULT_LEDGER_DIR,
+                runner=runner, rng=rng,
+            )  # C1: return value intentionally discarded, shadow-only by contract
+    except Exception:  # noqa: BLE001  # this seam is advisory only, never worth breaking real relevance ranking
+        pass
 
 
 def scope_matches(rule_scope_type, rule_scope_key, context):

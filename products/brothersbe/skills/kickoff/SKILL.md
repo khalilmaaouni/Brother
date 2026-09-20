@@ -19,7 +19,16 @@ the routing table that says which reference file to load when. Do not work from 
 ## Then run the six mechanical steps
 
 1. CLASSIFY in one line: the work profile (backend service, warehouse and SQL, pipeline, data
-   quality, infrastructure, performance, or artifact mode) and the tier from L1.
+   quality, infrastructure, performance, or artifact mode) and the tier from L1. State your own
+   classification first; it is the real answer and the founder confirm screen still governs it.
+   Then, only when this checkout is a real Brother checkout (a `scripts/jev_checks.py` and
+   `data/jev-registry.json` exist at its root), log a shadow second opinion for calibration by
+   running, fire-and-forget (never wait on it, never let its output or exit code change your
+   own stated classification):
+   `python3 scripts/jev_checks.py j001 --request "<the raw ask, verbatim>" --current-answer "<your own one-line classification>" >/dev/null 2>&1 &`
+   Off by default (`data/jev-seams.json`), so this call costs nothing and changes nothing until
+   a human sets J001 live; skip it entirely outside a Brother checkout or when the command is
+   not available.
 2. Read memory before question one, unconditionally: the project's Kay Vault space Overview
    and Open-Items when a vault is configured for this project, otherwise the project's own
    STATE.md and its plan files. Also read the failures index and LEARNED.md. Play back ONE

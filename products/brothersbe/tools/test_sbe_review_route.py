@@ -1048,5 +1048,531 @@ class Night0912Reviewroute(unittest.TestCase):
             self.assertEqual({}, mod._record_routed(d, ['security-reviewer']))
 
 
+class J049J050NeverChangeTheRoutedResult(RouteFixture):
+    """J049/J050, wave-2: fired AFTER route()'s own real, deterministic
+    tier/reviewer decision is computed, as a pure side effect. C1: the
+    returned dict is always exactly what the deterministic logic computed,
+    whatever the seam says -- proven directly against route(), in-process,
+    so jev_checks can be monkeypatched without a subprocess boundary."""
+
+    def _mod(self):
+        sys.path.insert(0, os.path.join(ROOT, "src"))
+        try:
+            from brothersbe import reviewroute as mod
+        finally:
+            sys.path.pop(0)
+        return mod
+
+    def test_a_normal_route_consults_the_seam_and_keeps_the_result(self):
+        mod = self._mod()
+        write(self.repo, "api/openapi.yaml", "openapi: 3.0.0\n")
+        self.commit()
+        real_check = mod.jev_checks.check_review_route_disposition if mod.jev_checks else None
+        if mod.jev_checks is None:
+            self.skipTest("jev_checks unavailable in this environment (fail-open by design)")
+        seen = {}
+        def fake(route_summary, current_answer, **k):
+            seen["route_summary"] = route_summary
+            seen["current_answer"] = current_answer
+            return None
+        mod.jev_checks.check_review_route_disposition = fake
+        try:
+            baseline = mod.route(self.repo, base=self.base)
+            result = mod.route(self.repo, base=self.base)
+        finally:
+            mod.jev_checks.check_review_route_disposition = real_check
+        self.assertEqual(baseline, result)
+        self.assertEqual(seen["current_answer"],
+                         (result["tier"], result["primaryReviewer"], result["secondaryReviewer"]))
+
+    def test_an_adversarial_seam_answer_never_changes_the_routed_result(self):
+        mod = self._mod()
+        write(self.repo, "api/openapi.yaml", "openapi: 3.0.0\n")
+        self.commit()
+        if mod.jev_checks is None:
+            self.skipTest("jev_checks unavailable in this environment (fail-open by design)")
+        real_check = mod.jev_checks.check_review_route_disposition
+        mod.jev_checks.check_review_route_disposition = \
+            lambda *a, **k: ("T0", "security-reviewer", None)
+        try:
+            result = mod.route(self.repo, base=self.base)
+        finally:
+            mod.jev_checks.check_review_route_disposition = real_check
+        # Whatever the real routing table decided stays exactly as decided,
+        # never overwritten by the rigged adversarial answer above.
+        expected_without_seam = mod.route(self.repo, base=self.base)
+        self.assertEqual(result["tier"], expected_without_seam["tier"])
+        self.assertEqual(result["primaryReviewer"], expected_without_seam["primaryReviewer"])
+        self.assertEqual(result["secondaryReviewer"], expected_without_seam["secondaryReviewer"])
+
+    def test_a_raising_seam_never_breaks_route(self):
+        mod = self._mod()
+        write(self.repo, "api/openapi.yaml", "openapi: 3.0.0\n")
+        self.commit()
+        if mod.jev_checks is None:
+            self.skipTest("jev_checks unavailable in this environment (fail-open by design)")
+        real_check = mod.jev_checks.check_review_route_disposition
+        mod.jev_checks.check_review_route_disposition = \
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
+        try:
+            result = mod.route(self.repo, base=self.base)
+        finally:
+            mod.jev_checks.check_review_route_disposition = real_check
+        self.assertEqual(result["verdict"], "ROUTED")
+
+    def test_jev_checks_unavailable_still_routes_correctly(self):
+        mod = self._mod()
+        write(self.repo, "api/openapi.yaml", "openapi: 3.0.0\n")
+        self.commit()
+        real_jev_checks = mod.jev_checks
+        mod.jev_checks = None
+        try:
+            result = mod.route(self.repo, base=self.base)
+        finally:
+            mod.jev_checks = real_jev_checks
+        self.assertEqual(result["verdict"], "ROUTED")
+
+
+class J056NeverChangesTheRoutedResult(RouteFixture):
+    """J056, wave-1: fired AFTER route()'s own real fast-path eligibility
+    boolean (`_is_low_risk_fast_path`) is computed, as a pure side effect. C1:
+    the returned dict's `lowRiskFastPath` is always exactly what the
+    deterministic heuristic computed, whatever the seam says -- proven
+    directly against route(), in-process, so jev_checks can be monkeypatched
+    without a subprocess boundary. Same structural template as
+    J049J050NeverChangeTheRoutedResult above."""
+
+    def _mod(self):
+        sys.path.insert(0, os.path.join(ROOT, "src"))
+        try:
+            from brothersbe import reviewroute as mod
+        finally:
+            sys.path.pop(0)
+        return mod
+
+    def test_a_normal_route_consults_the_seam_and_keeps_the_result(self):
+        mod = self._mod()
+        write(self.repo, "README.md", "base\nan ordinary sentence.\n")
+        self.commit()
+        if mod.jev_checks is None:
+            self.skipTest("jev_checks unavailable in this environment (fail-open by design)")
+        real_check = mod.jev_checks.check_fast_path_eligibility
+        seen = {}
+        def fake(route_summary, current_answer, **k):
+            seen["route_summary"] = route_summary
+            seen["current_answer"] = current_answer
+            return None
+        mod.jev_checks.check_fast_path_eligibility = fake
+        try:
+            baseline = mod.route(self.repo, base=self.base)
+            result = mod.route(self.repo, base=self.base)
+        finally:
+            mod.jev_checks.check_fast_path_eligibility = real_check
+        self.assertEqual(baseline, result)
+        self.assertTrue(result["lowRiskFastPath"], result)
+        self.assertEqual(seen["current_answer"], result["lowRiskFastPath"])
+
+    def test_an_adversarial_seam_answer_never_changes_the_routed_result(self):
+        mod = self._mod()
+        write(self.repo, "README.md", "base\nan ordinary sentence.\n")
+        self.commit()
+        if mod.jev_checks is None:
+            self.skipTest("jev_checks unavailable in this environment (fail-open by design)")
+        real_check = mod.jev_checks.check_fast_path_eligibility
+        mod.jev_checks.check_fast_path_eligibility = lambda *a, **k: False
+        try:
+            result = mod.route(self.repo, base=self.base)
+        finally:
+            mod.jev_checks.check_fast_path_eligibility = real_check
+        expected_without_seam = mod.route(self.repo, base=self.base)
+        self.assertEqual(result, expected_without_seam)
+        self.assertTrue(result["lowRiskFastPath"], result)
+
+    def test_a_raising_seam_never_breaks_route(self):
+        mod = self._mod()
+        write(self.repo, "README.md", "base\nan ordinary sentence.\n")
+        self.commit()
+        if mod.jev_checks is None:
+            self.skipTest("jev_checks unavailable in this environment (fail-open by design)")
+        real_check = mod.jev_checks.check_fast_path_eligibility
+        mod.jev_checks.check_fast_path_eligibility = \
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
+        try:
+            result = mod.route(self.repo, base=self.base)
+        finally:
+            mod.jev_checks.check_fast_path_eligibility = real_check
+        self.assertEqual(result["verdict"], "ROUTED")
+
+    def test_jev_checks_unavailable_still_routes_correctly(self):
+        mod = self._mod()
+        write(self.repo, "README.md", "base\nan ordinary sentence.\n")
+        self.commit()
+        real_jev_checks = mod.jev_checks
+        mod.jev_checks = None
+        try:
+            result = mod.route(self.repo, base=self.base)
+        finally:
+            mod.jev_checks = real_jev_checks
+        self.assertEqual(result["verdict"], "ROUTED")
+
+
+class J052NeverChangesTheRoutedResult(RouteFixture):
+    """J052, wave-2: fired AFTER route()'s own real migration-content-regex
+    hits (`_migration_content_hits`) are computed, as a pure side effect. C1:
+    the returned dict is always exactly what the deterministic detector
+    computed, whatever the seam says. Same structural template as
+    J049J050NeverChangeTheRoutedResult above."""
+
+    def _mod(self):
+        sys.path.insert(0, os.path.join(ROOT, "src"))
+        try:
+            from brothersbe import reviewroute as mod
+        finally:
+            sys.path.pop(0)
+        return mod
+
+    def test_a_normal_route_consults_the_seam_and_keeps_the_result(self):
+        mod = self._mod()
+        write(self.repo, "scripts/cleanup_job.py",
+             "def run():\n    execute('ALTER TABLE users ADD COLUMN active BOOLEAN;')\n")
+        self.commit()
+        if mod.jev_checks is None:
+            self.skipTest("jev_checks unavailable in this environment (fail-open by design)")
+        real_check = mod.jev_checks.check_migration_content_detector
+        seen = {}
+        def fake(diff_summary, current_answer, **k):
+            seen["diff_summary"] = diff_summary
+            seen["current_answer"] = current_answer
+            return None
+        mod.jev_checks.check_migration_content_detector = fake
+        try:
+            baseline = mod.route(self.repo, base=self.base)
+            result = mod.route(self.repo, base=self.base)
+        finally:
+            mod.jev_checks.check_migration_content_detector = real_check
+        self.assertEqual(baseline, result)
+        self.assertEqual(result["primaryReviewer"], "migration-reviewer", result)
+        self.assertTrue(seen["current_answer"], seen)
+
+    def test_an_adversarial_seam_answer_never_changes_the_routed_result(self):
+        mod = self._mod()
+        write(self.repo, "scripts/cleanup_job.py",
+             "def run():\n    execute('ALTER TABLE users ADD COLUMN active BOOLEAN;')\n")
+        self.commit()
+        if mod.jev_checks is None:
+            self.skipTest("jev_checks unavailable in this environment (fail-open by design)")
+        real_check = mod.jev_checks.check_migration_content_detector
+        mod.jev_checks.check_migration_content_detector = lambda *a, **k: False
+        try:
+            result = mod.route(self.repo, base=self.base)
+        finally:
+            mod.jev_checks.check_migration_content_detector = real_check
+        expected_without_seam = mod.route(self.repo, base=self.base)
+        self.assertEqual(result, expected_without_seam)
+        self.assertEqual(result["primaryReviewer"], "migration-reviewer", result)
+
+    def test_a_raising_seam_never_breaks_route(self):
+        mod = self._mod()
+        write(self.repo, "scripts/cleanup_job.py",
+             "def run():\n    execute('ALTER TABLE users ADD COLUMN active BOOLEAN;')\n")
+        self.commit()
+        if mod.jev_checks is None:
+            self.skipTest("jev_checks unavailable in this environment (fail-open by design)")
+        real_check = mod.jev_checks.check_migration_content_detector
+        mod.jev_checks.check_migration_content_detector = \
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
+        try:
+            result = mod.route(self.repo, base=self.base)
+        finally:
+            mod.jev_checks.check_migration_content_detector = real_check
+        self.assertEqual(result["verdict"], "ROUTED")
+
+    def test_jev_checks_unavailable_still_routes_correctly(self):
+        mod = self._mod()
+        write(self.repo, "scripts/cleanup_job.py",
+             "def run():\n    execute('ALTER TABLE users ADD COLUMN active BOOLEAN;')\n")
+        self.commit()
+        real_jev_checks = mod.jev_checks
+        mod.jev_checks = None
+        try:
+            result = mod.route(self.repo, base=self.base)
+        finally:
+            mod.jev_checks = real_jev_checks
+        self.assertEqual(result["verdict"], "ROUTED")
+        self.assertEqual(result["primaryReviewer"], "migration-reviewer", result)
+
+
+class J053NeverChangesTheRoutedResult(RouteFixture):
+    """J053, wave-2: fired AFTER route()'s own real embedded-SQL-regex hits
+    (`_embedded_sql_hits`) are computed, as a pure side effect. C1: the
+    returned dict is always exactly what the deterministic detector computed,
+    whatever the seam says. Same structural template as
+    J049J050NeverChangeTheRoutedResult above."""
+
+    def _mod(self):
+        sys.path.insert(0, os.path.join(ROOT, "src"))
+        try:
+            from brothersbe import reviewroute as mod
+        finally:
+            sys.path.pop(0)
+        return mod
+
+    def test_a_normal_route_consults_the_seam_and_keeps_the_result(self):
+        mod = self._mod()
+        write(self.repo, "src/reporting/query.py",
+             "def totals(db):\n"
+             "    return db.execute(\"SELECT id, total FROM orders WHERE total > 100\")\n")
+        self.commit()
+        if mod.jev_checks is None:
+            self.skipTest("jev_checks unavailable in this environment (fail-open by design)")
+        real_check = mod.jev_checks.check_embedded_sql_detector
+        seen = {}
+        def fake(diff_summary, current_answer, **k):
+            seen["diff_summary"] = diff_summary
+            seen["current_answer"] = current_answer
+            return None
+        mod.jev_checks.check_embedded_sql_detector = fake
+        try:
+            baseline = mod.route(self.repo, base=self.base)
+            result = mod.route(self.repo, base=self.base)
+        finally:
+            mod.jev_checks.check_embedded_sql_detector = real_check
+        self.assertEqual(baseline, result)
+        self.assertEqual(result["primaryReviewer"], "data-reviewer", result)
+        self.assertTrue(seen["current_answer"], seen)
+
+    def test_an_adversarial_seam_answer_never_changes_the_routed_result(self):
+        mod = self._mod()
+        write(self.repo, "src/reporting/query.py",
+             "def totals(db):\n"
+             "    return db.execute(\"SELECT id, total FROM orders WHERE total > 100\")\n")
+        self.commit()
+        if mod.jev_checks is None:
+            self.skipTest("jev_checks unavailable in this environment (fail-open by design)")
+        real_check = mod.jev_checks.check_embedded_sql_detector
+        mod.jev_checks.check_embedded_sql_detector = lambda *a, **k: False
+        try:
+            result = mod.route(self.repo, base=self.base)
+        finally:
+            mod.jev_checks.check_embedded_sql_detector = real_check
+        expected_without_seam = mod.route(self.repo, base=self.base)
+        self.assertEqual(result, expected_without_seam)
+        self.assertEqual(result["primaryReviewer"], "data-reviewer", result)
+
+    def test_a_raising_seam_never_breaks_route(self):
+        mod = self._mod()
+        write(self.repo, "src/reporting/query.py",
+             "def totals(db):\n"
+             "    return db.execute(\"SELECT id, total FROM orders WHERE total > 100\")\n")
+        self.commit()
+        if mod.jev_checks is None:
+            self.skipTest("jev_checks unavailable in this environment (fail-open by design)")
+        real_check = mod.jev_checks.check_embedded_sql_detector
+        mod.jev_checks.check_embedded_sql_detector = \
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
+        try:
+            result = mod.route(self.repo, base=self.base)
+        finally:
+            mod.jev_checks.check_embedded_sql_detector = real_check
+        self.assertEqual(result["verdict"], "ROUTED")
+
+    def test_jev_checks_unavailable_still_routes_correctly(self):
+        mod = self._mod()
+        write(self.repo, "src/reporting/query.py",
+             "def totals(db):\n"
+             "    return db.execute(\"SELECT id, total FROM orders WHERE total > 100\")\n")
+        self.commit()
+        real_jev_checks = mod.jev_checks
+        mod.jev_checks = None
+        try:
+            result = mod.route(self.repo, base=self.base)
+        finally:
+            mod.jev_checks = real_jev_checks
+        self.assertEqual(result["verdict"], "ROUTED")
+        self.assertEqual(result["primaryReviewer"], "data-reviewer", result)
+
+
+class J054NeverChangesTheRoutedResult(RouteFixture):
+    """J054, wave-2: fired AFTER route()'s own real doc-control-promise-regex
+    hits (`_doc_control_promise_hits`) are computed, as a pure side effect.
+    C1: the returned dict is always exactly what the deterministic detector
+    computed, whatever the seam says. Same structural template as
+    J049J050NeverChangeTheRoutedResult above."""
+
+    def _mod(self):
+        sys.path.insert(0, os.path.join(ROOT, "src"))
+        try:
+            from brothersbe import reviewroute as mod
+        finally:
+            sys.path.pop(0)
+        return mod
+
+    def _base2(self):
+        write(self.repo, "docs/SECURITY.md",
+             "# Security\nAll requests must be authenticated before reaching the payment "
+             "service.\n")
+        self.commit()
+        base2 = git(self.repo, "rev-parse", "HEAD")
+        write(self.repo, "docs/SECURITY.md",
+             "# Security\nRequests are typically checked before reaching the payment "
+             "service.\n")
+        self.commit("soften the security doc")
+        return base2
+
+    def test_a_normal_route_consults_the_seam_and_keeps_the_result(self):
+        mod = self._mod()
+        base2 = self._base2()
+        if mod.jev_checks is None:
+            self.skipTest("jev_checks unavailable in this environment (fail-open by design)")
+        real_check = mod.jev_checks.check_doc_control_promise_detector
+        seen = {}
+        def fake(diff_summary, current_answer, **k):
+            seen["diff_summary"] = diff_summary
+            seen["current_answer"] = current_answer
+            return None
+        mod.jev_checks.check_doc_control_promise_detector = fake
+        try:
+            baseline = mod.route(self.repo, base=base2)
+            result = mod.route(self.repo, base=base2)
+        finally:
+            mod.jev_checks.check_doc_control_promise_detector = real_check
+        self.assertEqual(baseline, result)
+        self.assertEqual(result["primaryReviewer"], "security-reviewer", result)
+        self.assertTrue(seen["current_answer"], seen)
+
+    def test_an_adversarial_seam_answer_never_changes_the_routed_result(self):
+        mod = self._mod()
+        base2 = self._base2()
+        if mod.jev_checks is None:
+            self.skipTest("jev_checks unavailable in this environment (fail-open by design)")
+        real_check = mod.jev_checks.check_doc_control_promise_detector
+        mod.jev_checks.check_doc_control_promise_detector = lambda *a, **k: False
+        try:
+            result = mod.route(self.repo, base=base2)
+        finally:
+            mod.jev_checks.check_doc_control_promise_detector = real_check
+        expected_without_seam = mod.route(self.repo, base=base2)
+        self.assertEqual(result, expected_without_seam)
+        self.assertEqual(result["primaryReviewer"], "security-reviewer", result)
+
+    def test_a_raising_seam_never_breaks_route(self):
+        mod = self._mod()
+        base2 = self._base2()
+        if mod.jev_checks is None:
+            self.skipTest("jev_checks unavailable in this environment (fail-open by design)")
+        real_check = mod.jev_checks.check_doc_control_promise_detector
+        mod.jev_checks.check_doc_control_promise_detector = \
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
+        try:
+            result = mod.route(self.repo, base=base2)
+        finally:
+            mod.jev_checks.check_doc_control_promise_detector = real_check
+        self.assertEqual(result["verdict"], "ROUTED")
+
+    def test_jev_checks_unavailable_still_routes_correctly(self):
+        mod = self._mod()
+        base2 = self._base2()
+        real_jev_checks = mod.jev_checks
+        mod.jev_checks = None
+        try:
+            result = mod.route(self.repo, base=base2)
+        finally:
+            mod.jev_checks = real_jev_checks
+        self.assertEqual(result["verdict"], "ROUTED")
+        self.assertEqual(result["primaryReviewer"], "security-reviewer", result)
+
+
+class J055NeverChangesTheRoutedResult(RouteFixture):
+    """J055, wave-2: fired AFTER route()'s own real test-tampering heuristic
+    hits (`_qa_hits`, filtered to the "test-weakened-assertion" shape) are
+    computed, as a pure side effect. C1: the returned dict is always exactly
+    what the deterministic detector computed, whatever the seam says. Same
+    structural template as J049J050NeverChangeTheRoutedResult above."""
+
+    def _mod(self):
+        sys.path.insert(0, os.path.join(ROOT, "src"))
+        try:
+            from brothersbe import reviewroute as mod
+        finally:
+            sys.path.pop(0)
+        return mod
+
+    def _base2(self):
+        write(self.repo, "tests/test_orders.py",
+             "def test_order_total():\n"
+             "    total = compute_total()\n"
+             "    assert total == 100\n")
+        self.commit()
+        base2 = git(self.repo, "rev-parse", "HEAD")
+        write(self.repo, "tests/test_orders.py",
+             "def test_order_total():\n"
+             "    total = compute_total()\n"
+             "    # assertion removed during a refactor\n")
+        self.commit("weaken the assertion")
+        return base2
+
+    def test_a_normal_route_consults_the_seam_and_keeps_the_result(self):
+        mod = self._mod()
+        base2 = self._base2()
+        if mod.jev_checks is None:
+            self.skipTest("jev_checks unavailable in this environment (fail-open by design)")
+        real_check = mod.jev_checks.check_test_tampering_detector
+        seen = {}
+        def fake(diff_summary, current_answer, **k):
+            seen["diff_summary"] = diff_summary
+            seen["current_answer"] = current_answer
+            return None
+        mod.jev_checks.check_test_tampering_detector = fake
+        try:
+            baseline = mod.route(self.repo, base=base2)
+            result = mod.route(self.repo, base=base2)
+        finally:
+            mod.jev_checks.check_test_tampering_detector = real_check
+        self.assertEqual(baseline, result)
+        self.assertEqual(result["primaryReviewer"], "qa-reviewer", result)
+        self.assertTrue(seen["current_answer"], seen)
+
+    def test_an_adversarial_seam_answer_never_changes_the_routed_result(self):
+        mod = self._mod()
+        base2 = self._base2()
+        if mod.jev_checks is None:
+            self.skipTest("jev_checks unavailable in this environment (fail-open by design)")
+        real_check = mod.jev_checks.check_test_tampering_detector
+        mod.jev_checks.check_test_tampering_detector = lambda *a, **k: False
+        try:
+            result = mod.route(self.repo, base=base2)
+        finally:
+            mod.jev_checks.check_test_tampering_detector = real_check
+        expected_without_seam = mod.route(self.repo, base=base2)
+        self.assertEqual(result, expected_without_seam)
+        self.assertEqual(result["primaryReviewer"], "qa-reviewer", result)
+
+    def test_a_raising_seam_never_breaks_route(self):
+        mod = self._mod()
+        base2 = self._base2()
+        if mod.jev_checks is None:
+            self.skipTest("jev_checks unavailable in this environment (fail-open by design)")
+        real_check = mod.jev_checks.check_test_tampering_detector
+        mod.jev_checks.check_test_tampering_detector = \
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
+        try:
+            result = mod.route(self.repo, base=base2)
+        finally:
+            mod.jev_checks.check_test_tampering_detector = real_check
+        self.assertEqual(result["verdict"], "ROUTED")
+
+    def test_jev_checks_unavailable_still_routes_correctly(self):
+        mod = self._mod()
+        base2 = self._base2()
+        real_jev_checks = mod.jev_checks
+        mod.jev_checks = None
+        try:
+            result = mod.route(self.repo, base=base2)
+        finally:
+            mod.jev_checks = real_jev_checks
+        self.assertEqual(result["verdict"], "ROUTED")
+        self.assertEqual(result["primaryReviewer"], "qa-reviewer", result)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -130,32 +130,84 @@ def _target_tier(record):
     return _SELECTOR_TIER.get(target.get("selector_type"), "api_tool")
 
 
-def _risk_for_action(driver_desc, action):
+def _risk_for_action(driver_desc, action, *, jev_runner=None):
     """The risk_class this driver's own describe() output declares for
     `action`. A validated description (checked by select_driver() before
     this is ever called) always has exactly one matching entry
     (mobile_driver_contract.hand_rules() enforces that both ways); returns
     None only if select_driver() is ever changed to skip that check, so a
-    caller reading this defensively never crashes on a bad description."""
+    caller reading this defensively never crashes on a bad description.
+
+    JEV-G1 wave-1 seam J097 (registry: mobile action risk classify):
+    second-opinions this table lookup via jev_seam.consult(), off by
+    default in data/jev-seams.json, called for its side effect only (the
+    calibration ledger row and A0.6 audit sample) -- WAVE 1 IS
+    SHADOW-ONLY BY CONTRACT (opus-review-seams-g1-g3.md, C1): this
+    function ALWAYS returns its own local `answer`, never consult()'s,
+    whatever mode says, including "act": a raw noul or score answer is
+    not even the right shape for a risk_class, and there is no promoted,
+    calibrated evidence for this entry yet to make "act" a real path
+    today regardless. `jev_runner` exists only so a test can inject a
+    scripted bridge."""
+    answer = None
     for entry in driver_desc.get("risk_classes", []):
         if isinstance(entry, dict) and entry.get("action") == action:
-            return entry.get("risk_class")
-    return None
+            answer = entry.get("risk_class")
+            break
+    try:
+        import jev_g1_seam_cache
+        if not jev_g1_seam_cache.is_off("J097"):
+            import jev_seam
+            jev_seam.consult(
+                "J097", {"driver_id": driver_desc.get("driver_id"), "action": action}, answer,
+                seams_config=jev_seam.load_seams_config(),
+                registry=jev_seam.load_registry(),
+                ledger_dir=jev_seam.DEFAULT_LEDGER_DIR, runner=jev_runner,
+            )  # C1: return value intentionally discarded, see docstring above
+    except Exception:
+        pass  # sbe: allow-silent the seam is advisory only, the table-lookup verdict always stands
+    return answer
 
 
-def _selector_match(tier, driver_desc):
+def _selector_match(tier, driver_desc, *, jev_runner=None):
     """True when this driver's real, self-reported capability matches what
     `tier` needs. "api_tool" always matches (no selector is involved, so
     this axis is a deliberate tie -- see rank 4, platform fidelity, for
     what actually decides an API/tool action). "visual_grounding" is the
     one tier where visual_grounding_support is the right signal, never
     deterministic_selector_support (a deterministic-selector driver cannot
-    interpret an image reference)."""
+    interpret an image reference).
+
+    JEV-G1 wave-1 seam J098 (registry: mobile driver selector match):
+    second-opinions this heuristic via jev_seam.consult(), off by
+    default in data/jev-seams.json, called for its side effect only (the
+    calibration ledger row and A0.6 audit sample) -- WAVE 1 IS
+    SHADOW-ONLY BY CONTRACT (opus-review-seams-g1-g3.md, C1): this
+    function ALWAYS returns its own local `answer` (a bool), never
+    consult()'s, whatever mode says, including "act": a raw jev choice
+    answer is a driver-name STRING, not the bool this function's own
+    contract promises, and there is no promoted, calibrated evidence for
+    this entry yet to make "act" a real path today regardless.
+    `jev_runner` exists only so a test can inject a scripted bridge."""
     if tier == "api_tool":
-        return True
-    if tier == "visual_grounding":
-        return bool(driver_desc.get("visual_grounding_support"))
-    return bool(driver_desc.get("deterministic_selector_support"))
+        answer = True
+    elif tier == "visual_grounding":
+        answer = bool(driver_desc.get("visual_grounding_support"))
+    else:
+        answer = bool(driver_desc.get("deterministic_selector_support"))
+    try:
+        import jev_g1_seam_cache
+        if not jev_g1_seam_cache.is_off("J098"):
+            import jev_seam
+            jev_seam.consult(
+                "J098", {"tier": tier, "driver_id": driver_desc.get("driver_id")}, answer,
+                seams_config=jev_seam.load_seams_config(),
+                registry=jev_seam.load_registry(),
+                ledger_dir=jev_seam.DEFAULT_LEDGER_DIR, runner=jev_runner,
+            )  # C1: return value intentionally discarded, see docstring above
+    except Exception:
+        pass  # sbe: allow-silent the seam is advisory only, the heuristic's verdict always stands
+    return answer
 
 
 def select_driver(record, driver_descriptions, platform=None):
