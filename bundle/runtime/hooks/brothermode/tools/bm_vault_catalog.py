@@ -247,7 +247,7 @@ def _sorted_newest_first(notes):
     return sorted(by_path, key=lambda n: n["_date_key"], reverse=True)
 
 
-def _render_project_catalog(slug, notes, created, note_id=None, vault=None):
+def _render_project_catalog(slug, notes, created, note_id=None, suffix_map=None):
     groups = {}
     for n in notes:
         groups.setdefault(_type_group(n), []).append(n)
@@ -259,7 +259,7 @@ def _render_project_catalog(slug, notes, created, note_id=None, vault=None):
         lines.append("## %s" % key)
         for n in groups[key]:
             alias = posixpath.basename(n["stem"])
-            suffix = _alias_suffix(vault, n) if vault else ""
+            suffix = suffix_map.get(n["relpath"], "") if suffix_map else ""
             lines.append("- [[%s|%s]]%s" % (n["stem"], alias, suffix))
     body = "\n".join(lines) + "\n"
     description = "Generated index of every note under 10-Projects/%s/." % slug
@@ -351,15 +351,43 @@ def _load_enrich_index():
     return mod
 
 
-def _alias_suffix(vault, note):
-    try:
-        eix = _load_enrich_index()
-    except Exception as exc:
-        sys.stderr.write(
-            "bm_vault_catalog: could not load bm_vault_enrich_index (%s), so no promoted "
-            "alias/question-form metadata was checked for this bake.\n" % exc)
-        return ""
-    return eix.catalog_line_suffix(vault, note["relpath"])
+# Measured on the founder's real vault (2026-09-13): a bake/check calling
+# _load_enrich_index() once per note took 274.9s real over ~1600 notes across
+# 13 projects, against 1.06-1.35s for sibling tools doing a comparable full
+# vault walk. Two stacked causes: (1) _load_enrich_index re-execs a 404-line
+# module from source every call, a by-path load carries no bytecode cache;
+# (2) the per-note read path (catalog_line_suffix -> promoted_terms_for_note
+# -> enrich.list_drafts) walks and reads the WHOLE vault on every call (see
+# that function's own docstring), so calling it once per note is quadratic
+# in note count. Both are fixed the same way bm_vault.py's cmd_index (VR5)
+# already fixed this exact problem: load the module once per process (same
+# list-cell cache idiom as bm_vault.py's _bm_setup_cache / _get_bm_setup),
+# and read promoted_suffix_map(vault) once for the whole vault instead of
+# calling catalog_line_suffix once per note.
+_ENRICH_INDEX_CACHE = []
+
+
+def _get_enrich_index():
+    if not _ENRICH_INDEX_CACHE:
+        try:
+            _ENRICH_INDEX_CACHE.append(_load_enrich_index())
+        except Exception as exc:
+            sys.stderr.write(
+                "bm_vault_catalog: could not load bm_vault_enrich_index (%s), so no promoted "
+                "alias/question-form metadata was checked for this bake.\n" % exc)
+            _ENRICH_INDEX_CACHE.append(None)
+    return _ENRICH_INDEX_CACHE[0]
+
+
+def _suffix_map(vault):
+    """{note_relpath: suffix} for every promoted alias/question-form note in the
+    vault, computed once per process. eix.promoted_suffix_map's own docstring
+    guarantees this is byte-identical, per note, to what the old one-call-per-
+    note eix.catalog_line_suffix(vault, relpath) returned."""
+    eix = _get_enrich_index()
+    if eix is None:
+        return {}
+    return eix.promoted_suffix_map(vault)
 
 
 def _foreign_active_holder(vault):
@@ -426,10 +454,11 @@ def _bake(vault):
     slugs, skipped = _split_template_dirs(_project_slugs(vault))
     for s in skipped:
         print("skipped template project: 10-Projects/%s" % s)
+    suffixes = _suffix_map(vault)
     for slug in slugs:
         path = os.path.join(vault, "10-Projects", slug, "Catalog.md")
         notes = _project_notes(vault, slug)
-        text = _render_project_catalog(slug, notes, _created_for(path), _existing_id(path), vault)
+        text = _render_project_catalog(slug, notes, _created_for(path), _existing_id(path), suffixes)
         _write(path, text)
     fpath = os.path.join(vault, "40-Failures", "Failures-by-Symptom.md")
     fnotes, foff_type = _failure_notes(vault)
@@ -450,10 +479,11 @@ def cmd_check(args):
         print("NO-DATA: no project directories found under %s/10-Projects" % vault)
         return 3
     stale = []
+    suffixes = _suffix_map(vault)
     for slug in slugs:
         path = os.path.join(vault, "10-Projects", slug, "Catalog.md")
         notes = _project_notes(vault, slug)
-        fresh = _render_project_catalog(slug, notes, _created_for(path), _existing_id(path), vault)
+        fresh = _render_project_catalog(slug, notes, _created_for(path), _existing_id(path), suffixes)
         if _is_stale(path, fresh):
             stale.append(_relpath(vault, path))
     fpath = os.path.join(vault, "40-Failures", "Failures-by-Symptom.md")

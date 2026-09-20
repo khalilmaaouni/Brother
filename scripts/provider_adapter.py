@@ -46,11 +46,30 @@ import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.dirname(HERE)
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
 import brother_paths  # noqa: E402
 import codex_smoke  # noqa: E402
+import cursor_smoke  # noqa: E402
+import cursor_plugin_install as cursor_install  # noqa: E402
+
+#: The shipped Cursor plugin surface CursorAdapter reads statically. Cursor
+#: plugin-dir hooks do not fire headless (measured, scripts/cursor_smoke.py's
+#: own --signed-in gate), so these files, never a live run, are where its
+#: hook_events/tool_events/sandbox_grants facts come from.
+CURSOR_HOOKS_JSON = os.path.join(REPO, "bundle", "cursor-hooks", "hooks.json")
+
+
+def _read_json_file(path):
+    """(dict, "") or (None, why). Never raises: a missing or malformed file
+    is reported, not thrown, since more than one capability reads it."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh), ""
+    except (OSError, ValueError) as exc:
+        return None, "%s could not be read: %s" % (path, exc)
 
 #: The fixed capability table. Every adapter answers each of these by name
 #: (a same-named zero-argument method), so the shared describe() loop below
@@ -322,6 +341,157 @@ class CodexAdapter(object):
                        "branch on client"}
 
 
+class CursorAdapter(object):
+    """The Cursor adapter: the headless `cursor-agent` CLI for invocation,
+    and every hook/tool/sandbox fact read STATICALLY off the shipped
+    plugin surface (bundle/cursor-hooks/hooks.json) rather than a live
+    signed-in run. Cursor plugin-dir hooks do not fire headless (measured,
+    scripts/cursor_smoke.py's own --signed-in gate and
+    docs/cursor/SMOKE-RUNBOOK.md), so nothing in this class drives one: a
+    fact this adapter cannot read from a file or a login-free CLI call is
+    NO-DATA, never guessed from the Codex adapter's shape next to it."""
+
+    name = "cursor"
+
+    def __init__(self, bin=None, env=None):
+        self.env = os.environ if env is None else env
+        self.bin = bin or cursor_smoke.resolve_cursor_agent(None)
+
+    def _client_env(self):
+        merged = dict(self.env)
+        merged["BROTHER_CLIENT"] = "cursor"
+        return merged
+
+    def invocation(self):
+        if not self.bin:
+            return Refusal("no cursor-agent binary found: checked PATH "
+                           "and ~/.local/bin/cursor-agent")
+        return {"binary": self.bin, "found_on": "PATH or "
+                                                "~/.local/bin/cursor-agent",
+                "note": "cursor-agent runs headless turns, but the "
+                       "plugin's OWN hooks do not fire headless (measured, "
+                       "scripts/cursor_smoke.py); hook_events, tool_events "
+                       "and sandbox_grants below are read from the shipped "
+                       "manifest, never a live run",
+                "source": "scripts/cursor_smoke.py resolve_cursor_agent"}
+
+    def worker_call(self):
+        return {"env_vars": ["MODEL_WORKER_CMD", "DOOR_MODEL_CMD"],
+                "note": "the same provider-neutral seams as Claude and "
+                       "Codex (scripts/model_worker.py, scripts/door.py); "
+                       "a Cursor turn's own plugin hooks do not fire "
+                       "headless, so these seams are what actually drives "
+                       "a run under this adapter, never a live cursor-agent "
+                       "turn"}
+
+    def hook_events(self):
+        doc, err = _read_json_file(CURSOR_HOOKS_JSON)
+        if doc is None:
+            return Refusal(err)
+        events = sorted((doc.get("hooks") or {}).keys())
+        if not events:
+            return Refusal("%s carries no hooks" % CURSOR_HOOKS_JSON)
+        return {"events": events,
+                "note": "read statically from the shipped manifest; none "
+                       "of these have been observed firing in a headless "
+                       "run (scripts/cursor_smoke.py)",
+                "source": "bundle/cursor-hooks/hooks.json"}
+
+    def tool_events(self):
+        doc, err = _read_json_file(CURSOR_HOOKS_JSON)
+        if doc is None:
+            return Refusal(err)
+        hooks = doc.get("hooks") or {}
+        events = sorted(name for name in
+                        ("preToolUse", "postToolUse", "beforeShellExecution",
+                         "afterShellExecution", "afterFileEdit")
+                        if name in hooks)
+        if not events:
+            return Refusal("%s carries none of the tool-scoped hook names"
+                          % CURSOR_HOOKS_JSON)
+        return {"events": events, "source": "bundle/cursor-hooks/hooks.json"}
+
+    def sandbox_grants(self):
+        doc, err = _read_json_file(CURSOR_HOOKS_JSON)
+        if doc is None:
+            return Refusal(err)
+        matchers = []
+        for name in ("preToolUse", "beforeShellExecution"):
+            for entry in (doc.get("hooks") or {}).get(name) or []:
+                m = entry.get("matcher")
+                if m:
+                    matchers.append("%s:%s" % (name, m))
+        return {"mechanism": "preToolUse/beforeShellExecution hook "
+                             "matchers (bm_fence_hook.py, bm_session_cap.py, "
+                             "bm_bash_write_guard.py), advisory only",
+                "matchers": matchers,
+                "note": "no OS-level writable-roots grant like Codex's "
+                       "sandbox_workspace_write is documented for Cursor; "
+                       "enforcement is the fence hook, and "
+                       "scripts/cursor_plugin_install.py's own docstring "
+                       "calls enforcement ADVISORY, never measured as a "
+                       "real deny",
+                "source": "bundle/cursor-hooks/hooks.json"}
+
+    def auth_discovery(self):
+        config_dir = brother_paths.config_dir(self._client_env())
+        cli_config = os.path.join(config_dir, "cli-config.json")
+        try:
+            present = os.path.exists(cli_config)
+        except OSError as exc:
+            return Refusal("could not check %s: %s" % (cli_config, exc))
+        return {"cursor_home": config_dir, "cli_config_present": present,
+                "note": "presence only, never content"}
+
+    def capability_discovery(self):
+        if not self.bin:
+            return Refusal("no cursor-agent binary found: checked PATH "
+                           "and ~/.local/bin/cursor-agent")
+        proc, err = _run([self.bin, "--version"])
+        if proc is None:
+            return Refusal(err)
+        if proc.returncode != 0:
+            return Refusal("cursor-agent --version exited %d: %s" % (
+                proc.returncode, (proc.stderr or proc.stdout).strip()))
+        return {"cursor_agent_version": (proc.stdout or proc.stderr).strip()}
+
+    def paths(self):
+        config_dir = brother_paths.config_dir(self._client_env())
+        return {"config_dir": config_dir,
+                "plugin_dir": cursor_install.default_plugin_dir(self.env),
+                "source": "scripts/cursor_plugin_install.py "
+                         "default_plugin_dir"}
+
+    def install(self):
+        return Refusal("scripts/cursor_plugin_install.py installs by "
+                       "copying bundle/ into place, a different shape than "
+                       "brother_install.py's --codex-home/--ref lifecycle "
+                       "this suite's shared runner drives; not wired into "
+                       "this suite, not measured here")
+
+    def upgrade(self):
+        return Refusal("no documented upgrade verb for the Cursor "
+                       "adapter; scripts/cursor_plugin_install.py has no "
+                       "re-copy path distinct from install, not measured "
+                       "as an upgrade")
+
+    def rollback(self):
+        return Refusal("no documented single rollback command for the "
+                       "Cursor adapter; the local-plugin copy carries no "
+                       "version pin to roll back to, not measured")
+
+    def uninstall(self):
+        return Refusal("scripts/cursor_plugin_install.py uninstall exists "
+                       "but is not wired into this suite's shared "
+                       "lifecycle runner (see install()); not measured "
+                       "here")
+
+    def resume(self):
+        return {"command": "python3 scripts/brother_run.py --continue",
+                "note": "provider neutral: scripts/brother_run.py does not "
+                       "branch on client"}
+
+
 class CortexAdapter(object):
     """The untested provider. Every capability answers Refusal, always.
     BROTHER_CORTEX_BIN, if it names an existing executable, adds a
@@ -401,7 +571,7 @@ class CortexAdapter(object):
 #: A grep for the quoted provider names is expected to hit here and inside
 #: the three class bodies above, nowhere else in this file.
 ADAPTERS = {"claude": ClaudeAdapter, "codex": CodexAdapter,
-           "cortex": CortexAdapter}
+           "cortex": CortexAdapter, "cursor": CursorAdapter}
 
 
 def _jsonable(value):

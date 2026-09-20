@@ -24,6 +24,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 HOOK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vault_recall_hook.py")
@@ -138,6 +139,71 @@ class TheTimeoutMustClearTheMeasuredWorstCase(unittest.TestCase):
         with io.open(HOOK, encoding="utf-8") as fh:
             src = fh.read()
         self.assertIn("timeout=TIMEOUT_S", src)
+
+
+class TheAnchorGrepDiesWithoutItsParent(unittest.TestCase):
+    """2026-09-11: greps from bm_freshness were found alive for 30 minutes under launchd after the
+    process that started them was SIGKILLed. This hook's own anchor grep has the same shape: its
+    timeout lives in the hook, so a host that kills the hook mid grep leaves the grep running. The
+    grep now carries its own alarm. The child below strips subprocess.run's timeout, so ONLY that
+    alarm can end the stub grep; without it the stub sleeps 30 seconds and this test fails."""
+
+    CHILD = (
+        "import importlib.util, subprocess, sys\n"
+        "run = subprocess.run\n"
+        "subprocess.run = lambda *a, **k: run(*a, **dict(k, timeout=None))\n"
+        "s = importlib.util.spec_from_file_location('h', sys.argv[1])\n"
+        "m = importlib.util.module_from_spec(s); s.loader.exec_module(m)\n"
+        "m.ANCHOR_GREP_TIMEOUT_S = 1\n"
+        "m._anchor_resolves('Zq.qzNoSuchSymbol', sys.argv[2])\n")
+
+    @staticmethod
+    def _alive(pid):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        out = subprocess.run(["ps", "-o", "state=", "-p", str(pid)],
+                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        return out.stdout.strip()[:1] not in (b"", b"Z")
+
+    def test_the_anchor_grep_dies_when_the_hook_is_sigkilled(self):
+        with tempfile.TemporaryDirectory() as d:
+            pidfile = os.path.join(d, "grep.pid")
+            bindir = os.path.join(d, "bin")
+            os.makedirs(bindir)
+            stub = os.path.join(bindir, "grep")
+            with open(stub, "w") as f:
+                f.write('#!/bin/sh\necho $$ > "%s"\nexec sleep 30\n' % pidfile)
+            os.chmod(stub, 0o755)
+
+            def read_pid():
+                try:
+                    with open(pidfile) as f:
+                        return f.read().strip()
+                except FileNotFoundError:
+                    return ""
+
+            env = dict(os.environ, PATH=bindir + os.pathsep + os.environ["PATH"])
+            child = subprocess.Popen([sys.executable, "-c", self.CHILD, HOOK, d], env=env,
+                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            try:
+                started_by = time.time() + 30
+                while time.time() < started_by and not read_pid():
+                    time.sleep(0.02)
+                if not read_pid():
+                    self.fail("the stub grep never started, so this test proved nothing")
+                grep_pid = int(read_pid())
+            finally:
+                child.kill()  # the host killing the hook mid grep
+                child.wait()
+            gone_by = time.time() + 8
+            while time.time() < gone_by and self._alive(grep_pid):
+                time.sleep(0.1)
+            alive = self._alive(grep_pid)
+            if alive:
+                os.kill(grep_pid, 9)
+            self.assertFalse(alive, "the anchor grep outlived its SIGKILLed hook by 8s")
 
 
 class TheToolPathFollowsTheRulingOfRecord(unittest.TestCase):

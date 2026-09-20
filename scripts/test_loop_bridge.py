@@ -10,6 +10,8 @@ shared file by corrupting it.
 So most of this file is written against widening rather than against the happy
 path.
 """
+import contextlib
+import io
 import os
 import sys
 import tempfile
@@ -721,6 +723,81 @@ class RenewalStopsWhenTheWorkerFinishes(unittest.TestCase):
                          % (count_at_return, count_after_wait))
 
 
+class MainDrainsJevSeamBeforeItReturns(unittest.TestCase):
+    """m4 (A0.8 round 6): main() is exactly the process-exits-after-its-
+    calls shape docs/how-to/use-calibrated-decisions.md now names, so it
+    must drain jev_seam before its own final return -- not only rely on
+    jev_seam's own atexit hook -- so the very last unit's J063/J102/J117
+    calls get the most possible time to land before this process starts
+    shutting down. run() is stood in for (as in the classes above), so
+    this never spawns a worker or reaches a real Jev call; only whether
+    B.jev_seam.drain() itself gets called, once, after run() and before
+    main() returns, is under test."""
+
+    def test_drain_is_called_once_after_run_returns(self):
+        def fake_run(plan, parts, worker, cwd=None, max_attempts=3,
+                    max_in_flight=None, lanes=None):
+            return {"dispatched": [{"id": "U1", "verdict": "PASS",
+                                    "scope": {"verdict": "OK"}}],
+                   "isolation": {}}
+
+        old_load, old_plan, old_run = B.graph_loop.load, B.graph_loop.plan, B.run
+        old_jev_seam = B.jev_seam
+        calls = []
+
+        class FakeJevSeam(object):
+            def drain(self):
+                calls.append(1)
+
+        B.jev_seam = FakeJevSeam()
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                store = os.path.join(d, "claims.json")
+                fake_plan = {"batch": [node("U1")], "deferred": [], "blocked": []}
+                B.graph_loop.load = lambda *a, **k: {}
+                B.graph_loop.plan = lambda *a, **k: fake_plan
+                B.run = fake_run
+                argv = ["--claims", store, "--cwd", d, "--tools", TOOLS_DIR,
+                       "--owner", "owner-c", "--null-worker", "--plan", "x"]
+                code = B.main(argv)
+        finally:
+            B.graph_loop.load, B.graph_loop.plan, B.run = old_load, old_plan, old_run
+            B.jev_seam = old_jev_seam
+
+        self.assertEqual(code, 0)
+        self.assertEqual(calls, [1], "main() must drain jev_seam exactly once, "
+                                     "at the end of the plan")
+
+    def test_no_jev_seam_module_is_never_a_hard_dependency(self):
+        # jev_seam is optional (this file must still work, and drain
+        # nothing, when it is unavailable) -- the same contract every
+        # other jev_seam-optional path in this file already keeps.
+        def fake_run(plan, parts, worker, cwd=None, max_attempts=3,
+                    max_in_flight=None, lanes=None):
+            return {"dispatched": [{"id": "U1", "verdict": "PASS",
+                                    "scope": {"verdict": "OK"}}],
+                   "isolation": {}}
+
+        old_load, old_plan, old_run = B.graph_loop.load, B.graph_loop.plan, B.run
+        old_jev_seam = B.jev_seam
+        B.jev_seam = None
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                store = os.path.join(d, "claims.json")
+                fake_plan = {"batch": [node("U1")], "deferred": [], "blocked": []}
+                B.graph_loop.load = lambda *a, **k: {}
+                B.graph_loop.plan = lambda *a, **k: fake_plan
+                B.run = fake_run
+                argv = ["--claims", store, "--cwd", d, "--tools", TOOLS_DIR,
+                       "--owner", "owner-d", "--null-worker", "--plan", "x"]
+                code = B.main(argv)
+        finally:
+            B.graph_loop.load, B.graph_loop.plan, B.run = old_load, old_plan, old_run
+            B.jev_seam = old_jev_seam
+
+        self.assertEqual(code, 0)
+
+
 class AnUndeclaredWriteIsNotIntegrableHoweverGreenItIs(unittest.TestCase):
     """Parity blocker P0.3's acceptance test, from the directive: a worker
     deliberately writes one undeclared file, and the expected result is
@@ -806,6 +883,367 @@ class AnUndeclaredWriteIsNotIntegrableHoweverGreenItIs(unittest.TestCase):
         to prevent, so unknown must block exactly as a violation does."""
         scope = B._audit_scope({"write_scope": ["a"]}, None, None)
         self.assertEqual(scope["verdict"], "NO-DATA")
+
+
+class J102GetsABoundedRedactedNoteNotTheRawOne(unittest.TestCase):
+    """Item 4 (opus review, 2026-09-19): J102 is tagged public_or_own_text
+    in data/jev-registry.json, but the call site hands it the worker's own
+    free-text completion note, which can carry anything, including a path
+    under the founder's home directory. Reported rather than fixed at the
+    registry (the wave-1 seam brief refuses a call-site edit to
+    data/jev-registry.json; jev_registry's own lint is the one place that
+    tag is reviewed): this call site treats the note as needs_content_gate
+    on its own regardless of the tag, applied to both J063 and J102 since
+    both receive the same note.
+
+    Home-path masking used to be _bounded_note's own job too. A2 (item 5,
+    A0.8 round 6) moved that to jev_decide.decide() itself -- the one
+    helper every seam payload (this note included) passes through before
+    the gate -- so _bounded_note now only bounds length; see
+    test_jev_decide.py's A2HomePathIsMaskedBeforeItLeavesTheMachine for
+    where that coverage now lives."""
+
+    def test_truncates_to_the_char_limit(self):
+        bounded = B._bounded_note("x" * 3000)
+        self.assertEqual(len(bounded), B._NOTE_CHAR_LIMIT + len(" ...[truncated]"))
+        self.assertTrue(bounded.startswith("x" * B._NOTE_CHAR_LIMIT))
+
+    def test_leaves_a_short_note_unchanged(self):
+        self.assertEqual(B._bounded_note("short note"), "short note")
+
+    def test_no_longer_masks_the_home_directory_itself(self):
+        # A2/item 5: masking moved downstream to jev_decide.decide(), the
+        # one place every seam payload passes through before the gate --
+        # _bounded_note only bounds length now, so a home path here is
+        # passed through UNCHANGED (it is still masked later, once this
+        # note reaches consult() -> decide(), never before this point).
+        home = os.path.expanduser("~")
+        note = "ran a script at %s/scripts/foo.py and it worked" % home
+        self.assertEqual(B._bounded_note(note), note)
+
+    def test_none_note_is_empty_string(self):
+        self.assertEqual(B._bounded_note(None), "")
+        self.assertEqual(B._bounded_note(""), "")
+
+
+class JevWave1SeamsAreRecordedOnlyNeverAVote(unittest.TestCase):
+    """J063/J102/J117, the wave-1 Jev seams wired into run_node() in this
+    change: a recorded second opinion, never a vote. Proven the way the
+    seam brief's rule 5(b) asks: force every one of them to shadow and
+    have Jev answer the OPPOSITE of what a human reading the unit would
+    want to hear (out of scope, claim mismatched, verification missing),
+    then show run_node()'s own verdict/integrable/scope/repair decision is
+    byte-identical to a run where these seams never fired at all. Only the
+    new, additive `record["jev"]` key may differ."""
+
+    def _repo(self):
+        import subprocess as sp
+        d = tempfile.mkdtemp(prefix="jev-wire-")
+        run = lambda *a: sp.run(["git"] + list(a), cwd=d, capture_output=True, text=True)
+        run("init", "-q", "-b", "main")
+        run("config", "user.email", "a@b.c")
+        run("config", "user.name", "t")
+        with open(os.path.join(d, "declared.txt"), "w", encoding="utf-8") as fh:
+            fh.write("base\n")
+        run("add", "-A")
+        run("commit", "-q", "-m", "base")
+        return d
+
+    def _run(self, repo):
+        import subprocess as sp
+
+        class Worker(object):
+            def run(self, unit, cwd=None):
+                with open(os.path.join(repo, "declared.txt"), "a",
+                          encoding="utf-8") as fh:
+                    fh.write("work\n")
+                sp.run(["git", "add", "-A"], cwd=repo, capture_output=True)
+                sp.run(["git", "commit", "-q", "-m", "w"], cwd=repo,
+                       capture_output=True)
+                return {"status": "ok", "note": "done, tests passed"}
+
+        class Verify(object):
+            @staticmethod
+            def verify(unit, cwd=None):
+                return {"verdict": "PASS", "reason": "its own check passed"}
+
+            @staticmethod
+            def is_pass(v):
+                return v.get("verdict") == "PASS"
+
+        class Repair(object):
+            @staticmethod
+            def repair(*a, **k):
+                return {"outcome": "n/a", "attempts": [], "reason": "",
+                        "final_verdict": {}}
+
+        node = {"id": "U1", "name": "keep the record stable", "done_check": "x",
+                "owns": ["declared.txt"]}
+        return B.run_node(node, {"verify": Verify, "repair": Repair},
+                          Worker(), cwd=repo)
+
+    @staticmethod
+    def _strip_jev(record):
+        stripped = dict(record)
+        stripped.pop("jev", None)
+        return stripped
+
+    class _FakeResult(object):
+        """The same field shape jev_seam.SeamResult carries: enough for
+        loop_bridge's own _jev_scope_audit()/_jev_completion_second_opinions()
+        to read `.mode` and `.jev["answer"]`, standing in for a real
+        jev_checks call without any network or subprocess."""
+        def __init__(self, answer):
+            self.answer = None
+            self.jev = {"answer": answer}
+            self.mode = "shadow"
+            self.reason = None
+            self.audit = False
+            self.decision_id = "fake"
+
+    def test_off_mode_adds_no_jev_key(self):
+        """Today's real data/jev-seams.json names no mode for any of the
+        three: this is the same shape the CLI-level tests in
+        test_jev_checks.py already prove for jev_checks itself, repeated
+        here at the loop_bridge integration boundary. Also covers item 1
+        (opus review, 2026-09-19): record["scope"] itself must carry no
+        Jev-added key either -- not only the top-level "jev" key -- since
+        _audit_scope() no longer passes "changed" through at all."""
+        rec = self._run(self._repo())
+        self.assertNotIn("jev", rec)
+        self.assertNotIn("changed", rec["scope"])
+
+    def test_wave1_blocking_modes_downgrade_to_shadow_and_shadow_passes_through(self):
+        """G3 cap removal follow-up (2026-09-19): jev_seam.consult()'s
+        shadow mode is proven async fire-and-forget (A0.8), but this file
+        is a long-lived per-unit dispatch loop with no per-unit drain, so
+        advise/act (synchronous, up to _hard_deadline() per call) must
+        never reach J063/J102/J117 here even if data/jev-seams.json names
+        them. _jev_seams_config() must therefore downgrade a configured
+        advise/act to shadow (never silently honoring it, never forcing
+        it all the way to off), pass a configured shadow through live,
+        and warn once on stderr only when an actual downgrade happens."""
+        real_load = B.jev_seam.load_seams_config
+        real_warned = dict(B._jev_enablement_warned)
+        try:
+            # Sub-case 1: a blocking mode is configured for two of the
+            # three ids; both must downgrade to shadow, and the warning
+            # must name the downgrade, not the old "forced to off" text.
+            B.jev_seam.load_seams_config = \
+                lambda *a, **k: {"version": 7,
+                                 "modes": {"J063": "act", "J102": "advise", "J117": "shadow"}}
+            B._jev_enablement_warned["done"] = False
+            buf = io.StringIO()
+            with contextlib.redirect_stderr(buf):
+                cfg = B._jev_seams_config()
+            self.assertEqual(cfg["modes"],
+                             {"J063": "shadow", "J102": "shadow", "J117": "shadow"})
+            self.assertEqual(cfg["version"], 7)
+            out = buf.getvalue()
+            self.assertIn("J063", out)
+            self.assertIn("act", out)
+            self.assertNotIn("forced to off", out)
+
+            # Sub-case 2, the load-bearing one: a configured shadow (never
+            # a blocking mode) must pass through live with NO warning,
+            # proving shadow is not collaterally capped the way the old
+            # blanket-off cap capped it.
+            B._jev_enablement_warned["done"] = False
+            B.jev_seam.load_seams_config = \
+                lambda *a, **k: {"modes": {"J063": "off", "J102": "shadow", "J117": "off"}}
+            buf2 = io.StringIO()
+            with contextlib.redirect_stderr(buf2):
+                cfg2 = B._jev_seams_config()
+            self.assertEqual(cfg2["modes"],
+                             {"J063": "off", "J102": "shadow", "J117": "off"})
+            self.assertEqual(buf2.getvalue(), "")
+
+            # Sub-case 3: an unrecognised or non-string mode value (a
+            # typo, a case variant, None) must resolve to off, same as a
+            # missing entry, never forwarded to resolve_mode() as-is.
+            B._jev_enablement_warned["done"] = False
+            B.jev_seam.load_seams_config = \
+                lambda *a, **k: {"modes": {"J063": "enforce", "J102": "Advise",
+                                           "J117": None}}
+            buf3 = io.StringIO()
+            with contextlib.redirect_stderr(buf3):
+                cfg3 = B._jev_seams_config()
+            self.assertEqual(cfg3["modes"],
+                             {"J063": "off", "J102": "off", "J117": "off"})
+            self.assertEqual(buf3.getvalue(), "")
+
+            # Sub-case 4: jev_seam unavailable must still return every
+            # wave-1 id forced to off, the same safe default as always.
+            real_jev_seam = B.jev_seam
+            try:
+                B.jev_seam = None
+                cfg4 = B._jev_seams_config()
+                self.assertEqual(cfg4["modes"],
+                                 {"J063": "off", "J102": "off", "J117": "off"})
+            finally:
+                B.jev_seam = real_jev_seam
+
+            # Sub-case 5: the warn-once guard suppresses a SECOND
+            # downgrade warning within the same process, proven with two
+            # separate downgrade-triggering calls rather than assumed.
+            B._jev_enablement_warned["done"] = False
+            B.jev_seam.load_seams_config = \
+                lambda *a, **k: {"modes": {"J063": "act"}}
+            buf5a = io.StringIO()
+            with contextlib.redirect_stderr(buf5a):
+                B._jev_seams_config()
+            buf5b = io.StringIO()
+            with contextlib.redirect_stderr(buf5b):
+                B._jev_seams_config()
+            self.assertNotEqual(buf5a.getvalue(), "")
+            self.assertEqual(buf5b.getvalue(), "")
+        finally:
+            B.jev_seam.load_seams_config = real_load
+            B._jev_enablement_warned.clear()
+            B._jev_enablement_warned.update(real_warned)
+
+    def test_shadow_with_adverse_answers_leaves_verdict_and_scope_byte_identical(self):
+        """The underlying 'recorded only, never a vote' invariant (item 1's
+        fix), proven independent of the A0.8 cap this file also enforces
+        (tested separately above): if these seams WERE live -- the cap
+        bypassed here on purpose, standing in for the day A0.8 lands -- and
+        Jev answered the OPPOSITE of what a human reading the unit would
+        want to hear (out of scope, claim mismatched, verification
+        missing), run_node()'s own verdict/integrable/scope/repair
+        decision is still byte-identical to a run where these seams never
+        fired at all. Only the additive record["jev"] key may differ."""
+        baseline = self._run(self._repo())
+
+        real_seams_config_fn = B._jev_seams_config
+        real_registry_fn = B._jev_registry
+        real_scope_check = B.jev_checks.check_scope_audit
+        real_claim_check = B.jev_checks.check_worker_completion_claim
+        real_done_check = B.jev_checks.check_done_claim_verification
+        # Bypasses the A0.8 cap (its own test above covers that it exists):
+        # a live config, as if the cap were not there. A non-None registry
+        # is all _jev_scope_audit()/_jev_completion_second_opinions() need
+        # to stop treating this as "unconfigured" and go on to call the
+        # (faked) check functions below; its actual content is never read
+        # once those are faked.
+        B._jev_seams_config = \
+            lambda: {"modes": {"J063": "shadow", "J102": "shadow", "J117": "shadow"}}
+        B._jev_registry = lambda: [{"id": "fake"}]
+        # ANSWERING THE OPPOSITE, per rule 5(b): a human reading this unit
+        # would say the file is in scope, the claim matches, and the note
+        # does carry a verification quote -- Jev is rigged to say the
+        # reverse of all three.
+        B.jev_checks.check_scope_audit = \
+            lambda *a, **k: self._FakeResult(0.02)  # "not part of the objective"
+        B.jev_checks.check_worker_completion_claim = \
+            lambda *a, **k: self._FakeResult(0.02)  # "claim does not match the diff"
+        B.jev_checks.check_done_claim_verification = \
+            lambda *a, **k: self._FakeResult(0.98)  # "lacks the verification quote"
+        try:
+            shadow = self._run(self._repo())
+        finally:
+            B._jev_seams_config = real_seams_config_fn
+            B._jev_registry = real_registry_fn
+            B.jev_checks.check_scope_audit = real_scope_check
+            B.jev_checks.check_worker_completion_claim = real_claim_check
+            B.jev_checks.check_done_claim_verification = real_done_check
+
+        # THE INVARIANT: whatever Jev said, the unit's own decision fields
+        # are untouched. Only the additive "jev" key may differ.
+        self.assertEqual(self._strip_jev(baseline), self._strip_jev(shadow))
+        self.assertNotIn("jev", baseline)
+        self.assertIn("jev", shadow)
+        self.assertEqual(shadow["verdict"], "PASS")
+        self.assertTrue(shadow["integrable"])
+        self.assertEqual(shadow["scope"]["verdict"], "CLEAN")
+        self.assertNotIn("changed", shadow["scope"])
+
+        # AND the recording itself really happened (never silently dropped):
+        # each of the three answers Jev gave is legible in the record.
+        self.assertAlmostEqual(shadow["jev"]["j117"][0]["jev_answer"], 0.02)
+        self.assertAlmostEqual(shadow["jev"]["j063"]["jev_answer"], 0.02)
+        self.assertAlmostEqual(shadow["jev"]["j102"]["jev_answer"], 0.98)
+
+
+class J035NeverChangesTheDeterministicFailureClass(unittest.TestCase):
+    """J035, wired self-containedly inside failure_class_of() itself (not
+    through _jev_seams_config()/_jev_registry(), which are scoped to the
+    three wave-1 ids only): 'other' is the one class _BREAKER_CLASSES never
+    counts, so this shadow-consults a second opinion on the note text ONLY
+    when the deterministic regex found nothing -- and, per the same
+    recorded-only-never-a-vote invariant as the wave-1 seams above, the
+    return value is always the deterministic answer, whatever Jev says."""
+
+    def test_a_deterministic_match_never_even_consults_the_seam(self):
+        """The regex found a real token: the fast path returns it directly
+        and the seam is never touched, matching every other
+        failure_class_of() test in this file (lines ~1926, ~1977)."""
+        real_check = B.jev_checks.check_worker_failure_classification
+        called = []
+        B.jev_checks.check_worker_failure_classification = \
+            lambda *a, **k: called.append(1)
+        try:
+            result = B.failure_class_of({"note": "failure_class=timeout, giving up"})
+        finally:
+            B.jev_checks.check_worker_failure_classification = real_check
+        self.assertEqual(result, "timeout")
+        self.assertEqual(called, [])
+
+    def test_b_no_token_falls_through_to_other_and_consults_the_seam(self):
+        real_check = B.jev_checks.check_worker_failure_classification
+        seen = {}
+        def fake(note_text, current_answer, **k):
+            seen["note_text"] = note_text
+            seen["current_answer"] = current_answer
+            return None
+        B.jev_checks.check_worker_failure_classification = fake
+        try:
+            result = B.failure_class_of({"note": "worker crashed, no token here"})
+        finally:
+            B.jev_checks.check_worker_failure_classification = real_check
+        self.assertEqual(result, "other")
+        self.assertEqual(seen["note_text"], "worker crashed, no token here")
+        self.assertEqual(seen["current_answer"], "other")
+
+    def test_c_a_raising_seam_never_breaks_the_caller(self):
+        """C1 discipline: the seam call is wrapped so a raise (network,
+        malformed config, anything) never reaches the breaker's own read
+        of the failure class."""
+        real_check = B.jev_checks.check_worker_failure_classification
+        B.jev_checks.check_worker_failure_classification = \
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
+        try:
+            result = B.failure_class_of({"note": "no token in this one either"})
+        finally:
+            B.jev_checks.check_worker_failure_classification = real_check
+        self.assertEqual(result, "other")
+
+    def test_d_a_breaker_counted_class_answered_by_jev_never_overrides_other(self):
+        """Adversarial case per rule 5(b): Jev answers 'rate_limit' (a
+        class the breaker DOES count) for a note the deterministic scan
+        found no token in. The seam is shadow-only: the caller still gets
+        'other', proving this can never quietly open the breaker on a
+        note the deterministic scan itself did not certify."""
+        real_check = B.jev_checks.check_worker_failure_classification
+        B.jev_checks.check_worker_failure_classification = \
+            lambda *a, **k: "rate_limit"
+        try:
+            result = B.failure_class_of({"note": "something vague went wrong"})
+        finally:
+            B.jev_checks.check_worker_failure_classification = real_check
+        self.assertEqual(result, "other")
+
+    def test_e_jev_checks_unavailable_still_returns_other_cleanly(self):
+        real_jev_checks = B.jev_checks
+        B.jev_checks = None
+        try:
+            result = B.failure_class_of({"note": "no token, and no jev_checks module"})
+        finally:
+            B.jev_checks = real_jev_checks
+        self.assertEqual(result, "other")
+
+    def test_f_empty_result_still_returns_other_and_never_raises(self):
+        result = B.failure_class_of(None)
+        self.assertEqual(result, "other")
 
 
 class TheLaneBranchNameHasOneImplementation(unittest.TestCase):

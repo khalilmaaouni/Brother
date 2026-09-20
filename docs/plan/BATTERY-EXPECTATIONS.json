@@ -20,18 +20,19 @@
     },
     "evad-score": {
       "class": "expected_unavailable",
-      "reason": "the codex series of 2026-09-04 measured t1 FAIL after a Claude-reviewer PASS on 2026-09-01; the regression is real and carried by rows E79 to E81. AMENDED 2026-09-05 (BAT-103), because the entry named only the regression while the score line it shelters reads '1/3 (33%), 4 trial(s) NO-DATA': four of the seven gauntlet trials were never run, and the run record says why in its own words. t5 'codex workspace out of credits after 418 s, two of four steps done, no report', t6 'codex workspace out of credits after 315 s, no report', t7 'codex workspace out of credits at start', and t3 'the sandbox refused the tamper cleanup (rm style commands not permitted) so the one-byte tamper was not completed'. None of the four is a moved document or a broken script: the trials are driven by an external, credit metered agent workspace and a sandbox that refuses part of one trial's own teardown, so no session can re-measure them from this tree, and a score is never asserted by hand. They are recorded here so a reader of this entry cannot mistake 1/3 for a measured three trial series.",
-      "recorded": "2026-09-04",
-      "review_by": "2026-09-18",
-      "removal_condition": "a re-measured series records t1 PASS or the rows close and the next series holds; the four NO-DATA trials need a credited external workspace (t5, t6, t7) and a sandbox that permits t3's own tamper cleanup, and each one that runs is recorded through scripts/evad_score.py --record, never written in by hand",
+      "reason": "RE-RECORDED 2026-09-19 by founder decision (screen https://claude.ai/artifact/GnLgi6tdtVDnGkUubGoqSc, option A, 'Re-record with measured state'), because the prior entry's review_by (2026-09-18) lapsed and the score it sheltered was itself 7.3 days stale. Fresh measurement taken this session: python3 scripts/evad_score.py, run against tree export/0546f237a0ee, reads '1/5 (20%), 2 trial(s) NO-DATA', REGRESSED 13 points against the previous stored run (1/3). Per-trial verdicts this run: t1 NO-DATA (FAIL -> NO-DATA, 'first ten minutes: a stranger reaches value without an internal noun'), t2 FAIL ('delivery proof: the chain survives a skeptic'), t3 FAIL (NO-DATA -> FAIL, 'release integrity: byte for byte, tamper caught'), t4 PASS ('blind Japanese corpus: negative class at or above 90 percent'), t5 FAIL (NO-DATA -> FAIL, 'failure injection: every control goes red when removed'), t6 NO-DATA ('docs honesty: every executable claim reproduces'), t7 FAIL (NO-DATA -> FAIL, 'overhead: a small task inside 1.5x the fast rival, both halves delivered'). This is a known-bad, honestly-dated baseline, not a claim of health: only t4 passes, and the regression against the prior run is real and unexplained pending a root-cause pass.",
+      "recorded": "2026-09-19",
+      "review_by": "2026-10-03",
+      "removal_condition": "a re-measured series records t1, t2, t3, t5 and t7 all PASS (or each remaining FAIL/NO-DATA is individually re-justified here with its own reason) and the next series holds; each run is recorded through scripts/evad_score.py --record, never written in by hand",
       "failing_tests": "none: the check runs scripts/evad_score.py, which is not a unittest suite; its FAIL output names gauntlet trial ids (t1..t7) rather than test names, and exits 1 by design whenever a trial regresses PASS to FAIL against the previous stored run",
-      "last_reverified": "2026-09-05: re-ran python3 scripts/evad_score.py, still 1/3 (33%), t1 FAIL (REGRESSED), same shape as the declared reason; four of seven trials also read NO-DATA this run (codex workspace out of credits), which is separate from and does not change the declared t1 regression."
+      "last_reverified": "2026-09-19 06:17 JST: re-ran python3 scripts/evad_score.py fresh this session, exit 0, printed '1/5 (20%), 2 trial(s) NO-DATA', latest underlying gauntlet run dated 2026-09-11T23:58:51+09:00 (7.3 days old, STALE), REGRESSED -13 points vs the previous run (1/3); see reason field above for the full per-trial breakdown from this exact run."
     },
     "release-note-perturb": {
       "class": "known_no_data",
       "reason": "PR 260 (row E116) put the real perturbation behind BROTHER_LONG_CHECKS because the run takes about 90 minutes on this tree, so an ordinary battery prints NO-DATA for it by design and says so in its own output line: 'long check (about 90 min) not run: set BROTHER_LONG_CHECKS=1'. The check itself is not broken and its self test (release-note-perturb-self) runs in every battery and reads PASS; what is undeclared here is only the deliberate skip. A real FAIL from scripts/release_note_perturb.py is not covered by this entry and still blocks.",
       "recorded": "2026-09-05",
-      "review_by": "2026-09-19",
+      "review_by": "2026-10-04",
+      "last_reverified": "2026-09-20 (the previous review_by 2026-09-19 expired, so the condition was re-examined before this date was written): scripts/check_all.sh lines 1078 to 1086 still run the real perturbation only when BROTHER_LONG_CHECKS=1 and print the same NO-DATA line otherwise. The removal condition is not met yet.",
       "removal_condition": "the battery sets BROTHER_LONG_CHECKS=1 on release cuts and the check reads PASS there",
       "failing_tests": "none: the check is one script, not a unittest suite, and it is not run at all in the default battery, so its NO-DATA line names no test"
     },
@@ -39,9 +40,9 @@
       "class": "known_no_data",
       "reason": "row S5, the tag signature leg of gate X7: scripts/test_release_closeout_sign.py skips TheTagSignatureLegReadsARealSignature's two cases (a good signature is a PASS, a tampered one is a FAIL) with 'NO-DATA: no gpg or gpg2 on PATH on this machine, so the signed and bad-signature legs of row S5 cannot run here'. check_all.sh's own comment above this row states the design: an unsigned tag must never read FAIL, because the signing key is the founder's alone, so the suite exits 0 with skipped=2 rather than inventing a signature this machine has no gpg binary to verify.",
       "recorded": "2026-09-05",
-      "review_by": "2026-09-19",
+      "review_by": "2026-10-04",
       "removal_condition": "gpg or gpg2 is installed on the machine that runs the battery, so TheTagSignatureLegReadsARealSignature's two cases run instead of skipping; then delete this entry",
-      "last_reverified": "2026-09-05: `which gpg gpg2` found neither on PATH; re-ran python3 scripts/test_release_closeout_sign.py -v, exit 0, 'OK (skipped=2)', same two tests skipped for the same reason."
+      "last_reverified": "2026-09-20, founder approved re-review (the previous review_by 2026-09-19 EXPIRED and refused the 1.0.21 cut, so this is a re-review with evidence, not an extension in place): `which gpg gpg2` found neither on PATH; re-ran python3 scripts/test_release_closeout_sign.py -v, exit 0, Ran 7 tests, 'OK (skipped=2)', the same two tests skipped for the same reason. The 2026-09-05 review read the same."
     }
   },
   "critical": {

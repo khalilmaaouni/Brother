@@ -62,9 +62,19 @@ EXIT_OK, EXIT_BLOCKED, EXIT_NODATA = 0, 1, 2
 
 #: Patterns that must never leave this machine. Shapes rather than bare words:
 #: a loose "sk-" matches the middle of "task-id", which produced four false
-#: refusals in this estate before the pattern was tightened.
+#: refusals in this estate before the pattern was tightened to require 20+
+#: trailing characters. That length alone was not enough: a sufficiently
+#: long hyphenated word landing right after any "sk" substring still reads
+#: as the shape (measured 2026-09-20: a merged PR's own branch name,
+#: docs/or-ask-provenance-wbs-2026-09-19, contains "a-sk-provenance..." and
+#: refused two real, benign pushes the same night). A real key's "sk-"
+#: always starts a fresh token; it is never the tail end of an English
+#: word. \b in front of "sk-" closes that class generically (task-, desk-,
+#: mask-, ask-, ...) without narrowing what a real key looks like: a key
+#: preceded by whitespace, "=", ":", a quote or the start of a line still
+#: matches, since \b holds at every one of those boundaries.
 SECRET_SHAPES = (
-    re.compile(r"sk-[A-Za-z0-9_-]{20,}"),
+    re.compile(r"\bsk-[A-Za-z0-9_-]{20,}"),
     re.compile(r"AKIA[0-9A-Z]{16}"),
     re.compile(r"ghp_[A-Za-z0-9]{36}"),
     re.compile(r"BEGIN [A-Z ]*PRIVATE KEY"),

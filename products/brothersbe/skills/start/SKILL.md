@@ -68,17 +68,18 @@ One entry, no menu. Detect from the ask itself which kind of user this is and op
 matching path. NEVER ask the user to self-classify, never show a mode picker, and never say
 the words role, level, persona, or mode to the user.
 
+BEFORE THE FIRST QUESTION, read this person's vault profile for this project: run `python3 "${CLAUDE_PLUGIN_ROOT}/tools/bm_profile_reader.py" read --project <id>` (a Codex install exports `${BROTHER_PLUGIN_ROOT}` instead, same rule as the plugin-root note at the top of this file; a clone install runs the same command from the checkout root; the vault root defaults to the founder's own vault or the `BROTHERMODE_VAULT` environment variable when it is set). `NO-DATA` means no profile exists yet, the ordinary case for a person's first project here: say nothing about it and continue exactly as the next paragraph describes. When it reads back a `role`, a `level`, or a promoted `preference:` line, skip the question that fact would have settled and say one plain line naming what was skipped and why, so the person can correct it: "I am assuming <fact>, from your last session here. Say so if that is wrong." Never invent a profile line, never claim one exists when the command reported `NO-DATA`, and never say the words profile, role, level, persona, or mode to the user. This is BrotherSBE's own reader, `tools/bm_profile_reader.py`: per `docs/adr/2026-08-12-where-the-shared-machinery-lives.md`, it reads the SAME file BrotherMode's `start` skill writes with its own `tools/bm_profile.py`, and never calls that tool.
+
 Read the level, in this order of trust:
 
-1. Session state, when this session already answered the working-style question below or a
-   prior turn already settled it. (Seam, not built: a vault-backed persistent profile is a
-   later phase. When it lands it slots in here, above the session state. Until then the level
-   is session scoped; never claim a profile exists or invent one.)
-2. Signals in the ask itself, free at intake time. Developer signals: file paths, function
+1. The vault profile above, when it already answered it.
+2. Session state, when this session already answered the working-style question below or a
+   prior turn already settled it, and the vault profile did not.
+3. Signals in the ask itself, free at intake time. Developer signals: file paths, function
    or class names, a pasted diff, code or infrastructure terms, a scoped change ("add
    idempotency keys to the invoice poster"). Outcome-speaker signals: a business outcome
    with no artifact names ("customers should stop getting duplicate invoices").
-3. When the signals are absent or genuinely conflict: ONE plain-language question, asked at
+4. When the signals are absent or genuinely conflict: ONE plain-language question, asked at
    most once per session, phrased as a working-style choice, verbatim: "Want me to read the
    project and tell you what I think you are asking for, or would you rather talk it through
    first?" The first answer leans developer, the second leans outcome speaker. Write the

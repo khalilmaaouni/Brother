@@ -5,7 +5,7 @@
   },
   "metadata": {
     "description": "Brother turns a plain-language outcome into checked work, a rerunnable receipt, useful local memory, and a human acceptance decision.",
-    "version": "1.0.20"
+    "version": "1.0.21"
   },
   "plugins": [
     {
@@ -14,7 +14,7 @@
         "source": "git-subdir",
         "url": "https://github.com/khalilmaaouni/Brother",
         "path": "products/brothermode",
-        "ref": "v1.0.20"
+        "ref": "v1.0.21"
       },
       "description": "Keep long-running AI work recoverable, give each file one supported writer, and deliver a record of decisions, cost, and checks.",
       "version": "3.4.5",
@@ -29,7 +29,7 @@
         "source": "git-subdir",
         "url": "https://github.com/khalilmaaouni/Brother",
         "path": "products/brothersbe",
-        "ref": "v1.0.20"
+        "ref": "v1.0.21"
       },
       "description": "Make missing evidence visible on risky backend and data work, with PASS, FAIL, and NO-DATA kept distinct for human review.",
       "version": "3.7.4",
@@ -44,14 +44,29 @@
         "source": "git-subdir",
         "url": "https://github.com/khalilmaaouni/Brother",
         "path": "bundle",
-        "ref": "v1.0.20"
+        "ref": "v1.0.21"
       },
       "description": "Turn a plain-language outcome into checked work, a rerunnable receipt, useful local memory, and a human acceptance decision.",
-      "version": "1.0.20",
+      "version": "1.0.21",
       "author": {
         "name": "Khalil Maaouni"
       },
       "category": "productivity"
+    },
+    {
+      "name": "brotherds",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/khalilmaaouni/Brother",
+        "path": "products/brotherds",
+        "ref": "v1.0.13"
+      },
+      "description": "EXPERIMENTAL. Turns a figure about to reach a decision into a checkable claim carrying its query, grain and uncertainty, then runs refusals against it and returns PASS, FAIL or NO-DATA.",
+      "version": "0.1.0",
+      "author": {
+        "name": "Khalil Maaouni"
+      },
+      "category": "engineering"
     }
   ]
 }

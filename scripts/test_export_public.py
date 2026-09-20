@@ -19,10 +19,21 @@ import tempfile
 import unittest
 from unittest import mock
 
+# Minor fix (opus-review-seams-g1-g3.md): redirect jev_seam's own
+# machine-level state root to a throwaway temp dir BEFORE jev_seam is
+# ever imported in this process, so no test here reads (or could ever
+# write) the real ~/.brother/jev -- must happen before the `import
+# jev_seam` line below: JEV_STATE_DIR is a module-level constant
+# jev_seam.py computes once, at its own import time.
+os.environ.setdefault("BROTHER_JEV_STATE_DIR",
+                       tempfile.mkdtemp(prefix="brother-jev-state-test-"))
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import export_public as EP  # noqa: E402
 import edition_guard as EG  # noqa: E402
+import jev_seam  # noqa: E402
+import jev_g1_seam_cache  # noqa: E402
 
 # E100: one sandbox for every temp tree this process makes, removed at exit.
 import os as _e100_os, sys as _e100_sys  # noqa: E402
@@ -2010,6 +2021,21 @@ class ABrandNewRemoteIsStartedOnlyWithBootstrap(unittest.TestCase):
                 ["git", "-C", remote_dir, "rev-parse", "v9.9.9^{}", "main"],
                 capture_output=True, text=True, check=True)
             self.assertEqual(len(set(tag.stdout.split())), 1, tag.stdout)
+            # Opus review (2026-09-19), B1: this checkout never configures
+            # a signing key, so signing_configured reads NO-DATA and the
+            # tag created above is a REAL ANNOTATED tag (sign_flag "-a"),
+            # exactly the shape export_public.py always creates and the
+            # earlier ls-remote-based reader in cut.py misread as its own
+            # tag-object sha rather than the commit it points at. The
+            # TAGGED: line must carry that exact peeled commit, read
+            # LOCALLY here (git rev-parse v9.9.9^{commit}) rather than
+            # asserted from a hand-written ls-remote string.
+            peeled_commit = subprocess.run(
+                ["git", "-C", remote_dir, "rev-parse", "v9.9.9^{commit}"],
+                capture_output=True, text=True, check=True).stdout.strip()
+            tagged_line = next(l for l in lines if l.startswith("TAGGED:"))
+            self.assertIn("(local commit %s)" % peeled_commit, tagged_line,
+                         tagged_line)
 
     def test_c_a_remote_with_any_branch_refuses_bootstrap_and_is_left_alone(self):
         """The flag is "start only from nothing", never "append if you
@@ -2192,6 +2218,86 @@ class ABrandNewRemoteIsStartedOnlyWithBootstrap(unittest.TestCase):
                 capture_output=True, text=True, check=True).stdout
             self.assertEqual(seed_tree, "")
             self.assertEqual(self._refs(remote_dir), "")
+
+
+class ThePeelRefusalNamesWhatAlreadyLanded(unittest.TestCase):
+    """m2 (opus re-review round 2, 2026-09-19): when the local peel right
+    after tag creation fails, the export commit is ALREADY on the remote
+    (the bootstrap first commit, or pushed and merged on the PR route) --
+    the refusal must say so, never the earlier "nothing was pushed", which
+    told an operator the wrong thing about what state the branch is in.
+    A real push_appended, a real bare remote; only the one `git rev-parse
+    <tag>^{commit}` call is intercepted to fail, everything else runs for
+    real through export_public._run."""
+
+    ALLOWLIST = ["scripts", "clean.md", "README.md", "docs"]
+
+    def _export_root(self, root):
+        _make_fake_root(root, {"clean.md": "first export, clean\n"})
+        _seed_tag_time_needs(root)
+        _git_track_all(root)
+        _seed_export_manifest(root, self.ALLOWLIST)
+
+    def _failing_peel_run(self):
+        def run(cmd, cwd=None, env=None, timeout=120):
+            if cmd[:2] == ["git", "rev-parse"] and cmd[-1].endswith(
+                    "^{commit}"):
+                return subprocess.CompletedProcess(
+                    cmd, 128, "", "fatal: injected failure for this test")
+            return EP._run(cmd, cwd, env=env, timeout=timeout)
+        return run
+
+    def test_bootstrap_says_the_first_commit_already_landed(self):
+        with tempfile.TemporaryDirectory() as remote_dir, \
+             tempfile.TemporaryDirectory() as root:
+            subprocess.run(["git", "init", "-q", "--bare", remote_dir],
+                           check=True)
+            self._export_root(root)
+            code, lines = EP.push_appended(
+                self.ALLOWLIST, remote_dir, "main", root=root, tag="v9.9.9",
+                bootstrap=True, run=self._failing_peel_run())
+            self.assertEqual(code, EP.EXIT_REFUSED, lines)
+            refusal = next(l for l in lines
+                          if l.startswith("REFUSED: could not resolve tag"))
+            self.assertIn("already the first commit of main", refusal)
+            self.assertNotIn("nothing was pushed", refusal)
+            # and the commit really did land on the remote
+            count = subprocess.run(
+                ["git", "-C", remote_dir, "rev-list", "--count", "main"],
+                capture_output=True, text=True, check=True).stdout.strip()
+            self.assertEqual(count, "1")
+            tags = subprocess.run(
+                ["git", "-C", remote_dir, "tag", "-l"], capture_output=True,
+                text=True, check=True).stdout.split()
+            self.assertEqual(tags, [])
+
+    def test_the_pr_route_says_pushed_and_merged(self):
+        with tempfile.TemporaryDirectory() as remote_dir, \
+             tempfile.TemporaryDirectory() as root:
+            _seed_bare_remote(remote_dir)
+            self._export_root(root)
+            with _fake_gh():
+                code, lines = EP.push_appended(
+                    self.ALLOWLIST, remote_dir, "main", root=root,
+                    tag="v9.9.9", run=self._failing_peel_run())
+            self.assertEqual(code, EP.EXIT_REFUSED, lines)
+            self.assertTrue(any(l.startswith("MERGED:") for l in lines),
+                            lines)
+            refusal = next(l for l in lines
+                          if l.startswith("REFUSED: could not resolve tag"))
+            self.assertIn("already pushed and merged into main", refusal)
+            self.assertNotIn("nothing was pushed", refusal)
+            # and the merge really did land on the remote (the fake gh's
+            # "pr merge" fast-forwards: the seed commit plus the export
+            # commit, same shape test_f_intact_manifests_pass... asserts)
+            count = subprocess.run(
+                ["git", "-C", remote_dir, "rev-list", "--count", "main"],
+                capture_output=True, text=True, check=True).stdout.strip()
+            self.assertEqual(count, "2", "the seed commit plus the export")
+            tags = subprocess.run(
+                ["git", "-C", remote_dir, "tag", "-l"], capture_output=True,
+                text=True, check=True).stdout.split()
+            self.assertEqual(tags, [])
 
 
 class ATagRefusesAnExportTreeItsOwnProductsCannotVerify(unittest.TestCase):
@@ -3616,6 +3722,450 @@ class ClientParityRunsOnTheExportTree(unittest.TestCase):
         self.assertFalse(EP.wants_required_fast(
             args(push=True, skip_required_fast=True)))
         self.assertTrue(EP.wants_required_fast(args(prove_required_fast=True)))
+
+
+def _j094_entry():
+    return {
+        "id": "J094", "role": "second_opinion", "risk": "low", "wave": "W1",
+        "privacy": "public_or_own_text",
+        "question": {
+            "type": "noul",
+            "instructions": "is this docs/code figure mismatch material?",
+        },
+    }
+
+
+def _noul_runner(prob):
+    """A scripted bridge runner answering a noul question at `prob`, no
+    network or subprocess: the same shape ScriptedRunner in
+    test_jev_seam.py uses, reimplemented so this file needs no import of
+    that test module."""
+    def fn(argv, stdin_text):
+        payload = json.loads(stdin_text)
+        answers = {qid: {"noul": prob, "confidence": prob}
+                   for qid in payload["questions"]}
+        response = {"model": "typesafe/jev-1.13-test", "answers": answers,
+                    "usage": {"cost": 0.001}}
+        return 0, json.dumps(response), ""
+    return fn
+
+
+class JevSeamJ094SecondOpinion(unittest.TestCase):
+    """J094 (docs-vs-code number materiality), wired into
+    rewrite_lint_figure() via jev_seam.consult(). Mode ships off in the
+    real data/jev-seams.json, so (a) needs no mocking; (b)-(d) mock
+    jev_seam.load_seams_config/load_registry to force shadow mode for
+    this one test only."""
+
+
+    def setUp(self):
+        # jev_g1_seam_cache caches the resolved mode per entry_id
+        # (module docstring: at most one jev_seam.load_seams_config()
+        # call per second) -- a call in an EARLIER test could still be
+        # "fresh" here, so reset before every test rather than rely on
+        # the freshness window happening to have elapsed.
+        jev_g1_seam_cache.reset()
+    def _seed(self, base, old_waived, old_clean, new_waived, new_clean):
+        os.makedirs(base, exist_ok=True)
+        with open(os.path.join(base, "SKILL.md"), "w", encoding="utf-8") as fh:
+            fh.write(
+                "Intro text.\n\nThis product's lint run: %d waived hits and "
+                "%d files that were scanned and genuinely found clean.\n"
+                % (old_waived, old_clean))
+
+        class _StubModule(object):
+            @staticmethod
+            def silent_failure_lints():
+                return "PASS", ("%d suppressed, %d file(s) holding no match "
+                                 "at all" % (new_waived, new_clean))
+        return _StubModule()
+
+    def test_a_mode_off_makes_zero_calls_and_output_is_byte_identical(self):
+        with tempfile.TemporaryDirectory() as base:
+            module = self._seed(base, 5, 3, 1, 1)
+
+            def boom(argv, stdin_text):
+                raise AssertionError("mode off must never invoke the runner")
+
+            changed = EP.rewrite_lint_figure(base, module, jev_runner=boom)
+            self.assertTrue(changed)
+            with open(os.path.join(base, "SKILL.md"), encoding="utf-8") as fh:
+                text = fh.read()
+            self.assertIn("1 waived hits and 1 files that were scanned and "
+                          "genuinely found clean", text)
+
+    def test_b_shadow_mode_output_identical_and_one_ledger_row_written(self):
+        with tempfile.TemporaryDirectory() as base, \
+             tempfile.TemporaryDirectory() as ledger_dir:
+            module = self._seed(base, 5, 3, 1, 1)
+            cfg = {"modes": {"J094": "shadow"}}
+            jev_g1_seam_cache.reset()  # the baseline call above may have cached this entry as off
+            with mock.patch.object(jev_seam, "load_seams_config", return_value=cfg), \
+                    mock.patch.object(jev_seam, "load_registry", return_value=[_j094_entry()]), \
+                    mock.patch.object(jev_seam, "DEFAULT_LEDGER_DIR", ledger_dir):
+                # A runner disagreeing with "material" (noul False, confident)
+                changed = EP.rewrite_lint_figure(base, module, jev_runner=_noul_runner(0.05))
+            self.assertTrue(changed, "shadow mode must never suppress the rewrite")
+            with open(os.path.join(base, "SKILL.md"), encoding="utf-8") as fh:
+                text = fh.read()
+            self.assertIn("1 waived hits and 1 files that were scanned and "
+                          "genuinely found clean", text)
+            # A0.8: shadow hands the call to a background worker and
+            # returns at once, before the ledger row exists. drain()
+            # waits for the worker to finish so the row is actually
+            # there to count.
+            jev_seam.drain(timeout=5)
+            decisions_path = os.path.join(ledger_dir, "decisions.jsonl")
+            self.assertTrue(os.path.isfile(decisions_path))
+            with open(decisions_path, encoding="utf-8") as fh:
+                rows = [ln for ln in fh if ln.strip()]
+            self.assertEqual(len(rows), 1)
+
+    def test_c_seam_path_exception_leaves_output_identical(self):
+        with tempfile.TemporaryDirectory() as base:
+            module = self._seed(base, 5, 3, 1, 1)
+            cfg = {"modes": {"J094": "shadow"}}
+            jev_g1_seam_cache.reset()  # the baseline call above may have cached this entry as off
+            with mock.patch.object(jev_seam, "load_seams_config", return_value=cfg), \
+                    mock.patch.object(jev_seam, "load_registry",
+                                       side_effect=RuntimeError("registry unreadable")):
+                changed = EP.rewrite_lint_figure(base, module, jev_runner=_noul_runner(0.05))
+            self.assertTrue(changed)
+            with open(os.path.join(base, "SKILL.md"), encoding="utf-8") as fh:
+                text = fh.read()
+            self.assertIn("1 waived hits and 1 files that were scanned and "
+                          "genuinely found clean", text)
+
+    def test_d_red_proof_wiring_that_trusts_jevs_raw_answer_breaks_test_b(self):
+        """Same proof shape as board_status's J025 seam test: show that a
+        call site trusting consult()'s raw jev.answer (instead of the
+        mode-safe .answer field) would have suppressed this rewrite under
+        shadow mode with a confident opposite answer -- exactly what
+        test_b asserts never happens -- without ever editing
+        export_public.py itself."""
+        with tempfile.TemporaryDirectory() as ledger_dir:
+            cfg = {"modes": {"J094": "shadow"}}
+            jev_g1_seam_cache.reset()  # the baseline call above may have cached this entry as off
+            with mock.patch.object(jev_seam, "load_seams_config", return_value=cfg), \
+                    mock.patch.object(jev_seam, "load_registry", return_value=[_j094_entry()]), \
+                    mock.patch.object(jev_seam, "DEFAULT_LEDGER_DIR", ledger_dir):
+                result = jev_seam.consult(
+                    "J094", {"docs_figure": "5 waived hits and 3 files ..."}, True,
+                    seams_config=jev_seam.load_seams_config(),
+                    registry=jev_seam.load_registry(),
+                    ledger_dir=jev_seam.DEFAULT_LEDGER_DIR,
+                    runner=_noul_runner(0.05),
+                )
+                # A0.8: shadow never returns Jev's answer (result.jev is
+                # always None); the eventual answer only lands in the
+                # ledger, once the background worker finishes. drain()
+                # first, then read it there.
+                jev_seam.drain(timeout=5)
+                decisions_path = os.path.join(ledger_dir, "decisions.jsonl")
+                with open(decisions_path, encoding="utf-8") as fh:
+                    rows = [json.loads(ln) for ln in fh if ln.strip()]
+                self.assertEqual(len(rows), 1)
+                wrongly_wired_material = bool(rows[0]["answer"] >= 0.5)  # raw jev answer
+                safely_wired_material = result.answer                     # what the real code uses
+            # The red proof: trusting the raw noul probability directly
+            # would have judged this mismatch immaterial (False), silently
+            # suppressing a real rewrite -- exactly what test_b proves
+            # never happens with the real (safe) wiring.
+            self.assertFalse(wrongly_wired_material)
+            self.assertTrue(safely_wired_material)
+
+    def test_e_a1_call_site_never_reads_a_patched_consults_return(self):
+        """A1 (opus-review-g1-round2-pkg-decide.md): test_d proves
+        consult()'s two fields disagree, but it never touches the CALL
+        SITE's own wiring -- rewrite_lint_figure() is never invoked
+        inside the mocked block there. This one does: jev_seam.consult
+        ITSELF is patched to return an ACT-mode SeamResult whose .answer
+        is 0.05 (a float, the wrong TYPE for this call site's own bool
+        answer), mode live via a patched config, and asserts the
+        rewrite still happens exactly as the mechanical check decided,
+        unaffected by 0.05."""
+        with tempfile.TemporaryDirectory() as base:
+            module = self._seed(base, 5, 3, 1, 1)
+            cfg = {"modes": {"J094": "shadow"}}
+            jev_g1_seam_cache.reset()
+            wrong = jev_seam.SeamResult(0.05, {"answer": 0.05}, jev_seam.ACT,
+                                        None, False, "mutation-probe")
+            with mock.patch.object(jev_seam, "load_seams_config", return_value=cfg), \
+                    mock.patch.object(jev_seam, "load_registry", return_value=[_j094_entry()]), \
+                    mock.patch.object(jev_seam, "DEFAULT_LEDGER_DIR", tempfile.mkdtemp()), \
+                    mock.patch.object(jev_seam, "consult", return_value=wrong):
+                changed = EP.rewrite_lint_figure(base, module)
+            self.assertTrue(changed)
+            with open(os.path.join(base, "SKILL.md"), encoding="utf-8") as fh:
+                text = fh.read()
+            self.assertIn("1 waived hits and 1 files that were scanned and "
+                          "genuinely found clean", text)
+
+
+class JevSeamPerfCacheNeverHitsDiskAfterWarmup(unittest.TestCase):
+    """Coordinator directive (measured regression in another wave-1
+    group: a seam in OFF mode made a hot call site 52x slower by
+    re-reading data/jev-seams.json on every call): after a first call
+    warms jev_seam's in-process cache, 1,000 further calls to
+    jev_seam.load_seams_config() -- the exact function
+    rewrite_lint_figure()'s guarded block calls on every invocation --
+    must touch the filesystem zero times and return the identical dict
+    every time.
+
+    This measures jev_seam.load_seams_config() directly rather than the
+    full rewrite_lint_figure(): that function legitimately calls open()
+    itself (reading and rewriting SKILL.md, unrelated to the seam), so a
+    blanket open()-call count around it would misattribute the
+    function's own real I/O to the seam. The cache this test proves is
+    the one and only thing standing between rewrite_lint_figure() and a
+    re-open of data/jev-seams.json on every call."""
+
+
+    def setUp(self):
+        # jev_g1_seam_cache caches the resolved mode per entry_id
+        # (module docstring: at most one jev_seam.load_seams_config()
+        # call per second) -- a call in an EARLIER test could still be
+        # "fresh" here, so reset before every test rather than rely on
+        # the freshness window happening to have elapsed.
+        jev_g1_seam_cache.reset()
+    def test_1000_config_loads_after_warmup_touch_no_filesystem(self):
+        first = jev_seam.load_seams_config()  # warms the in-process cache
+        self.assertIsInstance(first, dict)
+
+        calls = {"stat": 0, "exists": 0, "open": 0}
+        real_stat, real_exists, real_open = os.stat, os.path.exists, open
+
+        def counting_stat(*a, **kw):
+            calls["stat"] += 1
+            return real_stat(*a, **kw)
+
+        def counting_exists(*a, **kw):
+            calls["exists"] += 1
+            return real_exists(*a, **kw)
+
+        def counting_open(*a, **kw):
+            calls["open"] += 1
+            return real_open(*a, **kw)
+
+        outputs = []
+        with mock.patch("os.stat", counting_stat), \
+                mock.patch("os.path.exists", counting_exists), \
+                mock.patch("builtins.open", counting_open):
+            for _ in range(1000):
+                outputs.append(jev_seam.load_seams_config())
+
+        self.assertEqual(calls, {"stat": 0, "exists": 0, "open": 0},
+                         "a cached config load must never touch the "
+                         "filesystem within the cache interval")
+        self.assertTrue(all(o == first for o in outputs))
+
+    def test_repeated_mismatch_rewrite_still_returns_the_same_answer(self):
+        """rewrite_lint_figure()'s own output stability, without patching
+        open() globally (it needs real I/O to do its job): 1,000 calls
+        against the same mismatch all rewrite to the same figure."""
+        with tempfile.TemporaryDirectory() as base:
+            os.makedirs(base, exist_ok=True)
+            skill = os.path.join(base, "SKILL.md")
+
+            class _StubModule(object):
+                @staticmethod
+                def silent_failure_lints():
+                    return "PASS", "1 suppressed, 1 file(s) holding no match at all"
+
+            module = _StubModule()
+            results = set()
+            for _ in range(1000):
+                with open(skill, "w", encoding="utf-8") as fh:
+                    fh.write("5 waived hits and 3 files that were scanned and "
+                             "genuinely found clean.\n")
+                results.add(EP.rewrite_lint_figure(base, module))
+            self.assertEqual(results, {True})
+
+
+class J064GateLineShadowNeverChangesRunGates(unittest.TestCase):
+    """J064, wave-1 Jev seam ("Gate/CI/PR log-line classification"): a
+    shadow-only second opinion on every gate's own verdict line
+    (run_gates()'s own `lines`), fired AFTER all_ok/lines are fully
+    computed above -- never before, never read back into either. Tested
+    directly against EP.run_gates() (this file already imports
+    export_public as EP at module scope), reusing
+    OneTermListFeedsEveryGate._gates_over_a_clean_tree's own fixture
+    shape above and the same in-process monkeypatch technique
+    test_loop_bridge.py/test_sbe_review_route.py/test_cut.py's own J064
+    test class use for their wave-1/2 seams."""
+
+    def _fixture(self, term_present):
+        """A real, minimal export_dir/identity_dir pair (cleaned up via
+        addCleanup): `term_present` seeds a term private_terms_scan.py and
+        cleanse.sh both actually catch (FAIL case, all_ok False) or leaves
+        the tree clean (PASS case, all_ok True).
+
+        identity_dir is built through the real EP.build_identity_check_dir
+        against an EMPTY bare remote, never a bare `git init`: a bare
+        `git init` gives identity_guard.py no refs/remotes/origin/HEAD to
+        range over at all, so it reads NO-DATA (exit 2) and all_ok is
+        False even on an otherwise clean tree -- exactly the gap the
+        empty-remote branch of build_identity_check_dir's own docstring
+        exists to close (the 2026-09-03 clean-extraction shape: nothing to
+        compare against, so "everything is outgoing" is the honest,
+        PASSing range)."""
+        export_dir = tempfile.mkdtemp()
+        identity_dir = tempfile.mkdtemp()
+        root = tempfile.mkdtemp()
+        remote_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, export_dir, True)
+        self.addCleanup(shutil.rmtree, identity_dir, True)
+        self.addCleanup(shutil.rmtree, root, True)
+        self.addCleanup(shutil.rmtree, remote_dir, True)
+        term = "FAKETERM-J064-PLANTED-XYZ"
+        content = (("this tree carries %s\n" % term) if term_present
+                   else "hello, nothing private here\n")
+        allowlist_path = _write_lines(
+            os.path.join(root, "ALLOWLIST.txt"), ["scripts", "public.md"])
+        _make_fake_root(root, {"public.md": content})
+        EP.build_orphan_commit(export_dir, ["scripts", "public.md"], root=root)
+        subprocess.run(["git", "init", "-q", "--bare", remote_dir], check=True)
+        EP.build_identity_check_dir(identity_dir, allowlist_path, remote_dir,
+                                    "main", root=root)
+        terms_path = _write_lines(os.path.join(root, "terms.txt"), [term])
+        return export_dir, identity_dir, terms_path
+
+    def _run(self, export_dir, identity_dir, terms_path):
+        with mock.patch.dict(os.environ,
+                             {"BROTHER_PRIVATE_TERMS": terms_path}):
+            return EP.run_gates(export_dir, identity_dir)
+
+    def _skip_unless_seam_reachable(self):
+        """(shared) jev_checks importable is not enough to prove the seam
+        was REACHED: a missing data/jev-registry.json or
+        data/jev-seams.json (never real in a candidate export tree, per
+        docs/plan/EXPORT-ALLOWLIST.txt) makes run_gates()'s own try/except
+        catch the raise before check_gate_log_lines is ever called --
+        production's byte-identical-result property still holds (proved by
+        the adversarial/raising/unavailable tests below, which never
+        depend on the fake being reached), but the "was it actually
+        called" assertion here needs a real, readable registry/config."""
+        if EP.jev_checks is None:
+            self.skipTest("jev_checks unavailable in this environment "
+                          "(fail-open by design)")
+        try:
+            EP.jev_seam.load_seams_config()
+            EP.jev_seam.load_registry()
+        except Exception as exc:  # noqa: BLE001
+            self.skipTest("jev_seam config/registry unreadable in this "
+                          "environment (fail-open by design): %s" % exc)
+
+    def test_a_normal_call_consults_the_seam_with_the_real_lines_pass_case(self):
+        """(a) + wiring proof, PASS case: check_gate_log_lines is actually
+        called with every gate's own real verdict line, and the (all_ok,
+        lines) it produces matches a run where the seam never fired."""
+        self._skip_unless_seam_reachable()
+        export_dir, identity_dir, terms_path = self._fixture(term_present=False)
+        baseline_ok, baseline_lines = self._run(export_dir, identity_dir, terms_path)
+        real = EP.jev_checks.check_gate_log_lines
+        seen = {}
+
+        def fake(lines, *a, **k):
+            seen["lines"] = list(lines)
+            return []
+        EP.jev_checks.check_gate_log_lines = fake
+        try:
+            ok, lines = self._run(export_dir, identity_dir, terms_path)
+        finally:
+            EP.jev_checks.check_gate_log_lines = real
+        self.assertIn("lines", seen, "check_gate_log_lines was never called")
+        self.assertTrue(any(l.startswith("cleanse:") for l in seen["lines"]),
+                        "the real cleanse: verdict line was not among "
+                        "those handed to the seam: %r" % seen["lines"])
+        self.assertEqual(ok, baseline_ok)
+        self.assertEqual(lines, baseline_lines)
+
+    def test_a_normal_call_consults_the_seam_with_the_real_lines_fail_case(self):
+        """(a) + wiring proof, FAIL case: same as above, on a tree
+        carrying a term private_terms_scan.py/cleanse.sh both catch."""
+        self._skip_unless_seam_reachable()
+        export_dir, identity_dir, terms_path = self._fixture(term_present=True)
+        baseline_ok, baseline_lines = self._run(export_dir, identity_dir, terms_path)
+        self.assertFalse(baseline_ok, baseline_lines)
+        real = EP.jev_checks.check_gate_log_lines
+        seen = {}
+
+        def fake(lines, *a, **k):
+            seen["lines"] = list(lines)
+            return []
+        EP.jev_checks.check_gate_log_lines = fake
+        try:
+            ok, lines = self._run(export_dir, identity_dir, terms_path)
+        finally:
+            EP.jev_checks.check_gate_log_lines = real
+        self.assertIn("lines", seen, "check_gate_log_lines was never called")
+        self.assertEqual(ok, baseline_ok)
+        self.assertEqual(lines, baseline_lines)
+
+    def test_an_adversarial_seam_answer_never_changes_all_ok_or_lines(self):
+        """(a continued) + MUTATION-PROOF anchor, both PASS and FAIL cases:
+        check_gate_log_lines is rigged to answer "needs-human" on every
+        line (the registry's own fail_direction word for low confidence) --
+        the one shape a bug in run_gates() reading `.answer` back into its
+        return value would act on. run_gates()'s own (all_ok, lines) stay
+        byte-identical to a run where the seam never fired at all."""
+        if EP.jev_checks is None:
+            self.skipTest("jev_checks unavailable in this environment "
+                          "(fail-open by design)")
+        real = EP.jev_checks.check_gate_log_lines
+
+        class _AdverseResult(object):
+            answer = "needs-human"
+            mode = "shadow"
+            reason = "adversarial test fixture"
+
+        for term_present in (False, True):
+            export_dir, identity_dir, terms_path = self._fixture(term_present)
+            baseline_ok, baseline_lines = self._run(export_dir, identity_dir, terms_path)
+            EP.jev_checks.check_gate_log_lines = \
+                lambda lines, *a, **k: [_AdverseResult() for _ in lines]
+            try:
+                ok, lines = self._run(export_dir, identity_dir, terms_path)
+            finally:
+                EP.jev_checks.check_gate_log_lines = real
+            self.assertEqual(ok, baseline_ok)
+            self.assertEqual(lines, baseline_lines)
+
+    def test_a_raising_seam_never_breaks_run_gates(self):
+        """(a continued): a check_gate_log_lines that raises never breaks
+        run_gates() and never changes its return value."""
+        if EP.jev_checks is None:
+            self.skipTest("jev_checks unavailable in this environment "
+                          "(fail-open by design)")
+        export_dir, identity_dir, terms_path = self._fixture(term_present=False)
+        baseline_ok, baseline_lines = self._run(export_dir, identity_dir, terms_path)
+        real = EP.jev_checks.check_gate_log_lines
+        EP.jev_checks.check_gate_log_lines = \
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
+        try:
+            ok, lines = self._run(export_dir, identity_dir, terms_path)
+        finally:
+            EP.jev_checks.check_gate_log_lines = real
+        self.assertEqual(ok, baseline_ok)
+        self.assertEqual(lines, baseline_lines)
+
+    def test_jev_checks_unavailable_still_returns_the_same_result(self):
+        """(b): jev_checks and jev_seam both unavailable (the fail-open
+        case an import failure produces in real life) leaves (all_ok,
+        lines) unchanged, both PASS and FAIL cases."""
+        real_checks, real_seam = EP.jev_checks, EP.jev_seam
+        for term_present in (False, True):
+            export_dir, identity_dir, terms_path = self._fixture(term_present)
+            baseline_ok, baseline_lines = self._run(export_dir, identity_dir, terms_path)
+            EP.jev_checks = None
+            EP.jev_seam = None
+            try:
+                ok, lines = self._run(export_dir, identity_dir, terms_path)
+            finally:
+                EP.jev_checks = real_checks
+                EP.jev_seam = real_seam
+            self.assertEqual(ok, baseline_ok)
+            self.assertEqual(lines, baseline_lines)
 
 
 if __name__ == "__main__":

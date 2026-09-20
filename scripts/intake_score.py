@@ -569,7 +569,14 @@ def _looks_like_an_approval_prompt(line):
     genuine ask is its own line, never folded into an Assumptions or
     Options bullet) and either reads as a direct question or is short
     enough to be a stated prompt rather than a longer descriptive
-    sentence."""
+    sentence.
+
+    Pure heuristic, no seam here (M1 fix, opus-review-seams-g1-g3.md):
+    JEV-G1 wave-1 seam J096 used to live in this function and fire once
+    PER LINE, so a document with no approval prompt at all made one
+    bridge call per line with a 330s timeout each. J096 now asks ONCE
+    PER DOCUMENT, in score_sequencing() below, on a bounded excerpt --
+    see that function's own docstring."""
     stripped = line.strip()
     if BULLET_RE.match(line) or OPTION_ITEM_RE.match(line):
         return False
@@ -580,17 +587,79 @@ def _looks_like_an_approval_prompt(line):
     return len(stripped.split()) <= 8
 
 
-def score_sequencing(lines):
+#: The bounded excerpt J096's registry question is asked about: enough of
+#: the document to plausibly contain its approval point, never the whole
+#: record (M1 fix, see score_sequencing()'s own docstring).
+J096_EXCERPT_CAP = 2000
+
+
+def _window_around_line(lines, idx, cap):
+    """`cap` characters of "\\n".join(lines), centered as closely as the
+    start/end of the document allow on line `idx`'s own character offset.
+
+    A3 fix (opus-review-g1-round2-pkg-decide.md): score_sequencing() used
+    to send the document's first J096_EXCERPT_CAP characters regardless of
+    where the candidate approval point actually was. In all 7 shipped
+    *RECORD* examples the real approval point sat between character 3,313
+    and 11,973, always past that flat window, so J096 was structurally
+    asked about text that could never hold the answer. This centers the
+    excerpt on the SAME line the deterministic check itself found (`idx`,
+    score_sequencing()'s own `approval_idx`), so the excerpt sent and the
+    text the mechanical verdict was read from are the same region."""
+    full_text = "\n".join(lines)
+    offset = sum(len(ln) + 1 for ln in lines[:idx])  # +1 per line for the join newline
+    start = max(0, offset - cap // 2)
+    return full_text[start:start + cap]
+
+
+def score_sequencing(lines, *, jev_runner=None):
+    """Score whether this record's approval point comes after its Plan
+    heading.
+
+    JEV-G1 wave-1 seam J096 (registry: approval-prompt phrasing
+    detector): asks Jev's second opinion ONCE PER DOCUMENT, on a
+    J096_EXCERPT_CAP-character window AROUND the candidate approval point
+    (A3 fix, opus-review-g1-round2-pkg-decide.md: a flat first-N-character
+    window missed the approval point in all 7 shipped examples; see
+    _window_around_line()'s own docstring), never once per line (M1 fix,
+    opus-review-seams-g1-g3.md: the previous per-line placement inside
+    _looks_like_an_approval_prompt() sent a document with no prompt at
+    all out line by line, one bridge call each), and never at all when no
+    candidate region exists (A3 fix: nothing for the window to center on
+    means nothing to ask Jev about). Off by default in data/jev-seams.json,
+    called for its side effect only (the calibration ledger row and A0.6
+    audit sample) -- WAVE 1 IS SHADOW-ONLY BY CONTRACT
+    (opus-review-seams-g1-g3.md, C1): this function's own returned score
+    is ALWAYS the mechanical verdict below, never consult()'s raw answer,
+    whatever mode says. `jev_runner` exists only so a test can inject a
+    scripted bridge."""
     plan_idx = find_first_heading_index(lines, lambda t: re.search(r'\bplan\b', t, re.IGNORECASE))
     approval_idx = find_first_heading_index(
         lines, lambda t: re.search(r'\bapproval\b|\bapprove\b|\bconfirm', t, re.IGNORECASE))
     # A plain-text prompt can precede the first approval-ish heading, so take the
     # EARLIEST approval point: fall back to the first prompt and keep whichever is first.
+    prompt_line_idx = None
     for i, line in enumerate(lines):
         if _looks_like_an_approval_prompt(line):
-            if approval_idx is None or i < approval_idx:
-                approval_idx = i
+            prompt_line_idx = i
             break
+    if prompt_line_idx is not None and (approval_idx is None or prompt_line_idx < approval_idx):
+        approval_idx = prompt_line_idx
+
+    try:
+        import jev_g1_seam_cache
+        if not jev_g1_seam_cache.is_off("J096") and approval_idx is not None:
+            import jev_seam
+            excerpt = _window_around_line(lines, approval_idx, J096_EXCERPT_CAP)
+            jev_seam.consult(
+                "J096", {"excerpt": excerpt}, prompt_line_idx is not None,
+                seams_config=jev_seam.load_seams_config(),
+                registry=jev_seam.load_registry(),
+                ledger_dir=jev_seam.DEFAULT_LEDGER_DIR, runner=jev_runner,
+            )  # C1: return value intentionally discarded, see docstring above
+    except Exception:
+        pass  # sbe: allow-silent the seam is advisory only, the sequencing verdict below always stands
+
     if plan_idx is None or approval_idx is None:
         return None, "no Plan heading and/or approval prompt found, cannot determine order"
     if approval_idx < plan_idx:
@@ -695,13 +764,59 @@ def score_receipt_integrity(receipt_verified):
     return 10.0, "caller attested the close's check ran after the last edit, command preserved"
 
 
+#: The bounded excerpt J114's registry question is asked about: the
+#: sections the mechanical rubric itself scores, never the whole record.
+J114_EXCERPT_CAP = 4000
+
+
+def _j114_excerpt(lines, full_text, persona):
+    """`J114_EXCERPT_CAP` characters built from the SAME sections
+    score_grounded_assumptions()/score_level_adaptation()/score_options()
+    read, located the same way (find_section(), each function's own
+    predicate), rather than the document's first N characters.
+
+    A3 fix (opus-review-g1-round2-pkg-decide.md): a flat first-4000-
+    character cut lost the Options heading in 2 of 7 shipped examples (at
+    character 4,271 and 5,785) and Assumptions in a third (4,226), so the
+    rubric this seam second-opinions was structurally invisible to it.
+    Options is filled first and is never the section truncated to make
+    room; the Assumptions and persona sections share whatever budget is
+    left over."""
+    assumptions_sec = find_section(lines, lambda t: re.search(r'\bassumptions?\b', t, re.IGNORECASE))
+    assumptions_text = "\n".join(lines[assumptions_sec[0]:assumptions_sec[1]]) if assumptions_sec else ""
+
+    persona_pred = ((lambda t: re.search(r'\bba\b|\bbusiness analyst\b', t, re.IGNORECASE))
+                     if persona == 'ba' else
+                     (lambda t: re.search(r'\bdev\b|\bdeveloper\b', t, re.IGNORECASE)))
+    persona_sec = find_section(lines, persona_pred)
+    # _persona_section() itself falls back to the WHOLE record when no
+    # dedicated section exists; that fallback would swamp this excerpt's
+    # budget on its own, so this excerpt only draws from a real section.
+    persona_text = "\n".join(lines[persona_sec[0]:persona_sec[1]]) if persona_sec else ""
+
+    options_text = ""
+    options_sec = find_section(lines, lambda t: re.search(r'\boptions?\b', t, re.IGNORECASE))
+    if options_sec:
+        options_text = "\n".join(lines[options_sec[0]:options_sec[1]])[:J114_EXCERPT_CAP]
+
+    other = assumptions_text
+    if persona_text:
+        other = (other + "\n" + persona_text) if other else persona_text
+    other = other[:max(0, J114_EXCERPT_CAP - len(options_text))]
+
+    excerpt = other
+    if options_text:
+        excerpt = (excerpt + "\n" + options_text) if excerpt else options_text
+    return excerpt[:J114_EXCERPT_CAP]
+
+
 # ---------------------------------------------------------------------- #
 # Orchestration
 # ---------------------------------------------------------------------- #
 
 def score_record(text, persona, turns=None, process_questions=None,
                   override_rate=None, repeat_questions=None, receipt_verified=False,
-                  root=None):
+                  root=None, jev_runner=None):
     lines = text.splitlines()
     weight = dict(CRITERIA_WEIGHTS)
     results = []
@@ -730,11 +845,46 @@ def score_record(text, persona, turns=None, process_questions=None,
     score, evidence = score_convergence(override_rate, repeat_questions)
     results.append(CriterionResult('convergence', weight['convergence'], score, evidence))
 
-    score, evidence = score_sequencing(lines)
+    score, evidence = score_sequencing(lines, jev_runner=jev_runner)
     results.append(CriterionResult('sequencing', weight['sequencing'], score, evidence))
 
     score, evidence = score_receipt_integrity(receipt_verified)
     results.append(CriterionResult('receipt_integrity', weight['receipt_integrity'], score, evidence))
+
+    # JEV-G1 wave-1 seam J114 (registry: intake-doc mechanical rubric
+    # second opinion): ONE seam for score_grounded_assumptions/
+    # score_options/score_level_adaptation together, never three
+    # separate ones (per this unit's brief). Second-opinions the
+    # combined mechanical score via jev_seam.consult(), off by default
+    # in data/jev-seams.json, called for its side effect only (the
+    # calibration ledger row and A0.6 audit sample) -- WAVE 1 IS
+    # SHADOW-ONLY BY CONTRACT (opus-review-seams-g1-g3.md, C1): `results`
+    # above is NEVER touched by this call's return value, so the
+    # mechanical rubric keeps pass authority whatever mode says,
+    # including "act", exactly as the registry's own fail_direction
+    # states. The excerpt sent (_j114_excerpt(), A3 fix,
+    # opus-review-g1-round2-pkg-decide.md) is the sections the rubric
+    # itself scores, capped at J114_EXCERPT_CAP characters total, not the
+    # document's first J114_EXCERPT_CAP characters.
+    try:
+        import jev_g1_seam_cache
+        if not jev_g1_seam_cache.is_off("J114"):
+            import jev_seam
+            by_name = {r.name: r.score for r in results}
+            dims = [by_name.get('grounded_assumptions'),
+                    by_name.get('level_adaptation'),
+                    by_name.get('options_with_recommendation')]
+            scored = [d for d in dims if d is not None]
+            mechanical_score = round(sum(scored) / len(scored), 2) if scored else None
+            excerpt = _j114_excerpt(lines, text, persona)
+            jev_seam.consult(
+                "J114", {"text": excerpt}, mechanical_score,
+                seams_config=jev_seam.load_seams_config(),
+                registry=jev_seam.load_registry(),
+                ledger_dir=jev_seam.DEFAULT_LEDGER_DIR, runner=jev_runner,
+            )  # C1: return value intentionally discarded, see comment above
+    except Exception:
+        pass  # sbe: allow-silent the seam is advisory only, results is already built above
 
     return results
 

@@ -47,6 +47,21 @@ import re
 import subprocess
 import sys
 
+# J029, wave-2 Jev seam: optional, fail-open, exactly like loop_bridge.py's
+# own wave-1/wave-3 seams. The regex first pass above stays primary and
+# stdlib-only; this only fires once a DRIFT has already been found, to
+# classify its flavor (on-track/scope-creep/persona-shift/stalled) for the
+# calibration ledger, and never changes or clears a fired DRIFT (C1).
+try:
+    import jev_checks
+except Exception:  # noqa: BLE001
+    jev_checks = None
+
+try:
+    import jev_seam
+except Exception:  # noqa: BLE001
+    jev_seam = None
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ROADMAP = os.path.join(ROOT, "docs", "plan", "READINESS-ROADMAP-2026-08-29.json")
 
@@ -250,6 +265,27 @@ def check_evidence_commits(doc, repo=ROOT, runner=None):
     return out
 
 
+def _consult_j029(finding, evidence_text):
+    """J029, wave-2 Jev seam: fires ONLY on a finding the regex first pass
+    already produced (never on a clean row), to classify which kind of
+    drift it looks like, for the calibration ledger only. C1: `finding`,
+    the caller's own real verdict, is always returned unchanged -- this
+    can never clear, soften, or replace a fired DRIFT, whatever mode
+    says. The one place both call sites below route through, so a config
+    or import problem is handled once, not twice."""
+    if jev_checks is not None and jev_seam is not None:
+        try:
+            jev_checks.check_drift_classification(
+                evidence_text, finding,
+                seams_config=jev_seam.load_seams_config(),
+                registry=jev_seam.load_registry(),
+                ledger_dir=jev_seam.DEFAULT_LEDGER_DIR,
+            )  # C1: return value intentionally discarded, shadow-only by contract
+        except Exception:  # noqa: BLE001  # sbe: allow-silent this seam is advisory only, never worth breaking a real drift finding
+            pass
+    return finding
+
+
 def check_status_against_evidence(doc):
     """A status field contradicting its own evidence field, which a peer session
     found on this board today: SCHEDULED beside evidence reading DECIDED."""
@@ -269,9 +305,11 @@ def check_status_against_evidence(doc):
                     and not _decided_word_is_subpart_scoped_everywhere(
                         w.lower(), low)]
             if said:
-                out.append(("DRIFT", n.get("id"),
-                            "status reads %s while its own evidence says %s"
-                            % (status, ", ".join(said))))
+                out.append(_consult_j029(
+                    ("DRIFT", n.get("id"),
+                     "status reads %s while its own evidence says %s"
+                     % (status, ", ".join(said))),
+                    text))
     return out
 
 
@@ -294,15 +332,19 @@ def check_complaints(doc):
         done = [n for n in mine if (n.get("status") or "").upper() in CLOSED_STATUSES]
         openn = [n for n in mine if (n.get("status") or "").upper() not in CLOSED_STATUSES]
         if done and verdict == "NOT-ADDRESSED":
-            out.append(("DRIFT", cid,
-                        "reads NOT-ADDRESSED while %s is %s and claims to close "
-                        "it: the work moved and the verdict did not"
-                        % (done[0].get("id"), done[0].get("status"))))
+            out.append(_consult_j029(
+                ("DRIFT", cid,
+                 "reads NOT-ADDRESSED while %s is %s and claims to close "
+                 "it: the work moved and the verdict did not"
+                 % (done[0].get("id"), done[0].get("status"))),
+                "verdict=%s closed_by=%s" % (verdict, done[0].get("status"))))
         if verdict == "ADDRESSED" and openn and not done:
-            out.append(("DRIFT", cid,
-                        "reads ADDRESSED while the only node claiming to close "
-                        "it (%s) is still %s, which is the worse direction"
-                        % (openn[0].get("id"), openn[0].get("status"))))
+            out.append(_consult_j029(
+                ("DRIFT", cid,
+                 "reads ADDRESSED while the only node claiming to close "
+                 "it (%s) is still %s, which is the worse direction"
+                 % (openn[0].get("id"), openn[0].get("status"))),
+                "verdict=%s open_status=%s" % (verdict, openn[0].get("status"))))
     return out
 
 

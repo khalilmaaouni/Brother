@@ -44,18 +44,26 @@ WHAT THIS DOES NOT DO (left as explicit deltas for other steps)
   None of the five are made here; see the delta list this session reported
   alongside this file.
 
-A KNOWN, STATED GAP: NO PID IS EVER RECORDED PER SESSION TODAY
+A KNOWN, STATED GAP: NO PID IS EVER RECORDED PER SESSION TODAY, EXCEPT WHERE
+A CALLER RECORDS ITS OWN (R3, 1.0.21)
   tools/bm_store.py's own session ids are opaque random tokens
   ("cli-<uuid4 hex>", or whatever a caller passes to --session); no table
-  in the schema stores a process id against one. So `sweep()` always
-  computes pid=None, pid_alive=None for every real record it reads: process
-  liveness is a signal this oracle KNOWS how to use (see owner_liveness),
-  but the store gives it nothing to use today. `pid_hints` is the
-  documented extension point -- an optional {session_id: pid} map a caller
-  who has out-of-band knowledge (a future session-pid registry, SD4/SD6's
-  own territory) may pass in. Passing none is honest, not a defect; a
-  liveness oracle that pretended to check a signal it cannot see would be
-  the more dangerous of the two wrong answers.
+  in the schema stores a process id against one. So `sweep()` still
+  computes pid=None, pid_alive=None from the STORE for every real record
+  (see _owner_signals): process liveness is a signal owner_liveness KNOWS
+  how to use, but the store gives it nothing to use on its own. `pid_hints`
+  is the documented extension point -- an optional {session_id: pid} map a
+  caller with out-of-band knowledge may pass in. Passing none is honest,
+  not a defect; a liveness oracle that pretended to check a signal it
+  cannot see would be the more dangerous of the two wrong answers.
+
+  R3 (a dead release-cut fence read LIVE for hours, 1.0.20) adds the one
+  exception: scripts/cut.py's own claim_fence writes its pid and host
+  straight into the record's `objective` (a free-text column, no schema
+  change), and sweep() reads it back with parse_owner_tag, judging that
+  record with the stricter owner_process_liveness instead of the softer
+  owner_liveness heuristic. Every other fence still carries no tag and
+  falls straight through to owner_liveness, unchanged.
 
 ANOTHER KNOWN, STATED GAP: THE FOREIGN-COMMIT-BASE CHECK IS STANDALONE
   foreign_commit_base_finding() is a pure function that takes a claimed
@@ -96,6 +104,8 @@ import datetime
 import importlib.util
 import json
 import os
+import re
+import socket
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -178,6 +188,156 @@ def process_alive(pid):
     except (OSError, ValueError, TypeError):
         return False
     return True
+
+
+def this_host():
+    """The name a fence's recorded `host` is compared against. A local
+    syscall (uname), never a DNS lookup (that would be gethostbyname/
+    getfqdn), so it stays inside this module's own pure_read, no-network
+    contract. "" on any failure, which OWNER_TAG_RE can never produce, so
+    a genuine tag never accidentally matches an unreadable local host."""
+    try:
+        return socket.gethostname() or ""
+    except OSError:
+        return ""
+
+
+#: R3 (the 1.0.20 cut, closed for 1.0.21). cut.py's claim_fence stamps its
+#: own pid and host onto the release fence's objective at claim time (see
+#: cut.py, "[owner pid=%d host=%s]"); this is the one place that shape is
+#: read back. No schema change: `objective` is an existing free-text column
+#: (_active_records below now selects it), so this is additive and every
+#: fence that never carries the tag (every fence today besides cut.py's
+#: own) falls straight through to the unchanged owner_liveness() oracle.
+OWNER_TAG_RE = re.compile(r"\[owner pid=(\d+) host=([^\s\]]+)\]")
+
+
+def parse_owner_tag(objective):
+    """(pid:int, host:str) parsed out of a record's objective, or None when
+    it carries no such tag (every fence besides a cut.py release fence,
+    today)."""
+    m = OWNER_TAG_RE.search(objective or "")
+    if not m:
+        return None
+    return int(m.group(1)), m.group(2)
+
+
+#: Review item 8 (opus-review-release-gaps.md, 2026-09-19): a tag is read
+#: back only from the one fence family that actually writes it
+#: (cut.py's claim_fence, "release-cut-<version>"). A record's objective
+#: is free text ANY claimer can set; without this gate, a fence merely
+#: copying or quoting the tag's own words would be judged by someone
+#: else's pid, host and heartbeat rather than its own.
+OWNER_TAG_FENCE_PREFIX = "release-cut-"
+
+
+def owner_tag_for_record(record):
+    """parse_owner_tag(record's objective), but only for a record whose
+    NAME marks it as a release-cut fence; None for every other record,
+    however its objective happens to be worded."""
+    if not (record.get("name") or "").startswith(OWNER_TAG_FENCE_PREFIX):
+        return None
+    return parse_owner_tag(record.get("objective"))
+
+
+#: Review item 5 (opus-review-release-gaps.md, 2026-09-19): a checkable pid
+#: that answers alive is trusted as LIVE only up to this age. Past it, the
+#: OS has had long enough to reissue that pid number to an unrelated
+#: process since the real owner exited, so a live answer stops being
+#: evidence and the verdict becomes UNKNOWN (never DEAD: it is exactly the
+#: "cannot tell" case, not new negative evidence). 24h: long past any
+#: ordinary cut (minutes) or attended pause, short enough that a pid this
+#: old answering alive is genuinely suspect rather than merely idle.
+PID_TRUST_MAX_SECONDS = 24 * 3600
+
+
+def owner_process_liveness(pid, host, heartbeat_age_seconds, this_host_name,
+                           stale_after_seconds=DEFAULT_STALE_AFTER_SECONDS,
+                           pid_trust_after_seconds=PID_TRUST_MAX_SECONDS):
+    """(verdict, reason) for a fence that recorded its own owner evidence
+    (cut.py's pid+host tag) rather than being judged only by
+    owner_liveness()'s softer heuristics. This is a STRICTER, more direct
+    oracle for that evidence, used in ADDITION to owner_liveness (see
+    sweep()): a pid recorded by the process that IS the owner, at claim
+    time, carries none of owner_liveness's PID-reuse caveat in the SHORT
+    term (that caveat is about a stranger's --pid-hint for a session
+    nobody watched claim it) -- but reuse is still real over a long
+    enough span, which is what `pid_trust_after_seconds` (item 5) bounds.
+
+    ORDER IS THE FIX (review item 1, 2026-09-19): a CONFIRMED-DEAD pid on
+    THIS host is checked and returned BEFORE the heartbeat-freshness
+    question, never after. The previous order checked freshness first, so
+    a fresh heartbeat could outvote a pid that had actually exited --
+    probe: owner_process_liveness(999999999, host, 60.0, host) returned
+    LIVE, and a cut that crashed 3h into a run then stayed fenced for
+    about 7h (4h staleness window ADDED on top of when it actually died)
+    instead of going DEAD the moment its heartbeat next went stale. A dead
+    pid is decisive evidence and a stale heartbeat cannot un-kill it, so
+    it is checked first, unconditionally.
+
+      LIVE    the pid is confirmed alive on `this_host_name` and its own
+              heartbeat is not too old to trust (item 5) -- the strongest,
+              most direct signal, checked FIRST; or, failing that, the
+              heartbeat is still within `stale_after_seconds`.
+      DEAD    the pid is confirmed GONE on `this_host_name` -- checked
+              SECOND, before any heartbeat-freshness question, so a fresh
+              heartbeat can never outvote a pid that has actually exited;
+              or, failing that (no pid could be checked at all, `host` is
+              None or unrecorded), the heartbeat itself is older than
+              `stale_after_seconds`.
+      UNKNOWN never DEAD when this sweep genuinely cannot tell: no pid,
+              host or heartbeat was ever recorded at all; the pid answers
+              alive but past the reuse-trust cap (item 5); or the fence
+              was claimed on a DIFFERENT host (item 4: the store is one
+              local sqlite file, so a host mismatch here is far more
+              likely a hostname that changed under the SAME machine --
+              DHCP, VPN, sleep/wake -- than a genuinely different one,
+              and a stale heartbeat alone is never let promote that
+              mismatch to DEAD)."""
+    if pid is None and host is None and heartbeat_age_seconds is None:
+        return UNKNOWN, "no pid, host or heartbeat was ever recorded for this fence"
+    checkable = pid is not None and host is not None and host == this_host_name
+    host_mismatch = pid is not None and host is not None and host != this_host_name
+    fresh = (heartbeat_age_seconds is not None
+            and heartbeat_age_seconds <= stale_after_seconds)
+    if checkable:
+        if not process_alive(pid):
+            # Item 1: decisive, and checked before freshness on purpose.
+            return DEAD, (
+                "pid %s is gone on %s (%s)"
+                % (pid, this_host_name,
+                  "heartbeat %.0fs old" % heartbeat_age_seconds
+                  if heartbeat_age_seconds is not None
+                  else "no heartbeat recorded"))
+        if (heartbeat_age_seconds is not None
+                and heartbeat_age_seconds > pid_trust_after_seconds):
+            # Item 5: pid reuse over a long span; alive is no longer proof.
+            return UNKNOWN, (
+                "pid %s answers alive on %s, but its heartbeat is %.0fs "
+                "old (over the %.0fs pid-trust cap): too long to rule out "
+                "the OS having reissued this pid since the real owner "
+                "exited" % (pid, this_host_name, heartbeat_age_seconds,
+                           pid_trust_after_seconds))
+        return LIVE, "pid %s answers alive on %s" % (pid, this_host_name)
+    if fresh:
+        return LIVE, ("heartbeat age %.0fs is within the %.0fs staleness "
+                      "window" % (heartbeat_age_seconds, stale_after_seconds))
+    if host_mismatch:
+        # Item 4: never DEAD on a host string alone; a local store cannot
+        # actually be claimed from a different machine.
+        return UNKNOWN, (
+            "the fence was claimed on host %s, not this sweep's host %s; "
+            "its pid cannot be checked from here, and since the store is "
+            "one local file a host mismatch is read as an unreliable "
+            "hostname, never as grounds for DEAD" % (host, this_host_name))
+    if heartbeat_age_seconds is not None:
+        return DEAD, (
+            "heartbeat is %.0fs old (over the %.0fs window) and no pid "
+            "was recorded to check" % (heartbeat_age_seconds,
+                                       stale_after_seconds))
+    return UNKNOWN, (
+        "no heartbeat evidence exists to judge this fence without "
+        "checking its pid")
 
 
 #: One owner's evidence, gathered before the oracle ever runs, so the
@@ -304,10 +464,12 @@ def _scrub(bs, value):
 
 
 def _active_records(bs, store):
+    # objective added for R3: the one field a release fence's own pid+host
+    # tag rides in (parse_owner_tag), additive (see OWNER_TAG_RE).
     return [dict(r) for r in bs._exec(
         store,
         "SELECT lifecycle_uuid, name, state, session_id, owner, version, "
-        "created_at, updated_at FROM records WHERE state='active' "
+        "objective, created_at, updated_at FROM records WHERE state='active' "
         "ORDER BY name, lifecycle_uuid").fetchall()]
 
 
@@ -548,11 +710,21 @@ def sweep(bs, store, now=None, stale_after_seconds=DEFAULT_STALE_AFTER_SECONDS,
                             + _release_and_adopt_actions(by_uuid[ub]))))
 
     # -- stale fences (including dead watchdogs) and dead-owner ---------
-    # provisional records, both judged by the SD1 oracle.
+    # provisional records, both judged by the SD1 oracle -- or, for a
+    # fence carrying cut.py's own pid+host tag (R3), by the stricter
+    # owner_process_liveness oracle that evidence earns.
+    here = this_host()
     for u, record in by_uuid.items():
         signals = _owner_signals(bs, store, record, terminal_states,
                                  pid_hints, now)
-        verdict, reason = owner_liveness(signals, stale_after_seconds)
+        tag = owner_tag_for_record(record)
+        if tag is not None:
+            tag_pid, tag_host = tag
+            verdict, reason = owner_process_liveness(
+                tag_pid, tag_host, signals.heartbeat_age_seconds, here,
+                stale_after_seconds)
+        else:
+            verdict, reason = owner_liveness(signals, stale_after_seconds)
         if verdict != DEAD:
             continue
         is_watchdog = "watchdog" in (record["name"] or "").lower()

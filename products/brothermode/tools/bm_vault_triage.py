@@ -91,6 +91,17 @@ WHAT THIS IS NOT. It never mints a `contradicts:` edge, never edits a note,
 never touches the corpus. Its output is a list of candidates for a human
 (or a fenced, separate write step) to act on.
 
+THE ONE DOCUMENTED EXCEPTION: _consult_j082() below (J082, wave-2 Jev seam,
+"Vault note/claim duplicate & contradiction check") lazily mounts scripts/
+(via _jevpath.py, since this file lives in products/brothermode/tools/, a
+different directory) and imports jev_checks/jev_seam only inside that one
+function, only when classify() below runs, only for its side effect (a
+calibration ledger row). Every other function in this file stays exactly
+as free of network, subprocess and filesystem writes as always; a caller
+that never reaches classify() pays nothing, and classify() itself pays
+nothing when jev_checks cannot be reached or J082's own mode is off
+(jev_seam.py's own OFF branch).
+
 Python 3.9 floor, standard library only, writes nothing anywhere.
 """
 import argparse
@@ -245,13 +256,60 @@ def classify(a, b):
     """("SCOPED", dimension) when a stated dimension differs on both sides;
     ("CONTRADICTION", None) otherwise. Checked in DIMENSION_ORDER so two
     differing dimensions always report the same (first) one, deterministic
-    regardless of dict ordering."""
+    regardless of dict ordering.
+
+    J082 (wave-2 Jev seam, "Vault note/claim duplicate & contradiction
+    check"): fires immediately after the verdict below is computed, as a
+    pure side effect, using it as current_answer -- see the module
+    docstring's "ONE DOCUMENTED EXCEPTION" note. Never fired before the
+    verdict exists, and the return value below is always this real
+    verdict, whatever the seam answers."""
+    verdict = ("CONTRADICTION", None)
     for dim in DIMENSION_ORDER:
         va = a["dims"].get(dim)
         vb = b["dims"].get(dim)
         if va is not None and vb is not None and va != vb:
-            return "SCOPED", dim
-    return "CONTRADICTION", None
+            verdict = ("SCOPED", dim)
+            break
+    _consult_j082(a, b, verdict)
+    return verdict
+
+
+def _consult_j082(a, b, verdict, runner=None, rng=None):
+    """The one place classify() above reaches jev_checks/jev_seam (scripts/,
+    mounted lazily via _jevpath.py, since this file lives in
+    products/brothermode/tools/, a different directory).
+
+    Registry: J082, "Vault note/claim duplicate & contradiction check".
+    C1 (the invariant): `verdict` -- classify()'s own real ("SCOPED", dim)
+    or ("CONTRADICTION", None) result -- is always what this reports as
+    current_answer, and classify() itself always returns it unchanged,
+    whatever mode says (registry fail_direction: "unknown surfaces the
+    pair for human triage, never auto-merges or auto-contradicts").
+    Anchor: products/brothermode/tools/bm_vault_triage.py:244 (classify(),
+    immediately above).
+
+    Fail-open like every other wave-1/2/3 seam call site in this estate:
+    an import failure, a missing scripts/ sibling, or consult() itself
+    raising something undocumented never reaches classify()'s own
+    caller."""
+    try:
+        here = os.path.dirname(os.path.abspath(__file__))
+        if here not in sys.path:
+            sys.path.insert(0, here)
+        import _jevpath
+        if _jevpath.mount():
+            import jev_checks
+            import jev_seam
+            jev_checks.check_vault_triage_relationship(
+                a["text"], b["text"], verdict,
+                seams_config=jev_seam.load_seams_config(),
+                registry=jev_seam.load_registry(),
+                ledger_dir=jev_seam.DEFAULT_LEDGER_DIR,
+                runner=runner, rng=rng,
+            )  # C1: return value intentionally discarded, shadow-only by contract
+    except Exception:  # noqa: BLE001  # this seam is advisory only, never worth breaking real triage
+        pass
 
 
 def scan(vault):

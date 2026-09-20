@@ -133,6 +133,22 @@ def _do_claim(root, env, db_path, name, session_id,
     return row["lifecycle_uuid"], row["version"]
 
 
+def _do_claim_with_objective(root, env, db_path, name, session_id, objective,
+                             files=("probe/target-%s.py",)):
+    """Like _do_claim, but with an explicit --objective: R3's own fixture
+    need, a release fence carrying cut.py's "[owner pid=%d host=%s]" tag."""
+    files = [f % name if "%s" in f else f for f in files]
+    result = _run_module(root, env, "bm_store.py", [
+        "claim", name, "--lifetime", "ephemeral",
+        "--objective", objective,
+        "--files"] + files + ["--session", session_id])
+    if result.returncode != 0:
+        raise AssertionError("fixture claim %r failed: %s%s"
+                             % (name, result.stdout, result.stderr))
+    row = _row_by_name(db_path, name)
+    return row["lifecycle_uuid"], row["version"]
+
+
 def _do_backdate(db_path, lifecycle_uuid, when):
     """Set a record's own updated_at AND every transition row it owns to
     `when`, directly against the sqlite file: the only way to make a real,
@@ -223,6 +239,161 @@ class TestOwnerLiveness(unittest.TestCase):
         self.assertEqual(ST.DEAD, verdict,
                          "a live pid alone flipped a stale owner to non-DEAD")
         self.assertIn("PID REUSE", reason)
+
+
+class TestParseOwnerTag(unittest.TestCase):
+    """R3: the one place cut.py's claim_fence objective tag is read back."""
+
+    def test_a_well_formed_tag_parses(self):
+        self.assertEqual(
+            ST.parse_owner_tag("release cut 9.9.9, orchestrated by "
+                               "scripts/cut.py [owner pid=4242 "
+                               "host=some-host.local]"),
+            (4242, "some-host.local"))
+
+    def test_no_tag_is_none(self):
+        self.assertIsNone(ST.parse_owner_tag("bm_stall fixture: readme-fence"))
+        self.assertIsNone(ST.parse_owner_tag(""))
+        self.assertIsNone(ST.parse_owner_tag(None))
+
+
+class TestOwnerProcessLiveness(unittest.TestCase):
+    """R3 (the 1.0.20 cut, closed for 1.0.21): a release fence with no pid
+    or heartbeat left bm_stall reading its dead owner LIVE for as long as
+    the staleness window (about 4h, measured, parked by hand). These three
+    cases are the ones the fix is named against."""
+
+    def test_pid_gone_on_this_host_and_stale_heartbeat_is_dead(self):
+        verdict, reason = ST.owner_process_liveness(
+            pid=999999999, host="this-host", heartbeat_age_seconds=99999.0,
+            this_host_name="this-host", stale_after_seconds=14400)
+        self.assertEqual(ST.DEAD, verdict, reason)
+        self.assertIn("gone on this-host", reason)
+
+    def test_a_live_pid_on_this_host_is_live_even_with_a_stale_heartbeat(self):
+        # The point of R3: a heartbeat can only ever get as fresh as the
+        # last beat cut.py sent; a genuinely alive process must never wait
+        # out the staleness window to be believed. 36000s (10h) is well
+        # past the 14400s (4h) staleness window used here but still well
+        # inside the default 24h pid-trust cap (item 5's own bound), so
+        # this exercises staleness without also tripping reuse-distrust.
+        verdict, reason = ST.owner_process_liveness(
+            pid=os.getpid(), host="this-host",
+            heartbeat_age_seconds=36000.0, this_host_name="this-host",
+            stale_after_seconds=14400)
+        self.assertEqual(ST.LIVE, verdict, reason)
+        self.assertIn("answers alive", reason)
+
+    def test_missing_pid_host_and_heartbeat_is_unknown_never_dead(self):
+        verdict, reason = ST.owner_process_liveness(
+            pid=None, host=None, heartbeat_age_seconds=None,
+            this_host_name="this-host", stale_after_seconds=14400)
+        self.assertEqual(ST.UNKNOWN, verdict, reason)
+
+    def test_a_fresh_heartbeat_is_live_with_no_pid_evidence_at_all(self):
+        verdict, reason = ST.owner_process_liveness(
+            pid=None, host=None, heartbeat_age_seconds=30.0,
+            this_host_name="this-host", stale_after_seconds=14400)
+        self.assertEqual(ST.LIVE, verdict, reason)
+
+    def test_a_stale_heartbeat_alone_is_dead_even_with_no_pid_recorded(self):
+        verdict, reason = ST.owner_process_liveness(
+            pid=None, host=None, heartbeat_age_seconds=99999.0,
+            this_host_name="this-host", stale_after_seconds=14400)
+        self.assertEqual(ST.DEAD, verdict, reason)
+
+    def test_a_different_host_cannot_be_pid_checked_from_here(self):
+        # The pid was recorded on a machine that did not mint it: never
+        # guessed DEAD from a number this sweep cannot verify.
+        verdict, reason = ST.owner_process_liveness(
+            pid=1, host="another-host", heartbeat_age_seconds=None,
+            this_host_name="this-host", stale_after_seconds=14400)
+        self.assertEqual(ST.UNKNOWN, verdict, reason)
+
+    def test_a_different_host_with_a_stale_heartbeat_is_unknown_never_dead(self):
+        # Item 4 (opus-review-release-gaps.md, 2026-09-19): the store is
+        # one local sqlite file, so a host mismatch here is far more
+        # likely a hostname that changed under the SAME machine (DHCP,
+        # VPN, sleep/wake) than a genuinely different one. A stale
+        # heartbeat must never promote that mismatch to DEAD: a live cut
+        # waiting at the approve prompt (no heartbeats fire there) could
+        # otherwise be adopted out from under itself.
+        verdict, reason = ST.owner_process_liveness(
+            pid=1, host="another-host", heartbeat_age_seconds=99999.0,
+            this_host_name="this-host", stale_after_seconds=14400)
+        self.assertEqual(ST.UNKNOWN, verdict, reason)
+
+    def test_a_different_host_with_a_fresh_heartbeat_is_live(self):
+        verdict, reason = ST.owner_process_liveness(
+            pid=1, host="another-host", heartbeat_age_seconds=30.0,
+            this_host_name="this-host", stale_after_seconds=14400)
+        self.assertEqual(ST.LIVE, verdict, reason)
+
+    def test_pid_gone_with_a_fresh_heartbeat_is_dead(self):
+        # Item 1 (opus-review-release-gaps.md, 2026-09-19), THE load-
+        # bearing regression case: the old order checked heartbeat
+        # freshness BEFORE the dead-pid question, so a fresh heartbeat
+        # (which a still-running cut sends every <=60s) outvoted a pid
+        # that had already exited. Probe quoted in the review:
+        # owner_process_liveness(999999999, host, 60.0, host) returned
+        # LIVE; a crashed cut then stayed fenced up to 4h after its last
+        # beat instead of reading DEAD the instant its pid was checked.
+        verdict, reason = ST.owner_process_liveness(
+            pid=999999999, host="this-host", heartbeat_age_seconds=60.0,
+            this_host_name="this-host", stale_after_seconds=14400)
+        self.assertEqual(ST.DEAD, verdict, reason)
+        self.assertIn("gone on this-host", reason)
+
+    def test_a_live_pid_past_the_trust_cap_is_unknown_never_dead_or_live(self):
+        # Item 5: an alive pid this old is not trusted as proof any more
+        # (the OS may have reissued the number), but it is also not
+        # treated as evidence of death -- UNKNOWN, the genuine "cannot
+        # tell" verdict, never a guess in either direction.
+        verdict, reason = ST.owner_process_liveness(
+            pid=os.getpid(), host="this-host",
+            heartbeat_age_seconds=30 * 24 * 3600.0,  # 30 days
+            this_host_name="this-host", stale_after_seconds=14400)
+        self.assertEqual(ST.UNKNOWN, verdict, reason)
+        self.assertIn("pid-trust cap", reason)
+
+    def test_a_live_pid_just_inside_the_trust_cap_is_still_live(self):
+        verdict, reason = ST.owner_process_liveness(
+            pid=os.getpid(), host="this-host",
+            heartbeat_age_seconds=ST.PID_TRUST_MAX_SECONDS - 1,
+            this_host_name="this-host", stale_after_seconds=14400)
+        self.assertEqual(ST.LIVE, verdict, reason)
+
+    def test_a_custom_trust_cap_is_honored(self):
+        verdict, reason = ST.owner_process_liveness(
+            pid=os.getpid(), host="this-host", heartbeat_age_seconds=100.0,
+            this_host_name="this-host", stale_after_seconds=14400,
+            pid_trust_after_seconds=50)
+        self.assertEqual(ST.UNKNOWN, verdict, reason)
+
+
+class TestOwnerTagOnlyFromReleaseCutFences(unittest.TestCase):
+    """Item 8: a record's objective is free text any claimer can set; the
+    tag is read back only for a fence whose NAME marks it as cut.py's own
+    (release-cut-<version>), never a fence that merely copies the words."""
+
+    TAG = "[owner pid=4242 host=some-host.local]"
+
+    def test_a_release_cut_fence_reads_its_tag(self):
+        self.assertEqual(
+            ST.owner_tag_for_record({"name": "release-cut-1.0.21",
+                                     "objective": "orchestrated by "
+                                     "scripts/cut.py " + self.TAG}),
+            (4242, "some-host.local"))
+
+    def test_a_differently_named_fence_carrying_the_same_words_is_ignored(self):
+        self.assertIsNone(
+            ST.owner_tag_for_record({"name": "some-other-lane",
+                                     "objective": "quoting cut.py's tag: "
+                                     + self.TAG}))
+
+    def test_no_name_at_all_is_ignored(self):
+        self.assertIsNone(
+            ST.owner_tag_for_record({"objective": self.TAG}))
 
 
 # ---------------------------------------------------------------------------
@@ -387,6 +558,61 @@ class TestSeededCorpus(_StoreFixture):
         self.assertTrue(
             action["command"].startswith(("bm-store", "bm-learn", "python3 /")),
             action["command"])
+
+
+# ---------------------------------------------------------------------------
+# R3, end to end against a real store: a release fence carrying cut.py's
+# own pid+host tag is judged by owner_process_liveness, not the softer
+# generic oracle -- the behavior change this whole fix is for.
+# ---------------------------------------------------------------------------
+
+class TestReleaseFenceOwnerEvidence(_StoreFixture):
+    def _sweep(self):
+        store = self._open_readonly()
+        try:
+            return ST.sweep(BS, store, now=NOW, stale_after_seconds=14400)
+        finally:
+            store.close()
+
+    def test_a_dead_pid_on_this_host_with_a_stale_heartbeat_is_dead(self):
+        objective = ("release cut 9.9.9, orchestrated by scripts/cut.py "
+                    "[owner pid=999999999 host=%s]" % ST.this_host())
+        uuid_, _ = _do_claim_with_objective(
+            self.root, self.env, self.db_path, "release-cut-dead-pid",
+            "dead-cut-session", objective)
+        self._backdate(uuid_, STALE_AGO)
+        hit = [f for f in self._sweep() if f["lifecycle_uuid"] == uuid_]
+        self.assertTrue(hit, "the dead-pid release fence was not reported "
+                             "stale at all")
+        self.assertIn("gone on", hit[0]["message"])
+
+    def test_a_live_pid_on_this_host_is_not_reported_despite_a_stale_updated_at(self):
+        # THE DEFECT R3 CLOSES, reproduced against a real store: measured
+        # on the 1.0.20 cut, an unrelated dead fence's stale updated_at
+        # alone made owner_liveness's PID-reuse caveat read DEAD regardless
+        # of any pid. A release fence carrying its own owner tag is no
+        # longer judged that softer way.
+        objective = ("release cut 9.9.9, orchestrated by scripts/cut.py "
+                    "[owner pid=%d host=%s]" % (os.getpid(), ST.this_host()))
+        uuid_, _ = _do_claim_with_objective(
+            self.root, self.env, self.db_path, "release-cut-live-pid",
+            "live-cut-session", objective)
+        self._backdate(uuid_, STALE_AGO)
+        hit = [f for f in self._sweep() if f["lifecycle_uuid"] == uuid_]
+        self.assertEqual([], hit,
+                         "a release fence with a confirmed-alive pid was "
+                         "reported as a stale/dead fence: %s" % hit)
+
+    def test_a_fence_with_no_owner_tag_is_unaffected(self):
+        # Backward compatibility: every fence besides cut.py's own release
+        # fence carries no tag at all and must fall straight through to
+        # the unchanged owner_liveness() oracle -- still DEAD on a stale,
+        # unregistered, no-pid-known owner.
+        uuid_, _ = self._claim("plain-fence-no-tag", "plain-session")
+        self._backdate(uuid_, STALE_AGO)
+        hit = [f for f in self._sweep() if f["lifecycle_uuid"] == uuid_]
+        self.assertTrue(hit, "a plain, tagless stale fence must still be "
+                             "reported by the unchanged oracle")
 
 
 # ---------------------------------------------------------------------------

@@ -6,7 +6,9 @@ script's own CLI as a subprocess (never by importing internals and calling a
 function), because the contract this tool exists to hold is the CLI's exit
 code and its printed JSON, not an internal helper's return value.
 """
+import contextlib
 import datetime
+import io
 import json
 import os
 import subprocess
@@ -951,6 +953,157 @@ class Night0912BatteryVerdict(unittest.TestCase):
                 capture_output=True, text=True)
         self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
         self.assertIn("NO-DATA", proc.stdout)
+
+
+class J064GateLineShadowNeverChangesVerdict(unittest.TestCase):
+    """J064, wave-1 Jev seam ("Gate/CI/PR log-line classification"): a
+    shadow-only second opinion on the raw check_all verdict lines this run
+    actually saw, fired AFTER main() has already parsed them into its real
+    verdict -- never before, never read back into anything printed.
+
+    Tested in-process against battery_verdict.main() directly, UNLIKE
+    BatteryVerdictTest above (which drives the CLI as a subprocess on
+    purpose, per this file's own module docstring): a subprocess boundary
+    cannot observe whether check_gate_log_lines was actually called, or
+    prove that a mutation letting its answer leak into the printed verdict
+    would be caught. Same technique test_loop_bridge.py and
+    test_sbe_review_route.py already use for their own wave-1/2 seams."""
+
+    def setUp(self):
+        sys.path.insert(0, HERE)
+        import battery_verdict as BV
+        self.BV = BV
+        self.tmpdir = tempfile.mkdtemp()
+        self.expectations_path = os.path.join(self.tmpdir, "expectations.json")
+        with open(self.expectations_path, "w", encoding="utf-8") as fh:
+            json.dump(EXPECTATIONS, fh)
+        self.check_all_path = os.path.join(self.tmpdir, "check_all_clean.sh")
+        with open(self.check_all_path, "w", encoding="utf-8") as fh:
+            fh.write(CHECK_ALL_CLEAN)
+
+    def _lines(self):
+        return [
+            check_all_line("PASS", "0", "product-suite"),
+            check_all_line("FAIL", "1", "some-new-check", "boom"),
+        ]
+
+    def _run(self, lines):
+        input_path = os.path.join(self.tmpdir, "check_all_output.txt")
+        with open(input_path, "w", encoding="utf-8") as fh:
+            fh.write("Brother: every shipped check, each reporting its own exit code\n\n")
+            fh.write("\n".join(lines) + "\n\n")
+            fh.write("pass 1   fail 0   no-data 0\n")
+        argv = [input_path, "--expectations", self.expectations_path,
+                "--check-all", self.check_all_path, "--today", "2026-09-01"]
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = self.BV.main(argv)
+        return code, buf.getvalue()
+
+    def test_a_normal_call_consults_the_seam_with_the_real_lines(self):
+        """(a) + wiring proof: check_gate_log_lines is actually called,
+        with the real verdict lines this run saw, and the printed
+        verdict/exit code this call produces is the same a run without any
+        faked seam produces.
+
+        Skips (never fails) where jev_seam's own config/registry cannot be
+        read: TheRealExportTreeIsWhatTheReadmeSendsAReaderTo re-runs this
+        exact file as a real subprocess from inside a candidate export tree
+        that never carries data/jev-registry.json or data/jev-seams.json
+        (neither is in docs/plan/EXPORT-ALLOWLIST.txt) -- production
+        already handles that as fail-open (_jev_gate_line_shadow's own
+        try/except catches the raise before check_gate_log_lines is ever
+        reached), which is the byte-identical-verdict property the other
+        tests in this class prove; this one specifically also proves the
+        seam is REACHED, which needs a real registry/config to check."""
+        if self.BV.jev_checks is None:
+            self.skipTest("jev_checks unavailable in this environment "
+                          "(fail-open by design)")
+        try:
+            self.BV.jev_seam.load_seams_config()
+            self.BV.jev_seam.load_registry()
+        except Exception as exc:  # noqa: BLE001
+            self.skipTest("jev_seam config/registry unreadable in this "
+                          "environment (fail-open by design): %s" % exc)
+        baseline_code, baseline_out = self._run(self._lines())
+        real = self.BV.jev_checks.check_gate_log_lines
+        seen = {}
+
+        def fake(lines, *a, **k):
+            seen["lines"] = list(lines)
+            return []
+        self.BV.jev_checks.check_gate_log_lines = fake
+        try:
+            code, out = self._run(self._lines())
+        finally:
+            self.BV.jev_checks.check_gate_log_lines = real
+        self.assertIn("lines", seen, "check_gate_log_lines was never called")
+        self.assertTrue(any("some-new-check" in l for l in seen["lines"]),
+                        "the real verdict line was not among those handed "
+                        "to the seam: %r" % seen["lines"])
+        self.assertEqual(code, baseline_code)
+        self.assertEqual(out, baseline_out)
+
+    def test_an_adversarial_seam_answer_never_changes_verdict_or_exit(self):
+        """(a continued) + MUTATION-PROOF anchor: check_gate_log_lines is
+        rigged to answer "needs-human" on every line (the registry's own
+        fail_direction word for low confidence) -- the one shape a bug in
+        main() reading `.answer` back into the verdict would act on.
+        main()'s own printed verdict JSON and exit code stay byte-identical
+        to a run where the seam never fired at all. Deliberately mutated
+        and reverted by hand against this exact test (see the executor's
+        own report for the red-then-green transcript)."""
+        if self.BV.jev_checks is None:
+            self.skipTest("jev_checks unavailable in this environment "
+                          "(fail-open by design)")
+        baseline_code, baseline_out = self._run(self._lines())
+        real = self.BV.jev_checks.check_gate_log_lines
+
+        class _AdverseResult(object):
+            answer = "needs-human"
+            mode = "shadow"
+            reason = "adversarial test fixture"
+        self.BV.jev_checks.check_gate_log_lines = \
+            lambda lines, *a, **k: [_AdverseResult() for _ in lines]
+        try:
+            code, out = self._run(self._lines())
+        finally:
+            self.BV.jev_checks.check_gate_log_lines = real
+        self.assertEqual(code, baseline_code)
+        self.assertEqual(out, baseline_out)
+
+    def test_a_raising_seam_never_breaks_the_verdict(self):
+        """(a continued): a check_gate_log_lines that raises never breaks
+        main() and never changes what it prints."""
+        if self.BV.jev_checks is None:
+            self.skipTest("jev_checks unavailable in this environment "
+                          "(fail-open by design)")
+        baseline_code, baseline_out = self._run(self._lines())
+        real = self.BV.jev_checks.check_gate_log_lines
+        self.BV.jev_checks.check_gate_log_lines = \
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
+        try:
+            code, out = self._run(self._lines())
+        finally:
+            self.BV.jev_checks.check_gate_log_lines = real
+        self.assertEqual(code, baseline_code)
+        self.assertEqual(out, baseline_out)
+
+    def test_jev_checks_unavailable_still_prints_the_same_verdict(self):
+        """(b): jev_checks and jev_seam both unavailable (the fail-open
+        case an import failure produces in real life) leaves the printed
+        verdict and exit code unchanged."""
+        baseline_code, baseline_out = self._run(self._lines())
+        real_checks, real_seam = self.BV.jev_checks, self.BV.jev_seam
+        self.BV.jev_checks = None
+        self.BV.jev_seam = None
+        try:
+            code, out = self._run(self._lines())
+        finally:
+            self.BV.jev_checks = real_checks
+            self.BV.jev_seam = real_seam
+        self.assertEqual(code, baseline_code)
+        self.assertEqual(out, baseline_out)
 
 
 if __name__ == "__main__":

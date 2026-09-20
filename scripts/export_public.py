@@ -131,6 +131,18 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import edition_guard  # noqa: E402
 
+# J064, wave-1 Jev seam ("Gate/CI/PR log-line classification"): optional,
+# fail-open, same discipline as every other jev_checks/jev_seam import in
+# this estate (see jev_checks.py's own module docstring). A missing or
+# broken jev_checks means the shadow call in run_gates() below is a no-op;
+# this exporter's own (all_ok, lines) return value never depends on it.
+try:
+    import jev_checks
+    import jev_seam
+except Exception:  # noqa: BLE001
+    jev_checks = None
+    jev_seam = None
+
 ROOT = os.path.dirname(HERE)
 DEFAULT_ALLOWLIST = os.path.join(ROOT, "docs", "plan", "EXPORT-ALLOWLIST.txt")
 #: The value allowlist for the secret gate lives in pre_push_gate.py (one
@@ -727,7 +739,7 @@ def prune_citation_inventory(base, module):
     return True
 
 
-def rewrite_lint_figure(base, module):
+def rewrite_lint_figure(base, module, *, jev_runner=None):
     """Recompute the two numbers this product's SKILL.md prints about its
     own silent-failure lint run, over the EXPORT tree, and return whether
     the sentence changed.
@@ -794,6 +806,29 @@ def rewrite_lint_figure(base, module):
         print("export: %s/SKILL.md already states the export tree's lint run "
               "(%s)" % (rel, fresh))
         return False
+    # JEV-G1 wave-1 seam J094 (registry: docs-vs-code number materiality):
+    # this branch already treats every docs/code figure mismatch as
+    # material (it always rewrites, never silences a real drift), called
+    # for its side effect only (the calibration ledger row and A0.6
+    # audit sample) -- WAVE 1 IS SHADOW-ONLY BY CONTRACT
+    # (opus-review-seams-g1-g3.md, C1): the rewrite below ALWAYS happens
+    # on a real mismatch, whatever mode says, including "act": there is
+    # no promoted, calibrated evidence for this entry yet to make "act" a
+    # real path today, and this export step is exactly the kind of write
+    # a wrong-typed or falsely-confident raw answer must never gate. See
+    # the module docstring's LINT_FIGURE_RE line 198.
+    try:
+        import jev_g1_seam_cache
+        if not jev_g1_seam_cache.is_off("J094"):
+            import jev_seam
+            jev_seam.consult(
+                "J094", {"docs_figure": match.group(0), "code_figure": fresh}, True,
+                seams_config=jev_seam.load_seams_config(),
+                registry=jev_seam.load_registry(),
+                ledger_dir=jev_seam.DEFAULT_LEDGER_DIR, runner=jev_runner,
+            )  # C1: return value intentionally discarded, see comment above
+    except Exception:
+        pass  # sbe: allow-silent the seam is advisory only, the rewrite below always happens
     with open(skill, "w", encoding="utf-8") as fh:
         fh.write(text[:match.start()] + fresh + text[match.end():])
     print("export: %s/SKILL.md now states the export tree's own lint run "
@@ -1243,6 +1278,19 @@ def run_gates(export_dir, identity_dir, baseline_dir=None):
     lines.extend(secrets_lines)
     all_ok = all_ok and secrets_ok
 
+    # J064: recorded only, never a vote, fired AFTER all_ok/lines are fully
+    # computed above -- never before, never read back into either. Same
+    # discipline as this file's own J094 call site in rewrite_lint_figure:
+    # return value intentionally discarded, shadow-only by contract.
+    if jev_checks is not None and jev_seam is not None and lines:
+        try:
+            jev_checks.check_gate_log_lines(
+                lines, seams_config=jev_seam.load_seams_config(),
+                registry=jev_seam.load_registry(),
+                ledger_dir=jev_seam.DEFAULT_LEDGER_DIR)
+        except Exception:  # noqa: BLE001  # sbe: allow-silent this seam is advisory only, never worth risking this exporter's byte-identical gate verdicts
+            pass
+
     return all_ok, lines
 
 
@@ -1651,6 +1699,36 @@ def push_appended(allowlist, remote, branch, root=ROOT, tag=None,
                 lines.append("REFUSED: could not create tag %s locally (%s)"
                              % (tag, (tagged.stderr or "").strip()))
                 return EXIT_REFUSED, lines
+            # Opus review (2026-09-19), B1/B2: the caller (cut.py) needs the
+            # commit THIS tag was cut at as ground truth for reproduce_
+            # export.py's --expect-commit, and the only place that commit is
+            # genuine ground truth is HERE, locally, right after creating the
+            # tag and before it is ever pushed (irreversible once public). A
+            # later remote read (ls-remote or otherwise) can only ever
+            # confirm what is already on the remote, never what this export
+            # actually meant to tag. `tag^{commit}` peels both an annotated
+            # (or signed) tag and a lightweight one to the commit it points
+            # at, in the one repository (`d`) that has the tag object this
+            # push is about to make public.
+            peeled = run(["git", "rev-parse", "%s^{commit}" % tag], d)
+            tagged_commit = (peeled.stdout or "").strip()
+            if peeled.returncode != 0 or not re.fullmatch(
+                    r"[0-9a-f]{40}", tagged_commit):
+                # m2 (opus re-review round 2, 2026-09-19): by this point the
+                # export commit is ALREADY on the remote -- as the first
+                # commit of `branch` (the BOOTSTRAP: line above) or already
+                # pushed and merged (the PUSHED:/MERGED: lines above) -- so
+                # "nothing was pushed" was false and told an operator the
+                # wrong thing about what state the branch is in. Only the
+                # TAG itself was never created or pushed.
+                landed = ("the first commit of %s" % branch if bootstrap
+                          else "pushed and merged into %s" % branch)
+                lines.append(
+                    "REFUSED: could not resolve tag %s to a commit locally "
+                    "right after creating it (%s); the export was already "
+                    "%s, only the tag itself was never created or pushed"
+                    % (tag, (peeled.stderr or "").strip(), landed))
+                return EXIT_REFUSED, lines
             tag_push = run(["git", "push", remote, "refs/tags/%s" % tag],
                             d, env=env)
             if (tag_push.stderr or "").strip():
@@ -1660,9 +1738,13 @@ def push_appended(allowlist, remote, branch, root=ROOT, tag=None,
                              "existing %s is never moved, this exporter "
                              "never --force pushes" % tag)
                 return EXIT_REFUSED, lines
-            lines.append("TAGGED: %s points at %s on %s"
+            # The "(local commit <sha>)" clause is parsed back out by
+            # cut.py's _local_tagged_commit; both sides are kept in sync by
+            # scripts/test_cut.py and scripts/test_export_public.py, never
+            # independently retyped.
+            lines.append("TAGGED: %s points at %s (local commit %s) on %s"
                          % (tag, "the first commit" if bootstrap
-                            else "the merged tip", branch))
+                            else "the merged tip", tagged_commit, branch))
         return EXIT_OK, lines
 
 

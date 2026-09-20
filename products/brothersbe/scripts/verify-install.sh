@@ -265,7 +265,31 @@ if [ -s "$WORKDIR/walk_errors" ]; then
     done < "$WORKDIR/walk_errors"
 fi
 
+# A real installed copy of THIS repository also carries its own runtime
+# state that was never meant to be installed anywhere (.pytest_cache/,
+# STATE.md.bak-*, LANE-CHECKPOINT.patch and friends), and that state is
+# already named in this repository's own .gitignore. Asking git which of the
+# two an entry is, rather than hand-listing paths here a second time, means
+# this list can never drift out of sync with the .gitignore that is the
+# actual source of truth for "this is expected repo state, not a backdoor".
+# Same approach as products/brothermode/scripts/verify-install.sh, reused
+# rather than reinvented (a second implementation is a second place to keep
+# in sync, and this estate's own law is to use a key component, not rebuild
+# one).
+#
+# Drawn ONLY when $TARGET is itself a git repository. A real installed copy
+# (the case this script exists for) is a plain directory with no .git and no
+# .gitignore to consult, so every extra entry there keeps today's full alarm
+# and fails the run, exactly as before. A NON-REGULAR entry (symlink, pipe,
+# socket) is never moved into this quiet bucket even when git-ignored: it is
+# handled below, before this check runs, and stays loud every time.
+IS_GIT=0
+if git -C "$TARGET" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    IS_GIT=1
+fi
+
 EXTRA=0
+EXTRA_IGNORED=0
 NONREGULAR=0
 while IFS= read -r walked; do
     [ -z "$walked" ] && continue
@@ -300,8 +324,13 @@ while IFS= read -r walked; do
     # -e names the pattern, -- ends option parsing, and </dev/null denies the
     # stdin theft even if some future edit reintroduces the operand mistake.
     if ! grep -q -x -F -e "$rel" -- "$WORKDIR/manifest_paths" </dev/null; then
-        echo "EXTRA:     $rel"
-        EXTRA=$((EXTRA + 1))
+        if [ "$IS_GIT" -eq 1 ] && git -C "$TARGET" check-ignore -q -- "$rel"; then
+            echo "EXTRA (ignored, not failing): $rel"
+            EXTRA_IGNORED=$((EXTRA_IGNORED + 1))
+        else
+            echo "EXTRA:     $rel"
+            EXTRA=$((EXTRA + 1))
+        fi
     fi
 done < "$WORKDIR/installed_raw"
 
@@ -393,7 +422,7 @@ done < "$WORKDIR/excluded_files"
 
 echo ""
 echo "verify-install: checked against $MANIFEST"
-echo "verify-install: $OK file(s) match, $MISMATCHED mismatched, $MISSING missing, $EXTRA extra (present on disk, absent from the manifest), $NONREGULAR non-regular (a symlink or pipe the manifest cannot hash)"
+echo "verify-install: $OK file(s) match, $MISMATCHED mismatched, $MISSING missing, $EXTRA extra (present on disk, absent from the manifest, not ignored by git), $EXTRA_IGNORED extra (present on disk, absent from the manifest, but ignored by this repository's own .gitignore), $NONREGULAR non-regular (a symlink or pipe the manifest cannot hash)"
 if [ "$DENIED" -gt 0 ]; then
     echo "verify-install: $DENIED location(s) could not be enumerated (named UNWALKABLE above), so no sentence here covers what is inside them."
 fi

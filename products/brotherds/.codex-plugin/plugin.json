@@ -1,0 +1,36 @@
+{
+  "name": "brotherds",
+  "version": "0.1.0",
+  "description": "EXPERIMENTAL. Turns a figure that is about to reach a decision into a checkable claim carrying its query, its grain, its uncertainty and what it does not establish, then runs refusals against it and returns PASS, FAIL or NO-DATA. Its own north star, the verified claim rate, currently reports NO-DATA: no claim has yet been scored against a real outcome, so nothing here is proven end to end.",
+  "author": {
+    "name": "Khalil Maaouni"
+  },
+  "homepage": "https://github.com/khalilmaaouni/BrotherDS",
+  "repository": "https://github.com/khalilmaaouni/Brother",
+  "license": "MIT",
+  "keywords": [
+    "claims",
+    "evidence",
+    "verification",
+    "data-quality",
+    "forecast-accuracy",
+    "experimental",
+    "codex"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "BrotherDS",
+    "shortDescription": "EXPERIMENTAL claim verification, on explicit request.",
+    "longDescription": "EXPERIMENTAL. Turns a figure that is about to reach a decision into a checkable claim carrying its query, its grain, its uncertainty and what it does not establish, then runs refusals against it and returns PASS, FAIL or NO-DATA. Its own north star, the verified claim rate, currently reports NO-DATA: no claim has yet been scored against a real outcome, so nothing here is proven end to end.",
+    "developerName": "Khalil Maaouni",
+    "category": "Engineering",
+    "capabilities": [
+      "Interactive"
+    ],
+    "websiteURL": "https://github.com/khalilmaaouni/BrotherDS",
+    "defaultPrompt": [
+      "Verify this claim.",
+      "Check if this number can be trusted."
+    ]
+  }
+}

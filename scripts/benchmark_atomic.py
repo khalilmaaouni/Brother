@@ -339,7 +339,8 @@ def iter_sections(text):
 
 
 FENCE_RE = re.compile(r'```[^\n]*\n(.*?)```', re.DOTALL)
-INSTALL_HEADING_RE = re.compile(r'^#+\s*.*install.*$', re.IGNORECASE | re.MULTILINE)
+INSTALL_HEADING_RE = re.compile(r'^#+\s*.*(install|start|setup|quick ?start|getting started).*$',
+                                 re.IGNORECASE | re.MULTILINE)
 
 
 def find_install_block(text):

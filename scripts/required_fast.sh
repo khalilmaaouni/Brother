@@ -102,6 +102,13 @@ run_check "no-data-semantics"   python3 scripts/test_battery_verdict.py -v
 # --check refuses a stale copy, closing team complaint P12 (a design doc
 # that quietly went wrong and nobody could tell).
 run_check "docs-runtime-drift"  python3 scripts/system_doc.py --check
+# Same class of gap by another mechanism: hub main shipped a stale
+# products/brothermode/CHECKSUMS.sha256 after tools/bm_stall.py changed
+# without regenerating it, and nothing in this gate noticed. Each product's
+# own installer verifier is the check a real install would run; wiring it
+# here closes that hole for both products it covers.
+run_check "brothermode-verify-install" sh -c 'cd products/brothermode && sh scripts/verify-install.sh'
+run_check "brothersbe-verify-install"  sh -c 'cd products/brothersbe && sh scripts/verify-install.sh'
 # BO2: the README's own executable claims. Sub-second, and the front page is
 # the first thing an outside reader runs, so it earns a place in the cheap
 # slice rather than only in the full battery.

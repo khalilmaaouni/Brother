@@ -10,6 +10,10 @@
    "sha256": "fcc1dc4e1b19e2b6e20802d81f48f396df6b2c541f1f037147796ba083f084eb"
   },
   {
+   "path": "bridge_content_gate.py",
+   "sha256": "25d6d2f642a8fb365712a1fc14e2214a7d61f122ee409f8d5583913f486e2a36"
+  },
+  {
    "path": "brother-run",
    "sha256": "832d92a307e7053981da4c48e6a1f383ec439ad7257f3d10a404820a1e03ee73"
   },
@@ -28,6 +32,10 @@
   {
    "path": "codex_hooks_install.py",
    "sha256": "738427194dc091c9ce17924e27860f47b5f8317b6432dfee1ce7deb417b2a095"
+  },
+  {
+   "path": "coe_outside_gate.py",
+   "sha256": "89023288ba0b8ff9d02280d3f5432e902b0a438ae9353e490e339ef7ae4d3e80"
   },
   {
    "path": "continuity.py",
@@ -79,11 +87,31 @@
   },
   {
    "path": "jev_calibration.py",
-   "sha256": "44228822f1a433e4802b29f45c80d20378cd863452751b2846dea91eeca28490"
+   "sha256": "94f5ff8667c666f5ab2279c6196ed00a173093499538f1b0d8a128d502bc78de"
   },
   {
    "path": "jev_cascade.py",
-   "sha256": "1893b91a6d1e7b6d611a9ca7aebf629834adb645f80d946e60e12293a7c076cd"
+   "sha256": "9d0bce874651612ebc200f91c9062a67b39e05b8e2dea17e51a199ad43d3e40b"
+  },
+  {
+   "path": "jev_checks.py",
+   "sha256": "b8100e5af07e9a6314472a8d19ef404572dd30a1691c08fa83fc7d5d4c72ba3e"
+  },
+  {
+   "path": "jev_decide.py",
+   "sha256": "d3e3e29863dc39c767796e8fb54e1b617c6d9267ab275491270f7b20f6aec0bf"
+  },
+  {
+   "path": "jev_g1_seam_cache.py",
+   "sha256": "2f36b06c3a5e8ec6b6ae908112dad2ab02812509188d941d844664382255df79"
+  },
+  {
+   "path": "jev_registry.py",
+   "sha256": "a09f37a48078b349e326a86c068e2d9e3d967f2b23408b8ec03901e1907594e9"
+  },
+  {
+   "path": "jev_seam.py",
+   "sha256": "b18899ee944e3ba708d8356f42ca2c8b4f1fcef9ba32878e7ee3bb6540f5c16d"
   },
   {
    "path": "journal.py",
@@ -95,7 +123,7 @@
   },
   {
    "path": "lane_router.py",
-   "sha256": "cc2646d89928dd3d3880fa446f64d500980dc11f4b708bcbf2634b85b01ca106"
+   "sha256": "44d2a92416f596fe0bdc6a5e44dec7a01b9abe508672b1b1900e4dc936bddef2"
   },
   {
    "path": "load_reservation.py",
@@ -107,7 +135,7 @@
   },
   {
    "path": "loop_bridge.py",
-   "sha256": "fedf6c9e6868e1b8b609eae0703b456df47776c065053226bdb2aa133b7eed06"
+   "sha256": "7f95cfe8c301eb59c4c704e7abc4f8a929538a036c140f274a13a85729a56600"
   },
   {
    "path": "machine_reservation.py",
@@ -198,8 +226,12 @@
    "sha256": "d55b0981b76b6bcb73acc617ed2be596429761143e2a2de09e96b6cd5b6e8cd3"
   },
   {
+   "path": "preflight_snapshot.py",
+   "sha256": "5fa9917c7c65d01b83d6c29ed3013e6d9967849aa46283e624c75d0d56d05ac3"
+  },
+  {
    "path": "receipt_door.py",
-   "sha256": "9b99a622d47e22df3d0f187707f7582cb5c9370eb120f980341affc82356c7eb"
+   "sha256": "e0d9a170166b1d3cabde3c4200da8520e95885ffa173bd65e1ee1e922a50b846"
   },
   {
    "path": "resource_gate.py",
@@ -235,6 +267,6 @@
   }
  ],
  "generated_by": "scripts/bundle_runtime.py",
- "source_describe": "v1.0.17-162-g8c37c6f7d-dirty",
- "source_revision": "8c37c6f7dbf043d67af39d65949704ff8893abc5"
+ "source_describe": "v1.0.17-376-gfe0c67194-dirty",
+ "source_revision": "fe0c671940763bea744edb378fb39836337bad5a"
 }

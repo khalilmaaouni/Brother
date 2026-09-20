@@ -400,5 +400,39 @@ class TheLiveFile(unittest.TestCase):
                     "Install/update/uninstall"]))
 
 
+class DrivenBackwards(unittest.TestCase):
+    """The done-check's own words: drive the instrument backwards by removing
+    one evidence record and watching the capability it grounds drop, with
+    both exit codes captured rather than only the one that happens to read
+    red. Every doc here is a fixture written to a tempfile by run(); the real
+    evidence files under docs/plan are never touched."""
+
+    def test_removing_the_evidence_record_flips_the_exit_code_then_restoring_it_flips_back(self):
+        cap = capability("Release/CI", "MUST MATCH", 1.0, gsd=1.0)
+        cap["brother"]["cites"] = ["E7"]
+        passing = board([cap], mandatory=["Release/CI"])
+
+        code_before, out_before, _ = run(passing)
+        self.assertEqual(code_before, 0, out_before)
+        self.assertIn("FLOOR: PASS", out_before)
+
+        # Remove the one evidence record the score rests on: no roadmap row
+        # cited, and a basis that names no file either, so resolve_evidence
+        # refuses the cell and scores it 0.0, which is 1.00 behind gsd.
+        behind = json.loads(json.dumps(passing))
+        behind["capabilities"][0]["brother"]["cites"] = []
+        behind["capabilities"][0]["brother"]["basis"] = "asserted with no record"
+        code_behind, out_behind, _ = run(behind)
+        self.assertEqual(code_behind, 1, out_behind)
+        self.assertIn("FLOOR: FAIL", out_behind)
+        self.assertIn("Release/CI", out_behind)
+
+        # Restore the original fixture (the evidence record put back) and the
+        # exit code returns to 0.
+        code_restored, out_restored, _ = run(passing)
+        self.assertEqual(code_restored, 0, out_restored)
+        self.assertIn("FLOOR: PASS", out_restored)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

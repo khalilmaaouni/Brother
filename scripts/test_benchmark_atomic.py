@@ -548,6 +548,31 @@ class BehavioralInstallCommandTests(unittest.TestCase):
             verdict, _evidence = ba.check_install_commands(subject)
             self.assertEqual(verdict, 'NO-DATA')
 
+    def test_reads_the_block_under_a_start_in_sixty_seconds_heading(self):
+        """1.0.14 vocabulary widening: brother's own README puts its
+        one-line install command under '## Start in sixty seconds', not an
+        'Install' heading. Before the fix this reads NO-DATA on hub main's
+        own README, which is the defect this test pins."""
+        with tempfile.TemporaryDirectory() as tmp:
+            subject = self._subject_with_readme(
+                tmp, "# X\n\n## Start in sixty seconds\n\n### Claude Code\n\n```\npython3 --version\n```\n")
+            verdict, evidence = ba.check_install_commands(subject)
+            self.assertNotEqual(verdict, 'NO-DATA')
+            self.assertIn('python3 --version', evidence)
+
+    def test_install_heading_still_works_unchanged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            subject = self._subject_with_readme(tmp, "# X\n\n## Install\n\n```\ngit --version\n```\n")
+            verdict, evidence = ba.check_install_commands(subject)
+            self.assertEqual(verdict, 'PASS')
+            self.assertIn('git --version', evidence)
+
+    def test_no_data_when_no_heading_matches_any_onboarding_word(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            subject = self._subject_with_readme(tmp, "# X\n\n## Overview\n\n```\ngit --version\n```\n")
+            verdict, _evidence = ba.check_install_commands(subject)
+            self.assertEqual(verdict, 'NO-DATA')
+
 
 class BehavioralReceiptTests(unittest.TestCase):
     """receipt-artifact-exists, Gate 1 fault 2 repair #2: PASS now requires

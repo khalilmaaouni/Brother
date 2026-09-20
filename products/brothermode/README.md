@@ -59,7 +59,7 @@ identity; it is not the hub install command above.
 For a pinned source copy, the clone sequence from `bm_project_facts.py` is:
 
 ```bash
-git clone --branch v1.0.20 --depth 1 https://github.com/khalilmaaouni/Brother.git ~/.claude/skills/brothermode-src
+git clone --branch v1.0.21 --depth 1 https://github.com/khalilmaaouni/Brother.git ~/.claude/skills/brothermode-src
 cd ~/.claude/skills/brothermode-src/products/brothermode
 python3 scripts/install.py
 ```

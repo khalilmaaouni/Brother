@@ -17,6 +17,7 @@ Run directly: python3 benchmarks/safe-unwatched-time/test_run_benchmark.py
 import os
 import sys
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -53,20 +54,26 @@ class RealFamiliesRefuseADuration(unittest.TestCase):
             self.assertIn("raw_instrument", result)
             self.assertEqual(result["verdict"], "NO-DATA")
 
-    def test_an_unmapped_real_run_with_a_genuine_scope_violation_still_refuses(self):
+    def test_an_unmapped_real_run_with_a_genuine_scope_violation_now_reports_a_real_duration(self):
         """scope-auditing-adversity-2026-09-04 really did trip a scope
-        violation (measured=True, ok=False for scope_drift) and the harness
-        still refuses a duration, because recoverability and repeated-mistake
-        counting remain unmeasured regardless."""
+        violation (measured=True, ok=False for scope_drift). As of
+        2026-09-19, all four preservation checks are finally measured for
+        this run (unrecoverable_state and repeated_mistakes both now real,
+        always-on instruments), so the harness reports a REAL duration for
+        the first time -- broken by the real scope violation, with
+        all_preserved correctly False despite a number being reported."""
         run_dir = os.path.join(
             rb.RUNS_ROOT, "scope-auditing-adversity-2026-09-04")
         self.assertTrue(os.path.isdir(run_dir))
         result = rb.evaluate_run(run_dir)
-        self.assertEqual(result["verdict"], "NO-DATA")
+        self.assertEqual(result["verdict"], "13.9 min over 0 units")
         self.assertTrue(result["checks"]["scope_drift"]["measured"])
         self.assertFalse(result["checks"]["scope_drift"]["ok"])
-        self.assertFalse(result["checks"]["unrecoverable_state"]["measured"])
-        self.assertFalse(result["checks"]["repeated_mistakes"]["measured"])
+        self.assertTrue(result["checks"]["unrecoverable_state"]["measured"])
+        self.assertTrue(result["checks"]["unrecoverable_state"]["ok"])
+        self.assertTrue(result["checks"]["repeated_mistakes"]["measured"])
+        self.assertTrue(result["checks"]["repeated_mistakes"]["ok"])
+        self.assertFalse(result["all_preserved"])
 
     def test_a_missing_run_directory_is_no_data_not_a_crash(self):
         result = rb.evaluate_run(os.path.join(rb.RUNS_ROOT, "does-not-exist"))
@@ -97,27 +104,146 @@ class TheSyntheticFixtureProvesTheComputation(unittest.TestCase):
 
     def test_the_computation_actually_moves_not_just_the_label(self):
         """Backwards-drive: strip the fixture's preservation.json signal for
-        recoverability and confirm the SAME fixture then refuses, so the
-        pass above is not a property of the fixture directory's mere
-        existence."""
+        scope_drift and confirm the SAME fixture then refuses, so the pass
+        above is not a property of the fixture directory's mere existence.
+        scope_drift (2026-09-19), unlike unrecoverable_state and
+        repeated_mistakes, still has no always-on real fallback -- silence
+        in the journal isn't proof scope was ever checked -- so it remains
+        the one field whose removal must still flip this fixture to
+        NO-DATA."""
         import json
         import shutil
         import tempfile
         tmp = tempfile.mkdtemp(prefix="sut-bench-")
         try:
-            copy = os.path.join(tmp, "no-recoverability-signal")
+            copy = os.path.join(tmp, "no-scope-signal")
             shutil.copytree(FIXTURE_DIR, copy)
             pres_path = os.path.join(copy, "preservation.json")
             with open(pres_path, encoding="utf-8") as fh:
                 body = json.load(fh)
-            del body["recoverability_ok"]
+            del body["scope_checked_clean"]
             with open(pres_path, "w", encoding="utf-8") as fh:
                 json.dump(body, fh)
             result = rb.evaluate_run(copy)
             self.assertEqual(result["verdict"], "NO-DATA")
-            self.assertFalse(result["checks"]["unrecoverable_state"]["measured"])
+            self.assertFalse(result["checks"]["scope_drift"]["measured"])
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
+
+
+class RepeatedMistakesIsAlwaysMeasuredAndCanActuallyFire(unittest.TestCase):
+    """2026-09-19: unlike scope_drift (silence isn't proof), repeated_mistakes
+    is measured from a COMPLETE census of the run's own breaks list, so
+    "zero repeats found" is itself a real, positive finding. No real run on
+    this machine today has two same-shaped breaks (verified: every one has
+    0 or 1 total), so these cases are necessarily synthetic -- exactly the
+    same reason the fixture directory exists for the other three checks."""
+
+    def test_no_breaks_is_measured_and_ok(self):
+        result = rb.check_repeated_mistakes([])
+        self.assertTrue(result["measured"])
+        self.assertTrue(result["ok"])
+
+    def test_one_break_is_measured_and_ok(self):
+        result = rb.check_repeated_mistakes(
+            [(0, rb.sut.SCOPE, "a write outside declared scope")])
+        self.assertTrue(result["measured"])
+        self.assertTrue(result["ok"])
+
+    def test_two_distinct_breaks_never_count_as_a_repeat(self):
+        """Different kinds, or the same kind with a genuinely different
+        shape, are two real problems, not one recurring."""
+        result = rb.check_repeated_mistakes([
+            (0, rb.sut.SCOPE, "wrote outside declared scope: api/foo.py"),
+            (1, rb.sut.REFUTED, "the unit's own check did not pass"),
+        ])
+        self.assertTrue(result["measured"])
+        self.assertTrue(result["ok"])
+
+    def test_the_same_shape_twice_is_a_real_repeat(self):
+        """The core positive case: two breaks of the same kind whose detail
+        text is identical once VOLATILE-masked (different tmp paths, same
+        underlying shape) must be caught."""
+        result = rb.check_repeated_mistakes([
+            (0, rb.sut.REFUTED,
+             "the unit's own check did not pass in /tmp/lane-abc123/work"),
+            (1, rb.sut.REFUTED,
+             "the unit's own check did not pass in /tmp/lane-xyz789/work"),
+        ])
+        self.assertTrue(result["measured"])
+        self.assertFalse(result["ok"])
+        self.assertIn("recurred", result["reason"])
+
+    def test_volatile_masking_is_reused_not_reimplemented(self):
+        """A timestamp and a hex id differing between two otherwise-identical
+        failures must still compare equal, the same way repeat_guard.py's
+        own signature() already treats them -- proving VOLATILE is really
+        being applied here, not a hand-rolled subset of it."""
+        result = rb.check_repeated_mistakes([
+            (0, rb.sut.REFUTED, "check_exit 1 on unit-a at 2026-09-19T10:00"),
+            (1, rb.sut.REFUTED, "check_exit 1 on unit-a at 2026-09-19T18:30"),
+        ])
+        self.assertFalse(result["ok"])
+
+
+class UnrecoverableStateCanActuallyDetectALostUnit(unittest.TestCase):
+    """2026-09-19: no real run on this machine has an abandoned or unclear
+    unit today (all 6 real adversity run directories resolve every unit to
+    integrated/active/pending), so the positive detection path needs a
+    synthetic case the same way repeated_mistakes needed one. Patching
+    continuity.capsule() directly (rather than hand-building a fixture run
+    directory that reproduces its whole classification contract) tests
+    check_unrecoverable_state()'s own logic without reimplementing
+    continuity.py's bucket rules a second time."""
+
+    def test_no_units_is_measured_and_ok(self):
+        with mock.patch.object(rb.continuity, "capsule",
+                                return_value=({"units": []}, None)):
+            result = rb.check_unrecoverable_state("/irrelevant/for/this/mock")
+        self.assertTrue(result["measured"])
+        self.assertTrue(result["ok"])
+
+    def test_every_unit_integrated_or_pending_is_ok(self):
+        cap = {"units": [{"id": "A1", "bucket": "integrated"},
+                          {"id": "A2", "bucket": "pending"},
+                          {"id": "A3", "bucket": "active"}]}
+        with mock.patch.object(rb.continuity, "capsule",
+                                return_value=(cap, None)):
+            result = rb.check_unrecoverable_state("/irrelevant/for/this/mock")
+        self.assertTrue(result["measured"])
+        self.assertTrue(result["ok"])
+
+    def test_an_abandoned_unit_is_caught(self):
+        """The core positive case: a claim that died mid-flight, unresolved,
+        must flip this check to ok=False and name the unit."""
+        cap = {"units": [{"id": "A1", "bucket": "integrated"},
+                          {"id": "A2", "bucket": "abandoned"}]}
+        with mock.patch.object(rb.continuity, "capsule",
+                                return_value=(cap, None)):
+            result = rb.check_unrecoverable_state("/irrelevant/for/this/mock")
+        self.assertTrue(result["measured"])
+        self.assertFalse(result["ok"])
+        self.assertIn("A2", result["reason"])
+        self.assertIn("abandoned", result["reason"])
+
+    def test_an_unclear_unit_is_caught(self):
+        """continuity.py itself could not tell what happened to this unit --
+        exactly the state this check exists to refuse a duration over."""
+        cap = {"units": [{"id": "B7", "bucket": "unclear"}]}
+        with mock.patch.object(rb.continuity, "capsule",
+                                return_value=(cap, None)):
+            result = rb.check_unrecoverable_state("/irrelevant/for/this/mock")
+        self.assertFalse(result["ok"])
+        self.assertIn("B7", result["reason"])
+
+    def test_no_capsule_at_all_is_unmeasured_not_a_crash(self):
+        """continuity.capsule()'s own documented failure mode (no
+        journal.jsonl): this check must refuse, never guess ok=True."""
+        with mock.patch.object(rb.continuity, "capsule",
+                                return_value=(None, "no journal.jsonl found")):
+            result = rb.check_unrecoverable_state("/irrelevant/for/this/mock")
+        self.assertFalse(result["measured"])
+        self.assertIsNone(result["ok"])
 
 
 if __name__ == "__main__":
