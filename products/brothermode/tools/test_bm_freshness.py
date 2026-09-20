@@ -250,6 +250,88 @@ class TestSymbolScanBudget(TempRootCase):
         self.assertEqual(buf.getvalue(), "")
 
 
+class TestGrepOutlivesNothing(unittest.TestCase):
+    """2026-09-11: nine greps from this scan were found running for 30 minutes under launchd, output
+    to /dev/null, nobody reading them. The recall hook runs bm_vault check under a 12s timeout, and
+    subprocess.run's timeout SIGKILLs the child; _symbol_resolves_any reaps its greps only in a
+    finally, and a SIGKILLed process runs no finally. So each grep now carries its own alarm and
+    dies on its own, whatever happens to the process that started it. Real processes, no mocks: a
+    stub `grep` first on PATH records its pid and sleeps, which is a scan that never finishes."""
+
+    def setUp(self):
+        bf.reset_run_budget()
+        self._tmp = tempfile.TemporaryDirectory()
+        self.dir = self._tmp.name
+        self.pidfile = os.path.join(self.dir, "grep.pid")
+        stub = os.path.join(self.dir, "bin", "grep")
+        os.makedirs(os.path.dirname(stub))
+        with open(stub, "w") as f:
+            f.write('#!/bin/sh\necho $$ > "%s"\nexec sleep 30\n' % self.pidfile)
+        os.chmod(stub, 0o755)
+        self.env = dict(os.environ, PATH=os.path.dirname(stub) + os.pathsep + os.environ["PATH"])
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _alive(self, pid):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        # A dead child not yet reaped by its new parent still answers kill(0); ps says Z.
+        out = subprocess.run(["ps", "-o", "state=", "-p", str(pid)],
+                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        return out.stdout.strip()[:1] not in (b"", b"Z")
+
+    def test_a_grep_dies_on_its_own_when_its_parent_is_sigkilled(self):
+        child = subprocess.Popen(
+            [sys.executable, "-c",
+             "import importlib.util,sys\n"
+             "s=importlib.util.spec_from_file_location('bf', sys.argv[1])\n"
+             "m=importlib.util.module_from_spec(s); s.loader.exec_module(m)\n"
+             # No budget, so this process never reaps the grep itself: only the kill below ends
+             # it, which is the hook-timeout shape. The cap is what a grep may live on its own.
+             "m._GREP_CAP_S = 2\n"
+             "m._symbol_resolves_any({'A.b'}, [sys.argv[2]], budget=None)\n",
+             os.path.join(HERE, "bm_freshness.py"), self.dir],
+            env=self.env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        def read_pid():
+            try:
+                with open(self.pidfile) as f:
+                    return f.read().strip()
+            except FileNotFoundError:
+                return ""
+        try:
+            started_by = time.time() + 30  # interpreter start alone took over 4s on a swapping host
+            while time.time() < started_by:
+                if read_pid():
+                    break
+                time.sleep(0.02)
+            else:
+                self.fail("the stub grep never started, so this test proved nothing")
+            grep_pid = int(read_pid())
+        finally:
+            child.kill()  # what subprocess.run(timeout=) does to bm_vault check
+            child.wait()
+        deadline = time.time() + 8
+        while time.time() < deadline and self._alive(grep_pid):
+            time.sleep(0.1)
+        alive = self._alive(grep_pid)
+        if alive:
+            os.kill(grep_pid, 9)
+        self.assertFalse(alive, "the grep outlived its SIGKILLed parent by 8s: the orphan is back")
+
+    def test_a_grep_killed_by_its_own_alarm_is_reported_skipped_not_absent(self):
+        with mock.patch.dict(os.environ, {"PATH": self.env["PATH"]}), \
+                mock.patch.object(bf, "_GREP_CAP_S", 1):
+            t0 = time.time()
+            found, skipped = bf._symbol_resolves_any({"A.b"}, [self.dir], budget=None)
+        self.assertFalse(found)
+        self.assertEqual(skipped, [self.dir],
+                         "a grep that never finished must be named skipped, never read as a miss")
+        self.assertLess(time.time() - t0, 10, "the cap did not stop the grep")
+
+
 class TestResolveAnchorViaMap(unittest.TestCase):
     """F5: anchor resolution against a tools/bm_repomap.py-shaped map, no filesystem at all."""
 

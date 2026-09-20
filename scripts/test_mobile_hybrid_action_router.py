@@ -21,6 +21,16 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
+
+# Minor fix (opus-review-seams-g1-g3.md): redirect jev_seam's own
+# machine-level state root to a throwaway temp dir BEFORE jev_seam is
+# ever imported in this process, so no test here reads (or could ever
+# write) the real ~/.brother/jev -- must happen before the `import
+# jev_seam` line below: JEV_STATE_DIR is a module-level constant
+# jev_seam.py computes once, at its own import time.
+os.environ.setdefault("BROTHER_JEV_STATE_DIR",
+                       tempfile.mkdtemp(prefix="brother-jev-state-test-"))
 
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
 import mobile_hybrid_action_router as R
@@ -30,6 +40,8 @@ import mobile_visual_fallback_adapter as VISUAL
 import mobile_driver_contract as DC
 import contract_check as CC
 import test_mobile_canonical_action as MCAT  # reuse its record_for/VALID_BY_ACTION
+import jev_seam
+import jev_g1_seam_cache  # noqa: E402
 
 THIS_DIR = Path(__file__).resolve().parent
 
@@ -432,6 +444,326 @@ class RouterHardeningTests(unittest.TestCase):
         self.assertEqual(result["status"], "SELECTED")
         self.assertFalse([e for e in result["excluded"]
                           if "ambiguous identity" in e["reason"]])
+
+
+def _choice_entry(entry_id, options):
+    return {
+        "id": entry_id, "role": "second_opinion", "risk": "low", "wave": "W1",
+        "privacy": "public_or_own_text",
+        "question": {"type": "choice", "instructions": "classify", "options": options},
+    }
+
+
+def _choice_runner(choice, prob=0.9):
+    """A scripted bridge runner that always answers `choice`, no network
+    or subprocess: the shape ScriptedRunner in test_jev_seam.py uses,
+    reimplemented here so this file needs no import of that test module."""
+    def fn(argv, stdin_text):
+        payload = json.loads(stdin_text)
+        answers = {}
+        for qid, q in payload["questions"].items():
+            keys = list(q["criteria"])
+            others = [k for k in keys if k != choice]
+            probs = {choice: prob}
+            if others:
+                rest = (1.0 - prob) / len(others)
+                for k in others:
+                    probs[k] = rest
+            answers[qid] = {"choice": choice, "probabilities": probs, "confidence": prob}
+        response = {"model": "typesafe/jev-1.13-test", "answers": answers,
+                    "usage": {"cost": 0.001}}
+        return 0, json.dumps(response), ""
+    return fn
+
+
+class JevSeamJ097SecondOpinion(unittest.TestCase):
+    """J097 (mobile action risk classify), wired into _risk_for_action()
+    via jev_seam.consult(). Mode ships off in the real
+    data/jev-seams.json, so (a) needs no mocking; (b)-(d) mock
+    jev_seam.load_seams_config/load_registry to force shadow mode for
+    this one test only."""
+
+    DESC = {"driver_id": "d1", "risk_classes": [{"action": "TAP", "risk_class": "safe"}]}
+
+
+    def setUp(self):
+        # jev_g1_seam_cache caches the resolved mode per entry_id
+        # (module docstring: at most one jev_seam.load_seams_config()
+        # call per second) -- a call in an EARLIER test could still be
+        # "fresh" here, so reset before every test rather than rely on
+        # the freshness window happening to have elapsed.
+        jev_g1_seam_cache.reset()
+    def test_a_mode_off_makes_zero_calls_and_output_is_byte_identical(self):
+        def boom(argv, stdin_text):
+            raise AssertionError("mode off must never invoke the runner")
+
+        before = R._risk_for_action(self.DESC, "TAP")
+        after = R._risk_for_action(self.DESC, "TAP", jev_runner=boom)
+        self.assertEqual(before, "safe")
+        self.assertEqual(before, after)
+
+    def test_b_shadow_mode_output_identical_and_one_ledger_row_written(self):
+        expected = R._risk_for_action(self.DESC, "TAP")  # real config: off
+        ledger_dir = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, ledger_dir, ignore_errors=True)
+        cfg = {"modes": {"J097": "shadow"}}
+        entry = _choice_entry("J097", ["low", "medium", "high", "unknown"])
+        jev_g1_seam_cache.reset()  # the baseline call above may have cached this entry as off
+        with mock.patch.object(jev_seam, "load_seams_config", return_value=cfg), \
+                mock.patch.object(jev_seam, "load_registry", return_value=[entry]), \
+                mock.patch.object(jev_seam, "DEFAULT_LEDGER_DIR", ledger_dir):
+            after = R._risk_for_action(self.DESC, "TAP", jev_runner=_choice_runner("high"))
+        self.assertEqual(after, expected)
+        # A0.8: shadow hands the call to a background worker and returns
+        # at once, before the ledger row exists. drain() waits for the
+        # worker to finish so the row is actually there to count.
+        jev_seam.drain(timeout=5)
+        decisions_path = os.path.join(ledger_dir, "decisions.jsonl")
+        self.assertTrue(os.path.isfile(decisions_path))
+        with open(decisions_path, encoding="utf-8") as fh:
+            rows = [ln for ln in fh if ln.strip()]
+        self.assertEqual(len(rows), 1)
+
+    def test_c_seam_path_exception_leaves_output_identical(self):
+        expected = R._risk_for_action(self.DESC, "TAP")
+        cfg = {"modes": {"J097": "shadow"}}
+        jev_g1_seam_cache.reset()  # the baseline call above may have cached this entry as off
+        with mock.patch.object(jev_seam, "load_seams_config", return_value=cfg), \
+                mock.patch.object(jev_seam, "load_registry",
+                                   side_effect=RuntimeError("registry unreadable")):
+            after = R._risk_for_action(self.DESC, "TAP", jev_runner=_choice_runner("high"))
+        self.assertEqual(after, expected)
+
+    def test_d_red_proof_wiring_that_trusts_jevs_raw_answer_breaks_test_b(self):
+        current_answer = R._risk_for_action(self.DESC, "TAP")  # "safe"
+        ledger_dir = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, ledger_dir, ignore_errors=True)
+        cfg = {"modes": {"J097": "shadow"}}
+        entry = _choice_entry("J097", ["low", "medium", "high", "unknown"])
+        jev_g1_seam_cache.reset()  # the baseline call above may have cached this entry as off
+        with mock.patch.object(jev_seam, "load_seams_config", return_value=cfg), \
+                mock.patch.object(jev_seam, "load_registry", return_value=[entry]), \
+                mock.patch.object(jev_seam, "DEFAULT_LEDGER_DIR", ledger_dir):
+            result = jev_seam.consult(
+                "J097", {"driver_id": "d1", "action": "TAP"}, current_answer,
+                seams_config=jev_seam.load_seams_config(),
+                registry=jev_seam.load_registry(),
+                ledger_dir=jev_seam.DEFAULT_LEDGER_DIR,
+                runner=_choice_runner("high"),
+            )
+            # A0.8: shadow never returns Jev's answer (result.jev is
+            # always None); the eventual answer only lands in the
+            # ledger, once the background worker finishes. drain() first,
+            # then read it there.
+            jev_seam.drain(timeout=5)
+            decisions_path = os.path.join(ledger_dir, "decisions.jsonl")
+            with open(decisions_path, encoding="utf-8") as fh:
+                rows = [json.loads(ln) for ln in fh if ln.strip()]
+            self.assertEqual(len(rows), 1)
+            wrongly_wired = rows[0]["answer"]
+            safely_wired = result.answer
+        self.assertEqual(wrongly_wired, "high")
+        self.assertNotEqual(wrongly_wired, current_answer)
+        self.assertEqual(safely_wired, current_answer)
+
+    def test_e_a1_call_site_never_reads_a_patched_consults_return(self):
+        """A1 (opus-review-g1-round2-pkg-decide.md): test_d proves
+        consult()'s two fields disagree, but it never touches the CALL
+        SITE's own wiring -- _risk_for_action() is never invoked inside
+        the mocked block there. This one does: jev_seam.consult ITSELF
+        is patched to return an ACT-mode SeamResult whose .answer is
+        0.05 (a float, the wrong TYPE for this call site's own risk-name
+        string), mode live via a patched config, and asserts
+        _risk_for_action() still returns its own local verdict, never
+        0.05."""
+        cfg = {"modes": {"J097": "shadow"}}
+        entry = _choice_entry("J097", ["low", "medium", "high", "unknown"])
+        jev_g1_seam_cache.reset()
+        wrong = jev_seam.SeamResult(0.05, {"answer": 0.05}, jev_seam.ACT,
+                                    None, False, "mutation-probe")
+        with mock.patch.object(jev_seam, "load_seams_config", return_value=cfg), \
+                mock.patch.object(jev_seam, "load_registry", return_value=[entry]), \
+                mock.patch.object(jev_seam, "DEFAULT_LEDGER_DIR", tempfile.mkdtemp()), \
+                mock.patch.object(jev_seam, "consult", return_value=wrong):
+            after = R._risk_for_action(self.DESC, "TAP")
+        self.assertEqual(after, "safe")
+        self.assertNotEqual(after, wrong.answer)
+
+
+class JevSeamJ098SecondOpinion(unittest.TestCase):
+    """J098 (mobile driver selector match), wired into _selector_match()
+    via jev_seam.consult(). Mode ships off in the real
+    data/jev-seams.json, so (a) needs no mocking; (b)-(d) mock
+    jev_seam.load_seams_config/load_registry to force shadow mode for
+    this one test only."""
+
+    DESC = {"driver_id": "d1", "deterministic_selector_support": True}
+
+
+    def setUp(self):
+        # jev_g1_seam_cache caches the resolved mode per entry_id
+        # (module docstring: at most one jev_seam.load_seams_config()
+        # call per second) -- a call in an EARLIER test could still be
+        # "fresh" here, so reset before every test rather than rely on
+        # the freshness window happening to have elapsed.
+        jev_g1_seam_cache.reset()
+    def test_a_mode_off_makes_zero_calls_and_output_is_byte_identical(self):
+        def boom(argv, stdin_text):
+            raise AssertionError("mode off must never invoke the runner")
+
+        before = R._selector_match("native_semantic", self.DESC)
+        after = R._selector_match("native_semantic", self.DESC, jev_runner=boom)
+        self.assertTrue(before)
+        self.assertEqual(before, after)
+
+    def test_b_shadow_mode_output_identical_and_one_ledger_row_written(self):
+        expected = R._selector_match("native_semantic", self.DESC)  # real config: off
+        ledger_dir = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, ledger_dir, ignore_errors=True)
+        cfg = {"modes": {"J098": "shadow"}}
+        entry = _choice_entry("J098", ["driver-a", "driver-b", "driver-c", "unknown"])
+        jev_g1_seam_cache.reset()  # the baseline call above may have cached this entry as off
+        with mock.patch.object(jev_seam, "load_seams_config", return_value=cfg), \
+                mock.patch.object(jev_seam, "load_registry", return_value=[entry]), \
+                mock.patch.object(jev_seam, "DEFAULT_LEDGER_DIR", ledger_dir):
+            after = R._selector_match("native_semantic", self.DESC,
+                                       jev_runner=_choice_runner("driver-b"))
+        self.assertEqual(after, expected)
+        # A0.8: shadow hands the call to a background worker and returns
+        # at once, before the ledger row exists. drain() waits for the
+        # worker to finish so the row is actually there to count.
+        jev_seam.drain(timeout=5)
+        decisions_path = os.path.join(ledger_dir, "decisions.jsonl")
+        self.assertTrue(os.path.isfile(decisions_path))
+        with open(decisions_path, encoding="utf-8") as fh:
+            rows = [ln for ln in fh if ln.strip()]
+        self.assertEqual(len(rows), 1)
+
+    def test_c_seam_path_exception_leaves_output_identical(self):
+        expected = R._selector_match("native_semantic", self.DESC)
+        cfg = {"modes": {"J098": "shadow"}}
+        jev_g1_seam_cache.reset()  # the baseline call above may have cached this entry as off
+        with mock.patch.object(jev_seam, "load_seams_config", return_value=cfg), \
+                mock.patch.object(jev_seam, "load_registry",
+                                   side_effect=RuntimeError("registry unreadable")):
+            after = R._selector_match("native_semantic", self.DESC,
+                                       jev_runner=_choice_runner("driver-b"))
+        self.assertEqual(after, expected)
+
+    def test_d_red_proof_wiring_that_trusts_jevs_raw_answer_breaks_test_b(self):
+        current_answer = R._selector_match("native_semantic", self.DESC)  # True
+        ledger_dir = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, ledger_dir, ignore_errors=True)
+        cfg = {"modes": {"J098": "shadow"}}
+        entry = _choice_entry("J098", ["driver-a", "driver-b", "driver-c", "unknown"])
+        jev_g1_seam_cache.reset()  # the baseline call above may have cached this entry as off
+        with mock.patch.object(jev_seam, "load_seams_config", return_value=cfg), \
+                mock.patch.object(jev_seam, "load_registry", return_value=[entry]), \
+                mock.patch.object(jev_seam, "DEFAULT_LEDGER_DIR", ledger_dir):
+            result = jev_seam.consult(
+                "J098", {"tier": "native_semantic", "driver_id": "d1"}, current_answer,
+                seams_config=jev_seam.load_seams_config(),
+                registry=jev_seam.load_registry(),
+                ledger_dir=jev_seam.DEFAULT_LEDGER_DIR,
+                runner=_choice_runner("driver-b"),
+            )
+            # The raw jev answer is a driver-name string, never a bool:
+            # a call site that used it directly as the boolean flag this
+            # function must return would silently corrupt the type, on
+            # top of ignoring shadow-mode safety -- both are the wiring
+            # bug this red proof exists to catch.
+            # A0.8: shadow never returns Jev's answer (result.jev is
+            # always None); the eventual answer only lands in the
+            # ledger, once the background worker finishes. drain() first,
+            # then read it there.
+            jev_seam.drain(timeout=5)
+            decisions_path = os.path.join(ledger_dir, "decisions.jsonl")
+            with open(decisions_path, encoding="utf-8") as fh:
+                rows = [json.loads(ln) for ln in fh if ln.strip()]
+            self.assertEqual(len(rows), 1)
+            wrongly_wired = rows[0]["answer"]
+            safely_wired = result.answer
+        self.assertEqual(wrongly_wired, "driver-b")
+        self.assertNotEqual(wrongly_wired, current_answer)
+        self.assertEqual(safely_wired, current_answer)
+
+    def test_e_a1_call_site_never_reads_a_patched_consults_return(self):
+        """A1 (opus-review-g1-round2-pkg-decide.md): test_d proves
+        consult()'s two fields disagree, but it never touches the CALL
+        SITE's own wiring -- _selector_match() is never invoked inside
+        the mocked block there. This one does: jev_seam.consult ITSELF
+        is patched to return an ACT-mode SeamResult whose .answer is
+        0.05 (a float, the wrong TYPE for this call site's own bool
+        answer), mode live via a patched config, and asserts
+        _selector_match() still returns its own local verdict, never
+        0.05."""
+        cfg = {"modes": {"J098": "shadow"}}
+        entry = _choice_entry("J098", ["driver-a", "driver-b", "driver-c", "unknown"])
+        jev_g1_seam_cache.reset()
+        wrong = jev_seam.SeamResult(0.05, {"answer": 0.05}, jev_seam.ACT,
+                                    None, False, "mutation-probe")
+        with mock.patch.object(jev_seam, "load_seams_config", return_value=cfg), \
+                mock.patch.object(jev_seam, "load_registry", return_value=[entry]), \
+                mock.patch.object(jev_seam, "DEFAULT_LEDGER_DIR", tempfile.mkdtemp()), \
+                mock.patch.object(jev_seam, "consult", return_value=wrong):
+            after = R._selector_match("native_semantic", self.DESC)
+        self.assertTrue(after)
+        self.assertNotEqual(after, wrong.answer)
+
+
+class JevSeamPerfCacheNeverHitsDiskAfterWarmup(unittest.TestCase):
+    """Coordinator directive (measured regression in another wave-1
+    group: a seam in OFF mode made a hot call site 52x slower by
+    re-reading data/jev-seams.json on every call): after a first call
+    warms jev_seam's in-process cache, 1,000 further OFF-mode calls to
+    _risk_for_action()/_selector_match() must touch the filesystem zero
+    times and return the identical answer every time."""
+
+    DESC = {"driver_id": "d1", "risk_classes": [{"action": "TAP", "risk_class": "safe"}],
+            "deterministic_selector_support": True}
+
+
+    def setUp(self):
+        # jev_g1_seam_cache caches the resolved mode per entry_id
+        # (module docstring: at most one jev_seam.load_seams_config()
+        # call per second) -- a call in an EARLIER test could still be
+        # "fresh" here, so reset before every test rather than rely on
+        # the freshness window happening to have elapsed.
+        jev_g1_seam_cache.reset()
+    def test_1000_off_mode_calls_after_warmup_touch_no_filesystem(self):
+        first_risk = R._risk_for_action(self.DESC, "TAP")  # warms jev_seam's config cache
+        first_match = R._selector_match("native_semantic", self.DESC)
+        self.assertEqual(first_risk, "safe")
+        self.assertTrue(first_match)
+
+        calls = {"stat": 0, "exists": 0, "open": 0}
+        real_stat, real_exists, real_open = os.stat, os.path.exists, open
+
+        def counting_stat(*a, **kw):
+            calls["stat"] += 1
+            return real_stat(*a, **kw)
+
+        def counting_exists(*a, **kw):
+            calls["exists"] += 1
+            return real_exists(*a, **kw)
+
+        def counting_open(*a, **kw):
+            calls["open"] += 1
+            return real_open(*a, **kw)
+
+        risk_outputs, match_outputs = set(), set()
+        with mock.patch("os.stat", counting_stat), \
+                mock.patch("os.path.exists", counting_exists), \
+                mock.patch("builtins.open", counting_open):
+            for _ in range(1000):
+                risk_outputs.add(R._risk_for_action(self.DESC, "TAP"))
+                match_outputs.add(R._selector_match("native_semantic", self.DESC))
+
+        self.assertEqual(calls, {"stat": 0, "exists": 0, "open": 0},
+                         "an off-mode call must never touch the filesystem "
+                         "once jev_seam's config cache is warm")
+        self.assertEqual(risk_outputs, {"safe"})
+        self.assertEqual(match_outputs, {True})
 
 
 if __name__ == "__main__":

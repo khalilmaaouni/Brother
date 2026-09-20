@@ -47,6 +47,20 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import orchestrator_invariants  # noqa: E402
 import jev_cascade  # noqa: E402  (JEV-03: the calibrated ACT/ESCALATE/NO-DATA cascade)
 
+# J033 and J051, wave-2 Jev seams: optional, fail-open, same discipline
+# as record_drift.py's J029 and loop_bridge.py's wave-1/wave-3 seams. The
+# task_class/risk_class table and the word-boundary regex above both stay
+# primary and are never gated by this import succeeding.
+try:
+    import jev_checks
+except Exception:  # noqa: BLE001
+    jev_checks = None
+
+try:
+    import jev_seam
+except Exception:  # noqa: BLE001
+    jev_seam = None
+
 CONTENT_CLASSES = frozenset(("public", "generalized", "private"))
 OUTSIDE_OK = frozenset(("public", "generalized"))
 
@@ -161,6 +175,37 @@ def _route_adversarial_review(checker, outside, note):
                 "gap no row covered)" + note)
 
 
+def _opus_muse_ambiguous(checker):
+    """True when the same word-boundary regex _names_opus_gate uses finds
+    NEITHER opus nor muse in the checker field, or BOTH -- the two cases
+    J051's own registry entry names as ambiguous. A checker naming muse
+    alone, or opus alone, is unambiguous and never triggers this."""
+    if not isinstance(checker, str):
+        return True
+    opus = bool(_OPUS_WORD.search(checker))
+    muse = bool(_MUSE_WORD.search(checker))
+    return opus == muse
+
+
+def _consult_j051(lane, checker):
+    """J051, wave-2 Jev seam: fires only when the checker field is
+    ambiguous per _opus_muse_ambiguous, for the calibration ledger only.
+    C1: `lane` -- the real routed Lane from _route_adversarial_review --
+    is always returned unchanged, whatever mode says."""
+    if (jev_checks is not None and jev_seam is not None
+            and _opus_muse_ambiguous(checker)):
+        try:
+            jev_checks.check_adversarial_review_tier(
+                str(checker), lane.draft,
+                seams_config=jev_seam.load_seams_config(),
+                registry=jev_seam.load_registry(),
+                ledger_dir=jev_seam.DEFAULT_LEDGER_DIR,
+            )  # C1: return value intentionally discarded, shadow-only by contract
+        except Exception:  # noqa: BLE001  # sbe: allow-silent this seam is advisory only, never worth breaking real review routing
+            pass
+    return lane
+
+
 #: jev_cascade's ACT outcome routes a decision to this lane. See
 #: route_decision().
 DECISION_LANE = "jev"
@@ -235,6 +280,32 @@ def route_decision(decision, risk_class, calibration):
 
 
 def route_lane(task_class, risk_class="medium", content=None, codex=None, checker=None):
+    lane = _route_lane_deterministic(task_class, risk_class, content, codex, checker)
+    return _consult_j033(lane, task_class, risk_class, content)
+
+
+def _consult_j033(lane, task_class, risk_class, content):
+    """J033, wave-2 Jev seam: second-opinions the task_class/risk_class
+    table above only for the calibration ledger. C1: `lane` -- the
+    table's own real routed Lane -- is always returned unchanged,
+    whatever mode says; the registry's own fail_direction is explicit
+    that unknown never silently reroutes a unit."""
+    if jev_checks is not None and jev_seam is not None:
+        try:
+            state_text = ("task_class=%s risk_class=%s content=%s"
+                           % (task_class, risk_class, content))
+            jev_checks.check_lane_routing(
+                state_text, lane.draft,
+                seams_config=jev_seam.load_seams_config(),
+                registry=jev_seam.load_registry(),
+                ledger_dir=jev_seam.DEFAULT_LEDGER_DIR,
+            )  # C1: return value intentionally discarded, shadow-only by contract
+        except Exception:  # noqa: BLE001  # sbe: allow-silent this seam is advisory only, never worth breaking real dispatch routing
+            pass
+    return lane
+
+
+def _route_lane_deterministic(task_class, risk_class="medium", content=None, codex=None, checker=None):
     if task_class not in _KIND:
         raise ValueError("unknown task class: %r" % (task_class,))
     declared = content in CONTENT_CLASSES
@@ -256,7 +327,7 @@ def route_lane(task_class, risk_class="medium", content=None, codex=None, checke
                     "documentation is drafted by Codex (founder law 2026-09-07)" + credit_note + note)
     if kind == "judge":
         if task_class == "review":
-            return _route_adversarial_review(checker, outside, note)
+            return _consult_j051(_route_adversarial_review(checker, outside, note), checker)
         # A second opinion is worth having, not worth a failed pass: Codex
         # takes it only on observed headroom, otherwise the frontier tier does.
         second = "codex" if codex == "ok" else "claude-opus"

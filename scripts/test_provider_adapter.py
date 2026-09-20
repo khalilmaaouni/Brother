@@ -22,8 +22,9 @@ CAPABILITIES = ("invocation", "worker_call", "hook_events", "tool_events",
 
 
 class Registry(unittest.TestCase):
-    def test_three_adapters_registered(self):
-        self.assertEqual(sorted(PA.ADAPTERS), ["claude", "codex", "cortex"])
+    def test_four_adapters_registered(self):
+        self.assertEqual(sorted(PA.ADAPTERS),
+                         ["claude", "codex", "cortex", "cursor"])
 
     def test_every_adapter_answers_every_capability(self):
         for name, cls in PA.ADAPTERS.items():
@@ -49,9 +50,28 @@ class CortexIsNoData(unittest.TestCase):
                 self.assertIsInstance(getattr(adapter, cap)(), PA.Refusal, cap)
 
 
+class CursorReadsRealFactsNeverRefusesEverything(unittest.TestCase):
+    """Unlike Cortex, Cursor has a real installed surface to read: at least
+    one capability must answer with real data, not a Refusal, whatever
+    binaries happen to be on this machine's PATH."""
+
+    def test_hook_events_reads_the_shipped_manifest(self):
+        adapter = PA.CursorAdapter(env={})
+        result = adapter.hook_events()
+        self.assertNotIsInstance(result, PA.Refusal)
+        self.assertIn("sessionStart", result["events"])
+
+    def test_lifecycle_verbs_are_refusals_never_a_live_run(self):
+        # Cursor plugin-dir hooks do not fire headless (vault lesson): the
+        # four lifecycle capabilities must never claim a measured verb.
+        adapter = PA.CursorAdapter(env={})
+        for verb in ("install", "upgrade", "rollback", "uninstall"):
+            self.assertIsInstance(getattr(adapter, verb)(), PA.Refusal, verb)
+
+
 class Describe(unittest.TestCase):
     def test_describe_prints_valid_json_for_all_three(self):
-        for provider in ("claude", "codex", "cortex", "all"):
+        for provider in ("claude", "codex", "cortex", "cursor", "all"):
             proc = subprocess.run([sys.executable, os.path.join(HERE, "provider_adapter.py"),
                                    "describe", "--provider", provider],
                                   capture_output=True, text=True, env=dict(os.environ))
@@ -61,8 +81,9 @@ class Describe(unittest.TestCase):
 
 class NoProviderBranchingInTheCore(unittest.TestCase):
     """The core never branches on a provider name outside the adapter classes
-    and the registry: every line naming "claude", "codex" or "cortex" as a
-    string literal sits inside a class body or the ADAPTERS registry."""
+    and the registry: every line naming "claude", "codex", "cortex" or
+    "cursor" as a string literal sits inside a class body or the ADAPTERS
+    registry."""
 
     def test_string_literals_only_inside_classes_or_registry(self):
         path = os.path.join(HERE, "provider_adapter.py")
@@ -83,7 +104,7 @@ class NoProviderBranchingInTheCore(unittest.TestCase):
             stripped = line.strip()
             if stripped.startswith("#") or stripped.startswith('"""') or stripped.startswith("'''"):
                 continue
-            if re.search(r"[\"'](claude|codex|cortex)[\"']", line) and not (in_class or in_registry):
+            if re.search(r"[\"'](claude|codex|cortex|cursor)[\"']", line) and not (in_class or in_registry):
                 offenders.append((n, line.strip()))
         self.assertEqual(offenders, [])
 

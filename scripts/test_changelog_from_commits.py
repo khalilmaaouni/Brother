@@ -283,6 +283,247 @@ class GroupKeyIsAPureFunction(unittest.TestCase):
     def test_a_fix_branch_with_a_row_id_groups_by_the_row_id_too(self):
         self.assertEqual(CFC.group_key("fix/e110-something"), "E110")
 
+    def test_no_branch_at_all_is_other_too(self):
+        # A squash or rebase landing names no branch (git records none),
+        # exactly the same bucket as a branch matching neither shape above.
+        self.assertEqual(CFC.group_key(None), "Other")
+
+
+def _make_repo_with_three_landing_shapes():
+    """A real git repository, tagged v1.0.0 at the seed commit, with one PR
+    landed each of the three ways this module has to recognise (DEL-14: the
+    1.0.20 cut only recognised the first, silently dropping the other two),
+    plus a stray duplicate reference to the squash PR and one plain commit
+    naming no pull request at all."""
+    tmp = tempfile.mkdtemp(prefix="changelog-shapes-test-")
+    _write(os.path.join(tmp, "README.md"), "fixture\n")
+    for args in (["init", "-q", "-b", "main"],
+                ["config", "user.email", "t@example.com"],
+                ["config", "user.name", "T"],
+                ["add", "-A"],
+                ["commit", "-q", "-m", "seed"],
+                ["tag", "-a", "-m", "v1.0.0", "v1.0.0"]):
+        _git(args, tmp)
+
+    # #100: the classic GitHub merge-commit shape, unchanged from before.
+    _git(["checkout", "-q", "-b", "wbs/s1-merge-shape"], tmp)
+    _write(os.path.join(tmp, "a.txt"), "a\n")
+    _git(["add", "-A"], tmp)
+    _git(["commit", "-q", "-m", "add a"], tmp)
+    _git(["checkout", "-q", "main"], tmp)
+    _git(["merge", "--no-ff", "-q", "-m",
+         "Merge pull request #100 from someone/wbs/s1-merge-shape",
+         "wbs/s1-merge-shape"], tmp)
+
+    # #101: a "Squash and merge" landing, no merge commit at all, just a
+    # single-parent commit whose subject ends "(#101)".
+    _write(os.path.join(tmp, "b.txt"), "b\n")
+    _git(["add", "-A"], tmp)
+    _git(["commit", "-q", "-m", "Add a squashed feature (#101)"], tmp)
+
+    # A stray duplicate reference to #101, exactly the shape a follow-up
+    # commit mentioning the same PR in passing would take: must not
+    # produce a second "#101" entry.
+    _write(os.path.join(tmp, "b2.txt"), "b2\n")
+    _git(["add", "-A"], tmp)
+    _git(["commit", "-q", "-m", "follow-up mentioning (#101) again, not a new PR"], tmp)
+
+    # #102: a rebase-merge landing, another single-parent commit, this time
+    # with no "(#N)" on its subject at all (rebasing adds none) but the PR
+    # number written into the body by hand.
+    _write(os.path.join(tmp, "c.txt"), "c\n")
+    _git(["add", "-A"], tmp)
+    _git(["commit", "-q", "-m",
+         "Rebase-landed fix\n\nLands the change from PR (#102) after a "
+         "manual rebase onto main."], tmp)
+
+    # A plain commit naming no pull request in any of the three shapes: a
+    # direct commit, must stay absent exactly as before this fix.
+    _write(os.path.join(tmp, "d.txt"), "d\n")
+    _git(["add", "-A"], tmp)
+    _git(["commit", "-q", "-m", "plain follow-up commit, not a pull request"], tmp)
+
+    return tmp
+
+
+class TheThreeLandingShapesAllReachTheChangelog(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = _make_repo_with_three_landing_shapes()
+        cls.lines = CFC.changelog_lines("v1.0.0", "HEAD", root=cls.tmp)
+        cls.text = "\n".join(cls.lines)
+
+    def test_the_merge_commit_shape_still_groups_by_its_branch(self):
+        self.assertIn("## S1", self.text)
+        self.assertIn("- #100 wbs/s1-merge-shape", self.text)
+
+    def test_the_squash_shape_lands_with_the_number_stripped_from_its_label(self):
+        self.assertIn("- #101 Add a squashed feature", self.text)
+        self.assertNotIn("(#101)", self.text)
+
+    def test_the_rebase_shape_lands_from_a_body_reference(self):
+        self.assertIn("- #102 Rebase-landed fix", self.text)
+
+    def test_squash_and_rebase_land_under_other_with_no_branch(self):
+        self.assertIn("## Other", self.text)
+
+    def test_the_duplicate_reference_to_101_produces_only_one_entry(self):
+        self.assertEqual(self.text.count("#101"), 1)
+
+    def test_the_plain_commit_still_names_no_pull_request_and_stays_absent(self):
+        self.assertNotIn("plain follow-up commit", self.text)
+        self.assertNotIn("follow-up mentioning", self.text)
+
+
+def _make_repo_with_a_custom_subject_merge():
+    """A real git repository, tagged v1.0.0, with one classic GitHub
+    merge-commit PR (#100, control) and one merge commit whose subject is
+    NOT GitHub's own "Merge pull request #N from owner/branch" shape but
+    still ends "(#200)" (DEL-15: the shape a55283573 "Bring the 1.0.20
+    release cut back into main (#772)" actually is -- a two-parent merge
+    with a hand-written subject, which MERGE_RE alone always misses)."""
+    tmp = tempfile.mkdtemp(prefix="changelog-custom-merge-test-")
+    _write(os.path.join(tmp, "README.md"), "fixture\n")
+    for args in (["init", "-q", "-b", "main"],
+                ["config", "user.email", "t@example.com"],
+                ["config", "user.name", "T"],
+                ["add", "-A"],
+                ["commit", "-q", "-m", "seed"],
+                ["tag", "-a", "-m", "v1.0.0", "v1.0.0"]):
+        _git(args, tmp)
+
+    _git(["checkout", "-q", "-b", "wbs/s1-control"], tmp)
+    _write(os.path.join(tmp, "a.txt"), "a\n")
+    _git(["add", "-A"], tmp)
+    _git(["commit", "-q", "-m", "add a"], tmp)
+    _git(["checkout", "-q", "main"], tmp)
+    _git(["merge", "--no-ff", "-q", "-m",
+         "Merge pull request #100 from someone/wbs/s1-control",
+         "wbs/s1-control"], tmp)
+
+    _git(["checkout", "-q", "-b", "release-cut-branch"], tmp)
+    _write(os.path.join(tmp, "b.txt"), "b\n")
+    _git(["add", "-A"], tmp)
+    _git(["commit", "-q", "-m", "cut work"], tmp)
+    _git(["checkout", "-q", "main"], tmp)
+    _git(["merge", "--no-ff", "-q", "-m",
+         "Bring the release cut back into main (#200)",
+         "release-cut-branch"], tmp)
+
+    return tmp
+
+
+class AMergeCommitWithNoGitHubSubjectStillLandsViaTheSameFallback(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = _make_repo_with_a_custom_subject_merge()
+        cls.text = "\n".join(CFC.changelog_lines("v1.0.0", "HEAD", root=cls.tmp))
+
+    def test_the_classic_merge_shape_still_works_as_control(self):
+        self.assertIn("- #100 wbs/s1-control", self.text)
+
+    def test_a_merge_commit_with_a_custom_subject_lands_under_other(self):
+        self.assertIn("## Other", self.text)
+        self.assertIn("- #200 Bring the release cut back into main", self.text)
+
+
+def _make_repo_with_one_pr_landed_twice():
+    """A real git repository, tagged v1.0.0, where PR #101 lands TWICE
+    under two different shapes: first as a squash commit ("Add a squashed
+    feature (#101)"), then, later, as a merge commit whose custom subject
+    also ends "(#101)" (the exact repro asked for: a squash subject and a
+    later merge referencing it). Proves the seen_prs de-dup guard, not just
+    the squash-recognition or merge-fallback paths individually: deleting
+    that guard alone (with both recognisers intact) is what this fixture
+    is built to catch."""
+    tmp = tempfile.mkdtemp(prefix="changelog-dup-shapes-test-")
+    _write(os.path.join(tmp, "README.md"), "fixture\n")
+    for args in (["init", "-q", "-b", "main"],
+                ["config", "user.email", "t@example.com"],
+                ["config", "user.name", "T"],
+                ["add", "-A"],
+                ["commit", "-q", "-m", "seed"],
+                ["tag", "-a", "-m", "v1.0.0", "v1.0.0"]):
+        _git(args, tmp)
+
+    _write(os.path.join(tmp, "a.txt"), "a\n")
+    _git(["add", "-A"], tmp)
+    _git(["commit", "-q", "-m", "Add a squashed feature (#101)"], tmp)
+
+    _git(["checkout", "-q", "-b", "reapply-101"], tmp)
+    _write(os.path.join(tmp, "b.txt"), "b\n")
+    _git(["add", "-A"], tmp)
+    _git(["commit", "-q", "-m", "reapply work"], tmp)
+    _git(["checkout", "-q", "main"], tmp)
+    _git(["merge", "--no-ff", "-q", "-m",
+         "Bring PR back (#101)", "reapply-101"], tmp)
+
+    return tmp
+
+
+class ThePRSeenTwiceUnderTwoDifferentShapesIsListedOnce(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = _make_repo_with_one_pr_landed_twice()
+        cls.text = "\n".join(CFC.changelog_lines("v1.0.0", "HEAD", root=cls.tmp))
+
+    def test_101_appears_exactly_once(self):
+        self.assertEqual(self.text.count("#101"), 1, self.text)
+
+    def test_the_kept_occurrence_is_the_first_oldest_one(self):
+        # The squash commit landed before the merge commit; the guard
+        # keeps the first (oldest) occurrence, so the squash's own label
+        # survives, not the merge's.
+        self.assertIn("- #101 Add a squashed feature", self.text)
+        self.assertNotIn("- #101 Bring PR back", self.text)
+
+
+class TheRealA55283573RangeNowCarriesPR772(unittest.TestCase):
+    """DEL-15 itself: a55283573 "Bring the 1.0.20 release cut back into
+    main (#772)" is a two-parent merge commit with a subject GitHub never
+    wrote, so the merge-only MERGE_RE check dropped it even after DEL-14's
+    fix added squash and rebase recognition for single-parent commits.
+    Runs against this tree's own real history (root=ROOT, the default),
+    the exact range the review's own done-check names, skipping rather
+    than failing if that history is ever not reachable from wherever this
+    suite runs."""
+
+    FROM_REF = "8c37c6f7dbf043d67af39d65949704ff8893abc5~6"
+    TO_REF = "a5528357363deb43d2c3c59d2bb7566154840a2c"
+
+    def setUp(self):
+        if not CFC.ref_exists(self.FROM_REF) or not CFC.ref_exists(self.TO_REF):
+            self.skipTest("%s or %s not reachable in this checkout's history"
+                          % (self.FROM_REF, self.TO_REF))
+
+    def test_772_now_appears(self):
+        text = "\n".join(CFC.changelog_lines(self.FROM_REF, self.TO_REF))
+        self.assertIn("#772", text, text)
+
+
+class TheReal1020RangeNowCarriesItsFourMissingPRs(unittest.TestCase):
+    """DEL-14 itself: the 1.0.20 release note's changelog, generated by
+    `python3 scripts/changelog_from_commits.py v1.0.18 HEAD` at cut time,
+    silently dropped #767, #769, #770 and #771 because all four landed as
+    squash commits and this module only ever recognised merge commits. Runs
+    against this tree's own real history (root=ROOT, the default), the
+    same v1.0.18..<hub commit 1.0.20 was cut from> range the release note
+    itself names, skipping rather than failing if that history is ever not
+    reachable from wherever this suite runs."""
+
+    FROM_REF = "v1.0.18"
+    TO_REF = "9674ed8955ada5737d23ee2a1df3367fece0f1e3"
+
+    def setUp(self):
+        if not CFC.ref_exists(self.FROM_REF) or not CFC.ref_exists(self.TO_REF):
+            self.skipTest("%s or %s not reachable in this checkout's history"
+                          % (self.FROM_REF, self.TO_REF))
+
+    def test_all_four_previously_missing_prs_now_appear(self):
+        text = "\n".join(CFC.changelog_lines(self.FROM_REF, self.TO_REF))
+        for pr in (767, 769, 770, 771):
+            self.assertIn("#%d" % pr, text, text)
+
 
 def main():
     return unittest.main()

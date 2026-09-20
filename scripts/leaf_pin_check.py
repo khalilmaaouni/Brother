@@ -62,6 +62,7 @@ _ONE_REPO = "https://github.com/khalilmaaouni/Brother.git"
 LEAVES = {
     "brothermode": _ONE_REPO,
     "brothersbe": _ONE_REPO,
+    "brotherds": _ONE_REPO,
 }
 
 TAG = re.compile(r"refs/tags/v(\d+)\.(\d+)\.(\d+)$")

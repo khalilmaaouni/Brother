@@ -36,7 +36,8 @@ class Verdicts(unittest.TestCase):
         with mock.patch.object(lpc, "newest_published_tag", return_value="3.4.2"), \
              mock.patch.object(lpc, "declared",
                                return_value={"brothermode": [("a", "3.4.2")],
-                                             "brothersbe": [("b", "3.4.2")]}):
+                                             "brothersbe": [("b", "3.4.2")],
+                                             "brotherds": [("c", "3.4.2")]}):
             code, out = run_main()
         self.assertEqual(code, 0, out)
         self.assertIn("PASSED", out)
@@ -46,7 +47,8 @@ class Verdicts(unittest.TestCase):
         with mock.patch.object(lpc, "newest_published_tag", return_value="3.4.2"), \
              mock.patch.object(lpc, "declared",
                                return_value={"brothermode": [("a", "3.4.2")],
-                                             "brothersbe": [("b", "3.4.1")]}):
+                                             "brothersbe": [("b", "3.4.1")],
+                                             "brotherds": [("c", "3.4.2")]}):
             code, out = run_main()
         self.assertEqual(code, 1, out)
         self.assertIn("MISMATCH", out)
@@ -60,7 +62,8 @@ class Verdicts(unittest.TestCase):
         with mock.patch.object(lpc, "newest_published_tag", return_value="1.0.8"), \
              mock.patch.object(lpc, "declared",
                                return_value={"brothermode": [("a", "1.0.9")],
-                                             "brothersbe": [("b", "1.0.8")]}):
+                                             "brothersbe": [("b", "1.0.8")],
+                                             "brotherds": [("c", "1.0.8")]}):
             code, out = run_main()
         self.assertNotEqual(code, 0, "a cut in flight is not a clean pass")
         self.assertEqual(code, 2, out)
@@ -74,7 +77,8 @@ class Verdicts(unittest.TestCase):
         with mock.patch.object(lpc, "newest_published_tag", return_value=None), \
              mock.patch.object(lpc, "declared",
                                return_value={"brothermode": [("a", "3.4.2")],
-                                             "brothersbe": [("b", "3.4.2")]}):
+                                             "brothersbe": [("b", "3.4.2")],
+                                             "brotherds": [("c", "3.4.2")]}):
             code, out = run_main()
         self.assertNotEqual(code, 0, "a check that could not look exited as a pass")
         self.assertEqual(code, 2, out)
@@ -86,7 +90,8 @@ class Verdicts(unittest.TestCase):
         with mock.patch.object(lpc, "newest_published_tag", return_value="3.4.2"), \
              mock.patch.object(lpc, "declared",
                                return_value={"brothermode": [("a", "3.4.2")],
-                                             "brothersbe": []}):
+                                             "brothersbe": [],
+                                             "brotherds": [("c", "3.4.2")]}):
             code, out = run_main()
         self.assertNotEqual(code, 0, "a leaf declared nowhere passed by vacancy")
         self.assertEqual(code, 2, out)

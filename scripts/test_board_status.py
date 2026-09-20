@@ -7,12 +7,29 @@ tests that matter are the ones that try to make it lie.
 import datetime
 import json
 import os
+import shutil
+import stat
+import subprocess
 import sys
 import tempfile
+import time
 import unittest
+import uuid
+from unittest import mock
+
+# Minor fix (opus-review-seams-g1-g3.md): redirect jev_seam's own
+# machine-level state root to a throwaway temp dir BEFORE jev_seam is
+# ever imported in this process, so no test here reads (or could ever
+# write) the real ~/.brother/jev -- must happen before the `import
+# jev_seam` line below: JEV_STATE_DIR is a module-level constant
+# jev_seam.py computes once, at its own import time.
+os.environ.setdefault("BROTHER_JEV_STATE_DIR",
+                       tempfile.mkdtemp(prefix="brother-jev-state-test-"))
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import board_status as B  # noqa: E402
+import jev_seam  # noqa: E402
+import jev_g1_seam_cache  # noqa: E402
 
 
 def item(status, evidence="", **kw):
@@ -454,6 +471,566 @@ class TokensPerAcceptedDelivery(unittest.TestCase):
                 os.environ.pop("BROTHER_UNIT_TRACE", None)
             else:
                 os.environ["BROTHER_UNIT_TRACE"] = old
+
+
+def _j025_entry():
+    return {
+        "id": "J025", "role": "second_opinion", "risk": "low", "wave": "W1",
+        "privacy": "public_or_own_text",
+        "question": {
+            "type": "choice",
+            "instructions": "classify the row status",
+            "options": ["ready", "blocked", "partial", "stale", "done",
+                        "in-progress", "unknown"],
+        },
+    }
+
+
+def _choice_runner(choice, prob=0.9):
+    """A scripted bridge runner that always answers `choice`: the shape
+    ScriptedRunner in test_jev_seam.py uses, reimplemented here (no
+    network, no subprocess) so this file does not need to import that
+    test module."""
+    def fn(argv, stdin_text):
+        payload = json.loads(stdin_text)
+        answers = {}
+        for qid, q in payload["questions"].items():
+            keys = list(q["criteria"].keys())
+            others = [k for k in keys if k != choice]
+            probs = {choice: prob}
+            if others:
+                rest = (1.0 - prob) / len(others)
+                for k in others:
+                    probs[k] = rest
+            answers[qid] = {"choice": choice, "probabilities": probs, "confidence": prob}
+        response = {"model": "typesafe/jev-1.13-test", "answers": answers,
+                    "usage": {"cost": 0.001}}
+        return 0, json.dumps(response), ""
+    return fn
+
+
+class JevSeamJ025SecondOpinion(unittest.TestCase):
+    """J025 (roadmap row status classify), wired in classify() via
+    jev_seam.consult(). Per the wave-1 seam brief
+    (Documents/BrotherArchive/jev-deep-research-2026-09-18/wave2/seam-brief-common.md):
+    mode off ships unedited in data/jev-seams.json, so (a) below needs no
+    mocking at all; (b)-(d) mock jev_seam.load_seams_config/load_registry
+    to force shadow mode for this one test, never touching the real
+    registry file or the network."""
+
+
+    def setUp(self):
+        # jev_g1_seam_cache caches the resolved mode per entry_id
+        # (module docstring: at most one jev_seam.load_seams_config()
+        # call per second) -- a call in an EARLIER test could still be
+        # "fresh" here, so reset before every test rather than rely on
+        # the freshness window happening to have elapsed. Also reset the
+        # A4 per-render consult memo (_J025_CONSULT_MEMO): a status this
+        # class or an earlier class already consulted about must not
+        # silently suppress this test's own first consult for it.
+        jev_g1_seam_cache.reset()
+        B.reset_j025_consult_memo()
+    def test_a_mode_off_makes_zero_calls_and_output_is_byte_identical(self):
+        it = item("DONE", "x")
+
+        def boom(argv, stdin_text):
+            raise AssertionError("mode off must never invoke the runner")
+
+        before = B.classify(it)
+        after = B.classify(it, jev_runner=boom)
+        self.assertEqual(before, "done")
+        self.assertEqual(before, after)
+
+    def test_b_shadow_mode_output_identical_and_one_ledger_row_written(self):
+        it = item("DONE", "x")
+        expected = B.classify(it)  # real config: off, no mocking
+        ledger_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, ledger_dir, ignore_errors=True)
+        cfg = {"modes": {"J025": "shadow"}}
+        jev_g1_seam_cache.reset()  # the baseline call above may have cached this entry as off
+        with mock.patch.object(jev_seam, "load_seams_config", return_value=cfg), \
+                mock.patch.object(jev_seam, "load_registry", return_value=[_j025_entry()]), \
+                mock.patch.object(jev_seam, "DEFAULT_LEDGER_DIR", ledger_dir):
+            after = B.classify(it, jev_runner=_choice_runner("blocked"))
+        self.assertEqual(after, expected)
+        # A0.8: shadow hands the call to a background worker and returns
+        # at once, before the ledger row exists. drain() waits for the
+        # worker to finish so the row is actually there to count.
+        jev_seam.drain(timeout=5)
+        decisions_path = os.path.join(ledger_dir, "decisions.jsonl")
+        self.assertTrue(os.path.isfile(decisions_path), "shadow mode must write a ledger row")
+        with open(decisions_path, encoding="utf-8") as fh:
+            rows = [ln for ln in fh if ln.strip()]
+        self.assertEqual(len(rows), 1)
+
+    def test_c_seam_path_exception_leaves_output_identical(self):
+        it = item("DONE", "x")
+        expected = B.classify(it)
+        cfg = {"modes": {"J025": "shadow"}}
+        jev_g1_seam_cache.reset()  # the baseline call above may have cached this entry as off
+        with mock.patch.object(jev_seam, "load_seams_config", return_value=cfg), \
+                mock.patch.object(jev_seam, "load_registry",
+                                   side_effect=RuntimeError("registry unreadable")):
+            after = B.classify(it, jev_runner=_choice_runner("blocked"))
+        self.assertEqual(after, expected)
+
+    def test_d_red_proof_wiring_that_trusts_jevs_raw_answer_breaks_test_b(self):
+        """Prove test_b actually catches a wrong wiring: a call site that
+        used consult()'s raw jev.answer (bypassing the mode-safe .answer
+        field) would return a DIFFERENT verdict than the caller's own
+        under shadow mode with an opposite-answering runner -- exactly
+        what test_b asserts never happens. This never edits board_status.py
+        itself; it calls jev_seam.consult() the same way classify() does
+        and shows the two fields disagree, then confirms the real
+        classify() is wired to the safe one."""
+        it = item("DONE", "x")
+        st = str(it.get("status") or "").upper().strip()
+        current_answer = B.classify(it)  # "done", real config (off)
+        ledger_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, ledger_dir, ignore_errors=True)
+        cfg = {"modes": {"J025": "shadow"}}
+        jev_g1_seam_cache.reset()  # the baseline call above may have cached this entry as off
+        with mock.patch.object(jev_seam, "load_seams_config", return_value=cfg), \
+                mock.patch.object(jev_seam, "load_registry", return_value=[_j025_entry()]), \
+                mock.patch.object(jev_seam, "DEFAULT_LEDGER_DIR", ledger_dir):
+            result = jev_seam.consult(
+                "J025", {"status": st}, current_answer,
+                seams_config=jev_seam.load_seams_config(),
+                registry=jev_seam.load_registry(),
+                ledger_dir=jev_seam.DEFAULT_LEDGER_DIR,
+                runner=_choice_runner("blocked"),
+            )
+            # A0.8: shadow never returns Jev's answer (result.jev is
+            # always None); the eventual answer only lands in the ledger,
+            # once the background worker finishes. drain() first, then
+            # read it there.
+            jev_seam.drain(timeout=5)
+            decisions_path = os.path.join(ledger_dir, "decisions.jsonl")
+            with open(decisions_path, encoding="utf-8") as fh:
+                rows = [json.loads(ln) for ln in fh if ln.strip()]
+            self.assertEqual(len(rows), 1)
+            wrongly_wired_answer = rows[0]["answer"]  # what a broken call site would return
+            safely_wired_answer = result.answer       # what classify() actually returns
+
+            # The red proof: the wrong wiring disagrees with the caller's
+            # own verdict (so a test_b-shaped assertion would fail on it)...
+            self.assertNotEqual(wrongly_wired_answer, current_answer)
+            # ...while the real wiring (and the real classify() call) does not.
+            self.assertEqual(safely_wired_answer, current_answer)
+            after = B.classify(it, jev_runner=_choice_runner("blocked"))
+        self.assertEqual(after, current_answer)
+
+    def test_e_a1_call_site_never_reads_a_patched_consults_return(self):
+        """A1 (opus-review-g1-round2-pkg-decide.md): test_d proves
+        consult()'s two fields disagree, but it never touches the CALL
+        SITE's own wiring -- classify() is never invoked inside the
+        mocked block there. This one does: jev_seam.consult ITSELF is
+        patched to return an ACT-mode SeamResult whose .answer is 0.05 (a
+        float, the wrong TYPE for classify()'s own str return value),
+        mode live via a patched config, and asserts classify() still
+        returns its own local verdict, never 0.05. A call site wired as
+        `answer = jev_seam.consult(...).answer` (the pre-C1 wiring this
+        proves against) would return 0.05 here instead."""
+        it = item("DONE", "x")
+        cfg = {"modes": {"J025": "shadow"}}
+        jev_g1_seam_cache.reset()
+        wrong = jev_seam.SeamResult(0.05, {"answer": 0.05}, jev_seam.ACT,
+                                    None, False, "mutation-probe")
+        with mock.patch.object(jev_seam, "load_seams_config", return_value=cfg), \
+                mock.patch.object(jev_seam, "load_registry", return_value=[_j025_entry()]), \
+                mock.patch.object(jev_seam, "DEFAULT_LEDGER_DIR", tempfile.mkdtemp()), \
+                mock.patch.object(jev_seam, "consult", return_value=wrong):
+            after = B.classify(it)
+        self.assertEqual(after, "done")
+        self.assertNotEqual(after, wrong.answer)
+
+
+class J025ConsultIsMemoizedPerRenderNotPerRow(unittest.TestCase):
+    """A4 (opus-review-g1-round2-pkg-decide.md): a probe on the live board
+    found classify() making one J025 consult() call per roadmap ROW: 671
+    calls against only 7 distinct status strings. B.reset_j025_consult_memo()
+    clears classify()'s own per-render memo (module docstring next to
+    _J025_CONSULT_MEMO); main() calls it once per render."""
+
+    def setUp(self):
+        jev_g1_seam_cache.reset()
+        B.reset_j025_consult_memo()
+
+    def test_671_rows_7_distinct_statuses_make_at_most_7_consult_calls(self):
+        statuses = ["READY", "BLOCKED", "PARTIAL", "STALE", "DONE",
+                    "IN-PROGRESS", "MARINATING"]
+        items = [item(statuses[i % len(statuses)], "x") for i in range(671)]
+        self.assertEqual(len({it["status"] for it in items}), 7)
+
+        calls = []
+
+        def counting_consult(entry_id, state, current_answer, **kw):
+            calls.append(state)
+            return jev_seam.SeamResult(current_answer, None, jev_seam.SHADOW,
+                                       None, False, None)
+
+        cfg = {"modes": {"J025": "shadow"}}
+        with mock.patch.object(jev_seam, "load_seams_config", return_value=cfg), \
+                mock.patch.object(jev_seam, "load_registry", return_value=[_j025_entry()]), \
+                mock.patch.object(jev_seam, "DEFAULT_LEDGER_DIR", tempfile.mkdtemp()), \
+                mock.patch.object(jev_seam, "consult", side_effect=counting_consult):
+            counts, total = B.tally(items)
+
+        self.assertEqual(total, 671)
+        self.assertLessEqual(len(calls), 7)
+        self.assertEqual({c["status"] for c in calls}, set(statuses))
+
+
+def _j030_entry():
+    return {
+        "id": "J030", "role": "second_opinion", "risk": "medium", "wave": "W1",
+        "privacy": "needs_content_gate",
+        "question": {
+            "type": "noul",
+            "instructions": "does the row's claim match its quoted source",
+        },
+    }
+
+
+def _noul_runner(prob):
+    def fn(argv, stdin_text):
+        payload = json.loads(stdin_text)
+        answers = {qid: {"noul": prob, "confidence": prob}
+                   for qid in payload["questions"]}
+        response = {"model": "typesafe/jev-1.13-test", "answers": answers,
+                    "usage": {"cost": 0.001}}
+        return 0, json.dumps(response), ""
+    return fn
+
+
+class JevSeamJ030ClaimSupportedBySource(unittest.TestCase):
+    """J030 (roadmap row claim-vs-source support), wired into classify()'s
+    DONE branch via claim_supported_by_source(). Same shadow-only,
+    return-value-discarded contract as J025 (JevSeamJ025SecondOpinion
+    above); mirrored here rather than shared because the two seams guard
+    different call sites and different local answer types (bool vs str)."""
+
+    def setUp(self):
+        jev_g1_seam_cache.reset()
+        B.reset_j030_consult_memo()
+
+    def test_a_mode_off_makes_zero_calls_and_output_is_byte_identical(self):
+        it = item("DONE", "x")
+
+        def boom(argv, stdin_text):
+            raise AssertionError("mode off must never invoke the runner")
+
+        before = B.classify(it)
+        after = B.classify(it, jev_runner=boom)
+        self.assertEqual(before, "done")
+        self.assertEqual(before, after)
+
+    def test_b_shadow_mode_output_identical_and_one_ledger_row_written(self):
+        it = item("DONE", "x")
+        expected = B.classify(it)  # real config: off, no mocking
+        ledger_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, ledger_dir, ignore_errors=True)
+        cfg = {"modes": {"J030": "shadow"}}
+        jev_g1_seam_cache.reset()
+        with mock.patch.object(jev_seam, "load_seams_config", return_value=cfg), \
+                mock.patch.object(jev_seam, "load_registry", return_value=[_j030_entry()]), \
+                mock.patch.object(jev_seam, "DEFAULT_LEDGER_DIR", ledger_dir):
+            after = B.classify(it, jev_runner=_noul_runner(0.1))  # a "no" answer, still must not flip
+        self.assertEqual(after, expected)
+        jev_seam.drain(timeout=5)
+        decisions_path = os.path.join(ledger_dir, "decisions.jsonl")
+        self.assertTrue(os.path.isfile(decisions_path), "shadow mode must write a ledger row")
+        with open(decisions_path, encoding="utf-8") as fh:
+            rows = [ln for ln in fh if ln.strip()]
+        self.assertEqual(len(rows), 1)
+
+    def test_c_seam_path_exception_leaves_output_identical(self):
+        it = item("DONE", "x")
+        expected = B.classify(it)
+        cfg = {"modes": {"J030": "shadow"}}
+        jev_g1_seam_cache.reset()
+        with mock.patch.object(jev_seam, "load_seams_config", return_value=cfg), \
+                mock.patch.object(jev_seam, "load_registry",
+                                   side_effect=RuntimeError("registry unreadable")):
+            after = B.classify(it, jev_runner=_noul_runner(0.1))
+        self.assertEqual(after, expected)
+
+    def test_d_a_no_evidence_row_never_calls_the_seam_but_still_reads_claimed(self):
+        # The FLIGHT_WORDS/open branches of classify() never reach
+        # claim_supported_by_source() at all (only the DONE_WORDS branch
+        # calls it); a "claimed" row (DONE with empty evidence) is a
+        # local False from has_evidence() before the seam is even
+        # consulted for a live mode, since the memo key includes the
+        # empty evidence string and _J030_CONSULT_MEMO is still exercised
+        # -- assert the classify() verdict itself first.
+        it = item("DONE", "")
+        self.assertEqual(B.classify(it), "claimed")
+
+    def test_e_red_proof_wiring_that_trusts_jevs_raw_answer_breaks_test_b(self):
+        """Same red-proof shape as J025's own test_d: a call site using
+        consult()'s raw jev.answer instead of the mode-safe .answer field
+        would return Jev's own value, not the caller's local bool -- this
+        never edits board_status.py, it calls jev_seam.consult() the same
+        way claim_supported_by_source() does and shows the two disagree,
+        then confirms the real call site is wired to the safe one."""
+        it = item("DONE", "x")
+        claim = str(it.get("title") or it.get("status") or "").strip()
+        evidence = str(it.get("evidence") or "").strip()
+        current_answer = B.claim_supported_by_source(it)  # True, real config (off)
+        ledger_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, ledger_dir, ignore_errors=True)
+        cfg = {"modes": {"J030": "shadow"}}
+        jev_g1_seam_cache.reset()
+        with mock.patch.object(jev_seam, "load_seams_config", return_value=cfg), \
+                mock.patch.object(jev_seam, "load_registry", return_value=[_j030_entry()]), \
+                mock.patch.object(jev_seam, "DEFAULT_LEDGER_DIR", ledger_dir):
+            result = jev_seam.consult(
+                "J030", {"claim": claim, "evidence": evidence}, current_answer,
+                seams_config=jev_seam.load_seams_config(),
+                registry=jev_seam.load_registry(),
+                ledger_dir=jev_seam.DEFAULT_LEDGER_DIR,
+                runner=_noul_runner(0.05),  # a confident "no", opposite of current_answer
+            )
+            jev_seam.drain(timeout=5)
+            decisions_path = os.path.join(ledger_dir, "decisions.jsonl")
+            with open(decisions_path, encoding="utf-8") as fh:
+                rows = [json.loads(ln) for ln in fh if ln.strip()]
+            self.assertEqual(len(rows), 1)
+            wrongly_wired_answer = rows[0]["answer"]
+            safely_wired_answer = result.answer
+            self.assertNotEqual(wrongly_wired_answer, current_answer)
+            self.assertEqual(safely_wired_answer, current_answer)
+            after = B.classify(it, jev_runner=_noul_runner(0.05))
+        self.assertEqual(after, "done")  # current_answer == True -> classify() still says "done"
+
+
+class J030ConsultIsMemoizedPerRenderNotPerRow(unittest.TestCase):
+    """Same A4 reasoning as J025ConsultIsMemoizedPerRenderNotPerRow, for
+    J030's own memo: keyed on (claim, evidence), not the item, so repeat
+    pairs across many rows collapse to at most one consult() call each."""
+
+    def setUp(self):
+        jev_g1_seam_cache.reset()
+        B.reset_j030_consult_memo()
+
+    def test_many_rows_few_distinct_pairs_make_at_most_that_many_calls(self):
+        pairs = [("DONE", "x"), ("DONE", "y"), ("DONE", "x"), ("DONE", "")]
+        items = [item(st, ev) for st, ev in pairs] * 50  # 200 rows, 3 distinct pairs
+        self.assertEqual(len(items), 200)
+
+        calls = []
+
+        def counting_consult(entry_id, state, current_answer, **kw):
+            calls.append(state)
+            return jev_seam.SeamResult(current_answer, None, jev_seam.SHADOW,
+                                       None, False, None)
+
+        cfg = {"modes": {"J030": "shadow"}}
+        with mock.patch.object(jev_seam, "load_seams_config", return_value=cfg), \
+                mock.patch.object(jev_seam, "load_registry", return_value=[_j030_entry()]), \
+                mock.patch.object(jev_seam, "DEFAULT_LEDGER_DIR", tempfile.mkdtemp()), \
+                mock.patch.object(jev_seam, "consult", side_effect=counting_consult):
+            counts, total = B.tally(items)
+
+        self.assertEqual(total, 200)
+        self.assertLessEqual(len(calls), 3)
+
+
+class JevSeamPerfCacheNeverHitsDiskAfterWarmup(unittest.TestCase):
+    """Coordinator directive (measured regression in another wave-1
+    group: a seam in OFF mode made a hot call site 52x slower by
+    re-reading data/jev-seams.json on every call): after a first call
+    warms jev_seam's in-process cache, 1,000 further OFF-mode calls to
+    classify() must touch the filesystem zero times and return the
+    identical answer every time."""
+
+
+    def setUp(self):
+        # jev_g1_seam_cache caches the resolved mode per entry_id
+        # (module docstring: at most one jev_seam.load_seams_config()
+        # call per second) -- a call in an EARLIER test could still be
+        # "fresh" here, so reset before every test rather than rely on
+        # the freshness window happening to have elapsed. Also reset the
+        # A4 per-render consult memo, for the same reason.
+        jev_g1_seam_cache.reset()
+        B.reset_j025_consult_memo()
+    def test_1000_off_mode_calls_after_warmup_touch_no_filesystem(self):
+        it = item("DONE", "x")
+        first = B.classify(it)  # warms jev_seam's config cache
+        self.assertEqual(first, "done")
+
+        calls = {"stat": 0, "exists": 0, "open": 0}
+        real_stat, real_exists, real_open = os.stat, os.path.exists, open
+
+        def counting_stat(*a, **kw):
+            calls["stat"] += 1
+            return real_stat(*a, **kw)
+
+        def counting_exists(*a, **kw):
+            calls["exists"] += 1
+            return real_exists(*a, **kw)
+
+        def counting_open(*a, **kw):
+            calls["open"] += 1
+            return real_open(*a, **kw)
+
+        outputs = set()
+        with mock.patch("os.stat", counting_stat), \
+                mock.patch("os.path.exists", counting_exists), \
+                mock.patch("builtins.open", counting_open):
+            for _ in range(1000):
+                outputs.add(B.classify(it))
+
+        self.assertEqual(calls, {"stat": 0, "exists": 0, "open": 0},
+                         "an off-mode call must never touch the filesystem "
+                         "once jev_seam's config cache is warm")
+        self.assertEqual(outputs, {"done"})
+
+
+def _pid_alive(pid):
+    """True if `pid` is still a live process this test process can see.
+    Never raises. Mirrors test_jev_checks.py's/test_jev_decide.py's own
+    small, self-contained _pid_alive() (not worth importing across test
+    modules)."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True
+    return True
+
+
+class Item3AtexitDrainCoversG1CallSitesWithoutEditingThem(unittest.TestCase):
+    """Item 3 (A0.8 round 6, m1 and the G1 scope): the exit-drain fix
+    lives ONCE in jev_seam.py (_exit_drain_s()/_atexit_drain()) and must
+    cover every one of the eight G1 short-lived callers (board_status,
+    doc_assurance, export_public, intake_score x2,
+    mobile_hybrid_action_router x2, receipt_door) with NONE of them
+    calling drain() themselves. board_status.py's J025 call site
+    (classify(), see JevSeamJ025SecondOpinion above) stands in for all
+    eight: every one of the eight is wired through the exact same
+    jev_seam.consult() call, with no drain() of its own, so proving the
+    fix here proves it for the whole G1 shape.
+
+    Every test below runs classify() inside a REAL, separate OS process
+    (never an injected runner or an in-process atexit call in THIS
+    process), so the real atexit hook this fix lives in actually fires
+    at real process exit. seams_config is injected by monkeypatching
+    jev_seam.load_seams_config INSIDE that child process (started, never
+    stopped, so the patch is still active when atexit fires at shutdown)
+    rather than by touching the tracked data/jev-seams.json -- the same
+    technique JevSeamJ025SecondOpinion's own in-process tests already use
+    for this same function, just carried across the process boundary."""
+
+    def setUp(self):
+        self._tmp = tempfile.mkdtemp(prefix="brother-item3-g1-")
+        self.addCleanup(shutil.rmtree, self._tmp, ignore_errors=True)
+        self.state_dir = os.path.join(self._tmp, "state")
+        os.makedirs(self.state_dir)
+        self.ledger_path = os.path.join(self.state_dir, "ledger", "decisions.jsonl")
+
+    def _write_bridge(self, sleep_s):
+        """A real executable bridge: writes its own pid to the path named
+        by JEV_TEST_BRIDGE_PIDFILE (an env var, never argv[1] -- see item
+        6/FOLLOW-UPS.md's own test-pollution fix in test_jev_checks.py
+        for why argv[1] is unsafe here: decide() always appends
+        "--decisions" as the bridge's first real argument) before
+        sleeping, then answers every question with a fixed, TYPE-CORRECT
+        answer (J025 is a choice question: a bridge that always answered
+        {"noul": ...} fails jev_decide's own validation the moment
+        something actually drains for the result -- same trap
+        test_jev_checks.py's own _write_bridge fixture docstring names)."""
+        path = os.path.join(self._tmp, "bridge_%s.py" % uuid.uuid4().hex)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(
+                "#!/usr/bin/env python3\n"
+                "import sys, os, json, time\n"
+                "_pidfile = os.environ.get('JEV_TEST_BRIDGE_PIDFILE')\n"
+                "if _pidfile:\n"
+                "    with open(_pidfile, 'w') as f:\n"
+                "        f.write(str(os.getpid()))\n"
+                "time.sleep(%r)\n"
+                "data = json.loads(sys.stdin.read())\n"
+                "answers = {}\n"
+                "for qid, q in data.get('questions', {}).items():\n"
+                "    qtype = q.get('type')\n"
+                "    if qtype == 'choice':\n"
+                "        opts = list((q.get('criteria') or {}).keys()) or ['unknown']\n"
+                "        answers[qid] = {'choice': opts[0], 'probabilities': {opts[0]: 0.9}}\n"
+                "    elif qtype == 'score':\n"
+                "        crit = q.get('criteria')\n"
+                "        val = crit[0] if isinstance(crit, list) and crit else 'ok'\n"
+                "        answers[qid] = {'score': val}\n"
+                "    else:\n"
+                "        answers[qid] = {'noul': 0.9, 'confidence': 0.9}\n"
+                "print(json.dumps({'model': 'typesafe/jev-test', 'answers': answers, "
+                "'usage': {'cost': 0.001}}))\n"
+                % sleep_s
+            )
+        st = os.stat(path)
+        os.chmod(path, st.st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+        return path
+
+    def _run_child(self, cfg, bridge_argv, pidfile=None):
+        scripts_dir = os.path.dirname(os.path.abspath(B.__file__))
+        child_path = os.path.join(self._tmp, "child_%s.py" % uuid.uuid4().hex)
+        with open(child_path, "w", encoding="utf-8") as fh:
+            fh.write(
+                "import sys\n"
+                "sys.path.insert(0, %r)\n"
+                "from unittest import mock\n"
+                "import jev_seam\n"
+                "import board_status\n"
+                # Started, never stopped: the patch must still be active
+                # when the real atexit hook fires at process shutdown,
+                # after this script's own top-level code has finished.
+                "mock.patch.object(jev_seam, 'load_seams_config', return_value=%r).start()\n"
+                "board_status.classify({'status': 'IN PROGRESS'})\n"
+                "sys.stdout.write('child done\\n')\n"
+                % (scripts_dir, cfg)
+            )
+        env = dict(os.environ)
+        env["BROTHER_JEV_STATE_DIR"] = self.state_dir
+        env["BROTHER_DECISION_BRIDGE"] = " ".join(bridge_argv)
+        if pidfile:
+            env["JEV_TEST_BRIDGE_PIDFILE"] = pidfile
+        return subprocess.run([sys.executable, child_path], env=env,
+                               capture_output=True, text=True, timeout=30.0)
+
+    def _decision_rows(self):
+        if not os.path.exists(self.ledger_path):
+            return 0
+        with open(self.ledger_path, encoding="utf-8") as f:
+            return sum(1 for line in f if line.strip())
+
+    def test_3s_bridge_lands_its_ledger_row(self):
+        bridge = self._write_bridge(3.0)
+        cfg = {"modes": {"J025": "shadow"}}
+        proc = self._run_child(cfg, [sys.executable, bridge])
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("child done", proc.stdout)
+        self.assertEqual(self._decision_rows(), 1,
+                          "a G1 call site (J025) must get its shadow row landed by the central "
+                          "atexit fix alone, with no drain() call of its own in board_status.py")
+
+    def test_20s_bridge_with_a_small_cap_prints_one_stderr_line_and_leaves_no_orphan(self):
+        pidfile = os.path.join(self._tmp, "bridge.pid")
+        bridge = self._write_bridge(20.0)
+        cfg = {"modes": {"J025": "shadow"}, "call_deadline_s": 0.5}
+        proc = self._run_child(cfg, [sys.executable, bridge], pidfile=pidfile)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("child done", proc.stdout)
+        self.assertIn("atexit drain abandoned 1 shadow call", proc.stderr)
+        self.assertIn("entry id(s): J025", proc.stderr)
+        self.assertEqual(self._decision_rows(), 0)
+        self.assertTrue(os.path.exists(pidfile), "the bridge never even started")
+        with open(pidfile, encoding="utf-8") as f:
+            pid = int(f.read().strip())
+        time.sleep(0.3)  # give the OS a moment to actually reap the killed bridge
+        self.assertFalse(_pid_alive(pid),
+                          "the bridge subprocess must not survive process exit once the "
+                          "sized atexit drain has timed out")
 
 
 if __name__ == "__main__":

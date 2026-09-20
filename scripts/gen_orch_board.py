@@ -182,26 +182,34 @@ def build(wbs, status):
     pct = int(round(100.0 * c['done'] / c['total'])) if c['total'] else 0
     win = wbs['window']
     rm = wbs['role_map_tonight']
+    # Optional per-board text (2026-09-18): a WBS may carry a 'board' block so another
+    # initiative renders through this same component instead of a second renderer.
+    # Every key defaults to the ORCH-1020 text, so that board renders byte-identical.
+    bd = wbs.get('board') or {}
 
     p = ['<!doctype html><html lang="en"><head><meta charset="utf-8">',
          '<meta name="viewport" content="width=device-width,initial-scale=1">',
-         '<title>Overnight Control Plane</title><style>%s</style></head><body><div class="wrap">' % CSS]
+         '<title>%s</title><style>%s</style></head><body><div class="wrap">' % (e(bd.get('title', 'Overnight Control Plane')), CSS)]
 
     # 1 header
-    p.append('<p class="eyebrow">Brother 1.0.20 &middot; night run %s</p>' % e(status['run_id']))
-    p.append('<h1>Overnight Dual-Orchestrator Control Plane</h1>')
+    p.append('<p class="eyebrow">%s &middot; %s</p>' % (bd.get('eyebrow', 'Brother 1.0.20'), (e(bd['run_label']) if 'run_label' in bd else 'night run ' + e(status['run_id']))))
+    p.append('<h1>%s</h1>' % e(bd.get('h1', 'Overnight Dual-Orchestrator Control Plane')))
     p.append('<p class="stamp">Base revision <code>%s</code>, read from the repository of record. '
              'Page generated %s by <code>scripts/gen_orch_board.py</code> from '
-             '<code>docs/plan/ORCH-1020-WBS.json</code> and '
-             '<code>docs/plan/ORCH-1020-STATUS.json</code>, and from nothing else.</p>'
-             % (e(status['head'][:12]), e(status['generated_at'])))
+             '<code>%s</code> and '
+             '<code>%s</code>, and from nothing else.</p>'
+             % (e(status['head'][:12]), e(status['generated_at']),
+                e(bd.get('wbs_name', 'docs/plan/ORCH-1020-WBS.json')), e(bd.get('status_name', 'docs/plan/ORCH-1020-STATUS.json'))))
 
     # 2 north star
-    p.append('<div class="northstar"><strong>North star</strong>'
-             'The founder goes offline, both orchestrator processes may die and restart, '
-             'bounded subagents keep working, truth stays serial at integration, and the '
-             'morning handoff explains exactly what happened without anyone reading a model '
-             'transcript. Finishing these boxes is the price of admission, not the goal.</div>')
+    if 'northstar' in bd:
+        p.append('<div class="northstar"><strong>North star</strong>%s</div>' % e(bd['northstar']))
+    else:
+        p.append('<div class="northstar"><strong>North star</strong>'
+                 'The founder goes offline, both orchestrator processes may die and restart, '
+                 'bounded subagents keep working, truth stays serial at integration, and the '
+                 'morning handoff explains exactly what happened without anyone reading a model '
+                 'transcript. Finishing these boxes is the price of admission, not the goal.</div>')
 
     # 3 at a glance
     running = [u['id'] for u in units
@@ -214,24 +222,28 @@ def build(wbs, status):
              % (e(', '.join(running)) if running else '<span class="none">nothing running</span>'))
     p.append('<div class="card"><div class="k">Waiting on Khalil</div><div class="v">%s</div></div>'
              % (e('%d decision(s)' % len(waiting)) if waiting
-                else '<span class="none">nothing, by design: this is an unattended run</span>'))
+                else '<span class="none">%s</span>' % e(bd.get('waiting_none', 'nothing, by design: this is an unattended run'))))
     p.append('<div class="card"><div class="k">Risk watch</div><div class="v">%s</div></div>'
              % (e('%d open' % len(risks)) if risks else '<span class="none">none open</span>'))
-    p.append('<div class="card"><div class="k">Forecast</div><div class="v">Drain %s, hard stop %s</div></div>'
-             % (e(win['drain_start'][11:16]), e(win['hard_stop'][11:16])))
+    if 'forecast' in bd:
+        p.append('<div class="card"><div class="k">Forecast</div><div class="v">%s</div></div>' % e(bd['forecast']))
+    else:
+        p.append('<div class="card"><div class="k">Forecast</div><div class="v">Drain %s, hard stop %s</div></div>'
+                 % (e(win['drain_start'][11:16]), e(win['hard_stop'][11:16])))
     p.append('<div class="card"><div class="k">Ticked</div><div class="v"><strong>%d of %d</strong> (%d%%)%s</div></div>'
              % (c['done'], c['total'], pct,
                 (', plus %d claim(s) with no evidence, excluded' % c['claim']) if c['claim'] else ''))
     p.append('</div>')
 
     # 4 the two charts
-    short = [u for u in units if u['wave'] <= 3]
-    longr = [u for u in units if u['wave'] > 3]
-    p.append(gantt_table(short, status, wbs, 'Short range: the protocol spine (waves 0 to 3)',
+    split = bd.get('wave_split', 3)
+    short = [u for u in units if u['wave'] <= split]
+    longr = [u for u in units if u['wave'] > split]
+    p.append(gantt_table(short, status, wbs, bd.get('short_title', 'Short range: the protocol spine (waves 0 to 3)'),
                          'These rows are the critical path. The steering document forbids '
                          'parallelising them against each other where they touch the same '
                          'authority contract, so the graph is deliberately narrow here.'))
-    p.append(gantt_table(longr, status, wbs, 'Long range: execution, faults and closeout (waves 4 to 7)',
+    p.append(gantt_table(longr, status, wbs, bd.get('long_title', 'Long range: execution, faults and closeout (waves 4 to 7)'),
                          'These widen once the protocol is stable. ORCH-02 and ORCH-10 both '
                          'write the shared spine files and are sequenced against each other, '
                          'never run side by side.'))
@@ -353,11 +365,52 @@ def backlog(units, status):
     return {'source': 'scripts/gen_orch_board.py', 'rows': rows}
 
 
+USAGE = """usage: gen_orch_board.py [--wbs PATH] [--status PATH] [--out PATH] [--backlog PATH] [--check]
+
+Render the ORCH-1020 overnight control-plane board (or another initiative's,
+when --wbs/--status/--out/--backlog point elsewhere).
+
+  --wbs PATH      WBS json source (default: docs/plan/ORCH-1020-WBS.json)
+  --status PATH   status json source (default: docs/plan/ORCH-1020-STATUS.json)
+  --out PATH      board html output (default: docs/plan/ORCH-1020-GANTT.html)
+  --backlog PATH  backlog json output (default: docs/plan/ORCH-1020-BACKLOG.json)
+  --check         print tick-contract counts and closure findings, write
+                  nothing, exit 1 if any claim or finding exists, else 0
+  -h, --help      print this message and exit 0, writing nothing"""
+
+VALUE_FLAGS = ('--wbs', '--status', '--out', '--backlog')
+BOOL_FLAGS = ('--check', '--help', '-h')
+
+
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
+    # --wbs/--status/--out/--backlog let another initiative use this component;
+    # with none given the ORCH-1020 paths are used exactly as before.
+    if '--help' in argv or '-h' in argv:
+        print(USAGE)
+        return 0
+    i = 0
+    while i < len(argv):
+        tok = argv[i]
+        if tok in VALUE_FLAGS:
+            if i + 1 >= len(argv):
+                print('orch-board: %s needs a value (see --help)' % tok, file=sys.stderr)
+                return 2
+            i += 2
+            continue
+        if tok in BOOL_FLAGS:
+            i += 1
+            continue
+        print('orch-board: unknown flag %r (see --help)' % tok, file=sys.stderr)
+        return 2
+
+    def flag(name, default):
+        return argv[argv.index(name) + 1] if name in argv and argv.index(name) + 1 < len(argv) else default
+    wbs_path, status_path = flag('--wbs', WBS), flag('--status', STATUS)
+    output, backlog_path = flag('--out', OUTPUT), flag('--backlog', BACKLOG)
     try:
-        wbs = load(WBS)
-        status = load(STATUS)
+        wbs = load(wbs_path)
+        status = load(status_path)
     except (OSError, ValueError) as exc:
         print('orch-board: NO-DATA, cannot read a source: %s' % exc, file=sys.stderr)
         return 2
@@ -372,15 +425,15 @@ def main(argv=None):
         if findings:
             print('orch-board: %d closure integrity finding(s)' % len(findings))
         return 1 if (c['claim'] or findings) else 0
-    with open(OUTPUT, 'w', encoding='utf-8') as fh:
+    with open(output, 'w', encoding='utf-8') as fh:
         fh.write(page)
-    tmp = BACKLOG + '.tmp'
+    tmp = backlog_path + '.tmp'
     with open(tmp, 'w', encoding='utf-8') as fh:
         json.dump(backlog(wbs['units'], status), fh, indent=1)
-    os.replace(tmp, BACKLOG)
+    os.replace(tmp, backlog_path)
     c = counts(wbs['units'], status)
     print('orch-board: wrote %s, %d of %d ticked, %d claim(s) without evidence'
-          % (OUTPUT, c['done'], c['total'], c['claim']))
+          % (output, c['done'], c['total'], c['claim']))
     return 0
 
 

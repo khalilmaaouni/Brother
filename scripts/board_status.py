@@ -559,18 +559,139 @@ def has_evidence(item):
     return bool(str(item.get("evidence") or "").strip())
 
 
-def classify(item):
+#: A4 fix (opus-review-g1-round2-pkg-decide.md): classify() used to consult
+#: J025 unconditionally whenever the seam was live, once per roadmap ROW --
+#: 671 calls measured on the live board render against only 7 distinct
+#: status strings. Status strings repeat heavily (DONE_WORDS/FLIGHT_WORDS
+#: collapse many raw values), so a status this render has already asked
+#: Jev about tells a later row with the SAME status nothing new. Keyed on
+#: the status string, not the item, because two different rows with the
+#: same status are the same question to J025. Reset once per render (see
+#: reset_j025_consult_memo(), called by main()); never carried across
+#: processes, and staleness here can only delay a ledger row, never change
+#: the keyword verdict classify() returns (C1: the return value is always
+#: the local `answer`, whatever consult() says).
+_J025_CONSULT_MEMO = set()
+
+
+def reset_j025_consult_memo():
+    """Clears classify()'s per-render J025 memo. main() calls this once at
+    the top of every render; tests call it the same way they call
+    jev_g1_seam_cache.reset(), so a status memoized by an earlier test or
+    an earlier render does not silently suppress this render's own first
+    consult for that status."""
+    _J025_CONSULT_MEMO.clear()
+
+
+def classify(item, *, jev_runner=None):
     """'done', 'claimed', 'in_flight', or 'open'.
 
     'claimed' is the important one: a DONE with no evidence. Folding it into
     done is how a board starts flattering itself, and the whole point of a
-    progress bar somebody trusts is that it cannot."""
+    progress bar somebody trusts is that it cannot.
+
+    JEV-G1 wave-1 seam J025 (registry: roadmap row status classify):
+    second-opinions this keyword classify via jev_seam.consult(), off by
+    default in data/jev-seams.json, called for its side effect only (the
+    calibration ledger row and A0.6 audit sample) -- WAVE 1 IS
+    SHADOW-ONLY BY CONTRACT (opus-review-seams-g1-g3.md, C1): this
+    function ALWAYS returns its own local `answer`, never consult()'s,
+    whatever mode says, including "act": a raw noul or score answer is
+    not even the right TYPE for this function's return value, and there
+    is no promoted, calibrated evidence for this entry yet to make "act"
+    a real path today regardless. `jev_runner` exists only so a test can
+    inject a scripted bridge without touching the network. At most one
+    consult() call per distinct status string per render (see
+    _J025_CONSULT_MEMO above)."""
     st = str(item.get("status") or "").upper().strip()
     if any(w in st for w in DONE_WORDS):
-        return "done" if has_evidence(item) else "claimed"
-    if any(w in st for w in FLIGHT_WORDS):
-        return "in_flight"
-    return "open"
+        answer = "done" if claim_supported_by_source(item, jev_runner=jev_runner) else "claimed"
+    elif any(w in st for w in FLIGHT_WORDS):
+        answer = "in_flight"
+    else:
+        answer = "open"
+    try:
+        import jev_g1_seam_cache
+        if not jev_g1_seam_cache.is_off("J025") and st not in _J025_CONSULT_MEMO:
+            import jev_seam
+            jev_seam.consult(
+                "J025", {"status": st}, answer,
+                seams_config=jev_seam.load_seams_config(),
+                registry=jev_seam.load_registry(),
+                ledger_dir=jev_seam.DEFAULT_LEDGER_DIR,
+                runner=jev_runner,
+            )  # C1: return value intentionally discarded, see docstring above
+            _J025_CONSULT_MEMO.add(st)
+    except Exception:
+        pass  # sbe: allow-silent the seam is advisory only, classify() keeps its own keyword verdict
+    return answer
+
+
+#: J030 memo (same A4 pattern as _J025_CONSULT_MEMO above): claim/evidence
+#: pairs repeat across rows, so a (claim, evidence) this render has already
+#: asked Jev about tells a later row with the SAME pair nothing new. Keyed
+#: on the (claim, evidence) pair, not the item, because two different rows
+#: with the same claim and quoted evidence are the same question to J030.
+#: Reset once per render (see reset_j030_consult_memo(), called by main()
+#: alongside reset_j025_consult_memo()); never carried across processes,
+#: and staleness here can only delay a ledger row, never change the local
+#: verdict claim_supported_by_source() returns (C1: return is always local
+#: `answer`, whatever consult() says).
+_J030_CONSULT_MEMO = set()
+
+
+def reset_j030_consult_memo():
+    """Clears claim_supported_by_source()'s per-render J030 memo. main()
+    calls this once at the top of every render alongside
+    reset_j025_consult_memo(); tests call it the same way they call
+    jev_g1_seam_cache.reset()."""
+    _J030_CONSULT_MEMO.clear()
+
+
+def claim_supported_by_source(item, *, jev_runner=None):
+    """True iff the row's DONE-claim is locally supported by quoted evidence.
+
+    Local ground truth is has_evidence(item): non-empty `evidence` text.
+    Deliberately no semantic word-overlap check here -- that would change
+    classify() verdicts on existing boards. Semantics live entirely in
+    J030's second opinion (ledger only, see below).
+
+    JEV-G1 wave-1 seam J030 (registry: roadmap row claim-vs-source support,
+    noul yes/no: does the row's claim match its quoted evidence text):
+    second-opinions this local bool via jev_seam.consult(), off by default
+    in data/jev-seams.json, called for its side effect only (the
+    calibration ledger row and A0.6 audit sample) -- WAVE 1 IS
+    SHADOW-ONLY BY CONTRACT (opus-review-seams-g1-g3.md, C1): this
+    function ALWAYS returns its own local `answer`, never consult()'s,
+    whatever mode says, including "act": a raw noul/abstain answer is
+    ledger signal only, never obeyed, and there is no promoted, calibrated
+    evidence for this entry yet to make "act" a real path today
+    regardless. `jev_runner` exists only so a test can inject a scripted
+    bridge without touching the network. At most one consult() call per
+    distinct (claim, evidence) pair per render (see _J030_CONSULT_MEMO
+    above)."""
+    claim = str(
+        item.get("claim") or item.get("title") or item.get("text")
+        or item.get("status") or ""
+    ).strip()
+    evidence = str(item.get("evidence") or "").strip()
+    answer = has_evidence(item)  # == bool(evidence); preserves classify() behavior
+    memo_key = (claim, evidence)
+    try:
+        import jev_g1_seam_cache
+        if not jev_g1_seam_cache.is_off("J030") and memo_key not in _J030_CONSULT_MEMO:
+            import jev_seam
+            jev_seam.consult(
+                "J030", {"claim": claim, "evidence": evidence}, answer,
+                seams_config=jev_seam.load_seams_config(),
+                registry=jev_seam.load_registry(),
+                ledger_dir=jev_seam.DEFAULT_LEDGER_DIR,
+                runner=jev_runner,
+            )  # C1: return value intentionally discarded, see docstring above
+            _J030_CONSULT_MEMO.add(memo_key)
+    except Exception:
+        pass  # sbe: allow-silent the seam is advisory only, caller keeps its own local verdict
+    return answer
 
 
 def tally(items):
@@ -668,6 +789,8 @@ def main(argv=None):
                     help="unit trace jsonl path (else BROTHER_UNIT_TRACE, "
                          "else ~/.claude/unit-trace.jsonl)")
     args = ap.parse_args(list(sys.argv[1:] if argv is None else argv))
+    reset_j025_consult_memo()  # A4: one render, one memo (see its own docstring)
+    reset_j030_consult_memo()  # same reason, J030's own per-render memo
 
     if args.vault_counters:
         _print_vault_counters(vault_counters())

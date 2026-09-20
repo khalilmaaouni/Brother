@@ -383,5 +383,68 @@ class Night0912BmVaultStaleness(unittest.TestCase):
         self.assertIsNotNone(problem)
 
 
+class TestJ089VaultNoteTypeNeverChangesTheRegexAnswer(unittest.TestCase):
+    """J089, wave-1 ('Vault note type classify'): _note_type()'s own regex
+    read of the frontmatter `type:` field is `current_answer` for a shadow
+    consult() fired by _note_type_second_opinion(), called from classify()
+    immediately after. C1: whatever the seam says, horizon_days() below
+    still sees exactly what _note_type() itself returned."""
+
+    def setUp(self):
+        # scripts/ is already on sys.path (module-level _e100 setup above);
+        # importing jev_checks/jev_seam here returns the SAME cached module
+        # objects _note_type_second_opinion()'s own lazy import will use.
+        import jev_checks as real_jev_checks
+        self.jev_checks = real_jev_checks
+        self._real_check = real_jev_checks.check_vault_note_type
+
+    def tearDown(self):
+        self.jev_checks.check_vault_note_type = self._real_check
+
+    def test_a_normal_call_consults_the_seam_and_keeps_the_real_type(self):
+        seen = {}
+        def fake(note_text, current_answer, **k):
+            seen["note_text"] = note_text
+            seen["current_answer"] = current_answer
+            return "gotcha"  # an adversarial-looking Jev answer, still discarded
+        self.jev_checks.check_vault_note_type = fake
+        text = "---\ntype: decision\n---\nbody"
+        answer = st._note_type_second_opinion(text)
+        self.assertEqual(answer, "decision")
+        self.assertEqual(seen["current_answer"], "decision")
+        self.assertEqual(seen["note_text"], text)
+        # And the real caller, classify(), still routes on the real type:
+        # a "decision" horizon (180d) demotes at 200 days, unaffected by
+        # the seam's "gotcha" answer above.
+        old = (TODAY - datetime.timedelta(days=200)).isoformat()
+        state, _v, _a, _p = st.classify(note("decision", old), today=TODAY)
+        self.assertEqual(state, "stale")
+
+    def test_jev_checks_unreachable_still_returns_the_real_type(self):
+        """Simulates _jevpath.mount() finding no scripts/ sibling (the real
+        failure this fail-open path defends against)."""
+        import _jevpath
+        real_mount = _jevpath.mount
+        _jevpath.mount = lambda: False
+        try:
+            answer = st._note_type_second_opinion("---\ntype: reference\n---\nbody")
+        finally:
+            _jevpath.mount = real_mount
+        self.assertEqual(answer, "reference")
+
+    def test_a_raising_seam_never_loses_the_real_type(self):
+        self.jev_checks.check_vault_note_type = \
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
+        answer = st._note_type_second_opinion("---\ntype: failure\n---\nbody")
+        self.assertEqual(answer, "failure")
+
+    def test_no_type_field_still_returns_the_real_empty_answer(self):
+        called = []
+        self.jev_checks.check_vault_note_type = lambda *a, **k: called.append(1)
+        answer = st._note_type_second_opinion("no frontmatter at all")
+        self.assertEqual(answer, "")
+        self.assertEqual(len(called), 1)  # still fires: an absent type is a real answer, not skipped
+
+
 if __name__ == "__main__":
     unittest.main()

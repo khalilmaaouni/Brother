@@ -8,6 +8,7 @@ the four things the module claims and refuses to take any of them on trust.
 """
 import json
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -210,14 +211,26 @@ class TheRealDecisionStillResolves(unittest.TestCase):
         whole directory before this filter was added: 5 non-decide.py files,
         every one of them missing "options", every decide.py file carrying
         it. Without this, a new architecture record in that directory fails
-        THIS module's own tests for a shape it was never in."""
+        THIS module's own tests for a shape it was never in.
+
+        THE KEY ALONE STOPPED BEING ENOUGH: jev-competitive-edge-2026-09-19.json,
+        a WBS-linked competitive-edge ruling with its own unrelated "options"
+        list of plain id strings, tripped this filter the day it landed and
+        failed every downstream test written for a real decide.py option
+        object. Checked against the whole directory when this line was added:
+        every one of the 83 real decide.py specs has "options" as a list of
+        DICTS; this is the only file where it is a list of strings. That is
+        the added distinguishing signal, not just the key's presence."""
         found = []
         for name in sorted(os.listdir(self.DECISIONS)):
             if not name.endswith(".json"):
                 continue
             with open(os.path.join(self.DECISIONS, name), encoding="utf-8") as fh:
                 spec = json.load(fh)
-            if "options" not in spec:
+            opts = spec.get("options")
+            if not isinstance(opts, list) or not opts:
+                continue
+            if not all(isinstance(o, dict) for o in opts):
                 continue
             found.append((name, spec))
         return found
@@ -253,12 +266,36 @@ class TheRealDecisionStillResolves(unittest.TestCase):
     #: clone read red.
     MACHINE_SCOPE = "machine"
 
+    #: A source can also honestly cite nothing that was ever a file: a
+    #: session's own report to the founder, a command's typed argument text,
+    #: "this repo, tonight's own work". Inventing a path for these would be
+    #: fabrication (there is no file to name), and refusing to cite them at
+    #: all would throw away the evidence. Such a source declares scope
+    #: "narrative" and is exempt from file-existence checking, exactly like
+    #: "machine" is -- but the flag is not a mute button here either: a
+    #: narrative source must not ALSO look like a file path (a "/" segment
+    #: ending in a short extension, e.g. "docs/plan/journal.jsonl"), because
+    #: that shape means the citation was probably meant as a real file and
+    #: the author mistyped or forgot the path, which "narrative" must never
+    #: paper over. Checked in both directions, same as machine scope.
+    NARRATIVE_SCOPE = "narrative"
+    _LOOKS_LIKE_A_FILE = re.compile(r"/[^\s/]+\.[A-Za-z0-9]{1,6}\b")
+
     def test_every_source_names_a_file_that_exists(self):
         """The flag is not a mute button, so it is checked in both directions: a
         machine level source must name a path that is outside this tree by
-        construction, and an outside path carrying no flag still fails."""
+        construction, an outside path carrying no flag still fails, and a
+        narrative source must not be shaped like a file citation in disguise.
+        Every offender is COLLECTED and reported together, never truncated at
+        the first one: a source guard that stops at the first offender hid
+        every sibling behind it."""
         missing = []
         machine = []
+        narrative = []
+        machine_misscoped = []
+        unflagged_outside = []
+        narrative_misscoped = []
+        narrative_file_shaped = []
         for name, spec in self.specs():
           for opt in spec["options"]:
             for s in opt.get("sources") or []:
@@ -266,23 +303,58 @@ class TheRealDecisionStillResolves(unittest.TestCase):
                 if not p:
                     continue
                 outside = p.startswith("~") or os.path.isabs(p)
-                if s.get("scope") == self.MACHINE_SCOPE:
-                    self.assertTrue(
-                        outside,
-                        "%s: %r is declared machine level but is a repo relative "
-                        "path, so it must exist in this tree" % (opt["name"], p))
+                scope = s.get("scope")
+                if scope == self.MACHINE_SCOPE:
+                    if not outside:
+                        machine_misscoped.append(
+                            "%s: %r is declared machine level but is a repo relative "
+                            "path, so it must exist in this tree" % (opt["name"], p))
+                        continue
                     machine.append(p)
                     continue
-                self.assertFalse(
-                    outside,
-                    "%s: %r points outside this tree, so it must declare scope "
-                    "%r; this test never expands ~ and never reads the machine "
-                    "it runs on" % (opt["name"], p, self.MACHINE_SCOPE))
+                if scope == self.NARRATIVE_SCOPE:
+                    if outside:
+                        narrative_misscoped.append(
+                            "%s: %r is declared narrative but is shaped like a "
+                            "machine path, so it should declare scope %r instead"
+                            % (opt["name"], p, self.MACHINE_SCOPE))
+                        continue
+                    if self._LOOKS_LIKE_A_FILE.search(p):
+                        narrative_file_shaped.append(
+                            "%s: %r is declared narrative but is shaped like a file "
+                            "citation, so it must be a real repo-relative path (or "
+                            "scope %r) instead of scope %r"
+                            % (opt["name"], p, self.MACHINE_SCOPE, self.NARRATIVE_SCOPE))
+                        continue
+                    narrative.append(p)
+                    continue
+                if outside:
+                    unflagged_outside.append(
+                        "%s: %r points outside this tree, so it must declare scope "
+                        "%r; this test never expands ~ and never reads the machine "
+                        "it runs on" % (opt["name"], p, self.MACHINE_SCOPE))
+                    continue
                 if not os.path.isfile(os.path.join(ROOT, p)):
                     missing.append(p)
         if machine:
             print("%s: %d source(s) are machine level, so their existence was "
                   "not checked: %s" % (D.NODATA, len(machine), ", ".join(machine)))
+        if narrative:
+            print("%s: %d source(s) are narrative (no file ever existed), so "
+                  "their existence was not checked: %s"
+                  % (D.NODATA, len(narrative), ", ".join(narrative)))
+        self.assertEqual(machine_misscoped, [],
+                          "machine scoped sources name a repo relative path: %s"
+                          % machine_misscoped)
+        self.assertEqual(unflagged_outside, [],
+                          "sources point outside this tree without declaring "
+                          "machine scope: %s" % unflagged_outside)
+        self.assertEqual(narrative_misscoped, [],
+                          "narrative scoped sources are shaped like a machine "
+                          "path: %s" % narrative_misscoped)
+        self.assertEqual(narrative_file_shaped, [],
+                          "narrative scoped sources are shaped like a file "
+                          "citation: %s" % narrative_file_shaped)
         self.assertEqual(missing, [], "sources cite missing files: %s" % missing)
 
     def assert_unscored_record(self, name, spec):

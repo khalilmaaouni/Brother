@@ -394,6 +394,64 @@ def duplicate_suspects(distill_mod, candidate_title, existing):
     return hits
 
 
+def _dedup_second_opinion(distill_mod, candidate_title, existing, note_text,
+                           runner=None, rng=None):
+    """J118, wave-2 Jev seam ("Vault write-time dedup adjudicator"). Registry:
+    given a drafted note and the top-3 deterministically-retrieved candidate
+    notes, second-opinions SAME_ROOT_CAUSE_MERGE / RELATED_LINK_ONLY /
+    NOVEL_KEEP / UNKNOWN, for the calibration ledger only, fired immediately
+    AFTER duplicate_suspects() (this file, directly above) has already
+    computed its real title-overlap result, never before.
+
+    INVARIANT (C1, registry fail_direction): this function's return value IS
+    duplicate_suspects()'s own real return value, unchanged. _admit_one()
+    (this file, around line 568) decides whether the note carries the
+    'duplicate-suspect' dirt class -- and everything else about whether or
+    how it is written -- entirely from the list this function returns,
+    exactly as it would if this wrapper did not exist; whatever the seam
+    answers is fired-and-discarded here, never read by the caller. A merge
+    is never auto-applied by this function or anywhere downstream, only ever
+    a logged suggestion for a later human vault-gc pass.
+
+    `current_answer` handed to the seam is derived, here, from that same
+    real result: NOVEL_KEEP when duplicate_suspects() found nothing over
+    DUP_THRESHOLD, RELATED_LINK_ONLY when it did -- the deterministic layer
+    only ever flags a title-overlap suspect for later review, it never
+    merges, so RELATED_LINK_ONLY (not SAME_ROOT_CAUSE_MERGE) is its honest
+    current answer.
+
+    Fail-open like every other wave-1/2/3 seam call site in this estate:
+    jev_checks/jev_seam live in scripts/, mounted lazily here via
+    _jevpath.mount() (this file lives in products/brothermode/tools/, a
+    different directory)."""
+    dup_links = duplicate_suspects(distill_mod, candidate_title, existing)
+    current_answer = "RELATED_LINK_ONLY" if dup_links else "NOVEL_KEEP"
+    try:
+        here = os.path.dirname(os.path.abspath(__file__))
+        if here not in sys.path:
+            sys.path.insert(0, here)
+        import _jevpath
+        if _jevpath.mount():
+            import jev_checks
+            import jev_seam
+            titles_by_id = {}
+            for title, rel, nid in existing:
+                titles_by_id[nid or rel] = title
+            top3 = sorted(dup_links, key=lambda pair: pair[1], reverse=True)[:3]
+            candidates = [{"id": ident, "title": titles_by_id.get(ident), "score": score}
+                          for ident, score in top3]
+            jev_checks.check_vault_dedup_adjudication(
+                candidate_title, note_text, candidates, current_answer,
+                seams_config=jev_seam.load_seams_config(),
+                registry=jev_seam.load_registry(),
+                ledger_dir=jev_seam.DEFAULT_LEDGER_DIR,
+                runner=runner, rng=rng,
+            )  # C1: return value intentionally discarded, shadow-only by contract
+    except Exception:  # noqa: BLE001  # this seam is advisory only, never worth breaking a real admission
+        pass
+    return dup_links
+
+
 def classify_marker(audit_mod, text):
     """(status, event_id) where status is "echo", "forged", "unverifiable", or None
     (no marker line present at all, the common case). THE FIX for the forgeable-marker
@@ -642,7 +700,7 @@ def _admit_one(src, args, ids_mod, distill_mod, taken_ids, existing_titles):
     # marker fix exists to force, since excluding an unverified marker from
     # corroboration is the same evidence-laundering hole with an extra step.
     if distill_mod is not None and marker_status != "echo":
-        dup_links = duplicate_suspects(distill_mod, candidate_title, existing_titles)
+        dup_links = _dedup_second_opinion(distill_mod, candidate_title, existing_titles, text)
         if dup_links:
             dirt.append("duplicate-suspect")
 

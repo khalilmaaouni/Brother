@@ -52,6 +52,9 @@
       "brothersbe-work",
       "using-brother"
     ],
+    "brotherds": [
+      "brotherds"
+    ],
     "brothermode": [
       "auto",
       "brotherme-auto",
@@ -103,8 +106,9 @@
   },
   "shipped_plugins": [
     "brother",
+    "brotherds",
     "brothermode",
     "brothersbe"
   ],
-  "total": 94
+  "total": 95
 }

@@ -69,8 +69,10 @@ root, no subprocess needed, and the walk is built once per root and reused acros
 import argparse
 import importlib.util
 import json
+import math
 import os
 import re
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -168,6 +170,26 @@ def _file_resolves(anchor, root, idx):
     return False
 
 
+# ORPHAN (2026-09-11): nine greps from this module were found alive for 30 minutes under launchd,
+# output to /dev/null. The reaping below lives in a finally, and a SIGKILLed process runs no
+# finally. One such kill is routine: the recall hook runs bm_vault check under
+# subprocess.run(timeout=12), whose timeout SIGKILLs the child; test_bm_freshness drives exactly
+# that kill and watched the grep outlive it. Each grep now sets its own alarm before
+# exec (an alarm survives exec) and dies on its own after its budget plus a grace, or after this
+# cap when it has no budget, whatever happens to the process that started it.
+_GREP_GRACE_S = 2
+_GREP_CAP_S = 60
+
+
+def _expire_after(seconds):
+    """preexec_fn for a grep: SIGALRM, whose default action terminates, after `seconds`. None where
+    there is no alarm (Windows), which is also the only place preexec_fn is refused."""
+    if not hasattr(signal, "alarm"):
+        return None
+    secs = max(1, int(math.ceil(seconds)))
+    return lambda: signal.alarm(secs)
+
+
 def _symbol_resolves(anchor, root):
     """A symbol-shaped anchor resolves if it still appears verbatim anywhere under root. -m 1
     stops at the first hit; this only needs to know whether the symbol exists somewhere, not
@@ -179,7 +201,8 @@ def _symbol_resolves(anchor, root):
         cmd.append("--exclude-dir=" + d)
     cmd += ["--", anchor, root]
     try:
-        out = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
+        out = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20,
+                             preexec_fn=_expire_after(20 + _GREP_GRACE_S))
         return out.returncode == 0
     except Exception:
         return False
@@ -246,13 +269,15 @@ def _symbol_resolves_any(anchors, roots, budget):
         if budget <= 0:
             return False, list(roots)
     deadline = time.time() + budget if budget is not None else None
+    expire = _expire_after(budget + _GREP_GRACE_S if budget is not None else _GREP_CAP_S)
     pending = []
     launch_failed = []
     for root in roots:
         try:
             pending.append((root, subprocess.Popen(_symbol_grep_cmd(anchors, root),
                                                     stdout=subprocess.DEVNULL,
-                                                    stderr=subprocess.DEVNULL)))
+                                                    stderr=subprocess.DEVNULL,
+                                                    preexec_fn=expire)))
         except OSError:
             # A root that never launched must still be reported skipped: this
             # function's own contract (see resolve_any_anchor's docstring) is
@@ -270,6 +295,10 @@ def _symbol_resolves_any(anchors, roots, budget):
                     return True, []
                 if rc is None:
                     still.append((root, p))
+                elif rc < 0:
+                    # Killed by a signal (its own alarm, or anyone's): it never finished looking,
+                    # so the root is unchecked, never a miss.
+                    launch_failed.append(root)
             pending = still
             if pending:
                 time.sleep(0.02)

@@ -80,6 +80,96 @@ class ItCatchesTheDriftItWasBuiltFor(unittest.TestCase):
         self.assertIn("worse direction", drift[0][2])
 
 
+class J029NeverChangesAFiredDriftFinding(unittest.TestCase):
+    """J029, wave-2: fired only once the regex first pass above already
+    produced a DRIFT, to classify its flavor for the calibration ledger.
+    C1: whatever Jev says, the caller's own finding tuple is unchanged."""
+
+    def test_a_clean_row_never_even_consults_the_seam(self):
+        real_check = D.jev_checks.check_drift_classification
+        called = []
+        D.jev_checks.check_drift_classification = lambda *a, **k: called.append(1)
+        try:
+            doc = board([{"id": "CLEAN", "status": "DONE",
+                          "evidence": "measured and closed"}])
+            drift = D.check_status_against_evidence(doc)
+        finally:
+            D.jev_checks.check_drift_classification = real_check
+        self.assertEqual(drift, [])
+        self.assertEqual(called, [])
+
+    def test_a_fired_drift_consults_the_seam_with_the_evidence_text(self):
+        real_check = D.jev_checks.check_drift_classification
+        seen = {}
+        def fake(evidence_text, current_answer, **k):
+            seen["evidence_text"] = evidence_text
+            seen["current_answer"] = current_answer
+            return None
+        D.jev_checks.check_drift_classification = fake
+        try:
+            doc = board([{"id": "X", "status": "SCHEDULED",
+                          "evidence": "DECIDED 2026-08-29: measured and closed"}])
+            drift = D.check_status_against_evidence(doc)
+        finally:
+            D.jev_checks.check_drift_classification = real_check
+        self.assertTrue(drift)
+        self.assertIn("DECIDED", seen["evidence_text"])
+        self.assertEqual(seen["current_answer"], drift[0])
+
+    def test_a_raising_seam_never_loses_the_real_drift_finding(self):
+        real_check = D.jev_checks.check_drift_classification
+        D.jev_checks.check_drift_classification = \
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
+        try:
+            doc = board([{"id": "X", "status": "SCHEDULED",
+                          "evidence": "DECIDED 2026-08-29: measured and closed"}])
+            drift = D.check_status_against_evidence(doc)
+        finally:
+            D.jev_checks.check_drift_classification = real_check
+        self.assertTrue(drift)
+        self.assertEqual(drift[0][0], "DRIFT")
+
+    def test_an_adversarial_seam_answer_never_clears_the_flag(self):
+        """Rigged the opposite of what a fired DRIFT should get: Jev
+        answers 'on-track'. The finding must still read DRIFT."""
+        real_check = D.jev_checks.check_drift_classification
+        D.jev_checks.check_drift_classification = lambda *a, **k: "on-track"
+        try:
+            doc = board([{"id": "X", "status": "SCHEDULED",
+                          "evidence": "DECIDED 2026-08-29: measured and closed"}])
+            drift = D.check_status_against_evidence(doc)
+        finally:
+            D.jev_checks.check_drift_classification = real_check
+        self.assertEqual(len(drift), 1)
+        self.assertEqual(drift[0][0], "DRIFT")
+
+    def test_complaints_path_also_consults_and_never_changes_the_finding(self):
+        real_check = D.jev_checks.check_drift_classification
+        called = []
+        D.jev_checks.check_drift_classification = \
+            lambda *a, **k: called.append(1)
+        try:
+            doc = board(features=[{"id": "N1", "status": "DONE",
+                                   "closes_complaint": ["P3"]}],
+                       complaints={"P3": {"verdict": "NOT-ADDRESSED"}})
+            drift = [f for f in D.check_complaints(doc) if f[0] == "DRIFT"]
+        finally:
+            D.jev_checks.check_drift_classification = real_check
+        self.assertTrue(drift)
+        self.assertEqual(len(called), 1)
+
+    def test_jev_checks_unavailable_still_finds_the_real_drift(self):
+        real_jev_checks = D.jev_checks
+        D.jev_checks = None
+        try:
+            doc = board([{"id": "X", "status": "SCHEDULED",
+                          "evidence": "DECIDED 2026-08-29: measured and closed"}])
+            drift = D.check_status_against_evidence(doc)
+        finally:
+            D.jev_checks = real_jev_checks
+        self.assertTrue(drift)
+
+
 class ItRefusesToManufactureAViolation(unittest.TestCase):
     """Four classes, all of which this checker actually produced first."""
 

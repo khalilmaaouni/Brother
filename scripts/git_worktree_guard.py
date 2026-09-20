@@ -120,6 +120,38 @@ def check_stash(args, directory):
     return None
 
 
+def check_worktree_remove(args, directory):
+    """`git worktree remove <path> [--force]`. Without --force, git already
+    refuses on its own when the worktree is dirty -- this guard exists only
+    for the --force case, which bypasses that built-in protection exactly
+    the way it did on 2026-09-19: a worktree carrying real uncommitted
+    source changes (beyond an already-committed, already-merged base) was
+    force-removed in a batch of otherwise-safe cleanups, with no per-item
+    check in that same command."""
+    if '--force' not in args and '-f' not in args:
+        return None
+    paths = [a for a in args if not a.startswith('-')]
+    if not paths:
+        return None
+    target = paths[0]
+    if not os.path.isabs(target):
+        target = os.path.join(directory, target)
+    if status_is_dirty(target, '.'):
+        return ("'{0}' has uncommitted working tree changes; --force would discard "
+                "them permanently. Save a patch first (git -C {0} diff > file.patch), "
+                "or commit, before removing.").format(target)
+    return None
+
+
+def check_worktree(args, directory):
+    if not args:
+        return None
+    sub = args[0]
+    if sub != 'remove':
+        return None
+    return check_worktree_remove(args[1:], directory)
+
+
 def check_git(args, directory):
     # git's own options come before the subcommand: -C names the directory
     # the command acts on, -c sets a config value; both take a value word.
@@ -138,6 +170,8 @@ def check_git(args, directory):
         return check_restore(rest, directory)
     if sub == 'stash':
         return check_stash(rest, directory)
+    if sub == 'worktree':
+        return check_worktree(rest, directory)
     return None
 
 

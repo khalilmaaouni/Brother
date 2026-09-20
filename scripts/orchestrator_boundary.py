@@ -265,6 +265,24 @@ def authorize(action, *, store_path, run_id, scope, instance, epoch,
             "right now; authorize() grants nothing on a stale or unheld "
             "epoch" % (instance, scope, run_id, epoch))
     label, reason = fable_authority.classify(text)
+    # J091 (wave-3 Jev seam, high risk): a second opinion on this action's
+    # risk framing, beside fable_authority.classify()'s own keyword list,
+    # which stays sole authority -- see check_founder_decision_risk()'s
+    # own docstring. Shadow-only, off by default; any failure here must
+    # never affect the real RED/AMBER decision this function's callers
+    # rely on, so it is wrapped exactly like every other optional seam
+    # call site in this codebase.
+    try:
+        import jev_checks
+        import jev_seam
+        jev_checks.check_founder_decision_risk(
+            text, label,
+            seams_config=jev_seam.load_seams_config(),
+            registry=jev_seam.load_registry(),
+            ledger_dir=jev_seam.DEFAULT_LEDGER_DIR,
+        )  # C1: return value intentionally discarded, shadow-only by contract
+    except Exception:
+        pass  # sbe: allow-silent this seam is advisory only, never worth delaying the real RED/AMBER gate
     if label == fable_authority.RED:
         try:
             fable_authority.queue_red(text, reason, session=instance,

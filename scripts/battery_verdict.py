@@ -55,6 +55,22 @@ import re
 import subprocess
 import sys
 
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+
+# J064, wave-1 Jev seam ("Gate/CI/PR log-line classification"): optional,
+# fail-open, same discipline as every other jev_checks/jev_seam import in
+# this estate (see jev_checks.py's own module docstring). A missing or
+# broken jev_checks means the shadow call in _jev_gate_line_shadow() below
+# is a no-op; this script's own printed verdict JSON and exit code never
+# depend on it -- see that function's own docstring for the C1 guarantee.
+try:
+    import jev_checks
+    import jev_seam
+except Exception:  # noqa: BLE001
+    jev_checks = None
+    jev_seam = None
+
 
 def _today():
     """Today as an ISO date string, for the expiry comparison. Isolated here
@@ -125,6 +141,43 @@ def parse_check_all_output(text):
         if m and results:
             results[-1][2].append(m.group(1))
     return results
+
+
+def _gate_verdict_lines(text):
+    """The raw check_all.sh lines this run actually saw that
+    parse_check_all_output above turns into (name, verdict, failing_tests)
+    tuples: the identical "verdict word plus 'exit'" condition, read a
+    second time here so the original parser above is never touched -- this
+    exists only to hand J064 the real lines, never a different shape."""
+    lines = []
+    for line in text.splitlines():
+        tokens = line.split()
+        if len(tokens) >= 4 and tokens[0] in VERDICTS and tokens[1] == "exit":
+            lines.append(line)
+    return lines
+
+
+def _jev_gate_line_shadow(lines):
+    """J064: a shadow-only second opinion on `lines` (this run's own real
+    check_all verdict lines), fired AFTER parse_check_all_output has
+    already turned them into this run's real (name, verdict, failing_tests)
+    tuples -- never before, never read back into anything main() prints.
+    C1: main()'s own verdict JSON and exit code come only from
+    parse_check_all_output/classify's real output, whatever this call
+    answers or whether it runs at all (same discipline as reviewroute.py's
+    J049/J050 call site: return value intentionally discarded, shadow-only
+    by contract). Never raises; a missing jev_checks/jev_seam or an empty
+    `lines` makes this a no-op."""
+    if jev_checks is None or jev_seam is None or not lines:
+        return
+    try:
+        jev_checks.check_gate_log_lines(
+            lines, seams_config=jev_seam.load_seams_config(),
+            registry=jev_seam.load_registry(),
+            ledger_dir=jev_seam.DEFAULT_LEDGER_DIR)
+        # C1: return value intentionally discarded, shadow-only by contract
+    except Exception:  # noqa: BLE001  # sbe: allow-silent this seam is advisory only, never worth risking this script's byte-identical verdict/exit code
+        pass
 
 
 def load_expectations(path):
@@ -739,6 +792,10 @@ def main(argv=None):
     if not results:
         print(json.dumps({"error": "NO-DATA: no run_check lines found in input"}))
         return 2
+
+    # J064: recorded only, never a vote -- see _jev_gate_line_shadow()'s own
+    # docstring. verdict/exit code below are computed only from `results`.
+    _jev_gate_line_shadow(_gate_verdict_lines(text))
 
     verdict = classify(results, expectations, today=args.today or _today(),
                        critical=critical, unfinished=args.unfinished)

@@ -121,6 +121,48 @@ class ExtraEntriesAreReportedAndDoNotFail(unittest.TestCase):
         self.assertEqual(extra, {"brothermode": ["internal"]})
 
 
+class SkipExcludesANamedPluginWithoutFailingOrPassingIt(unittest.TestCase):
+    """--skip is for a leaf already proven not yet installable (not published
+    at its declared ref), never for one that simply failed. It must drop out
+    of the comparison on both sides and never need a details log."""
+
+    def test_a_skipped_plugin_needs_no_details_log(self):
+        manifest = {"shipped_plugins": ["brothermode", "brotherds"],
+                    "entries": {"brothermode": ["alpha", "beta", "gamma"],
+                                "brotherds": ["brotherds"]},
+                    "total": 4}
+        mpath, d = workspace(manifest, {"brothermode": DETAILS})
+        self.assertEqual(
+            C.main(["--manifest", mpath, "--details-dir", d,
+                    "--skip", "brotherds"]),
+            C.EXIT_MATCH)
+
+    def test_a_skipped_plugins_missing_entries_do_not_fail_the_run(self):
+        """Without --skip this manifest would fail NO-DATA: brotherds names
+        a details log this workspace never wrote. With --skip it is excluded,
+        never counted as a pass."""
+        manifest = {"shipped_plugins": ["brothermode", "brotherds"],
+                    "entries": {"brothermode": ["alpha", "beta", "gamma"],
+                                "brotherds": ["brotherds"]},
+                    "total": 4}
+        mpath, d = workspace(manifest, {"brothermode": DETAILS})
+        self.assertEqual(
+            C.main(["--manifest", mpath, "--details-dir", d]),
+            C.EXIT_NO_DATA)
+        self.assertEqual(
+            C.main(["--manifest", mpath, "--details-dir", d,
+                    "--skip", "brotherds"]),
+            C.EXIT_MATCH)
+
+    def test_compare_leaves_a_skipped_plugin_out_of_both_sides(self):
+        missing, extra = C.compare(
+            {"entries": {"brothermode": ["alpha"], "brotherds": ["x"]}},
+            {"brothermode": {"alpha"}},
+            skip={"brotherds"})
+        self.assertEqual(missing, {})
+        self.assertEqual(extra, {})
+
+
 class NoDataIsNeverAPass(unittest.TestCase):
     def test_a_plugin_with_no_details_log_is_NO_DATA(self):
         mpath, d = workspace(MANIFEST, {})

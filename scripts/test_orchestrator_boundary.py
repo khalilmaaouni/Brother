@@ -176,6 +176,67 @@ class TestStaleEpochRefusedAtUse(BoundaryTestBase):
         self.assertEqual(ctx.exception.invariant, "no stale authority")
 
 
+class TestJ091SeamNeverAffectsTheRealVerdict(BoundaryTestBase):
+    """J091 (wave-3 Jev seam): a shadow second opinion on the action's risk
+    framing must never be able to change whether authorize() refuses a RED
+    action or lets an AMBER one through, and a broken/raising seam call
+    must never delay or break authorize() itself."""
+
+    def test_seam_raising_never_breaks_a_safe_amber_action(self):
+        import jev_checks
+        real = jev_checks.check_founder_decision_risk
+        jev_checks.check_founder_decision_risk = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
+        try:
+            lease = self._acquire(self.instance_a)
+            # AMBER action (no RED/AMBER keyword match still resolves AMBER,
+            # per fable_authority.classify()'s own no-green-by-default rule)
+            self._authorize(self.instance_a, lease.epoch,
+                            action={"name": "DISPATCH", "text": "run the tests"},
+                            now=0.0)  # must not raise despite the seam exploding
+        finally:
+            jev_checks.check_founder_decision_risk = real
+
+    def test_seam_raising_never_lets_a_red_action_through(self):
+        import jev_checks
+        real = jev_checks.check_founder_decision_risk
+        jev_checks.check_founder_decision_risk = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
+        try:
+            lease = self._acquire(self.instance_a)
+            with self.assertRaises(boundary.BoundaryRefused) as ctx:
+                self._authorize(self.instance_a, lease.epoch,
+                                action={"name": "DISPATCH",
+                                        "text": "delete the stale remote branch"},
+                                now=0.0)
+            self.assertEqual(ctx.exception.invariant, "no RED action automated")
+        finally:
+            jev_checks.check_founder_decision_risk = real
+
+    def test_seam_call_receives_the_real_label_never_swaps_it(self):
+        # Even a seam call that (incorrectly) tried to answer "amber" for a
+        # RED-worthy action must never be consulted for the real verdict:
+        # asserts the real label reaching the seam is "RED" for a RED
+        # action, by capturing what the call site actually passes.
+        import jev_checks
+        captured = {}
+        real = jev_checks.check_founder_decision_risk
+
+        def spy(decision_text, current_answer, **kw):
+            captured["current_answer"] = current_answer
+            return real(decision_text, current_answer, **kw)
+
+        jev_checks.check_founder_decision_risk = spy
+        try:
+            lease = self._acquire(self.instance_a)
+            with self.assertRaises(boundary.BoundaryRefused):
+                self._authorize(self.instance_a, lease.epoch,
+                                action={"name": "DISPATCH",
+                                        "text": "delete the stale remote branch"},
+                                now=0.0)
+        finally:
+            jev_checks.check_founder_decision_risk = real
+        self.assertEqual(captured.get("current_answer"), "RED")
+
+
 class TestRedActionRefusedAndQueued(BoundaryTestBase):
     """Test 5: a RED action is refused and queued, and that refusal is
     scoped to itself, never a halt on the run."""

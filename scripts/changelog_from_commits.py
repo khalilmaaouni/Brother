@@ -9,21 +9,37 @@ Reads local git history between two refs, the same "git -C ROOT ..." shape
 scripts/release_note_from_tree.py already reads git in: no network, stdlib
 and a git subprocess only.
 
-WHAT COUNTS AS AN ENTRY. A merge commit whose subject is GitHub's own
-"Merge pull request #N from <owner>/<branch>" shape (`git log --merges`) is
-a landed pull request; a plain commit or a "Merge main into <branch>"
-housekeeping merge names no pull request and is skipped, per the row's own
-wording "pull request titles" (this tree has no network access to GitHub's
-actual PR title, so the merge subject, which GitHub writes from that title
-by default, is the checkable proxy).
+WHAT COUNTS AS AN ENTRY, three shapes, per PR (DEL-14: the first cut that
+used this generator, 1.0.20, silently dropped every PR that landed as
+anything other than the first shape):
+  - a merge commit whose subject is GitHub's own "Merge pull request #N
+    from <owner>/<branch>" shape (`git log --merges`);
+  - a "Squash and merge" landing: a commit whose subject ends "(#N)", the
+    marker GitHub itself appends to the squashed title;
+  - a rebase-merge landing: a commit carrying no such subject marker
+    (rebasing adds none) but naming its PR as "(#N)" somewhere in the
+    commit body instead.
+The last two are checked on ANY commit, not only a single-parent one
+(DEL-15: a55283573 "Bring the 1.0.20 release cut back into main (#772)" is
+itself a two-parent merge commit with a custom subject GitHub never wrote,
+so the first check misses it; the second, the same squash-subject check a
+single-parent commit gets, catches it). A commit matching none of the
+three is a direct commit naming no pull request and is skipped, per the
+row's own wording "pull request titles" (this tree has no network access
+to GitHub's actual PR title, so the commit text GitHub itself writes from
+that title, in whichever of the three shapes, is the checkable proxy). A PR
+number seen twice in the range (a stray duplicate reference, or the same
+PR landed twice under two different shapes) keeps only its first, oldest
+occurrence.
 
-GROUPING. A merge's branch is checked for a roadmap row id (row ids in
-docs/plan/READINESS-ROADMAP-2026-08-29.json look like S24, X8, P1-4:
+GROUPING. A merge commit's branch is checked for a roadmap row id (row ids
+in docs/plan/READINESS-ROADMAP-2026-08-29.json look like S24, X8, P1-4:
 letters then digits, optionally a hyphenated suffix) at the start of the
 slug after a `wbs/` or `fix/` prefix (`wbs/s24-codex-guide` -> S24,
 `wbs/x8-rows-1.0.8` -> X8, `wbs/p1-4-competitive-harness` -> P1-4). A
 branch that carries no such id groups under its own leading path segment
-(the wbs prefix itself: `wbs`, `fix`, `reland`); anything matching neither
+(the wbs prefix itself: `wbs`, `fix`, `reland`); anything matching neither,
+including a squash or rebase landing (neither names a branch at all),
 groups under "Other".
 
 USAGE (from the hub root):
@@ -45,6 +61,16 @@ NODATA = "NO-DATA"
 
 #: GitHub's own default merge-commit subject for a merged pull request.
 MERGE_RE = re.compile(r"^Merge pull request #(\d+) from [^/]+/(.+)$")
+#: GitHub's own default "Squash and merge" subject: the PR title with the
+#: number appended in parens, e.g. "Fix a bug (#767)". Checked only against
+#: a single-parent (non-merge) commit's own subject.
+SQUASH_RE = re.compile(r"^(.*?)\s*\(#(\d+)\)\s*$")
+#: The same "(#N)" marker a squash merge appends to the subject, searched
+#: in a single-parent commit's BODY instead: the shape a rebase merge
+#: leaves, since GitHub adds no PR marker of its own to a rebased commit,
+#: so a PR number reaching the changelog this way was written there by
+#: hand.
+BODY_PR_REF_RE = re.compile(r"\(#(\d+)\)")
 #: A roadmap row id (letters then digits, optionally -digits) at the start
 #: of a wbs/fix slug, e.g. "s24-codex-guide" -> "s24", "p1-4-thing" -> "p1-4".
 ROW_ID_RE = re.compile(r"^([a-z]{1,4}\d+(?:-\d+)*)-", re.IGNORECASE)
@@ -67,23 +93,67 @@ def ref_exists(ref, root=ROOT):
     return proc.returncode == 0
 
 
-def merge_entries(from_ref, to_ref, root=ROOT):
-    """[(pr_number, branch), ...] for every pull-request merge in
-    `from_ref..to_ref`, oldest first, or None when the range itself could
-    not be read (a bad ref git itself did not refuse to resolve, or some
-    other git failure)."""
+def pr_entries(from_ref, to_ref, root=ROOT):
+    """[(pr_number, branch, label), ...] for every pull request landed in
+    `from_ref..to_ref`, oldest first, one entry per PR number however it
+    landed (see the module docstring's three shapes): a classic GitHub
+    merge commit gives (pr, branch, branch); a squash or rebase landing
+    gives (pr, None, label) since neither shape names a branch at all,
+    label being the squashed title (squash) or the commit's own subject
+    (rebase) -- and a merge commit whose subject is not GitHub's own falls
+    through to these same two checks, so a merge that only a squash or
+    rebase marker identifies still lands (pr, None, label) rather than
+    being dropped. A commit naming no pull request in any of the three
+    shapes is a direct commit and is skipped. A PR number seen twice, in
+    the same shape or two different ones, keeps only its first, oldest
+    occurrence. None when the range itself could not be read (a bad ref
+    git itself did not refuse to resolve, or some other git failure)."""
     proc = subprocess.run(
-        ["git", "-C", root, "log", "--merges", "--reverse", "--pretty=%s",
+        ["git", "-C", root, "log", "--reverse",
+         "--pretty=format:%x1e%P%x1f%s%x1f%b",
          "%s..%s" % (from_ref, to_ref)],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
     )
     if proc.returncode != 0:
         return None
+    seen_prs = set()
     entries = []
-    for line in proc.stdout.splitlines():
-        m = MERGE_RE.match(line.strip())
-        if m:
-            entries.append((int(m.group(1)), m.group(2)))
+    for record in proc.stdout.split("\x1e"):
+        if not record.strip("\n"):
+            continue
+        fields = record.split("\x1f", 2)
+        parents = fields[0]
+        subject = fields[1].strip() if len(fields) > 1 else ""
+        body = fields[2] if len(fields) > 2 else ""
+        is_merge_commit = len(parents.split()) > 1
+
+        pr = branch = label = None
+        if is_merge_commit:
+            m = MERGE_RE.match(subject)
+            if m:
+                pr, branch, label = int(m.group(1)), m.group(2), m.group(2)
+        if pr is None:
+            # Either a single-parent commit, or a merge commit with a
+            # custom subject GitHub itself never wrote (a two-parent merge
+            # is still just a commit; nothing stops its author writing a
+            # squash- or rebase-shaped PR reference on it, and #772's own
+            # "Bring the 1.0.20 release cut back into main (#772)" merge
+            # did exactly that): fall back to the same two checks a
+            # single-parent commit gets.
+            m = SQUASH_RE.match(subject)
+            if m:
+                pr, branch, label = int(m.group(2)), None, m.group(1)
+            else:
+                m = BODY_PR_REF_RE.search(body)
+                if m:
+                    pr, branch, label = int(m.group(1)), None, subject
+        if pr is None:
+            continue
+
+        if pr in seen_prs:
+            continue
+        seen_prs.add(pr)
+        entries.append((pr, branch, label))
     return entries
 
 
@@ -118,7 +188,12 @@ def source_rev_for_tag(ref, root=ROOT):
 
 
 def group_key(branch):
-    """The changelog section a merged branch's pull request falls under."""
+    """The changelog section a merged branch's pull request falls under.
+    None (a squash or rebase landing, neither of which names a branch at
+    all) groups under "Other", same as a branch matching neither shape
+    below."""
+    if branch is None:
+        return "Other"
     core = branch[len("reland/"):] if branch.startswith("reland/") else branch
     prefix, sep, slug = core.partition("/")
     if not sep:
@@ -148,7 +223,7 @@ def changelog_lines(from_ref, to_ref, root=ROOT):
         return ["%s: ref %r does not exist" % (NODATA, git_from)]
     if not ref_exists(to_ref, root):
         return ["%s: ref %r does not exist" % (NODATA, to_ref)]
-    entries = merge_entries(git_from, to_ref, root)
+    entries = pr_entries(git_from, to_ref, root)
     if entries is None:
         return ["%s: git log %s..%s failed" % (NODATA, git_from, to_ref)]
     if not entries:
@@ -157,12 +232,12 @@ def changelog_lines(from_ref, to_ref, root=ROOT):
 
     groups = {}
     order = []
-    for pr, branch in entries:
+    for pr, branch, label in entries:
         key = group_key(branch)
         if key not in groups:
             groups[key] = []
             order.append(key)
-        groups[key].append((pr, branch))
+        groups[key].append((pr, label))
 
     lines = []
     if header:
@@ -170,8 +245,8 @@ def changelog_lines(from_ref, to_ref, root=ROOT):
         lines.append("")
     for key in sorted(order):
         lines.append("## %s" % key)
-        for pr, branch in groups[key]:
-            lines.append("- #%d %s" % (pr, branch))
+        for pr, label in groups[key]:
+            lines.append("- #%d %s" % (pr, label))
         lines.append("")
     return lines[:-1] if lines and lines[-1] == "" else lines
 

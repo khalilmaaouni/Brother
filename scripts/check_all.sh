@@ -260,6 +260,15 @@ run_check "fence-expiry-self"     python3 scripts/test_fence_expiry.py -v
 # committed run directory, so a record shape this estate actually writes
 # and this reader cannot parse turns red here.
 run_check "safe-unwatched-time-self" python3 scripts/test_safe_unwatched_time.py -v
+# P0-D/P0-E: the Proof Card and its outcome closure rule. Registered in the
+# same change that lands it, per this estate's own recorded lesson that an
+# unregistered check is invisible to every check the project owns. The
+# suite drives outcome_status() and the per-file proof vocabulary
+# backwards (a full green run, the same run with a top-level check added,
+# one file forced to NO-DATA, a quarantine verdict, a check green before
+# the change) so a card that upgraded uncertainty into success would turn
+# red here.
+run_check "proof-card-self"       python3 scripts/test_proof_card.py -v
 run_check "fence-expiry"          python3 scripts/fence_expiry.py
 # The graph loop. Codified 2026-08-29 on founder direction, after measuring
 # that this estate was using two of the ready-set standard's five practices.
@@ -1665,12 +1674,20 @@ run_check "air_gapped_install-self" python3 scripts/test_air_gapped_install.py -
 run_check "jev_cascade-self" python3 scripts/test_jev_cascade.py -v
 run_check "jev_calibration-self" python3 scripts/test_jev_calibration.py -v
 run_check "jev_decide-self" python3 scripts/test_jev_decide.py -v
+run_check "jev_registry-self" python3 scripts/test_jev_registry.py -v
+run_check "jev_registry-lint" python3 scripts/jev_registry.py lint data/jev-registry.json
+run_check "jev_canary-self" python3 scripts/test_jev_canary.py -v
+run_check "jev_seam-self" python3 scripts/test_jev_seam.py -v
+run_check "jev_checks-self" python3 scripts/test_jev_checks.py -v
+run_check "jev_g1_seam_cache-self" python3 scripts/test_jev_g1_seam_cache.py -v
+run_check "jev_seam-doc_assurance-self" python3 scripts/test_doc_assurance_jev_seam.py -v
 run_check "endurance_classes-self" python3 scripts/test_endurance_classes.py -v
 run_check "autonomy_corpus-self" python3 scripts/test_autonomy_corpus.py -v
 run_check "escape_gauntlet-self" python3 scripts/test_escape_gauntlet.py -v
 run_check "fixture_classes-self" python3 scripts/test_fixture_classes.py -v
 run_check "claude_parity-self" python3 scripts/test_claude_parity.py -v
 run_check "codex_parity-self" python3 scripts/test_codex_parity.py -v
+run_check "cursor_parity-self" python3 scripts/test_cursor_parity.py -v
 run_check "os_matrix-self" python3 scripts/test_os_matrix.py -v
 run_check "generic_skills_adapter-self" python3 scripts/test_generic_skills_adapter.py -v
 run_check "autonomy_floor-self" python3 scripts/test_autonomy_floor.py -v

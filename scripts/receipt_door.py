@@ -243,20 +243,61 @@ def risk_triggers(rows, lenses=None):
 
     `lenses` omitted or empty means no lens was inferred, which arms core
     alone (see _lens_forcing_triggers): a persona pack's classes never fire
-    on a repository that pack was not inferred for."""
+    on a repository that pack was not inferred for.
+
+    J099 (wave-2 Jev seam, "Receipt risk-trigger phrase scan"): fires once
+    per row, immediately after that row's own hit/no-hit verdict is
+    computed, as a pure side effect, using that real boolean as
+    current_answer -- see _consult_j099() below. `hits` is always this
+    function's own real regex matches, unchanged, whatever mode says."""
     armed = _dedupe(tuple(RISK_TRIGGERS)
                     + tuple(_lens_forcing_triggers(lenses)))
     hits = []
     for row in rows or []:
         text = _unit_text(row)
+        row_hit = False
         for name, pattern in armed:
             found = re.findall(pattern, text)
             if not found:
                 continue
+            row_hit = True
             words = sorted({m if isinstance(m, str) else next(
                 (p for p in m if p), "") for m in found} - {""})
             hits.append((name, row.get("id"), ", ".join(words)))
+        _consult_j099(text, row_hit)
     return hits
+
+
+def _consult_j099(unit_text, current_answer, jev_runner=None):
+    """The one place risk_triggers() above reaches jev_checks. Same package
+    as this module (scripts/), so no cross-package _jevpath bridge is
+    needed here, unlike products/brothermode/tools/bm_learning.py's J093
+    seam, which lives in a different directory.
+
+    C1: `current_answer` -- risk_triggers()'s own real per-row hit boolean,
+    computed for this row before this call -- is always what risk_triggers()
+    itself keeps in `hits` and returns, whatever mode says (registry
+    fail_direction: "abstain flags the unit anyway (safer default)").
+    Anchor: scripts/receipt_door.py:237 (risk_triggers(), immediately
+    above).
+
+    Fail-open like revert_broke_check's own J100 seam above: an import
+    failure or consult() itself raising something undocumented never
+    reaches risk_triggers()'s own caller. `jev_runner` exists only so a
+    test can inject a scripted bridge, mirroring revert_broke_check's own
+    parameter."""
+    try:
+        import jev_checks
+        import jev_seam
+        jev_checks.check_receipt_risk_trigger(
+            unit_text, current_answer,
+            seams_config=jev_seam.load_seams_config(),
+            registry=jev_seam.load_registry(),
+            ledger_dir=jev_seam.DEFAULT_LEDGER_DIR,
+            runner=jev_runner,
+        )  # C1: return value intentionally discarded, shadow-only by contract
+    except Exception:  # sbe: allow-silent the seam is advisory only, the risk scan always stands
+        pass
 
 
 #: The row field brother_run._stamp_dependency_mutations writes, spelled
@@ -291,16 +332,66 @@ BROKEN_REVERT_EXCEPTIONS = ("ImportError", "ModuleNotFoundError",
                             "NameError", "AttributeError")
 
 
-def revert_broke_check(stderr_text):
+def revert_broke_check(stderr_text, *, jev_runner=None):
     """True when `stderr_text` says the revert re-run could not run at all,
     rather than running and failing. Empty or absent stderr (a record from
     before the engine stamped it) is False: unmeasured reads exactly as it
-    did before this existed, and the caller decides what that means."""
+    did before this existed, and the caller decides what that means.
+
+    JEV-G1 wave-1 seam J100 (registry: revert-broke-something check):
+    second-opinions this keyword check via jev_seam.consult(), off by
+    default in data/jev-seams.json, called for its side effect only (the
+    calibration ledger row and A0.6 audit sample) -- WAVE 1 IS
+    SHADOW-ONLY BY CONTRACT (opus-review-seams-g1-g3.md, C1): this
+    function ALWAYS returns its own local `answer`, never consult()'s,
+    whatever mode says, including "act": a raw noul probability is not
+    even the right type for this function's bool contract, and there is
+    no promoted, calibrated evidence for this entry yet to make "act" a
+    real path today regardless. `jev_runner` exists only so a test can
+    inject a scripted bridge.
+
+    THE STATE SENT TO JEV IS CAPPED AND REDACTED (M1 fix,
+    opus-review-seams-g1-g3.md: raw stderr had no length cap and can
+    carry a real home directory path). _stderr_excerpt() below replaces
+    any real home-directory path with "~" and caps to 2,000 characters
+    before it ever reaches jev_seam.consult(); `text` itself (the full,
+    unredacted stderr) is what this function's own keyword check still
+    reads, unaffected."""
     text = str(stderr_text or "")
     if any(sig in text for sig in BROKEN_REVERT_SIGNATURES):
-        return True
-    lines = [ln for ln in text.splitlines() if ln.strip()]
-    return bool(lines) and lines[-1].strip().startswith(BROKEN_REVERT_EXCEPTIONS)
+        answer = True
+    else:
+        lines = [ln for ln in text.splitlines() if ln.strip()]
+        answer = bool(lines) and lines[-1].strip().startswith(BROKEN_REVERT_EXCEPTIONS)
+    try:
+        import jev_g1_seam_cache
+        if not jev_g1_seam_cache.is_off("J100"):
+            import jev_seam
+            jev_seam.consult(
+                "J100", {"stderr": _stderr_excerpt(text)}, answer,
+                seams_config=jev_seam.load_seams_config(),
+                registry=jev_seam.load_registry(),
+                ledger_dir=jev_seam.DEFAULT_LEDGER_DIR, runner=jev_runner,
+            )  # C1: return value intentionally discarded, see docstring above
+    except Exception:
+        pass  # sbe: allow-silent the seam is advisory only, the keyword verdict always stands
+    return answer
+
+
+#: M1 fix (opus-review-seams-g1-g3.md): the cap J100's own registry
+#: entry (data/jev-registry.json) names in its question instructions.
+J100_STDERR_EXCERPT_CAP = 2000
+
+
+def _stderr_excerpt(text):
+    """`text` with any real home-directory path replaced by "~" (a
+    revert's stderr can carry one, e.g. inside a traceback file path),
+    then capped to J100_STDERR_EXCERPT_CAP characters. Never the raw
+    stderr this function's own caller reads for its keyword check --
+    only what jev_seam.consult() is handed."""
+    home = os.path.expanduser("~")
+    redacted = text.replace(home, "~") if home and home != "~" else text
+    return redacted[:J100_STDERR_EXCERPT_CAP]
 
 
 def dependency_gap(row):

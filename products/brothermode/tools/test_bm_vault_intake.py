@@ -1253,5 +1253,91 @@ class VaultSavedWriteNotice(unittest.TestCase):
         self.assertNotIn("Vault saved", buf.getvalue(), buf.getvalue())
 
 
+class TestJ118VaultDedupAdjudicationNeverChangesTheRealResult(unittest.TestCase):
+    """J118, wave-2 ('Vault write-time dedup adjudicator'): duplicate_suspects()'s
+    own title-overlap result is the real answer _dedup_second_opinion() must
+    return unchanged, whatever the shadow seam says (registry fail_direction:
+    a merge is only ever a logged suggestion, never an auto-merge). Same
+    pattern as TestJ089VaultNoteTypeNeverChangesTheRegexAnswer in
+    test_bm_vault_staleness.py (the closest existing precedent, same product,
+    same file depth)."""
+
+    def setUp(self):
+        # scripts/ is already on sys.path (module-level _e100 setup above);
+        # importing jev_checks here returns the SAME cached module object
+        # _dedup_second_opinion()'s own lazy import will use.
+        import jev_checks as real_jev_checks
+        self.jev_checks = real_jev_checks
+        self._real_check = real_jev_checks.check_vault_dedup_adjudication
+        self.distill = _load_distill()
+
+    def tearDown(self):
+        self.jev_checks.check_vault_dedup_adjudication = self._real_check
+
+    def test_a_normal_call_consults_the_seam_and_keeps_the_real_dup_links(self):
+        seen = {}
+
+        def fake(candidate_title, note_text, candidates, current_answer, **k):
+            seen["candidate_title"] = candidate_title
+            seen["note_text"] = note_text
+            seen["candidates"] = candidates
+            seen["current_answer"] = current_answer
+            return "SAME_ROOT_CAUSE_MERGE"  # an adversarial-looking Jev answer, still discarded
+
+        self.jev_checks.check_vault_dedup_adjudication = fake
+        existing = [("zorbly payroll ledger", "a.md", "n-aaaaaaaaaaaaaaaa")]
+        title = "zorbly payroll ledger detail"
+        note_text = "the full drafted note body"
+        real_dup_links = intake.duplicate_suspects(self.distill, title, existing)
+
+        dup_links = intake._dedup_second_opinion(self.distill, title, existing, note_text)
+
+        self.assertEqual(dup_links, real_dup_links)
+        self.assertTrue(dup_links)  # the fixture is over DUP_THRESHOLD, never empty
+        self.assertEqual(seen["candidate_title"], title)
+        self.assertEqual(seen["note_text"], note_text)
+        self.assertEqual(seen["current_answer"], "RELATED_LINK_ONLY")
+        self.assertEqual(seen["candidates"][0]["id"], "n-aaaaaaaaaaaaaaaa")
+        self.assertEqual(seen["candidates"][0]["title"], "zorbly payroll ledger")
+
+    def test_a_novel_note_reports_novel_keep_and_stays_empty(self):
+        seen = {}
+
+        def fake(candidate_title, note_text, candidates, current_answer, **k):
+            seen["current_answer"] = current_answer
+            return "SAME_ROOT_CAUSE_MERGE"
+
+        self.jev_checks.check_vault_dedup_adjudication = fake
+        existing = [("something entirely unrelated", "a.md", None)]
+        dup_links = intake._dedup_second_opinion(
+            self.distill, "zorbly payroll ledger", existing, "note body")
+        self.assertEqual(dup_links, [])
+        self.assertEqual(seen["current_answer"], "NOVEL_KEEP")
+
+    def test_jev_checks_unreachable_still_returns_the_real_dup_links(self):
+        """Simulates _jevpath.mount() finding no scripts/ sibling (the real
+        failure this fail-open path defends against)."""
+        import _jevpath
+        real_mount = _jevpath.mount
+        _jevpath.mount = lambda: False
+        try:
+            existing = [("zorbly payroll ledger", "a.md", "n-aaaaaaaaaaaaaaaa")]
+            title = "zorbly payroll ledger detail"
+            real_dup_links = intake.duplicate_suspects(self.distill, title, existing)
+            dup_links = intake._dedup_second_opinion(self.distill, title, existing, "text")
+        finally:
+            _jevpath.mount = real_mount
+        self.assertEqual(dup_links, real_dup_links)
+
+    def test_a_raising_seam_never_loses_the_real_dup_links(self):
+        self.jev_checks.check_vault_dedup_adjudication = \
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
+        existing = [("zorbly payroll ledger", "a.md", "n-aaaaaaaaaaaaaaaa")]
+        title = "zorbly payroll ledger detail"
+        real_dup_links = intake.duplicate_suspects(self.distill, title, existing)
+        dup_links = intake._dedup_second_opinion(self.distill, title, existing, "text")
+        self.assertEqual(dup_links, real_dup_links)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

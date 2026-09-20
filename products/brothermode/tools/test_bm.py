@@ -5884,6 +5884,150 @@ class TestPostAuditLoopP7PureRanking(unittest.TestCase):
         miss = bl.explain_rank(self.RULE, q, None, {}, "fts5")
         self.assertEqual(miss["mode"], "fts5")
         self.assertEqual(miss["bm25"], 0.0)
+
+
+class TestJ083VaultRecallRerankNeverChangesTheScore(unittest.TestCase):
+    """J083, wave-1 ('Vault recall rerank'): lexical_overlap()'s own score
+    is `current_answer` for a shadow consult() -- see bm_learning.py's
+    module docstring and lexical_overlap()'s own docstring. C1: whatever
+    the seam says, lexical_overlap() keeps returning its own real score."""
+
+    def setUp(self):
+        # _jevpath and jev_checks/jev_seam are real files on disk in this
+        # worktree (scripts/, and products/brothermode/tools/_jevpath.py);
+        # _consult_j083 imports them lazily, so importing them here too
+        # just returns the SAME cached module objects from sys.modules --
+        # monkeypatching an attribute on them is visible to bl's own lazy
+        # import.
+        scripts_dir = os.path.abspath(os.path.join(HERE, "..", "..", "..", "scripts"))
+        if scripts_dir not in sys.path:
+            sys.path.insert(0, scripts_dir)
+        import jev_checks as real_jev_checks
+        import jev_seam as real_jev_seam
+        self.jev_checks = real_jev_checks
+        self.jev_seam = real_jev_seam
+        self._real_check = real_jev_checks.check_vault_recall_rerank
+
+    def tearDown(self):
+        self.jev_checks.check_vault_recall_rerank = self._real_check
+
+    def test_a_normal_call_consults_the_seam_and_keeps_the_real_score(self):
+        seen = {}
+        def fake(unit_spec, note_text, current_answer, **k):
+            seen["unit_spec"] = unit_spec
+            seen["note_text"] = note_text
+            seen["current_answer"] = current_answer
+            return "9"  # an adversarial-looking Jev answer, still discarded
+        self.jev_checks.check_vault_recall_rerank = fake
+        score = bl.lexical_overlap("pushing to github", "when pushing to github")
+        self.assertEqual(score, 1.0)
+        self.assertEqual(seen["current_answer"], 1.0)
+        self.assertIn("pushing", seen["unit_spec"])
+
+    def test_jev_checks_unreachable_still_returns_the_real_score(self):
+        """Simulates _jevpath.mount() finding no scripts/ sibling (the real
+        failure this fail-open path defends against, e.g. an installed
+        standalone copy of tools/): lexical_overlap() must still return its
+        own real score."""
+        import _jevpath
+        real_mount = _jevpath.mount
+        _jevpath.mount = lambda: False
+        try:
+            score = bl.lexical_overlap("pushing to github", "when pushing to github")
+        finally:
+            _jevpath.mount = real_mount
+        self.assertEqual(score, 1.0)
+
+    def test_a_raising_seam_never_loses_the_real_score(self):
+        self.jev_checks.check_vault_recall_rerank = \
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
+        score = bl.lexical_overlap("pushing to github", "when pushing to github")
+        self.assertEqual(score, 1.0)
+
+    def test_empty_query_never_consults(self):
+        called = []
+        self.jev_checks.check_vault_recall_rerank = lambda *a, **k: called.append(1)
+        score = bl.lexical_overlap("", "when pushing to github")
+        self.assertEqual(score, 0.0)
+        self.assertEqual(called, [])
+
+
+class TestJ093LearnedRuleAtomicityNeverChangesTheVerdict(unittest.TestCase):
+    """J093, wave-2 ('Learned-rule atomicity check'): atomicity_problems()'s
+    own real reasons list is what the caller always receives -- see
+    bm_learning.py's module docstring and atomicity_problems()'s own
+    docstring. C1: whatever the seam says, atomicity_problems() keeps
+    returning its own real verdict."""
+
+    def setUp(self):
+        # _jevpath and jev_checks/jev_seam are real files on disk in this
+        # worktree (scripts/, and products/brothermode/tools/_jevpath.py);
+        # _consult_j093 imports them lazily, so importing them here too
+        # just returns the SAME cached module objects from sys.modules --
+        # monkeypatching an attribute on them is visible to bl's own lazy
+        # import.
+        scripts_dir = os.path.abspath(os.path.join(HERE, "..", "..", "..", "scripts"))
+        if scripts_dir not in sys.path:
+            sys.path.insert(0, scripts_dir)
+        import jev_checks as real_jev_checks
+        import jev_seam as real_jev_seam
+        self.jev_checks = real_jev_checks
+        self.jev_seam = real_jev_seam
+        self._real_check = real_jev_checks.check_learned_rule_atomicity
+
+    def tearDown(self):
+        self.jev_checks.check_learned_rule_atomicity = self._real_check
+
+    def test_a_normal_call_consults_the_seam_and_keeps_the_real_reasons(self):
+        seen = {}
+        def fake(action_text, current_answer, **k):
+            seen["action_text"] = action_text
+            seen["current_answer"] = current_answer
+            return "true"  # an adversarial-looking Jev answer, still discarded
+        self.jev_checks.check_learned_rule_atomicity = fake
+        reasons = bl.atomicity_problems("always use tabs and never use spaces")
+        self.assertTrue(reasons)  # the real heuristic DOES flag "and never"
+        self.assertEqual(seen["current_answer"], True)
+        self.assertIn("tabs", seen["action_text"])
+
+    def test_b_a_clean_action_reports_false_as_current_answer(self):
+        seen = {}
+        def fake(action_text, current_answer, **k):
+            seen["current_answer"] = current_answer
+            return "true"  # an adversarial-looking Jev answer, still discarded
+        self.jev_checks.check_learned_rule_atomicity = fake
+        reasons = bl.atomicity_problems("never push through the desktop app")
+        self.assertEqual(reasons, [])
+        self.assertEqual(seen["current_answer"], False)
+
+    def test_c_jev_checks_unreachable_still_returns_the_real_reasons(self):
+        """Simulates _jevpath.mount() finding no scripts/ sibling (the real
+        failure this fail-open path defends against, e.g. an installed
+        standalone copy of tools/): atomicity_problems() must still return
+        its own real reasons."""
+        import _jevpath
+        real_mount = _jevpath.mount
+        _jevpath.mount = lambda: False
+        try:
+            reasons = bl.atomicity_problems("always use tabs and never use spaces")
+        finally:
+            _jevpath.mount = real_mount
+        self.assertTrue(reasons)
+
+    def test_d_a_raising_seam_never_loses_the_real_reasons(self):
+        self.jev_checks.check_learned_rule_atomicity = \
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
+        reasons = bl.atomicity_problems("always use tabs and never use spaces")
+        self.assertTrue(reasons)
+
+    def test_e_empty_text_never_consults(self):
+        called = []
+        self.jev_checks.check_learned_rule_atomicity = lambda *a, **k: called.append(1)
+        reasons = bl.atomicity_problems("")
+        self.assertEqual(reasons, ["action is empty"])
+        self.assertEqual(called, [])
+
+
 # ---------------------------------------------------------------------------
 # Loop P9 fix round: the release gate's OWN code was never under test. Three
 # reproduced defects are pinned here, each with the mutation that used to slip

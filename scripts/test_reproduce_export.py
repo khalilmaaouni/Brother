@@ -9,6 +9,7 @@ driven against real git, never a stub."""
 import contextlib
 import io
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -48,7 +49,7 @@ class ReproduceExport(unittest.TestCase):
     def _run(self, generated, tag_bytes, allowlist=("scripts",),
               source_rev=None, tag="v9.9.9"):
         saved = (R.EP.load_allowlist, R.source_tree, R.EP.build_export_tree,
-                 R.tag_file_bytes, R.os.path.exists)
+                 R.tag_file_bytes, R.os.path.exists, R.fetch_and_resolve_tag)
         self.tmp = tempfile.mkdtemp(prefix="repro-test-")
         exp = os.path.join(self.tmp, "export")
         os.makedirs(exp)
@@ -61,13 +62,21 @@ class ReproduceExport(unittest.TestCase):
                 _copy_into(exp, dest), copied)[2]
             R.tag_file_bytes = lambda tag, rel, public=None: tag_bytes.get(rel)
             R.os.path.exists = lambda p: True
+            # R1's fetch is exercised on its own below (FetchTagBeforeCompare
+            # and TheFetchGatesReproduction); every other case here is about
+            # the byte comparison, not the fetch, so it is stubbed to always
+            # have already succeeded.
+            R.fetch_and_resolve_tag = lambda public, tag, remote, runner=None, \
+                expect_commit=None: (
+                True, "stubbed: not fetched in this unit test")
             argv = ["--tag", tag, "--public", self.tmp]
             if source_rev is not None:
                 argv += ["--source-rev", source_rev]
             return R.main(argv)
         finally:
             (R.EP.load_allowlist, R.source_tree, R.EP.build_export_tree,
-             R.tag_file_bytes, R.os.path.exists) = saved
+             R.tag_file_bytes, R.os.path.exists,
+             R.fetch_and_resolve_tag) = saved
 
     def test_matching_bytes_reproduce_exit_0(self):
         gen = {"scripts/a.py": b"one", "scripts/b.py": b"two"}
@@ -158,6 +167,293 @@ class ReproduceExport(unittest.TestCase):
             self.assertEqual(R.main(["--tag", "v1", "--public", "/x"]), 2)
         finally:
             R.EP.load_allowlist = saved
+
+
+class FetchTagBeforeComparing(unittest.TestCase):
+    """R1 (found on the 1.0.20 cut): reproduce_export ran against ~/Brother
+    before the newly pushed tag existed there locally, and read the generic
+    'is the tag on this checkout?' NO-DATA. fetch_and_resolve_tag closes
+    that: a real bare repo stands in for the public remote, tag present
+    there only, never pre-seeded into the checkout under test."""
+
+    def setUp(self):
+        self.env = _isolated_git_env()
+        self.remote = tempfile.mkdtemp(prefix="repro-remote-")
+        for cmd in (["git", "init", "-q", "--bare"],):
+            subprocess.run(cmd, cwd=self.remote, capture_output=True,
+                           text=True, env=self.env, check=True)
+        # Populate the bare remote by pushing a real commit and tag into it
+        # from a throwaway working checkout, then discard the checkout: the
+        # remote is left holding ONLY its bare object database and refs.
+        work = tempfile.mkdtemp(prefix="repro-remote-seed-")
+        for cmd in (["git", "init", "-q"],
+                    ["git", "config", "user.email", "t@example.com"],
+                    ["git", "config", "user.name", "T"]):
+            subprocess.run(cmd, cwd=work, capture_output=True, text=True,
+                           env=self.env, check=True)
+        with open(os.path.join(work, "a.txt"), "w") as fh:
+            fh.write("one\n")
+        # Opus review (2026-09-19), B1: an ANNOTATED tag (`-a`), never a
+        # lightweight one -- export_public.py always creates an annotated
+        # or signed tag (its own sign_flag "-a"/"-s"), and the earlier bug
+        # this fixture exists to catch (a ls-remote read that returns the
+        # TAG OBJECT's own sha for an annotated tag, never the commit it
+        # points at) only shows up for that shape. A lightweight tag gets
+        # its own coverage below (test_a_lightweight_tag_also_passes).
+        for cmd in (["git", "add", "-A"],
+                    ["git", "-c", "commit.gpgsign=false", "commit", "-q",
+                     "-m", "seed"],
+                    ["git", "-c", "tag.gpgsign=false", "tag", "-a", TAG,
+                     "-m", "seed tag"],
+                    ["git", "remote", "add", "origin", self.remote],
+                    ["git", "push", "-q", "origin", "HEAD:refs/heads/main"],
+                    ["git", "push", "-q", "origin", "refs/tags/%s" % TAG]):
+            subprocess.run(cmd, cwd=work, capture_output=True, text=True,
+                           env=self.env, check=True)
+        # R2's fixture: the commit the tag actually points at, captured
+        # from the same fixture push it just made, so a match/mismatch
+        # test never has to guess or recompute it a second way.
+        self.pushed_sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=work, capture_output=True,
+            text=True, env=self.env, check=True).stdout.strip()
+        shutil.rmtree(work)
+        # `public`: a real checkout that never saw this tag, exactly the
+        # shape ~/Brother is right after a fresh push (its own history, no
+        # relation to the fixture commit above).
+        self.public = tempfile.mkdtemp(prefix="repro-public-")
+        for cmd in (["git", "init", "-q"],
+                    ["git", "config", "user.email", "t@example.com"],
+                    ["git", "config", "user.name", "T"]):
+            subprocess.run(cmd, cwd=self.public, capture_output=True,
+                           text=True, env=self.env, check=True)
+        with open(os.path.join(self.public, "unrelated.txt"), "w") as fh:
+            fh.write("nothing to do with the release\n")
+        for cmd in (["git", "add", "-A"],
+                    ["git", "-c", "commit.gpgsign=false", "commit", "-q",
+                     "-m", "unrelated"]):
+            subprocess.run(cmd, cwd=self.public, capture_output=True,
+                           text=True, env=self.env, check=True)
+
+    def _tag_resolves_locally(self):
+        proc = subprocess.run(["git", "-C", self.public, "rev-parse",
+                               "--verify", "%s^{commit}" % TAG],
+                              capture_output=True, text=True, env=self.env)
+        return proc.returncode == 0
+
+    def test_tag_present_only_on_the_remote_is_fetched_and_resolves(self):
+        self.assertFalse(self._tag_resolves_locally(),
+                         "fixture bug: the tag must not pre-exist locally")
+        ok, line = R.fetch_and_resolve_tag(self.public, TAG, self.remote)
+        self.assertTrue(ok, line)
+        self.assertIn(TAG, line)
+        self.assertTrue(self._tag_resolves_locally())
+
+    def test_a_tag_absent_from_the_remote_stays_no_data_never_true(self):
+        ok, line = R.fetch_and_resolve_tag(self.public, "v0.0.0-nope",
+                                           self.remote)
+        self.assertFalse(ok)
+        self.assertIn("NO-DATA", line)
+        self.assertFalse(self._tag_resolves_locally())
+
+    def test_an_unreachable_remote_is_no_data_never_true(self):
+        ok, line = R.fetch_and_resolve_tag(
+            self.public, TAG, os.path.join(self.remote, "does-not-exist"))
+        self.assertFalse(ok)
+        self.assertIn("NO-DATA", line)
+
+    def test_a_fetch_that_times_out_is_no_data_never_true(self):
+        # Review item 6: a stalled network or a credential prompt must
+        # never hang the post-push step indefinitely; TimeoutExpired is
+        # read the same way any other failure to fetch is.
+        def hanging_runner(cmd, **kw):
+            raise subprocess.TimeoutExpired(cmd, kw.get("timeout"))
+
+        ok, line = R.fetch_and_resolve_tag(self.public, TAG, self.remote,
+                                           runner=hanging_runner)
+        self.assertFalse(ok)
+        self.assertIn("NO-DATA", line)
+        self.assertIn("did not finish", line)
+
+    def test_a_rev_parse_that_times_out_is_no_data_never_true(self):
+        calls = []
+
+        def fetch_ok_then_hang(cmd, **kw):
+            calls.append(cmd)
+            if cmd[3] == "fetch":
+                return subprocess.CompletedProcess(cmd, 0, "", "")
+            raise subprocess.TimeoutExpired(cmd, kw.get("timeout"))
+
+        ok, line = R.fetch_and_resolve_tag(self.public, TAG, self.remote,
+                                           runner=fetch_ok_then_hang)
+        self.assertFalse(ok)
+        self.assertIn("NO-DATA", line)
+        self.assertIn("did not finish", line)
+        self.assertEqual(len(calls), 2, calls)
+
+    def test_the_timeout_and_terminal_prompt_guard_are_passed_to_git(self):
+        seen = []
+
+        def spy(cmd, **kw):
+            seen.append(kw)
+            return subprocess.CompletedProcess(
+                cmd, 0, self.remote if cmd[3] == "fetch" else "abc123\n", "")
+
+        ok, line = R.fetch_and_resolve_tag(self.public, TAG, self.remote,
+                                           runner=spy, timeout=7)
+        self.assertTrue(ok, line)
+        self.assertEqual(len(seen), 2, seen)
+        for kw in seen:
+            self.assertEqual(kw.get("timeout"), 7, kw)
+            self.assertEqual(kw.get("env", {}).get("GIT_TERMINAL_PROMPT"),
+                             "0", kw)
+
+    def test_expect_commit_matching_the_pushed_sha_still_passes(self):
+        # R2: the caller (cut.py) knows what it just pushed and hands it
+        # in; the fetched tag resolving to that SAME commit is still a
+        # plain pass.
+        ok, line = R.fetch_and_resolve_tag(self.public, TAG, self.remote,
+                                           expect_commit=self.pushed_sha)
+        self.assertTrue(ok, line)
+        self.assertIn(self.pushed_sha, line)
+
+    def test_expect_commit_not_matching_the_pushed_sha_refuses(self):
+        # R2: the tag resolves to SOME commit, cleanly, but not the one the
+        # caller says it just pushed -- refused, never a pass, even though
+        # a plain fetch_and_resolve_tag() call with no expectation would
+        # have read this exact fetch as fine (see the match test above).
+        other_sha = "0" * 40
+        self.assertNotEqual(self.pushed_sha, other_sha)
+        ok, line = R.fetch_and_resolve_tag(self.public, TAG, self.remote,
+                                           expect_commit=other_sha)
+        self.assertFalse(ok, line)
+        self.assertIn("NO-DATA", line)
+        self.assertIn(self.pushed_sha, line)
+        self.assertIn(other_sha, line)
+        self.assertIn("does not point at what was pushed", line)
+
+    def test_expect_commit_absent_keeps_todays_behaviour(self):
+        # R2: no expectation given (every call site before this feature,
+        # and cut.py itself whenever it could not resolve what it pushed)
+        # is unchanged -- the fetch resolving cleanly is still enough.
+        ok, line = R.fetch_and_resolve_tag(self.public, TAG, self.remote,
+                                           expect_commit=None)
+        self.assertTrue(ok, line)
+        self.assertIn(self.pushed_sha, line)
+
+    def test_a_lightweight_tag_also_passes(self):
+        # Matrix case (opus review, 2026-09-19): fetch_and_resolve_tag's own
+        # `git rev-parse <tag>^{commit}` peel handles a LIGHTWEIGHT tag
+        # (created with plain `git tag`, no -a/-m/-s) exactly as it handles
+        # the annotated one the rest of this fixture uses -- a real,
+        # separate lightweight tag pushed to the same real bare remote,
+        # never a hand-written ls-remote string.
+        work = tempfile.mkdtemp(prefix="repro-remote-seed-light-")
+        light_tag = "v9.9.9-light"
+        for cmd in (["git", "init", "-q"],
+                    ["git", "config", "user.email", "t@example.com"],
+                    ["git", "config", "user.name", "T"]):
+            subprocess.run(cmd, cwd=work, capture_output=True, text=True,
+                           env=self.env, check=True)
+        with open(os.path.join(work, "b.txt"), "w") as fh:
+            fh.write("two\n")
+        for cmd in (["git", "add", "-A"],
+                    ["git", "-c", "commit.gpgsign=false", "commit", "-q",
+                     "-m", "seed light"],
+                    ["git", "tag", light_tag],
+                    ["git", "remote", "add", "origin", self.remote],
+                    ["git", "push", "-q", "origin",
+                     "HEAD:refs/heads/light-branch"],
+                    ["git", "push", "-q", "origin",
+                     "refs/tags/%s" % light_tag]):
+            subprocess.run(cmd, cwd=work, capture_output=True, text=True,
+                           env=self.env, check=True)
+        light_sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=work, capture_output=True,
+            text=True, env=self.env, check=True).stdout.strip()
+        shutil.rmtree(work)
+        ok, line = R.fetch_and_resolve_tag(self.public, light_tag,
+                                           self.remote,
+                                           expect_commit=light_sha)
+        self.assertTrue(ok, line)
+        self.assertIn(light_sha, line)
+
+
+class TheReproducePathFetchesBeforeComparing(unittest.TestCase):
+    """The other half of R1: main()'s own non-verify-tree path calls the
+    fetch for real (nothing here stubs fetch_and_resolve_tag or
+    tag_file_bytes), so a pass here proves the wiring, not just the helper
+    function in isolation."""
+
+    def test_main_fetches_the_tag_then_reproduces_from_it(self):
+        env = _isolated_git_env()
+        remote = tempfile.mkdtemp(prefix="repro-e2e-remote-")
+        subprocess.run(["git", "init", "-q", "--bare"], cwd=remote,
+                       capture_output=True, text=True, env=env, check=True)
+        work = tempfile.mkdtemp(prefix="repro-e2e-seed-")
+        for cmd in (["git", "init", "-q"],
+                    ["git", "config", "user.email", "t@example.com"],
+                    ["git", "config", "user.name", "T"]):
+            subprocess.run(cmd, cwd=work, capture_output=True, text=True,
+                           env=env, check=True)
+        os.makedirs(os.path.join(work, "scripts"))
+        with open(os.path.join(work, "scripts", "a.py"), "w") as fh:
+            fh.write("print('one')\n")
+        for cmd in (["git", "add", "-A"],
+                    ["git", "-c", "commit.gpgsign=false", "commit", "-q",
+                     "-m", "export"],
+                    ["git", "-c", "tag.gpgsign=false", "tag", TAG],
+                    ["git", "remote", "add", "origin", remote],
+                    ["git", "push", "-q", "origin", "HEAD:refs/heads/main"],
+                    ["git", "push", "-q", "origin", "refs/tags/%s" % TAG]):
+            subprocess.run(cmd, cwd=work, capture_output=True, text=True,
+                           env=env, check=True)
+        shutil.rmtree(work)
+
+        public = tempfile.mkdtemp(prefix="repro-e2e-public-")
+        for cmd in (["git", "init", "-q"],
+                    ["git", "config", "user.email", "t@example.com"],
+                    ["git", "config", "user.name", "T"]):
+            subprocess.run(cmd, cwd=public, capture_output=True, text=True,
+                           env=env, check=True)
+        with open(os.path.join(public, "unrelated.txt"), "w") as fh:
+            fh.write("x\n")
+        for cmd in (["git", "add", "-A"],
+                    ["git", "-c", "commit.gpgsign=false", "commit", "-q",
+                     "-m", "unrelated"]):
+            subprocess.run(cmd, cwd=public, capture_output=True, text=True,
+                           env=env, check=True)
+        self.assertNotEqual(
+            subprocess.run(["git", "-C", public, "rev-parse", "--verify",
+                            "%s^{commit}" % TAG],
+                           capture_output=True, env=env).returncode, 0,
+            "fixture bug: the tag must not pre-exist in --public")
+
+        exp = tempfile.mkdtemp(prefix="repro-e2e-export-")
+        os.makedirs(os.path.join(exp, "scripts"))
+        with open(os.path.join(exp, "scripts", "a.py"), "w") as fh:
+            fh.write("print('one')\n")
+        saved = (R.EP.load_allowlist, R.source_tree, R.EP.build_export_tree)
+        try:
+            R.EP.load_allowlist = lambda p=None: ["scripts"]
+            R.source_tree = lambda rev, root=None: exp
+            R.EP.build_export_tree = lambda dest, al, root=None: (
+                _copy_into(exp, dest) or ["scripts/a.py"])
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = R.main(["--tag", TAG, "--public", public,
+                               "--remote", remote, "--source-rev", "HEAD"])
+        finally:
+            (R.EP.load_allowlist, R.source_tree,
+             R.EP.build_export_tree) = saved
+
+        self.assertEqual(code, 0, out.getvalue())
+        self.assertIn("fetched %s from %s" % (TAG, remote), out.getvalue())
+        self.assertEqual(
+            subprocess.run(["git", "-C", public, "rev-parse", "--verify",
+                            "%s^{commit}" % TAG],
+                           capture_output=True, env=env).returncode, 0,
+            "main() must leave the tag resolvable in --public: it fetched "
+            "for real, not against a stub")
 
 
 class ManifestShape(unittest.TestCase):
@@ -537,7 +833,8 @@ class RegenerateNoteFlag(unittest.TestCase):
         other_gen = {"scripts/a.py": b"one"}
         tag_bytes = {"scripts/a.py": b"one", self.REL_NOTE: tag_note}
         saved = (R.EP.load_allowlist, R.source_tree, R.EP.build_export_tree,
-                 R.tag_file_bytes, R.os.path.exists, R.regenerate_note)
+                 R.tag_file_bytes, R.os.path.exists, R.regenerate_note,
+                 R.fetch_and_resolve_tag)
         self.tmp = tempfile.mkdtemp(prefix="repro-note-test-")
         exp = os.path.join(self.tmp, "export")
         os.makedirs(exp)
@@ -554,6 +851,13 @@ class RegenerateNoteFlag(unittest.TestCase):
                 rel)
             R.os.path.exists = lambda p: True
             R.regenerate_note = lambda src, version: regenerate_result
+            # R1's fetch is covered on its own (FetchTagBeforeComparing /
+            # TheReproducePathFetchesBeforeComparing); this class is about
+            # DEL-13's note handling, so the fetch is stubbed as already
+            # succeeded.
+            R.fetch_and_resolve_tag = lambda public, tag, remote, runner=None, \
+                expect_commit=None: (
+                True, "stubbed: not fetched in this unit test")
             argv = ["--tag", TAG, "--public", self.tmp]
             if flag:
                 argv.append("--regenerate-note")
@@ -563,8 +867,8 @@ class RegenerateNoteFlag(unittest.TestCase):
             return code, out.getvalue()
         finally:
             (R.EP.load_allowlist, R.source_tree, R.EP.build_export_tree,
-             R.tag_file_bytes, R.os.path.exists,
-             R.regenerate_note) = saved
+             R.tag_file_bytes, R.os.path.exists, R.regenerate_note,
+             R.fetch_and_resolve_tag) = saved
 
     def test_a_matching_regenerated_note_passes_as_one_self_naming_file(self):
         note = (_NOTE % ("a" * 40, "a" * 8, "1" * 64)).encode()

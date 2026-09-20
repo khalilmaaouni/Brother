@@ -503,6 +503,26 @@ py-modules = [
     # packaging gate refuses an undeclared shipping tool, same lesson as
     # every entry above.
     "bm_vault_seams",
+    # 2026-09-19: bm_device_lease.py, the per-device lease store (atomic
+    # claim, TTL, release, quarantine). Declared here because
+    # the packaging gate refuses an undeclared shipping tool, same lesson as
+    # every entry above.
+    "bm_device_lease",
+    # 2026-09-19: bm_vault_pack.py, which compiles raw vault retrieval hits
+    # into one bounded Context Pack. Declared here because the
+    # packaging gate refuses an undeclared shipping tool, same lesson as
+    # every entry above.
+    "bm_vault_pack",
+    # 2026-09-19: bm_vault_plugins.py, which checks enabled Obsidian community
+    # plugins against the vault's own plugin policy. Declared here because the packaging gate refuses
+    # an undeclared shipping tool, same lesson as every entry above.
+    "bm_vault_plugins",
+    # 2026-09-19: _jevpath.py, the sys.path mount helper bm_learning.py's
+    # J083 seam and bm_vault_staleness.py's J089 seam use to reach
+    # scripts/jev_checks.py and jev_seam.py from a different directory.
+    # Declared here because the packaging gate refuses an undeclared
+    # shipping tool, same lesson as every entry above.
+    "_jevpath",
 ]
 # brotherme/core/schema.py is library code tools/bm_store.py loads by path
 # (see _schema() there); without this the wheel/sdist never contain it and
