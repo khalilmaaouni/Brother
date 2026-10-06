@@ -1,0 +1,68 @@
+name: runner-idle-probe
+on:
+  pull_request:
+    branches:
+      - main
+jobs:
+  probe:
+    # measurement only: how many idle seconds a fresh hosted runner offers after the same setup steps the
+    # required-fast job runs. Runs free on this public repository, never on a private one.
+    if: ${{ !github.event.repository.private }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      matrix:
+        sample: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code@2.1.251
+      - name: measure idle seconds
+        run: |
+          python3 - <<'EOF'
+          import os
+          import time
+
+
+          def ticks():
+              with open("/proc/stat") as fh:
+                  f = [int(x) for x in fh.readline().split()[1:]]
+              total = sum(f[:8])
+              return total - f[3] - (f[4] if len(f) > 4 else 0), total
+
+
+          cores = os.cpu_count() or 1
+          slots = max(1, cores // 2)
+          weight = min(4, slots)
+          ceiling = float(max(1, cores - 2))
+          print("cores %d slots %d weight %d ceiling %.1f: a start needs busy <= %.2f"
+                % (cores, slots, weight, ceiling, ceiling - weight))
+          prev = ticks()
+          time.sleep(1.0)
+          window, samples = [], []
+          first, eligible = None, 0
+          start = time.monotonic()
+          while time.monotonic() - start < 150:
+              cur = ticks()
+              if cur[1] > prev[1]:
+                  busy = (cur[0] - prev[0]) / float(cur[1] - prev[1]) * cores
+                  window.append(busy)
+                  del window[:-3]
+                  samples.append(busy)
+                  if max(window) + weight <= ceiling:
+                      eligible += 1
+                      if first is None:
+                          first = time.monotonic() - start
+              prev = cur
+              time.sleep(1.0)
+          print("polls %d, polls that would start %d, first start after %s s"
+                % (len(samples), eligible, "NEVER in 150" if first is None else "%.0f" % first))
+          print("busy cores per second: min %.3f median %.3f max %.3f, seconds at zero %d"
+                % (min(samples), sorted(samples)[len(samples) // 2], max(samples),
+                   sum(1 for s in samples if s == 0)))
+          print("first 40 seconds: " + " ".join("%.2f" % s for s in samples[:40]))
+          EOF
