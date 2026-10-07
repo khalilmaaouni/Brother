@@ -35,9 +35,11 @@ to keep passing at Stage 1 once the plugin directories arrive. Where an
 assertion cannot yet reach a verdict it says NO-DATA in its own message rather
 than passing quietly, because a control that cannot fail is not a control.
 """
+import ast
 import json
 import os
 import re
+import subprocess
 import tempfile
 import unittest
 
@@ -52,6 +54,18 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # rather than the name the tree actually built, so they skipped forever
 # instead of checking the real layout.
 PRODUCTS = ("brothermode", "brothersbe", "brotherds")
+
+
+def plugins_shape_ok(plugins):
+    """The two shapes the catalog may take: at least two plugins with brother
+    among them (before the 1.1.0 cut), or exactly one plugin named brother
+    (after it). An empty list, one other plugin, or brother missing fail."""
+    if not isinstance(plugins, list):
+        return False
+    names = [p.get("name") if isinstance(p, dict) else None for p in plugins]
+    if names == ["brother"]:
+        return True
+    return len(names) >= 2 and "brother" in names
 
 
 def _p(*parts):
@@ -361,10 +375,12 @@ class TestMarketplace(unittest.TestCase):
     def test_is_a_catalog_of_plugins(self):
         plugins = self.mp.get("plugins")
         self.assertIsInstance(plugins, list, "marketplace must list plugins")
-        self.assertGreaterEqual(
-            len(plugins), 2,
-            "the ADR chose three plugins under one marketplace; fewer than two "
-            "would be the one-install-unit shape it rejected",
+        self.assertTrue(
+            plugins_shape_ok(plugins),
+            "the catalog lists at least two plugins with brother among them, "
+            "or (from the 1.1.0 cut, U8) exactly one plugin named brother; "
+            "the exactly-one rule itself is enforced by donecheck_u8.py and "
+            "retire_catalogs.py --check, which the cut runs",
         )
 
     def test_each_plugin_is_separately_installable(self):
@@ -472,6 +488,113 @@ class TestCoordinationIsCurrent(unittest.TestCase):
             text,
             "the decision, in the words the deciding record states it in",
         )
+
+
+def _is_main_guard(node):
+    """True for a top-level `if __name__ == "__main__":`, either operand
+    order. Read from the parse tree, so the same text inside a string
+    literal (a fixture, a docstring) is never taken for the guard."""
+    if not (isinstance(node, ast.If) and isinstance(node.test, ast.Compare)):
+        return False
+    test = node.test
+    sides = [test.left] + list(test.comparators)
+    names = [s.id for s in sides if isinstance(s, ast.Name)]
+    values = [s.value for s in sides if isinstance(s, ast.Constant)]
+    return names == ["__name__"] and values == ["__main__"]
+
+
+def _defined_after_main(source, filename="<test file>"):
+    """(name, line) for every top-level class or function defined after the
+    module's first `if __name__ == "__main__":` block. Raises SyntaxError on
+    a file that does not parse, which the caller reports as a finding."""
+    found, seen_guard = [], False
+    for node in ast.parse(source, filename=filename).body:
+        if _is_main_guard(node):
+            seen_guard = True
+        elif seen_guard and isinstance(
+                node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            found.append((node.name, node.lineno))
+    return found
+
+
+class TestEveryTestFileRunsWhatItDefines(unittest.TestCase):
+    """A test file run directly runs every test it defines.
+
+    Python executes a module top to bottom, so `unittest.main()` inside an
+    `if __name__ == "__main__":` block runs the tests defined ABOVE it and
+    exits; a class written below it is never defined on that run, and the run
+    still prints OK. Measured 2026-09-26 on hub main 37d149ae4: four tracked
+    test files had classes below that block, three of them run exactly that
+    way by scripts/check_all.sh, so the battery did not run their stranded
+    tests. A text scan for the same shape, run the same day, missed
+    scripts/test_export_public.py and reported four false positives where the
+    guard's text sat inside a string literal, which is why this reads the
+    parse tree instead of the text.
+
+    Every tracked `test_*.py` is checked, whatever runs it: a file the
+    battery happens to import through `-m unittest` today still strands
+    those tests for anyone who runs it by its path.
+    """
+
+    def _tracked_test_files(self):
+        result = subprocess.run(
+            ["git", "-C", ROOT, "ls-files", "-z", "--", "*test_*.py"],
+            capture_output=True)
+        # A population that cannot be listed is not a clean one.
+        self.assertEqual(
+            result.returncode, 0,
+            "git ls-files failed, so no test file was checked: %s"
+            % result.stderr.decode("utf-8", "replace"))
+        paths = [p for p in result.stdout.decode("utf-8").split("\0")
+                 if p and os.path.basename(p).startswith("test_")]
+        self.assertTrue(paths, "no tracked test_*.py found, so nothing was "
+                               "checked; an empty population is not a pass")
+        return paths
+
+    def test_no_tracked_test_file_defines_anything_after_its_main_block(self):
+        findings = []
+        for path in self._tracked_test_files():
+            try:
+                with open(_p(path), "rb") as fh:
+                    stranded = _defined_after_main(fh.read(), path)
+            except (OSError, SyntaxError, ValueError) as exc:
+                findings.append("%s: could not be read or parsed (%s)"
+                                % (path, exc))
+                continue
+            if stranded:
+                findings.append("%s: %s" % (path, ", ".join(
+                    "%s at line %d" % item for item in stranded)))
+        self.assertEqual(
+            findings, [],
+            "defined below `if __name__ == \"__main__\":`, so a direct run "
+            "never reaches them; move that block to the end of the file:\n"
+            + "\n".join(findings))
+
+    def test_a_class_below_the_guard_is_found(self):
+        src = ('import unittest\nif __name__ == "__main__":\n'
+               '    unittest.main()\nclass Late(unittest.TestCase):\n'
+               '    pass\n')
+        self.assertEqual(_defined_after_main(src), [("Late", 4)])
+
+    def test_a_function_below_the_guard_is_found(self):
+        src = ('if __name__ == "__main__":\n    pass\n'
+               'def late():\n    pass\n')
+        self.assertEqual(_defined_after_main(src), [("late", 3)])
+
+    def test_the_reversed_comparison_is_still_the_guard(self):
+        src = ('if "__main__" == __name__:\n    pass\n'
+               'class Late:\n    pass\n')
+        self.assertEqual(_defined_after_main(src), [("Late", 3)])
+
+    def test_definitions_above_the_guard_are_fine(self):
+        src = ('class Early:\n    pass\n'
+               'if __name__ == "__main__":\n    pass\n')
+        self.assertEqual(_defined_after_main(src), [])
+
+    def test_the_guard_inside_a_string_literal_is_not_the_guard(self):
+        src = ('FIXTURE = """\nif __name__ == "__main__":\n'
+               '    main()\n"""\nclass AfterTheString:\n    pass\n')
+        self.assertEqual(_defined_after_main(src), [])
 
 
 if __name__ == "__main__":

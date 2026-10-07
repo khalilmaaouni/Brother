@@ -1,0 +1,2864 @@
+[
+  {
+    "entry_id": "tools/l5b_audit/flag_rules.py:1:_require_fn",
+    "test_id": "tools.l5b_audit.test_flag_rules",
+    "mutation_id": "M-L5B3-HOSTILE-REFUSAL-DROP",
+    "expect_substring": "test_rules_refuse_none_and_wrong_types"
+  },
+  {
+    "entry_id": "tools/l5b_audit/flag_rules.py:2:rule_grant_forgery",
+    "test_id": "tools.l5b_audit.test_flag_rules",
+    "mutation_id": "M-L5B3-GRANT-FORGERY-DROP",
+    "expect_substring": "test_grant_forgery_fires_without_authority"
+  },
+  {
+    "entry_id": "tools/l5b_audit/flag_rules.py:3:rule_ceiling_global",
+    "test_id": "tools.l5b_audit.test_flag_rules",
+    "mutation_id": "M-L5B3-CEILING-GLOBAL-DROP",
+    "expect_substring": "test_ceiling_global_fires_on_module_assignment"
+  },
+  {
+    "entry_id": "tools/l5b_audit/flag_rules.py:4:flag_call",
+    "test_id": "tools.l5b_audit.test_flag_rules",
+    "mutation_id": "M-L5B3-PROPAGATE-SAFE-DROP",
+    "expect_substring": "test_propagate_safe_rule_fires_on_short_reason"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/or_fanout.py:inventory_scope:os.path.isdir#1",
+    "test_id": "plugin.runtime.brother.core.test_or_fanout_l5a1",
+    "mutation_id": "M-L5B-FIRE-core-or_fanout-49-os.path.isdir",
+    "expect_substring": "ERROR: test_inventory_scope_bad_sha"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/or_fanout.py:inventory_scope:os.path.isdir#2",
+    "test_id": "plugin.runtime.brother.core.test_or_fanout_l5a1",
+    "mutation_id": "M-L5B-FIRE-core-or_fanout-55-os.path.isdir",
+    "expect_substring": "ERROR: test_inventory_scope_valid"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/or_fanout.py:inventory_scope:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.core.test_or_fanout_l5a1",
+    "mutation_id": "M-L5B-FIRE-core-or_fanout-58-os.path.abspath",
+    "expect_substring": "ERROR: test_inventory_scope_valid"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/or_fanout.py:inventory_scope:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.core.test_or_fanout_l5a1",
+    "mutation_id": "M-L5B-FIRE-core-or_fanout-60-os.path.isfile",
+    "expect_substring": "ERROR: test_inventory_scope_valid"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/or_fanout.py:inventory_scope:os.path.abspath#2",
+    "test_id": "plugin.runtime.brother.core.test_or_fanout_l5a1",
+    "mutation_id": "M-L5B-FIRE-core-or_fanout-61-os.path.abspath",
+    "expect_substring": "ERROR: test_inventory_scope_valid"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/or_fanout.py:sweep_secrets:os.path.isdir#1",
+    "test_id": "plugin.runtime.brother.core.test_or_fanout_l5a2",
+    "mutation_id": "M-L5B-FIRE-core-or_fanout-165-os.path.isdir",
+    "expect_substring": "ERROR: test_secrets_no_hardcoded_or_logged"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/or_fanout.py:sweep_secrets:open#1",
+    "test_id": "plugin.runtime.brother.core.test_or_fanout_l5a2",
+    "mutation_id": "M-L5B-FIRE-core-or_fanout-194-open",
+    "expect_substring": "FAIL: test_secrets_no_hardcoded_or_logged"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/or_fanout.py:_lock_for:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.core.test_or_fanout_m51",
+    "mutation_id": "M-L5B-FIRE-core-or_fanout-293-os.path.abspath",
+    "expect_substring": "ERROR: test_a_job_not_started_at_the_deadline_is_still_cancelled"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/or_fanout.py:_rewrite_atomic:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.core.test_or_fanout_m51",
+    "mutation_id": "M-L5B-FIRE-core-or_fanout-340-os.path.abspath",
+    "expect_substring": "ERROR: test_a_job_not_started_at_the_deadline_is_still_cancelled"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/or_fanout.py:_rewrite_atomic:os.path.isdir#1",
+    "test_id": "plugin.runtime.brother.core.test_or_fanout_m51",
+    "mutation_id": "M-L5B-FIRE-core-or_fanout-343-os.path.isdir",
+    "expect_substring": "ERROR: test_a_job_not_started_at_the_deadline_is_still_cancelled"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/or_fanout.py:_rewrite_atomic:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.core.test_or_fanout_m51",
+    "mutation_id": "M-L5B-FIRE-core-or_fanout-348-os.path.exists",
+    "expect_substring": "ERROR: test_a_job_not_started_at_the_deadline_is_still_cancelled"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/or_fanout.py:_rewrite_atomic:open#1",
+    "test_id": "plugin.runtime.brother.core.test_or_fanout_m51",
+    "mutation_id": "M-L5B-FIRE-core-or_fanout-350-open",
+    "expect_substring": "ERROR: test_a_job_not_started_at_the_deadline_is_still_cancelled"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/or_fanout.py:_rewrite_atomic:json.loads#1",
+    "test_id": "plugin.runtime.brother.core.test_or_fanout_m51",
+    "mutation_id": "M-L5B-FIRE-core-or_fanout-352-json.loads",
+    "expect_substring": "ERROR: test_a_job_not_started_at_the_deadline_is_still_cancelled"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/or_fanout.py:_rewrite_atomic:os.makedirs#1",
+    "test_id": "plugin.runtime.brother.core.test_or_fanout_m51",
+    "mutation_id": "M-L5B-FIRE-core-or_fanout-360-os.makedirs",
+    "expect_substring": "ERROR: test_a_job_not_started_at_the_deadline_is_still_cancelled"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/or_fanout.py:_rewrite_atomic:tempfile.mkstemp#1",
+    "test_id": "plugin.runtime.brother.core.test_or_fanout_m51",
+    "mutation_id": "M-L5B-FIRE-core-or_fanout-361-tempfile.mkstemp",
+    "expect_substring": "ERROR: test_a_job_not_started_at_the_deadline_is_still_cancelled"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/or_fanout.py:_rewrite_atomic:os.fdopen#1",
+    "test_id": "plugin.runtime.brother.core.test_or_fanout_m51",
+    "mutation_id": "M-L5B-FIRE-core-or_fanout-365-os.fdopen",
+    "expect_substring": "ERROR: test_a_job_not_started_at_the_deadline_is_still_cancelled"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/or_fanout.py:_rewrite_atomic:json.dump#1",
+    "test_id": "plugin.runtime.brother.core.test_or_fanout_m51",
+    "mutation_id": "M-L5B-FIRE-core-or_fanout-366-json.dump",
+    "expect_substring": "ERROR: test_a_job_not_started_at_the_deadline_is_still_cancelled"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/or_fanout.py:_rewrite_atomic:os.replace#1",
+    "test_id": "plugin.runtime.brother.core.test_or_fanout_m51",
+    "mutation_id": "M-L5B-FIRE-core-or_fanout-367-os.replace",
+    "expect_substring": "ERROR: test_a_job_not_started_at_the_deadline_is_still_cancelled"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/or_fanout.py:_pinned_root:os.path.isdir#1",
+    "test_id": "plugin.runtime.brother.core.test_or_fanout_m51",
+    "mutation_id": "M-L5B-FIRE-core-or_fanout-590-os.path.isdir",
+    "expect_substring": "FAIL: test_a_job_not_started_at_the_deadline_is_still_cancelled"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/or_fanout.py:_model_call:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.core.test_or_fanout_m51",
+    "mutation_id": "M-L5B-FIRE-core-or_fanout-675-os.path.isfile",
+    "expect_substring": "FAIL: test_a_job_not_started_at_the_deadline_is_still_cancelled"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/or_fanout.py:_save_rejected:os.makedirs#1",
+    "test_id": "plugin.runtime.brother.core.test_or_fanout_extract",
+    "mutation_id": "M-L5B-FIRE-core-or_fanout-779-os.makedirs",
+    "expect_substring": "ERROR: test_refused_answer_is_saved_beside_the_output"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/or_fanout.py:_save_rejected:open#1",
+    "test_id": "plugin.runtime.brother.core.test_or_fanout_extract",
+    "mutation_id": "M-L5B-FIRE-core-or_fanout-781-open",
+    "expect_substring": "ERROR: test_refused_answer_is_saved_beside_the_output"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/or_fanout.py:_run_off_bridge:os.makedirs#1",
+    "test_id": "plugin.runtime.brother.core.test_or_fanout_extract",
+    "mutation_id": "M-L5B-FIRE-core-or_fanout-821-os.makedirs",
+    "expect_substring": "ERROR: test_fenced_claude_answer_lands_as_clean_json"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/or_fanout.py:_run_off_bridge:tempfile.mkstemp#1",
+    "test_id": "plugin.runtime.brother.core.test_or_fanout_extract",
+    "mutation_id": "M-L5B-FIRE-core-or_fanout-822-tempfile.mkstemp",
+    "expect_substring": "ERROR: test_fenced_claude_answer_lands_as_clean_json"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/or_fanout.py:_run_off_bridge:os.fdopen#1",
+    "test_id": "plugin.runtime.brother.core.test_or_fanout_extract",
+    "mutation_id": "M-L5B-FIRE-core-or_fanout-824-os.fdopen",
+    "expect_substring": "ERROR: test_fenced_claude_answer_lands_as_clean_json"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/or_fanout.py:_run_off_bridge:os.replace#1",
+    "test_id": "plugin.runtime.brother.core.test_or_fanout_extract",
+    "mutation_id": "M-L5B-FIRE-core-or_fanout-826-os.replace",
+    "expect_substring": "ERROR: test_fenced_claude_answer_lands_as_clean_json"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/or_fanout.py:run_job:os.makedirs#1",
+    "test_id": "plugin.runtime.brother.core.test_or_fanout_m51",
+    "mutation_id": "M-L5B-FIRE-core-or_fanout-1035-os.makedirs",
+    "expect_substring": "FAIL: test_future_done_after_deadline_replaces_stall"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/or_fanout.py:run_job:tempfile.mkstemp#1",
+    "test_id": "plugin.runtime.brother.core.test_or_fanout_m51",
+    "mutation_id": "M-L5B-FIRE-core-or_fanout-1038-tempfile.mkstemp",
+    "expect_substring": "FAIL: test_future_done_after_deadline_replaces_stall"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/or_fanout.py:run_job:os.fdopen#1",
+    "test_id": "plugin.runtime.brother.core.test_or_fanout_m51",
+    "mutation_id": "M-L5B-FIRE-core-or_fanout-1040-os.fdopen",
+    "expect_substring": "FAIL: test_future_done_after_deadline_replaces_stall"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/or_fanout.py:run_job:os.replace#1",
+    "test_id": "plugin.runtime.brother.core.test_or_fanout_m51",
+    "mutation_id": "M-L5B-FIRE-core-or_fanout-1042-os.replace",
+    "expect_substring": "FAIL: test_future_done_after_deadline_replaces_stall"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/or_fanout.py:_main:open#1",
+    "test_id": "plugin.runtime.brother.core.test_or_fanout_m51",
+    "mutation_id": "M-L5B-FIRE-core-or_fanout-1122-open",
+    "expect_substring": "FAIL: test_main_honours_deadline_and_records_the_late_answer_before_exit"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/or_fanout.py:_main:json.loads#1",
+    "test_id": "plugin.runtime.brother.core.test_or_fanout_m51",
+    "mutation_id": "M-L5B-FIRE-core-or_fanout-1124-json.loads",
+    "expect_substring": "FAIL: test_main_honours_deadline_and_records_the_late_answer_before_exit"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/openrouter_ledger.py:_read_entries:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.core.test_openrouter_ledger_m41",
+    "mutation_id": "M-L5B-FIRE-core-openrouter_ledger-153-os.path.exists",
+    "expect_substring": "ERROR: test_an_untagged_legacy_reservation_still_sums"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/openrouter_ledger.py:_read_entries:open#1",
+    "test_id": "plugin.runtime.brother.core.test_openrouter_ledger_m41",
+    "mutation_id": "M-L5B-FIRE-core-openrouter_ledger-158-open",
+    "expect_substring": "ERROR: test_an_untagged_legacy_reservation_still_sums"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/openrouter_ledger.py:_append_entry:open#1",
+    "test_id": "plugin.runtime.brother.core.test_openrouter_ledger_m41",
+    "mutation_id": "M-L5B-FIRE-core-openrouter_ledger-186-open",
+    "expect_substring": "ERROR: test_an_untagged_legacy_reservation_still_sums"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/openrouter_ledger.py:_append_entry:json.dumps#1",
+    "test_id": "plugin.runtime.brother.core.test_openrouter_ledger_m41",
+    "mutation_id": "M-L5B-FIRE-core-openrouter_ledger-187-json.dumps",
+    "expect_substring": "ERROR: test_an_untagged_legacy_reservation_still_sums"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/openrouter_ledger.py:_append_entry:os.fsync#1",
+    "test_id": "plugin.runtime.brother.core.test_openrouter_ledger_m41",
+    "mutation_id": "M-L5B-FIRE-core-openrouter_ledger-191-os.fsync",
+    "expect_substring": "ERROR: test_an_untagged_legacy_reservation_still_sums"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/openrouter_ledger.py:_LockedLedger.__enter__:os.makedirs#1",
+    "test_id": "plugin.runtime.brother.core.test_openrouter_ledger_m41",
+    "mutation_id": "M-L5B-FIRE-core-openrouter_ledger-487-os.makedirs",
+    "expect_substring": "ERROR: test_an_untagged_legacy_reservation_still_sums"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/openrouter_ledger.py:_LockedLedger.__enter__:open#1",
+    "test_id": "plugin.runtime.brother.core.test_openrouter_ledger_m41",
+    "mutation_id": "M-L5B-FIRE-core-openrouter_ledger-488-open",
+    "expect_substring": "ERROR: test_an_untagged_legacy_reservation_still_sums"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/openrouter_ledger.py:_LockedLedger.__enter__:fcntl.flock#1",
+    "test_id": "plugin.runtime.brother.core.test_openrouter_ledger_m41",
+    "mutation_id": "M-L5B-FIRE-core-openrouter_ledger-489-fcntl.flock",
+    "expect_substring": "ERROR: test_an_untagged_legacy_reservation_still_sums"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/openrouter_ledger.py:_LockedLedger.__exit__:fcntl.flock#1",
+    "test_id": "plugin.runtime.brother.core.test_openrouter_ledger_m41",
+    "mutation_id": "M-L5B-FIRE-core-openrouter_ledger-493-fcntl.flock",
+    "expect_substring": "ERROR: test_an_untagged_legacy_reservation_still_sums"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/l5a_census.py:_resolve:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.core.test_l5a10",
+    "mutation_id": "M-L5B-FIRE-core-l5a_census-68-os.path.isfile",
+    "expect_substring": "ERROR: test_a_computed_dynamic_import_is_unresolved"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/l5a_census.py:_resolve:os.path.isfile#2",
+    "test_id": "plugin.runtime.brother.core.test_l5a10",
+    "mutation_id": "M-L5B-FIRE-core-l5a_census-70-os.path.isfile",
+    "expect_substring": "ERROR: test_a_computed_dynamic_import_is_unresolved"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/l5a_census.py:_resolve:os.path.isdir#1",
+    "test_id": "plugin.runtime.brother.core.test_l5a10",
+    "mutation_id": "M-L5B-FIRE-core-l5a_census-72-os.path.isdir",
+    "expect_substring": "ERROR: test_a_computed_dynamic_import_is_unresolved"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/l5a_census.py:dependency_census:os.path.isdir#1",
+    "test_id": "plugin.runtime.brother.core.test_l5a10",
+    "mutation_id": "M-L5B-FIRE-core-l5a_census-113-os.path.isdir",
+    "expect_substring": "ERROR: test_a_computed_dynamic_import_is_unresolved"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/l5a_census.py:dependency_census:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.core.test_l5a10",
+    "mutation_id": "M-L5B-FIRE-core-l5a_census-124-os.path.isfile",
+    "expect_substring": "ERROR: test_a_computed_dynamic_import_is_unresolved"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/l5a_census.py:dependency_census:open#1",
+    "test_id": "plugin.runtime.brother.core.test_l5a10",
+    "mutation_id": "M-L5B-FIRE-core-l5a_census-127-open",
+    "expect_substring": "ERROR: test_a_computed_dynamic_import_is_unresolved"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/l5a_census.py:dependency_census:open#2",
+    "test_id": "plugin.runtime.brother.core.test_l5a10",
+    "mutation_id": "M-L5B-FIRE-core-l5a_census-142-open",
+    "expect_substring": "FAIL: test_a_computed_dynamic_import_is_unresolved"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/assurance/evidence_lifecycle.py:_run_test_module:subprocess.run#1",
+    "test_id": "plugin.runtime.brother.assurance.test_evidence_lifecycle",
+    "mutation_id": "M-L5B-FIRE-assurance-evidence_lifecycle-50-subprocess.run",
+    "expect_substring": "ERROR: test_already_failing_test_at_head_returns_fail_not_no_data"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/assurance/evidence_lifecycle.py:_git_show:subprocess.run#1",
+    "test_id": "plugin.runtime.brother.assurance.test_evidence_lifecycle",
+    "mutation_id": "M-L5B-FIRE-assurance-evidence_lifecycle-58-subprocess.run",
+    "expect_substring": "ERROR: test_dead_seam_test_is_downgraded_to_no_data"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/assurance/evidence_lifecycle.py:check_sensitivity:open#1",
+    "test_id": "plugin.runtime.brother.assurance.test_evidence_lifecycle",
+    "mutation_id": "M-L5B-FIRE-assurance-evidence_lifecycle-85-open",
+    "expect_substring": "ERROR: test_already_failing_test_at_head_returns_fail_not_no_data"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/assurance/evidence_lifecycle.py:check_sensitivity:open#2",
+    "test_id": "plugin.runtime.brother.assurance.test_evidence_lifecycle",
+    "mutation_id": "M-L5B-FIRE-assurance-evidence_lifecycle-94-open",
+    "expect_substring": "ERROR: test_dead_seam_test_is_downgraded_to_no_data"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/assurance/evidence_lifecycle.py:check_sensitivity:open#3",
+    "test_id": "plugin.runtime.brother.assurance.test_evidence_lifecycle",
+    "mutation_id": "M-L5B-FIRE-assurance-evidence_lifecycle-98-open",
+    "expect_substring": "ERROR: test_dead_seam_test_is_downgraded_to_no_data"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_policy.py:_canonical_bytes:json.dumps#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_policy",
+    "mutation_id": "M-L5B-FIRE-core-dream_policy-196-json.dumps",
+    "expect_substring": "FAIL: test_action_allowed"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/repair_trajectory.py:_canonical_json:json.dumps#1",
+    "test_id": "plugin.runtime.brother.core.test_repair_trajectory_d141",
+    "mutation_id": "M-L5B-FIRE-core-repair_trajectory-110-json.dumps",
+    "expect_substring": "ERROR: test_from_record_repair"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/repair_trajectory.py:_decode_mapping:json.loads#1",
+    "test_id": "plugin.runtime.brother.core.test_repair_trajectory_store_d142",
+    "mutation_id": "M-L5B-FIRE-core-repair_trajectory-164-json.loads",
+    "expect_substring": "FAIL: test_anchor_preserved_on_append"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/openrouter_prices.py:load_catalog:open#1",
+    "test_id": "plugin.runtime.brother.core.test_openrouter_prices",
+    "mutation_id": "M-L5B-FIRE-core-openrouter_prices-87-open",
+    "expect_substring": "ERROR: test_cost_catalog_missing_after_load"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/state.py:ensure_state_layout:os.makedirs#1",
+    "test_id": "plugin.runtime.brother.core.test_state_product",
+    "mutation_id": "M-L5B-FIRE-core-state-54-os.makedirs",
+    "expect_substring": "ERROR: test_ensure_state_layout_creates_all_subdirectories"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_record.py:_journal:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_record",
+    "mutation_id": "M-L5B-FIRE-core-dream_record-184-os.path.abspath",
+    "expect_substring": "ERROR: test_a_journal_path_naming_another_existing_file_refuses_instead_of_loading"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_record.py:_journal:os.path.abspath#2",
+    "test_id": "plugin.runtime.brother.core.test_dream_record",
+    "mutation_id": "M-L5B-FIRE-core-dream_record-185-os.path.abspath",
+    "expect_substring": "ERROR: test_a_journal_path_naming_another_existing_file_refuses_instead_of_loading"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_record.py:_strict_json:json.dumps#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_record",
+    "mutation_id": "M-L5B-FIRE-core-dream_record-210-json.dumps",
+    "expect_substring": "ERROR: test_intent_with_reserialized_but_valid_artifact_is_not_durable"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_record.py:_write_artifact:os.makedirs#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_record",
+    "mutation_id": "M-L5B-FIRE-core-dream_record-219-os.makedirs",
+    "expect_substring": "ERROR: test_intent_with_reserialized_but_valid_artifact_is_not_durable"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_record.py:_write_artifact:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_record",
+    "mutation_id": "M-L5B-FIRE-core-dream_record-221-os.path.exists",
+    "expect_substring": "ERROR: test_intent_with_reserialized_but_valid_artifact_is_not_durable"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_record.py:_write_artifact:open#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_record",
+    "mutation_id": "M-L5B-FIRE-core-dream_record-223-open",
+    "expect_substring": "ERROR: test_intent_with_reserialized_but_valid_artifact_is_not_durable"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_record.py:_write_artifact:os.fsync#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_record",
+    "mutation_id": "M-L5B-FIRE-core-dream_record-226-os.fsync",
+    "expect_substring": "ERROR: test_intent_with_reserialized_but_valid_artifact_is_not_durable"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_record.py:_write_artifact:os.replace#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_record",
+    "mutation_id": "M-L5B-FIRE-core-dream_record-227-os.replace",
+    "expect_substring": "ERROR: test_intent_with_reserialized_but_valid_artifact_is_not_durable"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_record.py:_read_artifact:open#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_record",
+    "mutation_id": "M-L5B-FIRE-core-dream_record-316-open",
+    "expect_substring": "ERROR: test_a_decision_and_its_outcome_come_back_joined_and_graded"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_record.py:_read_artifact:json.loads#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_record",
+    "mutation_id": "M-L5B-FIRE-core-dream_record-323-json.loads",
+    "expect_substring": "ERROR: test_a_decision_and_its_outcome_come_back_joined_and_graded"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_record.py:journal_candidates:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_record",
+    "mutation_id": "M-L5B-FIRE-core-dream_record-364-os.path.abspath",
+    "expect_substring": "ERROR: test_a_journal_named_by_the_environment_and_missing_is_refused_not_replaced"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_record.py:journal_candidates:os.path.abspath#2",
+    "test_id": "plugin.runtime.brother.core.test_dream_record",
+    "mutation_id": "M-L5B-FIRE-core-dream_record-365-os.path.abspath",
+    "expect_substring": "ERROR: test_a_journal_named_by_the_environment_and_missing_is_refused_not_replaced"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_record.py:journal_path:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_record",
+    "mutation_id": "M-L5B-FIRE-core-dream_record-381-os.path.isfile",
+    "expect_substring": "ERROR: test_a_journal_named_by_the_environment_and_missing_is_refused_not_replaced"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_record.py:write_event:json.dumps#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_record",
+    "mutation_id": "M-L5B-FIRE-core-dream_record-420-json.dumps",
+    "expect_substring": "ERROR: test_intent_with_reserialized_but_valid_artifact_is_not_durable"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_record.py:write_event:os.makedirs#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_record",
+    "mutation_id": "M-L5B-FIRE-core-dream_record-428-os.makedirs",
+    "expect_substring": "ERROR: test_intent_with_reserialized_but_valid_artifact_is_not_durable"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_record.py:write_event:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_record",
+    "mutation_id": "M-L5B-FIRE-core-dream_record-429-os.path.exists",
+    "expect_substring": "ERROR: test_intent_with_reserialized_but_valid_artifact_is_not_durable"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_record.py:write_event:os.open#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_record",
+    "mutation_id": "M-L5B-FIRE-core-dream_record-434-os.open",
+    "expect_substring": "ERROR: test_intent_with_reserialized_but_valid_artifact_is_not_durable"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_record.py:write_event:os.fsync#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_record",
+    "mutation_id": "M-L5B-FIRE-core-dream_record-437-os.fsync",
+    "expect_substring": "ERROR: test_intent_with_reserialized_but_valid_artifact_is_not_durable"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_record.py:write_event:os.close#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_record",
+    "mutation_id": "M-L5B-FIRE-core-dream_record-439-os.close",
+    "expect_substring": "ERROR: test_intent_with_reserialized_but_valid_artifact_is_not_durable"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_record.py:write_event:os.replace#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_record",
+    "mutation_id": "M-L5B-FIRE-core-dream_record-440-os.replace",
+    "expect_substring": "ERROR: test_intent_with_reserialized_but_valid_artifact_is_not_durable"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_record.py:read_event_bytes:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_record",
+    "mutation_id": "M-L5B-FIRE-core-dream_record-470-os.path.abspath",
+    "expect_substring": "FAIL: test_record_intent_inserts_decision_parent_and_admits_only_when_durable"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_record.py:read_event_bytes:os.path.abspath#2",
+    "test_id": "plugin.runtime.brother.core.test_dream_record",
+    "mutation_id": "M-L5B-FIRE-core-dream_record-471-os.path.abspath",
+    "expect_substring": "FAIL: test_record_intent_inserts_decision_parent_and_admits_only_when_durable"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_record.py:read_event_bytes:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_record",
+    "mutation_id": "M-L5B-FIRE-core-dream_record-474-os.path.isfile",
+    "expect_substring": "FAIL: test_record_intent_inserts_decision_parent_and_admits_only_when_durable"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_record.py:read_event_bytes:open#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_record",
+    "mutation_id": "M-L5B-FIRE-core-dream_record-476-open",
+    "expect_substring": "FAIL: test_record_intent_inserts_decision_parent_and_admits_only_when_durable"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_record.py:intent_is_durable:json.loads#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_record",
+    "mutation_id": "M-L5B-FIRE-core-dream_record-626-json.loads",
+    "expect_substring": "FAIL: test_record_intent_inserts_decision_parent_and_admits_only_when_durable"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_record.py:read_gates:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_coverage",
+    "mutation_id": "M-L5B-FIRE-core-dream_record-742-os.path.exists",
+    "expect_substring": "ERROR: test_gate_ledger_shape_matches_reader"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_record.py:read_gates:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_coverage",
+    "mutation_id": "M-L5B-FIRE-core-dream_record-744-os.path.isfile",
+    "expect_substring": "ERROR: test_gate_ledger_shape_matches_reader"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_record.py:read_gates:open#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_coverage",
+    "mutation_id": "M-L5B-FIRE-core-dream_record-747-open",
+    "expect_substring": "ERROR: test_gate_ledger_shape_matches_reader"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/leases.py:_read_lease:open#1",
+    "test_id": "plugin.runtime.brother.core.test_leases",
+    "mutation_id": "M-L5B-FIRE-core-leases-40-open",
+    "expect_substring": "ERROR: test_acquire_after_real_expiry_succeeds"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/leases.py:_read_lease:json.load#1",
+    "test_id": "plugin.runtime.brother.core.test_leases",
+    "mutation_id": "M-L5B-FIRE-core-leases-41-json.load",
+    "expect_substring": "ERROR: test_acquire_after_real_expiry_succeeds"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/leases.py:_atomic_write:tempfile.mkstemp#1",
+    "test_id": "plugin.runtime.brother.core.test_leases",
+    "mutation_id": "M-L5B-FIRE-core-leases-103-tempfile.mkstemp",
+    "expect_substring": "ERROR: test_acquire_after_real_expiry_succeeds"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/leases.py:_atomic_write:os.fdopen#1",
+    "test_id": "plugin.runtime.brother.core.test_leases",
+    "mutation_id": "M-L5B-FIRE-core-leases-106-os.fdopen",
+    "expect_substring": "ERROR: test_acquire_after_real_expiry_succeeds"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/leases.py:_atomic_write:json.dump#1",
+    "test_id": "plugin.runtime.brother.core.test_leases",
+    "mutation_id": "M-L5B-FIRE-core-leases-107-json.dump",
+    "expect_substring": "ERROR: test_acquire_after_real_expiry_succeeds"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/leases.py:_atomic_write:os.fsync#1",
+    "test_id": "plugin.runtime.brother.core.test_leases",
+    "mutation_id": "M-L5B-FIRE-core-leases-109-os.fsync",
+    "expect_substring": "ERROR: test_acquire_after_real_expiry_succeeds"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/leases.py:_atomic_write:os.replace#1",
+    "test_id": "plugin.runtime.brother.core.test_leases",
+    "mutation_id": "M-L5B-FIRE-core-leases-110-os.replace",
+    "expect_substring": "ERROR: test_acquire_after_real_expiry_succeeds"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/leases.py:_serialized.wrapper:os.open#1",
+    "test_id": "plugin.runtime.brother.core.test_leases",
+    "mutation_id": "M-L5B-FIRE-core-leases-133-os.open",
+    "expect_substring": "ERROR: test_a_ttl_or_clock_that_is_not_a_sane_finite_number_is_refused"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/leases.py:_serialized.wrapper:fcntl.flock#1",
+    "test_id": "plugin.runtime.brother.core.test_leases",
+    "mutation_id": "M-L5B-FIRE-core-leases-138-fcntl.flock",
+    "expect_substring": "ERROR: test_a_ttl_or_clock_that_is_not_a_sane_finite_number_is_refused"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/leases.py:_serialized.wrapper:os.close#1",
+    "test_id": "plugin.runtime.brother.core.test_leases",
+    "mutation_id": "M-L5B-FIRE-core-leases-141-os.close",
+    "expect_substring": "ERROR: test_a_ttl_or_clock_that_is_not_a_sane_finite_number_is_refused"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/leases.py:acquire:os.open#1",
+    "test_id": "plugin.runtime.brother.core.test_leases",
+    "mutation_id": "M-L5B-FIRE-core-leases-174-os.open",
+    "expect_substring": "ERROR: test_a_ttl_or_clock_that_is_not_a_sane_finite_number_is_refused"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/leases.py:acquire:os.fdopen#1",
+    "test_id": "plugin.runtime.brother.core.test_leases",
+    "mutation_id": "M-L5B-FIRE-core-leases-176-os.fdopen",
+    "expect_substring": "ERROR: test_a_ttl_or_clock_that_is_not_a_sane_finite_number_is_refused"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/leases.py:acquire:json.dump#1",
+    "test_id": "plugin.runtime.brother.core.test_leases",
+    "mutation_id": "M-L5B-FIRE-core-leases-178-json.dump",
+    "expect_substring": "ERROR: test_a_ttl_or_clock_that_is_not_a_sane_finite_number_is_refused"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/leases.py:release:os.remove#1",
+    "test_id": "plugin.runtime.brother.core.test_leases",
+    "mutation_id": "M-L5B-FIRE-core-leases-241-os.remove",
+    "expect_substring": "ERROR: test_release_removes_lease"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_episode.py:_strict_json:json.dumps#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_episode",
+    "mutation_id": "M-L5B-FIRE-core-dream_episode-66-json.dumps",
+    "expect_substring": "ERROR: test_the_assembled_brief_carries_the_traced_lesson_above_the_specification"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_episode.py:episode_digest:json.dumps#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_episode",
+    "mutation_id": "M-L5B-FIRE-core-dream_episode-161-json.dumps",
+    "expect_substring": "ERROR: test_episode_digest_is_the_sha256_of_the_sorted_json_bytes"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_episode.py:receipt_matches:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_episode",
+    "mutation_id": "M-L5B-FIRE-core-dream_episode-190-os.path.abspath",
+    "expect_substring": "FAIL: test_the_assembled_brief_carries_the_traced_lesson_above_the_specification"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_episode.py:receipt_matches:os.path.abspath#2",
+    "test_id": "plugin.runtime.brother.core.test_dream_episode",
+    "mutation_id": "M-L5B-FIRE-core-dream_episode-191-os.path.abspath",
+    "expect_substring": "FAIL: test_the_assembled_brief_carries_the_traced_lesson_above_the_specification"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_episode.py:receipt_matches:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_episode",
+    "mutation_id": "M-L5B-FIRE-core-dream_episode-194-os.path.isfile",
+    "expect_substring": "FAIL: test_the_assembled_brief_carries_the_traced_lesson_above_the_specification"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_episode.py:receipt_matches:open#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_episode",
+    "mutation_id": "M-L5B-FIRE-core-dream_episode-196-open",
+    "expect_substring": "FAIL: test_the_assembled_brief_carries_the_traced_lesson_above_the_specification"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_episode.py:_read_one_episode:json.loads#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_episode",
+    "mutation_id": "M-L5B-FIRE-core-dream_episode-240-json.loads",
+    "expect_substring": "FAIL: test_the_assembled_brief_carries_the_traced_lesson_above_the_specification"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_gate_policy.py:load_run_records:os.path.isdir#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_gate_policy",
+    "mutation_id": "M-L5B-FIRE-core-dream_gate_policy-102-os.path.isdir",
+    "expect_substring": "ERROR: test_main_cli"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_gate_policy.py:load_run_records:open#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_gate_policy",
+    "mutation_id": "M-L5B-FIRE-core-dream_gate_policy-116-open",
+    "expect_substring": "FAIL: test_main_cli"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_gate_policy.py:load_run_records:json.load#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_gate_policy",
+    "mutation_id": "M-L5B-FIRE-core-dream_gate_policy-117-json.load",
+    "expect_substring": "FAIL: test_main_cli"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_gate_policy.py:hash_mapping:json.dumps#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_gate_policy",
+    "mutation_id": "M-L5B-FIRE-core-dream_gate_policy-468-json.dumps",
+    "expect_substring": "ERROR: test_hash_mapping_stable"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_gate_policy.py:main:open#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_gate_policy",
+    "mutation_id": "M-L5B-FIRE-core-dream_gate_policy-488-open",
+    "expect_substring": "FAIL: test_main_cli"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_manifest.py:guarded_register:json.loads#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_shadow",
+    "mutation_id": "M-L5B-FIRE-core-dream_manifest-82-json.loads",
+    "expect_substring": "FAIL: test_d11_manifest_idempotent"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_manifest.py:guarded_register:json.dumps#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_shadow",
+    "mutation_id": "M-L5B-FIRE-core-dream_manifest-107-json.dumps",
+    "expect_substring": "FAIL: test_d11_manifest_idempotent"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_gate.py:read_gates:open#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_gate",
+    "mutation_id": "M-L5B-FIRE-core-dream_gate-114-open",
+    "expect_substring": "ERROR: test_empty_returns_empty"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/openrouter_reaper.py:_pid_start_time:subprocess.run#1",
+    "test_id": "plugin.runtime.brother.core.test_openrouter_reaper",
+    "mutation_id": "M-L5B-FIRE-core-openrouter_reaper-135-subprocess.run",
+    "expect_substring": "FAIL: test_this_sessions_own_pid_is_alive_and_started_before_now"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_promote.py:_canonical_json:json.dumps#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_promote_d12b",
+    "mutation_id": "M-L5B-FIRE-core-dream_promote-134-json.dumps",
+    "expect_substring": "ERROR: test_an_unchanged_floor_still_loads"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_promote.py:PromotionStore._ensure_dream_dir:os.makedirs#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_promote_d12c",
+    "mutation_id": "M-L5B-FIRE-core-dream_promote-342-os.makedirs",
+    "expect_substring": "ERROR: test_canary_action_cap_is_enforced"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_promote.py:PromotionStore._lock:os.open#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_promote_d12c",
+    "mutation_id": "M-L5B-FIRE-core-dream_promote-347-os.open",
+    "expect_substring": "ERROR: test_canary_action_cap_is_enforced"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_promote.py:PromotionStore._lock:fcntl.flock#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_promote_d12c",
+    "mutation_id": "M-L5B-FIRE-core-dream_promote-350-fcntl.flock",
+    "expect_substring": "ERROR: test_canary_action_cap_is_enforced"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_promote.py:PromotionStore._lock:os.close#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_promote_d12c",
+    "mutation_id": "M-L5B-FIRE-core-dream_promote-360-os.close",
+    "expect_substring": "ERROR: test_canary_action_cap_is_enforced"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_promote.py:PromotionStore._read_records:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_promote_d12c",
+    "mutation_id": "M-L5B-FIRE-core-dream_promote-363-os.path.exists",
+    "expect_substring": "ERROR: test_canary_action_cap_is_enforced"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_promote.py:PromotionStore._read_records:open#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_promote_d12c",
+    "mutation_id": "M-L5B-FIRE-core-dream_promote-365-open",
+    "expect_substring": "ERROR: test_canary_action_cap_is_enforced"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_promote.py:PromotionStore._read_records:json.loads#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_promote_d12c",
+    "mutation_id": "M-L5B-FIRE-core-dream_promote-381-json.loads",
+    "expect_substring": "ERROR: test_canary_action_cap_is_enforced"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_promote.py:PromotionStore.append:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_promote_d12c",
+    "mutation_id": "M-L5B-FIRE-core-dream_promote-409-os.path.exists",
+    "expect_substring": "ERROR: test_canary_action_cap_is_enforced"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_promote.py:PromotionStore.append:os.open#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_promote_d12c",
+    "mutation_id": "M-L5B-FIRE-core-dream_promote-411-os.open",
+    "expect_substring": "ERROR: test_canary_action_cap_is_enforced"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_promote.py:PromotionStore.append:os.close#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_promote_d12c",
+    "mutation_id": "M-L5B-FIRE-core-dream_promote-415-os.close",
+    "expect_substring": "ERROR: test_canary_action_cap_is_enforced"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_promote.py:PromotionStore.append:os.replace#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_promote_d12c",
+    "mutation_id": "M-L5B-FIRE-core-dream_promote-416-os.replace",
+    "expect_substring": "ERROR: test_canary_action_cap_is_enforced"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_promote.py:PromotionStore.append:os.open#2",
+    "test_id": "plugin.runtime.brother.core.test_dream_promote_d12c",
+    "mutation_id": "M-L5B-FIRE-core-dream_promote-417-os.open",
+    "expect_substring": "ERROR: test_canary_action_cap_is_enforced"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_promote.py:PromotionStore.append:os.close#2",
+    "test_id": "plugin.runtime.brother.core.test_dream_promote_d12c",
+    "mutation_id": "M-L5B-FIRE-core-dream_promote-421-os.close",
+    "expect_substring": "ERROR: test_canary_action_cap_is_enforced"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_promote.py:SafetyFloor.__init__:open#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_promote_d12b",
+    "mutation_id": "M-L5B-FIRE-core-dream_promote-478-open",
+    "expect_substring": "ERROR: test_a_control_file_changed_after_the_floor_was_recorded_is_a_violation"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_promote.py:SafetyFloor.__init__:json.loads#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_promote_d12b",
+    "mutation_id": "M-L5B-FIRE-core-dream_promote-491-json.loads",
+    "expect_substring": "ERROR: test_an_unchanged_floor_still_loads"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_promote.py:SafetyFloor.__init__:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_promote_d12b",
+    "mutation_id": "M-L5B-FIRE-core-dream_promote-525-os.path.isfile",
+    "expect_substring": "ERROR: test_a_control_file_changed_after_the_floor_was_recorded_is_a_violation"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_promote.py:SafetyFloor.__init__:open#2",
+    "test_id": "plugin.runtime.brother.core.test_dream_promote_d12b",
+    "mutation_id": "M-L5B-FIRE-core-dream_promote-529-open",
+    "expect_substring": "ERROR: test_an_unchanged_floor_still_loads"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/rtm/voice_pipeline.py:collect_ids:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.rtm.test_voice_pipeline",
+    "mutation_id": "M-L5B-FIRE-rtm-voice_pipeline-49-os.path.exists",
+    "expect_substring": "ERROR: test_a_missing_corrupt_or_wall_page_is_no_data_with_a_reason_never_dropped"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/rtm/voice_pipeline.py:collect_ids:open#1",
+    "test_id": "plugin.runtime.brother.rtm.test_voice_pipeline",
+    "mutation_id": "M-L5B-FIRE-rtm-voice_pipeline-51-open",
+    "expect_substring": "ERROR: test_a_missing_corrupt_or_wall_page_is_no_data_with_a_reason_never_dropped"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/rtm/voice_pipeline.py:collect_ids:os.path.exists#2",
+    "test_id": "plugin.runtime.brother.rtm.test_voice_pipeline",
+    "mutation_id": "M-L5B-FIRE-rtm-voice_pipeline-58-os.path.exists",
+    "expect_substring": "ERROR: test_a_missing_corrupt_or_wall_page_is_no_data_with_a_reason_never_dropped"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/rtm/voice_pipeline.py:collect_ids:open#2",
+    "test_id": "plugin.runtime.brother.rtm.test_voice_pipeline",
+    "mutation_id": "M-L5B-FIRE-rtm-voice_pipeline-60-open",
+    "expect_substring": "FAIL: test_ids_come_from_every_source_and_are_deduplicated"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/rtm/voice_pipeline.py:fetch_missing:os.makedirs#1",
+    "test_id": "plugin.runtime.brother.rtm.test_voice_pipeline",
+    "mutation_id": "M-L5B-FIRE-rtm-voice_pipeline-69-os.makedirs",
+    "expect_substring": "ERROR: test_a_missing_corrupt_or_wall_page_is_no_data_with_a_reason_never_dropped"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/rtm/voice_pipeline.py:fetch_missing:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.rtm.test_voice_pipeline",
+    "mutation_id": "M-L5B-FIRE-rtm-voice_pipeline-71-os.path.exists",
+    "expect_substring": "ERROR: test_a_missing_corrupt_or_wall_page_is_no_data_with_a_reason_never_dropped"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/rtm/voice_pipeline.py:parse:open#1",
+    "test_id": "plugin.runtime.brother.rtm.test_voice_pipeline",
+    "mutation_id": "M-L5B-FIRE-rtm-voice_pipeline-88-open",
+    "expect_substring": "ERROR: test_a_page_is_parsed_and_someone_elses_post_is_not_counted_as_own"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/rtm/voice_pipeline.py:parse:json.loads#1",
+    "test_id": "plugin.runtime.brother.rtm.test_voice_pipeline",
+    "mutation_id": "M-L5B-FIRE-rtm-voice_pipeline-92-json.loads",
+    "expect_substring": "ERROR: test_a_page_is_parsed_and_someone_elses_post_is_not_counted_as_own"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/rtm/voice_pipeline.py:report:open#1",
+    "test_id": "plugin.runtime.brother.rtm.test_voice_pipeline",
+    "mutation_id": "M-L5B-FIRE-rtm-voice_pipeline-138-open",
+    "expect_substring": "ERROR: test_a_missing_corrupt_or_wall_page_is_no_data_with_a_reason_never_dropped"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/rtm/voice_pipeline.py:main:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.rtm.test_voice_pipeline",
+    "mutation_id": "M-L5B-FIRE-rtm-voice_pipeline-153-os.path.abspath",
+    "expect_substring": "ERROR: test_a_bad_folder_or_handle_is_refused_before_anything_is_touched"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/rtm/voice_pipeline.py:main:os.path.isdir#1",
+    "test_id": "plugin.runtime.brother.rtm.test_voice_pipeline",
+    "mutation_id": "M-L5B-FIRE-rtm-voice_pipeline-155-os.path.isdir",
+    "expect_substring": "ERROR: test_a_bad_folder_or_handle_is_refused_before_anything_is_touched"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/rtm/voice_pipeline.py:main:open#1",
+    "test_id": "plugin.runtime.brother.rtm.test_voice_pipeline",
+    "mutation_id": "M-L5B-FIRE-rtm-voice_pipeline-164-open",
+    "expect_substring": "ERROR: test_a_missing_corrupt_or_wall_page_is_no_data_with_a_reason_never_dropped"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/rtm/voice_pipeline.py:main:json.dumps#1",
+    "test_id": "plugin.runtime.brother.rtm.test_voice_pipeline",
+    "mutation_id": "M-L5B-FIRE-rtm-voice_pipeline-166-json.dumps",
+    "expect_substring": "ERROR: test_a_missing_corrupt_or_wall_page_is_no_data_with_a_reason_never_dropped"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/openrouter_dispatch.py:_grant_file_refusal:os.open#1",
+    "test_id": "plugin.runtime.brother.core.test_openrouter_dispatch",
+    "mutation_id": "M-L5B-FIRE-core-openrouter_dispatch-65-os.open",
+    "expect_substring": "FAIL: test_a_founder_cap_grant_lifts_the_cap_only_while_valid"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/openrouter_dispatch.py:_effective_cap_grant:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.core.test_openrouter_dispatch",
+    "mutation_id": "M-L5B-FIRE-core-openrouter_dispatch-103-os.path.exists",
+    "expect_substring": "ERROR: test_no_bridge_call_after_a_stop_during_the_reservation_wait"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/openrouter_dispatch.py:_effective_cap_grant:os.fdopen#1",
+    "test_id": "plugin.runtime.brother.core.test_openrouter_dispatch",
+    "mutation_id": "M-L5B-FIRE-core-openrouter_dispatch-109-os.fdopen",
+    "expect_substring": "FAIL: test_a_founder_cap_grant_lifts_the_cap_only_while_valid"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/openrouter_dispatch.py:effective_limits:open#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_dispatch",
+    "mutation_id": "M-L5B-FIRE-core-openrouter_dispatch-175-open",
+    "expect_substring": "FAIL: test_expired_grant_falls_back_to_base"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/sut.py:_append_event:open#1",
+    "test_id": "plugin.runtime.brother.mode.test_sut",
+    "mutation_id": "M-L5B-FIRE-mode-sut-32-open",
+    "expect_substring": "ERROR: test_a_new_segment_after_an_intervention_starts_fresh_unbroken"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/sut.py:_append_event:json.dumps#1",
+    "test_id": "plugin.runtime.brother.mode.test_sut",
+    "mutation_id": "M-L5B-FIRE-mode-sut-33-json.dumps",
+    "expect_substring": "ERROR: test_a_new_segment_after_an_intervention_starts_fresh_unbroken"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/sut.py:_read_events:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.mode.test_sut",
+    "mutation_id": "M-L5B-FIRE-mode-sut-38-os.path.exists",
+    "expect_substring": "ERROR: test_a_new_segment_after_an_intervention_starts_fresh_unbroken"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/sut.py:_read_events:open#1",
+    "test_id": "plugin.runtime.brother.mode.test_sut",
+    "mutation_id": "M-L5B-FIRE-mode-sut-41-open",
+    "expect_substring": "ERROR: test_a_new_segment_after_an_intervention_starts_fresh_unbroken"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/sut.py:_read_events:json.loads#1",
+    "test_id": "plugin.runtime.brother.mode.test_sut",
+    "mutation_id": "M-L5B-FIRE-mode-sut-45-json.loads",
+    "expect_substring": "ERROR: test_a_new_segment_after_an_intervention_starts_fresh_unbroken"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/repair_trajectory_store.py:_require_path:os.path.isdir#1",
+    "test_id": "plugin.runtime.brother.core.test_repair_trajectory_store_d142",
+    "mutation_id": "M-L5B-FIRE-core-repair_trajectory_store-51-os.path.isdir",
+    "expect_substring": "ERROR: test_anchor_preserved_on_append"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/repair_trajectory_store.py:TrajectoryStore.append:json.dumps#1",
+    "test_id": "plugin.runtime.brother.core.test_repair_trajectory_store_d142",
+    "mutation_id": "M-L5B-FIRE-core-repair_trajectory_store-87-json.dumps",
+    "expect_substring": "ERROR: test_anchor_preserved_on_append"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/repair_trajectory_store.py:TrajectoryStore.append:open#1",
+    "test_id": "plugin.runtime.brother.core.test_repair_trajectory_store_d142",
+    "mutation_id": "M-L5B-FIRE-core-repair_trajectory_store-89-open",
+    "expect_substring": "ERROR: test_anchor_preserved_on_append"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/repair_trajectory_store.py:TrajectoryStore.load_all:open#1",
+    "test_id": "plugin.runtime.brother.core.test_repair_trajectory_store_d142",
+    "mutation_id": "M-L5B-FIRE-core-repair_trajectory_store-96-open",
+    "expect_substring": "ERROR: test_anchor_preserved_on_append"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_report.py:report:json.dumps#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_report",
+    "mutation_id": "M-L5B-FIRE-core-dream_report-170-json.dumps",
+    "expect_substring": "ERROR: test_no_journal_json_is_no_data"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/branch_authority.py:_run_git:subprocess.run#1",
+    "test_id": "plugin.runtime.brother.core.test_branch_authority",
+    "mutation_id": "M-L5B-FIRE-core-branch_authority-24-subprocess.run",
+    "expect_substring": "ERROR: test_case_detached_head"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_policy_d15a.py:_hash_object:json.dumps#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_policy_d15a",
+    "mutation_id": "M-L5B-FIRE-core-dream_policy_d15a-181-json.dumps",
+    "expect_substring": "ERROR: test_empty_ready_is_ok_zero_width"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/openrouter_strict.py:run_strict:subprocess.run#1",
+    "test_id": "plugin.runtime.brother.core.test_openrouter_strict",
+    "mutation_id": "M-L5B-FIRE-core-openrouter_strict-228-subprocess.run",
+    "expect_substring": "ERROR: test_default_runner_captures_subprocess_output"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mobile/android.py:detect_android_sdk:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.mobile.test_android",
+    "mutation_id": "M-L5B-FIRE-mobile-android-42-os.path.isfile",
+    "expect_substring": "ERROR: test_sdk_root_set_but_no_real_adb_binary_is_still_no_data"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_grade.py:compute_evidence_digest:json.dumps#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_grade_b",
+    "mutation_id": "M-L5B-FIRE-core-dream_grade-343-json.dumps",
+    "expect_substring": "ERROR: test_denominator_frozen_after_run_start_blocks"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_grade.py:load_json_object:json.loads#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_grade",
+    "mutation_id": "M-L5B-FIRE-core-dream_grade-358-json.loads",
+    "expect_substring": "ERROR: test_load_json_object_accepts_str_and_bytes"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_grade.py:main.read_object:open#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_grade_f",
+    "mutation_id": "M-L5B-FIRE-core-dream_grade-1298-open",
+    "expect_substring": "FAIL: test_cli_exit_codes_for_defined_verdicts"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_grade.py:main:json.dumps#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_grade_f",
+    "mutation_id": "M-L5B-FIRE-core-dream_grade-1323-json.dumps",
+    "expect_substring": "ERROR: test_cli_exit_codes_for_defined_verdicts"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dispatch_semaphore.py:effective_slots:open#1",
+    "test_id": "plugin.runtime.brother.core.test_dispatch_semaphore",
+    "mutation_id": "M-L5B-FIRE-core-dispatch_semaphore-52-open",
+    "expect_substring": "ERROR: test_a_released_slot_is_free_again_and_a_held_one_is_not"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dispatch_semaphore.py:acquire_slot:os.makedirs#1",
+    "test_id": "plugin.runtime.brother.core.test_dispatch_semaphore",
+    "mutation_id": "M-L5B-FIRE-core-dispatch_semaphore-107-os.makedirs",
+    "expect_substring": "ERROR: test_a_released_slot_is_free_again_and_a_held_one_is_not"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dispatch_semaphore.py:acquire_slot:os.fdopen#1",
+    "test_id": "plugin.runtime.brother.core.test_dispatch_semaphore",
+    "mutation_id": "M-L5B-FIRE-core-dispatch_semaphore-116-os.fdopen",
+    "expect_substring": "ERROR: test_a_released_slot_is_free_again_and_a_held_one_is_not"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dispatch_semaphore.py:acquire_slot:os.open#1",
+    "test_id": "plugin.runtime.brother.core.test_dispatch_semaphore",
+    "mutation_id": "M-L5B-FIRE-core-dispatch_semaphore-116-os.open",
+    "expect_substring": "ERROR: test_a_released_slot_is_free_again_and_a_held_one_is_not"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dispatch_semaphore.py:acquire_slot:fcntl.flock#1",
+    "test_id": "plugin.runtime.brother.core.test_dispatch_semaphore",
+    "mutation_id": "M-L5B-FIRE-core-dispatch_semaphore-120-fcntl.flock",
+    "expect_substring": "ERROR: test_a_released_slot_is_free_again_and_a_held_one_is_not"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dispatch_semaphore.py:release_slot:fcntl.flock#1",
+    "test_id": "plugin.runtime.brother.core.test_dispatch_semaphore",
+    "mutation_id": "M-L5B-FIRE-core-dispatch_semaphore-137-fcntl.flock",
+    "expect_substring": "ERROR: test_a_released_slot_is_free_again_and_a_held_one_is_not"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dispatch_semaphore.py:_claim_owner:open#1",
+    "test_id": "plugin.runtime.brother.core.test_dispatch_semaphore",
+    "mutation_id": "M-L5B-FIRE-core-dispatch_semaphore-160-open",
+    "expect_substring": "ERROR: test_claim_task_is_idempotent_for_the_same_holder"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dispatch_semaphore.py:claim_task:os.makedirs#1",
+    "test_id": "plugin.runtime.brother.core.test_dispatch_semaphore",
+    "mutation_id": "M-L5B-FIRE-core-dispatch_semaphore-180-os.makedirs",
+    "expect_substring": "ERROR: test_a_task_hash_that_is_not_a_plain_file_name_is_refused"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dispatch_semaphore.py:claim_task:os.open#1",
+    "test_id": "plugin.runtime.brother.core.test_dispatch_semaphore",
+    "mutation_id": "M-L5B-FIRE-core-dispatch_semaphore-182-os.open",
+    "expect_substring": "ERROR: test_a_task_hash_that_is_not_a_plain_file_name_is_refused"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dispatch_semaphore.py:claim_task:os.fdopen#1",
+    "test_id": "plugin.runtime.brother.core.test_dispatch_semaphore",
+    "mutation_id": "M-L5B-FIRE-core-dispatch_semaphore-183-os.fdopen",
+    "expect_substring": "ERROR: test_a_task_hash_that_is_not_a_plain_file_name_is_refused"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dispatch_semaphore.py:release_task:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.core.test_dispatch_semaphore",
+    "mutation_id": "M-L5B-FIRE-core-dispatch_semaphore-206-os.path.exists",
+    "expect_substring": "ERROR: test_an_empty_or_truncated_claim_blocks_claim_and_release_alike"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dispatch_semaphore.py:release_task:os.remove#1",
+    "test_id": "plugin.runtime.brother.core.test_dispatch_semaphore",
+    "mutation_id": "M-L5B-FIRE-core-dispatch_semaphore-211-os.remove",
+    "expect_substring": "ERROR: test_only_the_owner_can_release_a_claim"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_world.py:_digest:json.dumps#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_world_d63",
+    "mutation_id": "M-L5B-FIRE-core-dream_world-42-json.dumps",
+    "expect_substring": "ERROR: test_dependency_does_not_create_ancestry"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_world.py:_manifest_hash:json.dumps#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_world_d65",
+    "mutation_id": "M-L5B-FIRE-core-dream_world-640-json.dumps",
+    "expect_substring": "ERROR: test_artifact_hash_mismatch_quarantines"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_world.py:load_records:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_world_d65",
+    "mutation_id": "M-L5B-FIRE-core-dream_world-875-os.path.abspath",
+    "expect_substring": "ERROR: test_artifact_hash_mismatch_quarantines"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_world.py:load_records:os.path.abspath#2",
+    "test_id": "plugin.runtime.brother.core.test_dream_world_d65",
+    "mutation_id": "M-L5B-FIRE-core-dream_world-876-os.path.abspath",
+    "expect_substring": "ERROR: test_artifact_hash_mismatch_quarantines"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_world.py:load_records:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_world_d65",
+    "mutation_id": "M-L5B-FIRE-core-dream_world-889-os.path.isfile",
+    "expect_substring": "ERROR: test_artifact_hash_mismatch_quarantines"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_world.py:load_records:os.path.abspath#3",
+    "test_id": "plugin.runtime.brother.core.test_dream_world_d65",
+    "mutation_id": "M-L5B-FIRE-core-dream_world-897-os.path.abspath",
+    "expect_substring": "ERROR: test_journal_absent_refuses_when_named"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_world.py:load_records:open#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_world_d65",
+    "mutation_id": "M-L5B-FIRE-core-dream_world-931-open",
+    "expect_substring": "FAIL: test_artifact_read_and_admitted"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_world.py:load_records:json.loads#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_world_d65",
+    "mutation_id": "M-L5B-FIRE-core-dream_world-939-json.loads",
+    "expect_substring": "FAIL: test_artifact_read_and_admitted"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/or_dispatch_cli.py:check_deps:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.core.test_l5a5",
+    "mutation_id": "M-L5B-FIRE-core-or_dispatch_cli-98-os.path.isfile",
+    "expect_substring": "ERROR: test_check_deps_requirements_missing_eq_blocked"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/or_dispatch_cli.py:check_deps:open#1",
+    "test_id": "plugin.runtime.brother.core.test_l5a5",
+    "mutation_id": "M-L5B-FIRE-core-or_dispatch_cli-103-open",
+    "expect_substring": "ERROR: test_lock_file_is_inherently_pinned"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/dream_repair.py:_canonical:json.dumps#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_repair",
+    "mutation_id": "M-L5B-FIRE-core-dream_repair-86-json.dumps",
+    "expect_substring": "ERROR: test_cap_argument_above_default_is_clamped"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/core/scratch_root.py:mkdtemp:os.makedirs#1",
+    "test_id": "plugin.runtime.brother.core.test_dream_dispatch",
+    "mutation_id": "M-L5B-FIRE-core-scratch_root-27-os.makedirs",
+    "expect_substring": "ERROR: test_a_corrupt_ledger_line_blocks"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/assurance/authority_hook_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-assurance-authority_hook_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_authority_hook_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/assurance/authority_hook_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-assurance-authority_hook_facade-23-os.path.exists",
+    "expect_substring": "ERROR: test_authority_hook_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/assurance/authority_hook_facade.py:load_authority_hook_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-assurance-authority_hook_facade-49-os.path.isfile",
+    "expect_substring": "ERROR: test_authority_hook_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/assurance/authority_hook_facade.py:load_authority_hook_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-assurance-authority_hook_facade-57-os.path.abspath",
+    "expect_substring": "ERROR: test_authority_hook_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/assurance/gate_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-assurance-gate_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_gate_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/assurance/gate_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-assurance-gate_facade-23-os.path.exists",
+    "expect_substring": "ERROR: test_gate_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/assurance/gate_facade.py:load_gate_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-assurance-gate_facade-49-os.path.isfile",
+    "expect_substring": "ERROR: test_gate_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/assurance/gate_facade.py:load_gate_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-assurance-gate_facade-57-os.path.abspath",
+    "expect_substring": "ERROR: test_gate_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/assurance/telemetry_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-assurance-telemetry_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_telemetry_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/assurance/telemetry_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-assurance-telemetry_facade-23-os.path.exists",
+    "expect_substring": "ERROR: test_telemetry_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/assurance/telemetry_facade.py:load_telemetry_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-assurance-telemetry_facade-49-os.path.isfile",
+    "expect_substring": "ERROR: test_telemetry_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/assurance/telemetry_facade.py:load_telemetry_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-assurance-telemetry_facade-57-os.path.abspath",
+    "expect_substring": "ERROR: test_telemetry_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/data/mdm_audit_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-data-mdm_audit_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_mdm_audit_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/data/mdm_audit_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-data-mdm_audit_facade-23-os.path.exists",
+    "expect_substring": "ERROR: test_mdm_audit_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/data/mdm_audit_facade.py:load_mdm_audit_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-data-mdm_audit_facade-49-os.path.isfile",
+    "expect_substring": "ERROR: test_mdm_audit_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/data/mdm_audit_facade.py:load_mdm_audit_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-data-mdm_audit_facade-57-os.path.abspath",
+    "expect_substring": "ERROR: test_mdm_audit_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/data/mdm_eval_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-data-mdm_eval_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_mdm_eval_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/data/mdm_eval_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-data-mdm_eval_facade-23-os.path.exists",
+    "expect_substring": "ERROR: test_mdm_eval_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/data/mdm_eval_facade.py:load_mdm_eval_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-data-mdm_eval_facade-49-os.path.isfile",
+    "expect_substring": "ERROR: test_mdm_eval_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/data/mdm_eval_facade.py:load_mdm_eval_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-data-mdm_eval_facade-57-os.path.abspath",
+    "expect_substring": "ERROR: test_mdm_eval_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/data/mdm_normalize_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-data-mdm_normalize_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_mdm_normalize_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/data/mdm_normalize_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-data-mdm_normalize_facade-23-os.path.exists",
+    "expect_substring": "ERROR: test_mdm_normalize_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/data/mdm_normalize_facade.py:load_mdm_normalize_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-data-mdm_normalize_facade-49-os.path.isfile",
+    "expect_substring": "ERROR: test_mdm_normalize_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/data/mdm_normalize_facade.py:load_mdm_normalize_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-data-mdm_normalize_facade-57-os.path.abspath",
+    "expect_substring": "ERROR: test_mdm_normalize_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/autosave_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-autosave_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_autosave_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/autosave_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-autosave_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_autosave_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/autosave_facade.py:load_autosave_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-autosave_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_autosave_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/autosave_facade.py:load_autosave_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-autosave_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_autosave_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/controller_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-controller_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_controller_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/controller_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-controller_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_controller_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/controller_facade.py:load_controller_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-controller_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_controller_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/controller_facade.py:load_controller_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-controller_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_controller_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/docs_export_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-docs_export_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_docs_export_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/docs_export_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-docs_export_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_docs_export_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/docs_export_facade.py:load_docs_export_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-docs_export_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_docs_export_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/docs_export_facade.py:load_docs_export_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-docs_export_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_docs_export_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/handover_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-handover_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_handover_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/handover_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-handover_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_handover_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/handover_facade.py:load_handover_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-handover_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_handover_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/handover_facade.py:load_handover_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-handover_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_handover_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/packs_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-packs_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_packs_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/packs_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-packs_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_packs_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/packs_facade.py:load_packs_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-packs_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_packs_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/packs_facade.py:load_packs_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-packs_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_packs_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/reconcile_worktrees_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-reconcile_worktrees_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_reconcile_worktrees_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/reconcile_worktrees_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-reconcile_worktrees_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_reconcile_worktrees_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/reconcile_worktrees_facade.py:load_reconcile_worktrees_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-reconcile_worktrees_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_reconcile_worktrees_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/reconcile_worktrees_facade.py:load_reconcile_worktrees_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-reconcile_worktrees_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_reconcile_worktrees_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/view_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-view_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_view_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/view_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-view_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_view_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/view_facade.py:load_view_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-view_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_view_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/view_facade.py:load_view_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-view_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_view_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/attribute_provenance_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-attribute_provenance_facade-7-os.path.abspath",
+    "expect_substring": "ERROR: test_attribute_provenance_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/attribute_provenance_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-attribute_provenance_facade-27-os.path.exists",
+    "expect_substring": "ERROR: test_attribute_provenance_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/attribute_provenance_facade.py:load_attribute_provenance_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-attribute_provenance_facade-56-os.path.isfile",
+    "expect_substring": "ERROR: test_attribute_provenance_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/attribute_provenance_facade.py:load_attribute_provenance_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-attribute_provenance_facade-66-os.path.abspath",
+    "expect_substring": "ERROR: test_attribute_provenance_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/census_ext_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-census_ext_facade-7-os.path.abspath",
+    "expect_substring": "ERROR: test_census_ext_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/census_ext_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-census_ext_facade-27-os.path.exists",
+    "expect_substring": "ERROR: test_census_ext_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/census_ext_facade.py:load_census_ext_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-census_ext_facade-56-os.path.isfile",
+    "expect_substring": "ERROR: test_census_ext_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/census_ext_facade.py:load_census_ext_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-census_ext_facade-66-os.path.abspath",
+    "expect_substring": "ERROR: test_census_ext_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/cli_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-cli_facade-7-os.path.abspath",
+    "expect_substring": "ERROR: test_cli_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/cli_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-cli_facade-27-os.path.exists",
+    "expect_substring": "ERROR: test_cli_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/cli_facade.py:load_cli_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-cli_facade-56-os.path.isfile",
+    "expect_substring": "ERROR: test_cli_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/cli_facade.py:load_cli_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-cli_facade-66-os.path.abspath",
+    "expect_substring": "ERROR: test_cli_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/compose_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-compose_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_compose_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/compose_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-compose_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_compose_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/compose_facade.py:load_vault_lint_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-compose_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_compose_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/compose_facade.py:load_vault_lint_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-compose_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_compose_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/crosswalk_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-crosswalk_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_crosswalk_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/crosswalk_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-crosswalk_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_crosswalk_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/crosswalk_facade.py:load_vault_lint_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-crosswalk_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_crosswalk_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/crosswalk_facade.py:load_vault_lint_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-crosswalk_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_crosswalk_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/digest_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-digest_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_digest_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/digest_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-digest_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_digest_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/digest_facade.py:load_vault_lint_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-digest_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_digest_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/digest_facade.py:load_vault_lint_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-digest_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_digest_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/enrich_gate_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-enrich_gate_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_enrich_gate_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/enrich_gate_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-enrich_gate_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_enrich_gate_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/enrich_gate_facade.py:load_vault_lint_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-enrich_gate_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_enrich_gate_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/enrich_gate_facade.py:load_vault_lint_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-enrich_gate_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_enrich_gate_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/events_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-events_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_events_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/events_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-events_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_events_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/events_facade.py:load_vault_lint_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-events_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_events_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/events_facade.py:load_vault_lint_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-events_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_events_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/export_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-export_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_export_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/export_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-export_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_export_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/export_facade.py:load_vault_lint_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-export_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_export_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/export_facade.py:load_vault_lint_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-export_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_export_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/heat_temporal_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-heat_temporal_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_heat_temporal_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/heat_temporal_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-heat_temporal_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_heat_temporal_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/heat_temporal_facade.py:load_heat_temporal_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-heat_temporal_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_heat_temporal_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/heat_temporal_facade.py:load_heat_temporal_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-heat_temporal_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_heat_temporal_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/identity_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-identity_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_identity_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/identity_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-identity_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_identity_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/identity_facade.py:load_identity_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-identity_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_identity_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/identity_facade.py:load_identity_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-identity_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_identity_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/interchange_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-interchange_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_interchange_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/interchange_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-interchange_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_interchange_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/interchange_facade.py:load_interchange_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-interchange_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_interchange_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/interchange_facade.py:load_interchange_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-interchange_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_interchange_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/labels_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-labels_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_labels_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/labels_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-labels_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_labels_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/labels_facade.py:load_vault_labels_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-labels_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_labels_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/labels_facade.py:load_vault_labels_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-labels_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_labels_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/lineage_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-lineage_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_lineage_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/lineage_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-lineage_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_lineage_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/lineage_facade.py:load_vault_lineage_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-lineage_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_lineage_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/lineage_facade.py:load_vault_lineage_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-lineage_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_lineage_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/notify_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-notify_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_notify_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/notify_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-notify_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_notify_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/notify_facade.py:load_vault_notify_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-notify_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_notify_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/notify_facade.py:load_vault_notify_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-notify_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_notify_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/pane_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-pane_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_pane_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/pane_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-pane_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_pane_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/pane_facade.py:load_pane_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-pane_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_pane_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/pane_facade.py:load_pane_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-pane_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_pane_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/posture_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-posture_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_posture_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/posture_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-posture_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_posture_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/posture_facade.py:load_posture_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-posture_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_posture_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/posture_facade.py:load_posture_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-posture_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_posture_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/promotions_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-promotions_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_promotions_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/promotions_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-promotions_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_promotions_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/promotions_facade.py:load_promotions_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-promotions_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_promotions_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/promotions_facade.py:load_promotions_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-promotions_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_promotions_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/recall_hook_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-recall_hook_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_recall_hook_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/recall_hook_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-recall_hook_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_recall_hook_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/recall_hook_facade.py:load_recall_hook:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-recall_hook_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_recall_hook_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/recall_hook_facade.py:load_recall_hook:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-recall_hook_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_recall_hook_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/retier_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-retier_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_retier_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/retier_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-retier_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_retier_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/retier_facade.py:load_retier_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-retier_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_retier_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/retier_facade.py:load_retier_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-retier_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_retier_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/shapes_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-shapes_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_shapes_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/shapes_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-shapes_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_shapes_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/shapes_facade.py:load_shapes_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-shapes_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_shapes_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/shapes_facade.py:load_shapes_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-shapes_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_shapes_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/triage_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-triage_facade-7-os.path.abspath",
+    "expect_substring": "ERROR: test_triage_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/triage_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-triage_facade-27-os.path.exists",
+    "expect_substring": "ERROR: test_triage_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/triage_facade.py:load_vault_triage_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-triage_facade-56-os.path.isfile",
+    "expect_substring": "ERROR: test_triage_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/triage_facade.py:load_vault_triage_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-triage_facade-66-os.path.abspath",
+    "expect_substring": "ERROR: test_triage_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/vault_lint_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-vault_lint_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_vault_lint_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/vault_lint_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-vault_lint_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_vault_lint_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/vault_lint_facade.py:load_vault_lint_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-vault_lint_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_vault_lint_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/vault_lint_facade.py:load_vault_lint_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-vault_lint_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_vault_lint_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/assurance/fence_hook_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-assurance-fence_hook_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_fence_hook_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/assurance/fence_hook_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-assurance-fence_hook_facade-23-os.path.exists",
+    "expect_substring": "ERROR: test_fence_hook_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/assurance/fence_hook_facade.py:load_fence_hook_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-assurance-fence_hook_facade-49-os.path.isfile",
+    "expect_substring": "ERROR: test_fence_hook_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/assurance/fence_hook_facade.py:load_fence_hook_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-assurance-fence_hook_facade-57-os.path.abspath",
+    "expect_substring": "ERROR: test_fence_hook_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/assurance/run_evals_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-assurance-run_evals_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_run_evals_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/assurance/run_evals_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-assurance-run_evals_facade-23-os.path.exists",
+    "expect_substring": "ERROR: test_run_evals_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/assurance/run_evals_facade.py:load_run_evals_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-assurance-run_evals_facade-49-os.path.isfile",
+    "expect_substring": "ERROR: test_run_evals_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/assurance/run_evals_facade.py:load_run_evals_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-assurance-run_evals_facade-57-os.path.abspath",
+    "expect_substring": "ERROR: test_run_evals_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/assurance/testkit_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-assurance-testkit_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_testkit_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/assurance/testkit_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-assurance-testkit_facade-23-os.path.exists",
+    "expect_substring": "ERROR: test_testkit_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/assurance/testkit_facade.py:load_testkit_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-assurance-testkit_facade-49-os.path.isfile",
+    "expect_substring": "ERROR: test_testkit_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/assurance/testkit_facade.py:load_testkit_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-assurance-testkit_facade-57-os.path.abspath",
+    "expect_substring": "ERROR: test_testkit_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/data/mdm_derive_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-data-mdm_derive_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_mdm_derive_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/data/mdm_derive_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-data-mdm_derive_facade-23-os.path.exists",
+    "expect_substring": "ERROR: test_mdm_derive_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/data/mdm_derive_facade.py:load_mdm_derive_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-data-mdm_derive_facade-49-os.path.isfile",
+    "expect_substring": "ERROR: test_mdm_derive_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/data/mdm_derive_facade.py:load_mdm_derive_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-data-mdm_derive_facade-57-os.path.abspath",
+    "expect_substring": "ERROR: test_mdm_derive_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/data/mdm_jan_lookup_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-data-mdm_jan_lookup_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_mdm_jan_lookup_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/data/mdm_jan_lookup_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-data-mdm_jan_lookup_facade-23-os.path.exists",
+    "expect_substring": "ERROR: test_mdm_jan_lookup_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/data/mdm_jan_lookup_facade.py:load_mdm_jan_lookup_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-data-mdm_jan_lookup_facade-49-os.path.isfile",
+    "expect_substring": "ERROR: test_mdm_jan_lookup_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/data/mdm_jan_lookup_facade.py:load_mdm_jan_lookup_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-data-mdm_jan_lookup_facade-57-os.path.abspath",
+    "expect_substring": "ERROR: test_mdm_jan_lookup_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/continue_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-continue_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_continue_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/continue_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-continue_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_continue_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/continue_facade.py:load_continue_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-continue_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_continue_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/continue_facade.py:load_continue_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-continue_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_continue_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/cursor_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-cursor_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_cursor_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/cursor_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-cursor_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_cursor_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/cursor_facade.py:load_cursor_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-cursor_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_cursor_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/cursor_facade.py:load_cursor_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-cursor_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_cursor_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/docs_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-docs_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_docs_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/docs_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-docs_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_docs_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/docs_facade.py:load_docs_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-docs_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_docs_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/docs_facade.py:load_docs_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-docs_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_docs_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/learn_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-learn_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_learn_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/learn_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-learn_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_learn_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/learn_facade.py:load_learn_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-learn_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_learn_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/learn_facade.py:load_learn_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-learn_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_learn_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/project_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-project_facade-22-os.path.abspath",
+    "expect_substring": "ERROR: test_project_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/project_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-project_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_project_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/project_facade.py:load_project_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-project_facade-48-os.path.isfile",
+    "expect_substring": "ERROR: test_project_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/project_facade.py:load_project_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-project_facade-51-os.path.abspath",
+    "expect_substring": "ERROR: test_project_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/runtimes_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-runtimes_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_runtimes_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/runtimes_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-runtimes_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_runtimes_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/runtimes_facade.py:load_runtimes_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-runtimes_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_runtimes_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/mode/runtimes_facade.py:load_runtimes_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-mode-runtimes_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_runtimes_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/assertions_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-assertions_facade-7-os.path.abspath",
+    "expect_substring": "ERROR: test_assertions_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/assertions_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-assertions_facade-27-os.path.exists",
+    "expect_substring": "ERROR: test_assertions_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/assertions_facade.py:load_assertions_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-assertions_facade-56-os.path.isfile",
+    "expect_substring": "ERROR: test_assertions_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/assertions_facade.py:load_assertions_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-assertions_facade-66-os.path.abspath",
+    "expect_substring": "ERROR: test_assertions_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/attributes_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-attributes_facade-7-os.path.abspath",
+    "expect_substring": "ERROR: test_attributes_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/attributes_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-attributes_facade-27-os.path.exists",
+    "expect_substring": "ERROR: test_attributes_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/attributes_facade.py:load_attributes_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-attributes_facade-56-os.path.isfile",
+    "expect_substring": "ERROR: test_attributes_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/attributes_facade.py:load_attributes_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-attributes_facade-66-os.path.abspath",
+    "expect_substring": "ERROR: test_attributes_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/cite_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-cite_facade-7-os.path.abspath",
+    "expect_substring": "ERROR: test_cite_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/cite_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-cite_facade-27-os.path.exists",
+    "expect_substring": "ERROR: test_cite_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/cite_facade.py:load_cite_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-cite_facade-56-os.path.isfile",
+    "expect_substring": "ERROR: test_cite_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/cite_facade.py:load_cite_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-cite_facade-66-os.path.abspath",
+    "expect_substring": "ERROR: test_cite_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/closure_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-closure_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_closure_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/closure_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-closure_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_closure_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/closure_facade.py:load_vault_lint_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-closure_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_closure_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/closure_facade.py:load_vault_lint_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-closure_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_closure_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/contract_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-contract_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_contract_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/contract_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-contract_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_contract_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/contract_facade.py:load_vault_lint_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-contract_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_contract_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/contract_facade.py:load_vault_lint_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-contract_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_contract_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/curate_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-curate_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_curate_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/curate_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-curate_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_curate_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/curate_facade.py:load_vault_lint_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-curate_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_curate_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/curate_facade.py:load_vault_lint_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-curate_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_curate_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/distill_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-distill_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_distill_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/distill_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-distill_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_distill_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/distill_facade.py:load_vault_lint_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-distill_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_distill_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/distill_facade.py:load_vault_lint_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-distill_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_distill_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/entity_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-entity_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_entity_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/entity_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-entity_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_entity_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/entity_facade.py:load_vault_lint_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-entity_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_entity_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/entity_facade.py:load_vault_lint_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-entity_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_entity_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/exchange_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-exchange_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_exchange_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/exchange_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-exchange_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_exchange_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/exchange_facade.py:load_vault_lint_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-exchange_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_exchange_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/exchange_facade.py:load_vault_lint_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-exchange_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_exchange_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/graph_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-graph_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_graph_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/graph_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-graph_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_graph_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/graph_facade.py:load_graph_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-graph_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_graph_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/graph_facade.py:load_graph_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-graph_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_graph_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/hierarchy_req_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-hierarchy_req_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_hierarchy_req_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/hierarchy_req_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-hierarchy_req_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_hierarchy_req_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/hierarchy_req_facade.py:load_hierarchy_req_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-hierarchy_req_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_hierarchy_req_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/hierarchy_req_facade.py:load_hierarchy_req_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-hierarchy_req_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_hierarchy_req_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/intake_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-intake_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_intake_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/intake_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-intake_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_intake_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/intake_facade.py:load_intake_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-intake_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_intake_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/intake_facade.py:load_intake_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-intake_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_intake_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/jbench_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-jbench_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_jbench_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/jbench_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-jbench_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_jbench_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/jbench_facade.py:load_vault_jbench_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-jbench_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_jbench_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/jbench_facade.py:load_vault_jbench_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-jbench_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_jbench_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/ledger_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-ledger_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_ledger_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/ledger_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-ledger_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_ledger_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/ledger_facade.py:load_vault_ledger_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-ledger_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_ledger_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/ledger_facade.py:load_vault_ledger_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-ledger_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_ledger_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/lock_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-lock_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_lock_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/lock_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-lock_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_lock_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/lock_facade.py:load_vault_lock_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-lock_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_lock_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/lock_facade.py:load_vault_lock_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-lock_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_lock_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/pack_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-pack_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_pack_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/pack_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-pack_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_pack_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/pack_facade.py:load_pack_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-pack_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_pack_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/pack_facade.py:load_pack_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-pack_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_pack_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/plugins_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-plugins_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_plugins_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/plugins_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-plugins_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_plugins_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/plugins_facade.py:load_plugins_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-plugins_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_plugins_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/plugins_facade.py:load_plugins_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-plugins_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_plugins_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/promote_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-promote_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_promote_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/promote_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-promote_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_promote_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/promote_facade.py:load_promote_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-promote_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_promote_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/promote_facade.py:load_promote_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-promote_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_promote_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/realdata_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-realdata_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_realdata_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/realdata_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-realdata_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_realdata_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/realdata_facade.py:load_realdata_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-realdata_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_realdata_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/realdata_facade.py:load_realdata_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-realdata_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_realdata_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/retention_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-retention_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_retention_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/retention_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-retention_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_retention_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/retention_facade.py:load_retention_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-retention_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_retention_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/retention_facade.py:load_retention_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-retention_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_retention_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/route_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-route_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_route_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/route_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-route_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_route_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/route_facade.py:load_route_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-route_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_route_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/route_facade.py:load_route_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-route_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_route_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/survivorship_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-survivorship_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_survivorship_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/survivorship_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-survivorship_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_survivorship_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/survivorship_facade.py:load_survivorship_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-survivorship_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_survivorship_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/survivorship_facade.py:load_survivorship_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-survivorship_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_survivorship_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/vault_facade.py:_candidate_paths:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-vault_facade-8-os.path.abspath",
+    "expect_substring": "ERROR: test_vault_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/vault_facade.py:_candidate_paths:os.path.exists#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-vault_facade-28-os.path.exists",
+    "expect_substring": "ERROR: test_vault_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/vault_facade.py:load_vault_cli:os.path.isfile#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-vault_facade-57-os.path.isfile",
+    "expect_substring": "ERROR: test_vault_facade_resolves_its_source"
+  },
+  {
+    "entry_id": "plugin/runtime/brother/vault/vault_facade.py:load_vault_cli:os.path.abspath#1",
+    "test_id": "plugin.runtime.brother.test_every_facade_resolves",
+    "mutation_id": "M-L5B-FIRE-vault-vault_facade-67-os.path.abspath",
+    "expect_substring": "ERROR: test_vault_facade_resolves_its_source"
+  }
+]

@@ -31,7 +31,7 @@ BEFORE THE FIRST QUESTION, read this person's vault profile for this project: ru
 
 Read the level silently from the ask, never asked as a question unless genuinely ambiguous, and skipped entirely when the profile above already answered it: file paths, code terms, or a pasted diff say dev; outcome language with no artifact names says BA. Which product surface they invoked (BrotherMode) is a weaker third signal leaning BA. When the signals are absent or conflict, ask ONE plain working-style question, once per person per project: "Want me to read the project and tell you what I think you are asking for, or would you rather talk it through first?" (the first answer leans dev, the second leans BA). Never say the words role, level, persona, or mode to the user. Write the answer to session state, and record it in the vault profile with `python3 "${CLAUDE_PLUGIN_ROOT}/tools/bm_profile.py" record --project <id> --key level --value <dev-or-ba>` so a second session on this project reads it back instead of asking again; a `correct:` line the person appended by hand always wins over anything recorded here. Adapt every sentence from here on to the detected level: plain outcomes for a BA, exact paths and commands for a dev, with zero leakage either way. Offer the switch any time, one utterance, no ceremony: "say 'show me the files' or 'just the outcomes' any time."
 
-If the ask is clearly an engineer's, asking for change assurance on a risky change to code, say so in one line and point them at BrotherSBE's own start (`/brothersbe:start`) instead of walking them through this guided flow here: one estate, two on-ramps, one doorway, never two products competing to answer the same ask.
+If the ask is clearly an engineer's, asking for change assurance on a risky change to code, say so in one line and point them at BrotherSBE's own start (`/brother:brothersbe-start`) instead of walking them through this guided flow here: one estate, two on-ramps, one doorway, never two products competing to answer the same ask.
 
 Then print the opening block: run `python3 "${CLAUDE_PLUGIN_ROOT}/tools/bm_view.py" doorway` (the packaged console script is `bm-view doorway`) and read its block out: it writes no file, creates no folder and needs nothing to have been set up, which is what makes it safe to run in a folder the user has not yet agreed to. Same install-path rule as below.
 
@@ -40,6 +40,13 @@ The block answers three questions and no others: what is about to happen, what i
 ## Minutes one to four: their goal, in their own words, one question at a time
 
 Every question travels as a decision card in the shape of references/kickoff.md, through the AskUserQuestion window, recommended option first. Chat text carries the evidence and the context around the window, never the option list. Ask only what changes the scope. Anything else becomes a stated assumption they can correct, which costs one line now instead of a question.
+
+For any non-trivial decision (2 to 3 options), the card is not the whole of it: beside it, in
+the same turn, render the machine-readable weight table and the one Mermaid diagram that
+references/kickoff.md's "The weight table and the diagram, beside every options decision"
+section requires, both tied to the recommended option and never appended later. A decision
+without its weight table and its diagram is a half-finished step, not a smaller one, exactly
+as BrotherSBE's own kickoff treats the same triple.
 
 ## Minute four: their yes, then the first thing written, then the first page
 
@@ -64,7 +71,7 @@ Do not describe what this product will do for them. Take the smallest genuine pi
 
 Rewrite the page once the first piece is done, and let it do the explaining: the drawing of the stages shows where they are, the stages not reached yet read as waiting rather than missing, and every section still empty says what will be there. The first catch-up arrives at the first change of phase rather than on a clock, so a first run gets one without waiting half an hour for it.
 
-Offer three commands during this whole stretch and no more: `/brothermode:start`, `/brothermode:status`, `/brothermode:next`. The others introduce themselves when they become useful, and a user who has met three commands and used all three is further along than one who was handed nine.
+Offer three commands during this whole stretch and no more: `/brother:brothermode-start`, `/brother:brothermode-status`, `/brother:brothermode-next`. The others introduce themselves when they become useful, and a user who has met three commands and used all three is further along than one who was handed nine.
 
 The first time a decision is put to them, the last option on the card is their own: they can take the decision and the work under it back. That option is not a closing courtesy, it is on every card and on the page, and it is offered before they think to ask.
 
@@ -74,9 +81,9 @@ Once the goal, scope, and first decision are settled, run the mechanical command
 
 ## The task that keeps the walkthrough from dead-ending
 
-A brief on its own leaves `/brothermode:next` with nothing to say: ask it what to do next right after the brief and it reports that no task is ready, because none exists yet. That is the walkthrough's one real dead end, and closing it is part of finishing the kickoff, not a later chore.
+A brief on its own leaves `/brother:brothermode-next` with nothing to say: ask it what to do next right after the brief and it reports that no task is ready, because none exists yet. That is the walkthrough's one real dead end, and closing it is part of finishing the kickoff, not a later chore.
 
-Take the first concrete step the user just agreed to, in their own words, never a guess, and record it as a task with the mechanical command `python3 "${CLAUDE_PLUGIN_ROOT}/tools/bm_project.py" task add --project-id <id> --title "<their words>" --status ready --actor-type model --actor-name brothermode-start` (the packaged console script is `bm-project task add`). Same install-path rule as above. The `--status ready` part is the one that matters: leave it off and the task is created but stuck in a waiting state, and `/brothermode:next` will still skip it, so the dead end reopens with nothing telling you why.
+Take the first concrete step the user just agreed to, in their own words, never a guess, and record it as a task with the mechanical command `python3 "${CLAUDE_PLUGIN_ROOT}/tools/bm_project.py" task add --project-id <id> --title "<their words>" --status ready --actor-type model --actor-name brothermode-start` (the packaged console script is `bm-project task add`). Same install-path rule as above. The `--status ready` part is the one that matters: leave it off and the task is created but stuck in a waiting state, and `/brother:brothermode-next` will still skip it, so the dead end reopens with nothing telling you why.
 
 Then say one plain sentence: they now have a task the system can track, and asking what to do next will hand it straight back to them.
 

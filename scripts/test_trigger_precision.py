@@ -1,5 +1,4 @@
-"""TRIGGER-05 calibration. Runs the real tool against the real repeat-guard
-hook in a temporary HOME, so the matching under test is the guard's own."""
+"""TRIGGER-05 calibration with a test-owned guard in a temporary HOME."""
 import json
 import os
 import subprocess
@@ -9,7 +8,24 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOOL = os.path.join(HERE, "trigger_precision.py")
-HOOK = os.path.expanduser("~/.claude/hooks/repeat_guard.py")
+GUARD = '''import json
+import os
+
+LESSONS = os.path.expanduser("~/.claude/repeat-guard/lessons.jsonl")
+
+def matching_lessons(text):
+    matches = []
+    with open(LESSONS, encoding="utf-8") as source:
+        for line in source:
+            try:
+                lesson = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(lesson, dict) and lesson.get("trigger"):
+                if str(lesson["trigger"]).lower() in text.lower():
+                    matches.append(lesson)
+    return matches
+'''
 
 
 def call(text):
@@ -25,6 +41,10 @@ class TriggerPrecision(unittest.TestCase):
         self.lessons = os.path.join(self.home, ".claude", "repeat-guard", "lessons.jsonl")
         self.tdir = os.path.join(self.home, "t")
         os.makedirs(self.tdir)
+        self.hook = os.path.join(self.home, ".claude", "hooks", "repeat_guard.py")
+        os.makedirs(os.path.dirname(self.hook))
+        with open(self.hook, "w", encoding="utf-8") as fh:
+            fh.write(GUARD)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -38,7 +58,7 @@ class TriggerPrecision(unittest.TestCase):
     def run_tool(self, *extra):
         env = dict(os.environ, HOME=self.home)
         return subprocess.run(
-            [sys.executable, TOOL, "--hook", HOOK,
+            [sys.executable, TOOL, "--hook", self.hook,
              "--transcripts", os.path.join(self.tdir, "*.jsonl")] + list(extra),
             capture_output=True, text=True, env=env, timeout=60)
 
@@ -80,6 +100,23 @@ class TriggerPrecision(unittest.TestCase):
         self.run_tool("--apply")
         with open(self.lessons, encoding="utf-8") as fh:
             self.assertIn("{not json", fh.read())
+
+    def test_missing_or_unloadable_guard_is_one_line_no_data(self):
+        self.write([{"trigger": "noisy", "note": "a"}], ["noisy"] * 300)
+        for source in (None, "this is invalid python!", "raise RuntimeError('unavailable')",
+                       "LESSONS = 'unused'\n"):
+            with self.subTest(source=source):
+                if source is None:
+                    os.remove(self.hook)
+                else:
+                    with open(self.hook, "w", encoding="utf-8") as fh:
+                        fh.write(source)
+                proc = self.run_tool("--apply")
+                self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+                self.assertIn("NO-DATA", proc.stdout)
+                self.assertEqual(len(proc.stdout.splitlines()), 1)
+                self.assertEqual(proc.stderr, "")
+                self.assertNotIn("silent", self.read_lessons()[0])
 
 
 if __name__ == "__main__":

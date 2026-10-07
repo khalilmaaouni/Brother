@@ -329,10 +329,27 @@ class LaneRouter(unittest.TestCase):
                                       "confidence": 0.9}, "low", handle)
 
 
+def _pin_seam_inputs(test):
+    """Both routing seams load data/jev-registry.json and data/jev-seams.json,
+    hub files the public export does not ship, and fail open when one is
+    missing: on an export-shaped tree load_registry() raises, the consult
+    these classes assert never happens, and they read KeyError
+    'current_answer' and 0 != 1 (measured 2026-09-26 by
+    scripts/hermetic_test_check.py). Every test here swaps the checker for a
+    fake that ignores both inputs, so pin them rather than read the tree."""
+    for name, value in (("load_registry", object()), ("load_seams_config", {})):
+        patcher = mock.patch.object(R.jev_seam, name, return_value=value)
+        patcher.start()
+        test.addCleanup(patcher.stop)
+
+
 class J033NeverChangesTheRoutedLane(unittest.TestCase):
     """J033, wave-2: second-opinions the task_class/risk_class table for
     the calibration ledger only. C1: whatever Jev says, route_lane()'s
     own real Lane is unchanged."""
+
+    def setUp(self):
+        _pin_seam_inputs(self)
 
     def test_a_normal_route_consults_the_seam_and_keeps_the_lane(self):
         real_check = R.jev_checks.check_lane_routing
@@ -397,6 +414,9 @@ class J051OnlyConsultsOnAnAmbiguousCheckerAndNeverReroutes(unittest.TestCase):
     """J051, wave-2: fires only when the checker field names neither opus
     nor muse, or both -- the two cases _names_opus_gate cannot resolve on
     its own. C1: whatever Jev says, the real routed lane is unchanged."""
+
+    def setUp(self):
+        _pin_seam_inputs(self)
 
     def test_opus_only_is_unambiguous_and_never_consults(self):
         real_check = R.jev_checks.check_adversarial_review_tier

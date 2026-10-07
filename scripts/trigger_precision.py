@@ -12,7 +12,8 @@ lesson under the bar is NOT thereby proven precise; it is unrefuted.
 Matching reuses the live hook's own matching_lessons(), so this tool can
 never disagree with what the guard actually does.
 
-Failure direction: an unreadable transcript is skipped and counted; zero
+Failure direction: a missing or unloadable guard is NO-DATA (exit 2).
+An unreadable transcript is skipped and counted; zero
 replayed calls is NO-DATA (exit 2), never a clean bill. --apply writes only
 by atomic replace, and only ever ADDS a "silent" field; it never deletes a
 lesson or un-silences one (requalifying is a deliberate hand edit).
@@ -116,7 +117,16 @@ def main(argv=None):
     ap.add_argument("--hook", default=HOOK)
     ap.add_argument("--transcripts", default=TRANSCRIPTS)
     a = ap.parse_args(argv)
-    guard = load_guard(a.hook)
+    try:
+        guard = load_guard(a.hook)
+        if not callable(getattr(guard, "matching_lessons", None)) or not hasattr(guard, "LESSONS"):
+            raise ValueError("guard contract absent")
+    except Exception as exc:
+        # Only classify loading the optional input, never a replay failure.
+        # Exception text can include private hook source or multiple lines.
+        print("trigger-precision: NO-DATA, guard could not be loaded (%s)"
+              % type(exc).__name__)
+        return 2
     paths = sorted(glob.glob(a.transcripts), key=os.path.getmtime, reverse=True)[:a.limit]
     fires, calls, skipped, silent = measure(guard, paths)
     print("trigger-precision: %d transcripts, %d unreadable, %d tool calls replayed"

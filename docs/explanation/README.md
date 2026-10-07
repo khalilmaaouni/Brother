@@ -1,6 +1,8 @@
 # Explanations
 
 - [Why Brother](why-brother.md)
+- [What you can do with Brother](what-you-can-do-with-brother.md)
+- [Mobile development and assurance with Brother](mobile-development-and-assurance.md)
 - [Evidence before confidence](evidence-before-confidence.md)
 - [Why NO-DATA exists](no-data.md)
 - [Human authority](human-authority.md)

@@ -43,8 +43,8 @@ def test_no_product_name_at_start(description: str, name: str) -> bool:
     first_line = description.split('\n')[0].strip()
     # Extract just the first sentence (up to first period)
     first_sentence = first_line.split('.')[0] + '.'
-    # Allow "/brothersbe:" in invocation lines at end, but not product name in situation
-    if 'BrotherSBE' in first_sentence or ('brothersbe' in first_sentence and '/brothersbe:' not in first_sentence):
+    # Allow "/brother:brothersbe-" in invocation lines at end, but not product name in situation
+    if 'BrotherSBE' in first_sentence or ('brothersbe' in first_sentence and '/brother:brothersbe-' not in first_sentence):
         say("FAIL %s: description mentions product name in situation: %s" % (name, first_sentence[:60]))
         return False
     return True
@@ -60,10 +60,10 @@ def test_no_invoke_or_run_start(description: str, name: str) -> bool:
 
 
 def test_has_namespaced_invocation(skill_path: Path, name: str) -> bool:
-    """Assert: file contains 'Invoke as /brothersbe:<name>'."""
+    """Assert: file contains 'Invoke as /brother:brothersbe-<name>'."""
     with open(skill_path) as f:
         content = f.read()
-    if f'Invoke as /brothersbe:{name}' not in content:
+    if f'Invoke as /brother:brothersbe-{name}' not in content:
         say("FAIL %s: missing the namespaced invocation for %s in file" % (name, name))
         return False
     return True

@@ -63,6 +63,7 @@ except Exception:  # noqa: BLE001
 
 CONTENT_CLASSES = frozenset(("public", "generalized", "private"))
 OUTSIDE_OK = frozenset(("public", "generalized"))
+OUTSIDE_LANES: frozenset = frozenset(("deepseek", "muse"))
 
 #: The kind of work each task class is. Checked complete against
 #: orchestrator_invariants.TASK_CLASSES at import, so the two cannot drift.
@@ -90,6 +91,52 @@ CODEX_STALE_S = 24 * 3600
 Lane = collections.namedtuple("Lane", "draft review verify requires_scan reason")
 
 VERIFY = "deterministic-check+claude"
+
+DIVERGENCE_ADVISED_UNKNOWN: str = "advised_lane_unknown"
+DIVERGENCE_EXECUTED_UNKNOWN: str = "executed_lane_unknown"
+DIVERGENCE_CHANGED_TEMPLATE: str = "executed %s where %s was advised"
+
+
+def lane_dict(lane: object) -> dict:
+    """Return the recorded lane fields, or None for fields the lane lacks.
+
+    Never raises: a malformed, missing or hostile lane object yields a dict
+    whose every present field is None rather than an exception.
+    """
+    def _field(name):
+        try:
+            return getattr(lane, name, None)
+        except Exception:  # noqa: BLE001  # sbe: allow-silent malformed object refused as None
+            return None
+    return {
+        "advised": _field("draft"),
+        "review": _field("review"),
+        "verify": _field("verify"),
+        "requires_scan": _field("requires_scan"),
+        "reason": _field("reason"),
+    }
+
+
+def lane_divergence(advised: object, executed: object) -> object:
+    """Return the divergence string, or None when both lanes agree.
+
+    Unknown advice and unknown execution have their own named strings, never
+    a coercion of one into the other. Never raises on any input value.
+    """
+    if advised is None:
+        return DIVERGENCE_ADVISED_UNKNOWN
+    if executed is None:
+        return DIVERGENCE_EXECUTED_UNKNOWN
+    try:
+        equal = advised == executed
+    except Exception:  # noqa: BLE001  # sbe: allow-silent hostile equality refused as divergence
+        equal = False
+    if equal:
+        return None
+    try:
+        return DIVERGENCE_CHANGED_TEMPLATE % (executed, advised)
+    except Exception:  # noqa: BLE001  # sbe: allow-silent hostile formatting refused as unknown executed
+        return DIVERGENCE_EXECUTED_UNKNOWN
 
 
 def codex_headroom(path=None, now=None):
@@ -324,7 +371,7 @@ def _route_lane_deterministic(task_class, risk_class="medium", content=None, cod
         credit_note = "" if codex == "ok" else "; Codex credit headroom is %s, check before spending the pass" % (
             "exhausted" if codex == "exhausted" else "unknown")
         return Lane("codex", "muse" if outside else "claude-opus", VERIFY, outside,
-                    "documentation is drafted by Codex (founder law 2026-09-07)" + credit_note + note)
+                    "documentation goes to the Codex drafting lane, never credited (owner laws 2026-09-07 and 2026-09-26)" + credit_note + note)
     if kind == "judge":
         if task_class == "review":
             return _consult_j051(_route_adversarial_review(checker, outside, note), checker)

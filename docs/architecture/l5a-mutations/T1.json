@@ -1,0 +1,14 @@
+{
+ "applied_to": "a disposable git archive of HEAD by scripts/l5a_mutation_probe.py, never the live tree",
+ "edits": [
+  {
+   "add": "OPENROUTER_API_KEY = \"sk-or-test-12345\"\n",
+   "file": "plugin/runtime/brother/core/l5a_planted.py"
+  }
+ ],
+ "id": "M1",
+ "requirement": "REQ-07",
+ "test": "plugin.runtime.brother.core.test_or_fanout_l5a2.TestSecrets.test_secrets_no_hardcoded_or_logged",
+ "threshold": "L5a spec section 10, T1",
+ "what": "a hardcoded credential value planted under plugin/runtime/brother/core"
+}

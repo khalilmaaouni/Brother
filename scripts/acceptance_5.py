@@ -41,15 +41,15 @@ Exit contract, matching the estate's other acceptance scripts:
   1  FAIL      the hung process was still alive after cancellation, or the
                session did not recover to run the next command
   2  NO-DATA   the sibling tools checkout (bm_worker_spawn) is not present
-               in this environment
+               in this environment, or the hung worker never recorded its
+               pid, so its termination could not be checked
 
 Usage: python3 scripts/acceptance_5.py [--explain] [--calibrate]
---calibrate forces this test red using a real, well-known limitation of
-subprocess timeouts rather than a mock: the worker backgrounds a second,
-fully-detached process (a subshell that spawns it and exits immediately,
-orphaning it) before hanging in the foreground itself. Cancellation kills
-the foreground process subprocess.run is actually watching, but the
-detached grandchild survives, exactly the mechanical shape of "cancellation
+--calibrate forces this test red using a real limit of process-group
+cancellation rather than a mock: before hanging in the foreground, the
+worker starts a daemon (fork, setsid, stdio to /dev/null), which leaves the
+worker's process group. Cancellation kills that whole group, but the daemon
+is outside it and survives, exactly the mechanical shape of "cancellation
 leaves the terminal wedged" / "the next command inherits stale state".
 Passes only if this test correctly reads that surviving process as FAIL,
 and always cleans it up afterwards regardless of the verdict.
@@ -68,15 +68,16 @@ proves (product_acceptance.py's own comment, lines 1088-1092).
 scripts/test_acceptance.py also drives it, as a test harness.
 
 PRODUCER: this module is the sole producer of the files it writes. The
-_write() helper (lines 113-116) is used by build_hanging_worker() (line
-137), build_escaping_worker() (line 151) and build_wellbehaved_worker()
-(line 166) to write the scripted shell worker files and their PID files.
+_write() helper (lines 135-138) is used by build_hanging_worker() (line
+165), build_escaping_worker() (line 210) and build_wellbehaved_worker()
+(line 224) to write the scripted shell worker files and their PID files.
 All of these live inside the tempfile.TemporaryDirectory opened at line
-184 and are deleted when that with-block exits; nothing else in this repo
+237 and are deleted when that with-block exits; nothing else in this repo
 writes through this module's helper.
 """
 import argparse
 import os
+import shlex
 import signal
 import sys
 import tempfile
@@ -101,8 +102,8 @@ TEMPLATE = """area 5 template addition to G1-M3.3's shape:
     already waits on the child it kills, so the honest run's assertion is
     almost free, and the calibration exists to prove the assertion is not
     vacuous
-  - the forced bad state is a REAL OS behaviour (a detached grandchild
-    process escaping the killed process's lineage), not a fake return value,
+  - the forced bad state is a REAL OS behaviour (a daemonized grandchild
+    leaving the killed process group), not a fake return value,
     matching area 3's rule that a fallback mechanism under test must be one
     every other script here already trusts
   - any process this test deliberately leaks for the calibration is killed
@@ -169,18 +170,49 @@ def build_hanging_worker(tmp):
     return worker, pidfile
 
 
+#: The daemon(3) recipe, run as the escaping worker's grandchild: fork and
+#: let the parent return, setsid() into a session of its own, point stdio at
+#: /dev/null, record its pid, then exec a long sleep. The pid is written only
+#: AFTER setsid(), so a pid file on disk proves the escape really happened.
+_DAEMONIZE = """import os, sys
+if os.fork():
+    sys.exit(0)
+os.setsid()
+null = os.open(os.devnull, os.O_RDWR)
+for fd in (0, 1, 2):
+    os.dup2(null, fd)
+with open(sys.argv[1] + ".tmp", "w") as fh:
+    fh.write(str(os.getpid()))
+os.replace(sys.argv[1] + ".tmp", sys.argv[1])
+os.execvp("sleep", ["sleep", "9999"])
+"""
+
+
 def build_escaping_worker(tmp):
-    """--calibrate only: a real detached grandchild that survives the
-    foreground process being killed. The subshell backgrounds `sleep` and
-    exits immediately, orphaning it (reparented away from this script's
-    process group), before the foreground itself also hangs."""
+    """--calibrate only: a real grandchild that survives cancellation.
+
+    SpawningWorker starts each worker in a session of its own and cancels it
+    with os.killpg on that group (bm_worker_spawn._run_process), so a plain
+    `sleep &` grandchild shares the group and dies with it: that is why the
+    old `(sleep 9999 &)` escape stopped escaping. What still escapes is a
+    daemon: a descendant that calls setsid() leaves the worker's process
+    group, and nothing in the group kill can name it again. This is how
+    real tools a worker may start detach themselves (ssh-agent, gpg-agent,
+    build and language-server daemons), so the survivor is the product's
+    real limit, not a staged one.
+
+    Its stdio goes to /dev/null, as daemon(3) does: a survivor still
+    holding the worker's stdout pipe would stall the spawner's post-kill
+    read until it exited, and this calibration would hang instead of
+    reading red."""
     worker = os.path.join(tmp, "escape.sh")
     pidfile = os.path.join(tmp, "escape.pid")
     _write(worker,
           "#!/bin/sh\n"
           "cat >/dev/null\n"
-          "(sleep 9999 & echo $! > %s)\n"
-          "exec sleep 9999\n" % pidfile)
+          "%s -I -S -c %s %s\n"
+          "exec sleep 9999\n" % (shlex.quote(sys.executable),
+                                 shlex.quote(_DAEMONIZE), shlex.quote(pidfile)))
     return worker, pidfile
 
 
@@ -229,7 +261,11 @@ def _run(explain, escape):
                     pid = int(fh.read().strip() or 0) or None
             leaked_pid = pid
 
-            if pid and _pid_alive(pid):
+            if pid is None:
+                return 2, ("NO-DATA: the hung worker never recorded its pid in "
+                           "%s, so whether cancellation terminated it cannot "
+                           "be checked" % pidfile)
+            if _pid_alive(pid):
                 return 1, ("FAIL: cancellation was reported (status=%s) but "
                            "PID %d is still alive %.2fs later: the process was "
                            "not actually terminated, which is the wedged-"
@@ -277,17 +313,18 @@ def run(explain=False):
 
 
 def calibrate():
-    """G1-M3.8.2: force this test red once. A detached grandchild process
-    escapes the killed foreground process (a real OS behaviour, not a
-    mock), and this test passes its own calibration only if it correctly
-    reads the surviving process as a failure. The escaped process is always
-    killed afterwards, whatever this returns."""
+    """G1-M3.8.2: force this test red once. A daemonized grandchild
+    (setsid) escapes the worker's process-group kill (a real OS behaviour,
+    not a mock), and this test passes its own calibration only if it
+    correctly reads the surviving process as a failure. The escaped process
+    is always killed afterwards, whatever this returns."""
     code, evidence = _run(explain=False, escape=True)
     if code == 1 and "still alive" in evidence:
-        return 0, ("PASS: calibration used a real detached grandchild that "
-                   "escapes the killed foreground process, and this test "
-                   "correctly read the survivor as failed (%s): a green "
-                   "reading of this test means something" % evidence)
+        return 0, ("PASS: calibration used a real daemonized grandchild that "
+                   "left the worker's process group and escaped its group "
+                   "kill, and this test correctly read the survivor as failed "
+                   "(%s): a green reading of this test means something"
+                   % evidence)
     if code == 2:
         return 1, ("FAIL: calibration could not run at all (%s), so nothing "
                    "was proven about this test's ability to fail" % evidence)

@@ -103,7 +103,9 @@ punishes a check for being new. Neither is acceptable here.
 This repository does not grow a new front door for every feature. The numeric
 surface caps that once bounded skills, commands, agents, and hooks were
 withdrawn 2026-08-22 in favor of the architecture of record (Option B: one
-repository, three plugins, one marketplace, see `docs/CHARTER.md`), whose C4
+repository and one marketplace; its catalog listed the three product plugins
+beside `brother` until release 1.1.0, which lists `brother` alone, see
+`docs/CHARTER.md`), whose C4
 criterion freezes the tool surface: no existing skill or command is renamed,
 and no new public command lands without the founder deciding to add one on
 purpose. `tests/test_surface.py` verifies the structural shape this repository
@@ -220,3 +222,12 @@ attribution to any tool that helped write this repository appears anywhere in
 it, by policy, from the first commit. An agent committing here never adds a
 co-author trailer, a generated-by footer, or a credit line naming the tool
 that produced the change.
+
+That covers drafting credits too (owner law, 2026-09-26): no header, footer,
+docstring, comment, release note, generated page or record credits any model
+or tool (Codex, GPT, Claude, DeepSeek, Muse, Jev or any other) as its author,
+drafter or co-author. A model may draft; only the owner is credited. Which
+lane produced what is provenance, and it lives in local evidence logs, never
+in the shipped text. `python3 scripts/self_check_staged.py` refuses a new
+credit line at commit time, and `scripts/test_export_public.py` refuses one
+anywhere in the exported tree.

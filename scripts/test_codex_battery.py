@@ -4,6 +4,7 @@ portability rules (a receipt under a temp directory never passes B6; on a
 tag after v1.0.8 an ABSENT brothermode@brother is the pass for B8)."""
 
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -28,7 +29,12 @@ class DurableReceipt(unittest.TestCase):
         self.assertTrue(cb.receipt_under_temp(os.path.join(tempfile.gettempdir(), "r.json")))
 
     def test_home_receipt_is_durable(self):
-        self.assertFalse(cb.receipt_under_temp(os.path.expanduser("~/.codex/brother/runs/r.json")))
+        # HOME pinned outside every temp root: the public runner's empty HOME
+        # lives under the temp directory, so the ambient one proves nothing.
+        from unittest import mock
+        with mock.patch.dict(os.environ, {"HOME": "/home/durable-fixture"}):
+            path = os.path.expanduser("~/.codex/brother/runs/r.json")
+        self.assertFalse(cb.receipt_under_temp(path))
 
 
 class ReceiptProvesChange(unittest.TestCase):
@@ -82,6 +88,23 @@ class BrothermodeExpectation(unittest.TestCase):
         self.assertEqual(cb.check_available_plugins(body, False)[0], "FAIL")
         self.assertEqual(cb.check_available_plugins('"pluginId": "brother@brother"', False)[0], "PASS")
         self.assertEqual(cb.check_available_plugins('"pluginId": "brother@brother"', None)[0], "NO-DATA")
+
+
+class ToyCommitIdentityIsNeutral(unittest.TestCase):
+    """The toy repository's commit identity is nobody's: this script is
+    exported, and until 2026-10-05 the toy commit carried a real address."""
+
+    ADDRESS = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+\.[A-Za-z]{2,}")
+
+    def test_the_tool_carries_no_address_shaped_literal(self):
+        with open(os.path.join(HERE, "codex_battery.py"), encoding="utf-8") as fh:
+            lines = fh.read().splitlines()
+        self.assertGreater(len(lines), 100, "the scan read almost nothing")
+        # line numbers only: the message never repeats what it found
+        hits = ["line %d" % number for number, line in enumerate(lines, 1)
+                if self.ADDRESS.search(line)]
+        self.assertEqual([], hits, "codex_battery.py carries an address "
+                         "shaped literal at: " + ", ".join(hits))
 
 
 if __name__ == "__main__":

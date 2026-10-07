@@ -5,8 +5,7 @@ Written 2026-09-12 after a session printed a count of hits and pushed anyway,
 and after a commit message quoting a scanner's own pattern carried private
 terms onto main. Four families: secret shapes, attribution lines, em and en
 dashes, and the private terms in ~/.brothersbe-private-names. A matched term
-is never printed, only its position in the list. Drafted by DeepSeek V4.1
-Flash, cross-reviewed by Muse Spark 1.2.
+is never printed, only its position in the list.
 
 Scans commits in a git revision range.  Exits:
   0 when every family examined at least one commit and found nothing

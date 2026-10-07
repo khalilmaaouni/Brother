@@ -8,8 +8,11 @@ It failed correctly against the published surface, a local repin was made,
 and the same check then PASSED before anything was pushed. A pass over a
 published surface that was still wrong.
 
-So the cases here poison the LOCAL manifest with a version that cannot occur
-(999.0.0) and watch which number the script reports.
+So the cases here poison the LOCAL manifest's brother entry with a version
+that cannot occur (999.0.0) and watch which number the script reports. Since
+2026-10-06 (docs/plan/specs/OP1.md, OP1.f) the promise is the one plugin's
+version: the per leaf probe a one entry marketplace would abort on is gone,
+and a manifest with no single brother entry stops the run before any install.
 
 No real install happens. A stub `claude` on PATH answers the binary check and
 then fails the marketplace add, which is AFTER the promises line is printed
@@ -30,14 +33,17 @@ SCRIPT = os.path.join(REPO_ROOT, 'scripts', 'bundle-install-smoke.sh')
 POISON = '999.0.0'
 LOCAL_MANIFEST = (
     '{"plugins": ['
-    '{"name": "brothermode", "version": "%s"},'
-    '{"name": "brothersbe", "version": "%s"}]}' % (POISON, POISON)
+    '{"name": "brother", "version": "%s", "source": {"source": "path", "path": "bundle"}}]}'
+    % POISON
 )
+#: A manifest with no brother entry at all: the one plugin promise cannot be
+#: read from it, so the script must stop before any install.
+NO_BROTHER_MANIFEST = '{"plugins": [{"name": "brothermode", "version": "%s"}]}' % POISON
 
 STUB_CLAUDE = "#!/bin/sh\necho 'stub claude: refusing on purpose' >&2\nexit 1\n"
 
 
-def build_tree(tmp, dead_url=False):
+def build_tree(tmp, dead_url=False, manifest=LOCAL_MANIFEST):
     """A throwaway tree holding the script, a POISONED local manifest, and a
     stub claude on PATH."""
     os.makedirs(os.path.join(tmp, 'scripts'))
@@ -55,7 +61,7 @@ def build_tree(tmp, dead_url=False):
 
     with open(os.path.join(tmp, '.claude-plugin', 'marketplace.json'), 'w',
               encoding='utf-8') as fh:
-        fh.write(LOCAL_MANIFEST)
+        fh.write(manifest)
 
     stub = os.path.join(tmp, 'bin', 'claude')
     with open(stub, 'w', encoding='utf-8') as fh:
@@ -79,6 +85,14 @@ class PromiseAndDeliveryComeFromOnePlace(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             dest = build_tree(tmp)
             r = run(tmp, dest, '--github')
+            if 'could not fetch the PUBLISHED manifest' in r.stdout + r.stderr:
+                # The premise is the network. A confined run has none, and the script then refuses, loudly,
+                # to fall back to the local manifest: that refusal is the behaviour under test, and it is
+                # asserted here before the case says it could not go further.
+                self.assertNotIn(POISON, r.stdout, 'the local manifest was read in --github mode')
+                self.assertNotEqual(r.returncode, 0, 'a fetch that failed must not read as a pass')
+                self.skipTest('no network here: the published manifest could not be fetched, and the script '
+                              'refused to fall back to the local one')
             self.assertIn('promises read from: the published manifest at main',
                           r.stdout, r.stdout + r.stderr)
             self.assertIn('umbrella promises', r.stdout, r.stdout + r.stderr)
@@ -106,6 +120,20 @@ class PromiseAndDeliveryComeFromOnePlace(unittest.TestCase):
             self.assertNotIn('umbrella promises', r.stdout,
                              'it reported promises despite having no published manifest')
             self.assertNotIn(POISON, r.stdout)
+
+    def test_a_manifest_with_no_brother_entry_stops_before_any_install(self):
+        """The one plugin promise is the brother entry's version. A manifest
+        that names no such entry gives this proof nothing to hold the install
+        to, so it stops (exit 1) before the marketplace add, and prints no
+        promise it could not read."""
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = build_tree(tmp, manifest=NO_BROTHER_MANIFEST)
+            r = run(tmp, dest)
+            self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+            self.assertIn('names no single brother entry', r.stdout + r.stderr)
+            self.assertNotIn('umbrella promises', r.stdout)
+            self.assertNotIn('stub claude', r.stderr,
+                             'the stub client was called although there was nothing to prove')
 
 
 if __name__ == '__main__':

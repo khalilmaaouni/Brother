@@ -17,7 +17,7 @@ own mount has to be lazy) never counts as a hit: `ast` only ever sees
 string content as a `Constant`, never as an `Attribute` node, so prose is
 structurally invisible to the walk below.
 
-`KNOWN_UNCONVERTED` holds exactly one module, for a load-bearing reason
+`KNOWN_UNCONVERTED` holds two modules. `tasks.py` for a load-bearing reason
 discovered when the fold-in was attempted: `tasks.py` is loaded STANDALONE
 by `tools/sbe_authority_hook.py` through `spec_from_file_location`, with no
 package parent, so a package-relative `from ._toolspath import mount` there
@@ -52,7 +52,12 @@ CONVERTED = {
 }
 
 #: See the module docstring: the one standalone-loaded exception, by proof.
-KNOWN_UNCONVERTED = frozenset(("tasks.py",))
+# `_jevpath.py` (2026-09-19, J049/J050) is the second mount and mounts a
+# DIFFERENT directory: the main repo's `scripts/` (jev_seam.py, jev_checks.py),
+# which `_toolspath.mount()` cannot serve because that one mounts `tools/`.
+# It is fail-open by design (an installed standalone brothersbe has no
+# `scripts/` sibling) and is documented in its own module docstring.
+KNOWN_UNCONVERTED = frozenset(("tasks.py", "_jevpath.py"))
 
 
 def _parse(path):

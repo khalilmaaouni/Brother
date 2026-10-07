@@ -10,13 +10,13 @@ Install is a few minutes. Turning the gates from advisory into blocking is real 
 - Python 3 on PATH (the tools use the standard library only, no third-party packages, no network).
 - Git (the approval gate reads commit trailers and signatures).
 
-## 1. Clone the skill
+## 1. Download and place the skill
 
 ```
-git clone https://github.com/khalilmaaouni/BrotherSBE ~/.claude/skills/brothersbe
+git clone https://github.com/khalilmaaouni/Brother.git
 ```
 
-Standalone: it works with nothing else installed. See [PARITY.md](../PARITY.md) for what it shares with BrotherModeUp.
+Copy the checkout's `products/brothersbe` folder to `~/.claude/skills/brothersbe`. The destination should contain `SKILL.md` and `tools/` directly. If it already exists, preserve it and follow [migration guidance](MIGRATION.md) before replacing it. The manual hook paths below refer to this copy.
 
 ## 2. Point the vault at a folder you choose
 
@@ -58,7 +58,7 @@ What each does: SessionStart injects the active-laws digest plus mechanical nags
 
 ## 4. Prove it works, in 60 seconds
 
-Section 1 cloned the repo and left you wherever you were, so enter the clone first;
+Section 1 placed the product files in the skill folder, so enter that folder first;
 every command from here down is relative to it.
 
 ```
@@ -70,14 +70,14 @@ output, in [README.md](ENGINEERING-REFERENCE.md#a-60-second-first-run): run them
 directory. Then see the gates on a directory:
 
 ```
-python3 tools/sbe_gate.py .            # all four gates, advisory
+python3 tools/sbe_gate.py .            # all gates, advisory
 python3 tools/sbe_gate.py numbers .    # one class
 python3 tools/sbe_gate.py --strict design   # enforcing: exits nonzero on any FAIL
 ```
 
 ## 5. Turn the gates from advisory into blocking (the real step)
 
-Cloning the skill gives you the tools. It does not stop a bad merge until you wire `--strict` into the CI of the repository you want guarded. This is the same CI wiring [README.md](ENGINEERING-REFERENCE.md#wire-the-checks-into-ci-every-install-path) documents in full, with the actual workflow steps kept in one place so a step added there is never silently missing here: wire the ten steps [CI-ORDER.md](CI-ORDER.md) names into the guarded repo's own workflow (and make `tools/` reachable there, by vendoring it or adding a clone step). It runs on every pull request, seven steps, not three: the first blocks on a failed hard gate (a number with no re-run, an untested migration reverse, an unsigned money-path change, an unrun check). The second blocks on an incomplete dossier (a missing artifact, an ADR with no rejected alternatives, an entity with no system of record, a diagram node nothing defines, a dossier that is still the shipped template). The third blocks on a silent-failure lint. Three more run the regression evals, the honesty meta-test and the tool tests, because a gate whose fixtures nobody runs is a gate nobody knows still works. The waiver step (third of the seven) surfaces any design waiver as an annotation and in the job summary, because a waiver examined nothing and the exit code cannot tell you it happened. Advisory mode tells a session; only this CI wiring stops a merge, and that is by design.
+Installing the skill gives you tools; it does not stop a merge. Follow [CI-ORDER.md](CI-ORDER.md) to add the checks to your repository's automated pull request workflow. Make the BrotherSBE tools available to that workflow and configure the checks as required before merging. The [CI wiring reference](ENGINEERING-REFERENCE.md#wire-the-checks-into-ci-every-install-path) explains the setup. Read FAIL and NO-DATA results separately, and make any waiver visible to the reviewer.
 
 Two settings decide whether those steps can see anything.
 

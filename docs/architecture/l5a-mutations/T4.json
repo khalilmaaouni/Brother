@@ -1,0 +1,15 @@
+{
+ "applied_to": "a disposable git archive of HEAD by scripts/l5a_mutation_probe.py, never the live tree",
+ "edits": [
+  {
+   "file": "plugin/runtime/brother/core/l5a6_score.py",
+   "find": "    elif point == 4 and any((_census_third_party(e) or 0) > 0 for e in point_evidence):\n",
+   "replace": "    elif False:\n"
+  }
+ ],
+ "id": "M4c",
+ "requirement": "REQ-08 threshold 8",
+ "test": "plugin.runtime.brother.core.test_l5a10.TestPointFour.test_a_third_party_import_with_no_vulnerability_db_is_no_data",
+ "threshold": "L5a spec section 10, T4",
+ "what": "a third party import with no vulnerability DB lookup is scored instead of read as NO-DATA"
+}

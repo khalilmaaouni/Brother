@@ -1,6 +1,6 @@
 ---
 name: handover
-description: Use when someone wants to hand this change's ownership to another named human, or when a receiver wants to inspect and accept or reject a handover already prepared for them. Runs the status and worktree checks first, then prepares (or reads) 12-handover.json through the sbe handover engine and renders the concise handover summary a receiver needs, never the project's whole history. Invoke as /brothersbe:handover.
+description: Use when someone wants to hand this change's ownership to another named human, or when a receiver wants to inspect and accept or reject a handover already prepared for them. Runs the status and worktree checks first, then prepares (or reads) 12-handover.json through the sbe handover engine and renders the concise handover summary a receiver needs, never the project's whole history. Invoke as /brother:brothersbe-handover.
 ---
 
 Plugin root: a Claude Code install exports `${CLAUDE_PLUGIN_ROOT}` and a Codex install exports `${BROTHER_PLUGIN_ROOT}`; both name this plugin's own directory, so read whichever variable appears below as the one your client set. On a clone install neither is set: run the same commands from the checkout root instead.
@@ -12,7 +12,7 @@ acknowledges it. A chat message saying "it's yours now" is not a handover: nobod
 status` it later, and "I told them" cannot be checked. This skill never claims ownership moved
 before `sbe handover acknowledge` says so. Read
 `${CLAUDE_PLUGIN_ROOT}/references/team-execution.md` first: its "The handover protocol" section
-carries the states, the acceptance rules and the boundary against `/brothersbe:work`'s takeover
+carries the states, the acceptance rules and the boundary against `/brother:brothersbe-work`'s takeover
 protocol, which this skill does not replace.
 
 This skill never runs `git merge`, `git rebase`, or `git push`, and it never edits
@@ -34,7 +34,7 @@ Before anything else, read state, never guess it:
 "${CLAUDE_PLUGIN_ROOT}/bin/sbe" status --team --json
 ```
 
-Resolve the active dossier the same way `/brothersbe:work` does (`scope.storesInspected.intake`
+Resolve the active dossier the same way `/brother:brothersbe-work` does (`scope.storesInspected.intake`
 for a flat layout, `scope.storesInspected.dossiers` for a team layout; more than one candidate
 with open or ready work is named and asked about, never guessed). Read that dossier's `handover`
 entry (LT-302.B's field, present in both commands' JSON) for its current `status`: `none` (no
@@ -128,7 +128,7 @@ task ownership move, and only through the existing registry behavior other comma
 When the person talking is the receiver, for example:
 
 ```
-/brothersbe:handover
+/brother:brothersbe-handover
 Explain what I inherit and show me the first file and command I should inspect.
 ```
 

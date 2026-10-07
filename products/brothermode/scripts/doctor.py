@@ -858,7 +858,35 @@ def doctor(settings_path):
 # rather than a doctor.py traceback.
 # ---------------------------------------------------------------------------
 
-CheckResult = collections.namedtuple("CheckResult", "key title status message")
+CheckResult = collections.namedtuple(
+    "CheckResult", "key title status message remedy")
+#: `remedy` is optional and defaults to None: every check written before
+#: --fix existed keeps its exact four-argument shape and needs no edit.
+CheckResult.__new__.__defaults__ = (None,)
+
+#: WHAT A CHECK SAYS CAN BE DONE ABOUT ITS OWN FAILURE (--fix, 2026-09-10).
+#: `command` is the ONE copyable command a human runs. `apply` is None, the
+#: default and the overwhelmingly common case, meaning only a human may run
+#: it; or a zero-argument callable returning (changed, detail) when the
+#: remedy is safe, local and reversible enough for --fix to perform it.
+#:
+#: DECLARED BY THE CHECK, beside the failure that produced it, never by a
+#: central map from check name to fix. A central map goes stale the moment
+#: somebody adds a check and NOTHING FAILS WHEN IT DOES: the new check simply
+#: has no entry, --fix quietly says it cannot help, and the gap is invisible.
+#: Here the remedy sits in the same return statement as the message it
+#: repairs, so the two cannot drift apart without somebody editing both.
+#:
+#: WHAT NO REMEDY MAY EVER APPLY, whatever a check asks for: installing
+#: software, changing permissions or any security setting, touching a
+#: credential, writing outside the operator's own BrotherMode configuration,
+#: running anything that needs a password, pushing, or changing a git
+#: remote. Those are printed, never run. As of this writing exactly ONE
+#: remedy in this file carries an apply at all (the vault directory, below);
+#: every other failing check prints its command and stops, which is the
+#: discipline and not a gap waiting to be filled.
+Remedy = collections.namedtuple("Remedy", "command apply")
+Remedy.__new__.__defaults__ = (None,)
 
 STATUS_PASS = "PASS"
 STATUS_FAIL = "FAIL"
@@ -889,8 +917,8 @@ CHECK_TITLES = collections.OrderedDict((
 ))
 
 
-def _result(key, status, message):
-    return CheckResult(key, CHECK_TITLES[key], status, message)
+def _result(key, status, message, remedy=None):
+    return CheckResult(key, CHECK_TITLES[key], status, message, remedy)
 
 
 def _run_check(key, fn, *args):
@@ -919,7 +947,8 @@ def check_fence(settings_path):
             "Until these are fixed, treat file ownership as a coordination "
             "ledger only: bm_store.py still refuses an overlapping CLAIM, but "
             "nothing refuses a WRITE.")
-        return _result("fence", STATUS_FAIL, "\n".join(lines))
+        return _result("fence", STATUS_FAIL, "\n".join(lines),
+                       Remedy("python3 scripts/install.py --upgrade"))
     lines = list(notes)
     lines.append(
         "OK: for each of %s, the wired hook denied a foreign write and "
@@ -1129,8 +1158,13 @@ def check_consent():
         return _result("consent", STATUS_FAIL,
                        "FAIL: the config at %s could not be read (%s). Run: "
                        "python3 scripts/setup.py --reconfigure"
-                       % (_mask_home(cfg_path), err))
+                       % (_mask_home(cfg_path), err),
+                       Remedy("python3 scripts/setup.py --reconfigure"))
     if not _bm_setup.is_consented(cfg):
+        # No remedy attached, and never one: this is a SKIP (a brand new,
+        # never-initialized install), not a failure --fix acts on, and
+        # consent is the operator saying yes; a tool that granted its own
+        # consent would be the exact thing setup.py exists to refuse.
         return _result("consent", STATUS_SKIP,
                        "SKIP: setup has not been completed yet, so nothing "
                        "below that depends on it can be checked either. This "
@@ -1138,6 +1172,45 @@ def check_consent():
                        "breakage. Run: python3 scripts/setup.py")
     return _result("consent", STATUS_PASS,
                    "PASS: setup is complete (config at %s)." % _mask_home(cfg_path))
+
+
+def _apply_vault_from_template(root, vault_path):
+    """The ONE automatic remedy in this file, returned as a callable so
+    check_vault can hand --fix something to run rather than something to
+    print. It creates the operator's own configured vault directory by
+    copying this install's shipped vault-template into it.
+
+    WHY THIS ONE QUALIFIES where nothing else here does. It is SAFE (it
+    writes only to the path the operator's own config already names as
+    their vault, and only when nothing is there); it is LOCAL (no network,
+    no privilege, no shell, no install, no permission change); and it is
+    REVERSIBLE by deleting one directory, which the detail line says out
+    loud. It is IDEMPOTENT by refusing outright when the directory already
+    exists, so a second --fix reports nothing to do rather than copying a
+    second time or merging into somebody's real vault.
+
+    It never overwrites, never merges, and never touches a directory that
+    already exists, so a vault holding real work cannot be harmed by it:
+    the only state it acts on is the absence of one."""
+    def apply():
+        if os.path.isdir(vault_path):
+            return False, ("the vault at %s already exists, so there is "
+                           "nothing to create" % _mask_home(vault_path))
+        template = os.path.join(root, "vault-template")
+        if not os.path.isdir(template):
+            return False, ("no vault template at %s to copy from, so this "
+                           "cannot be created for you"
+                           % _mask_home(template))
+        try:
+            shutil.copytree(template, vault_path)
+        except (IOError, OSError, shutil.Error) as exc:
+            return False, ("could not create %s (%s), so nothing was changed"
+                           % (_mask_home(vault_path),
+                              _mask_home_text(str(exc))))
+        return True, ("created %s from %s. To undo this, delete that "
+                      "directory." % (_mask_home(vault_path),
+                                      _mask_home(template)))
+    return apply
 
 
 def check_vault(root):
@@ -1150,18 +1223,27 @@ def check_vault(root):
     if not isinstance(vault_path, str) or not vault_path:
         return _result("vault", STATUS_FAIL,
                        "FAIL: the config has no vault_path recorded. Run: "
-                       "python3 scripts/setup.py --reconfigure")
+                       "python3 scripts/setup.py --reconfigure",
+                       Remedy("python3 scripts/setup.py --reconfigure"))
     vault_path = os.path.expanduser(vault_path)
     if not os.path.isdir(vault_path):
         return _result("vault", STATUS_FAIL,
                        "FAIL: the vault path %s does not exist yet. Create it: "
                        "cp -R %s/vault-template %s"
-                       % (_mask_home(vault_path), _mask_home(root), _mask_home(vault_path)))
+                       % (_mask_home(vault_path), _mask_home(root),
+                          _mask_home(vault_path)),
+                       Remedy("cp -R %s/vault-template %s"
+                              % (_mask_home(root), _mask_home(vault_path)),
+                              _apply_vault_from_template(root, vault_path)))
     if not os.access(vault_path, os.W_OK):
         return _result("vault", STATUS_FAIL,
                        "FAIL: the vault path %s exists but is not writable by "
                        "you. Fix it: chmod u+w %s"
-                       % (_mask_home(vault_path), _mask_home(vault_path)))
+                       % (_mask_home(vault_path), _mask_home(vault_path)),
+                       # Printed, never applied: changing a permission is on
+                       # the never list above, and a directory the operator
+                       # cannot write may well be deliberate.
+                       Remedy("chmod u+w %s" % _mask_home(vault_path)))
     return _result("vault", STATUS_PASS,
                    "PASS: the vault at %s exists and is writable." % _mask_home(vault_path))
 
@@ -1391,7 +1473,11 @@ def check_hook_wiring_matches_mode(settings, settings_err, settings_path, root):
         return _result("mode_wiring", STATUS_FAIL,
                        "FAIL: %s could not be read (%s), so hook wiring "
                        "cannot be compared against installation_mode."
-                       % (_mask_home(settings_path), settings_err))
+                       % (_mask_home(settings_path), settings_err),
+                       # Same cause, same one command, resolved the same
+                       # way: this row fails only because the settings row
+                       # above did.
+                       _settings_remedy(settings_path))
     mode = cfg.get("installation_mode")
     plugin_name = _plugin_name(root)
     has_plugin = _plugin_enabled(settings, plugin_name)
@@ -1715,16 +1801,36 @@ def check_checksums(root):
                        "CHECKSUMS.sha256: %s%s. This catches a half-finished "
                        "update; re-run the update steps (commands/"
                        "brotherme-update.md) or restore the named file(s)."
-                       % (len(problems), listed, "; ".join(shown), more))
+                       % (len(problems), listed, "; ".join(shown), more),
+                       # Printed, never applied, and this one is worth saying
+                       # plainly: the mechanical way to make this check green
+                       # is to regenerate CHECKSUMS.sha256 from the files as
+                       # they now are, which repairs nothing. It forges the
+                       # evidence. --fix must never be the tool that makes a
+                       # tamper detector agree with the tamper.
+                       Remedy("python3 scripts/install.py --upgrade"))
     return _result("checksums", STATUS_PASS,
                    "PASS: all %d file(s) listed in CHECKSUMS.sha256 match."
                    % listed)
 
 
+def _settings_remedy(settings_path):
+    """The one command for an unreadable settings file, or None when there
+    is no single command. An ABSENT file is created by the installer; a
+    file that is THERE and holds invalid JSON has to be repaired by the
+    person whose file it is, and offering to reinstall over it would risk
+    their own unrelated settings. Returning None there is the honest
+    answer, and --fix prints the check's own message instead."""
+    if os.path.exists(settings_path):
+        return None
+    return Remedy("python3 scripts/install.py")
+
+
 def check_settings_json(settings_path):
     _settings, err = read_settings(settings_path)
     if err:
-        return _result("settings_json", STATUS_FAIL, "FAIL: %s" % err)
+        return _result("settings_json", STATUS_FAIL, "FAIL: %s" % err,
+                       _settings_remedy(settings_path))
     return _result("settings_json", STATUS_PASS,
                    "PASS: %s is valid JSON." % _mask_home(settings_path))
 
@@ -2226,7 +2332,13 @@ def _count_trust_entries_by_toml(block):
     is valid TOML on its own, and tomllib's own comment handling replaces
     the "#" guess in _count_trust_entries_by_line entirely for this path.
     Returns None on any parse failure, so the caller uses the line scan
-    above instead of trusting a partial parse."""
+    above instead of trusting a partial parse. Returns None as well when
+    tomllib is absent (Python 3.9 and 3.10): this function is the whole
+    of the "tomllib present" branch, so the caller's guard and its own
+    agree, and a direct call on an older interpreter answers the contract
+    instead of raising AttributeError on the None placeholder."""
+    if tomllib is None:
+        return None
     try:
         doc = tomllib.loads(block)
     except tomllib.TOMLDecodeError:  # sbe: allow-silent pure reader, never rewrites; None tells the caller to fall back to _count_trust_entries_by_line, which computes the same count without tomllib, so no finding is dropped
@@ -2645,6 +2757,100 @@ def main_status(explicit_settings):
     return code
 
 
+def main_fix(settings_path):
+    """--fix: run every check, apply the remedies that are safe to apply,
+    and print exactly one copyable command for every remedy that is not.
+
+    EXIT CODE, and the reasoning is this product's own. A run that had to do
+    anything exits EXIT_PROBLEMS even when every apply succeeded, because
+    nothing here re-ran the checks afterwards and an unverified repair is
+    not a repair. Only a run that found nothing failing exits 0. So the
+    honest way to learn whether a fix held is to run --fix again, which
+    re-runs every check from scratch: the second run is the verification,
+    and it is also where idempotence shows, because a remedy that already
+    landed leaves its check passing and is never reached a second time."""
+    checks = run_all_checks(settings_path)
+    proven = sum(1 for c in checks if c.status == STATUS_PASS)
+    skipped = sum(1 for c in checks if c.status == STATUS_SKIP)
+    failing = [c for c in checks if c.status == STATUS_FAIL]
+
+    _out("BrotherMode doctor --fix: %d checks" % len(checks))
+    _out("  settings: %s" % _mask_home(settings_path))
+    _out("")
+    _out("What --fix will NEVER do, whatever a check asks for: install "
+         "software, change permissions or any security setting, touch a "
+         "credential, write outside your own BrotherMode configuration, run "
+         "anything that needs a password, push, or change a git remote. A "
+         "remedy needing any of those is printed for you to run, never run "
+         "here.")
+    _out("")
+
+    if not failing:
+        _out("Nothing to do: no check failed. %d of %d proven, %d skipped."
+             % (proven, len(checks), skipped))
+        return EXIT_OK
+
+    applied = []
+    nothing_to_do = []
+    yours = []
+    for c in failing:
+        remedy = c.remedy
+        if remedy is not None and remedy.apply is not None:
+            try:
+                changed, detail = remedy.apply()
+            except Exception as exc:  # noqa: BLE001 - one remedy must never
+                # take down the rest of --fix, exactly as _run_check refuses
+                # to let one broken check hide the others.
+                changed, detail = False, (
+                    "this remedy raised (%s: %s) and changed nothing"
+                    % (type(exc).__name__, _mask_home_text(str(exc))))
+            (applied if changed else nothing_to_do).append((c, detail))
+        else:
+            yours.append(c)
+
+    if applied:
+        _out("APPLIED (%d), each one safe, local and reversible:" % len(applied))
+        for c, detail in applied:
+            _out("  - %s" % c.title)
+            _out("    %s" % detail)
+        _out("")
+    if nothing_to_do:
+        _out("NOTHING TO DO (%d), the remedy was already in place or could "
+             "not run:" % len(nothing_to_do))
+        for c, detail in nothing_to_do:
+            _out("  - %s" % c.title)
+            _out("    %s" % detail)
+        _out("")
+    if yours:
+        _out("NEEDS YOU (%d), one command each, NOT run here:" % len(yours))
+        for c in yours:
+            _out("  - %s" % c.title)
+            # _first_problem_line, not message.splitlines()[0]: check_fence's
+            # FAIL message opens with its NOTES and carries the actual
+            # problem further down, so the naive first line prints an
+            # explanation of the install shape and no evidence of what is
+            # wrong. That helper's own docstring records this being got
+            # wrong once already, by the --status row reading the same
+            # message shape; this is the same read, so it is the same call.
+            _out("    %s" % _first_problem_line(c.message))
+            if c.remedy is not None and c.remedy.command:
+                _out("    run: %s" % c.remedy.command)
+            else:
+                _out("    run: python3 products/brothermode/scripts/"
+                     "doctor.py   (this check names no single command; its "
+                     "own full message, printed by that run, says what is "
+                     "wrong)")
+        _out("")
+
+    _out("%d applied, %d nothing to do, %d still need you."
+         % (len(applied), len(nothing_to_do), len(yours)))
+    _out("Nothing above was verified after it was applied. Run this command "
+         "again: it re-runs every check from scratch, which is what proves "
+         "whether a fix held, and an already-fixed check is never reached a "
+         "second time.")
+    return EXIT_PROBLEMS
+
+
 def build_parser():
     p = argparse.ArgumentParser(
         prog="doctor.py",
@@ -2659,6 +2865,13 @@ def build_parser():
                    help="treat any SKIP as a failure too: exit nonzero and "
                         "list each skipped check and why (default: a SKIP "
                         "can be legitimate and still exits 0)")
+    p.add_argument("--fix", action="store_true",
+                   help="apply the remedies that are safe, local and "
+                        "reversible, and print one copyable command for "
+                        "every remedy that is not; refused (exit 2) when "
+                        "combined with --status, --json or --strict, "
+                        "because --fix prints an action report rather than "
+                        "a check report")
     p.add_argument("--status", action="store_true",
                    help="print the six-row DOC-0 status table (Brother "
                         "runtime, Git isolation, Claude/Codex safety hooks, "
@@ -2675,6 +2888,15 @@ def main(argv):
         _err("doctor.py: needs Python 3.9 or newer; this interpreter is %s"
              % platform.python_version())
         return EXIT_UNSUPPORTED
+    if args.fix:
+        if args.status or args.json or args.strict:
+            _err("doctor.py: --fix cannot be combined with --status, --json "
+                 "or --strict; --fix prints what it did and what you must "
+                 "run, which is a different report from either of those. "
+                 "Run --fix alone.")
+            return EXIT_USAGE
+        return main_fix(os.path.abspath(args.settings
+                                        or default_settings_path()))
     if args.status:
         if args.json or args.strict:
             _err("doctor.py: --status cannot be combined with --json or "

@@ -158,7 +158,7 @@ def _skill_missing_invocation(path):
     unchanged against a scratch copy that no longer lives under skills/."""
     name = os.path.basename(os.path.dirname(path))
     text = _read(path)
-    needle = "Invoke as /brothersbe:%s." % name
+    needle = "Invoke as /brother:brothersbe-%s." % name
     if needle in text:
         return []
     return ["%s does not contain %r" % (path, needle)]
@@ -184,7 +184,7 @@ class TestSkillsNamespaced(unittest.TestCase):
         real = os.path.join(ROOT, "skills", "review", "SKILL.md")
 
         def strip_namespace(text):
-            return text.replace("Invoke as /brothersbe:review.", "Invoke as /review.")
+            return text.replace("Invoke as /brother:brothersbe-review.", "Invoke as /review.")
 
         _calibrate(self, real, strip_namespace, _skill_missing_invocation)
 
@@ -438,7 +438,7 @@ class TestCoexistence(unittest.TestCase):
                 os.makedirs(os.path.join(bsb, "skills", name))
                 io.open(os.path.join(bsb, "skills", name, "SKILL.md"), "w",
                         encoding="utf-8").write(
-                    "---\nname: %s\n---\nInvoke as /brothersbe:%s.\n" % (name, name))
+                    "---\nname: %s\n---\nInvoke as /brother:brothersbe-%s.\n" % (name, name))
 
             # A representative second plugin: same-shaped layout, its own
             # plugin name, and ON PURPOSE a skill directory ALSO named

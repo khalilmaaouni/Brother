@@ -29,13 +29,11 @@ WIRING_SITES = [
     # bundle/hooks/hooks.json and therefore reported the vault engine as
     # unreachable while products/brothermode/hooks/hooks.json registered it on
     # SessionStart. A root set that misses a real door manufactures dead tools.
-    # bundle/hooks/hooks.json was RENAMED to bundle/hooks/union.json on
-    # 2026-09-13 (it double-fired every shared hook on Claude Code, since
-    # brothermode/brothersbe already register the same events themselves);
-    # a missing root is dropped silently by this module's own frontier
-    # construction, so leaving the retired name out here is correct, not an
-    # oversight.
-    ("hooks", ["bundle/hooks/union.json",
+    # bundle/hooks/hooks.json is the one plugin's own merged file again since
+    # 2026-09-30 (docs/architecture/ADR-ONE-PLUGIN-HOOKS.md); the
+    # 2026-09-13 union.json name is retired. A missing root is dropped
+    # silently by this module's own frontier construction.
+    ("hooks", ["bundle/hooks/hooks.json",
                "products/brothermode/hooks/hooks.json",
                "products/brothersbe/hooks/hooks.json"]),
     ("bundle", ["bundle/runtime/RUNTIME-MANIFEST.json"]),

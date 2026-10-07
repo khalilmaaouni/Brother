@@ -15,7 +15,7 @@ plain `sbe status` said "nothing blocking here" (it never looked at task or
 review state at all), `sbe status --team`'s own severity-10 said "nothing
 left to do, open a PR" (severity 9, "completed changes", sorts numerically
 below severity 11, "review record", even though review had not run), and
-`/brothersbe:next`'s prose ladder said "run review" (its own rung order
+`/brother:brothersbe-next`'s prose ladder said "run review" (its own rung order
 puts review before "everything green", unlike team's raw severity numbers).
 
 This module owns the ONE priority ladder now. `status.py`'s `build_report`

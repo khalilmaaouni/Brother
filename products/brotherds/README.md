@@ -26,6 +26,16 @@ computed there. Nothing was broken. Everything ran. The number was just wrong.
 
 Python 3.9 or newer. One dependency, and only for claims that query a database.
 
+Clone the public repository:
+
+```bash
+git clone https://github.com/khalilmaaouni/Brother.git
+```
+
+Open a terminal in `products/brotherds` inside the new `Brother` folder. If you already have a checkout, use that folder in your existing copy. Run the commands below from there.
+
+For database queries, install the dependency:
+
 ```bash
 pip install duckdb
 ```

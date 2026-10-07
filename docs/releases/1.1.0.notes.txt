@@ -1,0 +1,37 @@
+Brother 1.1.0 follows 1.0.21.
+
+From this release, the catalog lists one plugin, `brother`. The older plugins `brothermode` and `brothersbe` are retired from the catalog. Pinned installs of either still resolve, and their help says to install `brother` and remove the old plugin. See [the migration guide](../how-to/migrate-to-one-plugin.md).
+
+Claim verification, formerly the `brotherds` plugin, is not carried by the one plugin in this release. Its users keep their existing copy. It remains experimental.
+
+The one plugin carries the door and its routes. The full instructions for the older plugins' individual verb skills remain in the repository under `products/` and cannot be installed through the one plugin in this release. Carrying those instructions is the first unit of the next release.
+
+Unattended operation of brother.loop and repair.loop is unsupported in the public edition in 1.1.0. The unattended build loop under `scripts/loop` is the maintainer's own tooling. It is not a supported public feature of 1.1.0, and this release makes no claim about endurance.
+
+The proof behind this release is one completed unattended run of eight hours, started 2026-10-05 23:10 JST and ended 2026-10-06 07:14 JST. Thirty sub units landed in six landing commits, and the driver exited 0. A second consecutive run did not start. The two run proof will be run after this release on the shipped runtime, and its result will be published with the next release.
+
+Claude Code and Codex are the hosts this release is built and package checked for. The live host proof, a signed in session on each host firing the shipped hooks, is not recorded for this release: its verifier, `python3 scripts/host_live_verify.py docs/plan/evidence/hp1-real-2026-10-04`, reads NO-DATA. Cursor remains advisory until a signed in canary demonstrates a deny. Antigravity is experimental and unverified in 1.1.0.
+
+The planned automated pre-cut review, in which every commit, merge and pull request is judged on the frozen candidate, is built only in part: its first two parts exist as tooling, and the other four do not. For this release, independent adversarial reviews covered each change set, and a machine wide inventory covered everything developed since 1.0.21.
+
+Several safety hooks the maintainer runs on his own machine, a session spend guard, a decision intake gate, a disk floor gate and a workflow cost wall, are not shipped in 1.1.0. Where shipped text cites one of them, it describes the maintainer's environment, not what an install gives.
+
+Antigravity's host data guard is opt in. Set `BROTHER_ANTIGRAVITY_GUARD_HOST_DATA=1` to turn it on. By default, Antigravity has full access to its data folder.
+
+Limitation F-007: on Antigravity, the hook does not block a `run_command` whose command reaches outside the workspace. The owner accepted this under the full access decision.
+
+On Claude Code and Codex, 1.1.0 ships no guard against writes outside the project folder. This is planned for the next release.
+
+The deliver verb reads the receipts recorded in an outcome contract. It does not read the receipt of an engine run.
+
+When acceptance cites a run, the README requires a review receipt or an explicit recorded review skip with its reason and decision maker. The rule enforcement tool lives in the repository and is not included in this release's plugin. The plugin's acceptance record does not check for a review receipt. Carrying the rule in the plugin is planned for the next release.
+
+The engine's independent review pass is off by default. It runs only when `REVIEW_MODEL_CMD` names a reviewer command. When that variable is not set, the review reads NO-DATA. The review pass reports and blocks nothing.
+
+Lesson capture reads its vault folder from `BROTHERMODE_VAULT_ROOT`, with no default. If it is unset, capture is skipped and reads NO-DATA. Lesson recall checks an explicit `--vault` argument, then `BM_VAULT_ROOT`, `BROTHERMODE_VAULT`, and its configuration file. Until the unified resolver planned for the next release is available, set `BROTHERMODE_VAULT_ROOT` and `BM_VAULT_ROOT` to the same folder.
+
+A receipt carries the verdict of the numbers gate only. The other four assurance gates, migration, approval, ran and proof, are not run on any landing path in 1.1.0; they are run by hand with the gate tool.
+
+The loop driver does not check the power source. On a laptop, a low battery sleep can end a run with a disk alarm, because the sleep image is read as missing free space. Keep the machine on AC power for an unattended run. A power check is planned for the next release.
+
+Three declared test exceptions stand in 1.1.0, each with a review date of 2026-10-20. The external verification score was not re-measured for this release; its last recorded run reads 1 of 5. The long release note perturbation check runs only when `BROTHER_LONG_CHECKS=1` is set, and it was not run. The two tag signature test cases are skipped on a machine without gpg.

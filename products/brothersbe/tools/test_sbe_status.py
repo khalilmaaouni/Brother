@@ -688,6 +688,56 @@ class TestCompletedEvidence(StatusFixture):
         self.assertNotIn(".sbe/evidence/broke.json", completed_block)
 
 
+class TestAdvisoryFailingReceipt(StatusFixture):
+    """Persona evaluation 2026-09-11, scenario L01-S4: a contract probe run
+    through `sbe evidence run` on a dirty tree exited 1, and `sbe status`
+    answered "nothing blocking here that this tool can see" with an empty
+    blocker list. The receipt verifies NO-DATA (LOCAL-ADVISORY: dirty tree),
+    and status dropped every NO-DATA receipt before reading its exit code.
+    Advisory means it cannot PROVE a pass; it never means a recorded failure
+    stops being one."""
+
+    def _dirty_run(self, exit_code):
+        # An uncommitted path at run time, the real store's "1 uncommitted path(s)".
+        write(self.repo, "probe-scratch.txt", "uncommitted\n")
+        out_path = self.run_evidence(".sbe/evidence/orders-contract-probe.json",
+                                     "orders-contract-probe", exit_code=exit_code)
+        with io.open(out_path, encoding="utf-8") as fh:
+            receipt = json.load(fh)
+        self.assertIs(receipt.get("workingTreeDirty"), True,
+                      "setup check: the receipt must be advisory (dirty tree) for this "
+                      "fixture to reach the NO-DATA path at all: %r" % receipt)
+        self.assertEqual(receipt.get("exitCode"), exit_code)
+        return ".sbe/evidence/orders-contract-probe.json"
+
+    def test_an_advisory_receipt_recording_exit_1_blocks_and_is_named(self):
+        rel = self._dirty_run(1)
+        code, data, text = self.status_json("--base", self.base)
+        self.assertIsNotNone(data, text)
+        self.assertNotEqual(code, 0, "a recorded failure must block: %s" % text)
+        self.assertNotIn("nothing blocking here", data["nextAction"], data["nextAction"])
+        named = [i for i in data["mergeBlockers"] if i.get("path") == rel]
+        self.assertTrue(named, "the failing receipt must be a merge blocker: %s" % text)
+        self.assertIn("exit code 1", named[0]["finding"], named[0])
+        self.assertIn("orders-contract-probe", named[0]["finding"],
+                      "the finding must name the command that failed: %r" % named[0])
+        self.assertIn("(MERGE BLOCKERS)", data["nextAction"], data["nextAction"])
+        code, text, _ = self.status("--base", self.base)
+        self.assertNotIn("nothing blocking here", text, text)
+        self.assertIn(rel, text.split("MERGE BLOCKERS:")[1].split("ACTIVE CONFLICTS")[0])
+
+    def test_an_advisory_receipt_recording_exit_0_changes_nothing(self):
+        rel = self._dirty_run(0)
+        code, data, text = self.status_json("--base", self.base)
+        self.assertIsNotNone(data, text)
+        self.assertEqual(code, 0, text)
+        for section in ("brokenClaims", "mergeBlockers", "soundEvidence"):
+            self.assertFalse(
+                any(rel in (i.get("path") or "") or rel in i.get("finding", "")
+                    for i in data[section]),
+                "an advisory PASSING receipt is NO-DATA, never %s: %s" % (section, text))
+
+
 class TestNextAction(StatusFixture):
     def test_next_action_tracks_broken_claims_first_when_both_are_present(self):
         out_path = self.run_evidence(".sbe/evidence/r1.json", "score")

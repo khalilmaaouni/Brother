@@ -2,6 +2,10 @@
   "schema": "brother.gate-obligations/v1",
   "default": "REQUIRED_FOR_MERGE",
   "checks": {
+    "supply-chain-gate": {
+      "obligation": "REQUIRED_FOR_MERGE",
+      "reason": "an unverified dependency graph is not a clean one; NO-DATA here means the audit could not read the tree, which blocks merge rather than passing it."
+    },
     "plugin-manifest": {
       "obligation": "REQUIRED_FOR_MERGE",
       "reason": "required-fast CI installs the pinned validation CLI; a missing validator is incomplete required evidence."
@@ -13,6 +17,10 @@
     "closing-ceremony-real": {
       "obligation": "REQUIRED_FOR_RELEASE",
       "reason": "reads the machine's own handover root (~/Documents/BrotherModeUp-handovers), which CI does not have; the local lander and the release closeout run it for real, the fixture suite alone is not this gate."
+    },
+    "one-plugin-readiness-static": {
+      "obligation": "REQUIRED_FOR_RELEASE",
+      "reason": "its catalogs-one-plugin bar reads NO-DATA, awaiting the 1.1.0 cut, until the cut chain applies scripts/retire_catalogs.py (docs/plan/specs/OP1.md R20, decision 9); a merge before the cut carries that one NO-DATA. Nothing judges a release stage for this row yet (required_fast.sh judges the merge stage only), so after the cut's catalog step the bar is expected to read PASS but no step requires it: that step is a row of the next release. Any FAIL is red at the merge stage."
     },
     "key-components": {
       "obligation": "REQUIRED_FOR_MERGE",
@@ -28,6 +36,11 @@
       "obligation": "REQUIRED_FOR_MERGE",
       "expected_absent_input": "docs/plan/READINESS-ROADMAP-2026-08-29.json",
       "reason": "the roadmap file is not shipped in the public edition."
+    },
+    "plugin-runtime-tests-fast": {
+      "obligation": "REQUIRED_FOR_MERGE",
+      "expected_absent_input": ".brother-edition",
+      "reason": "the plugin runtime module tests are not shipped in the public edition; the hub's edition marker, never exported, is what tells the two apart, so the hub itself never gets this allowance."
     }
   }
 }

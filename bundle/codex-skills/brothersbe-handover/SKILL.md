@@ -1,6 +1,6 @@
 ---
 name: brothersbe-handover
-description: "Use when someone wants to hand this change's ownership to another named human, or when a receiver wants to inspect and accept or reject a handover already prepared for them. Runs the status and worktree checks first, then prepares (or reads) 12-handover.json through the sbe handover engine and renders the concise handover summary a receiver needs, never the project's whole history. Invoke as /brothersbe:handover."
+description: "Use when someone wants to hand this change's ownership to another named human, or when a receiver wants to inspect and accept or reject a handover already prepared for them. Runs the status and worktree checks first, then prepares (or reads) 12-handover.json through the sbe handover engine and renders the concise handover summary a receiver needs, never the project's whole history. Invoke as /brother:brothersbe-handover."
 ---
 
 This is the Codex route for the `brothersbe` product skill.

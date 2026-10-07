@@ -106,6 +106,41 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 #: An unrecognised fourth value is never guessed at: see _validate_decision.
 QTYPES = frozenset(("noul", "choice", "score"))
 
+#: The question types refused on the direct seam path before any bridge
+#: call (D3.4). This is the same closed, non-empty pair
+#: plugin/runtime/brother/core/model_capability_profile.py records in its
+#: own JEV_QUARANTINED_QUESTION_TYPES: score and choice were the two types
+#: a real control run found broken. The literal is repeated here rather
+#: than imported, because scripts/ is the public export tree and does not
+#: ship plugin/; the test beside the plugin module asserts the two sets
+#: are equal whenever both are importable.
+QUARANTINED_QTYPES = frozenset(("score", "choice"))
+
+
+def quarantined_qtypes_are_consistent():
+    """True when QUARANTINED_QTYPES is a non-empty set of strings drawn
+    only from QTYPES, else False plus a reason naming the first problem.
+
+    Never raises, whatever module level QUARANTINED_QTYPES holds: a hand
+    edited or hostile value is a refusal here, never a raw TypeError
+    reaching an operator. An empty set is a defect, not the safe case:
+    the direct seam path has no other quarantine guard between it and
+    decide().
+    """
+    try:
+        members = list(QUARANTINED_QTYPES)
+    except TypeError as exc:
+        return False, "QUARANTINED_QTYPES could not be read: %s" % exc
+    not_strings = [m for m in members if not isinstance(m, str)]
+    if not_strings:
+        return False, "quarantined qtypes must be strings, got %r" % (not_strings,)
+    if not members:
+        return False, "QUARANTINED_QTYPES must never be empty"
+    unknown = sorted(m for m in members if m not in QTYPES)
+    if unknown:
+        return False, "quarantined qtypes not in QTYPES: %s" % (", ".join(unknown),)
+    return True, ""
+
 #: Confidence band lower bounds used when a caller supplies none. The WBS
 #: unit that specified this module (JEV-02) pins this exact tuple.
 DEFAULT_BANDS = (0.5, 0.7, 0.9, 1.0)
@@ -136,6 +171,13 @@ DEFAULT_LEDGER_PATH = os.path.join(HERE, "jev_calibration_default_ledger.jsonl")
 #: segments is a deliberately round policy knob, not a derived number.
 DEFAULT_MAX_SEGMENT_BYTES = 50 * 1024 * 1024
 DEFAULT_RETENTION_SEGMENTS = 12
+
+TERMINAL_PHASES = frozenset({
+    "off_mode", "mode_unknown", "canary_off", "refused", "quarantined",
+    "promotions_path_invalid", "budget_exhausted", "breaker_open",
+    "inflight_drop", "thread_start_failed", "answered", "no_data",
+    "abstain", "near_threshold_disagreement", "write_error",
+})
 
 #: Matches the "<10-digit sequence>-<UTC timestamp>Z-<8 hex>" middle
 #: section of a rotated segment's filename (see _rotate_if_needed() and
@@ -216,8 +258,8 @@ def _validate_decision(rec):
     if "answer" not in rec:
         raise ValueError("missing required field: answer")
     try:
-        json.dumps(rec["answer"])
-    except TypeError:
+        json.dumps(rec["answer"], allow_nan=False)
+    except (TypeError, ValueError):
         raise ValueError("answer is not JSON-serializable: %r" % (rec["answer"],))
     prob = _require_finite_number(rec, "prob", low=0.0, high=1.0)
     confidence = _require_finite_number(rec, "confidence", low=0.0, high=1.0)
@@ -270,6 +312,120 @@ def _append_line(path, rec):
         os.fsync(fd)
     finally:
         os.close(fd)
+
+
+#: The only schema string a submission row may carry (D3.1). Pinned as a
+#: constant, not rebuilt per call, so a caller filtering the attempts
+#: ledger for this exact provenance string cannot be broken by a rewording.
+ATTEMPT_SCHEMA = "attempt/v1"
+
+#: The only phase a freshly written submission row may carry: this row IS
+#: the submission (REQ-SUBMIT); the terminal row for the same attempt_id is
+#: a different write made elsewhere.
+ATTEMPT_PHASE_SUBMITTED = "submitted"
+
+#: The four modes a submission row may record, matching jev_seam.py's own
+#: OFF/SHADOW/ADVISE/ACT. Any other string is a config typo, never guessed
+#: at: _validate_attempt_row() refuses it.
+ATTEMPT_MODES = ("off", "shadow", "advise", "act")
+
+#: A submission identity is uuid4's lowercase hex, exactly 32 characters:
+#: the shape jev_seam.mint_attempt_id() mints. Matched with an anchored
+#: pattern rather than a length test, so a 32-character string drawn from
+#: the wrong alphabet is refused too.
+_ATTEMPT_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+
+
+def _iso8601_is_parseable(text):
+    """True only when `text` is a non-empty ISO 8601 string that
+    datetime.fromisoformat() accepts. A trailing Z (Python 3.9's own
+    fromisoformat() does not accept that suffix) is read as UTC."""
+    if not isinstance(text, str):
+        return False
+    candidate = text.strip()
+    if not candidate:
+        return False
+    if candidate[-1] in ("Z", "z"):
+        candidate = candidate[:-1] + "+00:00"
+    try:
+        datetime.fromisoformat(candidate)
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
+def _submission_at_is_parseable(value):
+    """True only when `value` names a real instant.
+
+    This module's own _parse_ts() reader is reused first (a sibling helper
+    reused, never copied); anything it raises on, and anything it reports
+    as unusable (None or False), falls through to the strict ISO 8601 shape
+    check above for string input. A bool is never a timestamp (and is an
+    int in Python), and neither is anything that is not a str, int or
+    float: both are refused before any parser is reached.
+    """
+    if isinstance(value, bool):
+        return False
+    if not isinstance(value, (str, int, float)):
+        return False
+    parsed = None
+    try:
+        parsed = _parse_ts(value)
+    except Exception:  # an instant that cannot be read is simply not parseable
+        parsed = None
+    if parsed is not None and parsed is not False:
+        return True
+    if isinstance(value, str):
+        return _iso8601_is_parseable(value)
+    return False
+
+
+def _validate_attempt_row(attempt):
+    """Raises ValueError unless `attempt` is exactly the attempt/v1 phase
+    submitted row this ledger writes. Nothing is coerced and nothing is
+    guessed at: a missing, unknown or corrupt field is refused HERE, before
+    _append_line() ever runs, so a malformed row can never reach disk."""
+    if not isinstance(attempt, dict):
+        raise ValueError("submission row must be a dict, got %s" % (type(attempt).__name__,))
+    if attempt.get("schema") != ATTEMPT_SCHEMA:
+        raise ValueError("submission row schema must be %r, got %r"
+                         % (ATTEMPT_SCHEMA, attempt.get("schema")))
+    if attempt.get("phase") != ATTEMPT_PHASE_SUBMITTED:
+        raise ValueError("submission row phase must be %r, got %r"
+                         % (ATTEMPT_PHASE_SUBMITTED, attempt.get("phase")))
+    attempt_id = attempt.get("attempt_id")
+    if not isinstance(attempt_id, str) or _ATTEMPT_ID_RE.match(attempt_id) is None:
+        raise ValueError("submission row attempt_id must be 32 lowercase hex characters, got %r"
+                         % (attempt_id,))
+    parent_id = attempt.get("parent_id")
+    if parent_id is not None and not isinstance(parent_id, str):
+        raise ValueError("submission row parent_id must be a string or None, got %s"
+                         % (type(parent_id).__name__,))
+    entry_id = attempt.get("entry_id")
+    if not isinstance(entry_id, str) or not entry_id.strip():
+        raise ValueError("submission row entry_id must be a non-empty string, got %r" % (entry_id,))
+    mode = attempt.get("mode")
+    if not isinstance(mode, str) or mode not in ATTEMPT_MODES:
+        raise ValueError("submission row mode must be one of %r, got %r" % (ATTEMPT_MODES, mode))
+    if not _submission_at_is_parseable(attempt.get("at")):
+        raise ValueError("submission row at must be a parseable timestamp, got %r"
+                         % (attempt.get("at"),))
+
+
+def append_submission(attempts_path, attempt, *, max_segment_bytes=DEFAULT_MAX_SEGMENT_BYTES,
+                      retention_segments=DEFAULT_RETENTION_SEGMENTS):
+    """Validates and appends one attempt/v1 phase submitted row.
+
+    Synchronous by contract (REQ-SUBMIT): the row is on disk, rotated per
+    _rotate_if_needed() if this append pushed the active file past
+    max_segment_bytes, before this function returns. Raises ValueError and
+    writes nothing on any schema failure; see _validate_attempt_row().
+    Pass max_segment_bytes=None to disable rotation for this path entirely.
+    """
+    _validate_attempt_row(attempt)
+    _attempt_row_is_json_writable(attempt, "submission row")
+    _append_line(attempts_path, attempt)
+    _rotate_if_needed(attempts_path, max_segment_bytes, retention_segments)
 
 
 def _stat_reliable(path):
@@ -934,8 +1090,115 @@ def append_decision(path, rec, *, max_segment_bytes=DEFAULT_MAX_SEGMENT_BYTES,
                        protect_ids_referenced_in=sibling_outcomes_path)
 
 
+_PROPOSITION_HASH_RE = re.compile(r'^[0-9a-f]{16}$')
+
+
+def proposition_hash(family, qtype, framing, model):
+    '''Pure helper: stable 16 lowercase hex identity for one proposition.
+
+    Distinct from jev_decide._framing_hash: this hashes family, qtype,
+    framing and model together, with a fixed key order and no sort_keys,
+    so the same independently settled proposition always hashes the same
+    way while a different model or framing never collides.
+    '''
+    if not isinstance(family, str) or not family.strip():
+        raise ValueError('proposition_hash family must be a non-empty string')
+    if not isinstance(qtype, str) or qtype not in QTYPES:
+        raise ValueError('proposition_hash qtype must be one of %s' % (sorted(QTYPES),))
+    if framing is not None and not isinstance(framing, str):
+        raise ValueError('proposition_hash framing must be a string or None')
+    if not isinstance(model, str):
+        raise ValueError('proposition_hash model must be a string')
+    material = json.dumps({
+        'family': family,
+        'qtype': qtype,
+        'framing': framing,
+        'model': model,
+    })
+    return hashlib.sha256(material.encode('utf-8')).hexdigest()[:16]
+
+
+def _validate_attempt_identity(rec):
+    """A row's identity only: which attempt, which phase. A torn line or a
+    row with no identity refuses; a key field missing on a submission row
+    (the seam writes it before the key is known) does not."""
+    if not isinstance(rec, dict):
+        raise ValueError("attempts ledger row must be a JSON object, got %r" % (rec,))
+    phase = rec.get("phase")
+    if not isinstance(phase, str) or not phase:
+        raise ValueError("attempts ledger row phase must be a non empty str, got %r" % (phase,))
+    attempt_id = rec.get("attempt_id")
+    if not isinstance(attempt_id, str) or _ATTEMPT_ID_RE.match(attempt_id) is None:
+        raise ValueError("attempts ledger row attempt_id must be 32 lowercase hex, got %r" % (attempt_id,))
+
+
+def _validate_attempt_binding_row(rec):
+    """One attempts ledger row as the outcome binder reads it: a submission
+    row must carry its identity, a terminal row must be whole."""
+    if isinstance(rec, dict) and rec.get('phase') == ATTEMPT_PHASE_SUBMITTED:
+        _validate_attempt_identity(rec)
+        return
+    _validate_attempt_terminal(rec)
+
+
+def _validate_attempt_binding(attempts_path, outcomes_path, rec):
+    '''Refuses any outcome row carrying attempt_id or proposition_hash
+    unless both are present, correctly shaped, match one answered terminal
+    row in the attempts ledger, and this attempt_id has no prior label.'''
+    if not isinstance(attempts_path, str) or not attempts_path:
+        raise ValueError('append_outcome with attempt_id requires a non-empty attempts_path')
+    attempt_id = rec.get('attempt_id')
+    proposition_hash_value = rec.get('proposition_hash')
+    if not isinstance(attempt_id, str):
+        raise ValueError('outcome attempt_id must be a 32 lowercase hex string')
+    if _ATTEMPT_ID_RE.match(attempt_id) is None:
+        raise ValueError('outcome attempt_id must be 32 lowercase hex characters')
+    if not isinstance(proposition_hash_value, str):
+        raise ValueError('outcome proposition_hash must be a 16 lowercase hex string')
+    if _PROPOSITION_HASH_RE.match(proposition_hash_value) is None:
+        raise ValueError('outcome proposition_hash must be 16 lowercase hex characters')
+    # The attempts ledger holds submission rows beside terminal rows (the
+    # seam writes one of each per attempt). Reading it with the terminal
+    # validator alone read every real ledger as corrupt, so no outcome could
+    # ever bind (found 2026-09-24 by the seam level test): a submission row
+    # is checked for its identity only, a terminal row in full.
+    ledger_records, corrupt, reliable = _read_rotated_jsonl(attempts_path, _validate_attempt_binding_row)
+    if not reliable or corrupt:
+        raise ValueError('attempts ledger at %s is corrupt or unreadable; refusing to bind outcome' % attempts_path)
+    matching = [r for _, r in ledger_records
+                if r.get('phase') != ATTEMPT_PHASE_SUBMITTED and r.get('attempt_id') == attempt_id]
+    if len(matching) != 1:
+        raise ValueError('attempt_id %r must have exactly one terminal row in the attempts ledger' % attempt_id)
+    term = matching[0]
+    if term.get('phase') != 'answered':
+        raise ValueError('attempt_id %r terminal phase is not answered' % attempt_id)
+    qtype = term.get('qtype')
+    if not isinstance(qtype, str) or qtype not in QTYPES:
+        raise ValueError('terminal answered row for attempt_id %r lacks a valid qtype' % attempt_id)
+    expected = proposition_hash(term.get('family'), qtype, term.get('framing'), term.get('model'))
+    if expected != proposition_hash_value:
+        raise ValueError('outcome proposition_hash does not match the terminal row for this attempt_id')
+    # D3 section 5: the outcome's id must equal the terminal row's
+    # decision_id, so a label is pinned to the decision this attempt
+    # actually wrote and never to another. A terminal row whose
+    # decision_id is None can equal no valid outcome id (the legacy id
+    # field is a non empty str), so it is refused by the same comparison.
+    term_decision_id = term.get('decision_id')
+    if rec.get('id') != term_decision_id:
+        raise ValueError('outcome id %r does not equal the terminal decision_id %r for attempt_id %r '
+                         '(None means the attempt wrote no decision to label)'
+                         % (rec.get('id'), term_decision_id, attempt_id))
+    existing_outcomes, out_corrupt, out_reliable = _read_rotated_jsonl(outcomes_path, _validate_outcome)
+    if not out_reliable or out_corrupt:
+        raise ValueError('outcomes ledger at %s is corrupt or unreadable; refusing to bind outcome' % outcomes_path)
+    for _, out_rec in existing_outcomes:
+        if out_rec.get('attempt_id') == attempt_id:
+            raise ValueError('attempt_id %r already has an outcome label' % attempt_id)
+
+
 def append_outcome(path, rec, *, decisions_path=None, max_segment_bytes=DEFAULT_MAX_SEGMENT_BYTES,
-                    retention_segments=DEFAULT_RETENTION_SEGMENTS, allow_unchecked=False):
+                    retention_segments=DEFAULT_RETENTION_SEGMENTS, allow_unchecked=False,
+                    attempts_path=None):
     """Validates and appends one outcome record. Raises ValueError and
     writes nothing on any validation failure. Rotates `path` per
     _rotate_if_needed() afterward; pass max_segment_bytes=None to disable
@@ -1003,8 +1266,14 @@ def append_outcome(path, rec, *, decisions_path=None, max_segment_bytes=DEFAULT_
     unreliability is now provably about a DIFFERENT family, so the
     ordinary "found in ids" check below is trusted instead of refusing
     on principle."""
+    if not isinstance(path, str) or not path.strip():
+        raise ValueError('outcomes path must be a non-empty str')
+    if os.path.isdir(path):
+        raise ValueError('outcomes path must be a file path, not a directory')
     _validate_outcome(rec)
-    if decisions_path is None:
+    if 'attempt_id' in rec or 'proposition_hash' in rec:
+        _validate_attempt_binding(attempts_path, path, rec)
+    elif decisions_path is None:
         if not allow_unchecked:
             raise ValueError(
                 "append_outcome requires decisions_path (or allow_unchecked=True as an "
@@ -1491,7 +1760,128 @@ def _ledger_anomaly_touches(j, family, qtype):
     return False
 
 
-def report(decisions_path, outcomes_path, family, qtype, framing=None, bands=DEFAULT_BANDS):
+class _CorruptLedgerError(ValueError):
+    """A corrupt decisions-ledger row could belong to the queried key.
+
+    A ValueError subclass, so every caller that already refuses a
+    ValueError from this module keeps refusing this one. report() raises
+    it instead of returning a measurement that silently dropped the
+    damaged row; threshold() catches exactly this class and turns it
+    into its own documented "ledger anomaly" refusal, because threshold's
+    contract is a (bound, reason) pair for a ledger content problem,
+    while a caller-supplied argument problem still raises, unchanged.
+    """
+
+
+def _require_band_sequence(bands):
+    """Refuses a bands value that is not a re-iterable sequence of numbers.
+
+    The specification declares bands as Tuple[float, ...]. A generator,
+    or any other one-shot iterator, passed instead used to be silently
+    consumed and accepted: the red team's probe got an ordinary report()
+    dict back, and an ordinary (bound, reason) tuple back from
+    threshold(), from an input the caller can only iterate once. Refused
+    here, at the one validation every report() and threshold() path
+    routes through, so the refusal names the problem instead of a later
+    pass meeting an exhausted iterator. Both callers write nothing either
+    way.
+    """
+    if isinstance(bands, (list, tuple)):
+        return bands
+    raise ValueError(
+        "bands must be a list or tuple of numbers, got %s" % (type(bands).__name__))
+
+
+def _require_model_filter(model):
+    """None means "no model filter"; anything else must be a real model id.
+
+    One validation, called by report() and by threshold(), so a hostile
+    model value is refused at the same place whichever entry point a
+    caller reaches this module through. An empty or whitespace-only
+    string is refused rather than treated as a filter that matches
+    nothing: silently filtering every row out of a measurement is the
+    fail-open direction this module refuses everywhere else.
+    """
+    if model is None:
+        return
+    if not isinstance(model, str) or not model.strip():
+        raise ValueError("model must be a non-empty string or None, got %r" % (model,))
+
+
+def _require_plain_ledger_path(path, name):
+    """Raises ValueError unless `path` is a plain, non-empty string naming
+    a ledger file the caller is entitled to read.
+
+    A ledger path is a caller-supplied control, so a hostile one is
+    refused at the source rather than followed: bytes, None, a number, an
+    empty or whitespace-only string, a string carrying a NUL byte, a path
+    with a ".." component (a traversal that would leave the directory the
+    caller pointed at) and a path that names a directory are all refused
+    here. A path that simply does not exist yet is NOT refused: an
+    unwritten ledger is the ordinary "no data recorded yet" state this
+    module already reads as empty, never an error.
+    """
+    if not isinstance(path, str) or not path.strip():
+        raise ValueError("%s must be a non-empty string, got %r" % (name, path))
+    if "\x00" in path:
+        raise ValueError("%s must not carry a NUL byte, got %r" % (name, path))
+    parts = path.split(os.sep)
+    if ".." in parts:
+        raise ValueError(
+            "%s must not contain a '..' component (path traversal), got %r" % (name, path))
+    if os.path.isdir(path):
+        raise ValueError("%s must be a file path, not a directory: %r" % (name, path))
+
+
+def _corrupt_decision_touches_key(entry, family, qtype):
+    """True when one corrupt decisions-ledger entry could belong to the
+    queried (family, qtype) key.
+
+    An entry that names no readable family or qtype is unattributable: it
+    could be this key, so it counts, exactly as _ledger_anomaly_touches
+    already treats an unattributable anomaly as ledger wide. An entry
+    whose qtype is not a recognised question type is likewise not
+    attributable to a different key. Only an entry naming BOTH a readable
+    family and a recognised qtype, and naming a different family or a
+    different qtype, is provably about some other key and is left alone.
+    """
+    entry_family = entry.get("family")
+    entry_qtype = entry.get("qtype")
+    if entry_family is None or entry_qtype is None:
+        return True
+    if entry_qtype not in QTYPES:
+        return True
+    return entry_family == family and entry_qtype == qtype
+
+
+def _refuse_corrupt_decisions_for_key(j, family, qtype):
+    """Raises _CorruptLedgerError when a corrupt decisions-ledger entry
+    could belong to the queried (family, qtype) key.
+
+    REQ-CORRUPT-BLOCKS and the D3.5 edge that corrupt rows are never
+    routed to a bucket and then silently excluded from the bound: a
+    report that quietly drops such a row offers an ordinary looking
+    measurement for a key whose evidence is in fact damaged. An
+    unreadable ledger is deliberately not refused here -- that case has
+    its own reported flag (join()'s "reliable", report()'s
+    "ledger_reliable", threshold()'s "ledger unreadable"), and a readable
+    read can put no corrupt entry in this list at all.
+    """
+    if not j.get("reliable"):
+        return
+    for entry in j.get("corrupt_decisions") or ():
+        if not isinstance(entry, dict):
+            raise _CorruptLedgerError(
+                "corrupt decisions ledger entry for family %r qtype %r is not a "
+                "record: %r" % (family, qtype, entry))
+        if _corrupt_decision_touches_key(entry, family, qtype):
+            raise _CorruptLedgerError(
+                "corrupt decision row could belong to family %r qtype %r (line "
+                "%s): refusing to exclude it and report a measurement as if it "
+                "were absent" % (family, qtype, entry.get("line")))
+
+
+def report(decisions_path, outcomes_path, family, qtype, framing=None, bands=DEFAULT_BANDS, model=None):
     """Per-confidence-band precision for one family, qtype and, optionally,
     one exact framing. A noul and a choice sharing a family name are never
     pooled: filtering is on family AND qtype AND (if given) framing,
@@ -1547,14 +1937,20 @@ def report(decisions_path, outcomes_path, family, qtype, framing=None, bands=DEF
         raise ValueError("qtype must be one of %s, got %r" % (sorted(QTYPES), qtype))
     if framing is not None:
         framing = _require_nonempty_str({"framing": framing}, "framing")
-    bands = _validate_bands(bands)
+    _require_model_filter(model)
+    bands = _validate_bands(_require_band_sequence(bands))
+    _require_plain_ledger_path(decisions_path, "decisions_path")
+    _require_plain_ledger_path(outcomes_path, "outcomes_path")
 
     j = join(decisions_path, outcomes_path)
+    _refuse_corrupt_decisions_for_key(j, family, qtype)
 
     def in_scope(dec):
         if dec["family"] != family or dec["qtype"] != qtype:
             return False
         if framing is not None and dec["framing"] != framing:
+            return False
+        if model is not None and dec.get("model") != model:
             return False
         return True
 
@@ -1620,8 +2016,76 @@ def report(decisions_path, outcomes_path, family, qtype, framing=None, bands=DEF
     }
 
 
-def threshold(decisions_path, outcomes_path, family, qtype, target_precision, min_n,
-              framing=None, bands=DEFAULT_BANDS):
+def threshold(decisions_path, outcomes_path, family=None, qtype=None, target_precision=None,
+              min_n=None, framing=None, bands=DEFAULT_BANDS, *, model=None, risk_class=None,
+              population_floor=0.5, attempts_path=None):
+    """Model aware and framing strict threshold entry point (D3.5).
+
+    Old positional callers (family, qtype, target_precision, min_n) keep
+    the historical dict return, unchanged. The keyword form (family,
+    qtype, framing, model, risk_class) returns a (bound, reason) tuple:
+    a bands value that is not a list or tuple is refused before anything
+    is read, an empty or missing model raises ValueError, a hostile
+    ledger path is refused, framing None returns (None,
+    "framing_required"), an unreadable attempts ledger returns (None,
+    "attempts_unreadable"), and a corrupt outcomes row for the touched
+    key returns (None, "corrupt_outcomes") instead of computing a bound
+    from a partial read.
+    """
+    bands = _require_band_sequence(bands)
+    _require_plain_ledger_path(decisions_path, "decisions_path")
+    _require_plain_ledger_path(outcomes_path, "outcomes_path")
+    _require_model_filter(model)
+    new_style = risk_class is not None
+    if isinstance(population_floor, bool) or not isinstance(population_floor, (int, float)):
+        raise ValueError("population_floor must be a number, got %r" % (population_floor,))
+    if not (0.0 <= population_floor <= 1.0):
+        raise ValueError("population_floor must be within [0, 1], got %r" % (population_floor,))
+    if new_style and model is None:
+        raise ValueError("threshold model must be a non-empty string when risk_class is given")
+    if new_style:
+        if attempts_path is not None:
+            if not isinstance(attempts_path, str) or not attempts_path.strip():
+                raise ValueError("attempts_path must be a non-empty string or None")
+            _attempts_records, attempts_corrupt, attempts_reliable = _read_rotated_jsonl(
+                attempts_path, lambda rec: None)
+            if attempts_corrupt or not attempts_reliable:
+                return (None, "attempts_unreadable")
+        _outcomes_records, outcomes_corrupt, outcomes_reliable = _read_rotated_jsonl(
+            outcomes_path, _validate_outcome)
+        if outcomes_corrupt or not outcomes_reliable:
+            return (None, "corrupt_outcomes")
+        if framing is None:
+            return (None, "framing_required")
+        if not isinstance(framing, str) or not framing.strip():
+            raise ValueError("framing must be a non-empty string or None, got %r" % (framing,))
+        target_precision, min_n = _threshold_target_for_risk_class(risk_class)
+        if target_precision is None:
+            return (None, "critical_never_acts")
+    result = _threshold_dict(decisions_path, outcomes_path, family, qtype, target_precision,
+                             min_n, framing=framing, bands=bands, model=model)
+    if new_style:
+        return (result["threshold"], result["reason"])
+    return result
+
+
+def _threshold_target_for_risk_class(risk_class):
+    """(target_precision, min_n) for one risk class, read from jev_cascade's
+    own pinned policy table rather than restated here. Raises ValueError
+    for a malformed or unknown risk class; returns (None, min_n) for
+    critical, whose policy is that it never acts."""
+    try:
+        import jev_cascade
+    except ImportError as exc:
+        raise ValueError("risk_class needs the jev_cascade policy table: %s" % exc)
+    if not isinstance(risk_class, str) or risk_class not in jev_cascade.RISK_TARGET_PRECISION:
+        raise ValueError("risk_class must be one of %s, got %r"
+                         % (sorted(jev_cascade.RISK_TARGET_PRECISION), risk_class))
+    return jev_cascade.RISK_TARGET_PRECISION[risk_class], jev_cascade.MIN_SAMPLES
+
+
+def _threshold_dict(decisions_path, outcomes_path, family, qtype, target_precision, min_n,
+                    framing=None, bands=DEFAULT_BANDS, model=None):
     """The lowest confidence band whose Wilson lower bound meets or exceeds
     target_precision, using only bands with at least min_n joined
     decisions. Never falls back to a default: returns
@@ -1660,7 +2124,18 @@ def threshold(decisions_path, outcomes_path, family, qtype, target_precision, mi
     if isinstance(min_n, bool) or not isinstance(min_n, int) or min_n < 1:
         raise ValueError("min_n must be a positive integer, got %r" % (min_n,))
 
-    rep = report(decisions_path, outcomes_path, family, qtype, framing=framing, bands=bands)
+    try:
+        rep = report(decisions_path, outcomes_path, family, qtype, framing=framing,
+                     bands=bands, model=model)
+    except _CorruptLedgerError:
+        return {
+            "threshold": None,
+            "reason": "ledger anomaly",
+            "rows": [],
+            "below_lowest_band": {
+                "count": 0, "correct": 0, "precision": None, "wilson_lower_95": None,
+            },
+        }
     rows = rep["rows"]
 
     if not rep["ledger_reliable"]:
@@ -1880,6 +2355,436 @@ def _main(argv=None):
         return 0
     print("usage: jev_calibration.py selftest", file=sys.stderr)
     return 2
+
+
+#: The decision_id a terminal row may carry: the shape jev_seam._decision_id()
+#: actually mints ("<entry_id>:<16 hex content digest>:<16 hex random>"), or the
+#: 32 lowercase hex the D3 draft named (kept readable so no row written under
+#: the earlier validator turns the ledger anomalous). Free text is refused.
+_DECISION_ID_RE = re.compile(r"^(?:[0-9a-f]{32}|\S+:[0-9a-f]{16}:[0-9a-f]{16})$")
+
+
+def _validate_attempt_terminal(rec: dict) -> None:
+    if not isinstance(rec, dict):
+        raise ValueError("terminal attempt row must be a dict")
+    schema = rec.get("schema")
+    if schema != "attempt/v1":
+        raise ValueError("terminal attempt row schema must be attempt/v1")
+    phase = rec.get("phase")
+    if not isinstance(phase, str) or phase not in TERMINAL_PHASES:
+        raise ValueError("terminal attempt row phase not in TERMINAL_PHASES")
+    attempt_id = rec.get("attempt_id")
+    if not isinstance(attempt_id, str) or not _ATTEMPT_ID_RE.match(attempt_id):
+        raise ValueError("terminal attempt row attempt_id must be 32 lowercase hex")
+    parent_id = rec.get("parent_id")
+    if parent_id is not None and not isinstance(parent_id, str):
+        raise ValueError("terminal attempt row parent_id must be str or None")
+    entry_id = rec.get("entry_id")
+    if not isinstance(entry_id, str) or not entry_id:
+        raise ValueError("terminal attempt row entry_id must be a non empty str")
+    mode = rec.get("mode")
+    if not isinstance(mode, str) or mode not in ATTEMPT_MODES:
+        raise ValueError("terminal attempt row mode must be one of off shadow advise act")
+    at = rec.get("at")
+    if not isinstance(at, str) or not at:
+        raise ValueError("terminal attempt row at must be a non empty str")
+    try:
+        datetime.fromisoformat(at.replace("Z", "+00:00"))
+    except Exception:
+        raise ValueError("terminal attempt row at must be ISO 8601 parseable")
+    family = rec.get("family")
+    if not isinstance(family, str) or not family:
+        raise ValueError("terminal attempt row family must be a non empty str")
+    qtype = rec.get("qtype")
+    if qtype is not None:
+        if not isinstance(qtype, str) or qtype not in QTYPES:
+            raise ValueError("terminal attempt row qtype must be in QTYPES or None")
+    framing = rec.get("framing")
+    if framing is not None:
+        if not isinstance(framing, str) or not re.match(r"^[0-9a-f]{16}$", framing):
+            raise ValueError("terminal attempt row framing must be 16 lowercase hex or None")
+    model = rec.get("model")
+    if not isinstance(model, str):
+        raise ValueError("terminal attempt row model must be a str")
+    answer = rec.get("answer")
+    try:
+        json.dumps(answer)
+    except Exception:
+        raise ValueError("terminal attempt row answer must be JSON serializable or None")
+    for field in ("prob", "confidence"):
+        value = rec.get(field)
+        if value is not None:
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError("terminal attempt row %s must be a number or None" % field)
+            if not math.isfinite(value) or value < 0.0 or value > 1.0:
+                raise ValueError("terminal attempt row %s must be in [0.0, 1.0]" % field)
+    cost = rec.get("cost")
+    if isinstance(cost, bool) or not isinstance(cost, (int, float)):
+        raise ValueError("terminal attempt row cost must be a number")
+    if not math.isfinite(cost) or cost < 0.0:
+        raise ValueError("terminal attempt row cost must be finite and >= 0.0")
+    reason = rec.get("reason")
+    if reason is not None and not isinstance(reason, str):
+        raise ValueError("terminal attempt row reason must be str or None")
+    audit = rec.get("audit")
+    if not isinstance(audit, bool):
+        raise ValueError("terminal attempt row audit must be bool")
+    decision_id = rec.get("decision_id")
+    if decision_id is not None:
+        if not isinstance(decision_id, str) or not _DECISION_ID_RE.match(decision_id):
+            raise ValueError("terminal attempt row decision_id must be the seam's minted "
+                             "<entry_id>:<16 hex>:<16 hex> shape, 32 lowercase hex, or None")
+    _attempt_row_is_json_writable(rec, "terminal attempt row")
+
+
+#: attempt ids that already have a terminal row, per ledger path, in this
+#: process (D3 section 5: exactly one terminal row per attempt_id). The
+#: seam mints a fresh uuid4 per consult and writes exactly one terminal, so
+#: a duplicate can only come from a caller reusing an id; refusing it here
+#: costs no read. The write path must stay read free: a thousand off mode
+#: calls are pinned to cost only their two appends (test_jev_checks
+#: OffModeCostsNothing), and J048's machine wide hook fires per tool call.
+#: Readers keep their own defence: count_attempt_population counts distinct
+#: attempt_id, and the outcome binder requires exactly one terminal row.
+#: ponytail: process local and bounded; a cross process duplicate is not
+#: refused here (uuid4 collision odds aside), move to an index file if one
+#: is ever observed.
+_TERMINAL_IDS_CAP = 100000
+_TERMINAL_IDS_SEEN = {}
+
+
+def _terminal_already_written(attempts_path, attempt_id):
+    key = os.path.realpath(attempts_path)
+    seen = _TERMINAL_IDS_SEEN.get(key)
+    return seen is not None and attempt_id in seen[1]
+
+
+def _remember_terminal(attempts_path, attempt_id):
+    key = os.path.realpath(attempts_path)
+    order, ids = _TERMINAL_IDS_SEEN.setdefault(key, ([], set()))
+    order.append(attempt_id)
+    ids.add(attempt_id)
+    if len(order) > _TERMINAL_IDS_CAP:
+        ids.discard(order.pop(0))
+
+
+def append_terminal(attempts_path: str, attempt: dict, *, max_segment_bytes: int = 52428800,
+                    retention_segments: int = 12) -> None:
+    if not isinstance(attempts_path, str) or not attempts_path:
+        raise ValueError("attempts_path must be a non empty str")
+    if os.path.isdir(attempts_path):
+        raise ValueError("attempts_path must be a file path, not a directory")
+    _validate_attempt_terminal(attempt)
+    if _terminal_already_written(attempts_path, attempt["attempt_id"]):
+        raise ValueError("attempt_id %r already has a terminal row; exactly one is allowed"
+                         % (attempt["attempt_id"],))
+    try:
+        _append_line(attempts_path, attempt)
+        _rotate_if_needed(attempts_path, max_segment_bytes, retention_segments)
+    except OSError as exc:
+        raise ValueError("attempts_path could not be written: %s" % exc) from exc
+    _remember_terminal(attempts_path, attempt["attempt_id"])
+
+
+#: The answered over submitted population floor (D3.6). A key whose
+#: distinct answered attempts divided by its distinct submitted attempts
+#: falls below this is refused a calibrated bound: too much of what was
+#: asked was never independently settled, so the survivors are a survivor
+#: biased view of what the model can do, not a measurement of it. A policy
+#: knob, not a derived number, pinned by test.
+DEFAULT_POPULATION_FLOOR = 0.5
+
+#: The exact shape of the framing field on an attempts row: a Decision
+#: record's own stored framing_hash, 16 lowercase hex, or None when the
+#: framing was not known at submission time. Defined once here so the
+#: writing validators and the counting read path cannot drift apart on
+#: what a well formed key field is.
+_ATTEMPT_FRAMING_RE = re.compile(r"^[0-9a-f]{16}$")
+
+
+def _attempt_row_is_json_writable(rec, label):
+    """Raises ValueError unless rec survives the serialization that
+    _append_line() itself performs.
+
+    Mirrors _append_line()'s own call (a plain json.dumps with
+    sort_keys=True), so a value that would crash that single os.write()
+    call -- an unserializable object in any field, an extra field no other
+    validator inspects, or a mix of key types sort_keys cannot order -- is
+    refused here as a value, never propagated as a raw TypeError out of the
+    encoder into the caller.
+    """
+    try:
+        json.dumps(rec, sort_keys=True)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("%s must be JSON serializable: %s" % (label, exc))
+
+
+def _validate_attempt_key_fields(rec, label):
+    """Raises ValueError unless every key field on one attempts row is well
+    formed: the four fields count_attempt_population() matches on.
+
+    qtype is 'noul', 'choice', 'score' or None; framing is 16 lowercase hex
+    or None; model is a str (empty allowed, per the submission row
+    contract); entry_id is a non-empty str. A row carrying anything else is
+    unknown input, and unknown input blocks: it is never skipped as if its
+    key simply did not match, because a row skipped for a malformed key
+    field is indistinguishable, to the floor gate, from a row that was
+    never asked at all.
+    """
+    qtype = rec.get("qtype")
+    if qtype is not None and (not isinstance(qtype, str) or qtype not in QTYPES):
+        raise ValueError("%s qtype must be one of %s or None, got %r"
+                         % (label, sorted(QTYPES), qtype))
+    framing = rec.get("framing")
+    if framing is not None and (not isinstance(framing, str)
+                                or not _ATTEMPT_FRAMING_RE.match(framing)):
+        raise ValueError("%s framing must be 16 lowercase hex or None, got %r"
+                         % (label, framing))
+    # A submission row written before the bridge reported carries model
+    # "" (D3 section 5); rows the seam wrote before 2026-09-24 carry no
+    # model field at all and read as "". A model field that is present
+    # and not a str is hostile and refuses.
+    model = rec.get("model", "")
+    if not isinstance(model, str):
+        raise ValueError("%s model must be a str, got %r" % (label, model))
+    entry_id = rec.get("entry_id")
+    if not isinstance(entry_id, str) or not entry_id.strip():
+        raise ValueError("%s entry_id must be a non-empty str, got %r" % (label, entry_id))
+
+
+def _validate_attempt_ledger_row(rec):
+    """Raises ValueError unless rec is one well formed attempts row.
+
+    Runs the shape validator that already exists for this row's own phase
+    (append_submission's _validate_attempt_row() for a submission row,
+    append_terminal's _validate_attempt_terminal() for a terminal row), and
+    then the key field and whole row serializability checks on top. A row
+    whose phase is neither shape is refused, never read as absent.
+    """
+    if not isinstance(rec, dict):
+        raise ValueError("attempts ledger row must be a JSON object, got %r" % (rec,))
+    if rec.get("phase") == ATTEMPT_PHASE_SUBMITTED:
+        _validate_attempt_row(rec)
+        _validate_attempt_key_fields(rec, "submission row")
+        _attempt_row_is_json_writable(rec, "submission row")
+        return
+    _validate_attempt_terminal(rec)
+    _validate_attempt_key_fields(rec, "terminal row")
+    _attempt_row_is_json_writable(rec, "terminal row")
+
+
+def count_attempt_population(attempts_path, *, family, qtype, framing, model):
+    """(distinct submitted, distinct answered) for one exact key.
+
+    Both counts are scoped to the touched (family, qtype, framing, model)
+    key, never a whole ledger total: a well populated ledger for one key
+    must never let a starved population for another key pass the floor.
+    Submitted rows are matched on entry_id equal to family together with
+    qtype, framing and model exactly, because every submission row records
+    the full key; answered rows are matched on family, qtype, framing and
+    model exactly, and counted as DISTINCT attempt_id, so a duplicated
+    terminal row cannot inflate the answered side.
+
+    Reads through _read_rotated_jsonl(), the rotated read the rest of this
+    module already uses: the single os.write() atomicity ceiling in
+    _append_line() is retained, so counting never needs a lock. Any corrupt,
+    torn, malformed or unreadable attempts row raises ValueError: it is
+    never read as an absent row and never silently skipped.
+    """
+    if not isinstance(attempts_path, str) or not attempts_path.strip():
+        raise ValueError("attempts_path must be a non-empty string, got %r" % (attempts_path,))
+    _require_plain_ledger_path(attempts_path, "attempts_path")
+    if not isinstance(family, str) or not family.strip():
+        raise ValueError("family must be a non-empty string, got %r" % (family,))
+    if not isinstance(qtype, str) or qtype not in QTYPES:
+        raise ValueError("qtype must be one of %s, got %r" % (sorted(QTYPES), qtype))
+    if framing is not None and (not isinstance(framing, str) or not framing.strip()):
+        raise ValueError("framing must be a non-empty string or None, got %r" % (framing,))
+    if not isinstance(model, str) or not model.strip():
+        raise ValueError("model must be a non-empty string, got %r" % (model,))
+    records, corrupt, reliable = _read_rotated_jsonl(
+        attempts_path, _validate_attempt_ledger_row)
+    if corrupt or not reliable:
+        raise ValueError("attempts ledger at %s is corrupt or unreadable" % attempts_path)
+    want_key = (family, qtype, framing, model)
+    submitted = set()
+    answered = set()
+    # The seam writes its submission row before the registry lookup, so a
+    # real submission row carries no qtype, framing or model; its key is
+    # the one its own terminal row (any terminal phase) was settled under.
+    # A submission row that carries the key itself (seeded history, a
+    # future writer that knows it) still matches on its own fields.
+    keyed_terminal_attempts = set()
+    for _line_no, rec in records:
+        if rec.get("phase") != ATTEMPT_PHASE_SUBMITTED:
+            row_key = (rec.get("family"), rec.get("qtype"), rec.get("framing"), rec.get("model"))
+            if row_key == want_key:
+                keyed_terminal_attempts.add(rec["attempt_id"])
+    for _line_no, rec in records:
+        phase = rec.get("phase")
+        if phase == ATTEMPT_PHASE_SUBMITTED:
+            row_key = (rec.get("entry_id"), rec.get("qtype"), rec.get("framing"), rec.get("model", ""))
+            if row_key == want_key or (rec.get("entry_id") == family
+                                       and rec["attempt_id"] in keyed_terminal_attempts):
+                submitted.add(rec["attempt_id"])
+        elif phase == "answered":
+            row_key = (rec.get("family"), rec.get("qtype"), rec.get("framing"), rec.get("model"))
+            if row_key == want_key:
+                answered.add(rec["attempt_id"])
+    return len(submitted), len(answered)
+
+
+def threshold_with_floor(decisions_path, outcomes_path, *, family, qtype, framing, model,
+                         risk_class, attempts_path,
+                         population_floor=DEFAULT_POPULATION_FLOOR, bands=DEFAULT_BANDS):
+    """(bound, reason) applying the population floor before the Wilson read.
+
+    The floor family reasons are framing_required, no_submissions,
+    no_answered_attempts, attempts_unreadable and population_floor, plus
+    corrupt_outcomes from the Wilson read this delegates to. Whatever the
+    reason, the bound is None: a refusal is never rendered as a number and
+    0.0 is never substituted for it.
+
+    framing None is refused first, before any count: a key with no framing
+    cannot be scoped at all, so no population can authorize ACT for it. A
+    missing or hostile attempts_path is itself a refusal, never a value to
+    act on. The bound is delegated to threshold(), so the floor gate and
+    the bound it gates can never disagree.
+
+    Raises ValueError for a hostile argument (a wrong type, a bool or out
+    of range floor, a qtype outside QTYPES, an empty model); a corrupt or
+    unreadable ledger is a refused reason, never a raise.
+    """
+    if not isinstance(family, str) or not family.strip():
+        raise ValueError("family must be a non-empty string, got %r" % (family,))
+    if not isinstance(qtype, str) or qtype not in QTYPES:
+        raise ValueError("qtype must be one of %s, got %r" % (sorted(QTYPES), qtype))
+    if framing is not None and (not isinstance(framing, str) or not framing.strip()):
+        raise ValueError("framing must be a non-empty string or None, got %r" % (framing,))
+    if not isinstance(model, str) or not model.strip():
+        raise ValueError("model must be a non-empty string, got %r" % (model,))
+    if not isinstance(risk_class, str) or not risk_class.strip():
+        raise ValueError("risk_class must be a non-empty string, got %r" % (risk_class,))
+    if isinstance(population_floor, bool) or not isinstance(population_floor, (int, float)):
+        raise ValueError("population_floor must be a number, got %r" % (population_floor,))
+    if not (0.0 <= population_floor <= 1.0):
+        raise ValueError("population_floor must be within [0, 1], got %r" % (population_floor,))
+    if framing is None:
+        return (None, "framing_required")
+    if not isinstance(attempts_path, str) or not attempts_path.strip():
+        return (None, "attempts_unreadable")
+    try:
+        submitted, answered = count_attempt_population(
+            attempts_path, family=family, qtype=qtype, framing=framing, model=model)
+    except (ValueError, OSError):
+        return (None, "attempts_unreadable")
+    if submitted <= 0:
+        return (None, "no_submissions")
+    if answered <= 0:
+        return (None, "no_answered_attempts")
+    if answered / submitted < population_floor:
+        return (None, "population_floor")
+    return threshold(
+        decisions_path, outcomes_path,
+        family=family, qtype=qtype, framing=framing, model=model,
+        risk_class=risk_class, bands=bands,
+        population_floor=population_floor, attempts_path=attempts_path)
+
+
+def bind_outcome_to_attempt(attempts_path=None, outcomes_path=None, outcome=None):
+    """D3.7: bind one outcome to the exact attempt and proposition.
+
+    Refuses with ValueError, and writes nothing, unless the attempts ledger
+    holds exactly one answered terminal row for outcome["attempt_id"], that
+    row's (family, qtype, framing, model) recomputes to
+    outcome["proposition_hash"], and outcome["id"] equals that row's
+    decision_id. A missing, unreadable, non UTF 8, corrupt or non object
+    attempts ledger is refused, never read as an empty ledger. Every field,
+    including each path, is checked by type: a wrong type, None, NaN, a bool
+    or an unhashable value is a refusal here, never a raw interpreter error.
+    """
+    if not isinstance(attempts_path, str) or not attempts_path.strip():
+        raise ValueError("attempts_path must be a non-empty string")
+    if not isinstance(outcomes_path, str) or not outcomes_path.strip():
+        raise ValueError("outcomes_path must be a non-empty string")
+    if not isinstance(outcome, dict):
+        raise ValueError("outcome must be a dict, got %r" % (outcome,))
+    attempt_id = outcome.get("attempt_id")
+    if not isinstance(attempt_id, str) or not _ATTEMPT_ID_RE.match(attempt_id):
+        raise ValueError("outcome attempt_id must be 32 lowercase hex")
+    prop_hash = outcome.get("proposition_hash")
+    if not isinstance(prop_hash, str) or not _PROPOSITION_HASH_RE.match(prop_hash):
+        raise ValueError("outcome proposition_hash must be 16 lowercase hex")
+    outcome_id = outcome.get("id")
+    if not isinstance(outcome_id, str) or not outcome_id.strip():
+        raise ValueError("outcome id must be a non-empty string")
+    try:
+        json.dumps(outcome, allow_nan=False)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("outcome is not JSON-serializable: %s" % exc) from exc
+
+    try:
+        with open(attempts_path, "rb") as fh:
+            attempts_raw = fh.read()
+    except OSError as exc:
+        raise ValueError("attempts ledger %s could not be read: %s" % (attempts_path, exc)) from exc
+    try:
+        attempts_text = attempts_raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError("attempts ledger %s is not valid UTF-8" % (attempts_path,)) from exc
+
+    terminals = []
+    for line in attempts_text.splitlines():
+        if not line.strip():
+            continue
+        try:
+            rec = json.loads(line)
+        except ValueError as exc:
+            raise ValueError("attempts ledger %s contains a corrupt line" % (attempts_path,)) from exc
+        if not isinstance(rec, dict):
+            raise ValueError("attempts ledger %s contains a non-object line" % (attempts_path,))
+        matched = rec.get("attempt_id") == attempt_id and rec.get("phase") in TERMINAL_PHASES
+        if matched:
+            terminals.append(rec)
+    if len(terminals) != 1:
+        raise ValueError("attempt_id %r must have exactly one terminal row, found %d"
+                         % (attempt_id, len(terminals)))
+    terminal = terminals[0]
+    if terminal.get("phase") != "answered":
+        raise ValueError("attempt_id %r is not an answered terminal row" % (attempt_id,))
+
+    if os.path.isfile(outcomes_path):
+        try:
+            with open(outcomes_path, "rb") as fh:
+                existing_raw = fh.read()
+        except OSError as exc:
+            raise ValueError("outcomes ledger %s could not be read: %s" % (outcomes_path, exc)) from exc
+        try:
+            existing_text = existing_raw.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError("outcomes ledger %s is not valid UTF-8" % (outcomes_path,)) from exc
+        for line in existing_text.splitlines():
+            if not line.strip():
+                continue
+            try:
+                existing = json.loads(line)
+            except ValueError as exc:
+                raise ValueError("outcomes ledger %s contains a corrupt line" % (outcomes_path,)) from exc
+            if isinstance(existing, dict) and existing.get("attempt_id") == attempt_id:
+                raise ValueError(
+                    "attempt_id %r already has an outcome; the first label wins" % (attempt_id,))
+
+    expected_hash = proposition_hash(terminal.get("family"), terminal.get("qtype"),
+                                     terminal.get("framing"), terminal.get("model"))
+    if expected_hash != prop_hash:
+        raise ValueError("proposition_hash does not match the terminal row for attempt_id %r"
+                         % (attempt_id,))
+    if terminal.get("decision_id") != outcome_id:
+        raise ValueError("outcome id must equal the terminal decision_id for attempt_id %r"
+                         % (attempt_id,))
+
+    _append_line(outcomes_path, outcome)
+    _rotate_if_needed(outcomes_path, DEFAULT_MAX_SEGMENT_BYTES, DEFAULT_RETENTION_SEGMENTS)
 
 
 if __name__ == "__main__":

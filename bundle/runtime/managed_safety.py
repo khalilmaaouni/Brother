@@ -451,3 +451,63 @@ def materialize(lane_path, unit):
                       "after being read back (missing %s)"
                       % (unit_id, ", ".join(missing)))
     return token, ""
+
+
+def adopt(lane_path, unit, prior_session):
+    """RESUME-FIX F4 (2026-09-26): take over the fence claim a KILLED
+    worker's session still holds on `unit` in its lane, so a resume that
+    recovers that worker's result leaves no active claim under a dead
+    session behind it (which would refuse every later materialize() for the
+    unit, a repair's included). The caller proves the owning process dead
+    first; this proves the rest from the store itself, read-only, before
+    it moves anything:
+
+      * `prior_session` is the raw session materialize() minted, and its
+        token file already exists in this lane (never minted here: a
+        missing token means this is not that session's lane);
+      * the unit holds an ACTIVE record, fencing exactly the unit's
+        declared write scope today (a scope that changed since is not the
+        work that was fenced).
+
+    Then one transition active -> adopted under that session's own label,
+    pinned to the record's version: the store refuses it when another
+    session holds the record, and of two concurrent resumes only one can
+    win. Returns (True, "") or (False, why) and never raises; nothing is
+    moved on any refusal."""
+    bs, fh, problem = _load_fence_modules()
+    if bs is None or fh is None:
+        return False, "the fence modules could not be loaded: %s" % (problem or "")
+    unit_id = str(unit.get("unit_id") or "").strip()
+    write_scope = list(unit.get("write_scope") or [])
+    if not unit_id or not write_scope or not prior_session:
+        return False, "no unit id, write scope or prior session to adopt"
+    lane_path = os.path.realpath(lane_path)
+    try:
+        if not os.path.isfile(fh.token_path(lane_path, prior_session)):
+            return False, "the prior session never held a claim in this lane"
+        label = fh.session_label(lane_path, prior_session)
+        rows = fh.active_claims(lane_path)
+        want = {fh.canonical_target(lane_path, p) for p in write_scope}
+    except Exception as exc:  # noqa: BLE001  # sbe: allow-silent, refused on this line
+        return False, "the lane store could not be read: %s" % type(exc).__name__
+    # One active record per name is the store's own unique index, and the
+    # transition below refuses a record active under any OTHER session
+    # (live-session-adopt-blocked), so neither is re-checked here.
+    mine = [r for r in rows if r["name"] == unit_id]
+    if not mine:
+        return False, "%s holds no active fence claim in this lane" % unit_id
+    if {r["path"] for r in mine} != want:
+        return False, "%s's declared write scope changed since it was fenced" % unit_id
+    try:
+        store = bs.Store(lane_path, create=False)
+    except Exception as exc:  # noqa: BLE001  # sbe: allow-silent, refused on this line
+        return False, "the lane store could not be opened: %s" % type(exc).__name__
+    try:
+        store.transition(mine[0]["lifecycle_uuid"], mine[0]["version"],
+                         "adopted", session_id=label,
+                         note="adopted by a resume after its worker was killed")
+    except Exception as exc:  # noqa: BLE001  # sbe: allow-silent, refused on this line (StaleIdentity when a concurrent resume won)
+        return False, "the store refused the adoption: %s" % type(exc).__name__
+    finally:
+        store.close()
+    return True, ""

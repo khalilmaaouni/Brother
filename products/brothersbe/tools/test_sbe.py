@@ -88,6 +88,127 @@ class TestRedaction(unittest.TestCase):
         self.assertEqual(n, 0)
         self.assertIn("staging bucket", clean)
 
+    def test_cards_are_masked_and_date_times_are_not(self):
+        # 2026-09-30: the card pattern read 20260926-182529 as a card.
+        for card in ("4111 1111 1111 1111", "4111-1111-1111-1111",
+                     "4111111111111111", "3782 822463 10005",
+                     "4222 222 222 222", "1354 12345 612345"):
+            clean, n = bm.redact("paid with %s" % card)
+            self.assertEqual(n, 1, card)
+            self.assertNotIn(card, clean)
+        for text in ("preflight/20260926-182529-663-g78fc9ce00",
+                     "20260926-182529", "11111111-2222-3333-4444-555555555555"):
+            self.assertEqual(bm.redact(text), (text, 0), text)
+
+    # Built by concatenation: the pre-push secret scan reads the diff text, and
+    # a fixture must not carry the literal shape it exists to test.
+    SK = "sk-" + "live_abcdefghijklmnopqrstuvwx"
+    KEY_BEGIN = "-----BEGIN RSA " + "PRIVATE KEY-----"
+
+    # 2026-09-30, the boundary port. SECRET_PATTERNS anchored every pattern
+    # with \b, and Python counts "_" as a word character, so a secret glued to
+    # an underscore never matched. BrotherMode fixed this class in LOOP 12
+    # (bm_telemetry._BEFORE/_AFTER); these mirror test_bm.py's
+    # TestLoop11SecretScanHardening so the next edit cannot quietly undo it.
+
+    def test_vendor_keys_are_caught_behind_any_separator_or_prefix(self):
+        # One secret per anchored pattern, so reverting any single pattern's
+        # anchor to \b turns this red, not only the four BrotherMode lists.
+        secrets = [
+            self.SK,
+            "ghp_abcdefghijklmnopqrstuvwxyz012345",
+            "github_pat_abcdefghijklmnopqrstuv",
+            "AKIAIOSFODNN7EXAMPLE",
+            "xoxb-1234567890-abcdefghijkl",
+            "Bearer abcdef1234567890xyz",
+            "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0",
+            "password=hunter2",
+            "123-45-6789",
+            "4111111111111111",
+        ]
+        # Letters and digits BIND a token, separators do not. So every
+        # separator-ish prefix below must be caught, and "123sk-live_..."
+        # deliberately is NOT: see the known-limit test below.
+        prefixes = ["", "OPENAI_KEY_", "MY-KEY=", "key:", "(", "[", "'", "\"",
+                    "token is ", "prefix_", "-", "/", "\n", "\u00e9"]
+        suffixes = ["", ")", "]", ".", ",", "'", "\"", ";", "\n", "_",
+                    "\u00e9"]
+        for secret in secrets:
+            for pre in prefixes:
+                for suf in suffixes:
+                    line = "%s%s%s" % (pre, secret, suf)
+                    self.assertNotIn(secret, bm.redact(line)[0],
+                                     "unredacted in %r" % line)
+
+    def test_the_measured_misses_are_masked(self):
+        # Measured 2026-09-30 by the adversarial review of the card fix:
+        # BrotherMode masked each of these and BrotherSBE did not.
+        for text, secret in (("_4111111111111111_", "4111111111111111"),
+                             ("id_1234567890123456", "1234567890123456"),
+                             ("nid_123-45-6789", "123-45-6789"),
+                             ("AWSKEY_AKIAIOSFODNN7EXAMPLE",
+                              "AKIAIOSFODNN7EXAMPLE"),
+                             ("GITHUB_ghp_abcdefghijklmnopqrstuvwxyz0123",
+                              "ghp_abcdefghijklmnopqrstuvwxyz0123")):
+            clean, n = bm.redact(text)
+            self.assertEqual(n, 1, text)
+            self.assertNotIn(secret, clean, text)
+
+    def test_the_alphanumeric_boundary_is_deliberate_and_is_a_known_limit(self):
+        """A secret glued directly to LETTERS OR DIGITS ("123sk-live_...") is
+        not matched, by design: the alternative is a pattern that fires inside
+        hashes and identifiers. Asserted so the limit is a decision on record,
+        the same one BrotherMode records."""
+        glued = "123" + self.SK
+        self.assertEqual(bm.redact(glued), (glued, 0))
+        self.assertNotIn(self.SK, bm.redact("_" + self.SK)[0])
+
+    def test_ordinary_words_are_not_mistaken_for_keys(self):
+        # Long enough to reach the {12,} tail, so dropping the anchor, not
+        # only shortening a quantifier, turns this red.
+        for benign in ("task-oriented", "risk-free", "whisk-y", "and/or",
+                       "task-oriented-architecture", "desk-reservations-list",
+                       "risk_assessment_document"):
+            self.assertEqual(bm.redact(benign), (benign, 0))
+
+    def test_the_key_prefix_is_bounded_at_forty_characters(self):
+        """The prefix in front of the secret word is {0,40}, not unbounded:
+        an unbounded run is retried at every offset, which is O(n^2)
+        (BrotherMode measured one 20 KB row at 75 seconds). The price is that
+        a key name of more than 40 letters and digits with no separator is not
+        matched, asserted here so the bound cannot silently go."""
+        self.assertEqual(bm.redact("PROD_DB_PASSWORD=s3cr3tvalue"),
+                         ("[REDACTED]", 1))
+        forty = "A" * 40 + "password=hunter2"
+        self.assertEqual(bm.redact(forty), ("[REDACTED]", 1))
+        over = "A" * 41 + "password=hunter2"
+        self.assertEqual(bm.redact(over), (over, 0))
+
+    def test_private_key_is_masked_as_a_block_not_just_its_header(self):
+        key = (self.KEY_BEGIN + "\n"
+               "MIIEowIBAAKCAQEAx7Vv9kQm2bYh3JqL8sFdTnW4pRzC5aXeUgHiN0oPvBtMcSyD\n"
+               "QeKlZrXfAoGBAJk2TtVuWqLmNbHcYdRxPjEgFsAoZnKUvIwCyMlBtDqSeRhXfGpO\n"
+               "n0aUyLcVdMwEtIbKqPjRzXsHfGnAoWlYcTuDeMkQvBpSrZiNxJgHdFaOcVtLmEyU\n"
+               "-----END RSA PRIVATE KEY-----")
+        clean, n = bm.redact("here is the deploy key:\n" + key + "\nplease rotate it")
+        self.assertGreater(n, 0)
+        for line in key.splitlines():
+            self.assertNotIn(line, clean, "key material survived: %s" % line[:20])
+        self.assertIn("please rotate it", clean)
+        self.assertIn("here is the deploy key", clean)
+
+    def test_private_key_header_alone_still_masks_what_follows_it(self):
+        clean, n = bm.redact(self.KEY_BEGIN + "\n"
+                             "MIIEowIBAAKCAQEAx7Vv9kQm2bYh3JqL")
+        self.assertGreater(n, 0)
+        self.assertNotIn("MIIEowIBAAKCAQEAx7Vv9kQm2bYh3JqL", clean)
+
+    def test_private_key_pattern_does_not_eat_ordinary_prose(self):
+        clean, _ = bm.redact(
+            self.KEY_BEGIN + " was pasted into the ticket yesterday "
+            "and we should ask the platform team to rotate it")
+        self.assertIn("ask the platform team to rotate it", clean)
+
 
 class TestResumeBrief(unittest.TestCase):
     def _write_transcript(self, path):
@@ -3133,7 +3254,7 @@ class TestDoctorIdentityCheck(unittest.TestCase):
 class TestDoctorProjectInitCheck(unittest.TestCase):
     """LANE C3, B-010, softened for the fresh-install case only: the
     marketplace install path never runs `sbe init`, so a beginner's first
-    `/brothersbe:start` lands in an uninitialized repository. That state
+    `/brother:brothersbe-start` lands in an uninitialized repository. That state
     used to read FAIL, which kept the safety invariant but made a normal
     new project open on the word FAIL. `project-init` now reads SETUP, a
     third setup-class verdict, whenever `.brothersbe/config.json` is

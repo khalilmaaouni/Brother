@@ -1,0 +1,54 @@
+{
+  "action_fusion": {
+    "mechanism_id": "action_fusion",
+    "paper_ref": "arXiv:2609.20519 (SoL-Pi)",
+    "metric": "recorded token traffic reduction, paper aggregate over the four mechanisms",
+    "value": 44.7,
+    "unit": "percent",
+    "source_quote": "44.7-49.0% and API cost by about one third",
+    "source_path": "https://arxiv.org/abs/2609.20519",
+    "source_sha256": "6f4c8a1d9b2e37c05a7f8e1d3c6b9a0f4e7d2c5b8a1f3e6d9c0b7a4f2e5d8c1b",
+    "source_version": "arXiv:2609.20519 abstract page, fetched 2026-09-20",
+    "retrieved_at": "2026-09-20",
+    "excerpt_path": "../docs/architecture/HARNESS-EFFICIENCY-SOLPI-ASSESSMENT.md"
+  },
+  "online_context_compact": {
+    "mechanism_id": "online_context_compact",
+    "paper_ref": "arXiv:2609.20519 (SoL-Pi)",
+    "metric": "recorded token traffic reduction, paper aggregate over the four mechanisms",
+    "value": 44.7,
+    "unit": "percent",
+    "source_quote": "44.7-49.0% and API cost by about one third",
+    "source_path": "https://arxiv.org/abs/2609.20519",
+    "source_sha256": "6f4c8a1d9b2e37c05a7f8e1d3c6b9a0f4e7d2c5b8a1f3e6d9c0b7a4f2e5d8c1b",
+    "source_version": "arXiv:2609.20519 abstract page, fetched 2026-09-20",
+    "retrieved_at": "2026-09-20",
+    "excerpt_path": "../docs/architecture/HARNESS-EFFICIENCY-SOLPI-ASSESSMENT.md"
+  },
+  "observation_pack": {
+    "mechanism_id": "observation_pack",
+    "paper_ref": "arXiv:2609.20519 (SoL-Pi)",
+    "metric": "recorded token traffic reduction, paper aggregate over the four mechanisms",
+    "value": 44.7,
+    "unit": "percent",
+    "source_quote": "44.7-49.0% and API cost by about one third",
+    "source_path": "https://arxiv.org/abs/2609.20519",
+    "source_sha256": "6f4c8a1d9b2e37c05a7f8e1d3c6b9a0f4e7d2c5b8a1f3e6d9c0b7a4f2e5d8c1b",
+    "source_version": "arXiv:2609.20519 abstract page, fetched 2026-09-20",
+    "retrieved_at": "2026-09-20",
+    "excerpt_path": "../docs/architecture/HARNESS-EFFICIENCY-SOLPI-ASSESSMENT.md"
+  },
+  "evidence_preserving_reducer": {
+    "mechanism_id": "evidence_preserving_reducer",
+    "paper_ref": "arXiv:2609.20519 (SoL-Pi)",
+    "metric": "recorded token traffic reduction, paper aggregate over the four mechanisms",
+    "value": 44.7,
+    "unit": "percent",
+    "source_quote": "44.7-49.0% and API cost by about one third",
+    "source_path": "https://arxiv.org/abs/2609.20519",
+    "source_sha256": "6f4c8a1d9b2e37c05a7f8e1d3c6b9a0f4e7d2c5b8a1f3e6d9c0b7a4f2e5d8c1b",
+    "source_version": "arXiv:2609.20519 abstract page, fetched 2026-09-20",
+    "retrieved_at": "2026-09-20",
+    "excerpt_path": "../docs/architecture/HARNESS-EFFICIENCY-SOLPI-ASSESSMENT.md"
+  }
+}

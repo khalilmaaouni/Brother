@@ -298,7 +298,7 @@ def atomic_append(path, obj, mode=0o644):
         try:
             os.chmod(path, 0o600)
         except OSError as e:
-            print("bm_telemetry: warning: could not make %s owner-only (%s)"
+            say("bm_telemetry: warning: could not make %s owner-only (%s)"
                   % (path, e), file=sys.stderr)
 
 
@@ -477,7 +477,20 @@ SECRET_PATTERNS = [
                r"|secret|token|api[_-]?key|access[_-]?key|private[_-]?key"
                r"|credential)s?\s*(?:[:=]|\s+(?:is|was)\s+)\s*\S+", re.I),
     re.compile(_BEFORE + r"\d{3}-\d{2}-\d{4}" + _AFTER),           # us ssn shape
-    re.compile(_BEFORE + r"(?:\d[ -]?){13,16}" + _AFTER),           # card-ish digits
+    # Card numbers, in the layouts cards are actually printed in: one unbroken
+    # run, 4-4-4-(1..4) groups, the Amex and Diners 4-6-(4..5) groups, the 13
+    # digit Visa 4-3-3-3 and the 15 digit airline 4-5-6, with a space or
+    # hyphen between groups. Every layout starts with a group of four, which
+    # is what a date-time (a group of eight) never does. 2026-09-30: this was
+    # (?:\d[ -]?){13,16}, a separator allowed between ANY two digits, so the
+    # date-time in a tag such as preflight/20260926-182529 (8 then 6) read as
+    # a card, and every receipt screen written from a checkout that could see
+    # that tag had its git describe mangled on disk. Kept a regex rather than
+    # a Luhn check on purpose: bm_vault_intake runs these patterns itself, and
+    # one in ten date-times passes Luhn anyway.
+    re.compile(_BEFORE + r"(?:\d{13,16}|\d{4}[ -]\d{4}[ -]\d{4}[ -]\d{1,4}"
+               r"|\d{4}[ -]\d{6}[ -]\d{4,5}|\d{4}[ -]\d{3}[ -]\d{3}[ -]\d{3}"
+               r"|\d{4}[ -]\d{5}[ -]\d{6})" + _AFTER),               # card digits
 ]
 
 
@@ -514,6 +527,21 @@ def _get_bm_learning():
     if not _bm_learning_cache:
         _bm_learning_cache.extend(_load_bm_learning())
     return _bm_learning_cache[0], _bm_learning_cache[1]
+
+
+def say(line, file=None):
+    """Every line this file prints leaves through bm_learning.say, the print
+    choke point (tools/test_bm_print_choke_point.py): formatted whole, then
+    flattened, so a path, a payload field or a file's text cannot open a
+    second line under the real one. Loaded by the same never-raising path as
+    every other bm_learning use here: this is a hook, so a missing or older
+    sibling degrades to an escaped line, never a traceback and never a raw
+    one."""
+    learning, _err = _get_bm_learning()
+    if learning is not None and hasattr(learning, "say"):
+        learning.say(line, file=file)
+    else:
+        print(ascii("%s" % (line,)), file=file)
 
 
 def _load_bm_setup():
@@ -744,7 +772,7 @@ def cmd_outcomes_append():
             b = datetime.datetime.fromisoformat(main["last_ts"].replace("Z", "+00:00"))
             hours = round((b - a).total_seconds() / 3600, 2)
         except Exception as e:
-            print("bm_telemetry: warning: could not compute session hours from "
+            say("bm_telemetry: warning: could not compute session hours from "
                   "%r/%r (%s); recording 0.0" % (main["first_ts"], main["last_ts"], e),
                   file=sys.stderr)
     rec = {
@@ -767,7 +795,7 @@ def cmd_outcomes_append():
     comparable = {k: v for k, v in rec.items() if k != "ts"}
     for prev in read_records(LEDGER):
         if prev.get("session_id") == sid and {k: v for k, v in prev.items() if k != "ts"} == comparable:
-            print("bm_telemetry: duplicate flush for %s (identical metrics); not recorded" % sid[:8])
+            say("bm_telemetry: duplicate flush for %s (identical metrics); not recorded" % sid[:8])
             return
     atomic_append(LEDGER, rec)
     ncorr, ndropped = scan_corrections(sid, project, main["user_texts"])
@@ -776,7 +804,7 @@ def cmd_outcomes_append():
     # reads at every SessionEnd.
     cap_note = (" (%d more matched but were not captured, cap %d/session)"
                 % (ndropped, CORRECTION_CAP_PER_SESSION)) if ndropped else ""
-    print("bm_telemetry: recorded %s (%dk out, %d tools, %.1fh, %d correction candidates%s)"
+    say("bm_telemetry: recorded %s (%dk out, %d tools, %.1fh, %d correction candidates%s)"
           % (sid[:8], main["out"] // 1000, main["tool_calls"], hours, ncorr, cap_note))
 
 
@@ -812,7 +840,7 @@ def cmd_migrate():
         print("migrate: %d lines, %d migrated to schema 2, count ok (%d)"
               % (n_before, changed, n_after))
     if bad:
-        print("migrate: %d malformed line(s) in the original could not be parsed "
+        say("migrate: %d malformed line(s) in the original could not be parsed "
               "(line numbers %s) and are NOT in the rewritten file; the exact "
               "original bytes are preserved at %s%s, nothing was deleted."
               % (len(bad), ",".join(str(i) for i in bad[:10]) + (",..." if len(bad) > 10 else ""),
@@ -834,7 +862,7 @@ def cmd_dedup():
     ):
         rows, bad = read_records(path, report_bad=True)
         if not rows:
-            print("dedup: %s empty or missing, skipped" % os.path.basename(path))
+            say("dedup: %s empty or missing, skipped" % os.path.basename(path))
             continue
         if keep == "last":
             kept_rev, seen = [], set()
@@ -857,7 +885,7 @@ def cmd_dedup():
             # No rewrite happens on this branch, so the file on disk is
             # untouched: any malformed line already in it is neither lost
             # nor hidden, just still there for the next read to report.
-            print("dedup: %s already clean (%d lines%s)"
+            say("dedup: %s already clean (%d lines%s)"
                   % (os.path.basename(path), len(rows),
                      ", %d malformed line(s) left in place" % len(bad) if bad else ""))
             continue
@@ -866,11 +894,11 @@ def cmd_dedup():
         bak = "%s.bak-dedup%s" % (path, stamp)
         backed_up = atomic_backup(path, bak)
         atomic_write(path, "".join(json.dumps(r, separators=(",", ":")) + "\n" for r in kept))
-        print("dedup: %s %d -> %d lines (%d duplicate flushes dropped; backup %s)"
+        say("dedup: %s %d -> %d lines (%d duplicate flushes dropped; backup %s)"
               % (os.path.basename(path), len(rows), len(kept),
                  len(rows) - len(kept), os.path.basename(bak)))
         if bad:
-            print("dedup: %d malformed line(s) in %s could not be parsed and are NOT in "
+            say("dedup: %d malformed line(s) in %s could not be parsed and are NOT in "
                   "the rewritten file; the exact original bytes are preserved at %s%s."
                   % (len(bad), os.path.basename(path), bak,
                      "" if backed_up else " (from an earlier run today)"))
@@ -927,7 +955,7 @@ def cmd_speed():
               "from every count below; nothing was deleted." % len(led_bad))
     for label, w, runs in (("last 7d ", cur, cur_runs), ("prior 7d", prev, prev_runs)):
         per = ("%.1f span-h/run" % (w["hours"] / runs)) if runs else "no runs recorded"
-        print("  %s: %d sessions, %.1f span-h, %dk out, %d recorded runs -> %s"
+        say("  %s: %d sessions, %.1f span-h, %dk out, %d recorded runs -> %s"
               % (label, w["sessions"], w["hours"], w["outk"], runs, per))
     if not (cur_runs and prev_runs):
         print("  trend: NO-DATA (both windows need recorded runs; nothing is invented)")
@@ -1189,7 +1217,7 @@ def cmd_scorecard():
     print("ledger: %d sessions, %d last 7d, %dk out last 7d, %d correction candidates pending, "
           "%d rework signal(s), %d escaped defect(s)"
           % (len(rows), len(recent), out7 // 1000, len(corrections), n_rework, n_escaped))
-    print("1 self-learning : reviews=%d, last=%s, sealed predictions=%d (10: 0 gaps 14d + 2 reviews + >=5 predictions)"
+    say("1 self-learning : reviews=%d, last=%s, sealed predictions=%d (10: 0 gaps 14d + 2 reviews + >=5 predictions)"
           % (len(reviews), ("%.1fd" % lr_age) if lr_age is not None else "never", preds["sealed"]))
     # FIX (fix-round 2026-07-26): this used to print len(rows), len(rows), a
     # value compared against ITSELF that can never be anything but 100 percent
@@ -1214,24 +1242,24 @@ def cmd_scorecard():
     # the literal string "avg=None" instead of an absent value. Metric 9
     # below prints "no data" for the identical situation; matched here.
     avg_txt = ("%.2f" % avg_rating) if avg_rating is not None else "no data"
-    print("4 alignment     : ratings=%d avg=%s (unattributed=%d, never averaged), "
+    say("4 alignment     : ratings=%d avg=%s (unattributed=%d, never averaged), "
           "prediction alignment (diverged only)=%s, corrections captured=%d, rework=%d, escaped-defects=%d "
           "(10: avg>=4.5 + 0 repeats 2wk)"
           % (len(attributed), avg_txt, len(unattributed), diverged_txt,
              len(corrections), n_rework, n_escaped))
-    print("5 memory        : canonical=%s; registry + vault hygiene judged weekly" % LEDGER)
+    say("5 memory        : canonical=%s; registry + vault hygiene judged weekly" % LEDGER)
     print("6 honesty       : floor gate; escaped defects=%d (signals.jsonl); "
           "evidence blocks in fence closes judged weekly" % n_escaped)
     collisions, coll_note = _coordination_collisions(os.getcwd())
     if collisions is None:
-        print("7 coordination  : floor gate; collisions NOT MEASURED (%s); "
+        say("7 coordination  : floor gate; collisions NOT MEASURED (%s); "
               "baton drops and resume-not-respawn judged weekly from OUTCOMES incidents" % coll_note)
     else:
-        print("7 coordination  : floor gate; collisions=%d (bm_store.verify() at %s); "
+        say("7 coordination  : floor gate; collisions=%d (bm_store.verify() at %s); "
               "baton drops and resume-not-respawn judged weekly from OUTCOMES incidents"
               % (collisions, os.getcwd()))
     print("8 delivery      : shipped surfaces vs spend, check: fields on fences, judged weekly")
-    print("9 cache economy : warm-read ratio 7d=%s (10: sustained >=90%% + zero broken-prefix incidents 2wk)"
+    say("9 cache economy : warm-read ratio 7d=%s (10: sustained >=90%% + zero broken-prefix incidents 2wk)"
           % (("%.1f%%" % ratio) if ratio is not None else "no data"))
 
 
@@ -1309,7 +1337,7 @@ def cmd_rate(argv):
         # truncate or round silently into a plausible-looking integer.
         score = int(score_raw)
     except ValueError:
-        print("rate: refused, --score must be a whole number 1-5 (got %r). A founder "
+        say("rate: refused, --score must be a whole number 1-5 (got %r). A founder "
               "answering a 1-to-5 ask cannot produce a fraction; a fractional score here "
               "would mean the system rated itself, not the founder." % score_raw)
         return
@@ -1330,10 +1358,10 @@ def cmd_rate(argv):
     # the correction candidates in CORRECTIONS, which have been 0600 all along.
     atomic_append(RATINGS, rec, mode=0o600)
     if is_attributed:
-        print("bm_telemetry: rating %d recorded for '%s' (attributed: session %s)"
+        say("bm_telemetry: rating %d recorded for '%s' (attributed: session %s)"
               % (score, task, session[:8]))
     else:
-        print("bm_telemetry: rating %d recorded for '%s' (UNATTRIBUTED: no --reply/--session; "
+        say("bm_telemetry: rating %d recorded for '%s' (UNATTRIBUTED: no --reply/--session; "
               "reported separately at scorecard time, never averaged in)" % (score, task))
 
 
@@ -1380,7 +1408,7 @@ def cmd_signal(kind, argv):
         elif a == "--artifact":
             artifact = next(it, "")
     if not session or not task:
-        print("usage: %s --session ID --task \"...\" [--record ID] "
+        say("usage: %s --session ID --task \"...\" [--record ID] "
               "[--artifact PATH] [--evidence \"...\"] [--note \"...\"]" % kind)
         return
     rec = {"ts": now_iso(), "kind": kind, "session_id": session,
@@ -1390,7 +1418,7 @@ def cmd_signal(kind, argv):
     # Owner-only: task/evidence/note can carry founder-written prose, the
     # same sensitivity as RATINGS and CORRECTIONS above.
     atomic_append(SIGNALS, rec, mode=0o600)
-    print("bm_telemetry: %s recorded for session %s" % (kind, session[:8]))
+    say("bm_telemetry: %s recorded for session %s" % (kind, session[:8]))
 
 
 def cmd_startup_nags():
@@ -1431,7 +1459,7 @@ def cmd_startup_nags():
     active = {r.get("ts", "")[:10] for r in led if 0 < (age_days(r.get("ts", "")) or 99) <= 3}
     missing = sorted(d for d in active if d and d not in log_days and d != today)
     if missing:
-        print("BROTHERMODE NAG: active day(s) %s have no session log in project memory; backfill or waive with a note."
+        say("BROTHERMODE NAG: active day(s) %s have no session log in project memory; backfill or waive with a note."
               % ", ".join(missing))
 
 
@@ -1492,7 +1520,7 @@ def cmd_registry_check(argv):
         return
     for p in paths:
         if not os.path.isfile(p):
-            print("%s: missing" % p)
+            say("%s: missing" % p)
             continue
         age = (datetime.datetime.now().timestamp() - os.path.getmtime(p)) / 86400
         live = []
@@ -1501,11 +1529,11 @@ def cmd_registry_check(argv):
             if s.startswith("- ") and "agent" in s.lower() and "LANDED" not in s and "ADOPTED" not in s:
                 live.append(s[:90])
         if live and age > 2:
-            print("%s: %d live-looking fences in a %.1f-day-old file:" % (p, len(live), age))
+            say("%s: %d live-looking fences in a %.1f-day-old file:" % (p, len(live), age))
             for l in live:
-                print("   " + l)
+                say("   " + l)
         else:
-            print("%s: clean (%d live-looking fences, %.1fd old)" % (p, len(live), age))
+            say("%s: clean (%d live-looking fences, %.1fd old)" % (p, len(live), age))
 
 
 # D3 fix (fence sweep, 2026-07-30): cmd_fence_lint used to match ONLY
@@ -1579,7 +1607,7 @@ def cmd_fence_lint(argv):
     if hits:
         print("LIVE FENCES (fence-then-dispatch; overlap means queue):")
         for h in hits[:8]:
-            print("  " + h)
+            say("  " + h)
         if len(hits) > 8:
             # N-6 finding 8 (2026-08-04): this used to print only the first
             # eight with no count of how many were hidden, so a dispatcher
@@ -1590,7 +1618,7 @@ def cmd_fence_lint(argv):
             print("  ... %d more not shown (%d live fences total)"
                   % (len(hits) - 8, len(hits)))
     else:
-        print("fence-lint: no live fences found under %s" % cwd)
+        say("fence-lint: no live fences found under %s" % cwd)
 
 
 # ---------------------------------------------------------------------------
@@ -1663,12 +1691,12 @@ def cmd_check_update():
         # Direction is not knowable without reading git objects, so the message
         # and the command are both symmetric: left-right marks which side each
         # commit is on, and works whether you are behind, ahead, or diverged.
-        print("BROTHERMODE UPDATE: installed copy (%s) and fetched origin (%s) "
+        say("BROTHERMODE UPDATE: installed copy (%s) and fetched origin (%s) "
               "differ. See which side each commit is on, then update:"
               % (local[:7], remote[:7]))
-        print("  git -C %s log --oneline --left-right %s...%s"
+        say("  git -C %s log --oneline --left-right %s...%s"
               % (SKILL_DIR, local[:7], remote[:7]))
-        print("  git -C %s pull    # then re-read the sections that changed" % SKILL_DIR)
+        say("  git -C %s pull    # then re-read the sections that changed" % SKILL_DIR)
     else:
         # (b) no fetched update, but the copy may simply be old
         try:
@@ -1677,16 +1705,16 @@ def cmd_check_update():
         except OSError:
             age = 0
         if age > STALE_AFTER_DAYS:
-            print("BROTHERMODE UPDATE: your copy of the law is %d days old. Check "
+            say("BROTHERMODE UPDATE: your copy of the law is %d days old. Check "
                   "for updates: git -C %s pull" % (age, SKILL_DIR))
 
     # (c) the law changed under you since the last session that looked: say so
     # ONCE, because a changed law must be read, not silently inherited.
     known = _read_first_line(VERSION_MARK)
     if known and known != local:
-        print("BROTHERMODE: the skill changed since your last session (%s -> %s). "
+        say("BROTHERMODE: the skill changed since your last session (%s -> %s). "
               "Read the diff before relying on it:" % (known[:7], local[:7]))
-        print("  git -C %s log --oneline %s..%s" % (SKILL_DIR, known[:7], local[:7]))
+        say("  git -C %s log --oneline %s..%s" % (SKILL_DIR, known[:7], local[:7]))
     if known != local:
         try:
             os.makedirs(TEL_DIR, exist_ok=True)
@@ -1862,7 +1890,7 @@ def _bm_store_unavailable_notice(caller):
     non-buggy fallback and stays quiet."""
     bm_store, err = _get_bm_store()
     if bm_store is None:
-        print("BROTHERMODE: %s degraded to the legacy per-folder identity because "
+        say("BROTHERMODE: %s degraded to the legacy per-folder identity because "
               "bm_store.py could not be loaded (%s); a session where it loads will "
               "resolve a different identity for the same project." % (caller, err),
               file=sys.stderr)
@@ -1920,7 +1948,7 @@ def _migration_pointer(cwd, new_identity, path_for):
         return
     old_path = path_for(legacy)
     if os.path.exists(old_path) and not os.path.exists(path_for(new_identity)):
-        print("BROTHERMODE: found a pre-migration file at %s (old per-folder identity); "
+        say("BROTHERMODE: found a pre-migration file at %s (old per-folder identity); "
               "this session now keys by project root as %s. Nothing was moved "
               "automatically; read the old file directly if you need it."
               % (old_path, new_identity), file=sys.stderr)
@@ -1986,6 +2014,155 @@ def _resume_path(cwd):
     return _resume_path_for(identity)
 
 
+# J1.c compaction capsule. The helper below is INLINE on purpose: this
+# file must not depend on a sibling module. The section it produces is
+# always returned, so a reader can tell "nothing failed" from "the section
+# did not run". Reads parsed transcript lines only, writes nothing.
+_PRECOMPACT_FAILURE_MARKERS = (
+    "Traceback", "REFUSED", "FAILED", "fatal:", "denied",
+    "exit code 1", "Exit code",
+)
+_PRECOMPACT_MAX_ROWS = 40
+_PRECOMPACT_MAX_DETAIL = 300
+_PRECOMPACT_WS = re.compile(r"\s+")
+_PRECOMPACT_TEMP = re.compile(
+    r"(?:/tmp/|/private/tmp/|/var/tmp/|/private/var/folders/|/var/folders/)"
+    r"[^\s\"']*")
+_PRECOMPACT_NUM = re.compile(r"\b\d{4,13}\b")
+
+
+def _precompact_attempt_section(lines):
+    """The resume brief's Already tried and failed section.
+
+    Pairs each tool call with its result, records every FAILED attempt
+    deduplicated by a stable fingerprint, bounds the list by a budget and
+    says how many older rows were cut. The section is ALWAYS returned, so
+    a reader can tell "nothing failed" from "the section did not run".
+    """
+    attempts = []
+    by_id = {}
+    for idx, line in enumerate(lines):
+        if not isinstance(line, dict):
+            continue
+        msg = line.get("message")
+        if not isinstance(msg, dict):
+            continue
+        content = msg.get("content")
+        if not isinstance(content, list):
+            continue
+        for blk in content:
+            if not isinstance(blk, dict):
+                continue
+            if blk.get("type") != "tool_use":
+                continue
+            cid = blk.get("id")
+            if not isinstance(cid, str):
+                continue
+            nm = blk.get("name")
+            if not isinstance(nm, str):
+                nm = ""
+            rec = {"id": cid, "name": nm, "input": blk.get("input"),
+                   "result_text": None, "is_error": False, "index": idx}
+            attempts.append(rec)
+            by_id[cid] = rec
+    for line in lines:
+        if not isinstance(line, dict):
+            continue
+        msg = line.get("message")
+        if not isinstance(msg, dict):
+            continue
+        content = msg.get("content")
+        if not isinstance(content, list):
+            continue
+        for blk in content:
+            if not isinstance(blk, dict):
+                continue
+            if blk.get("type") != "tool_result":
+                continue
+            cid = blk.get("tool_use_id")
+            if not isinstance(cid, str):
+                continue
+            rec = by_id.get(cid)
+            if rec is None:
+                continue
+            if rec["result_text"] is not None:
+                continue
+            c = blk.get("content")
+            if isinstance(c, str):
+                rec["result_text"] = c
+            elif isinstance(c, list):
+                parts = []
+                for item in c:
+                    if isinstance(item, dict) and isinstance(item.get("text"), str):
+                        parts.append(item["text"])
+                    elif isinstance(item, str):
+                        parts.append(item)
+                rec["result_text"] = "\n".join(parts)
+            elif c is None:
+                rec["result_text"] = ""
+            else:
+                rec["result_text"] = str(c)
+            rec["is_error"] = blk.get("is_error") is True
+    failed = {}
+    for att in attempts:
+        text = att["result_text"]
+        if text is None:
+            continue
+        bad = att["is_error"]
+        if not bad:
+            for marker in _PRECOMPACT_FAILURE_MARKERS:
+                if marker in text:
+                    bad = True
+                    break
+        if not bad:
+            continue
+        nm = att["name"]
+        try:
+            inp_str = json.dumps(att["input"], sort_keys=True,
+                                 separators=(",", ":"), default=str)
+        except (TypeError, ValueError):
+            inp_str = str(att["input"])
+        masked = _PRECOMPACT_NUM.sub(
+            "<NUM>", _PRECOMPACT_TEMP.sub(
+                "<TEMP>", _PRECOMPACT_WS.sub(" ", inp_str)))
+        fp = hashlib.sha256((nm + "\n" + masked).encode("utf-8")).hexdigest()
+        row = failed.get(fp)
+        if row is None:
+            row = {"what": nm, "why": "", "count": 0,
+                   "last_index": att["index"]}
+            failed[fp] = row
+        row["count"] += 1
+        if att["index"] >= row["last_index"]:
+            row["last_index"] = att["index"]
+            inp = att["input"]
+            if nm == "Bash" and isinstance(inp, dict):
+                row["what"] = ("Bash: " + str(inp.get("command") or ""))[:100]
+            else:
+                row["what"] = nm
+            last = ""
+            for ln in text.splitlines():
+                st = ln.strip()
+                if st:
+                    last = st
+            row["why"] = last[:_PRECOMPACT_MAX_DETAIL]
+    rows = sorted(failed.values(), key=lambda r: r["last_index"], reverse=True)
+    cut = 0
+    if len(rows) > _PRECOMPACT_MAX_ROWS:
+        cut = len(rows) - _PRECOMPACT_MAX_ROWS
+        rows = rows[:_PRECOMPACT_MAX_ROWS]
+    out = ["## Already tried and failed (do not repeat without a new reason)", ""]
+    if not rows:
+        out.append("(none were recorded)")
+    else:
+        for r in rows:
+            out.append("- %s (failed %d time(s))" % (r["what"], r["count"]))
+            if r["why"]:
+                out.append("  why: %s" % r["why"])
+        if cut:
+            out.append("(%d older row(s) cut to fit the budget)" % cut)
+    return "\n".join(out)
+
+
 def cmd_precompact_brief():
     """Distill the dying session into a forward-looking resume brief. The git
     autosave preserves WHAT you had (files); this preserves WHERE you were and
@@ -2016,6 +2193,7 @@ def cmd_precompact_brief():
     last_user = ""
     assistant_text = []   # recent reasoning/decision snippets
     tools = []            # recent tool actions, as short descriptors
+    brief_lines = []      # every parsed transcript line, for the attempt section
     try:
         f = open(tp, "r", errors="replace")
     except OSError:
@@ -2026,6 +2204,7 @@ def cmd_precompact_brief():
                 o = json.loads(raw)
             except Exception:  # sbe: allow-silent skip one malformed transcript line, brief assembly continues
                 continue
+            brief_lines.append(o)
             t = o.get("type")
             m = o.get("message") or {}
             if t == "user" and not o.get("isMeta"):
@@ -2118,6 +2297,15 @@ def cmd_precompact_brief():
     lines.append("## Recent actions (last %d)" % len(tools))
     for d in tools:
         lines.append("- " + d)
+    lines.append("")
+    # J1.c: the brief gains the attempt section. It is ALWAYS present, so a
+    # reader can tell "nothing failed" from "the section did not run". The
+    # helper is inline on purpose; this file depends on no sibling module.
+    try:
+        lines.append(_precompact_attempt_section(brief_lines))
+    except Exception:  # sbe: never block the brief write; refused rather than faked
+        lines.append("## Already tried and failed (do not repeat without a new reason)")
+        lines.append("(section refused rather than faked)")
     lines.append("")
     # Owner-only: this is sensitive recent context, like corrections.jsonl.
     try:
@@ -2283,12 +2471,12 @@ def cmd_compact_hint():
     cwd = (payload or {}).get("cwd") or os.getcwd()
     session_id = (payload or {}).get("session_id") or "unknown"
     try:
-        print(_autosave_recovery_line(cwd, session_id))
+        say(_autosave_recovery_line(cwd, session_id))
     except Exception as e:
         # Absolute backstop (GATE E requirement: never block, never raise):
         # even a bug in the honesty check itself must degrade to a message
         # that claims nothing, not to the old unconditional claim.
-        print("BROTHERMODE: resumed after a compaction. Could not verify whether "
+        say("BROTHERMODE: resumed after a compaction. Could not verify whether "
               "your files are autosaved (%r). No claim is made either way." % (e,))
     # The thread: the resume brief written at the moment of death (the WHY/where),
     # which the git snapshot does not carry.
@@ -2296,7 +2484,10 @@ def cmd_compact_hint():
     try:
         with open(rp, "r", errors="replace") as f:
             print("")
-            print(f.read().strip())
+            # The brief is several lines on purpose, so each line leaves through
+            # say() on its own: its layout survives, a cursor escape does not.
+            for brief_line in f.read().strip().splitlines():
+                say(brief_line)
     except OSError:  # sbe: allow-silent no resume brief exists yet is the normal, non-buggy case
         pass
 
@@ -2333,11 +2524,11 @@ def cmd_handoff(argv):
                            if os.path.isdir(os.path.join(projects_dir, d)))
         except OSError:
             avail = []
-        print("usage: handoff <project>. available: %s" % (", ".join(avail) or "(none)"))
+        say("usage: handoff <project>. available: %s" % (", ".join(avail) or "(none)"))
         return
     base = os.path.join(projects_dir, name)
     if not os.path.isdir(base):
-        print("handoff: no vault project named %r under %s" % (name, projects_dir))
+        say("handoff: no vault project named %r under %s" % (name, projects_dir))
         return
     parts = ["# Handoff: %s" % name, "",
              "A shareable summary of this project for a teammate. Assembled from the",
@@ -2363,10 +2554,10 @@ def cmd_handoff(argv):
     try:
         with open(out, "w") as f:
             f.write("\n".join(parts) + "\n")
-        print("handoff written (secret-redacted): %s" % out)
+        say("handoff written (secret-redacted): %s" % out)
         print("review it before sharing; it is a snapshot, redaction is best-effort.")
     except OSError as e:
-        print("handoff: could not write (%r)" % (e,))
+        say("handoff: could not write (%r)" % (e,))
 
 
 def cmd_purge_corrections(argv):
@@ -2375,23 +2566,23 @@ def cmd_purge_corrections(argv):
     at any time. Prints exactly what it will remove before removing it."""
     rows = read_records(CORRECTIONS)
     if not rows:
-        print("purge-corrections: nothing to purge (%s)" % CORRECTIONS)
+        say("purge-corrections: nothing to purge (%s)" % CORRECTIONS)
         return
     if "--yes" not in argv:
-        print("purge-corrections: %d candidate(s) in %s" % (len(rows), CORRECTIONS))
-        print("  oldest: %s   newest: %s" % (rows[0].get("ts", "?"), rows[-1].get("ts", "?")))
+        say("purge-corrections: %d candidate(s) in %s" % (len(rows), CORRECTIONS))
+        say("  oldest: %s   newest: %s" % (rows[0].get("ts", "?"), rows[-1].get("ts", "?")))
         print("  re-run with --yes to delete the file.")
         return
     try:
         os.remove(CORRECTIONS)
-        print("purge-corrections: removed %d candidate(s) from %s" % (len(rows), CORRECTIONS))
+        say("purge-corrections: removed %d candidate(s) from %s" % (len(rows), CORRECTIONS))
     except OSError as e:
-        print("purge-corrections: could not remove (%r)" % (e,))
+        say("purge-corrections: could not remove (%r)" % (e,))
 
 
 def cmd_prediction_audit():
     c = prediction_counts()
-    print("prediction ledger: %d sealed, %d scored (all outcomes), %d hits (all outcomes) (%s)"
+    say("prediction ledger: %d sealed, %d scored (all outcomes), %d hits (all outcomes) (%s)"
           % (c["sealed"], c["scored"], c["hits"], FOUNDER_MODEL))
     if c["sealed"] == 0:
         print("AUDIT FLAG: zero sealed predictions; section 14 requires sealing BEFORE recommendations.")
@@ -2467,7 +2658,7 @@ def main():
         else:
             print(__doc__.strip())
     except Exception as e:
-        print("bm_telemetry: swallowed error (never blocks): %r" % (e,))
+        say("bm_telemetry: swallowed error (never blocks): %r" % (e,))
     sys.exit(0)
 
 

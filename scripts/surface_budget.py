@@ -30,6 +30,12 @@ SKIP_DIRS = {
     # skills pushed the umbrella count over its ceiling for skills no user
     # can invoke from here.
     'products',
+    # plugin/ is a library, not an installable tree: its skills (two that ship
+    # nowhere, and a copy of the door) are in no host manifest and reach no
+    # install (docs/plan/specs/OP1.md 13.3). Counting them made
+    # bundle/MANIFEST.json promise entries under brother that an install of
+    # bundle/ can never show, so the installed surface check failed on them.
+    'plugin',
 }
 
 # All products are measured from this repository.

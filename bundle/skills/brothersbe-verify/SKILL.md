@@ -1,6 +1,6 @@
 ---
 name: brothersbe-verify
-description: "Use when work is about to be called done, a figure that could reach a decision has been produced, a schema migration is part of the change, the change touches money or a partner path, or a verification plan is being written. Runs the hard gates and reports PASS, FAIL or NO-DATA with the evidence each verdict actually read. Invoke as /brothersbe:verify."
+description: "Use when work is about to be called done, a figure that could reach a decision has been produced, a schema migration is part of the change, the change touches money or a partner path, or a verification plan is being written. Runs the hard gates and reports PASS, FAIL or NO-DATA with the evidence each verdict actually read. Invoke as /brother:brothersbe-verify."
 ---
 
 This is the Codex route for the `brothersbe` product skill.

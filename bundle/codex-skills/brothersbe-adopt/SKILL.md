@@ -1,6 +1,6 @@
 ---
 name: brothersbe-adopt
-description: "Use when someone is adding risk and evidence checks to a repository that has never had them, or is checking whether an existing installation is actually wired up. Inspects the repository for readiness, proposes a configuration, and reports what is present, what is missing and what it could not check. Dry run by default. Invoke as /brothersbe:adopt."
+description: "Use when someone is adding risk and evidence checks to a repository that has never had them, or is checking whether an existing installation is actually wired up. Inspects the repository for readiness, proposes a configuration, and reports what is present, what is missing and what it could not check. Dry run by default. Invoke as /brother:brothersbe-adopt."
 ---
 
 This is the Codex route for the `brothersbe` product skill.

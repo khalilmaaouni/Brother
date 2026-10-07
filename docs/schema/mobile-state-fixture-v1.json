@@ -1,0 +1,174 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "mobile-state-fixture-v1",
+  "title": "Mobile State Fixture v1",
+  "description": "EPIC M2.01 of docs/plan/MOBILE-EPIC-M2-UNITS.md. Epic M2's objective is 'every critical journey starts from reproducible state'; this is the declared-state contract a fixture file must satisfy before M2.02's reset adapters, M2.03's test-only routes, or M2.05's provenance evidence can act on it. scripts/mobile_state_fixture.py is a read-only LOADER/VALIDATOR only: it checks a fixture file against this schema and a small set of hand rules the schema's keywords cannot express (see that module's docstring). It never resets device state, never talks to a simulator/emulator, and never talks to a backend -- that is M2.02's separate, later scope. Only the keyword subset scripts/mobile_project_profile.py and scripts/mobile_toolchain_probe.py already document is used here (same convention): type, required, properties, enum, const, items, minItems, additionalProperties -- no $ref/definitions, scripts/contract_check.py's enforced subset does not support them, confirmed by the M1.03 dispatch before this unit started, so every object is written out flat and in full below rather than referenced.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "fixture_id", "account_data_ref", "backend_dataset",
+    "app_storage", "keychain_policy", "feature_flags", "clock",
+    "randomness_seed", "locale", "timezone", "network_profile",
+    "permissions", "location", "notifications", "external_services",
+    "cleanup_policy"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "mobile-state-fixture-v1",
+      "description": "Which shape this record follows, so a reader never has to guess."
+    },
+    "fixture_id": {
+      "type": "string",
+      "description": "A stable identifier for this fixture, e.g. 'onboarding-fresh-install-v1'. Never the founder's own priority app's real name (standing never-name-the-app rule); name it by role/journey instead."
+    },
+    "account_data_ref": {
+      "type": "string",
+      "description": "A reference/pointer to the account or data fixture a journey should start from (e.g. a fixture-store id or a file path under a fixtures directory). Never a real account's data inline -- this field only points at one, it does not carry one; scripts/mobile_state_fixture.py's hand_rules refuses a value that looks secret/PII-shaped (an email address, a live https:// endpoint, a 'password=' shape) as a cheap, non-exhaustive backstop."
+    },
+    "backend_dataset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version"],
+      "description": "The backend-side dataset this fixture assumes, so a journey run against a fixture that has drifted from its backend counterpart fails loudly (wrong version) instead of silently.",
+      "properties": {
+        "id": {"type": "string", "description": "Stable id of the backend dataset/namespace this fixture pairs with."},
+        "version": {"type": "string", "description": "The dataset's own version/revision string. Compared by the caller, not by this schema, against whatever the backend actually reports."}
+      }
+    },
+    "app_storage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reset_mode"],
+      "description": "How the app's own local/on-device storage should be prepared before a journey starts. reset_mode picks one of three strategies; checkpoint_ref and preserved_keys are each required only for the strategy that needs them -- a conditional the keyword subset below cannot express, enforced instead by scripts/mobile_state_fixture.py's hand_rules (documented there).",
+      "properties": {
+        "reset_mode": {
+          "type": "string",
+          "enum": ["clean", "restore-checkpoint", "preserve-named-keys"],
+          "description": "'clean': wipe all local app storage. 'restore-checkpoint': restore a previously captured snapshot named in checkpoint_ref. 'preserve-named-keys': wipe everything except the key names listed in preserved_keys."
+        },
+        "checkpoint_ref": {
+          "type": ["string", "null"],
+          "description": "Reference to the snapshot/checkpoint to restore. Required (non-null) only when reset_mode is 'restore-checkpoint'; the exact snapshot format is M2.02's concern, not this schema's."
+        },
+        "preserved_keys": {
+          "type": "array",
+          "items": {"type": "string"},
+          "minItems": 1,
+          "description": "Storage key names to leave untouched. Required (non-empty) only when reset_mode is 'preserve-named-keys'; ignored otherwise. minItems:1 is a schema-level backstop (the hand rule enforcing 'required' already rejects an empty list too)."
+        }
+      }
+    },
+    "keychain_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "description": "How keychain (iOS) / keystore (Android) entries should be prepared. Kept separate from app_storage because keychain/keystore survives an app uninstall on real devices in ways local storage does not -- conflating the two would hide that difference from a fixture author.",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["clean", "preserve", "seeded"],
+          "description": "'clean': remove all entries this app owns. 'preserve': leave entries untouched. 'seeded': plant the entries named in seeded_items before the journey starts."
+        },
+        "seeded_items": {
+          "type": "array",
+          "items": {"type": "string"},
+          "minItems": 1,
+          "description": "Names (never real secret values -- this is a reference list, the actual seed values live in whatever secret store M2.02's adapter reads; scripts/mobile_state_fixture.py's hand_rules also refuses a value that merely looks secret-shaped) of keychain/keystore entries to seed. Used only when mode is 'seeded'."
+        }
+      }
+    },
+    "feature_flags": {
+      "type": "object",
+      "additionalProperties": {"type": "boolean"},
+      "description": "Flag name -> boolean toggle. Deliberately boolean-only (YAGNI): a flag needing a non-boolean value is a different, larger fixture concern than this unit's scope and can be added when a real journey needs it, not guessed at now."
+    },
+    "clock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "description": "Whether the journey runs against a fixed, deterministic clock or the machine's real clock. fixed_value is required only when mode is 'fixed' -- enforced by hand_rules, not by the keywords below.",
+      "properties": {
+        "mode": {"type": "string", "enum": ["fixed", "real"]},
+        "fixed_value": {
+          "type": ["string", "null"],
+          "description": "ISO-8601 timestamp the clock should report. Required (non-null) only when mode is 'fixed'."
+        }
+      }
+    },
+    "randomness_seed": {
+      "type": ["integer", "null"],
+      "description": "Seed for any deterministic-randomness hook (see M2.04). null means real/unseeded randomness -- an explicit choice, not an omission."
+    },
+    "locale": {
+      "type": "string",
+      "description": "Locale identifier the app/OS should report, e.g. 'en-US'."
+    },
+    "timezone": {
+      "type": "string",
+      "description": "IANA timezone id the device/simulator should report, e.g. 'Asia/Tokyo'."
+    },
+    "network_profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "description": "The network condition a journey should run under.",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["online", "offline", "throttled"],
+          "description": "'throttled' covers any degraded-but-connected condition; detail names the exact profile (e.g. 'slow-3g') so 'throttled' does not have to grow a new enum value per condition."
+        },
+        "detail": {
+          "type": "string",
+          "description": "Profile name, meaningful only when mode is 'throttled' (e.g. 'slow-3g', 'high-latency'). Required (non-empty) when mode is 'throttled', forbidden otherwise -- enforced by hand_rules, not by the keywords below (an earlier draft of this schema let 'throttled' pass with no detail and let 'online' carry a silently-ignored detail; caught by Muse's adversarial review, 2026-09-15)."
+        }
+      }
+    },
+    "permissions": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "enum": ["granted", "denied", "prompt", "not-determined", "limited", "restricted"]
+      },
+      "description": "OS permission name (e.g. 'location', 'notifications', 'camera') -> the state it should be seeded to before the journey starts. 'prompt' means the OS should still be asking; 'not-determined' means never asked at all; 'limited' is iOS 14+'s reduced-access grant (e.g. selected-photos-only); 'restricted' is an OS/MDM-level block the user cannot themselves change (distinct from 'denied', which the user chose and can reverse). Extended past the original four-state draft after Muse's adversarial review (2026-09-15) named 'limited' as a real, commonly-tested iOS state this schema could not express."
+    },
+    "location": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "description": "Location-services state. latitude/longitude are required together when mode is 'simulated', forbidden otherwise, and range-checked (-90..90 / -180..180) -- all three enforced by hand_rules, not by the keywords below.",
+      "properties": {
+        "mode": {"type": "string", "enum": ["real", "simulated", "disabled"]},
+        "latitude": {"type": ["number", "null"], "description": "Degrees, -90..90. Required (non-null) only when mode is 'simulated'."},
+        "longitude": {"type": ["number", "null"], "description": "Degrees, -180..180. Required (non-null) only when mode is 'simulated'."}
+      }
+    },
+    "notifications": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "description": "Push/local notification handling for the journey.",
+      "properties": {
+        "mode": {"type": "string", "enum": ["real", "mocked", "disabled"]}
+      }
+    },
+    "external_services": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "References to external-service sandbox configs the journey depends on (e.g. a payments sandbox, a maps sandbox). Never a live production service reference -- this fixture contract is a test-state contract, not a production config; scripts/mobile_state_fixture.py's hand_rules refuses an entry that looks like a live https:// endpoint or other secret-shaped value as a cheap, non-exhaustive backstop."
+    },
+    "cleanup_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required"],
+      "description": "Whether cleanup after the journey is required, and how. method is required only when required is true -- enforced by hand_rules, not by the keywords below.",
+      "properties": {
+        "required": {"type": "boolean"},
+        "method": {
+          "type": ["string", "null"],
+          "description": "How cleanup should be performed (e.g. 'restore-checkpoint', 'delete-account', 'reset-app-storage'). Required (non-null) only when required is true."
+        }
+      }
+    }
+  }
+}

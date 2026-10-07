@@ -25,7 +25,7 @@ asked for the advanced view (see references/status-view.md).
 | triage | "sizing up the task" |
 | insight ledger | "the record of what was decided, why, and what proved it" |
 | evidence class | "how a claim was checked", said as one of four plain labels: "verified by command", "measured", "verified by inspection", or "my reasoning, not verified" |
-| briefing | "a short catch-up on where the work stands"; the command that asks for one is named `/brothermode:brief`, and the catch-up's own text says catch-up |
+| briefing | "a short catch-up on where the work stands"; the command that asks for one is named `/brother:brothermode-brief`, and the catch-up's own text says catch-up |
 | handback | "handing this back to you", written as the option itself ("Hand this back to me: I take this decision and the work under it") and never as a noun |
 | active minutes | "time actually spent working on your project, not time on the clock" |
 | watchdog | "the automatic check that offers you a catch-up once enough work has happened"; the word watchdog belongs to the pages that disclose it (SECURITY.md and docs/KNOWN-LIMITS.md), never to a status line |

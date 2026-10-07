@@ -126,6 +126,7 @@ def build_fixture(root):
     write_json(root / "bundle" / ".claude-plugin" / "plugin.json", BUNDLE_CLAUDE)
     write_json(root / "bundle" / ".codex-plugin" / "plugin.json", BUNDLE_CODEX)
     write_json(root / "bundle" / ".cursor-plugin" / "plugin.json", BUNDLE_CURSOR)
+    write_json(root / "bundle" / ".antigravity-plugin" / "plugin.json", BUNDLE_CURSOR)
     write_text(root / "docs" / "VERSIONING.md", VERSIONING_MD)
     write_json(root / "products" / "brothermode" / ".claude-plugin" / "plugin.json", PRODUCT_CLAUDE)
     write_json(root / "products" / "brothermode" / ".codex-plugin" / "plugin.json", PRODUCT_CLAUDE)
@@ -191,6 +192,62 @@ class VersionSourceTests(unittest.TestCase):
         result = run(["--check", "--root", str(self.tmp)])
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("DRIFT: marketplace:brothermode.source.ref", result.stdout)
+
+    def test_an_unlisted_ref_pinned_plugin_is_checked_and_bumped(self):
+        # brotherds sat at v1.0.13 through every cut because the carrier list named three plugins
+        path = self.tmp / ".claude-plugin" / "marketplace.json"
+        doc = json.loads(path.read_text())
+        doc["plugins"].append({"name": "brotherds", "source": {
+            "source": "git-subdir", "url": "https://example.invalid/r", "path": "products/brotherds", "ref": "v0.0.1"}})
+        write_json(path, doc)
+
+        result = run(["--check", "--root", str(self.tmp)])
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("DRIFT: marketplace:brotherds.source.ref", result.stdout)
+
+        write_result = run(["--write", "--version", "1.0.10", "--root", str(self.tmp)])
+        self.assertEqual(write_result.returncode, 0, write_result.stdout)
+        refs = {p["name"]: p["source"].get("ref") for p in json.loads(path.read_text())["plugins"]
+                if isinstance(p.get("source"), dict)}
+        self.assertEqual(refs.get("brotherds"), "v1.0.10")
+
+    def test_a_retired_catalog_with_brother_alone_is_bumped(self):
+        # from 1.1.0 retire_catalogs leaves only brother before the bump; requiring brothermode refused every cut
+        path = self.tmp / ".claude-plugin" / "marketplace.json"
+        doc = json.loads(path.read_text())
+        doc["plugins"] = [p for p in doc["plugins"] if p["name"] == "brother"]
+        self.assertEqual(len(doc["plugins"]), 1)
+        write_json(path, doc)
+
+        write_result = run(["--write", "--version", "1.0.10", "--root", str(self.tmp)])
+        self.assertEqual(write_result.returncode, 0, write_result.stdout)
+        refs = [p["source"].get("ref") for p in json.loads(path.read_text())["plugins"]]
+        self.assertEqual(refs, ["v1.0.10"])
+
+    def test_a_catalog_without_brother_is_still_refused(self):
+        path = self.tmp / ".claude-plugin" / "marketplace.json"
+        doc = json.loads(path.read_text())
+        doc["plugins"] = [p for p in doc["plugins"] if p["name"] != "brother"]
+        write_json(path, doc)
+
+        write_result = run(["--write", "--version", "1.0.10", "--root", str(self.tmp)])
+        self.assertNotEqual(write_result.returncode, 0, write_result.stdout)
+        said = (write_result.stdout or "") + (write_result.stderr or "")
+        self.assertRegex(said, r"brother'? plugin entry.*not found, refusing to bump silently")
+
+    def test_a_brother_entry_without_a_ref_is_drift(self):
+        # brother is the one required ref carrier; dropping it from the fixed list lets a ref-less entry pass
+        path = self.tmp / ".claude-plugin" / "marketplace.json"
+        doc = json.loads(path.read_text())
+        for plugin in doc["plugins"]:
+            if plugin["name"] == "brother":
+                del plugin["source"]["ref"]
+        write_json(path, doc)
+
+        result = run(["--check", "--root", str(self.tmp)])
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("DRIFT: marketplace:brother.source.ref", result.stdout)
+        self.assertIn("carrier=missing", result.stdout)
 
     def test_write_then_check_is_clean(self):
         write_result = run(["--write", "--version", "1.0.10", "--root", str(self.tmp)])

@@ -1,6 +1,6 @@
 ---
 name: brothermode-brotherme
-description: "v3 internal reference for BrotherMode's guided beginner flows (kickoff detail, the deep tour, the guided-loop delegation pattern). Not a direct entry point. The public surface is six names and two of them are not shipped: /brothermode:start, :status, :deliver and :doctor work today, while verify and toolkit are named for the surface and neither ships a stub. Every other skill in this folder, including next, review, view and help, keeps working exactly as it does today and is advanced internal surface rather than part of the public six. Verified on Claude Code; this plugin packaging is a release candidate."
+description: "v3 internal reference for BrotherMode's guided beginner flows (kickoff detail, the deep tour, the guided-loop delegation pattern). Not a direct entry point. The public surface is six names and two of them are not shipped: /brother:brothermode-start, :status, :deliver and :doctor work today, while verify and toolkit are named for the surface and neither ships a stub. Every other skill in this folder, including next, review, view and help, keeps working exactly as it does today and is advanced internal surface rather than part of the public six. Verified on Claude Code; this plugin packaging is a release candidate."
 ---
 
 This is the Codex route for the `brothermode` product skill.

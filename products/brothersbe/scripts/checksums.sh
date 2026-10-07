@@ -58,7 +58,12 @@ else
     exit 1
 fi
 
-WORKDIR=$(mktemp -d 2>/dev/null || echo "/tmp/sbe-checksums-work.$$")
+# A template under TMPDIR, never a bare `mktemp -d`: macOS mktemp without a
+# template ignores TMPDIR and uses the per-user Darwin temp dir, which a
+# sandboxed run (TMPDIR inside its own scratch root) cannot write. The
+# trailing slash macOS puts on TMPDIR is dropped so no path here carries "//".
+TMPBASE=${TMPDIR:-/tmp}; TMPBASE=${TMPBASE%/}
+WORKDIR=$(mktemp -d "$TMPBASE/sbe-checksums-work.XXXXXX" 2>/dev/null || echo "$TMPBASE/sbe-checksums-work.$$")
 mkdir -p "$WORKDIR"
 trap 'rm -rf "$WORKDIR"' EXIT INT TERM
 

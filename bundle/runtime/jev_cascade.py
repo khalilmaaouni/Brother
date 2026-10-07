@@ -581,6 +581,32 @@ def route(decision, risk_class, calibration, today=None):
 
     target_precision = RISK_TARGET_PRECISION[risk_class]
 
+    # D3.6: when a real attempts ledger sits beside the outcomes ledger, the
+    # population floor is checked before any bound is read. Every floor
+    # family reason and corrupt_outcomes maps to ESCALATE with the reason
+    # verbatim: a refusal is never painted over with a bound of 0.0, and a
+    # decision that names no model is left to the pre-D3.6 path unchanged
+    # rather than forced into a key it never carried.
+    if (isinstance(model, str) and model.strip()
+            and isinstance(calibration.outcomes_path, str)
+            and calibration.outcomes_path.strip()):
+        try:
+            attempts_candidate = os.path.join(
+                os.path.dirname(os.path.abspath(calibration.outcomes_path)),
+                "attempts.jsonl")
+            attempts_present = os.path.isfile(attempts_candidate)
+        except (OSError, ValueError):
+            attempts_present = False
+        if attempts_present:
+            floor_bound, floor_reason = jev_calibration.threshold_with_floor(
+                calibration.decisions_path, calibration.outcomes_path,
+                family=family, qtype=qtype, framing=framing, model=model,
+                risk_class=risk_class, attempts_path=attempts_candidate,
+                bands=calibration.bands,
+            )
+            if floor_bound is None:
+                return _escalate_or_exhausted(decision_id, rung, floor_reason)
+
     res = jev_calibration.threshold(
         calibration.decisions_path, calibration.outcomes_path,
         family, qtype, target_precision, MIN_SAMPLES,

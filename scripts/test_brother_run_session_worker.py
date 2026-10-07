@@ -43,6 +43,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 BROTHER_RUN = os.path.join(HERE, "brother_run.py")
 import brother_run as _br  # noqa: E402
+import claim_store as _cs  # noqa: E402
 from test_brother_run_plan import (  # noqa: E402
     PlanFileRunBase, run_dirs, sh, two_units, write_contract, write_plan)
 
@@ -94,7 +95,11 @@ class SessionWorkerBase(PlanFileRunBase):
         path = os.path.join(self.run_dir(), _br.CLAIMS_FILENAME)
         self.assertTrue(os.path.isfile(path), "no claim store at %s" % path)
         with open(path, encoding="utf-8") as fh:
-            return json.load(fh)
+            data = json.load(fh)
+        # The store's own bookkeeping keys (schema, attempts, unit_attempts,
+        # D1.1) sit beside the unit records; only unit records are claims.
+        return {k: v for k, v in data.items()
+                if k not in _cs.RESERVED_TOP_LEVEL}
 
 
 class InsideASessionTheUnitsAreClaimedAndNoWorkerIsSpawned(SessionWorkerBase):
@@ -347,6 +352,15 @@ class TheHeadlessWorkerIsUnchanged(SessionWorkerBase):
         self.assertEqual(proc.returncode, 0, out)
         self.assertIn("integrated (2):", out, out)
         self.assertEqual(self.spawned(), [], out)
+
+
+def setUpModule():
+    # Test-owned disk premise: worker admission reads this host's free
+    # disk, so a full disk would otherwise read as a failing suite.
+    from hermetic_worker_env import worker_environment
+    _disk = worker_environment()
+    _disk.__enter__()
+    unittest.addModuleCleanup(_disk.__exit__, None, None, None)
 
 
 if __name__ == "__main__":

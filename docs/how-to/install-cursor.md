@@ -30,18 +30,15 @@ Checkout discovery recognizes the local umbrella install and resolves to
 its nested `runtime/hooks/brothermode` root.
 
 For the model worker, `BROTHER_MODEL_CLIENT=cursor` selects the adapter in
-`scripts/model_worker.py`. Its default uses `--mode ask` (read-only);
-workers that must edit need an appropriate `MODEL_WORKER_CMD` override.
+`scripts/model_worker.py`. Its default is read-only and cannot edit files.
+The repository does not provide a verified editing command for this worker.
+An editing workflow therefore needs additional setup and verification.
 
 Optional MCP ships as `bundle/mcp.json` plus
 `bundle/runtime/hooks/brothermode/mcp/bm_mcp_server.py`. The configuration
 runs the server from the nested checkout. Both may be absent; validation
 refuses a configuration/server mismatch. If sibling tools cannot load, the
 server returns an explicit tool error rather than crashing.
-
-These are WBS-70 U1 through U7 source changes. U7 also reserves additional
-agent hook events without wiring them or adding gates. U8 is the current
-documentation pass; U9, final regeneration, has not started.
 
 The older BrotherMode compatibility installer
 (`products/brothermode/scripts/install_cursor.py`, default

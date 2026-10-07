@@ -41,11 +41,14 @@ import re
 import sys
 from pathlib import Path
 
-#: The one place this estate declares what the bridge's default model id is
+#: The one place this estate declares what the bridge's default model is
 #: SUPPOSED to be. Change this line, in a commit, when the bridge's own
 #: default is deliberately changed: that commit is the whole fix for
-#: "changed at least twice with no commit."
-PINNED_DEFAULT_MODEL = "meta/muse-spark-1.3-contributor"
+#: "changed at least twice with no commit." Since FX-31.7 the value is a
+#: registry NAME (the bridge resolves it through the registry's bridge
+#: aliases at the call), so the vendor id itself lives in one row of
+#: docs/plan/model-registry.json and nowhere in code.
+PINNED_DEFAULT_MODEL = "deepseek"
 
 #: Where the bridge actually lives on this estate's machines, per its own
 #: docstring and ~/.claude/bin/or_ask.py's usage line in every brief that

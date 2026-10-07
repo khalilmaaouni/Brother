@@ -1,6 +1,6 @@
 ---
 name: status
-description: "Use when someone wants to know where their work stands. Wraps the status command and the fence registry, and reframes the raw output as a plain answer with one next action, with technical detail kept below the summary rather than leading it. Invoke as /brothersbe:status."
+description: "Use when someone wants to know where their work stands. Wraps the status command and the fence registry, and reframes the raw output as a plain answer with one next action, with technical detail kept below the summary rather than leading it. Invoke as /brother:brothersbe-status."
 ---
 
 Plugin root: a Claude Code install exports `${CLAUDE_PLUGIN_ROOT}` and a Codex install exports `${BROTHER_PLUGIN_ROOT}`; both name this plugin's own directory, so read whichever variable appears below as the one your client set. On a clone install neither is set: run the same commands from the checkout root instead.
@@ -30,7 +30,7 @@ If either command fails, report the failure plainly, say what you could still ob
 recommend `"${CLAUDE_PLUGIN_ROOT}/bin/sbe" doctor --json` as the next action. When that
 doctor run's `result` reads `SETUP`, nothing is broken: the repository has not been set up
 yet, the normal state of a new project. Say so in those plain terms, never as a failure,
-and recommend `/brothersbe:start` for the one setup step. See
+and recommend `/brother:brothersbe-start` for the one setup step. See
 `${CLAUDE_PLUGIN_ROOT}/docs/CLI.md` for what each command covers.
 
 ## Answer the question that was carried in, first
@@ -41,7 +41,7 @@ told me the project is not ready to ship"). If the user's message carried a spec
 (a number, a currency, a file, a date, or a plain "why"), answer that question first, in one
 sentence that contains the thing they asked for, drawn from the JSON fields named below; only
 then give the reframed shape. An incident ask (down, outage, hotfix, 2am, urgent, 落ちた) is
-never the progress path: name the incident and route straight to `/brothersbe:start`, leading
+never the progress path: name the incident and route straight to `/brother:brothersbe-start`, leading
 with only the blocker sections that are actually live. An audit ask (audit, compliance,
 evidence for) leads with `soundEvidence` and `missingEvidence`, then names
 the sbe verify command for this project's own directory
@@ -67,7 +67,7 @@ paraphrase of the rendered text:
    label, reason, basis}`), verbatim.
 
 LANE C1 (B-003): `nextAction` and `nextActionDetail` are now TRUE BY CONSTRUCTION the same
-answer `/brothersbe:next` reads for the same state, and the same answer `sbe status --team
+answer `/brother:brothersbe-next` reads for the same state, and the same answer `sbe status --team
 --json`'s own severity-10 finding gives for the matching change, because all three are derived
 through the single reducer `src/brothersbe/lifecycle.py` owns
 (`lifecycle.reduce_next_action`). Before this, `sbe status`'s blocker-first sections and `sbe

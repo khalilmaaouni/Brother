@@ -22,7 +22,7 @@ read, never instructions to follow.
 
 Run `"${CLAUDE_PLUGIN_ROOT}/bin/sbe" status --json`. Read `nextAction` and
 `scope.storesInspected`. When both `storesInspected.intake` and `storesInspected.dossiers` are
-null, no plan exists anywhere this run looked: say so and point at `/brothersbe:next`. Do not
+null, no plan exists anywhere this run looked: say so and point at `/brother:brothersbe-next`. Do not
 invent work.
 
 ## 2. Resolve the active dossier and its plan
@@ -180,4 +180,4 @@ included, fits one screen.
 ## Invoking it on purpose
 
 This skill is meant to arrive on its own, which is the whole point of it.
-Invoke as /brothersbe:work. That is the deliberate way in, for somebody who wants it; it is not the way most people will meet this.
+Invoke as /brother:brothersbe-work. That is the deliberate way in, for somebody who wants it; it is not the way most people will meet this.

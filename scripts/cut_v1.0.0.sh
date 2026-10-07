@@ -28,7 +28,21 @@ export VERSION
 TAG="v$VERSION"
 PUBLIC_REMOTE=https://github.com/khalilmaaouni/Brother
 
+# Every step header is followed by one clock line. Measured 2026-09-20: the
+# chain ran 5,004s to 6,397s and no log could say which step the time went
+# to, because the headers carried no clock; only the outer steps cut.py
+# streams did. A plain line, separate from the header, so nothing that reads
+# a header changes. Format: [step HH:MM:SS] <id> +<s since previous>s, total <s>s
+CUT_T0=$(date +%s)
+CUT_TPREV=$CUT_T0
+step_clock() {
+  cut_now=$(date +%s)
+  echo "[step $(date +%H:%M:%S)] $1 +$((cut_now - CUT_TPREV))s, total $((cut_now - CUT_T0))s"
+  CUT_TPREV=$cut_now
+}
+
 echo "== 1. bump the source of truth and every carrier to $VERSION and point refs at the tag =="
+step_clock "1"
 # scripts/version_source.py is the one place that knows every carrier
 # (.claude-plugin/marketplace.json's metadata.version, the brother plugin
 # entry's version, every plugin entry's source.ref, the two bundle
@@ -38,6 +52,7 @@ echo "== 1. bump the source of truth and every carrier to $VERSION and point ref
 python3 scripts/version_source.py --write --version "$VERSION"
 
 echo "== 1b. re-pin the product's public install tag to $TAG =="
+step_clock "1b"
 # Row BAT-103. The 1.0.3 cut moved products/brothermode/README.md's pinned
 # clone to v1.0.3 by hand and left PUBLIC_INSTALL_TAG (the constant every
 # install page is held equal to) at v1.0.0, so four of that product's own
@@ -95,6 +110,7 @@ else:
 REPIN
 
 echo "== 2. drop the release-invariant exception (the tag will exist) =="
+step_clock "2"
 python3 - <<'PY'
 import json
 p = 'docs/plan/BATTERY-EXPECTATIONS.json'
@@ -108,6 +124,7 @@ else:
 PY
 
 echo "== 2r. regenerate what the bump above may have gone stale (SYSTEM.md, bundle/runtime, product checksums) =="
+step_clock "2r"
 # Row measured on 1.0.4: these three landed in a commit AFTER the release
 # note had already stamped an earlier HEAD, so the note named a revision
 # whose export was short exactly these files (X7 FAIL). Running them here,
@@ -123,16 +140,28 @@ sh products/brothermode/scripts/checksums.sh CHECKSUMS.sha256
 sh products/brothersbe/scripts/checksums.sh CHECKSUMS.sha256
 
 echo "== 2s. commit the bump and the regeneration together =="
+step_clock "2s"
 BUMP_MSG="$VERSION: the version bump and the regenerated manifests"
 echo "git add -A && git commit -q -m \"$BUMP_MSG\""
 git add -A
-git commit -q -m "$BUMP_MSG"
-git log -1 --oneline
+# CV1 (2026-09-30): the manifests can already carry $VERSION (bumped ahead of
+# the tag, as 1.1.0 was), so step 1 changes nothing and `git commit` on an
+# empty index exits 1, which `set -e` turns into a dead cut one step before
+# the note. An empty index is recorded and the cut continues; a bump, whole
+# or partial, still commits. Proven by scripts/test_cut_bump_commit.py.
+if git diff --cached --quiet; then
+  echo "already at $VERSION, nothing to commit"
+else
+  git commit -q -m "$BUMP_MSG"
+  git log -1 --oneline
+fi
 
 echo "== 2b. refresh the release note and export manifest (tree is clean now, so the note's stamped revision covers everything above) =="
+step_clock "2b"
 python3 scripts/refresh_cut.py --version "$VERSION"
 
 echo "== 2b2. preflight: the export's own tag-time checks on the export tree, right after the note exists and before any long step =="
+step_clock "2b2"
 # Row DEL-15. The 1.0.10 cut ran the ~45 minutes of steps below (note
 # refresh, perturbation drive, plugin validate, release invariant, the
 # export --dry-run at step 4) and read CLEAR at 21:12, then the export
@@ -152,9 +181,11 @@ echo "== 2b2. preflight: the export's own tag-time checks on the export tree, ri
 python3 scripts/export_public.py --dry-run --tag-time-checks
 
 echo "== 2c. refuse if any release note the export ships still carries the placeholder stamp =="
+step_clock "2c"
 python3 scripts/release_notes_stamped.py
 
 echo "== 2d. drive the note's own files table: every file it names must go red =="
+step_clock "2d"
 # Row E95. The generator above MEASURES this table, so this line is the
 # independent read-back: it parses the note that was just written and breaks
 # each file it names, requiring the suite beside it to fail. Slow (one suite
@@ -165,17 +196,30 @@ echo "== 2d. drive the note's own files table: every file it names must go red =
 python3 scripts/release_note_perturb.py --version "$VERSION"
 
 echo "== 2t. commit the note and the manifest that describes it (the second, self-naming commit) =="
+step_clock "2t"
 NOTE_MSG="$VERSION: the export manifest that describes the tree and the note it ships"
 echo "git add -A && git commit -q -m \"$NOTE_MSG\""
 git add -A
-git commit -q -m "$NOTE_MSG"
-git log -1 --oneline
+# CV1.a (2026-10-03): the guard step 2s already carries. A note refresh that
+# changes nothing leaves an empty index, and `git commit` on it exits 1, which
+# `set -e` turned into a cut that stopped at 2t with no reason printed. An
+# empty index is recorded and the cut continues; a staged change still
+# commits, and a commit that fails still stops the script (`set -e`, line 15).
+# Proven by scripts/test_cv1_cut_rehearsed.py, class CV1aNextVersion.
+if git diff --cached --quiet; then
+  echo "already at $VERSION, nothing to commit at step 2t"
+else
+  git commit -q -m "$NOTE_MSG"
+  git log -1 --oneline
+fi
 
 echo "== 3. validate the manifests =="
+step_clock "3"
 claude plugin validate bundle
 claude plugin validate .
 
 echo "== 4. release invariant and export dry run (must read CLEAR) =="
+step_clock "4"
 # No `|| echo NOTE` swallow here: `set -e` (line 15) is what must stop this
 # script on a real FAIL, and a command joined with `||` always exits 0 on
 # its own, which silently defeated `set -e` for exit 1 (a genuine identity
@@ -192,6 +236,7 @@ python3 scripts/export_public.py --dry-run --tag-time-checks
 
 echo
 echo "== STOP. Review the output above. The dry run must read CLEAR. =="
+step_clock "STOP"
 echo "Both commits above are already made (the bump plus regeneration, then the"
 echo "note plus manifest); nothing here is left to commit. Push the branch through"
 echo "the four gates, then run the one irreversible line below by hand (it pushes"

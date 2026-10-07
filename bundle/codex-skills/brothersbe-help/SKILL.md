@@ -1,6 +1,6 @@
 ---
 name: brothersbe-help
-description: "Use when someone asks how this system works or which command or skill to use. Explains in plain language how a change earns its evidence and its approval, points to the three entry skills, and only then offers the full map of specialist skills and commands. Invoke as /brothersbe:help."
+description: "Use when someone asks how this system works or which command or skill to use. Explains in plain language how a change earns its evidence and its approval, points to the three entry skills, and only then offers the full map of specialist skills and commands. Invoke as /brother:brothersbe-help."
 ---
 
 This is the Codex route for the `brothersbe` product skill.

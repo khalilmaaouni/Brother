@@ -211,10 +211,6 @@ class ValidatorRefusesBadResults(unittest.TestCase):
         self.assertIn("NO-DATA", result.stdout)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TheTemplateGivesReviewersSomewhereToWriteTheNarrativeMeasures(
         unittest.TestCase):
     """benchmarks/ACCEPTANCE-TIME.md names four measures per arm. Two of them,
@@ -269,3 +265,7 @@ class TheTemplateGivesReviewersSomewhereToWriteTheNarrativeMeasures(
                              result.stdout + result.stderr)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
+
+
+if __name__ == "__main__":
+    unittest.main()

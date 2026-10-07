@@ -1,0 +1,15 @@
+{
+ "applied_to": "a disposable git archive of HEAD by scripts/l5a_mutation_probe.py, never the live tree",
+ "edits": [
+  {
+   "file": "plugin/runtime/brother/core/l5a6_score.py",
+   "find": "    if excerpt_digest(entry[\"excerpt\"]) != entry[\"excerpt_hash\"]:\n        return False\n",
+   "replace": ""
+  }
+ ],
+ "id": "M5",
+ "requirement": "REQ-08",
+ "test": "plugin.runtime.brother.core.test_l5a6.TestScore.test_an_edited_output_block_is_caught_by_the_replay_hash",
+ "threshold": "L5a spec section 10, T5",
+ "what": "the replay no longer compares an excerpt with its recorded hash, so an edited output block passes"
+}

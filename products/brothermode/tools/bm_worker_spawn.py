@@ -77,6 +77,12 @@ import bm_controller  # noqa: E402
 #: asked for a watchdog at all.
 DEFAULT_TIMEOUT_SECONDS = 900
 
+#: How long to keep reading a killed worker's pipes. The kill closes every
+#: pipe its group held, so this only bounds a descendant that left the group
+#: with setsid() (a daemon a tool started) and still holds an inherited pipe:
+#: reading to EOF would wait on that daemon, forever for a long-lived one.
+DRAIN_GRACE_SECONDS = 2
+
 #: The keys a worker's answer must carry to be readable. Absent any of them the
 #: verdict is "malformed", never a guess at what the worker meant.
 REQUIRED_RESULT_KEYS = ("worker_claim", "artifacts")
@@ -128,13 +134,23 @@ def _result(status, claim="", artifacts=None, cost=None, note="", usage=None):
     return out
 
 
+def _decoded(data, text):
+    """TimeoutExpired carries raw bytes even in text mode (CPython's
+    _check_timeout), so a partial read is decoded to match what a completed
+    read would have returned."""
+    if text and isinstance(data, bytes):
+        return data.decode(errors="replace")
+    return data
+
+
 def _run_process(argv, input=None, cwd=None, env=None, capture_output=True,
                  text=True, timeout=None):
     """Reap the worker's process group on timeout, including its model CLI.
 
     The injected runner seam is unchanged. POSIX children share a fresh group
     owned by this invocation, so cancelling it never targets another worker.
-    Other platforms retain subprocess.run's direct-child cancellation.
+    Other platforms retain subprocess.run's direct-child cancellation. After
+    the kill, the read is bounded by DRAIN_GRACE_SECONDS rather than by EOF.
     """
     proc = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE, cwd=cwd,
@@ -150,7 +166,22 @@ def _run_process(argv, input=None, cwd=None, env=None, capture_output=True,
                 proc.kill()
         except ProcessLookupError:
             pass  # sbe: allow-silent the owned group already exited
-        stdout, stderr = proc.communicate()
+        except PermissionError:
+            # Darwin answers EPERM, not ESRCH, when the only member left is
+            # the exited, unreaped worker. Only a dead worker makes it benign.
+            if proc.poll() is None:
+                raise
+        try:
+            stdout, stderr = proc.communicate(timeout=DRAIN_GRACE_SECONDS)
+        except subprocess.TimeoutExpired as drain:
+            # EOF is not coming: a descendant outside the killed group holds
+            # the pipes. Reap the dead child, stop reading, keep what arrived.
+            proc.wait()
+            for pipe in (proc.stdin, proc.stdout, proc.stderr):
+                if pipe:
+                    pipe.close()
+            stdout = _decoded(drain.output, text)
+            stderr = _decoded(drain.stderr, text)
         raise subprocess.TimeoutExpired(argv, timeout, output=stdout, stderr=stderr)
     if (os.name == "posix" and proc.returncode != 0
             and "failure_class=timeout" in (stderr or "")):

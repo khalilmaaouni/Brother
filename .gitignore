@@ -43,3 +43,6 @@ docs/plan/LOAD-REFUSALS.jsonl
 # someone points a config at the old in-tree location. data/jev-promotions.jsonl
 # is NOT ignored: founder-signed promotions are meant to be reviewable in git.
 data/jev-canary-reset.json
+
+# C0.3: the gate ledger is a measurement written by the fast gate on every check. Tracked, it would dirty the tree the gate is judging (a recorded failure on this estate). It stays tree local and untracked; override with GATE_LEDGER_PATH.
+logs/gate-ledger.jsonl

@@ -501,8 +501,8 @@ once and forgets. The reason travels with the code.
 The tool holds itself to the rule it enforces. Running the lint over the shipped tools:
 
 ```
-$ python3 tools/sbe_score.py tools/     # one of fourteen check lines; the rest are omitted here
-silent-failure-lints      PASS     134 file(s) scanned under tools/, 0 unexempted hit(s), 65 suppressed by an inline `sbe: allow-silent` comment (sbe_autosave.py:177, sbe_autosave.py:192, sbe_autosave.py:219, sbe_autosave.py:435, sbe_autosave.py:531, and 60 more not named), 119 file(s) holding no match at all; 5 file(s) under tools/ were not opened because this lint has no pattern that reads their kind (.jsonl 2, .json 1, .md 1, .sh 1); its patterns are written for .py .sql .swift .rb .js .ts .go, so this verdict covers those kinds and says nothing about the rest; this tool's own source was not scanned (1 file(s): sbe_score.py), because it declares these patterns as strings and would match itself [severity: gate]
+$ python3 tools/sbe_score.py tools/     # one of seventeen check lines; the rest are omitted here
+silent-failure-lints      PASS     138 file(s) scanned under tools/, 0 unexempted hit(s), 67 suppressed by an inline `sbe: allow-silent` comment (bm_profile_reader.py:64, brother_paths.py:312, sbe_autosave.py:177, sbe_autosave.py:192, sbe_autosave.py:219, and 62 more not named), 121 file(s) holding no match at all; 5 file(s) under tools/ were not opened because this lint has no pattern that reads their kind (.jsonl 2, .json 1, .md 1, .sh 1); its patterns are written for .py .sql .swift .rb .js .ts .go, so this verdict covers those kinds and says nothing about the rest; this tool's own source was not scanned (1 file(s): sbe_score.py), because it declares these patterns as strings and would match itself [severity: gate]
 ```
 
 The evidence carries the exemption count and names the lines, because "clean" over

@@ -1,0 +1,15 @@
+{
+ "applied_to": "a disposable git archive of HEAD by scripts/l5a_mutation_probe.py, never the live tree",
+ "edits": [
+  {
+   "file": "plugin/runtime/brother/core/or_fanout.py",
+   "find": "    if real_parent != real_root and not real_parent.startswith(real_root + os.sep):\n        raise ValueError(\"write path escapes root: %r\" % (rel,))\n",
+   "replace": "    if False:\n        raise ValueError(\"write path escapes root: %r\" % (rel,))\n"
+  }
+ ],
+ "id": "M3b",
+ "requirement": "REQ-01",
+ "test": "plugin.runtime.brother.core.test_l5a4.TestWrites.test_file_write_boundary",
+ "threshold": "L5a spec section 10, T3",
+ "what": "resolve_write no longer compares the resolved parent with the pinned root, so the jail escapes"
+}

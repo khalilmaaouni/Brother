@@ -18,6 +18,7 @@ import re
 import stat
 import subprocess
 import tempfile
+import time
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -32,7 +33,9 @@ with open(SCRIPT) as f:
 # literal anchors so a stub build never depends on which real checks are
 # currently listed.
 _CHECKS_START = 'run_check "version-truth"'
-_FOOTER_START = '\necho\necho "pass $pass   fail $fail   no-data $nodata"'
+# ACC2: the check list runs inside a two-phase loop, so the footer starts at
+# the loop's own closing line (done, then drain the checks still running).
+_FOOTER_START = '\ndone\ndrain_checks\n'
 
 _start = _SOURCE.index(_CHECKS_START)
 _end = _SOURCE.index(_FOOTER_START)
@@ -49,6 +52,10 @@ _FIXTURES = tempfile.TemporaryDirectory(prefix="required-fast-fixtures-")
 def install_obligation_fixture(scripts_dir, optional=()):
     shutil.copyfile(os.path.join(HERE, "evidence_obligation.py"),
                     os.path.join(scripts_dir, "evidence_obligation.py"))
+    # The gate's own header runs this guard before any check (required_fast.sh,
+    # git_location_guard.py --assert-clean), so a stub without it stops at exit 2.
+    shutil.copyfile(os.path.join(HERE, "git_location_guard.py"),
+                    os.path.join(scripts_dir, "git_location_guard.py"))
     data = {"schema": "brother.gate-obligations/v1",
             "default": "REQUIRED_FOR_MERGE", "checks": {
                 name: {"obligation": "OPTIONAL", "reason": "test optional evidence"}
@@ -80,6 +87,66 @@ def run(path, extra_env=None):
     return proc.returncode, proc.stdout + proc.stderr
 
 
+def real_rows(name):
+    """The real script's own lines for one check name: its run_check line, or
+    the whole if/else/fi that chooses between two of them. Read from the
+    script, never typed here, so the cases below drive the gate's own text."""
+    lines = _SOURCE.splitlines()
+    hits = [i for i, line in enumerate(lines) if 'run_check "%s"' % name in line]
+    assert hits, "required_fast.sh declares no run_check %r" % name
+    lo, hi = hits[0], hits[-1]
+    if lines[lo].startswith(" "):
+        while not lines[lo].startswith("if "):
+            lo -= 1
+        while lines[hi] != "fi":
+            hi += 1
+    return lines[lo:hi + 1]
+
+
+def build_tree(rows, tracked=(), marker=False, real_map=False):
+    """A tree holding the gate (header, `rows`, footer), the two tools its
+    header and footer run, the discoverer, and only what a case adds:
+    `tracked` files as {relative path: text}, the hub's edition marker, and
+    the real obligations map in place of the stub one. Returns the root."""
+    root = tempfile.mkdtemp(dir=_FIXTURES.name)
+    scripts_dir = os.path.join(root, "scripts")
+    os.makedirs(scripts_dir)
+    install_obligation_fixture(scripts_dir)
+    if real_map:
+        shutil.copyfile(os.path.join(HERE, "gate_obligations.json"),
+                        os.path.join(scripts_dir, "gate_obligations.json"))
+    shutil.copyfile(os.path.join(HERE, "plugin_runtime_fast_discover.py"),
+                    os.path.join(scripts_dir, "plugin_runtime_fast_discover.py"))
+    for rel, text in dict(tracked).items():
+        dest = os.path.join(root, rel)
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        with open(dest, "w") as handle:
+            handle.write(text)
+    if marker:
+        with open(os.path.join(root, ".brother-edition"), "w") as handle:
+            handle.write("edition: public-core\nvault: none\n")
+    path = os.path.join(scripts_dir, "required_fast.sh")
+    with open(path, "w") as handle:
+        handle.write(HEADER + "\n".join(rows) + "\n" + FOOTER)
+    os.chmod(path, os.stat(path).st_mode | stat.S_IEXEC)
+    return root
+
+
+def run_tree(root):
+    """The gate in `root` the way the cut preflight's export tree gate runs
+    it: HOME an empty directory, no git variable, nothing forcing the width.
+    Its temp files (the failure keep among them) land under this suite's own
+    fixture folder and leave with it."""
+    home = tempfile.mkdtemp(dir=_FIXTURES.name)
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith(("GIT_", "BROTHER_", "REQUIRED_FAST_"))
+           and k not in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "GITHUB_ACTIONS")}
+    env.update(HOME=home, BROTHER_HEAVY_SLOT="off", TMPDIR=tempfile.mkdtemp(dir=_FIXTURES.name))
+    proc = subprocess.run(["sh", os.path.join(root, "scripts", "required_fast.sh")],
+                          capture_output=True, text=True, timeout=120, env=env)
+    return proc.returncode, proc.stdout + proc.stderr
+
+
 class RequiredFastScript(unittest.TestCase):
     def test_script_exists_and_is_shell(self):
         self.assertTrue(os.path.exists(SCRIPT))
@@ -99,6 +166,24 @@ class RequiredFastScript(unittest.TestCase):
         self.assertEqual(code, 0, out)
         self.assertIn("pass 3   fail 0   no-data 0", out)
         self.assertNotIn("FAILED:", out)
+
+    def test_the_summary_reports_the_width_the_gate_really_ran_at(self):
+        # 2026-10-04: donecheck_acc2 reads this to refuse a "side by side" run the environment forced serial
+        path = build_stub_script(['run_check "stub-a" true'])
+        try:
+            # every forcing variable blanked (an empty value reads as unset): the caller's own environment, the hermetic
+            # export box included, may set one, and this case is about the plain width (push gate, 2026-10-04)
+            plain = dict.fromkeys(("BROTHER_JEV_STATE_DIR", "BROTHER_CONFIG_DIR", "CLAUDE_CONFIG_DIR", "CODEX_HOME",
+                                   "BROTHER_MACHINE_RESERVATION_PATH", "BROTHER_LOAD_REFUSALS_LOG", "REQUIRED_FAST_ORDER_PIN"), "")
+            _, one = run(path, dict(plain, REQUIRED_FAST_JOBS="1", BROTHER_HEAVY_SLOT="off"))
+            _, forced = run(path, dict(plain, REQUIRED_FAST_JOBS="4", BROTHER_HEAVY_SLOT="off", BROTHER_JEV_STATE_DIR="/tmp/x"))
+        finally:
+            os.remove(path)
+        self.assertRegex(one, r"(?m)^width 1$")
+        self.assertRegex(forced, r"(?m)^width 1 \(forced by BROTHER_JEV_STATE_DIR\)$")
+        # the summary line stays byte identical: four readers anchor it at the end of the line
+        for out in (one, forced):
+            self.assertRegex(out, r"(?m)^pass 1   fail 0   no-data 0$")
 
     def test_one_fail_exits_one_and_is_named(self):
         path = build_stub_script([
@@ -211,6 +296,220 @@ class RequiredFastScript(unittest.TestCase):
         self.assertIn("pass 0   fail 1   no-data 1", out)
 
 
+class ParallelPhase(unittest.TestCase):
+    """ACC2, 2026-09-26: audited checks run REQUIRED_FAST_JOBS at a time. The
+    stub names below are on the audited list on purpose (version-truth,
+    bundle-runtime, surface); any other name runs in the serial phase."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(dir=_FIXTURES.name)
+
+    def timed(self, stubs, optional=(), **env):
+        env.setdefault("TMPDIR", self.tmp)
+        path = build_stub_script(stubs, optional=optional)
+        full = dict(os.environ)
+        for k in ("BROTHER_JEV_STATE_DIR", "BROTHER_CONFIG_DIR", "CLAUDE_CONFIG_DIR", "CODEX_HOME",
+                  "BROTHER_MACHINE_RESERVATION_PATH", "BROTHER_LOAD_REFUSALS_LOG",
+                  "REQUIRED_FAST_JOBS"):
+            full.pop(k, None)
+        full.update(env)
+        started = time.time()
+        proc = subprocess.run(["sh", path], capture_output=True, text=True, timeout=30, env=full)
+        return proc.returncode, proc.stdout + proc.stderr, time.time() - started
+
+    SLEEPERS = ['run_check "version-truth" sh -c "sleep 1.5"',
+                'run_check "bundle-runtime" sh -c "sleep 1.5"']
+
+    def test_audited_checks_run_side_by_side(self):
+        code, out, wall = self.timed(self.SLEEPERS, REQUIRED_FAST_JOBS="2")
+        self.assertEqual(code, 0, out)
+        self.assertIn("pass 2   fail 0   no-data 0", out)
+        self.assertLess(wall, 2.8, "two 1.5 s checks did not overlap")
+
+    def test_one_job_runs_them_one_after_another(self):
+        code, out, wall = self.timed(self.SLEEPERS, REQUIRED_FAST_JOBS="1")
+        self.assertEqual(code, 0, out)
+        self.assertGreaterEqual(wall, 3.0)
+
+    def test_caller_shared_state_forces_one_job(self):
+        shared = os.path.join(self.tmp, "caller-jev")
+        os.makedirs(shared)
+        code, out, wall = self.timed(self.SLEEPERS, REQUIRED_FAST_JOBS="2",
+                                     BROTHER_JEV_STATE_DIR=shared)
+        self.assertEqual(code, 0, out)
+        self.assertGreaterEqual(wall, 3.0, "a caller-named Jev directory was shared by parallel checks")
+
+    def test_a_parallel_failure_is_counted_and_named(self):
+        code, out, _ = self.timed(['run_check "version-truth" sh -c "exit 1"',
+                                   'run_check "bundle-runtime" true'], REQUIRED_FAST_JOBS="2")
+        self.assertEqual(code, 1, out)
+        self.assertIn("pass 1   fail 1   no-data 0", out)
+        self.assertIn("FAILED: version-truth", out)
+
+    def test_a_parallel_no_data_is_counted_never_passed(self):
+        code, out, _ = self.timed(['run_check "version-truth" sh -c "exit 2"'],
+                                  optional=("version-truth",), REQUIRED_FAST_JOBS="2")
+        self.assertIn("pass 0   fail 0   no-data 1", out)
+        self.assertIn("NO-DATA: version-truth", out)
+        self.assertEqual(code, 0, out)
+
+    def test_a_required_parallel_no_data_still_blocks_the_merge(self):
+        code, out, _ = self.timed(['run_check "version-truth" sh -c "exit 2"'],
+                                  REQUIRED_FAST_JOBS="2")
+        self.assertIn("pass 0   fail 0   no-data 1", out)
+        # The obligation step's own verdict row must name the check: an empty
+        # results file also exits 1, for the wrong reason.
+        self.assertIn("version-truth\tNO-DATA\tREQUIRED_FOR_MERGE\tBLOCKED", out)
+        self.assertEqual(code, 1, out)
+
+    def test_serial_checks_start_after_the_parallel_ones_finish(self):
+        marker = os.path.join(self.tmp, "parallel-done")
+        code, out, _ = self.timed([
+            'run_check "version-truth" sh -c "sleep 1; touch %s"' % marker,
+            'run_check "stub-serial" test -f %s' % marker,
+        ], REQUIRED_FAST_JOBS="2")
+        self.assertEqual(code, 0, out)
+        self.assertIn("pass 2   fail 0", out)
+
+    def test_each_parallel_check_gets_its_own_jev_state(self):
+        a, b = os.path.join(self.tmp, "a"), os.path.join(self.tmp, "b")
+        code, out, _ = self.timed([
+            'run_check "version-truth" sh -c \'echo "$BROTHER_JEV_STATE_DIR" > %s\'' % a,
+            'run_check "surface" sh -c \'echo "$BROTHER_JEV_STATE_DIR" > %s\'' % b,
+        ], REQUIRED_FAST_JOBS="2")
+        self.assertEqual(code, 0, out)
+        with open(a) as fa, open(b) as fb:
+            one, two = fa.read().strip(), fb.read().strip()
+        self.assertTrue(one and two)
+        self.assertNotEqual(one, two, "two parallel checks shared one Jev state directory")
+
+    def test_the_two_longest_checks_start_first(self):
+        """Longest first: measured 2026-09-26, the gate side by side took 254 s
+        against 496 s one at a time (0.51) with these two started 7th and 20th."""
+        order = [m for m in re.findall(r'^run_check "([^"]+)"', _SOURCE, re.M)]
+        self.assertEqual(order[1:3], ["brother-run", "export-public"], order[:5])
+
+    def test_a_bad_job_count_is_no_data(self):
+        code, out, _ = self.timed(self.SLEEPERS, REQUIRED_FAST_JOBS="many")
+        self.assertEqual(code, 2, out)
+        self.assertIn("NO-DATA: REQUIRED_FAST_JOBS must be a positive integer", out)
+
+    def test_the_pool_directory_is_removed_at_the_end(self):
+        code, out, _ = self.timed(self.SLEEPERS, REQUIRED_FAST_JOBS="2")
+        self.assertEqual(code, 0, out)
+        self.assertEqual([n for n in os.listdir(self.tmp) if n.startswith("required-fast-pool.")], [])
+
+
+class TheLongSuitesRunAsTwoShards(unittest.TestCase):
+    LONG = {"brother-run": "test_brother_run.py", "export-public": "test_export_public.py"}
+
+    def _rows(self) -> dict:
+        return dict(re.findall(r'^run_check "([^"]+)"\s+(.+)$', _SOURCE, re.M))
+
+    def test_each_long_suite_is_declared_as_two_shards(self) -> None:
+        rows = self._rows()
+        for name, filename in self.LONG.items():
+            self.assertEqual(rows.get(name),
+                             "env BROTHER_TEST_SHARD=1/2 python3 scripts/%s -v" % filename)
+            self.assertEqual(rows.get(name + "-2"),
+                             "env BROTHER_TEST_SHARD=2/2 python3 scripts/%s -v" % filename)
+            matching = sorted(n for n, cmd in rows.items() if "scripts/%s" % filename in cmd)
+            self.assertEqual(matching, sorted([name, name + "-2"]))
+
+    def test_every_shard_starts_in_the_parallel_phase(self) -> None:
+        start = _SOURCE.index('  case "$1" in')
+        end = _SOURCE.index(') check_phase=parallel ;;', start)
+        words = re.findall(r"[a-z0-9-]+", _SOURCE[start:end])
+        for name in self.LONG:
+            self.assertIn(name, words)
+            self.assertIn(name + "-2", words)
+
+    def test_the_four_shards_start_right_after_version_truth(self) -> None:
+        names = re.findall(r'^run_check "([^"]+)"', _SOURCE, re.M)
+        self.assertEqual(names[:5], ["version-truth", "brother-run", "export-public",
+                                     "brother-run-2", "export-public-2"])
+
+    def test_both_long_suites_hand_their_loader_to_suite_shard(self) -> None:
+        import ast
+        for filename in self.LONG.values():
+            path = os.path.join(HERE, filename)
+            with open(path) as fh:
+                tree = ast.parse(fh.read())
+            funcs = [n for n in tree.body
+                     if isinstance(n, ast.FunctionDef) and n.name == "load_tests"]
+            self.assertEqual(len(funcs), 1, "%s: expected exactly one load_tests" % filename)
+            fn = funcs[0]
+            self.assertEqual([a.arg for a in fn.args.args], ["loader", "tests", "pattern"])
+            returns = [n for n in ast.walk(fn) if isinstance(n, ast.Return)]
+            self.assertEqual(len(returns), 1, "%s: expected exactly one return" % filename)
+            self.assertEqual(ast.unparse(returns[0].value),
+                             "suite_shard.select(tests, os.environ.get('BROTHER_TEST_SHARD'))")
+
+
+class ReceiptSuitesRunSideBySide(unittest.TestCase):
+    SLEEPERS = ParallelPhase.SLEEPERS
+    setUp = ParallelPhase.setUp
+    timed = ParallelPhase.timed
+
+    def test_each_parallel_check_gets_its_own_reservation_and_refusal_paths(self) -> None:
+        first = os.path.join(self.tmp, "first-paths")
+        second = os.path.join(self.tmp, "second-paths")
+        code, out, _ = self.timed([
+            'run_check "version-truth" sh -c \'echo "$BROTHER_MACHINE_RESERVATION_PATH $BROTHER_LOAD_REFUSALS_LOG" > %s\'' % first,
+            'run_check "surface" sh -c \'echo "$BROTHER_MACHINE_RESERVATION_PATH $BROTHER_LOAD_REFUSALS_LOG" > %s\'' % second,
+        ], REQUIRED_FAST_JOBS="2")
+        self.assertEqual(code, 0, out)
+        with open(first) as f1, open(second) as f2:
+            one = f1.read().split()
+            two = f2.read().split()
+        self.assertEqual(len(one), 2, one)
+        self.assertEqual(len(two), 2, two)
+        all_paths = one + two
+        for path in all_paths:
+            self.assertTrue(path.startswith(os.path.join(self.tmp, "required-fast-pool.")), path)
+        self.assertEqual(len(set(all_paths)), 4, all_paths)
+
+    def test_a_caller_named_reservation_path_forces_one_job(self) -> None:
+        caller = os.path.join(self.tmp, "caller-reservation.json")
+        code, out, wall = self.timed(self.SLEEPERS, REQUIRED_FAST_JOBS="2",
+                                     BROTHER_MACHINE_RESERVATION_PATH=caller)
+        self.assertEqual(code, 0, out)
+        self.assertGreaterEqual(wall, 3.0, "the caller-named reservation path did not force one job")
+
+    def test_a_caller_named_refusal_log_forces_one_job(self) -> None:
+        caller = os.path.join(self.tmp, "caller-refusals.jsonl")
+        code, out, wall = self.timed(self.SLEEPERS, REQUIRED_FAST_JOBS="2",
+                                     BROTHER_LOAD_REFUSALS_LOG=caller)
+        self.assertEqual(code, 0, out)
+        self.assertGreaterEqual(wall, 3.0, "the caller-named refusal log did not force one job")
+
+    def test_the_receipt_suites_start_side_by_side(self) -> None:
+        code, out, wall = self.timed([
+            'run_check "receipt-door" sh -c "sleep 1.5"',
+            'run_check "receipt-contract-v1" sh -c "sleep 1.5"',
+        ], REQUIRED_FAST_JOBS="2")
+        self.assertEqual(code, 0, out)
+        self.assertIn("pass 2   fail 0   no-data 0", out)
+        self.assertLess(wall, 2.8, "the two receipt suites did not overlap")
+
+    FOUR = ['run_check "version-truth" sh -c "sleep 1.5"',
+            'run_check "bundle-runtime" sh -c "sleep 1.5"',
+            'run_check "surface" sh -c "sleep 1.5"',
+            'run_check "packs" sh -c "sleep 1.5"']
+
+    def test_the_default_runs_four_side_by_side(self) -> None:
+        code, out, wall = self.timed(self.FOUR)
+        self.assertEqual(code, 0, out)
+        self.assertIn("pass 4   fail 0   no-data 0", out)
+        self.assertLess(wall, 2.8, "the default did not run four checks side by side")
+
+    def test_the_default_stops_at_four(self) -> None:
+        code, out, wall = self.timed(self.FOUR + ['run_check "mobile-design" sh -c "sleep 1.5"'])
+        self.assertEqual(code, 0, out)
+        self.assertIn("pass 5   fail 0   no-data 0", out)
+        self.assertGreaterEqual(wall, 3.0, "the default ran a fifth check side by side")
+
+
 class TwoWorktreesShareOneTempDirectory(unittest.TestCase):
     """Row E100. Lane BM2's gate run read a traceback out of lane AW2's tree,
     because the failure capture was keyed by check name and pid inside one
@@ -232,9 +531,10 @@ class TwoWorktreesShareOneTempDirectory(unittest.TestCase):
         os.chmod(path, os.stat(path).st_mode | stat.S_IEXEC)
         return path
 
-    def run_sharing(self, path, shared_tmp):
+    def run_sharing(self, path, shared_tmp, **extra):
         env = dict(os.environ)
         env["TMPDIR"] = shared_tmp
+        env.update(extra)
         proc = subprocess.run(["sh", path], capture_output=True, text=True,
                               timeout=20, env=env)
         return proc.returncode, proc.stdout + proc.stderr
@@ -270,10 +570,24 @@ class TwoWorktreesShareOneTempDirectory(unittest.TestCase):
             'run_check "stub-a" true',
             'exit 7',
         ])
-        code, out = self.run_sharing(path, shared)
+        # One at a time, so "after 1 check" is well defined (ACC2 runs audited
+        # checks first when jobs > 1; the twin below covers that phase).
+        code, out = self.run_sharing(path, shared, REQUIRED_FAST_JOBS="1")
         self.assertEqual(code, 7, out)
         self.assertIn("NO-DATA: required-fast stopped after 1 check(s)", out)
         self.assertIn("lane-killed", out)
+        self.assertIn("This is NOT a pass", out)
+        self.assertNotIn("pass 1   fail 0", out)
+
+    def test_a_run_that_dies_in_the_parallel_phase_is_still_no_data(self):
+        shared = tempfile.mkdtemp(prefix="shared-tmpdir-")
+        path = self.build_in_lane("lane-killed-parallel", [
+            'run_check "version-truth" true',
+            'exit 7',
+        ])
+        code, out = self.run_sharing(path, shared, REQUIRED_FAST_JOBS="2")
+        self.assertEqual(code, 7, out)
+        self.assertIn("NO-DATA: required-fast stopped after", out)
         self.assertIn("This is NOT a pass", out)
         self.assertNotIn("pass 1   fail 0", out)
 
@@ -286,6 +600,71 @@ class TwoWorktreesShareOneTempDirectory(unittest.TestCase):
         self.assertEqual(code, 0, out)
         self.assertIn("pass 1   fail 0   no-data 0", out)
         self.assertNotIn("required-fast stopped after", out)
+
+
+PLUGIN_ROW = "plugin-runtime-tests-fast"
+ONE_PASSING_TEST = {"plugin/runtime/brother/core/test_one.py":
+                    "import unittest\n\n\nclass T(unittest.TestCase):\n    def test_one(self):\n        pass\n"}
+
+
+class ThePluginRuntimeRowWhereItsTestsDoNotShip(unittest.TestCase):
+    """The public export carries the plugin runtime modules the loop imports
+    and none of their tests (docs/plan/EXPORT-ALLOWLIST.txt, owner ruling
+    2026-09-26), and the public repository's CI and the cut preflight's
+    export tree gate both run this same file on that tree. Reached for the
+    first time on 2026-10-06, the row read FAIL there ("no test modules
+    found"): a red for an input the tree is not meant to hold.
+
+    Every case drives the gate's OWN rows for this check (real_rows), in a
+    tree that differs from the next case in one thing only."""
+
+    def summary(self, **tree):
+        code, out = run_tree(build_tree(real_rows(PLUGIN_ROW), **tree))
+        row = next((line for line in out.splitlines()
+                    if PLUGIN_ROW in line and " exit " in line), "")
+        return code, row, out
+
+    def test_an_export_shaped_tree_reads_no_data_with_the_reason(self):
+        code, row, out = self.summary()
+        self.assertIn("pass 0   fail 0   no-data 1", out, out)
+        self.assertTrue(row.startswith("NO-DATA exit 2"), row)
+        self.assertIn("NO-DATA: this tree carries no plugin/runtime/brother test module", out)
+        self.assertNotIn("FAILED:", out)
+
+    def test_the_hub_without_its_tests_still_fails(self):
+        # the edition marker is the one thing this tree has that the case above does not
+        code, row, out = self.summary(marker=True)
+        self.assertEqual(code, 1, out)
+        self.assertIn("pass 0   fail 1   no-data 0", out, out)
+        self.assertTrue(row.startswith("FAIL    exit 1"), row)
+        self.assertIn("FAILED: %s" % PLUGIN_ROW, out)
+
+    def test_a_tree_that_carries_a_test_runs_it_whatever_its_edition(self):
+        for marker in (False, True):
+            with self.subTest(marker=marker):
+                code, row, out = self.summary(tracked=ONE_PASSING_TEST, marker=marker)
+                self.assertEqual(code, 0, out)
+                self.assertIn("pass 1   fail 0   no-data 0", out, out)
+                self.assertTrue(row.startswith("PASS    exit 0"), row)
+
+    # The two cases below read the REAL scripts/gate_obligations.json: what the
+    # merge transition does with that NO-DATA is the map's decision, not the row's.
+
+    def test_the_real_map_allows_that_no_data_in_an_export_shaped_tree_and_says_why(self):
+        code, row, out = self.summary(real_map=True)
+        self.assertEqual(code, 0, out)
+        self.assertIn("%s\tNO-DATA\tREQUIRED_FOR_MERGE\tALLOWED\tNO-DATA_ALLOWED: "
+                      "the plugin runtime module tests are not shipped in the public edition" % PLUGIN_ROW, out)
+        self.assertIn("transition: ALLOWED", out)
+        self.assertNotIn("%s\tPASS" % PLUGIN_ROW, out)
+
+    def test_the_real_map_blocks_that_no_data_wherever_the_hub_marker_is(self):
+        # a row that answers NO-DATA in the hub (the gate's own rows never do, see above): the map still refuses it
+        stub = ['run_check "%s" sh -c \'echo "NO-DATA: stub"; exit 2\'' % PLUGIN_ROW]
+        code, out = run_tree(build_tree(stub, marker=True, real_map=True))
+        self.assertEqual(code, 1, out)
+        self.assertIn("%s\tNO-DATA\tREQUIRED_FOR_MERGE\tBLOCKED\tNO-DATA_BLOCKING" % PLUGIN_ROW, out)
+        self.assertIn("transition: BLOCKED (%s)" % PLUGIN_ROW, out)
 
 
 if __name__ == "__main__":

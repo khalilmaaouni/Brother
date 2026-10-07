@@ -1,0 +1,8 @@
+{"source": "Claude API reference bundled with Claude Code 2.1.280 (model table cached 2026-06-24; shared/prompt-caching.md: cache write 1.25x base for 5 min, 2x for 1 h, cache read 0.1x)",
+ "validation": "Sonnet 5 trimmed 7+5: cw1h 1776 x 4.00 + cr 7340 x 0.20 + out 3 x 10 per million = 0.0086 USD, CLI total_cost_usd 0.0086; Opus 5.5 standard setup: cw1h 47686 x 8.00 + cr 21396 x 0.20 per million = 0.3858, CLI 0.3858 (2026-09-23 14:2x-14:3x)",
+ "usd_per_million": {
+  "claude-opus-5-5": {"input": 4.0, "output": 20.0, "cache_write_5m": 5.0, "cache_write_1h": 8.0, "cache_read": 0.2},
+  "claude-sonnet-5": {"input": 2.0, "output": 10.0, "cache_write_5m": 2.5, "cache_write_1h": 4.0, "cache_read": 0.2},
+  "claude-haiku-4-5-20251001": {"input": 1.0, "output": 5.0, "cache_write_5m": 1.25, "cache_write_1h": 2.0, "cache_read": 0.1},
+  "claude-opus-5": {"input": 5.0, "output": 25.0, "cache_write_5m": 6.25, "cache_write_1h": 10.0, "cache_read": 0.5},
+  "claude-opus-4-7": {"input": 5.0, "output": 25.0, "cache_write_5m": 6.25, "cache_write_1h": 10.0, "cache_read": 0.5}}}

@@ -42,7 +42,9 @@ PR's merge leaves every included PR queued and nothing marked merged; a
 batch whose regeneration changes SYSTEM.md still gates green and the
 regenerated file rides along in the batch's own commit. A further case
 covers the mid-PR refusal at the top of the script (the serial runner still
-between START and END).
+between START and END). The last class proves the gate decides on each
+command's exit status: a gate command that prints every success line and
+then fails is still red, in a dry run and in a real run that lands nothing.
 """
 import os
 import shutil
@@ -503,6 +505,63 @@ class SerialRunnerMidPRRefusesToStart(LandBatchFixture):
         r = self.run_batch(["502"], extra_env={"LAND_BATCH_SERIAL_PID": str(p.pid)})
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual(self.pr_state("502"), "MERGED")
+
+
+# Every success line the gate's old grep looked for, printed by a gate command that then FAILS.
+FORGED_LINES = ("## bundle exit 0", "## required_fast exit 0", "## board-check exit 0")
+
+
+class GateDecidesOnExitStatusNotPrintedText(LandBatchFixture):
+    """THE GATE READS EACH COMMAND'S OWN EXIT STATUS, NEVER ITS PRINTED TEXT (finding 6 of the landing
+    audit, 2026-09-27). run_gate grepped its combined log for "## <name> exit 0", so a child that
+    printed those words made the gate green while the real checks exited 1 and 2.
+
+    Each fixture fails exactly ONE gate command, and that command prints every forged success line
+    (the board's forged line is its last, since the gate keeps only the board's last line), so only
+    that one command's exit status can refuse it. The expected red names are asserted whole, so a
+    guard that refuses the wrong command fails the case too."""
+
+    def reseed_gates(self, failing):
+        clone = os.path.join(self.work, "reseed")
+        sh(["git", "clone", "-q", self.origin, clone], env=git_env())
+        py = "#!/usr/bin/env python3\nimport sys\n%s\nsys.exit(%d)\n"
+        prints = "\n".join("print(%r)" % l for l in FORGED_LINES)
+        echoes = "\n".join("echo '%s'" % l for l in FORGED_LINES)
+        self._write(clone, "scripts/bundle_runtime.py", py % (prints, 1 if failing == "bundle_runtime" else 0))
+        self._write(clone, "scripts/required_fast.sh",
+                    "#!/bin/sh\n%s\nexit %d\n" % (echoes, 1 if failing == "required_fast" else 0))
+        self._write(clone, "scripts/gen_readiness_board.py", py % (prints, 2 if failing == "board-check" else 0))
+        sh(["git", "commit", "-qam", "gates that print success and fail"], cwd=clone, env=git_env())
+        sh(["git", "push", "-q", "origin", "main"], cwd=clone, env=git_env())
+
+    def assert_red_only(self, failing, n):
+        self.reseed_gates(failing)
+        self.make_pr(n, {"pr%s.marker" % n: "x\n"})
+        r = self.run_batch(["--dry-run", n])
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("gate RED: %s (" % failing, r.stdout)
+
+    def test_a_failing_bundle_check_is_red_whatever_is_printed(self):
+        self.assert_red_only("bundle_runtime", "601")
+
+    def test_a_failing_required_fast_is_red_whatever_is_printed(self):
+        self.assert_red_only("required_fast", "602")
+
+    def test_a_failing_board_check_is_red_whatever_is_printed(self):
+        self.assert_red_only("board-check", "603")
+
+    def test_a_real_run_lands_nothing_when_a_check_fails_but_prints_success(self):
+        # the second call site, the bisect half, gates through the same function
+        self.reseed_gates("required_fast")
+        before = self.main_tip()
+        self.make_pr("604", {"pr604.marker": "x\n"})
+        r = self.run_batch(["604"])
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("BATCH RED half a: required_fast", r.stdout)
+        self.assertEqual(self.main_tip(), before)
+        self.assertEqual(self.pr_state("604"), "OPEN")
+        self.assertEqual(self.queue_lines(), ["604"])
+        self.assertNotIn("pr create", self.calls_log())
 
 
 if __name__ == "__main__":

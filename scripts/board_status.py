@@ -121,6 +121,8 @@ def _token_field(value):
 #: other shapes, not rows a founder could annotate with unit_ids; for those
 #: the join simply does not exist yet, which is itself a NO-DATA reason.
 _ROW_SECTION_KEYS = ("features", "rows", "gates")
+#: Every top level key sections() counts; a source holding none of them is refused.
+KNOWN_SECTION_KEYS = _ROW_SECTION_KEYS + ("team_complaints", "learning_loop")
 
 
 def tokens_per_accepted_delivery_for_section(items, trace_lines, trace_error):
@@ -241,13 +243,14 @@ VAULT_AUDIT_PATH = os.path.expanduser("~/.claude/bm_vault_audit.jsonl")
 #: claims.json this reads.
 RUNS_ROOT = os.path.join(ROOT, "docs", "plan", "runs")
 
-#: bundle/runtime/brother-run's default_runs_root(): the shipped launcher
-#: writes run state inside this dev checkout only when the checkout is a
-#: writable git toplevel; an installed plugin has no such repo beside it, so
-#: it falls back to this per-user state directory instead
-#: (os.path.expanduser(os.path.join("~", ".claude", "brother-run")), copied
-#: verbatim from that fallback line so this never drifts from it). A real
-#: run made through the shipped runtime lands here, not under RUNS_ROOT.
+#: brother_state.state_root(), the one rule since 2026-10-06 (the launcher
+#: no longer has a default of its own): the engine run from a development
+#: checkout (scripts/brother_run.py) keeps run state in that checkout, and
+#: the shipped runtime, launcher or engine alike, keeps it in this per-user
+#: state directory, never in the plugin folder
+#: (brother_state.PER_USER_STATE_ROOT, "~/.claude/brother-run", written out
+#: here because this module reads no engine code). A real run made through
+#: the shipped runtime lands here, not under RUNS_ROOT.
 USER_RUNS_ROOT = os.path.join(
     os.path.expanduser(os.path.join("~", ".claude", "brother-run")),
     "docs", "plan", "runs")
@@ -802,6 +805,18 @@ def main(argv=None):
     except (OSError, ValueError) as exc:
         print("%s: could not read %s: %s" % (NODATA, args.source, exc),
               file=sys.stderr)
+        return 2
+
+    # A BOARD THIS TOOL CANNOT READ IS NO-DATA, NEVER AN EMPTY SUCCESS (review
+    # item 9, 2026-09-26): the launch board carries `units`, and this exited 0
+    # having counted nothing, with a headline read from another file, so the
+    # report looked like an answer. Every mode refuses before printing a line.
+    known = [k for k in KNOWN_SECTION_KEYS if k in doc] if isinstance(doc, dict) else []
+    if not known:
+        found = sorted(doc)[:12] if isinstance(doc, dict) else [type(doc).__name__]
+        print("%s: %s carries none of the sections this tool counts (%s); it "
+              "carries %s, so nothing is reported rather than an empty board"
+              % (NODATA, args.source, ", ".join(KNOWN_SECTION_KEYS), ", ".join(found)))
         return 2
 
     if args.item:

@@ -44,7 +44,9 @@ revision stamp and the manifest digest, nothing else): anything else
 differing, the pull request list included, refuses (exit 1) rather than
 writing a note that can never be reproduced from the commit that will
 claim it. A version with no note yet at HEAD (the first cut) has nothing
-to have moved away from, so it is not a refusal.
+to have moved away from, so it is not a refusal. Neither is the hand written
+uncut draft of the version being cut, which names no cut commit and is
+replaced by the generator's output (refuse_if_note_moved says exactly when).
 
 THE TWO INVOCATIONS, from the hub root:
 
@@ -75,6 +77,7 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import cut_preflight as CP  # noqa: E402
 import export_public as EP  # noqa: E402
 import release_note_from_tree as RN  # noqa: E402
 import reproduce_export as REX  # noqa: E402
@@ -277,7 +280,18 @@ def refuse_if_note_moved(version, root=EP.ROOT):
     reproduce_export.py could never match the note to the revision it
     names. A version with no committed note yet (the first cut) is not a
     refusal: there is nothing yet for the regenerated note to have moved
-    away from."""
+    away from.
+
+    THE UNCUT DRAFT (measured 2026-10-05 on the 1.1.0 candidate, cut step
+    2b). The committed note can also be the hand written draft of the version
+    being cut, which names no cut commit (cut_preflight.is_uncut_draft says
+    why it exists and is the one predicate both readers of that fact call).
+    It claims no revision, so like the first cut there is nothing for the
+    regenerated note to have moved away from: the generator's output replaces
+    it, and the run says so. FAIL DIRECTION: unknown blocks. A committed note
+    that is not UTF-8 text, that carries the cut line in any shape, or that
+    sits beside manifests which do not declare this version is no draft, and
+    is compared and refused exactly as before."""
     shipped = committed_note_bytes(version, root)
     if shipped is None:
         return None, []
@@ -289,6 +303,17 @@ def refuse_if_note_moved(version, root=EP.ROOT):
         return EXIT_NODATA, ["NO-DATA: could not read %s to compare it "
                              "against the note committed at HEAD: %s"
                              % (note_path, exc)]
+    try:
+        shipped_text = shipped.decode("utf-8")
+    except UnicodeDecodeError:
+        shipped_text = None
+    if CP.is_uncut_draft(root, version, shipped_text):
+        rel = os.path.relpath(note_path, root)
+        return None, ["note: %s at HEAD is the uncut draft of %s (it names no "
+                      "cut commit), so the regenerated note replaces it and "
+                      "nothing in the draft is carried over: hand written "
+                      "text belongs in docs/releases/%s.notes.txt"
+                      % (rel, version, version)]
     ok, detail = REX.compare_release_note(generated, shipped)
     if ok:
         return None, []

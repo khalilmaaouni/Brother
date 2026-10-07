@@ -140,7 +140,9 @@ def _env_seconds(name, default):
 
 
 RECALL_TIMEOUT_S = _env_seconds("BROTHERDS_RECALL_TIMEOUT_S", 5)
-CAPTURE_TIMEOUT_S = 10
+# The capture door was a hard 10 s: on 2026-09-24 01:49 every landing of the loop went RED on discover because this
+# budget ran out beside five graders, alone and in batch. BROTHERDS_CAPTURE_TIMEOUT_S raises it without a code change.
+CAPTURE_TIMEOUT_S = _env_seconds("BROTHERDS_CAPTURE_TIMEOUT_S", 30)
 
 # Matches the "  <title>  [kind, source]" and "  WITHHELD (...)  <title>
 # [kind, source]" lines bm_vault.py's own _print_hits() prints, whether the

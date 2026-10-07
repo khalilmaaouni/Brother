@@ -80,6 +80,7 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import cut_preflight as CP  # noqa: E402
 import export_public as EP  # noqa: E402
 
 PUBLIC_CHECKOUT = os.path.expanduser("~/Brother")
@@ -524,6 +525,45 @@ def apply_release_stamp(export_dir, tag, source_rev):
         EP.stamp_source_revision(notes_path, version, source_rev)
 
 
+def set_aside_uncut_draft(export_dir, src_root, version):
+    """The line to print when the rebuilt tree's docs/releases/<version>.md is
+    the uncut draft of that version and was removed from it, else None with
+    the tree untouched.
+
+    WHY (review round 1, 2026-10-06, the third reader of this fact). When the
+    manifests are bumped ahead of the tag, the revision the generated note
+    names still carries the hand written draft: cut_v1.0.0.sh commits that
+    revision at step 2s and only step 2b replaces the draft. Rebuilding the
+    tag from that revision then put the draft where the note goes and compared
+    it with the tag's note, which can never match, so release_closeout.py read
+    a published tag as not reproducible. A draft is no release note
+    (cut_preflight.is_uncut_draft, the one predicate cut_preflight.py and
+    refresh_cut.py also call). With it set aside, this revision reads exactly
+    like one that carries no note at all: the note is regenerated here under
+    --regenerate-note and compared with the tag's, or said to be unchecked.
+
+    The manifests are the SOURCE REVISION's own (src_root), never this
+    checkout's: the question is what that revision declared it was.
+
+    FAIL DIRECTION: unknown blocks. A note that cannot be read, is not UTF-8,
+    carries any mark of the generator, or sits beside manifests that do not
+    declare this version stays in the tree and is compared with the tag's
+    note as before, so a real difference is still a MISMATCH."""
+    note_path = os.path.join(export_dir, "docs", "releases", "%s.md" % version)
+    try:
+        with open(note_path, "rb") as fh:
+            text = fh.read().decode("utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    if not CP.is_uncut_draft(src_root, version, text):
+        return None
+    os.remove(note_path)
+    return ("note: docs/releases/%s.md at the source revision is the uncut "
+            "draft of %s (it names no cut commit), so it is set aside and "
+            "the note is treated as not yet written at that revision"
+            % (version, version))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--source-rev", default="HEAD")
@@ -624,6 +664,9 @@ def main(argv=None):
         print("NO-DATA: the allowlist copied nothing from %s"
               % args.source_rev)
         return 2
+    draft_line = set_aside_uncut_draft(export_dir, src, args.tag.lstrip("v"))
+    if draft_line:
+        print(draft_line)
     apply_release_stamp(export_dir, args.tag, args.source_rev)
 
     rel_manifest, rel_note = self_naming_paths(args.tag.lstrip("v"))

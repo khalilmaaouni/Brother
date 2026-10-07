@@ -26,6 +26,7 @@ import shutil
 import subprocess
 import sys
 import time
+import brother_paths  # noqa: E402  (one Codex binary resolver, ACC5)
 
 HOME = os.path.expanduser("~")
 EVID = os.path.join(HOME, ".claude/evidence/codex-battery")
@@ -50,7 +51,7 @@ PUBCLONE = None
 #: reads it to decide whether the list leg expects brothermode or not.
 BROTHERMODE_INSTALLED = False
 
-CODEX_BUNDLED = "/Applications/ChatGPT.app/Contents/Resources/codex"
+CODEX_BUNDLED = brother_paths.codex_bin()
 CODEX_NPM = os.path.join(HOME, ".local/bin/codex")
 
 #: This file ships beside codex_smoke.py, so its sibling import needs no
@@ -153,8 +154,8 @@ def setup_toy(toy_dir):
             'if __name__ == "__main__":\n'
             "    unittest.main()\n")
     sh(["git", "add", "-A"], cwd=toy_dir)
-    sh(["git", "-c", "user.email=khalil.maaouni@lascenti.com",
-        "-c", "user.name=khalil.maaouni", "commit", "-q", "-m", "toy"],
+    sh(["git", "-c", "user.email=t@t",
+        "-c", "user.name=t", "commit", "-q", "-m", "toy"],
        cwd=toy_dir)
 
 

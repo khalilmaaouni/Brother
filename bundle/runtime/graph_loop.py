@@ -54,10 +54,12 @@ Exit 0 a plan was produced. Exit 2 NO-DATA, the roadmap could not be read.
 Python 3.9 floor, standard library only.
 """
 import argparse
+import hashlib
 import json
 import os
 import shutil
 import sys
+from typing import Mapping, Sequence
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
@@ -66,6 +68,15 @@ import resource_gate  # noqa: E402  (sibling module, scripts/resource_gate.py)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ROADMAP = os.path.join(ROOT, 'docs', 'plan', 'READINESS-ROADMAP-2026-08-29.json')
+
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
+try:
+    from plugin.runtime.brother.core.dream_policy import rank_ready_units, SchedulingError
+except ImportError:
+    rank_ready_units = None
+    SchedulingError = None
 
 # Resource floors. The disk numbers are this estate's own standing law: under 15
 # GiB clean up before builds, under 8 refuse. Measured 2026-08-29 at 8.9 GiB,
@@ -113,6 +124,179 @@ ROUTING_METADATA_FIELDS = (
 )
 
 
+#: D1.2: schema name for ready-set fingerprints. A fingerprint is always
+#: 64 lowercase hex sha256 over canonical JSON. Missing, corrupt or hostile
+#: keys are treated as the restrictive empty list or 0, never guessed.
+PLAN_FINGERPRINT_SCHEMA = "plan-v1"
+
+
+def _plan_doc_ok(doc):
+    """True only for a mapping whose rows/features are sequences of mappings.
+
+    This is the one validation every scheduler entry point routes through.
+    A wrong type, a generator where a list belongs, bytes that are not a
+    document, or a mapping whose own get raises is refused here rather than
+    crashing later in nodes().
+    """
+    if not isinstance(doc, dict):
+        return False
+    try:
+        for key in ("rows", "features"):
+            value = doc.get(key)
+            if value is None:
+                continue
+            if not isinstance(value, (list, tuple)):
+                return False
+            for item in value:
+                if not isinstance(item, dict):
+                    return False
+    except Exception:  # noqa: BLE001  (deny a hostile mapping, never crash)
+        return False
+    return True
+
+
+def _plan_no_data(reason):
+    """The module's own refusal value for plan()."""
+    return {
+        "batch": [],
+        "deferred": [],
+        "blocked": [],
+        "in_flight": [],
+        "weight": {},
+        "capacity": 0,
+        "notes": [reason],
+        "unknown_deps": [],
+    }
+
+
+def _plan_fingerprint_empty_payload():
+    """The restrictive shape: every unreadable part of a plan is this."""
+    return {
+        "schema": PLAN_FINGERPRINT_SCHEMA,
+        "batch": [],
+        "deferred": [],
+        "blocked": [],
+        "unknown_deps": [],
+        "capacity": 0,
+    }
+
+
+def _plan_fingerprint_digest(payload):
+    """Canonical JSON of one payload, as 64 lowercase hex characters."""
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"),
+                           ensure_ascii=True, allow_nan=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _plan_fingerprint_get(mapping, key):
+    """Read ONE key without trusting the mapping.
+
+    A hostile mapping can raise anything out of get: an unhashable lookup
+    key, a stored key whose __eq__ raises, a get attribute that is not
+    callable, or a dict subclass that overrides get itself. Every one of
+    those is denied here by returning the missing-key value, so the raw
+    interpreter exception never reaches the caller and a value produced by
+    a raising path is never accepted. This is the ONE place every plan key
+    is read through.
+    """
+    try:
+        if not isinstance(mapping, dict):
+            return None
+        return mapping.get(key)
+    except Exception:  # noqa: BLE001  (deny a hostile mapping, never crash)
+        return None
+
+
+def _plan_fingerprint_list(value):
+    """A plan list, copied so a record altered mid-read cannot slip through.
+
+    A wrong type, or a sequence whose own iteration raises, is denied as the
+    empty shape: a partial read would look like real data.
+    """
+    try:
+        if not isinstance(value, (list, tuple)):
+            return []
+        return list(value)
+    except Exception:  # noqa: BLE001  (deny a hostile sequence, never crash)
+        return []
+
+
+def _plan_fingerprint_items(value):
+    """The string members of one dependency pair; other members are denied."""
+    out = []
+    try:
+        for item in value:
+            out.append(item if isinstance(item, str) else "")
+    except Exception:  # noqa: BLE001  (deny a hostile sequence, never crash)
+        return []
+    return out
+
+
+def _plan_fingerprint_component(value):
+    """Reduce one plan component to JSON-safe deterministic primitives.
+
+    A node dict gives its id string; a dependency pair gives [holder id,
+    unmet ids]; a bare string is itself. Anything else, including a value
+    whose own methods raise, is denied as None rather than crashing and
+    rather than being accepted as a node.
+    """
+    try:
+        if isinstance(value, dict):
+            node_id = _plan_fingerprint_get(value, "id")
+            return node_id if isinstance(node_id, str) else ""
+        if isinstance(value, (list, tuple)):
+            if len(value) != 2:
+                return None
+            left, right = value[0], value[1]
+            if isinstance(left, dict):
+                left = _plan_fingerprint_get(left, "id")
+            if not isinstance(left, str):
+                left = ""
+            if isinstance(right, (list, tuple)):
+                right = _plan_fingerprint_items(right)
+            elif not isinstance(right, str):
+                right = ""
+            return [left, right]
+        if isinstance(value, str):
+            return value
+    except Exception:  # noqa: BLE001  (deny a hostile component, never crash)
+        return None
+    return None
+
+
+def _plan_fingerprint_capacity(value):
+    """Capacity is an int, never a bool, never a float, never NaN."""
+    try:
+        if isinstance(value, int) and not isinstance(value, bool):
+            return int(value)
+    except Exception:  # noqa: BLE001  (deny a hostile number, never crash)
+        return 0
+    return 0
+
+
+def plan_fingerprint(plan):
+    """Return a stable 64-character lowercase hex fingerprint for a plan.
+
+    D1.2 reads exactly the plan() output keys already shown in this file:
+    batch, deferred, blocked, unknown_deps and capacity. A missing key is
+    the empty list, or 0 for capacity. Nothing here raises and nothing here
+    returns an empty string: a plan that cannot be read at all, including a
+    mapping whose own get raises, is denied as that same restrictive shape,
+    so corrupt input can never pass as a real plan.
+    """
+    batch = _plan_fingerprint_list(_plan_fingerprint_get(plan, "batch"))
+    deferred = _plan_fingerprint_list(_plan_fingerprint_get(plan, "deferred"))
+    blocked = _plan_fingerprint_list(_plan_fingerprint_get(plan, "blocked"))
+    unknown = _plan_fingerprint_list(_plan_fingerprint_get(plan, "unknown_deps"))
+    payload = _plan_fingerprint_empty_payload()
+    payload["batch"] = [_plan_fingerprint_component(n) for n in batch]
+    payload["deferred"] = [_plan_fingerprint_component(p) for p in deferred]
+    payload["blocked"] = [_plan_fingerprint_component(p) for p in blocked]
+    payload["unknown_deps"] = [_plan_fingerprint_component(p) for p in unknown]
+    payload["capacity"] = _plan_fingerprint_capacity(_plan_fingerprint_get(plan, "capacity"))
+    return _plan_fingerprint_digest(payload)
+
+
 def load(path=None):
     if path is None:
         path = ROADMAP
@@ -124,6 +308,8 @@ def nodes(doc):
     """Rows and features are the same kind of thing to the scheduler: a unit of
     work with dependencies and a write set. Treating them separately is how a
     feature and a row that touch one file get dispatched together."""
+    if not _plan_doc_ok(doc):
+        return []
     out = []
     for r in doc.get('rows', []) + doc.get('features', []):
         out.append({
@@ -298,7 +484,7 @@ def machine_capacity():
     return slots, notes
 
 
-def plan(doc, slots=None, also_in_flight=None):
+def _plan_impl(doc, slots=None, also_in_flight=None):
     """The dispatch plan: what is ready, what is blocked and by what, and the
     largest batch that may run TOGETHER without two writers on one path.
 
@@ -390,6 +576,138 @@ def plan(doc, slots=None, also_in_flight=None):
     return {'batch': batch, 'deferred': deferred, 'blocked': blocked,
             'in_flight': in_flight, 'weight': weight, 'capacity': cap,
             'notes': notes, 'unknown_deps': unknown_deps(all_nodes)}
+
+
+def plan(doc, slots=None, also_in_flight=None):
+    """D1.2 wrapper: refuse hostile or corrupt input as NO-DATA.
+
+    The scheduling logic below is unchanged for a well-formed document.
+    A document that is not a mapping, or whose rows/features are not
+    sequences of mappings, is refused before any scheduling work, and any
+    raw interpreter exception raised by a corrupt record is converted to
+    the module's own NO-DATA plan rather than reaching the caller.
+    """
+    if not _plan_doc_ok(doc):
+        return _plan_no_data('NO-DATA: plan refused a document that is not a '
+                             'mapping with list rows and features')
+    try:
+        return _plan_impl(doc, slots=slots, also_in_flight=also_in_flight)
+    except (TypeError, AttributeError, KeyError, ValueError, IndexError) as exc:
+        return _plan_no_data('NO-DATA: plan refused corrupt input: %s' % exc)
+
+
+def _scheduling_result_to_dict(result):
+    """Convert a SchedulingResult-like object to a plain dict."""
+    return {
+        "status": getattr(result, "status", "NO-DATA"),
+        "reason": getattr(result, "reason", ""),
+        "chosen_order": tuple(getattr(result, "chosen_order", ())),
+        "width": getattr(result, "width", 0),
+        "policy_hash": getattr(result, "policy_hash", ""),
+        "limits_hash": getattr(result, "limits_hash", ""),
+        "constraints_hash": getattr(result, "constraints_hash", ""),
+        "refused": tuple(getattr(result, "refused", ())),
+    }
+
+
+def _no_data_scheduling_plan(deferred, blocked, reason):
+    """A plan that refuses as NO-DATA, with empty batch."""
+    return {
+        "batch": [],
+        "deferred": list(deferred),
+        "blocked": list(blocked),
+        "scheduling": {
+            "status": "NO-DATA",
+            "reason": reason,
+            "chosen_order": (),
+            "width": 0,
+            "policy_hash": "",
+            "limits_hash": "",
+            "constraints_hash": "",
+            "refused": (),
+        },
+    }
+
+
+def _blocks_scheduling_plan(deferred, blocked, reason):
+    """A plan that refuses as BLOCKS, with empty batch."""
+    return {
+        "batch": [],
+        "deferred": list(deferred),
+        "blocked": list(blocked),
+        "scheduling": {
+            "status": "BLOCKS",
+            "reason": reason,
+            "chosen_order": (),
+            "width": 0,
+            "policy_hash": "",
+            "limits_hash": "",
+            "constraints_hash": "",
+            "refused": (),
+        },
+    }
+
+
+def plan_with_scheduling(
+    ready: Sequence[Mapping[str, object]],
+    deferred: Sequence[tuple[Mapping[str, object], str]],
+    blocked: Sequence[tuple[Mapping[str, object], tuple[str, ...]]],
+    incumbent_order: Sequence[str],
+    policy: object,
+    limits: object,
+    constraints: object,
+) -> dict[str, object]:
+    """D15-B: integrate ranking and bounded width into a graph plan.
+
+    Calls rank_ready_units from the scheduling policy module. If that module
+    is missing, refuses as NO-DATA. If rank_ready_units raises SchedulingError,
+    refuses as BLOCKS. On OK, batch is exactly the ready mappings in
+    chosen_order[:width] order. deferred and blocked pass through unchanged.
+    """
+    if rank_ready_units is None:
+        return _no_data_scheduling_plan(
+            deferred, blocked,
+            "scheduling policy module missing; cannot rank ready units",
+        )
+    try:
+        ready_list = list(ready)
+    except TypeError:
+        return _no_data_scheduling_plan(deferred, blocked, "ready is not iterable")
+    for item in ready_list:
+        if not isinstance(item, Mapping):
+            return _no_data_scheduling_plan(deferred, blocked, "ready item is not a mapping")
+        if not isinstance(item.get("id"), str):
+            return _no_data_scheduling_plan(deferred, blocked, "ready item missing string id")
+    try:
+        result = rank_ready_units(ready_list, policy, limits, constraints)
+    except SchedulingError as exc:
+        code = getattr(exc, "code", str(exc))
+        return _blocks_scheduling_plan(deferred, blocked, code)
+    except Exception as exc:
+        return _no_data_scheduling_plan(deferred, blocked, "scheduling error: %s" % exc)
+
+    scheduling = _scheduling_result_to_dict(result)
+    status = scheduling.get("status")
+    if status != "OK":
+        batch = []
+    else:
+        chosen = scheduling.get("chosen_order", ())
+        width = scheduling.get("width", 0)
+        by_id = {}
+        for item in ready_list:
+            uid = item.get("id")
+            if uid not in by_id:
+                by_id[uid] = item
+        batch = []
+        for uid in chosen[:width]:
+            if uid in by_id:
+                batch.append(by_id[uid])
+    return {
+        "batch": batch,
+        "deferred": list(deferred),
+        "blocked": list(blocked),
+        "scheduling": scheduling,
+    }
 
 
 def main(argv=None):

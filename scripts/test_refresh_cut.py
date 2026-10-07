@@ -312,5 +312,150 @@ class TheNotesContentCannotMoveSinceTheCutCommit(unittest.TestCase):
         self.assertEqual(lines, [])
 
 
+DRAFT = "# Brother %s\n\nWhat moved, drafted by hand before the cut.\n" % VERSION
+
+
+def _declare(tmp, version):
+    """The manifests of the fixture tree declare `version` (or, with a text
+    that is not a version, carry that text as the whole file)."""
+    path = os.path.join(tmp, ".claude-plugin", "marketplace.json")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write('{"metadata": {"version": "%s"}, "plugins": []}\n' % version
+                 if version[:1].isdigit() else version)
+
+
+def _commit_note(tmp, text, version=VERSION):
+    path = os.path.join(tmp, "docs", "releases", "%s.md" % version)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as fh:
+        fh.write(text if isinstance(text, bytes) else text.encode("utf-8"))
+    _git(["add", "-A"], tmp)
+    _git(["commit", "-q", "-m", "note"], tmp)
+
+
+class TheUncutDraftIsTheGeneratorsExpectedInput(unittest.TestCase):
+    """Measured 2026-10-05 and 2026-10-06 on the 1.1.0 candidate, at cut step
+    2b: the manifests already declared the new version, so the note of that
+    version existed as a hand written draft with no cut commit line (the
+    release invariant requires the file, the pre-cut review forbids the line),
+    and the refresh refused the generator's own output against it: "it differs
+    beyond its source revision stamp and its manifest digest". A draft names no
+    revision, so there is no cut commit for the regenerated note to have moved
+    away from. Every fixture is that tree's shape with ONE thing changed."""
+
+    def setUp(self):
+        self.tmp = _make_repo()
+        _declare(self.tmp, VERSION)
+        _commit_note(self.tmp, DRAFT)
+
+    def regenerated(self, pr_lines=("- #460 wbs/one",)):
+        _write_note(self.tmp, VERSION, rev="c" * 40, digest="d" * 64,
+                   pr_lines=list(pr_lines))
+
+    # The defect, at the entry point.
+    def test_main_replaces_the_draft_and_says_so(self):
+        import contextlib
+        import io
+
+        def bind(func):
+            def _wrapped(*args, **kwargs):
+                kwargs.setdefault("root", self.tmp)
+                return func(*args, **kwargs)
+            return _wrapped
+
+        def fake_regenerate(version):
+            self.regenerated()
+            manifest = os.path.join(self.tmp, "docs", "releases",
+                                    "%s.export-manifest.txt" % version)
+            with open(manifest, "w", encoding="utf-8") as fh:
+                fh.write("stub\n")
+            return True, ["regenerated (stub)"]
+
+        out = io.StringIO()
+        with mock.patch.object(RC, "refuse_if_dirty", bind(RC.refuse_if_dirty)), \
+             mock.patch.object(RC, "stage_release_files", bind(RC.stage_release_files)), \
+             mock.patch.object(RC, "refuse_if_note_moved", bind(RC.refuse_if_note_moved)), \
+             mock.patch.object(RC, "regenerate", fake_regenerate), \
+             mock.patch.object(RC, "check", lambda version: (RC.EXIT_CLEAR, ["CLEAR: stub"])), \
+             contextlib.redirect_stdout(out):
+            code = RC.main(["--version", VERSION])
+        self.assertEqual(code, RC.EXIT_CLEAR, out.getvalue())
+        # Never silent: the run says the draft was replaced, and by what.
+        self.assertIn("uncut draft", out.getvalue())
+        self.assertIn("%s.notes.txt" % VERSION, out.getvalue())
+        status = _status(self.tmp)
+        for rel in RC.release_paths(VERSION):
+            self.assertTrue([l for l in status.splitlines() if rel in l], status)
+
+    def test_the_draft_is_not_a_refusal(self):
+        self.regenerated()
+        code, lines = RC.refuse_if_note_moved(VERSION, root=self.tmp)
+        self.assertIsNone(code, lines)
+        self.assertTrue(any("uncut draft" in l for l in lines), lines)
+
+    # One guard per case. Unknown blocks: each of these still refuses.
+    def assert_refused(self):
+        self.regenerated()
+        code, lines = RC.refuse_if_note_moved(VERSION, root=self.tmp)
+        self.assertEqual(code, RC.EXIT_REFUSED, lines)
+        self.assertFalse(any("uncut draft" in l for l in lines), lines)
+
+    def test_a_cut_note_that_moved_still_refuses_where_the_manifests_declare_it(self):
+        # The same tree, but the committed note names a cut commit: a real cut
+        # note whose pull request list then gained a line.
+        _write_note(self.tmp, VERSION, rev="a" * 40, digest="b" * 64,
+                   pr_lines=["- #460 wbs/one"])
+        _git(["add", "-A"], self.tmp)
+        _git(["commit", "-q", "-m", "cut"], self.tmp)
+        self.regenerated(pr_lines=("- #460 wbs/one", "- #466 wbs/portability-release"))
+        code, lines = RC.refuse_if_note_moved(VERSION, root=self.tmp)
+        self.assertEqual(code, RC.EXIT_REFUSED, lines)
+        self.assertTrue(any("466" in l for l in lines), lines)
+
+    def test_a_draft_of_a_version_the_manifests_do_not_declare_still_refuses(self):
+        _declare(self.tmp, "9.9.8")
+        self.assert_refused()
+
+    def test_a_draft_beside_manifests_that_cannot_be_read_still_refuses(self):
+        for label, text in (("not json", "{not json"), ("no metadata", "{}"), ("empty", "")):
+            with self.subTest(manifest=label):
+                _declare(self.tmp, text or " ")
+                self.assert_refused()
+        os.remove(os.path.join(self.tmp, ".claude-plugin", "marketplace.json"))
+        self.assert_refused()
+
+    def test_a_draft_that_carries_the_cut_line_in_any_shape_still_refuses(self):
+        _commit_note(self.tmp, DRAFT + "\nCut from hub commit `PENDING`\n")
+        self.assert_refused()
+
+    def test_a_committed_note_that_is_not_text_still_refuses(self):
+        _commit_note(self.tmp, b"\xff\xfe a draft in another encoding\n")
+        self.assert_refused()
+
+    def test_a_finished_note_damaged_by_hand_still_refuses(self):
+        """Review round 1: a finished note whose cut line was deleted or
+        reshaped read as the draft, so a hand edited body was replaced without
+        a word. Each damaged shape is compared and refused, as before."""
+        rev, cut = "a" * 40, "Cut from hub commit"
+        finished = _note_text(VERSION, rev, "b" * 64, ["- #460 wbs/one"])
+        line = "%s `%s` (hub, private).\n" % (cut, rev)
+        self.assertIn(line, finished)
+        for label, text in (("the cut line deleted", finished.replace(line, "")),
+                            ("the cut line in lower case", finished.replace(cut, cut.lower())),
+                            ("the cut line double spaced", finished.replace(cut, "Cut  from  hub  commit")),
+                            ("the cut line wrapped", finished.replace(cut, "Cut from hub\ncommit")),
+                            ("the note emptied", ""),
+                            ("the note blanked to white space", " \n\t\n")):
+            with self.subTest(damage=label):
+                _commit_note(self.tmp, text)
+                # The regenerated note differs in its body from what was committed.
+                self.regenerated(pr_lines=("- #460 wbs/one", "- #466 wbs/portability-release"))
+                code, lines = RC.refuse_if_note_moved(VERSION, root=self.tmp)
+                self.assertEqual(code, RC.EXIT_REFUSED, lines)
+                self.assertFalse(any("uncut draft" in l for l in lines), lines)
+                _git(["checkout", "-q", "--", "."], self.tmp)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -58,7 +58,7 @@ The pinned clone ref comes from
 release ref, independent of the product's `VERSION`:
 
 ```bash
-git clone --branch v1.0.21 --depth 1 https://github.com/khalilmaaouni/Brother.git ~/.claude/skills/brothermode-src
+git clone --branch v1.1.0 --depth 1 https://github.com/khalilmaaouni/Brother.git ~/.claude/skills/brothermode-src
 cd ~/.claude/skills/brothermode-src/products/brothermode
 ls SKILL.md
 cat VERSION
@@ -95,23 +95,7 @@ When the user types /brothermode (any casing), read and follow
 That is an instruction-file route, not registration of the standalone plugin's
 namespaced commands.
 
-### Separate development copy
-
-For an exported-source development copy, use a separate target:
-
-```bash
-# Development branch (changes over time)
-git clone --branch main https://github.com/khalilmaaouni/Brother.git ~/.claude/skills/brothermode-dev-src
-cd ~/.claude/skills/brothermode-dev-src/products/brothermode
-python3 scripts/install.py --target ~/.claude/skills/brothermode-dev
-```
-
-Inspect that install with `--dry-run` first. Use
-`BM_PRODUCT_ROOT="$HOME/.claude/skills/brothermode-dev"` for the remaining
-commands and adjust the trigger path. The different target does not separate
-settings; use `--settings` for an isolated host configuration. Private hub
-contributors follow [PROJECT.md](../../../PROJECT.md) instead of treating the
-public export as the development remote.
+For a separate development copy, follow the [setup reference](SETUP.md#requirements-and-install-choices).
 
 ## 2. Enable the target repository
 
@@ -243,6 +227,9 @@ For upgrades, removal, retained data, and the hook behavior table, continue to
 
 ## Appendix: clone hook wiring
 
+<details>
+<summary>Manual hook wiring (optional)</summary>
+
 Prefer the installer. This reference block matches its `hook_groups()` event,
 matcher, command, and timeout structure, which `tools/test_bm_docs.py` checks.
 It is the clone wiring, not the larger product-plugin manifest. Merge with
@@ -288,3 +275,5 @@ steps above.
   }
 }
 ```
+
+</details>

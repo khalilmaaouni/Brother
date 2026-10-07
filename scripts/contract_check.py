@@ -355,12 +355,25 @@ def hand_rules(record, schema):
     return problems
 
 
-def check(record, schema):
-    """Every problem found, structural then hand rules, deduplicated but
-    order preserved."""
+def checked(instance, schema, hand_rules_fn):
+    """The shared root-cause fix for every check() in this repo shaped
+    "validate() then hand_rules()": a hand_rules callback is allowed to
+    assume the shapes (dict/list/string types, presence) validate()
+    already confirmed -- calling it anyway on a structurally invalid
+    instance is exactly how a wrong-typed field (an int where a dict was
+    required) turns a clean FAIL into an uncaught AttributeError. Run
+    hand_rules_fn (a zero-arg callable closing over whatever the caller
+    needs) ONLY when validate() found nothing wrong; a structurally
+    invalid instance FAILs on the structural problems alone, since
+    hand_rules has nothing valid left to check anyway. Every caller of
+    this pattern (this module's own check(), scripts/mobile_state_fixture
+    .py, scripts/mobile_project_profile.py) routes through here so a
+    future validator built the same way inherits the fix instead of
+    reintroducing the same crash."""
     problems = []
-    validate(record, schema, "", problems)
-    problems.extend(hand_rules(record, schema))
+    validate(instance, schema, "", problems)
+    if not problems:
+        problems.extend(hand_rules_fn())
     seen = set()
     out = []
     for p in problems:
@@ -368,6 +381,13 @@ def check(record, schema):
             seen.add(p)
             out.append(p)
     return out
+
+
+def check(record, schema):
+    """Every problem found, structural then hand rules (skipped when
+    structural problems exist -- see checked()), deduplicated but order
+    preserved."""
+    return checked(record, schema, lambda: hand_rules(record, schema))
 
 
 def main(argv=None):

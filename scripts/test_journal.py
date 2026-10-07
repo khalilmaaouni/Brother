@@ -214,5 +214,64 @@ class TheRunDirectoryComesFromTheEnvironmentWhenACallerHasNone(
             "VN3b-1")
 
 
+class TheAppendIsDurableBeforeClose(unittest.TestCase):
+    def test_fsync_is_called_after_write_and_before_close(self):
+        from unittest import mock
+        calls = []
+        real_write = journal.os.write
+        real_fsync = journal.os.fsync
+        real_close = journal.os.close
+
+        def tracked_write(fd, data):
+            calls.append("write")
+            return real_write(fd, data)
+
+        def tracked_fsync(fd):
+            calls.append("fsync")
+            return real_fsync(fd)
+
+        def tracked_close(fd):
+            calls.append("close")
+            return real_close(fd)
+
+        tmp = tempfile.mkdtemp(prefix="journal-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        with mock.patch.object(journal.os, "write", tracked_write), \
+             mock.patch.object(journal.os, "fsync", tracked_fsync), \
+             mock.patch.object(journal.os, "close", tracked_close):
+            journal.append(tmp, "run.opened")
+        self.assertEqual(calls, ["write", "fsync", "close"])
+
+
+class TheEventIdParameter(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="journal-")
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+
+    def test_event_id_none_still_generates_a_uuid4_hex(self):
+        eid = journal.append(self.tmp, "run.opened")
+        self.assertRegex(eid, r"^[0-9a-f]{32}$")
+        row = journal.read(self.tmp)[0]
+        self.assertEqual(row["event_id"], eid)
+        self.assertEqual(sorted(row), ["at", "event_id", "parent_ids",
+                                       "payload", "run_id", "session_id",
+                                       "type", "unit_id"])
+
+    def test_a_given_event_id_is_used_verbatim_and_returned(self):
+        eid = "deadbeef" * 4
+        returned = journal.append(self.tmp, "run.opened", event_id=eid)
+        self.assertEqual(returned, eid)
+        row = journal.read(self.tmp)[0]
+        self.assertEqual(row["event_id"], eid)
+
+    def test_an_invalid_event_id_raises_before_any_write(self):
+        with self.assertRaises(ValueError):
+            journal.append(self.tmp, "run.opened", event_id="")
+        with self.assertRaises(ValueError):
+            journal.append(self.tmp, "run.opened", event_id=123)
+        self.assertFalse(
+            os.path.exists(os.path.join(self.tmp, journal.JOURNAL_FILENAME)))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

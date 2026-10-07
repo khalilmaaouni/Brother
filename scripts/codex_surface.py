@@ -52,7 +52,7 @@ def render(name, description, product, canonical, kind, command_name=None):
     if command_name:
         command_line = (
             "This is the Codex route for the existing Claude command "
-            "`/%s:%s`.\n\n" % (product, command_name)
+            "`/brother:%s`.\n\n" % command_name
         )
     else:
         command_line = "This is the Codex route for the `%s` product skill.\n\n" % product

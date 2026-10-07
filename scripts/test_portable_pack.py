@@ -385,16 +385,27 @@ class PortabilityProof(unittest.TestCase):
         self.assertEqual(verdict, "NO-DATA")
 
 
+def fixture_roadmap(td):
+    """The roadmap input as a fixture. The real one is this checkout's own
+    docs/plan file, which the export tree does not ship; its validity is
+    covered by scripts/test_gen_readiness_board.py and
+    scripts/gen_readiness_board.py --check."""
+    path = os.path.join(td, "roadmap.json")
+    write_json(path, valid_doc([valid_row("R1", "DONE"), valid_row("R2", "OPEN")]))
+    return path
+
+
 class RealCollectAgainstThisWorktree(unittest.TestCase):
     """The task's own instruction: at least one test runs the REAL collect
-    against this worktree, not a fixture. Uses the real roadmap (already
-    known to validate: scripts/test_gen_readiness_board.py and
-    scripts/gen_readiness_board.py --check both cover that separately)."""
+    against this worktree, not a fixture. The collect (git state of this
+    worktree) is real; only the roadmap input is a fixture, see
+    fixture_roadmap()."""
 
     def test_real_run_against_this_worktree_verifies(self):
         with tempfile.TemporaryDirectory() as td:
             zip_path, had_no_data = PP.build_pack(
-                [REPO_ROOT], out_dir=td, today="2026-08-30")
+                [REPO_ROOT], out_dir=td, today="2026-08-30",
+                roadmap_path=fixture_roadmap(td))
             verdict, problems = PP.verify_pack(zip_path)
             self.assertEqual(verdict, "PASS", problems)
             # pull_requests may be NO-DATA on a machine without `gh`; that is
@@ -417,11 +428,23 @@ class CliMain(unittest.TestCase):
         self.assertIn("NO-DATA", out.stdout)
 
     def test_build_then_verify_round_trip_exits_0(self):
+        """The build half goes through main() with the collect pinned: the
+        real collector reads docs/plan/LIVE-STATE.json and a signed-in gh,
+        neither of which an export tree under an empty HOME has, and says
+        NO-DATA (exit 2) there by contract. RealCollectAgainstThisWorktree
+        drives the real collect; this pins main()'s exit 0 path."""
+        from unittest import mock
+        import contextlib
+        import io
         with tempfile.TemporaryDirectory() as td:
             out_dir = os.path.join(td, "out")
-            build = self._run("--repo", REPO_ROOT, "--out-dir", out_dir,
-                              "--date", "2026-08-30")
-            self.assertEqual(build.returncode, 0, build.stdout + build.stderr)
+            out = io.StringIO()
+            with mock.patch.object(HC, "collect_state", fake_collect), \
+                    contextlib.redirect_stdout(out):
+                code = PP.main(["--repo", REPO_ROOT, "--out-dir", out_dir,
+                                "--date", "2026-08-30",
+                                "--roadmap", fixture_roadmap(td)])
+            self.assertEqual(code, 0, out.getvalue())
             zip_path = os.path.join(out_dir, "2026-08-30-portable-pack.zip")
             self.assertTrue(os.path.isfile(zip_path))
             verify = self._run("--verify", zip_path)

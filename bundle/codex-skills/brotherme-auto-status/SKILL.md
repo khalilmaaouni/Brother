@@ -3,7 +3,7 @@ name: brotherme-auto-status
 description: "Show where the Full-Auto controller run stands right now, in plain language"
 ---
 
-This is the Codex route for the existing Claude command `/brothermode:brotherme-auto-status`.
+This is the Codex route for the existing Claude command `/brother:brotherme-auto-status`.
 
 Codex has no slash command surface. Invoke this skill by name in a bounded outcome. The shared `using-brother` route remains the entry point when the outcome is ambiguous.
 

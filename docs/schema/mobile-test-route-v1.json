@@ -1,0 +1,156 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "mobile-test-route-v1",
+  "title": "Mobile Test Route v1",
+  "description": "EPIC M2.03 of docs/plan/MOBILE-EPIC-M2-UNITS.md: 'a safe pattern for reaching expensive states quickly without changing normal production navigation semantics.' This is a DESIGN/CONTRACT for a test-only deep-link/route pattern, never a live implementation: the 'app' referenced by any record is always the abstract target project via scripts/mobile_project_profile.py's profile, never a specific real repository (standing never-name-the-app rule). scripts/mobile_test_route.py is a read-only LOADER/VALIDATOR plus a documentation GENERATOR: it checks a route record against this schema and a set of hand rules the schema's keywords cannot express (see that module's docstring), then, only for a record with zero problems, can render the Markdown a real project's own developers would need to wire the route in safely. It never opens a network port, never modifies any real app's navigation code, and never executes anything against a device or simulator -- that is out of this unit's scope entirely, unlike M2.02's device-touching adapters. THE CENTRAL RULE THIS SCHEMA EXISTS TO ENFORCE: a route record must never be able to validate as safe while actually carrying no real build/config fence. build_fence is a required object (a route with none of it FAILs on the missing key alone), and release_build_excluded is pinned to const true rather than a plain boolean -- a boolean would let a fence look present while silently defaulting to unsafe; const true forces the record's author to affirmatively write the word true, and scripts/mobile_test_route.py's hand rules additionally refuse an empty/placeholder fence_identifier or verification_note that would otherwise let this const alone create a false sense of safety. Only the keyword subset scripts/mobile_project_profile.py, scripts/mobile_toolchain_probe.py and scripts/mobile_state_fixture.py already document is used here (same convention): type, required, properties, enum, const, items, minItems, additionalProperties -- no $ref/definitions/if-then/pattern/minLength, scripts/contract_check.py's enforced subset does not support them, so every object is written out flat and in full below rather than referenced, and every conditional/non-empty rule is enforced by hand instead (documented in scripts/mobile_test_route.py).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "route_id", "description", "target_state",
+    "entry_mechanism", "build_fence", "route_parameters",
+    "exercises_real_path", "production_exposure_review"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "mobile-test-route-v1",
+      "description": "Which shape this record follows, so a reader never has to guess."
+    },
+    "route_id": {
+      "type": "string",
+      "description": "A stable identifier for this route, e.g. 'jump-to-expired-trial-paywall'. Never the founder's own priority app's real name (standing never-name-the-app rule); name it by role/journey instead."
+    },
+    "description": {
+      "type": "string",
+      "description": "What this route does and why it exists as a shortcut, in plain words a reviewer can judge without reading code."
+    },
+    "target_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["description"],
+      "description": "The expensive state this route is meant to reach quickly.",
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "Plain description of the state reached, e.g. 'user mid-onboarding at step 4 with two prior purchases'."
+        },
+        "state_fixture_ref": {
+          "type": "string",
+          "description": "Optional pointer to a mobile-state-fixture-v1 fixture_id (docs/schema/mobile-state-fixture-v1.json) this route is meant to arrive at, when the underlying data state is itself declared by a fixture. Never a real account's data inline -- this field only points at a fixture record, it does not carry one."
+        }
+      }
+    },
+    "entry_mechanism": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mechanism", "identifier"],
+      "description": "How this route is invoked from outside the app.",
+      "properties": {
+        "mechanism": {
+          "type": "string",
+          "enum": [
+            "deep-link-url-scheme", "universal-link-path",
+            "in-app-debug-menu", "launch-argument",
+            "environment-variable-trigger"
+          ],
+          "description": "The invocation channel. This field alone is never a fence: an obscure or undocumented mechanism is still reachable by anyone who finds it, which is exactly why build_fence below is separate and required."
+        },
+        "identifier": {
+          "type": "string",
+          "description": "The concrete scheme/path/menu-item/argument/variable name a developer would need to wire this up, e.g. 'brothertest://route/expired-trial-paywall' or 'BROTHER_TEST_ROUTE=expired-trial-paywall'."
+        }
+      }
+    },
+    "build_fence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fence_mechanism", "fence_identifier", "release_build_excluded",
+        "verification_note"
+      ],
+      "description": "THE REQUIRED FENCE. A route record with no build_fence object at all fails on the missing required key alone; scripts/mobile_test_route.py's hand rules additionally refuse a fence object whose fields are present but empty, so this object can never look production-safe by omission or by a hollow value. Presence of this object plus a passing release_build_excluded const still does not by itself prove the fence holds in the real build system -- verification_note is where the record states how that is actually confirmed, and a human reviewer judges whether that stated method is real (this schema and its checker cannot execute a target project's own build system).",
+      "properties": {
+        "fence_mechanism": {
+          "type": "string",
+          "enum": [
+            "build-flag", "scheme", "environment-variable",
+            "compile-time-constant"
+          ],
+          "description": "How the route is compiled/configured out of a release build."
+        },
+        "fence_identifier": {
+          "type": "string",
+          "description": "The concrete flag/scheme/variable/constant name that gates this route. Required non-empty by hand rule -- an empty string satisfies the schema's type:string alone (no minLength in the enforced keyword subset), which is exactly the omission this field exists to close."
+        },
+        "release_build_excluded": {
+          "const": true,
+          "description": "Deliberately a const, never a plain boolean: a plain boolean silently defaults to a JSON-absent value being treated as false by most readers but PASSES an 'additionalProperties: false, not required' schema if simply omitted, and a boolean typed field still accepts an explicit false without any structural complaint. Pinning this to const:true means the ONLY way a record satisfies the schema is to write the literal value true, forcing the author to affirmatively declare the exclusion rather than let a missing or false value slip through as merely 'unspecified'. This field asserts intent, not proof; the proof is verification_note."
+        },
+        "verification_note": {
+          "type": "string",
+          "description": "How the target project's own developers would actually confirm, in their build system, that this route is excluded from a release build (e.g. 'CI asserts the BROTHER_TEST_ROUTES flag is unset in the release scheme's build settings'). Required non-empty by hand rule; a placeholder value ('TODO', 'TBD', 'n/a') is rejected as non-exhaustive but cheap backstop, mirroring scripts/mobile_state_fixture.py's own secret-shape backstop. This module cannot execute the target project's build system, so it can only refuse an obviously hollow claim, never confirm a true one -- a human reviewer signing production_exposure_review still owns that judgment."
+        }
+      }
+    },
+    "route_parameters": {
+      "type": "array",
+      "description": "Every parameter this route accepts, each with its own validation shape. An empty array is valid (a route may take no parameters).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "type", "required", "description", "validation"],
+        "properties": {
+          "name": {"type": "string", "description": "Parameter name as it appears in the route's identifier (query param, path segment, launch-argument name, etc)."},
+          "type": {
+            "type": "string",
+            "enum": ["string", "integer", "boolean", "enum"],
+            "description": "Picks which validation.* fields are required; see scripts/mobile_test_route.py's hand_rules for the per-type shape the schema's keyword subset cannot express (no if/then support)."
+          },
+          "required": {"type": "boolean", "description": "Whether the route fails to resolve without this parameter."},
+          "description": {"type": "string", "description": "What this parameter controls, in plain words."},
+          "validation": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "The bound on this parameter's accepted values. Which fields are required/forbidden depends on the sibling 'type' field -- enforced by scripts/mobile_test_route.py's hand_rules, not by this schema's keywords. type:'integer' requires BOTH min_value and max_value (never an unbounded integer, which could otherwise be used to reach arbitrary internal state by trial and error); type:'string' requires max_length; type:'enum' requires a non-empty allowed_values list; type:'boolean' requires none of the above and forbids all of them.",
+            "properties": {
+              "allowed_values": {
+                "type": "array", "minItems": 1, "items": {"type": "string"},
+                "description": "Required (and only meaningful) when type is 'enum'."
+              },
+              "max_length": {"type": "integer", "description": "Required (and only meaningful) when type is 'string'."},
+              "min_value": {"type": "integer", "description": "Required (and only meaningful) when type is 'integer'."},
+              "max_value": {"type": "integer", "description": "Required (and only meaningful) when type is 'integer'."}
+            }
+          }
+        }
+      }
+    },
+    "exercises_real_path": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["classification", "rationale"],
+      "description": "Does exercising this route still count as proving the real user-visible critical path, or does it bypass verification? The one field this whole unit exists to force into the open rather than leave implicit.",
+      "properties": {
+        "classification": {
+          "type": "string",
+          "enum": ["full-real-path", "partial-real-path-shortcut", "bypasses-verification"],
+          "description": "'full-real-path': the route only sets up starting state, the journey proof that follows still drives the real user-visible flow end to end. 'partial-real-path-shortcut': the route skips some real steps (e.g. skips a real onboarding flow to reach its end state) -- a journey proof using it is not evidence for the skipped steps. 'bypasses-verification': using this route in place of the real path proves nothing about the real path at all; a journey proof must never cite this route as evidence for a user-visible claim it did not actually exercise. scripts/mobile_test_route.py's hand rules require production_exposure_review.residual_risk_accepted to be explicitly true whenever this is 'bypasses-verification', so a bypass can never pass silently."
+        },
+        "rationale": {
+          "type": "string",
+          "description": "Why this classification is the right one for this specific route. Required non-empty by hand rule."
+        }
+      }
+    },
+    "production_exposure_review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reviewer", "risk_if_shipped", "residual_risk_accepted"],
+      "description": "Production exposure risk reviewed, per the source roadmap's own wording -- a route this affects real users if the fence above ever fails, so a record without a stated review is incomplete regardless of how the fence looks.",
+      "properties": {
+        "reviewer": {"type": "string", "description": "Who reviewed the production exposure risk. Required non-empty by hand rule."},
+        "risk_if_shipped": {"type": "string", "description": "The actual worst case if this route's fence failed and it shipped active in a release build. Required non-empty by hand rule -- a review with no stated risk is not a review."},
+        "residual_risk_accepted": {"type": "boolean", "description": "Whether the reviewer accepted the residual risk described above. scripts/mobile_test_route.py's hand rules require this to be true whenever exercises_real_path.classification is 'bypasses-verification'."}
+      }
+    }
+  }
+}

@@ -876,7 +876,7 @@ class TestProjectIdResolution(LeadCase):
         # refusal that no longer happens.
         code, out, err = self.run_cli("status")
         self.assertEqual(0, code, out + err)
-        self.assertIn("/brothermode:start", out)
+        self.assertIn("/brother:brothermode-start", out)
         self.assertNotIn("(python3 tools/bm_project.py start)", out)
 
 
@@ -916,6 +916,72 @@ class TestVerdictLine(LeadCase):
         self.assertIn("no executed evidence", values["Verdict"])
 
 
+class TestVerdictCountsWhatTheRiskFieldCounts(LeadCase):
+    """2026-09-18: status printed 'Verdict: do not ship yet: 0 open
+    decision(s), 0 open risk(s)' over 'Risk: 122 open' on a live store.
+    The Verdict counted only RISK insights newer than the last briefing,
+    while the Risk field also counted unresolved human alerts, so an alert
+    or an older unsuperseded risk could never block and the verdict could
+    read 'nothing is blocking' over open risks. Each case below leaves
+    exactly one open risk as the ONLY blocker, with executed evidence
+    recorded, so the verdict must block and both counts must read 1."""
+
+    def setUp(self):
+        LeadCase.setUp(self)
+        self.seed_project()
+        self.record(_insight(kind="CALIBRATION", subject="the booking test",
+                             claim="the booking test catches a broken form",
+                             evidence_class="EXECUTED",
+                             evidence="python3 -m pytest test_booking.py",
+                             mutation="removed the required attribute",
+                             observed="1 failure"))
+
+    def assert_one_blocking_risk(self):
+        code, out, err = self.run_cli("status", "--project-id", "p1")
+        self.assertEqual(0, code, out + err)
+        values = _field_values(out)
+        self.assertEqual(
+            "do not ship yet: 0 open decision(s), 1 open risk(s), "
+            "evidence recorded", values["Verdict"],
+            "one open risk must block and be counted. Got:\n%s" % out)
+        self.assertEqual("1 open", values["Risk"],
+                         "the Risk field must count the same set. "
+                         "Got:\n%s" % out)
+
+    def test_an_unresolved_human_alert_blocks(self):
+        self.store.raise_alert(
+            {"alert_id": "a1", "severity": "high",
+             "message": "a Bash command changed a path inside the fence",
+             "requires_human": True, "created_at": self.clock.iso()},
+            "p1", self.actor)
+        self.assert_one_blocking_risk()
+
+    def test_a_risk_older_than_the_last_briefing_still_blocks(self):
+        self.record(_insight(kind="RISK", subject="the refund path",
+                             claim="the refund path is untested",
+                             evidence_class="REASONED", confidence="low",
+                             flip_condition="run the refund test"))
+        self.clock.advance(60)
+        self.store.record_briefing(
+            "p1", {"trigger": "REQUESTED",
+                   "where_we_are": "the booking form is being wired"},
+            self.actor)
+        self.clock.advance(60)
+        self.assert_one_blocking_risk()
+
+    def test_a_resolved_or_non_human_alert_does_not_block(self):
+        self.store.raise_alert(
+            {"alert_id": "a2", "severity": "info", "message": "fyi",
+             "requires_human": False, "created_at": self.clock.iso()},
+            "p1", self.actor)
+        code, out, err = self.run_cli("status", "--project-id", "p1")
+        self.assertEqual(0, code, out + err)
+        values = _field_values(out)
+        self.assertTrue(values["Verdict"].startswith("nothing is blocking"),
+                        out)
+        self.assertEqual("none new", values["Risk"], out)
+
+
 # ---------------------------------------------------------------------------
 # R-12: status answers the question it was asked before the fields
 # ---------------------------------------------------------------------------
@@ -949,8 +1015,8 @@ class TestAskAnswersFirst(LeadCase):
             "Asked: 2am outage, one line for execs", lines[0],
             "the Asked line must come first. Got:\n%s" % out)
         self.assertEqual(
-            "Route: incident, see brothersbe:start", lines[1],
-            "an incident ask must route to brothersbe:start. Got:\n%s"
+            "Route: incident, see /brother:brothersbe-start", lines[1],
+            "an incident ask must route to /brother:brothersbe-start. Got:\n%s"
             % out)
         self.assertTrue(
             lines[2].startswith("Verdict:"),
@@ -1032,7 +1098,7 @@ class TestAskRoutesInJapanese(LeadCase):
         self.assertEqual(0, code, out + err)
         lines = [ln for ln in out.splitlines() if ln.strip()]
         self.assertEqual(
-            "Route: incident, see brothersbe:start", lines[1],
+            "Route: incident, see /brother:brothersbe-start", lines[1],
             "an ask of 2\u6642\u969c\u5bb3 must route to incident. "
             "Got:\n%s" % out)
 
@@ -1047,7 +1113,7 @@ class TestSkillTextNamesTheThreeAskRoutes(unittest.TestCase):
     def test_brothermode_status_skill_names_the_three_routes(self):
         text = _read_text(os.path.join(ROOT, "skills", "status",
                                        "SKILL.md"))
-        for needle in ("answer that question first", "brothersbe:start",
+        for needle in ("answer that question first", "brother:brothersbe-start",
                       "sbe verify", "honesty.md"):
             self.assertIn(
                 needle, text,
@@ -2673,7 +2739,7 @@ class TestNoProjectTreeRead(NoProjectCase):
         self.assertIn("Add the delivery window migration", out,
                       "the last commit's subject must be named. "
                       "Got:\n%s" % out)
-        self.assertIn("/brothermode:start", out)
+        self.assertIn("/brother:brothermode-start", out)
 
     def test_brief_lists_a_change_request_document_by_name(self):
         docs = os.path.join(self.root, "docs")

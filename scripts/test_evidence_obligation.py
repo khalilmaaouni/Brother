@@ -187,10 +187,29 @@ class EvidenceObligationTests(unittest.TestCase):
                 ("key-components", 2),
                 ("readiness-board", 2),
                 ("board-status", 2),
+                ("plugin-runtime-tests-fast", 2),
             ]
             proc = run_transition(repo, "merge", lines)
             self.assertEqual(proc.returncode, 0)
             self.assertIn("transition: ALLOWED", proc.stdout)
+
+    def test_current_map_allows_the_plugin_runtime_row_only_where_the_hub_marker_is_absent(self):
+        # the real map, two trees that differ in the hub's edition marker alone (never exported), at both stages
+        with open(os.path.join(HERE, "gate_obligations.json"), "r", encoding="utf-8") as handle:
+            obligations = json.load(handle)
+        row = [("plugin-runtime-tests-fast", 2)]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = make_repo(temp_dir, obligations)
+            for stage in ("merge", "release"):
+                public = run_transition(repo, stage, row)
+                self.assertEqual(public.returncode, 0, public.stdout)
+                self.assertIn("plugin-runtime-tests-fast\tNO-DATA\tREQUIRED_FOR_MERGE\tALLOWED\tNO-DATA_ALLOWED", public.stdout)
+            with open(os.path.join(repo, ".brother-edition"), "w", encoding="utf-8") as handle:
+                handle.write("edition: public-core\n")
+            for stage in ("merge", "release"):
+                hub = run_transition(repo, stage, row)
+                self.assertEqual(hub.returncode, 1, hub.stdout)
+                self.assertIn("plugin-runtime-tests-fast\tNO-DATA\tREQUIRED_FOR_MERGE\tBLOCKED\tNO-DATA_BLOCKING", hub.stdout)
 
     def test_missing_file_empty_stdin_unknown_level(self):
         with tempfile.TemporaryDirectory() as temp_dir:

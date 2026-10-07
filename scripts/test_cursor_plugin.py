@@ -25,6 +25,20 @@ REPO = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 
 import cursor_plugin_install as inst  # noqa: E402
+import retire_catalogs as RC  # noqa: E402
+
+PRODUCTS = ("brothermode", "brothersbe")
+
+
+def _expected_names(source):
+    """The catalog shape the source catalog commits to: only brother once
+    retired (legal only from RC.RETIRE_AT), brother plus the products before."""
+    names = [p["name"] for p in source["plugins"]]
+    if names == [RC.KEEP]:
+        if not RC.applies(source["metadata"]["version"]):
+            raise AssertionError("catalog retired below %s" % (RC.RETIRE_AT,))
+        return [RC.KEEP]
+    return [RC.KEEP] + list(PRODUCTS)
 
 
 REQUIRED_HOOK_EVENTS = (
@@ -58,8 +72,8 @@ class TestCursorPluginPackage(unittest.TestCase):
                                             "marketplace.json")))
         self.assertEqual(doc["name"], "brother")
         names = [p["name"] for p in doc["plugins"]]
-        self.assertEqual(names, ["brother", "brothermode", "brothersbe"])
         source = json.loads(_read(".claude-plugin/marketplace.json"))
+        self.assertEqual(names, _expected_names(source))
         self.assertEqual(doc["metadata"]["version"], source["metadata"]["version"])
         self.assertFalse(_has_dash(json.dumps(doc)))
 
@@ -77,12 +91,18 @@ class TestCursorPluginPackage(unittest.TestCase):
     def test_product_manifests_match_marketplace_versions(self):
         market = json.loads(_read(os.path.join(
             ".claude-plugin", "marketplace.json")))
-        for name in ("brothermode", "brothersbe"):
-            entry = next(p for p in market["plugins"] if p["name"] == name)
+        listed = {p["name"]: p for p in market["plugins"]}
+        for name in PRODUCTS:
             manifest = json.loads(_read(os.path.join(
                 "products", name, ".cursor-plugin", "plugin.json")))
             self.assertEqual(manifest["name"], name)
-            self.assertEqual(manifest["version"], entry["version"])
+            if name in listed:
+                want = listed[name]["version"]
+            else:
+                # Retired from the catalog: the product's own manifest rules.
+                want = json.loads(_read(os.path.join(
+                    "products", name, ".claude-plugin", "plugin.json")))["version"]
+            self.assertEqual(manifest["version"], want)
 
     def test_hooks_cover_every_required_event_and_use_plugin_root(self):
         doc = json.loads(_read(os.path.join(
@@ -253,6 +273,27 @@ class TestCursorPluginDoorSmoke(unittest.TestCase):
         combined = (proc.stdout or "") + (proc.stderr or "")
         self.assertIn(proc.returncode, (0, 1, 2), combined)
         self.assertNotIn("Traceback (most recent call last)", combined)
+
+
+class TestRetiredCatalogShape(unittest.TestCase):
+    """The rehearsed cut retires the catalogs; the shape check must follow."""
+
+    def _src(self, names, version):
+        return {"metadata": {"version": version},
+                "plugins": [{"name": n} for n in names]}
+
+    def test_before_retirement_lists_the_products(self):
+        self.assertEqual(_expected_names(self._src(
+            ["brothermode", "brothersbe", "brother"], "1.1.0")),
+            ["brother", "brothermode", "brothersbe"])
+
+    def test_after_retirement_lists_only_brother(self):
+        self.assertEqual(_expected_names(self._src(["brother"], "1.1.0")),
+                         ["brother"])
+
+    def test_retired_below_the_rule_is_refused(self):
+        with self.assertRaises(AssertionError):
+            _expected_names(self._src(["brother"], "1.0.9"))
 
 
 if __name__ == "__main__":

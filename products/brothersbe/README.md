@@ -4,7 +4,7 @@
 
 ## Install through Brother
 
-The root [Brother install](../../README.md#install) is the public route:
+The root [Brother install](../../README.md#start-in-sixty-seconds) is the public route:
 
 ```bash
 claude plugin marketplace add khalilmaaouni/Brother && claude plugin install brother@brother
@@ -83,7 +83,7 @@ For a migration, do not treat the existence of a reverse file as proof that it r
 - The work code path never runs a git merge, rebase, push, or deploy. `TestNoMergeLaw` in `tools/test_sbe_work.py` parses `src/brothersbe/work.py` and fails on any git argument vector whose first word is one of those four, and on any argument head that scan cannot read statically. Approval and release are a design limit, not a proven one: no check here establishes them.
 - It does not replace engineering, security, data, or quality review.
 - Platform-specific behavior needs evidence from the platform where it will run.
-- The current public tag is unsigned.
+- Signature status is not established here. Check the exact tag you download; a matching checksum does not authenticate its publisher.
 
 The honest handoff is simple: here is what passed, here is what failed, here is what remains unknown, and here are the commands that produced those answers.
 

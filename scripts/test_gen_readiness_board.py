@@ -161,10 +161,9 @@ class EndToEnd(unittest.TestCase):
         self.assertEqual(missing, [], 'rows with no done_check: %s' % missing)
 
     def test_the_rendered_board_contains_no_em_or_en_dash(self):
-        code, _ = self.run_script()
-        self.assertEqual(code, 0)
-        with open(board.OUTPUT, encoding='utf-8') as fh:
-            text = fh.read()
+        # Rendered in memory, never written: running the generator here rewrote the TRACKED board in whatever tree
+        # the fast gate ran in, which dirtied the loop's launch tree after every landing (2026-09-30).
+        text = board.render(board.load())
         # Written as escapes, never as literals. The first draft of this test
         # embedded the two characters directly and cleanse.sh, which scans the
         # whole tree, refused the commit: the dash checker contained the dashes
@@ -617,6 +616,19 @@ class Night0912GenReadinessBoard(unittest.TestCase):
         problems = board.validate(d)
         self.assertTrue(problems, 'a row without an id must be rejected')
         self.assertTrue(any('id' in p.lower() for p in problems), problems)
+
+
+# THE PRIVATE ROADMAP IS NOT SHIPPED (2026-09-30): the public export tree carries no
+# docs/plan/READINESS-ROADMAP-2026-08-29.json, and required_fast.sh already reports this suite NO-DATA
+# there. Most classes load it (36 errors and 2 failures on the export tree before this); the few that
+# build their own fixtures skip with them, which is the same one rule the fast gate applies to the whole
+# suite, stated here by name rather than as 36 errors that say nothing about the change under test.
+for _name, _cls in list(globals().items()):
+    if isinstance(_cls, type) and issubclass(_cls, unittest.TestCase) and _cls is not unittest.TestCase:
+        globals()[_name] = unittest.skipUnless(os.path.exists(board.SOURCE),
+                                               'no %s in this tree (a private file the public export never ships)'
+                                               % os.path.relpath(board.SOURCE, board.ROOT))(_cls)
+del _name, _cls   # a module level name left bound to a TestCase is loaded a second time
 
 
 if __name__ == '__main__':

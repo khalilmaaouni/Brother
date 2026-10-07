@@ -23,7 +23,9 @@ suite pins THAT SHAPE, not just that some text exists:
 import glob
 import os
 import re
+import subprocess
 import sys
+import typing
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -74,6 +76,47 @@ def _body(text):
             newline = after.find("\n")
             return "" if newline == -1 else after[newline + 1:]
     return text
+
+
+HANDOVER_DIR = "handover-to-launch-epic-2026-09-20"
+
+
+def handover_mentions(body):
+    """Every line of the command file that names the handover directory, in
+    file order, so the door can be proven to name it exactly once."""
+    if not isinstance(body, str):
+        raise ValueError(
+            "handover_mentions needs the command file as a str, got %s"
+            % type(body).__name__)
+    return [line for line in body.splitlines() if HANDOVER_DIR in line]
+
+
+def command_lines(body):
+    """Every line of the command file a person could run, taken from fenced
+    and indented blocks, in file order, so the bare door can be proven to
+    hand over exactly one command."""
+    if not isinstance(body, str):
+        raise ValueError(
+            "command_lines needs the command file as a str, got %s"
+            % type(body).__name__)
+    commands = []
+    in_fence = False
+    for line in body.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            if stripped:
+                commands.append(stripped)
+            continue
+        if line[:4] == "    " and stripped:
+            commands.append(stripped)
+            continue
+        for span in re.findall(r"`([^`\n]+)`", line):
+            if " --" in span:
+                commands.append(span.strip())
+    return commands
 
 
 def _iter_bundle_text_files():
@@ -191,6 +234,12 @@ class ShippedCommandStaysSmall(unittest.TestCase):
             % (COMMAND_PATH, len(lines), self.CEILING, MAINTAINER_REFERENCE))
 
     def test_maintainer_reference_exists_and_is_named_by_the_command(self):
+        # A checkout property: the reference is hub-only, so the export tree cannot hold it (2026-09-28, the hermetic
+        # check refused a landing that only touched this file). Skipped when absent, as test_jev_catalogue_l6b1 does
+        # for its plan document. ponytail: the export tree carries no marker of its own, so a reference deleted in a
+        # checkout also skips here; add an export marker to export_public.py if that case ever matters.
+        if not os.path.isfile(MAINTAINER_REFERENCE):
+            self.skipTest("hub-only reference, not in this tree: %s" % MAINTAINER_REFERENCE)
         self.assertTrue(
             os.path.isfile(MAINTAINER_REFERENCE),
             "the maintainer reference %s is missing, so the command's "
@@ -252,20 +301,47 @@ class TestDoorTable(unittest.TestCase):
     def test_every_installed_skill_name_appears_in_the_door_table(self):
         door_text = _read(COMMAND_PATH)
         missing = []
-        for product in GDT.PRODUCTS:
-            pattern = os.path.join(GDT.ROOT, "products", product, "skills",
-                                    "*", "SKILL.md")
-            paths = sorted(glob.glob(pattern))
-            self.assertTrue(
-                paths, "no skills found under products/%s/skills" % product)
-            for path in paths:
-                name, _typeable = GDT.read_skill(path)
-                row_marker = "| %s |" % name
-                if row_marker not in door_text:
-                    missing.append("%s:%s" % (product, name))
+        pattern = os.path.join(GDT.ROOT, "bundle", "skills", "*", "SKILL.md")
+        paths = sorted(glob.glob(pattern))
+        self.assertTrue(paths, "no skills found under bundle/skills")
+        rows = 0
+        for path in paths:
+            name, _typeable = GDT.read_skill(path)
+            split = GDT.split_name(name)
+            if split is None:
+                continue
+            rows += 1
+            product, verb = split
+            if "| %s |" % verb not in door_text:
+                missing.append("%s:%s" % (product, verb))
+            if "`/brother:%s`" % name not in door_text:
+                missing.append("cell /brother:%s" % name)
+        self.assertGreater(rows, 0)
         self.assertEqual(
             missing, [],
             "%s carries no row for: %s" % (COMMAND_PATH, ", ".join(missing)))
+
+    def test_no_retired_namespace_in_bundle(self):
+        """One plugin (2026-09-30): after 1.1.0 nothing but `brother` is
+        installed, so a cell or a skill saying /brothermode:, /brothersbe:
+        or /brotherds: names a command that does not exist."""
+        hits = GDT.retired_namespace_hits(REPO_ROOT, ("bundle",))
+        self.assertEqual(hits, [], hits[:5])
+
+    def test_check_mode_goes_red_on_a_stale_table(self):
+        before = _read(COMMAND_PATH)
+        try:
+            GDT.rewrite(COMMAND_PATH, "| Verb | x | y |\n|---|---|---|\n")
+            proc = subprocess.run([sys.executable, "-B", GDT.__file__,
+                                   "--check"], capture_output=True, text=True)
+            self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+            self.assertIn("DRIFT", proc.stderr)
+        finally:
+            with open(COMMAND_PATH, "w", encoding="utf-8") as fh:
+                fh.write(before)
+        proc = subprocess.run([sys.executable, "-B", GDT.__file__, "--check"],
+                              capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
 
     def test_generator_is_idempotent(self):
         cells = GDT.collect()
@@ -315,6 +391,65 @@ class TestDoorTable(unittest.TestCase):
             real_cells = GDT.collect()
             restored = GDT.rewrite(COMMAND_PATH, GDT.render_table(real_cells))
             self.assertTrue(restored or GDT.BEGIN in _read(COMMAND_PATH))
+
+class HandoverMentions(unittest.TestCase):
+    """RQ-05 (2026-09-20) had the door name the handover directory exactly
+    once. Reversed 2026-09-30 (architecture review F6): that directory lives
+    under a private evidence root, never in the plugin, so a user reading
+    /brother saw an internal session pointer. The door names it never."""
+
+    @unittest.skipUnless(os.path.isfile(COMMAND_PATH),
+                         "bundle/commands/brother.md is not present")
+    def test_handover_directory_never_named(self):
+        mentions = handover_mentions(_body(_read(COMMAND_PATH)))
+        self.assertEqual(
+            mentions, [],
+            "the door must not carry the private pointer %s, found %r"
+            % (HANDOVER_DIR, mentions))
+
+
+class HandsOneCommand(unittest.TestCase):
+    """RQ-04: bare /brother hands the person exactly one command."""
+
+    @unittest.skipUnless(os.path.isfile(COMMAND_PATH),
+                         "bundle absent from this export copy")
+    def test_bare_brother_names_exactly_one_command(self):
+        lines = _read(COMMAND_PATH).splitlines()
+        start = None
+        for i, line in enumerate(lines):
+            if line.startswith("## Bare `/brother`"):
+                start = i
+                break
+        self.assertIsNotNone(start, "the bare /brother section is missing")
+        end = len(lines)
+        for j in range(start + 1, len(lines)):
+            if lines[j].startswith("## "):
+                end = j
+                break
+        bare = "\n".join(lines[start:end])
+        commands = command_lines(bare)
+        self.assertEqual(
+            len(commands), 1,
+            "bare /brother must hand exactly one command, found %r"
+            % (commands,))
+        self.assertIn("brother-run --continue", commands[0])
+
+
+class RefusesHostileInput(unittest.TestCase):
+    """Both helpers refuse a non-str body with ValueError, never a crash."""
+
+    BAD = (None, 123, 1.5, float("nan"), True, b"bytes", ["a"], {"k": 1})
+
+    def test_handover_mentions_refuses_a_non_str(self):
+        for bad in self.BAD:
+            with self.assertRaises(ValueError):
+                handover_mentions(bad)
+
+    def test_command_lines_refuses_a_non_str(self):
+        for bad in self.BAD:
+            with self.assertRaises(ValueError):
+                command_lines(bad)
+
 
 if __name__ == "__main__":
     unittest.main()

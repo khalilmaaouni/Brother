@@ -66,6 +66,26 @@ from private_terms_scan import load_terms, scan_text  # noqa: E402
 #: rather than imported (see the module docstring for why).
 DASHES = (chr(0x2014), chr(0x2013))  # em dash, en dash
 
+#: A credit line names a model or tool as the author or drafter of the text
+#: around it. Owner law 2026-09-26: only the owner is credited, and no model
+#: may add a credit. The shape is an authorship verb, then "by" or "with",
+#: then a model or tool name. Assembled from these word lists, never written
+#: as one phrase, for the same reason DASHES is built from code points: a
+#: scanner must not contain what it forbids. Naming a tool without claiming
+#: authorship (a routing note, a billing figure, "reviewed by") is not a
+#: credit and does not match. scripts/test_export_public.py applies this same
+#: pattern to the whole exported tree.
+CREDIT_VERBS = ("drafted", "written", "authored", "co-authored", "generated",
+                "produced", "created", "prepared", "composed", "made",
+                "built", "powered")
+CREDIT_NAMES = ("Codex", "ChatGPT", "OpenAI", "GPT", r"gpt-\d", "Claude",
+                "Anthropic", "Opus", "Sonnet", "Haiku", "Fable", "DeepSeek",
+                "Muse", "Jev", "Typesafe", "Gemini", "Copilot", "Nemotron",
+                "Llama", "Mistral", "Qwen")
+MODEL_CREDIT = re.compile(r"\b(?:%s)\s+(?:by|with)\s+\[?(?:%s)\b"
+                          % ("|".join(CREDIT_VERBS), "|".join(CREDIT_NAMES)),
+                          re.IGNORECASE)
+
 EXIT_CLEAN, EXIT_FOUND, EXIT_NO_DATA = 0, 1, 2
 
 #: How this tool recognises a pre-commit hook it installed, to avoid
@@ -120,6 +140,12 @@ def scan_dashes(added_lines):
             if any(d in content for d in DASHES)]
 
 
+def scan_model_credits(added_lines):
+    """[(path, lineno)] for every added line crediting a model or tool."""
+    return [(path, lineno) for path, lineno, content in added_lines
+            if MODEL_CREDIT.search(content)]
+
+
 def scan_private_terms(added_lines, terms):
     """[(path, lineno, [length, ...])] for every added line carrying a
     private term. The matched term is never kept past this call and never
@@ -139,6 +165,34 @@ def staged_diff(cwd=None, runner=None):
     return runner(["git", "diff", "--cached", "--no-color", "--unified=0"])
 
 
+def drop_merge_carried(added, cwd=None, runner=None):
+    """ACC9 (2026-09-26): (kept, carried). During a merge the staged diff is
+    taken against the branch HEAD, so every line the merge brings from the
+    other branch looks added, and merging main forward was blocked on lines
+    main already carried. A line whose exact text is already in MERGE_HEAD's
+    copy of the same file is the other branch's, not the committer's: it is
+    not counted. Everything else is still scanned, including anything written
+    while resolving the merge. No merge in progress, or MERGE_HEAD or that
+    file's copy unreadable: nothing is dropped, so a failure here scans more,
+    never less."""
+    run = runner or (lambda cmd: subprocess.run(
+        cmd, capture_output=True, text=True, cwd=cwd))
+    probe = run(["git", "rev-parse", "-q", "--verify", "MERGE_HEAD^{commit}"])
+    if probe.returncode != 0 or not re.fullmatch(r"[0-9a-f]{40,64}", (probe.stdout or "").strip()):
+        return added, 0
+    theirs = {}
+    kept, carried = [], 0
+    for path, lineno, content in added:
+        if path not in theirs:
+            shown = run(["git", "show", "MERGE_HEAD:" + path])
+            theirs[path] = set((shown.stdout or "").splitlines()) if shown.returncode == 0 else None
+        if theirs[path] is not None and content in theirs[path]:
+            carried += 1
+        else:
+            kept.append((path, lineno, content))
+    return kept, carried
+
+
 def run_scan(cwd=None, terms_path=None, runner=None):
     """Returns (exit_code, [message_lines]). Never raises on a missing terms
     file or an unreadable diff: NO-DATA IS NEVER A PASS, so both come back as
@@ -147,15 +201,24 @@ def run_scan(cwd=None, terms_path=None, runner=None):
     if proc.returncode != 0:
         return EXIT_NO_DATA, ["NO-DATA: could not read the staged diff: %s"
                                % (proc.stderr or "").strip()]
-    added = list(parse_added_lines(proc.stdout or ""))
+    added, carried = drop_merge_carried(list(parse_added_lines(proc.stdout or "")), cwd, runner)
     dash_hits = scan_dashes(added)
     terms = load_terms(terms_path)
 
     lines = []
+    if carried:
+        lines.append("note: %d line(s) already in MERGE_HEAD's copy of their file "
+                     "were not counted: the merge brings them from the other branch"
+                     % carried)
     found = False
     for path, lineno in dash_hits:
         found = True
         lines.append("BLOCK dash: %s:%d" % (path, lineno))
+    for path, lineno in scan_model_credits(added):
+        found = True
+        lines.append("BLOCK model credit: %s:%d (only the owner is "
+                     "credited; record provenance in a local evidence log)"
+                     % (path, lineno))
 
     if terms is None:
         lines.append(
@@ -178,8 +241,8 @@ def run_scan(cwd=None, terms_path=None, runner=None):
         return EXIT_FOUND, lines
     if terms is None or not terms:
         return EXIT_NO_DATA, lines
-    lines.append("PASS: %d added line(s) checked, no new dash and no "
-                  "private term" % len(added))
+    lines.append("PASS: %d added line(s) checked, no new dash, no model "
+                  "credit and no private term" % len(added))
     return EXIT_CLEAN, lines
 
 

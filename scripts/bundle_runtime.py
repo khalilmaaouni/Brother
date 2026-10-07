@@ -94,7 +94,8 @@ tools/, and writes bundle/hooks/hooks.json: the union of both products'
 hooks.json, brothermode's own event order first then brothersbe's, every
 `${CLAUDE_PLUGIN_ROOT}/tools/` rewritten to
 `${CLAUDE_PLUGIN_ROOT}/runtime/hooks/<product>/tools/` so the mirrored copy
-is what actually runs.
+is what actually runs, and every command wrapped by the double-fire guard
+(runtime/hooks/hook_guard.py, docs/architecture/ADR-ONE-PLUGIN-HOOKS.md).
 
 WHY A SEPARATE MANIFEST (bundle/runtime/hooks/HOOKS-MANIFEST.json) RATHER
 THAN ADDING TO RUNTIME-MANIFEST.json's OWN "files" LIST: ManifestMatchesThe
@@ -127,35 +128,62 @@ ENTRY = "brother_run.py"
 #: closure root, not a pretend import from brother_run.py: evidence units call
 #: it directly, and an installed runtime must carry the same guard a checkout
 #: can name in its done_check.
-SUPPORT_ENTRIES = ("native_evidence.py", "mobile_workflow.py", "mobile_design.py")
+#: dream_bridge.py is a support root too: nothing in the runner imports it,
+#: and an installed copy without it has no way to reach the learning recorder.
+SUPPORT_ENTRIES = ("native_evidence.py", "mobile_workflow.py", "mobile_design.py",
+                   "dream_bridge.py")
 MANIFEST_NAME = "RUNTIME-MANIFEST.json"
 LAUNCHER_NAME = "brother-run"
 VERIFIER_NAME = "verify_runtime.py"
 #: The two products whose hooks.json a Codex-only or Claude-only install
 #: must still carry, in the order their commands appear in the merged
-#: bundle/hooks/union.json (brothermode first, per the brief).
+#: bundle/hooks/hooks.json (brothermode first, per the brief).
 HOOK_PRODUCTS = ("brothermode", "brothersbe")
-#: DECISION 2026-09-13: this file is NEVER named "hooks.json". Claude Code
-#: auto-loads an installed plugin's own hooks/hooks.json by convention, and
-#: brother ALSO declares brothermode+brothersbe as real plugin dependencies
-#: (needed for their 15 slash-commands), which Claude auto-enables and which
-#: register these same hook events themselves. A brother-owned hooks.json at
-#: the conventional path made every shared hook fire twice, all session, on
-#: Claude Code -- the only host left reading it (Codex's plugin validator
-#: refuses any manifest carrying a "hooks" key at all; Cursor has its own
-#: separate live generator, scripts/cursor_plugin_install.py). Naming this
-#: output "union.json" instead is the whole fix: check_hooks() below also
-#: actively refuses a resurrected bundle/hooks/hooks.json, so moving this
-#: back is a red gate, not a quiet regression.
-HOOKS_JSON_NAME = "union.json"
+#: DECISION 2026-09-30 (docs/architecture/ADR-ONE-PLUGIN-HOOKS.md): the
+#: merged file IS named "hooks.json", the path Claude Code auto-loads from an
+#: installed plugin, because after 1.1.0 brother is the ONLY plugin a user
+#: installs and it must carry its own fence, clock guard and session memory.
+#: The 2026-09-13 double-firing (brother depended on brothermode and
+#: brothersbe, which registered the same events themselves) is prevented at
+#: runtime instead: every generated command is wrapped by HOOK_GUARD_NAME,
+#: which yields when the old standalone plugin for that product is enabled
+#: and installed, and by the manifest carrying no "dependencies" key
+#: (check_hooks() refuses one). The name the file carried in between,
+#: "union.json", is the retired one now, and check_hooks() refuses it.
+HOOKS_JSON_NAME = "hooks.json"
 #: The retired path check_hooks() must never find populated again.
-RETIRED_HOOKS_JSON_NAME = "hooks.json"
+RETIRED_HOOKS_JSON_NAME = "union.json"
+#: The double-fire guard: source scripts/hook_guard.py, mirrored to
+#: bundle/runtime/hooks/hook_guard.py and listed in HOOKS-MANIFEST.json.
+HOOK_GUARD_NAME = "hook_guard.py"
+#: Every hook event Claude Code names (code.claude.com/docs/en/hooks, the
+#: hook events table, read 2026-09-30). The generator interpolates the event
+#: into a shell command, so anything else is refused, never shipped.
+HOOK_EVENTS = frozenset((
+    "SessionStart", "Setup", "UserPromptSubmit", "UserPromptExpansion",
+    "PreToolUse", "PermissionRequest", "PermissionDenied", "PostToolUse",
+    "PostToolUseFailure", "PostToolBatch", "Notification", "MessageDisplay",
+    "SubagentStart", "SubagentStop", "TaskCreated", "TaskCompleted", "Stop",
+    "StopFailure", "TeammateIdle", "InstructionsLoaded", "ConfigChange",
+    "CwdChanged", "DirectoryAdded", "FileChanged", "WorktreeCreate",
+    "WorktreeRemove", "PreCompact", "PostCompact", "PreModelSwitch",
+    "PostModelSwitch", "Elicitation", "ElicitationResult", "SessionEnd"))
+#: The bundle's Claude Code manifest; check_hooks() refuses a "dependencies"
+#: key in it, since a dependency plugin would register the same hooks again.
+PLUGIN_MANIFEST_TAIL = os.path.join(".claude-plugin", "plugin.json")
+#: The file every host manifest directory under bundle/ carries.
+PLUGIN_MANIFEST_NAME = "plugin.json"
+#: Every host manifest directory the bundle ships (OP1.b, docs/plan/specs/
+#: OP1.md 5.2). manifest_problems() reports one of these missing, and a
+#: fifth "-plugin" directory it discovers that is not listed here: adding a
+#: host is a deliberate change to this tuple and to scripts/client_parity.py
+#: in the same commit, never a directory nobody listed.
+KNOWN_HOSTS = (".claude-plugin", ".codex-plugin", ".cursor-plugin",
+               ".antigravity-plugin")
 #: What a PRODUCT's own hooks file is named on disk (products/<name>/hooks/
 #: this), which is NOT renamed and never will be: Codex's own installer
 #: (codex_hooks_install.py) and Cursor's (cursor_plugin_install.py) both
-#: read a product's hooks straight from this exact name. Only brother's
-#: OWN merged output (HOOKS_JSON_NAME above) moved; a product's source file
-#: did not, so this is a separate constant, not a reuse of HOOKS_JSON_NAME.
+#: read a product's hooks straight from this exact name.
 PRODUCT_HOOKS_JSON_NAME = "hooks.json"
 HOOKS_MANIFEST_NAME = "HOOKS-MANIFEST.json"
 #: The one product that ships an optional MCP server today. Its
@@ -165,6 +193,13 @@ HOOKS_MANIFEST_NAME = "HOOKS-MANIFEST.json"
 MCP_PRODUCT = "brothermode"
 MCP_SERVER_NAME = "bm_mcp_server.py"
 MCP_JSON_NAME = "mcp.json"
+#: The Antigravity adapter's one script: source scripts/<this>, mirrored
+#: into bundle/.antigravity-plugin/scripts/ (F3, 2026-09-30: the bundle is
+#: the only plugin tree shipped, so the adapter ships from it). The
+#: adapter's hooks.json, mcp_config.json and rules/ are sources of their
+#: own, hand written under bundle/.antigravity-plugin/.
+ANTIGRAVITY_HOOK_NAME = "brother_antigravity_hook.py"
+ANTIGRAVITY_DIR_TAIL = os.path.join(".antigravity-plugin", "scripts")
 #: Matches the exact command shape every hook in both products uses:
 #: `... "${CLAUDE_PLUGIN_ROOT}/tools/<name>.py" ...`.
 _HOOK_TOOL_RE = re.compile(
@@ -191,6 +226,12 @@ DATA_DIRS = ("packs",)
 DATA_FILES = {
     "contract_check.py": ("docs/schema/outcome-contract-v1.json",
                           "outcome-contract-v1.json"),
+    # REQ-BUNDLE: the learning recorder lives in the plugin tree, which an
+    # installed runtime does not carry. It ships flat beside its bridge and
+    # beside journal.py: the bridge's last candidate is <here>/dream_record.py
+    # and the recorder's is <here>/journal.py.
+    "dream_bridge.py": ("plugin/runtime/brother/core/dream_record.py",
+                        "dream_record.py"),
 }
 
 NODATA = "NO-DATA"
@@ -226,35 +267,16 @@ LAUNCHER_DIR = os.path.dirname(os.path.abspath(__file__))
 BROTHER_RUN = os.path.join(LAUNCHER_DIR, "brother_run.py")
 
 
-def default_runs_root(launcher_dir=LAUNCHER_DIR, env=None):
-    """Where a run's Work document and claim store live when the caller does
-    not say with --runs-root. A dev checkout keeps them inside its own
-    repository, exactly as brother_run.py does by default when it is run
-    from scripts/ directly. An installed plugin has no such writable
-    repository beside it (the plugin cache is replaced on update, so writing
-    run state there would lose it at the next upgrade), so that case falls
-    back to a per-user state directory instead."""
-    env = os.environ if env is None else env
-    override = (env.get("BROTHER_RUNS_ROOT") or "").strip()
-    if override:
-        return override
-    try:
-        proc = subprocess.run(
-            ["git", "-C", launcher_dir, "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, timeout=10)
-    except OSError:
-        proc = None
-    if proc is not None and proc.returncode == 0:
-        top = proc.stdout.strip()
-        if top and os.access(top, os.W_OK):
-            return top
-    return os.path.expanduser(os.path.join("~", ".claude", "brother-run"))
-
-
 def main(argv=None):
+    """WHERE A RUN'S RECORDS LIVE IS THE ENGINE'S ONE RULE (brother_run.py,
+    default_runs_root), never a second one here. Until 2026-10-06 this
+    launcher computed a default of its own and passed it as --runs-root, so
+    it and `python3 <plugin root>/runtime/brother_run.py`, the form the
+    shipped skill gives, kept records in two places: runs started that way
+    sat inside the plugin folder, which an update replaces, and --continue
+    here never saw them. It now passes the caller's arguments and nothing
+    else; an explicit --runs-root still reaches the engine untouched."""
     args = list(sys.argv[1:] if argv is None else argv)
-    if "--runs-root" not in args:
-        args = args + ["--runs-root", default_runs_root()]
     return subprocess.call([sys.executable, BROTHER_RUN] + args)
 
 
@@ -608,17 +630,32 @@ def compute_hook_package_files(product, tools_dir, closure,
     return sorted(found)
 
 
-def _rewrite_plugin_root_command(command, product):
+def _rewrite_plugin_root_command(command, product, event, matcher):
     """`${CLAUDE_PLUGIN_ROOT}/tools/` moved to where this module mirrors
     `product`'s tools once installed, so the command that actually ships
-    points at bytes that actually exist in the plugin."""
-    return command.replace(
+    points at bytes that actually exist in the plugin; and every command is
+    wrapped by the double-fire guard (HOOK_GUARD_NAME, see the ADR), which
+    is told the product, the event and the group's matcher so it can yield
+    per hook (the identity is event, matcher and script). A matcher the
+    shell could expand inside double quotes is refused, never shipped."""
+    if event not in HOOK_EVENTS:
+        raise ValueError("%s: %r is not a Claude Code hook event"
+                         % (product, event))
+    if not isinstance(matcher, str) or any(c in matcher for c in '"$`\\'):
+        raise ValueError("%s %s: matcher %r cannot be passed to the guard"
+                         % (product, event, matcher))
+    return ('python3 "${CLAUDE_PLUGIN_ROOT}/runtime/hooks/%s" %s %s "--matcher=%s" '
+            % (HOOK_GUARD_NAME, product, event, matcher)) + command.replace(
         "${CLAUDE_PLUGIN_ROOT}/tools/",
         "${CLAUDE_PLUGIN_ROOT}/runtime/hooks/%s/tools/" % product)
 
 
+def _hook_guard_src(scripts_dir=SCRIPTS_DIR):
+    return os.path.join(scripts_dir, HOOK_GUARD_NAME)
+
+
 def merged_hooks_doc(products=HOOK_PRODUCTS, products_dir=PRODUCTS_DIR):
-    """bundle/hooks/union.json's content (see HOOKS_JSON_NAME): the union
+    """bundle/hooks/hooks.json's content (see HOOKS_JSON_NAME): the union
     of every named
     product's own hooks.json, each command rewritten to its mirrored
     location, `products`' own order preserved (brothermode's event order
@@ -641,7 +678,8 @@ def merged_hooks_doc(products=HOOK_PRODUCTS, products_dir=PRODUCTS_DIR):
                 new_group = {k: v for k, v in group.items() if k != "hooks"}
                 new_group["hooks"] = [
                     dict(h, command=_rewrite_plugin_root_command(
-                        h.get("command", ""), product))
+                        h.get("command", ""), product, event,
+                        group.get("matcher", "")))
                     for h in group.get("hooks", [])]
                 groups.append(new_group)
         merged[event] = groups
@@ -649,8 +687,9 @@ def merged_hooks_doc(products=HOOK_PRODUCTS, products_dir=PRODUCTS_DIR):
 
 
 def _hooks_manifest_bytes(products=HOOK_PRODUCTS, products_dir=PRODUCTS_DIR,
-                          runtime_dir=RUNTIME_DIR):
-    files = []
+                          runtime_dir=RUNTIME_DIR, scripts_dir=SCRIPTS_DIR):
+    files = [{"path": HOOK_GUARD_NAME,
+              "sha256": _sha256(_read_bytes(_hook_guard_src(scripts_dir)))}]
     for product in products:
         tools_dir, closure = compute_hook_closure(product, products_dir,
                                                   runtime_dir)
@@ -676,11 +715,11 @@ def _hooks_json_bytes(products=HOOK_PRODUCTS, products_dir=PRODUCTS_DIR):
 
 
 def generate_hooks(products=HOOK_PRODUCTS, products_dir=PRODUCTS_DIR,
-                   runtime_dir=RUNTIME_DIR):
+                   runtime_dir=RUNTIME_DIR, scripts_dir=SCRIPTS_DIR):
     """Mirrors every named product's hook-tool closure into
     bundle/runtime/hooks/<product>/tools/, writes their manifest
     (bundle/runtime/hooks/HOOKS-MANIFEST.json), and writes
-    bundle/hooks/union.json (see HOOKS_JSON_NAME). Returns (hook_counts,
+    bundle/hooks/hooks.json (see HOOKS_JSON_NAME). Returns (hook_counts,
     changed): hook_counts is
     {product: command_count reported by that product's own hooks.json},
     changed is the list of paths (relative to the bundle root) written or
@@ -697,6 +736,20 @@ def generate_hooks(products=HOOK_PRODUCTS, products_dir=PRODUCTS_DIR,
             dst = os.path.join(runtime_dir, "hooks", product, "tools", name)
             if _write_if_changed(dst, data):
                 changed.append("runtime/hooks/%s/tools/%s" % (product, name))
+        # Orphan cleanup: a name _mirrored_tool_names already found on disk
+        # but that compute_hook_closure dropped, which only happens when
+        # _closure_from_entries' existence check found no products/ source
+        # left to walk (see check_hooks' own "no longer exists" DRIFT for
+        # the read-only half of this same rule). Nothing can regenerate this
+        # file from any source, so the fix is to stop shipping it.
+        for name in _mirrored_tool_names(product, runtime_dir):
+            if name in closure:
+                continue
+            stale = os.path.join(runtime_dir, "hooks", product, "tools", name)
+            if os.path.isfile(stale):
+                os.remove(stale)
+                changed.append("runtime/hooks/%s/tools/%s (removed: source "
+                               "no longer exists)" % (product, name))
         for tail in compute_hook_package_files(product, tools_dir, closure,
                                                products_dir):
             data = _read_bytes(os.path.join(os.path.dirname(tools_dir),
@@ -705,10 +758,13 @@ def generate_hooks(products=HOOK_PRODUCTS, products_dir=PRODUCTS_DIR,
                                *tail.split("/"))
             if _write_if_changed(dst, data):
                 changed.append("runtime/hooks/%s/%s" % (product, tail))
+    guard_dst = os.path.join(runtime_dir, "hooks", HOOK_GUARD_NAME)
+    if _write_if_changed(guard_dst, _read_bytes(_hook_guard_src(scripts_dir))):
+        changed.append("runtime/hooks/" + HOOK_GUARD_NAME)
     manifest_path = os.path.join(runtime_dir, "hooks", HOOKS_MANIFEST_NAME)
     if _write_if_changed(manifest_path,
                          _hooks_manifest_bytes(products, products_dir,
-                                               runtime_dir)):
+                                               runtime_dir, scripts_dir)):
         changed.append("runtime/hooks/" + HOOKS_MANIFEST_NAME)
     bundle_dir = os.path.dirname(runtime_dir)
     hooks_json_path = os.path.join(bundle_dir, "hooks", HOOKS_JSON_NAME)
@@ -719,12 +775,21 @@ def generate_hooks(products=HOOK_PRODUCTS, products_dir=PRODUCTS_DIR,
 
 
 def check_hooks(products=HOOK_PRODUCTS, products_dir=PRODUCTS_DIR,
-               runtime_dir=RUNTIME_DIR):
-    """Read-only: do bundle/runtime/hooks/ and bundle/hooks/union.json
-    match products/*/hooks/ right now, and does the retired
-    bundle/hooks/hooks.json stay gone? Returns (ok, problems); never
+               runtime_dir=RUNTIME_DIR, scripts_dir=SCRIPTS_DIR):
+    """Read-only: do bundle/runtime/hooks/ and bundle/hooks/hooks.json
+    match products/*/hooks/ right now, is the double-fire guard shipped
+    unchanged, does the retired bundle/hooks/union.json stay gone, and does
+    the manifest carry no "dependencies"? Returns (ok, problems); never
     writes anything."""
     problems = []
+    guard_dst = os.path.join(runtime_dir, "hooks", HOOK_GUARD_NAME)
+    if not os.path.isfile(guard_dst):
+        problems.append("runtime/hooks/%s: missing from bundle/runtime"
+                        % HOOK_GUARD_NAME)
+    elif _read_bytes(guard_dst) != _read_bytes(_hook_guard_src(scripts_dir)):
+        problems.append("runtime/hooks/%s: bundle/runtime copy does not "
+                        "match scripts/%s" % (HOOK_GUARD_NAME,
+                                              HOOK_GUARD_NAME))
     for product in products:
         tools_dir, closure = compute_hook_closure(product, products_dir,
                                                   runtime_dir)
@@ -767,7 +832,7 @@ def check_hooks(products=HOOK_PRODUCTS, products_dir=PRODUCTS_DIR,
     if not os.path.isfile(manifest_path):
         problems.append("runtime/hooks/%s: missing" % HOOKS_MANIFEST_NAME)
     elif _read_bytes(manifest_path) != _hooks_manifest_bytes(
-            products, products_dir, runtime_dir):
+            products, products_dir, runtime_dir, scripts_dir):
         problems.append("runtime/hooks/%s: stale, does not match a fresh "
                         "generation" % HOOKS_MANIFEST_NAME)
     bundle_dir = os.path.dirname(runtime_dir)
@@ -779,18 +844,111 @@ def check_hooks(products=HOOK_PRODUCTS, products_dir=PRODUCTS_DIR,
         problems.append("hooks/%s: stale, does not match a fresh "
                         "generation from the products' own hooks.json"
                         % HOOKS_JSON_NAME)
-    # DECISION 2026-09-13 (see HOOKS_JSON_NAME above): a file at the retired
-    # conventional name means brother would double-fire every shared hook on
-    # Claude Code again. This is a hard FAIL, not a warning, and it fires
-    # whether the file reappeared by a bad merge, a manual edit, or someone
-    # "fixing" this generator back to its old name.
+    # DECISION 2026-09-30 (see HOOKS_JSON_NAME above): a file at the retired
+    # name means the generator, or a bad merge, moved the hooks back to a
+    # path Claude Code never loads, which ships a plugin with no hooks.
     retired_path = os.path.join(bundle_dir, "hooks", RETIRED_HOOKS_JSON_NAME)
     if os.path.isfile(retired_path):
-        problems.append("hooks/%s: must not exist (retired 2026-09-13 -- "
-                        "its presence double-fires every shared hook on "
-                        "Claude Code; see HOOKS_JSON_NAME's docstring)"
-                        % RETIRED_HOOKS_JSON_NAME)
+        problems.append("hooks/%s: must not exist (retired 2026-09-30; the "
+                        "merged hooks live at hooks/%s, see HOOKS_JSON_NAME)"
+                        % (RETIRED_HOOKS_JSON_NAME, HOOKS_JSON_NAME))
+    # A dependency plugin registers the same hooks again: the exact
+    # 2026-09-13 double fire. The guard handles a user who still has one
+    # installed; the manifest must never ask Claude Code to enable one.
+    problems += _plugin_manifest_problems(
+        os.path.join(bundle_dir, PLUGIN_MANIFEST_TAIL), PLUGIN_MANIFEST_TAIL)
     return (not problems), problems
+
+
+def _plugin_manifest_problems(path, label):
+    """The one reader of a host manifest's shape, for check_hooks() and
+    manifest_problems() alike: unreadable, not a JSON object, or carrying
+    "dependencies" is each a problem naming `label`; a clean file is []."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            doc = json.load(fh)
+    except (OSError, ValueError) as exc:
+        return ["%s: unreadable (%s)" % (label, exc)]
+    if not isinstance(doc, dict):
+        return ["%s: not a JSON object" % label]
+    if "dependencies" in doc:
+        return ['%s: must carry no "dependencies" key (a dependency plugin '
+                "fires the same hooks twice)" % label]
+    return []
+
+
+def host_manifest_dirs(bundle_dir):
+    """The one discovery of host manifest directories (docs/plan/specs/
+    OP1.md 5.2): every DIRECTORY directly under `bundle_dir` whose name ends
+    in "-plugin", dotted or not, that holds a plugin.json, sorted. A listing
+    of the entries, never a shell glob (`*-plugin` skips the dotted four).
+    An unlistable `bundle_dir` is [] and the caller reports it."""
+    try:
+        names = os.listdir(bundle_dir)
+    except OSError:
+        return []
+    return sorted(
+        n for n in names
+        if n.endswith("-plugin")
+        and os.path.isdir(os.path.join(bundle_dir, n))
+        and os.path.isfile(os.path.join(bundle_dir, n, PLUGIN_MANIFEST_NAME)))
+
+
+def manifest_problems(bundle_dir):
+    """Read-only: every host manifest under `bundle_dir` is readable, an
+    object, and declares no "dependencies"; every KNOWN_HOSTS directory is
+    present with its plugin.json; no host directory outside KNOWN_HOSTS
+    exists. One problem per fault, [] when clean, and exactly
+    ["no plugin manifest found under <dir>"] when nothing is discovered (an
+    absent or unlistable bundle is a problem, never a clean read)."""
+    found = host_manifest_dirs(bundle_dir)
+    if not found:
+        return ["no plugin manifest found under %s" % bundle_dir]
+    problems = []
+    for name in found:
+        rel = os.path.join(name, PLUGIN_MANIFEST_NAME)
+        problems += _plugin_manifest_problems(os.path.join(bundle_dir, rel),
+                                              rel)
+        if name not in KNOWN_HOSTS:
+            problems.append("%s: host manifest directory not listed in "
+                            "KNOWN_HOSTS (a host is added on purpose, with "
+                            "scripts/client_parity.py)" % name)
+    for name in KNOWN_HOSTS:
+        if name not in found:
+            problems.append("%s: required host manifest directory or its "
+                            "%s is missing" % (name, PLUGIN_MANIFEST_NAME))
+    return problems
+
+
+def _antigravity_dst(runtime_dir=RUNTIME_DIR):
+    return os.path.join(os.path.dirname(runtime_dir), ANTIGRAVITY_DIR_TAIL,
+                        ANTIGRAVITY_HOOK_NAME)
+
+
+def generate_antigravity(runtime_dir=RUNTIME_DIR, scripts_dir=SCRIPTS_DIR):
+    """Mirror scripts/brother_antigravity_hook.py into the bundle's
+    Antigravity adapter. Returns the list of bundle-relative paths
+    written."""
+    src = os.path.join(scripts_dir, ANTIGRAVITY_HOOK_NAME)
+    if _write_if_changed(_antigravity_dst(runtime_dir), _read_bytes(src)):
+        return [os.path.join(ANTIGRAVITY_DIR_TAIL, ANTIGRAVITY_HOOK_NAME)]
+    return []
+
+
+def check_antigravity(runtime_dir=RUNTIME_DIR, scripts_dir=SCRIPTS_DIR):
+    """Read-only: does the shipped adapter script match its scripts/ source?
+    A missing source BLOCKS (it is the adapter, not an option)."""
+    src = os.path.join(scripts_dir, ANTIGRAVITY_HOOK_NAME)
+    dst = _antigravity_dst(runtime_dir)
+    rel = os.path.join(ANTIGRAVITY_DIR_TAIL, ANTIGRAVITY_HOOK_NAME)
+    if not os.path.isfile(src):
+        return False, ["scripts/%s: missing" % ANTIGRAVITY_HOOK_NAME]
+    if not os.path.isfile(dst):
+        return False, ["%s: missing from bundle" % rel]
+    if _read_bytes(src) != _read_bytes(dst):
+        return False, ["%s: bundle copy does not match scripts/%s"
+                       % (rel, ANTIGRAVITY_HOOK_NAME)]
+    return True, []
 
 
 def _mcp_server_src(product=MCP_PRODUCT, products_dir=PRODUCTS_DIR):
@@ -1025,6 +1183,59 @@ def _write_if_changed(path, data):
     return True
 
 
+# THE LOOP RIDES IN THE BUNDLE (M3, 2026-09-24: 66 of 70 loop tools were named nowhere in the shipped bundle, so /brother
+# could not reach the unattended delivery loop and every night's fixes stayed outside the product). Every file of
+# scripts/loop/ is mirrored byte for byte into bundle/runtime/loop/ with its own manifest, checked like the closure.
+LOOP_DIR_NAME = "loop"
+LOOP_MANIFEST_NAME = "LOOP-MANIFEST.json"
+
+
+def loop_files(scripts_dir=SCRIPTS_DIR):
+    """Sorted relative names of the loop tools to mirror (python, shell, and the markdown a tool reads beside itself
+    such as brief_head.md; no caches, no backups); [] when there is no scripts/loop directory, which is not an error
+    for a checkout that has none."""
+    d = os.path.join(scripts_dir, LOOP_DIR_NAME)
+    if not os.path.isdir(d): return []
+    return sorted(n for n in os.listdir(d) if n.endswith((".py", ".sh", ".md", ".c")) and ".bak" not in n and os.path.isfile(os.path.join(d, n)))   # .c: brother_keychain.c, built by brother_login.py beside it (2026-10-03)
+
+
+def _loop_manifest_bytes(names, scripts_dir):
+    rows = [{"name": n, "sha256": hashlib.sha256(_read_bytes(os.path.join(scripts_dir, LOOP_DIR_NAME, n))).hexdigest()} for n in names]
+    return (json.dumps({"note": "generated by scripts/bundle_runtime.py from scripts/loop; never hand edited", "files": rows}, indent=1, sort_keys=True) + "\n").encode("utf-8")
+
+
+def generate_loop(scripts_dir=SCRIPTS_DIR, runtime_dir=RUNTIME_DIR):
+    """Mirror scripts/loop into bundle/runtime/loop; returns the names written or changed."""
+    names = loop_files(scripts_dir); changed = []
+    if not names: return changed
+    dst_dir = os.path.join(runtime_dir, LOOP_DIR_NAME); os.makedirs(dst_dir, exist_ok=True)
+    for n in names:
+        if _write_if_changed(os.path.join(dst_dir, n), _read_bytes(os.path.join(scripts_dir, LOOP_DIR_NAME, n))): changed.append(LOOP_DIR_NAME + "/" + n)
+    if _write_if_changed(os.path.join(dst_dir, LOOP_MANIFEST_NAME), _loop_manifest_bytes(names, scripts_dir)): changed.append(LOOP_DIR_NAME + "/" + LOOP_MANIFEST_NAME)
+    for n in os.listdir(dst_dir):   # a tool retired from scripts/loop leaves the bundle too, and is named
+        if n != LOOP_MANIFEST_NAME and n not in names and (n.endswith(".py") or n.endswith(".sh")):
+            os.remove(os.path.join(dst_dir, n)); changed.append(LOOP_DIR_NAME + "/" + n + " (removed)")
+    return changed
+
+
+def check_loop(scripts_dir=SCRIPTS_DIR, runtime_dir=RUNTIME_DIR):
+    """Read only: every loop tool present in the bundle byte for byte, none extra, the manifest current."""
+    names = loop_files(scripts_dir); problems = []
+    if not names: return problems
+    dst_dir = os.path.join(runtime_dir, LOOP_DIR_NAME)
+    for n in names:
+        dst = os.path.join(dst_dir, n)
+        if not os.path.isfile(dst): problems.append("loop/%s: missing from bundle/runtime/loop" % n)
+        elif _read_bytes(os.path.join(scripts_dir, LOOP_DIR_NAME, n)) != _read_bytes(dst): problems.append("loop/%s: bundle copy does not match scripts/loop" % n)
+    if os.path.isdir(dst_dir):
+        for n in sorted(os.listdir(dst_dir)):
+            if n != LOOP_MANIFEST_NAME and (n.endswith(".py") or n.endswith(".sh")) and n not in names: problems.append("loop/%s: in the bundle, not in scripts/loop" % n)
+    mp = os.path.join(dst_dir, LOOP_MANIFEST_NAME)
+    if not os.path.isfile(mp): problems.append("loop/%s: missing" % LOOP_MANIFEST_NAME)
+    elif _read_bytes(mp) != _loop_manifest_bytes(names, scripts_dir): problems.append("loop/%s: stale" % LOOP_MANIFEST_NAME)
+    return problems
+
+
 def generate(scripts_dir=SCRIPTS_DIR, runtime_dir=RUNTIME_DIR):
     closure = compute_closure(scripts_dir=scripts_dir)
     changed = []
@@ -1040,6 +1251,7 @@ def generate(scripts_dir=SCRIPTS_DIR, runtime_dir=RUNTIME_DIR):
         if _write_if_changed(os.path.join(runtime_dir, dest),
                              _read_bytes(src)):
             changed.append(dest)
+    changed += generate_loop(scripts_dir, runtime_dir)
     launcher_path = os.path.join(runtime_dir, LAUNCHER_NAME)
     if _write_if_changed(launcher_path, LAUNCHER_SOURCE.encode("utf-8")):
         changed.append(LAUNCHER_NAME)
@@ -1077,6 +1289,7 @@ def check(scripts_dir=SCRIPTS_DIR, runtime_dir=RUNTIME_DIR):
               != _read_bytes(dst)):
             problems.append("%s: bundle/runtime copy does not match its "
                             "scripts/ source" % rel)
+    problems += check_loop(scripts_dir, runtime_dir)
     for dest, src in compute_extra_files(closure, scripts_dir):
         dst = os.path.join(runtime_dir, dest)
         if not os.path.isfile(dst):
@@ -1140,7 +1353,11 @@ def main(argv=None):
         cs_ok, cs_problems = CS.check()
         hooks_ok, hooks_problems = check_hooks()
         mcp_ok, mcp_problems = check_mcp()
-        if ok and cs_ok and hooks_ok and mcp_ok:
+        ag_ok, ag_problems = check_antigravity()
+        manifest_problems_found = manifest_problems(
+            os.path.dirname(RUNTIME_DIR))
+        if (ok and cs_ok and hooks_ok and mcp_ok and ag_ok
+                and not manifest_problems_found):
             total_hook_commands = sum(
                 count_hook_commands(_load_hooks_json(p) or {"hooks": {}})
                 for p in HOOK_PRODUCTS)
@@ -1153,7 +1370,8 @@ def main(argv=None):
                      HOOKS_JSON_NAME, total_hook_commands, len(HOOK_PRODUCTS),
                      MCP_PRODUCT))
             return 0
-        for problem in problems + cs_problems + hooks_problems + mcp_problems:
+        for problem in (problems + cs_problems + hooks_problems + mcp_problems
+                        + ag_problems + manifest_problems_found):
             print("bundle_runtime: DRIFT: %s" % problem, file=sys.stderr)
         return 1
 
@@ -1166,8 +1384,9 @@ def main(argv=None):
     closure, changed = generate()
     hook_counts, hooks_changed = generate_hooks()
     mcp_changed = generate_mcp()
+    ag_changed = generate_antigravity()
     changed = (changed + ["codex-skills/" + c for c in cs_changed]
-              + hooks_changed + mcp_changed)
+              + hooks_changed + mcp_changed + ag_changed)
     if changed:
         print("bundle_runtime: wrote %d file(s): %s"
               % (len(changed), ", ".join(changed)))

@@ -66,6 +66,15 @@ live outside the walk.
 Run: python3 evals/test_no_data_class.py
      python3 evals/test_no_data_class.py --tools <dir>
      python3 evals/test_no_data_class.py --quiet     (summary and failures only)
+     python3 evals/test_no_data_class.py --lint-only (static checks, no scenario)
+
+The fourth form runs every check here that needs no scenario (registry
+discovery and its integrity, both source lints with both allowlists
+reconciled, the harness writer pin, the check floor) and says the scenario
+sweep did NOT run. It exists for the per-PR lane: the full run takes minutes,
+so that lane dropped this file entirely, and six source-lint reds sat on the
+main branch for two weeks with nothing fast looking at them. Exit 0 there
+covers the static checks only, never the sweep.
 
 The second form runs the SAME scenarios against a different copy of the tools,
 which is how the before-list was measured against the tree that shipped these
@@ -87,6 +96,7 @@ RUN_DIR = TOOLS_DIR
 if "--tools" in sys.argv:
     RUN_DIR = os.path.abspath(sys.argv[sys.argv.index("--tools") + 1])
 QUIET = "--quiet" in sys.argv
+LINT_ONLY = "--lint-only" in sys.argv
 # Seeded generative mode: each `--seed N` adds one random composition sweep on
 # top of the fixed one (see seeded_cases). No seeds means no random scenarios,
 # so the default run and its printed counts are byte-stable.
@@ -619,6 +629,12 @@ NOT_A_VERDICT = {
                                                      "verdict; feeds the cross-project execution "
                                                      "check's read-only-verb exemption, amendment "
                                                      "2026-08-29",
+    ("sbe_bash_write_guard.py", "_git_targets"): "returns (the word after `git` on a command "
+                                                 "line, the paths that subcommand writes), a "
+                                                 "parse of the command's own arguments and "
+                                                 "never a verdict: its one caller formats the "
+                                                 "word into a candidate label; the same shape "
+                                                 "as _exec_target_raw",
     ("sbe_passport.py", "read_deposit"): "returns (the producer deposit or None, a note naming "
                                          "whether it was absent, unreadable or read), not a "
                                          "verdict; the same shape as sbe_gate.py's load_receipt",
@@ -664,6 +680,14 @@ NOT_A_VERDICT = {
     ("test_sbe_discover.py", "run"): "this suite's own fixture helper; returns (exit code, "
                                      "stdout) from running the discover tool in a subprocess, "
                                      "not a verdict",
+    ("test_bm_profile_reader.py", "make_profile"): "this suite's own fixture builder; returns "
+                                                   "(a fresh temp directory, the Profile.md path "
+                                                   "under it), two paths and never a verdict",
+    ("test_bm_profile_reader.py", "run_reader_cli"): "this suite's own fixture helper; returns "
+                                                     "(exit code, stdout plus stderr) from "
+                                                     "running bm_profile_reader.py in a "
+                                                     "subprocess, process output and never a "
+                                                     "verdict",
     ("test_sbe_design_fingerprint.py", "run_check"): "this suite's own fixture helper; returns "
                                                      "(exit code, stdout plus stderr) from "
                                                      "running sbe_design behaviour-check in a "
@@ -1785,17 +1809,26 @@ def counts():
     return checks, regs, len(mods), scenarios, waived
 
 
-def main():
+def static_checks():
+    """Every check in this file that runs no scenario, in the order main() reports them.
+
+    Registry discovery and its integrity (imports, bare registry values, a
+    registry with no adapter, pruned, planted, non-regular and refused paths),
+    the verdict-source lint and the report-print lint with BOTH allowlists
+    reconciled (a dead entry fails, a shadowed key fails), and the harness
+    writer pin. main() and --lint-only both call this one function, so the
+    fast mode cannot skip a reconciliation the full run does, and a static
+    check added here is in both modes the day it is added. Prints nothing.
+
+    Returns (mods, known, failures, lint_exemptions, print_exempt_hits), where
+    known maps (file, attr) to (adapter, registry) for every walkable registry.
+    """
     mods, import_failures = load_tool_modules()
     del PRUNED_WITH_SOURCE[len(set(PRUNED_WITH_SOURCE)):]
     registries, defects = discover_registries(mods)
     failures = list(import_failures) + list(defects)
-    checked = ran = 0
-    notapplicable, exemptions, unregistered = [], [], []
+    unregistered = []
     lint_exemptions = []
-
-    print("BROTHERSBE HONESTY META-TEST: no check may report PASS over evidence it never examined")
-    print("tools under test: %s" % RUN_DIR)
 
     # Registries are discovered. One this test cannot invoke is a failure, never a skip.
     known = {}
@@ -1870,6 +1903,71 @@ def main():
         failures.append("%s could not be entered (permission or I/O error), so any registry or "
                         "verdict-producing function in it is outside this test's coverage while "
                         "the summary line below still counts as if it were not" % path)
+    return mods, known, failures, lint_exemptions, print_exempt_hits
+
+
+def floor_failures(checked):
+    """The check-count floor, shared by main() and --lint-only."""
+    if checked < FLOOR_CHECKS:
+        return ["only %d check(s) discovered, below the floor of %d. Deleting a check "
+                "used to shrink this count in silence, with the anti-shrinkage guarantee "
+                "living only in the eval suite and a number in a doc; the floor is raised "
+                "when checks are added and never lowered" % (checked, FLOOR_CHECKS)]
+    return []
+
+
+def print_lint_exemptions(lint_exemptions, print_exempt_hits):
+    """Both source lints' reconciled allowlists, printed the same way in both modes."""
+    print("\ndeclared exemptions from the verdict-source lint (each names the function it "
+          "resolved to this run):")
+    for e in lint_exemptions or ["none"]:
+        print("  %s" % e)
+    print("\ndeclared exemptions from the report-print lint (the linted set is every file "
+          "tool_sources() walks; each entry states its reason and what it excused this run):")
+    for fn in sorted(print_exempt_hits) or ["none"]:
+        print("  %s: excused %d print(s); %s" % (fn, print_exempt_hits[fn],
+                                                 REPORT_PRINT_EXEMPT[fn]))
+
+
+def lint_only_main():
+    """--lint-only: static_checks() and the floor, no scenario. Returns the exit code.
+
+    1 on any failure, 0 otherwise, and the 0 is stated as covering the static
+    checks only: the sweep is named NOT RUN in the output and the summary line,
+    which is worded so the doc-consistency eval's summary regex (dc2 in
+    evals/run_evals.py) cannot read it as a full run. --tools and --seed are
+    refused (exit 2), since this mode invokes no tool and runs no scenario and
+    would otherwise ignore them while answering as if it had honoured them.
+    """
+    if SEEDS or "--tools" in sys.argv:
+        print("REFUSED: --lint-only invokes no tool and runs no scenario, so --tools and --seed "
+              "would be ignored while the answer read as if they were honoured; drop "
+              "--lint-only to use either")
+        return 2
+    mods, known, failures, lint_exemptions, print_exempt_hits = static_checks()
+    checked = sum(len(reg) for _adapter, reg in known.values())
+    failures.extend(floor_failures(checked))
+    print("BROTHERSBE HONESTY META-TEST, LINT-ONLY: registry discovery and both source lints, "
+          "allowlists reconciled; no scenario runs")
+    print("sources linted: %s" % TOOLS_DIR)
+    print_lint_exemptions(lint_exemptions, print_exempt_hits)
+    print("\nscenario sweep: NOT RUN (--lint-only). Exit 0 here covers the static checks "
+          "above and nothing else; the sweep is run by the full form of this file.")
+    print("\nlint-only: %d check(s) found in %d registries across %d module(s), scenario "
+          "sweep not run, %d failure(s)." % (checked, len(known), len(mods), len(failures)))
+    for f in failures:
+        print("  FAIL %s" % f)
+    return 1 if failures else 0
+
+
+def main():
+    mods, known, failures, lint_exemptions, print_exempt_hits = static_checks()
+    checked = ran = 0
+    notapplicable, exemptions = [], []
+
+    print("BROTHERSBE HONESTY META-TEST: no check may report PASS over evidence it never examined")
+    print("tools under test: %s" % RUN_DIR)
+
     if not ACCESS_APPLIES:
         notapplicable.append("the ACCESS scenarios (chmod, broken symlink, symlink loop, FIFO) do "
                              "not apply on this host: running as root, or not POSIX, so taking "
@@ -2007,20 +2105,8 @@ def main():
     print("\ndeclared exemptions from the empty-value sweep (each states its reason):")
     for e in exemptions or ["none"]:
         print("  %s" % e)
-    print("\ndeclared exemptions from the verdict-source lint (each names the function it "
-          "resolved to this run):")
-    for e in lint_exemptions or ["none"]:
-        print("  %s" % e)
-    print("\ndeclared exemptions from the report-print lint (the linted set is every file "
-          "tool_sources() walks; each entry states its reason and what it excused this run):")
-    for fn in sorted(print_exempt_hits) or ["none"]:
-        print("  %s: excused %d print(s); %s" % (fn, print_exempt_hits[fn],
-                                                 REPORT_PRINT_EXEMPT[fn]))
-    if checked < FLOOR_CHECKS:
-        failures.append("only %d check(s) discovered, below the floor of %d. Deleting a check "
-                        "used to shrink this count in silence, with the anti-shrinkage guarantee "
-                        "living only in the eval suite and a number in a doc; the floor is raised "
-                        "when checks are added and never lowered" % (checked, FLOOR_CHECKS))
+    print_lint_exemptions(lint_exemptions, print_exempt_hits)
+    failures.extend(floor_failures(checked))
     print("\n%d checks discovered from %d registries in %d module(s), %d scenarios run, "
           "%d waived by declared exemption, %d failure(s)."
           % (checked, len(known), len(mods), ran, WAIVED[0], len(failures)))
@@ -2088,4 +2174,6 @@ class Night0912SbeGatelock(unittest.TestCase):
 
 
 if __name__ == "__main__":
+    if LINT_ONLY:
+        sys.exit(lint_only_main())
     main()

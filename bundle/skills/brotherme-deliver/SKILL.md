@@ -3,7 +3,7 @@ name: brotherme-deliver
 description: "Package the finished work into one delivery summary with the evidence that it works"
 ---
 
-This is the Codex route for the existing Claude command `/brothermode:brotherme-deliver`.
+This is the Codex route for the existing Claude command `/brother:brotherme-deliver`.
 
 Codex has no slash command surface. Invoke this skill by name in a bounded outcome. The shared `using-brother` route remains the entry point when the outcome is ambiguous.
 

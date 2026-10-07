@@ -1,6 +1,6 @@
 ---
 name: brothersbe-next
-description: "Use when someone asks what to do next in their work. Evaluates a fixed priority ladder against observable state and returns exactly one recommended action with a one sentence reason, never a menu of options. Invoke as /brothersbe:next."
+description: "Use when someone asks what to do next in their work. Evaluates a fixed priority ladder against observable state and returns exactly one recommended action with a one sentence reason, never a menu of options. Invoke as /brother:brothersbe-next."
 ---
 
 This is the Codex route for the `brothersbe` product skill.

@@ -188,7 +188,7 @@ def _line(event):
 
 
 def append(run_dir, type, parent_ids=(), unit_id=None, session_id=None,
-           payload=None):
+           payload=None, event_id=None):
     """One event on this run's journal. Returns its event_id, or None when
     nothing was written (no run directory, or a write that failed and said
     so). Never raises: see the module docstring's availability rule.
@@ -201,9 +201,12 @@ def append(run_dir, type, parent_ids=(), unit_id=None, session_id=None,
     is about the run rather than one unit), at (ISO 8601, UTC, with its
     offset), type, payload."""
     run_dir = str(run_dir or "").strip()
+    if event_id is None:
+        event_id = uuid.uuid4().hex
+    elif not isinstance(event_id, str) or not event_id:
+        raise ValueError("event_id must be a non-empty string")
     if not run_dir:
         return None
-    event_id = uuid.uuid4().hex
     event = {
         "event_id": event_id,
         # A None parent DROPS OUT rather than becoming the string "None":
@@ -225,6 +228,7 @@ def append(run_dir, type, parent_ids=(), unit_id=None, session_id=None,
                      os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o644)
         try:
             os.write(fd, line)
+            os.fsync(fd)
         finally:
             os.close(fd)
     except (OSError, TypeError, ValueError) as exc:

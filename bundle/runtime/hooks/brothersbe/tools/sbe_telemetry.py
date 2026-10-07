@@ -555,25 +555,55 @@ def parse_transcript(path, collect_user_texts=False):
 # and keep the file owner-only. This is best-effort pattern matching, not a
 # guarantee: treat the file as sensitive and purge it when you no longer need it
 # (tools/sbe_telemetry.py purge-corrections).
+#
+# 2026-09-30, ported from BrotherMode's LOOP 12 (bm_telemetry.py). Every
+# pattern below used to be anchored with \b, and Python counts "_" as a word
+# character, so a secret with a word character in front of it never matched:
+# OPENAI_KEY_sk-live_..., AWSKEY_AKIA..., GITHUB_ghp_..., _4111111111111111_
+# and id_1234567890123456 all went to disk in clear while BrotherMode masked
+# them. \b also fails beside a non-ASCII letter. _BEFORE and _AFTER are the
+# boundary meant: letters and digits bind a token, separators do not, so
+# "task-oriented" still does not trip the sk-/rk- pattern.
+# Order and count stay as they were: src/brothersbe/evidence.py pairs each
+# pattern with a label in ARGV_REDACTION_SHAPES by position.
+_BEFORE = r"(?<![A-Za-z0-9])"
+_AFTER = r"(?![A-Za-z0-9])"
+
 SECRET_PATTERNS = [
-    re.compile(r"\b(sk|rk)[-_][A-Za-z0-9_-]{12,}", re.I),           # api keys
-    re.compile(r"\bgh[oprsu]_[A-Za-z0-9]{16,}"),                     # github tokens
-    re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}"),
-    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),                            # aws key id
-    re.compile(r"\bxox[abprs]-[A-Za-z0-9-]{10,}", re.I),             # slack
-    re.compile(r"\b[Bb]earer\s+[A-Za-z0-9._~+/=-]{16,}"),
-    re.compile(r"-----BEGIN[ A-Z]*PRIVATE KEY-----"),
-    re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"),      # jwt
+    re.compile(_BEFORE + r"(sk|rk)[-_][A-Za-z0-9_-]{12,}", re.I),   # api keys
+    re.compile(_BEFORE + r"gh[oprsu]_[A-Za-z0-9]{16,}"),             # github tokens
+    re.compile(_BEFORE + r"github_pat_[A-Za-z0-9_]{20,}"),
+    re.compile(_BEFORE + r"AKIA[0-9A-Z]{16}" + _AFTER),             # aws key id
+    re.compile(_BEFORE + r"xox[abprs]-[A-Za-z0-9-]{10,}", re.I),     # slack
+    re.compile(_BEFORE + r"[Bb]earer\s+[A-Za-z0-9._~+/=-]{16,}"),
+    # A private key is a BLOCK, not a line. Matching only the -----BEGIN-----
+    # header left every line of base64 key material after it going to disk.
+    # Prefer the real BEGIN..END span; with no END marker (a truncated paste)
+    # take the base64-looking lines that follow and stop there, so ordinary
+    # prose after a mentioned header is never swallowed.
+    re.compile(r"-----BEGIN[ A-Z]*PRIVATE KEY-----"
+               r"(?:[\s\S]*?-----END[ A-Z]*PRIVATE KEY-----"
+               r"|(?:\s*[A-Za-z0-9+/=]{16,})*)"),
+    re.compile(_BEFORE + r"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"),  # jwt
     # key=value and key: value where the key names a secret
     # key=value, key: value, and the natural-language "the password is hunter2".
     # Over-redaction is deliberate here: a masked non-secret costs nothing, a
     # stored secret costs a lot.
-    # Leading [A-Za-z0-9_]* so PROD_DB_PASSWORD= matches as well as password=.
-    re.compile(r"(?i)[A-Za-z0-9_]*(?:pass(?:word|wd|phrase)?|secret|token"
-               r"|api[_-]?key|access[_-]?key|private[_-]?key|credential)s?"
-               r"\s*(?:[:=]|\s+(?:is|was)\s+)\s*\S+"),
-    re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),                          # us ssn shape
-    re.compile(r"\b(?:\d[ -]?){13,16}\b"),                          # card-ish digits
+    # Leading prefix so PROD_DB_PASSWORD= matches as well as password=. Bounded
+    # to {0,40}: an unbounded [A-Za-z0-9_]* is retried at every offset of a long
+    # run, which is O(n^2) (BrotherMode measured one 20 KB row at 75 seconds).
+    re.compile(_BEFORE + r"[A-Za-z0-9_]{0,40}(?:pass(?:word|wd|phrase)?"
+               r"|secret|token|api[_-]?key|access[_-]?key|private[_-]?key"
+               r"|credential)s?\s*(?:[:=]|\s+(?:is|was)\s+)\s*\S+", re.I),
+    re.compile(_BEFORE + r"\d{3}-\d{2}-\d{4}" + _AFTER),           # us ssn shape
+    # Card numbers in their printed layouts only (one run, 4-4-4-(1..4),
+    # 4-6-(4..5), 4-3-3-3 or 4-5-6). 2026-09-30: the old (?:\d[ -]?){13,16}
+    # let a separator sit between any two digits, so a date-time such as
+    # 20260926-182529 read as a card. Same layouts as BrotherMode's
+    # bm_telemetry.SECRET_PATTERNS.
+    re.compile(_BEFORE + r"(?:\d{13,16}|\d{4}[ -]\d{4}[ -]\d{4}[ -]\d{1,4}"
+               r"|\d{4}[ -]\d{6}[ -]\d{4,5}|\d{4}[ -]\d{3}[ -]\d{3}[ -]\d{3}"
+               r"|\d{4}[ -]\d{5}[ -]\d{6})" + _AFTER),              # card digits
 ]
 
 

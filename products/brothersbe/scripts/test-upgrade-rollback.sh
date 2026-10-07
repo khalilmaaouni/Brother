@@ -149,7 +149,9 @@ fi
 
 echo "test-upgrade-rollback: previous tag found: $PREV_TAG"
 
-WORKDIR=$(mktemp -d 2>/dev/null || echo "/tmp/sbe-test-upgrade-rollback-work.$$")
+# a template under TMPDIR, slash trimmed: bare `mktemp -d` ignores TMPDIR on macOS (see checksums.sh)
+TMPBASE=${TMPDIR:-/tmp}; TMPBASE=${TMPBASE%/}
+WORKDIR=$(mktemp -d "$TMPBASE/sbe-test-upgrade-rollback-work.XXXXXX" 2>/dev/null || echo "$TMPBASE/sbe-test-upgrade-rollback-work.$$")
 mkdir -p "$WORKDIR"
 TARGET="$WORKDIR/install"
 trap 'rm -rf "$WORKDIR"' EXIT INT TERM

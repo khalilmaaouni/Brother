@@ -1,0 +1,10 @@
+{
+  "note": "Fixture shape of docs/plan/loop-canary.json (not shipped by the export) for a hermetic test that stages the loop's configs without this tree's own private evidence paths: a build that really landed, replayed by scripts/loop/loop_canary.py through the whole judging path in a sandbox at the tree its landing was made against.",
+  "sub": "FIXTURE.0",
+  "landing_commit": "0000000000000000000000000000000000000000",
+  "base_commit": "0000000000000000000000000000000000000000",
+  "build": "~/.claude/evidence/fixture-runs/FIXTURE.0/round0/out/FIXTURE.0-r0-build.json",
+  "probe": "~/.claude/evidence/fixture-runs/FIXTURE.0/round0/probes/out/FIXTURE.0-probe-deepseek.json",
+  "fixtures": [],
+  "note_fixtures": "No secondary fixtures in this placeholder: a hermetic test that needs the file to exist and parse, not to replay a real canary (loop_canary.py is stubbed in those tests)."
+}

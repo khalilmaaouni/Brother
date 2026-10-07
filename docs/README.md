@@ -23,6 +23,8 @@ Evaluating rather than installing? Read [Where Brother fits](explanation/choosin
 
 **Install/operate:** [Claude Code](how-to/install-claude-code.md) · [Codex](how-to/install-codex.md) · [Run](how-to/run-brother.md) · [Resume](how-to/resume-work.md) · [Recover](how-to/recover-from-failure.md) · [Scope hooks](how-to/scope-hooks.md)
 
+**Understand Brother:** [What you can do with Brother](explanation/what-you-can-do-with-brother.md)
+
 **Define/verify:** [Outcome contract](how-to/write-an-outcome-contract.md) · [Schedulable plan](how-to/write-a-schedulable-plan.md) · [Review receipt](how-to/review-a-receipt.md) · [Migration](how-to/verify-a-migration.md) · [Decision-grade number](how-to/verify-a-number.md) · [Vault](how-to/use-the-vault.md) · [Team adoption](how-to/adopt-on-a-team.md) · [Release decision](how-to/prepare-a-release.md)
 
 ## Look up the contract

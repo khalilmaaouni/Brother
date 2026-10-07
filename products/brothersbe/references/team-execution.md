@@ -1,8 +1,8 @@
 # Team execution
 
-LOAD WHEN: `/brothersbe:work` is resolving ready tasks, dispatching an implementation-worker
+LOAD WHEN: `/brother:brothersbe-work` is resolving ready tasks, dispatching an implementation-worker
 against a worktree, or a human is taking over a task another writer has claimed; or
-`/brothersbe:handover` is preparing, showing, or resolving an explicit human handover of a whole
+`/brother:brothersbe-handover` is preparing, showing, or resolving an explicit human handover of a whole
 change.
 
 (The compact reference both `skills/work/SKILL.md` and `skills/handover/SKILL.md` point at.
@@ -99,7 +99,7 @@ context reset, a new session, or a later audit.
 
 ## The handover protocol
 
-On "hand this off to `<name>`", or a receiver asking what they inherit: `/brothersbe:handover`
+On "hand this off to `<name>`", or a receiver asking what they inherit: `/brother:brothersbe-handover`
 runs this flow (see `skills/handover/SKILL.md` for the exact commands and rendered shapes).
 
 1. **State and worktree checks, first.** `sbe status --json` and `sbe status --team --json` for

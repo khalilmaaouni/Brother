@@ -3,6 +3,8 @@ name: help
 description: Explain what BrotherMode does and how to use it, in plain language
 ---
 
+Retired from the catalog in Brother 1.1.0, where one plugin carries everything: install brother@brother, then uninstall this plugin. This copy keeps working until you do; say that once, early, when someone asks for help here.
+
 Outcome to produce: a short, plain-language orientation that ends in ONE question, not a list of everything the product can do. No setup steps that involve editing files, and no internal machinery.
 
 Answer in the language the user wrote in, per references/honesty.md.
@@ -21,9 +23,9 @@ Do not print the command list unless they ask for it. That is the whole change t
 
 ## The three to name, if they ask what they can say right now
 
-- `/brothermode:start` to begin a project.
-- `/brothermode:status` for where things stand.
-- `/brothermode:next` for the best next step.
+- `/brother:brothermode-start` to begin a project.
+- `/brother:brothermode-status` for where things stand.
+- `/brother:brothermode-next` for the best next step.
 
 Those three names are how a client with slash commands, such as Claude Code, reaches them. A client without them reaches the same three by asking in plain words, or by running the command underneath: `python3 "${BROTHER_PLUGIN_ROOT}/tools/brothermode_cli.py" start`, `... status --project-id <id>`, `... next --project-id <id>` (the packaged console script is `brothermode start`, and `${CLAUDE_PLUGIN_ROOT}` names the same directory under Claude Code). Give the plain-words route first: the command is for someone who asks for it.
 
@@ -33,10 +35,10 @@ Each of the others introduces itself when it becomes useful: the one for decisio
 
 Only when they ask for the full list, give it, grouped so it reads as four small sets rather than one wall:
 
-- **Getting going:** `/brothermode:start`, `/brothermode:status`, `/brothermode:next`, `/brothermode:help`.
-- **Deciding, and taking over:** `/brothermode:decisions` (what is waiting on them to decide), `/brothermode:handback` (take a decision and the work under it back into their own hands).
-- **Looking at it:** `/brothermode:view` (write the page that shows where the project stands), `/brothermode:brief` (the short catch-up on where the work stands), `/brothermode:review` (check the work), `/brothermode:deliver` (package the result), `/brothermode:handover-pack` (the pages another person would take the project over from).
-- **Running it, and updating:** `/brothermode:auto`, `/brothermode:auto-status` and `/brothermode:stop` belong to the flows that own them, and `/brothermode:update` gets the latest version. Doctor: `/brothermode:doctor` checks the install itself, ten PASS/FAIL/SKIP items.
+- **Getting going:** `/brother:brothermode-start`, `/brother:brothermode-status`, `/brother:brothermode-next`, `/brother:brothermode-help`.
+- **Deciding, and taking over:** `/brother:brothermode-decisions` (what is waiting on them to decide), `/brother:brothermode-handback` (take a decision and the work under it back into their own hands).
+- **Looking at it:** `/brother:brothermode-view` (write the page that shows where the project stands), `/brother:brothermode-brief` (the short catch-up on where the work stands), `/brother:brothermode-review` (check the work), `/brother:brothermode-deliver` (package the result), `/brother:brothermode-handover-pack` (the pages another person would take the project over from).
+- **Running it, and updating:** `/brother:brothermode-auto`, `/brother:brothermode-auto-status` and `/brother:brothermode-stop` belong to the flows that own them, and `/brother:brothermode-update` gets the latest version. Doctor: `/brother:brothermode-doctor` checks the install itself, ten PASS/FAIL/SKIP items.
 
 Say in the same breath that the catch-up and the handover pages are normally run on their behalf rather than the other way round, and that the full-auto and decisions/handback family are the more advanced layer: still reachable by name once the user knows to ask for them, not part of the short list a first-time user is shown.
 

@@ -164,6 +164,92 @@ def view(result, mode="tail", n=20, grep=None):
     return "\n".join(lines[-n:])
 
 
+# M3.6 R28-R34: the evidence checked log reducer. A summary's quotations must
+# exist verbatim in the full text; quote free or empty input is refused.
+ACCEPT = "ACCEPT"
+BLOCK = "BLOCK"
+
+
+def _require_text(value, name):
+    if not isinstance(value, str):
+        raise ValueError("%s must be a string, got %s"
+                         % (name, type(value).__name__))
+    return value
+
+
+def quoted_spans(summary: str) -> list[str]:
+    """Extract double quoted and single quoted spans from a summary.
+
+    Quote free text returns an empty list. An unclosed quote is corrupt input
+    and is refused rather than guessed at. The quote characters themselves are
+    delimiters, not part of the span."""
+    _require_text(summary, "summary")
+    spans = []
+    i = 0
+    n = len(summary)
+    while i < n:
+        ch = summary[i]
+        if ch == '"' or ch == "'":
+            quote = ch
+            j = i + 1
+            buf = []
+            while j < n:
+                if summary[j] == "\\" and j + 1 < n:
+                    buf.append(summary[j + 1])
+                    j += 2
+                    continue
+                if summary[j] == quote:
+                    break
+                buf.append(summary[j])
+                j += 1
+            if j >= n:
+                raise ValueError("summary has an unclosed %s quote" % quote)
+            if buf:
+                spans.append("".join(buf))
+            i = j + 1
+        else:
+            i += 1
+    return spans
+
+
+def verbatim_hits(full_text: str, spans: list[str]) -> tuple[bool, list[str]]:
+    """True only when every span occurs exactly in full_text.
+
+    Returns (all_found, missing). A missing span is listed, never dropped, so
+    the caller can say which quotation did not survive."""
+    _require_text(full_text, "full_text")
+    if not isinstance(spans, list):
+        raise ValueError("spans must be a list, got %s" % type(spans).__name__)
+    missing = []
+    for span in spans:
+        if not isinstance(span, str):
+            raise ValueError("every span must be a string, got %s"
+                             % type(span).__name__)
+        if span not in full_text:
+            missing.append(span)
+    return (not missing, missing)
+
+
+def reduce_log(full_text: str, summary: str) -> dict:
+    """ACCEPT only when every quoted span of summary is verbatim in full_text.
+
+    Empty, non string, or quote free input is refused with ValueError, never
+    accepted. A quote that does not match yields BLOCK. No remote model call is
+    made here; if one is added later it must sit behind the same private terms
+    gate as every OpenRouter lane, and an unreadable private names file must
+    block the call."""
+    _require_text(full_text, "full_text")
+    _require_text(summary, "summary")
+    if not full_text or not summary:
+        raise ValueError("reduce_log refuses empty input")
+    spans = quoted_spans(summary)
+    if not spans:
+        raise ValueError("reduce_log refuses a quote free summary")
+    ok, missing = verbatim_hits(full_text, spans)
+    verdict = ACCEPT if ok else BLOCK
+    return {"verdict": verdict, "spans": spans, "missing": missing}
+
+
 def _ledger():
     """The attempt ledger, or None. Optional on purpose: this runner must keep
     working in a checkout that does not carry the ledger, and a missing

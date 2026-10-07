@@ -67,6 +67,7 @@ Python 3.9 floor, standard library only, no network in this module itself
 (exactly like jev_seam.py: network lives inside decide()'s bridge
 subprocess, never here).
 """
+import math
 import os
 import sys
 
@@ -106,6 +107,56 @@ else:
     _JEV_STATE_DIR_FALLBACK = (os.environ.get("BROTHER_JEV_STATE_DIR")
                                 or os.path.expanduser("~/.brother/jev"))
     DEFAULT_LEDGER_DIR = os.path.join(_JEV_STATE_DIR_FALLBACK, "ledger")
+
+
+def check_quarantine_config(population_floor=None):
+    """Validates the quarantine set shape and an optional population floor.
+
+    Returns (True, "") when every input is well formed, else (False,
+    reason). Never raises, for any input: a hostile floor (a bool, a
+    string, a mapping, a list, NaN, an infinity) and a malformed quarantine
+    constant are both refusals here, never a raw TypeError. Reuses
+    jev_calibration's own QUARANTINED_QTYPES and
+    quarantined_qtypes_are_consistent, so the direct seam path and this
+    hook cannot drift apart. This hook REPORTS; the caller decides whether
+    to block, and a missing or malformed quarantine set is reported as a
+    refusal, never as the safe case.
+    """
+    try:
+        import jev_calibration as _calibration
+    except ImportError as exc:
+        return False, "jev_calibration could not be imported: %s" % exc
+    try:
+        checker = _calibration.quarantined_qtypes_are_consistent
+    except AttributeError:
+        return False, "quarantined_qtypes_are_consistent is missing from jev_calibration"
+    if not callable(checker):
+        return False, "quarantined_qtypes_are_consistent is not callable"
+    try:
+        quarantined = _calibration.QUARANTINED_QTYPES
+    except AttributeError:
+        return False, "QUARANTINED_QTYPES is missing from jev_calibration"
+    if not isinstance(quarantined, frozenset):
+        return False, "QUARANTINED_QTYPES must be a frozenset"
+    if not quarantined:
+        return False, "QUARANTINED_QTYPES must never be empty"
+    try:
+        verdict = checker()
+    except Exception as exc:
+        return False, "quarantined_qtypes_are_consistent raised: %s" % exc
+    if not isinstance(verdict, tuple) or len(verdict) != 2:
+        return False, "quarantined_qtypes_are_consistent returned a malformed verdict"
+    ok, reason = verdict
+    if not ok:
+        return False, reason
+    if population_floor is not None:
+        if isinstance(population_floor, bool) or not isinstance(population_floor, (int, float)):
+            return False, "population_floor must be a number or None"
+        if not math.isfinite(population_floor):
+            return False, "population_floor must be finite"
+        if not (0.0 <= population_floor <= 1.0):
+            return False, "population_floor must be within [0.0, 1.0]"
+    return True, ""
 
 
 class _FallbackResult(object):

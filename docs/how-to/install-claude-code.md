@@ -32,6 +32,10 @@ Read [Hook scope](../reference/hooks.md) before broad/team installation.
 
 Read the run's effective safety message. `not enforced` is not equivalent to an enforced boundary. Keep production access and broad permissions outside your first trial; follow [safe delegation](delegate-safely.md).
 
+## Live proof on Claude Code
+
+Claude Code is the reference host of the live proof. The session runs `claude --print --output-format stream-json --include-hook-events --plugin-dir <bundle>` with the witness shim first on `PATH`, and its stdout is kept beside the evidence file. `scripts/host_live_claude.py` compares the hook events the host reports with the witness rows, per run. The binary comes from `HP1_CLAUDE_BIN`, then `CLAUDE_BIN`, then the newest install under `~/Library/Application Support/Claude/claude-code/`, never from `PATH` alone. Never pass `--bare`: it skips hooks. A missing binary or a stream line without the expected fields is NO-DATA, not a pass.
+
 ## Upgrade
 
 ```bash

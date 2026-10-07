@@ -99,6 +99,18 @@ try:
 except ImportError:  # pragma: no cover, exercised only by a partial deployment
     bm_vault_seams = None
 
+# The print choke point (tools/test_bm_print_choke_point.py): every line this
+# file prints is formatted whole, then leaves through bm_learning.say, so a
+# note path, title or reason carrying a line break or a cursor escape cannot
+# print a second line under the real one. Guarded like the two above: an older
+# bm_learning.py without say() degrades to an escaped line, never a traceback
+# and never a raw one.
+try:
+    from bm_learning import say  # noqa: E402
+except ImportError:  # pragma: no cover, exercised only by a partial deployment
+    def say(line, file=None):
+        print(ascii("%s" % (line,)), file=file)
+
 # Row M4: an empty tuple as an except clause's type matches nothing, so
 # `except _UNKNOWN_SEAM_ERROR` below is a safe no-op when bm_vault_seams
 # itself is absent, instead of masking an unrelated exception behind an
@@ -881,7 +893,7 @@ def _correction_rules():
         root, _source = bs.require_root()
         store = bs.Store(root, create=False)
     except Exception as e:
-        print("NO-DATA correction-rule store: %s" % e)
+        say("NO-DATA correction-rule store: %s" % e)
         return []
     try:
         return store.list_learning_rules(states=L.INJECTABLE_STATES)
@@ -1031,10 +1043,10 @@ def _print_loaded_line(status):
     docstring: "Output is injected into session context") carries it into the
     model's view, and stderr, so a human watching the session start sees the
     same words in the terminal that the model was just given."""
-    print(status)
+    say(status)
     loaded = _loaded_line(status)
     if loaded:
-        print(loaded)
+        say(loaded)
         sys.stderr.write(loaded + "\n")
 
 
@@ -1044,16 +1056,16 @@ def cmd_status_line(args):
     Always exits 0: an unreadable index is a NO-DATA line, never a blocked edit."""
     vault = args.get("vault") or _default_vault()
     if not vault:
-        print("vault-index: NO-DATA: no vault root configured (%s), so nothing is indexed "
+        say("vault-index: NO-DATA: no vault root configured (%s), so nothing is indexed "
               "and point-of-need recall is empty" % CONFIG_PATH)
         return 0
     try:
         con = _connect()
         _schema(con)
-        print(_status_line(con, _index_roots(vault)))
+        say(_status_line(con, _index_roots(vault)))
         con.close()
     except (sqlite3.Error, OSError) as exc:
-        print("vault-index: NO-DATA: the index could not be read (%s)" % exc)
+        say("vault-index: NO-DATA: the index could not be read (%s)" % exc)
     return 0
 
 
@@ -1091,7 +1103,7 @@ def cmd_refresh(args):
         return 0
     vault = args.get("vault") or _default_vault()
     if not vault:
-        print("vault-index: NO-DATA: no vault root configured. Set BM_VAULT_ROOT or write "
+        say("vault-index: NO-DATA: no vault root configured. Set BM_VAULT_ROOT or write "
               "{\"vault\": \"...\"} to %s; point-of-need recall stays empty until then."
               % CONFIG_PATH)
         return 0
@@ -1105,12 +1117,12 @@ def cmd_refresh(args):
         behind = _unindexed(con, roots)
         orphans = _repair_fts_orphans(con)
     except (sqlite3.Error, OSError) as exc:
-        print("vault-index: NO-DATA: the index could not be read (%s); recall serves whatever "
+        say("vault-index: NO-DATA: the index could not be read (%s); recall serves whatever "
               "it already holds" % exc)
         return 0
     if orphans:
         _line = "vault-index: rebuilt the text index, %d orphan rows removed" % orphans
-        print(_line)
+        say(_line)
         sys.stderr.write(_line + "\n")
     if behind == 0:
         # The common case, and the reason the check comes first: nothing to do, nothing
@@ -1124,26 +1136,26 @@ def cmd_refresh(args):
         with contextlib.redirect_stdout(captured):
             cmd_index({"vault": vault, "budget": budget, "paths": []})
     except (sqlite3.Error, OSError, ValueError) as exc:
-        print("vault-index: NO-DATA: the refresh failed (%s); recall serves whatever it "
+        say("vault-index: NO-DATA: the refresh failed (%s); recall serves whatever it "
               "already holds" % exc)
         return 0
     finally:
         for line in captured.getvalue().splitlines():
             if line.strip():
-                print("vault-index: %s" % line.strip())
+                say("vault-index: %s" % line.strip())
     try:
         con = _connect()
         _print_loaded_line(_status_line(con, roots))
         con.close()
     except (sqlite3.Error, OSError) as exc:
-        print("vault-index: NO-DATA: the index could not be read after the refresh (%s)" % exc)
+        say("vault-index: NO-DATA: the index could not be read after the refresh (%s)" % exc)
     return 0
 
 
 def cmd_index(args):
     vault = args.get("vault") or _default_vault()
     if not vault:
-        print("NO-DATA vault root: nothing configured. Pass --vault, set BM_VAULT_ROOT or "
+        say("NO-DATA vault root: nothing configured. Pass --vault, set BM_VAULT_ROOT or "
               "BROTHERMODE_VAULT, or write {\"vault\": \"...\"} to %s. Refusing to index a "
               "guessed path (D01)." % CONFIG_PATH)
         return 2
@@ -1244,7 +1256,7 @@ def cmd_index(args):
     if prev_name != current_model and con.execute(
             "SELECT COUNT(*) c FROM vectors").fetchone()["c"]:
         con.execute("DELETE FROM vectors")
-        print("embed model changed %s -> %s: all vectors cleared for re-embedding"
+        say("embed model changed %s -> %s: all vectors cleared for re-embedding"
               % (prev_name, current_model))
     con.execute("INSERT OR REPLACE INTO meta (k,v) VALUES ('embed_model',?)", (current_model,))
     pending = con.execute(
@@ -2042,7 +2054,7 @@ def _search(con, text=None, paths=None, limit=6, fast=False, explain=None, deny=
                 analyzer_mod = _load_bm_vault_analyzer()
                 cjk_ids = _cjk_hits(con, text, analyzer_mod)
             except Exception as e:
-                print("cjk signal unavailable (%s); ranking runs without it" % e,
+                say("cjk signal unavailable (%s); ranking runs without it" % e,
                       file=sys.stderr)
             note("cjk: %d hit(s) in %dms" % (len(cjk_ids), int((time.time() - t0) * 1000)))
             add(cjk_ids, 3.0, "cjk")
@@ -2143,7 +2155,7 @@ def _search(con, text=None, paths=None, limit=6, fast=False, explain=None, deny=
             fused = _ja_disambiguate(con, text, _load_bm_vault_analyzer(), fused, why, note)
             note("disambiguation: %dms" % int((time.time() - t0) * 1000))
         except Exception as e:
-            print("disambiguation unavailable (%s); results keep fused order" % e,
+            say("disambiguation unavailable (%s); results keep fused order" % e,
                   file=sys.stderr)
     # E57 mechanism 2: time decay and reinforcement, applied HERE on purpose. AFTER the
     # policy trim (a denied note's body is never read, not even to age it) and BEFORE the
@@ -2158,7 +2170,7 @@ def _search(con, text=None, paths=None, limit=6, fast=False, explain=None, deny=
             decay_mod = _load_bm_vault_decay()
         except Exception as e:
             decay_mod = None
-            print("decay ranking unavailable (%s); results keep fused order" % e,
+            say("decay ranking unavailable (%s); results keep fused order" % e,
                   file=sys.stderr)
         if decay_mod is not None:
             # One store read for the whole result set, never one per note.
@@ -2277,12 +2289,12 @@ def _search(con, text=None, paths=None, limit=6, fast=False, explain=None, deny=
         try:
             auth = _load_bm_vault_authority()
         except Exception as e:
-            print("authority ranking unavailable (%s); results keep fused order" % e,
+            say("authority ranking unavailable (%s); results keep fused order" % e,
                   file=sys.stderr)
         try:
             stale_mod = _load_bm_vault_staleness()
         except Exception as e:
-            print("staleness demotion unavailable (%s); authority ranks as declared" % e,
+            say("staleness demotion unavailable (%s); authority ranks as declared" % e,
                   file=sys.stderr)
 
     def _authority_sort(pairs):
@@ -2292,7 +2304,7 @@ def _search(con, text=None, paths=None, limit=6, fast=False, explain=None, deny=
             body = row["body"] if row else ""
             level, problem = auth.read_authority(body)
             if problem:
-                print("authority: note %s ranks casual, %s" % (nid, problem),
+                say("authority: note %s ranks casual, %s" % (nid, problem),
                       file=sys.stderr)
                 note("authority: note %s ranks casual, %s" % (nid, problem))
                 level = "casual"
@@ -2308,7 +2320,7 @@ def _search(con, text=None, paths=None, limit=6, fast=False, explain=None, deny=
                     idx = auth.LEVELS.index(level)
                     level = auth.LEVELS[idx - 1]
                     msg = "authority demoted, unverified since %s" % verified
-                    print("staleness: note %s %s" % (nid, msg), file=sys.stderr)
+                    say("staleness: note %s %s" % (nid, msg), file=sys.stderr)
                     note("staleness: note %s %s" % (nid, msg))
                     why.setdefault(nid, []).append(msg)
             levels[nid] = level
@@ -2478,10 +2490,10 @@ def _print_annotations(enrich, body):
         temporal = asof.classify(window, problems, datetime.date.today(), bt)
     else:
         temporal = "unavailable"
-    print("    id: %s  authority: %s  temporal: %s" % (note_id, authority, temporal))
+    say("    id: %s  authority: %s  temporal: %s" % (note_id, authority, temporal))
     if prov:
         for claim, locator in prov.find_claims(body)[:3]:
-            print("    evidence: %s (claim: %s)" % (locator, claim[:100]))
+            say("    evidence: %s (claim: %s)" % (locator, claim[:100]))
     return note_id
 
 
@@ -2567,15 +2579,15 @@ def _print_hits(con, fused, why, header, roots=None, ledger_hits=None, withheld_
         # one, exactly the failure Row P0-M above this exists to prevent.
         print("NO-DATA: seam module unavailable, mutation state unknown")
     if "__nodata__" in why:
-        print("NOTE: " + why.pop("__nodata__")[0])
+        say("NOTE: " + why.pop("__nodata__")[0])
     if not fused:
-        print("NO-DATA %s" % header)
+        say("NO-DATA %s" % header)
         print("  Nothing in the vault or project memory matched. That is a real answer: say so, "
               "rather than assuming the estate has never met this.")
         if withheld_out is not None:
             withheld_out.append(0)
         return 1
-    print(header)
+    say(header)
     freshness = _load_bm_freshness()
     # D4 (2026-09-10): the verified-at label printed per served note below is a
     # DISPLAY aid, not a safety gate -- the demotion seam in _search's
@@ -2587,7 +2599,7 @@ def _print_hits(con, fused, why, header, roots=None, ledger_hits=None, withheld_
         stale_mod = _load_bm_vault_staleness()
     except Exception as e:
         stale_mod = None
-        print("NOTE: verified-at label unavailable (%s); notes below print "
+        say("NOTE: verified-at label unavailable (%s); notes below print "
               "without it" % e, file=sys.stderr)
     # VN1 (2026-09-08): MISSING AUTHORITY FAILS CLOSED FOR APPLICATION. A module this
     # loop needs to tell a candidate or contradicted note apart from an ordinary one is
@@ -2602,7 +2614,7 @@ def _print_hits(con, fused, why, header, roots=None, ledger_hits=None, withheld_
     except Exception as e:
         lifecycle = None
         lifecycle_error = e
-        print("NOTE: D12 lifecycle contract unavailable (%s); every note below is "
+        say("NOTE: D12 lifecycle contract unavailable (%s); every note below is "
               "withheld (NO-DATA) until this is fixed -- unable to tell a candidate "
               "from an ordinary note without it" % e, file=sys.stderr)
     contradiction_error = None
@@ -2611,7 +2623,7 @@ def _print_hits(con, fused, why, header, roots=None, ledger_hits=None, withheld_
     except Exception as e:
         contradiction = None
         contradiction_error = e
-        print("NOTE: contradiction resolver unavailable (%s); any note that is part "
+        say("NOTE: contradiction resolver unavailable (%s); any note that is part "
               "of a CONTRADICTS pair is withheld (NO-DATA) below rather than served "
               "with a plain, unresolved annotation" % e, file=sys.stderr)
     duplicate_probe = _make_duplicate_probe(con) if contradiction is not None else None
@@ -2643,10 +2655,11 @@ def _print_hits(con, fused, why, header, roots=None, ledger_hits=None, withheld_
             replaced_by = _superseded_by(con, row["path"])
             if replaced_by:
                 withheld += 1
-                print("\n  WITHHELD (superseded)  %s  [%s, %s]" % (row["title"], row["kind"],
+                print()
+                say("  WITHHELD (superseded)  %s  [%s, %s]" % (row["title"], row["kind"],
                                                                     row["source"]) + seam_suffix)
-                print("    superseded by: %s" % ", ".join(sorted(replaced_by)))
-                print("    %s" % row["path"])
+                say("    superseded by: %s" % ", ".join(sorted(replaced_by)))
+                say("    %s" % row["path"])
                 print(_WITHHELD_MARKER_LINE)
                 continue
             # VN1: the lifecycle contract failed to load above, so this loop cannot
@@ -2657,10 +2670,11 @@ def _print_hits(con, fused, why, header, roots=None, ledger_hits=None, withheld_
             if lifecycle_error is not None:
                 withheld += 1
                 reason = "NO-DATA: lifecycle contract unavailable (%s)" % lifecycle_error
-                print("\n  WITHHELD (%s)  %s  [%s, %s]" % (
+                print()
+                say("  WITHHELD (%s)  %s  [%s, %s]" % (
                     reason, row["title"], row["kind"], row["source"]) + seam_suffix)
-                print("    reason: %s" % reason)
-                print("    %s" % row["path"])
+                say("    reason: %s" % reason)
+                say("    %s" % row["path"])
                 print(_WITHHELD_MARKER_LINE)
                 continue
             # D12 (2026-08-30): a note explicitly declared "candidate" is written,
@@ -2696,10 +2710,11 @@ def _print_hits(con, fused, why, header, roots=None, ledger_hits=None, withheld_
                         # unreadable-contract case in this loop already takes.
                         withheld += 1
                         reason = "NO-DATA: promotion state unreadable (%s)" % e
-                        print("\n  WITHHELD (%s)  %s  [%s, %s]" % (
+                        print()
+                        say("  WITHHELD (%s)  %s  [%s, %s]" % (
                             reason, row["title"], row["kind"], row["source"]) + seam_suffix)
-                        print("    reason: %s" % reason)
-                        print("    %s" % row["path"])
+                        say("    reason: %s" % reason)
+                        say("    %s" % row["path"])
                         print(_WITHHELD_MARKER_LINE)
                         continue
                 # MUTATION SEAM, never set in production: BM_VAULT_DISABLE_LIFECYCLE_GATE
@@ -2707,20 +2722,22 @@ def _print_hits(con, fused, why, header, roots=None, ledger_hits=None, withheld_
                 if (_promo_state == "candidate"
                         and not os.environ.get("BM_VAULT_DISABLE_LIFECYCLE_GATE")):
                     withheld += 1
-                    print("\n  WITHHELD (candidate, not yet validated)  %s  [%s, %s]"
+                    print()
+                    say("  WITHHELD (candidate, not yet validated)  %s  [%s, %s]"
                           % (row["title"], row["kind"], row["source"]) + seam_suffix)
                     print("    reason: declared a candidate under the D12 lifecycle "
                           "contract; nobody has validated it yet")
-                    print("    %s" % row["path"])
+                    say("    %s" % row["path"])
                     print(_WITHHELD_MARKER_LINE)
                     continue
             state, reason = _note_freshness(con, freshness, nid, fresh_roots, idx_cache, state_con)
             if state == "stale":
                 withheld += 1
-                print("\n  WITHHELD (stale)  %s  [%s, %s]" % (row["title"], row["kind"],
+                print()
+                say("  WITHHELD (stale)  %s  [%s, %s]" % (row["title"], row["kind"],
                                                                row["source"]) + seam_suffix)
-                print("    reason: %s" % reason)
-                print("    %s" % row["path"])
+                say("    reason: %s" % reason)
+                say("    %s" % row["path"])
                 print(_WITHHELD_MARKER_LINE)
                 continue
             # THE PRECEDENCE LAW (founder steering 2026-09-05, sections 6 to
@@ -2741,10 +2758,11 @@ def _print_hits(con, fused, why, header, roots=None, ledger_hits=None, withheld_
                 # CONTRADICTS annotation.
                 withheld += 1
                 reason = "NO-DATA: contradiction resolver unavailable (%s)" % contradiction_error
-                print("\n  WITHHELD (%s)  %s vs %s  [%s, %s]" % (
+                print()
+                say("  WITHHELD (%s)  %s vs %s  [%s, %s]" % (
                     reason, row["title"], ", ".join(conflicting), row["kind"], row["source"]) + seam_suffix)
-                print("    reason: %s" % reason)
-                print("    %s" % row["path"])
+                say("    reason: %s" % reason)
+                say("    %s" % row["path"])
                 print(_WITHHELD_MARKER_LINE)
                 continue
             if conflicting and contradiction is not None:
@@ -2765,10 +2783,11 @@ def _print_hits(con, fused, why, header, roots=None, ledger_hits=None, withheld_
                 if resolver_crashed:
                     withheld += 1
                     reason = "NO-DATA: %s" % why_line
-                    print("\n  WITHHELD (%s)  %s vs %s  [%s, %s]" % (
+                    print()
+                    say("  WITHHELD (%s)  %s vs %s  [%s, %s]" % (
                         reason, row["title"], ", ".join(conflicting), row["kind"], row["source"]) + seam_suffix)
-                    print("    reason: %s" % reason)
-                    print("    %s" % row["path"])
+                    say("    reason: %s" % reason)
+                    say("    %s" % row["path"])
                     print(_WITHHELD_MARKER_LINE)
                     continue
                 if verdict == "APPLY" and winner_title == row["title"]:
@@ -2779,11 +2798,12 @@ def _print_hits(con, fused, why, header, roots=None, ledger_hits=None, withheld_
                               if verdict == "APPLY" else
                               ("contradiction unresolved" if verdict == "WITHHOLD" else
                                "contradiction escalated"))
-                    print("\n  WITHHELD (%s)  %s vs %s  [%s, %s]" % (
+                    print()
+                    say("  WITHHELD (%s)  %s vs %s  [%s, %s]" % (
                         label, row["title"], ", ".join(conflicting), row["kind"], row["source"]) + seam_suffix)
-                    print("    reason: %s" % (why_line or "no current evidence resolves "
+                    say("    reason: %s" % (why_line or "no current evidence resolves "
                                                 "this conflict"))
-                    print("    %s" % row["path"])
+                    say("    %s" % row["path"])
                     print(_WITHHELD_MARKER_LINE)
                     continue
                 # else verdict == "NO_DATA": the resolver's OWN genuine answer (never
@@ -2831,10 +2851,11 @@ def _print_hits(con, fused, why, header, roots=None, ledger_hits=None, withheld_
                     evidence_unavailable = "NO-DATA: evidence tier unavailable (%s)" % e
             if evidence_unavailable is not None:
                 withheld += 1
-                print("\n  WITHHELD (%s)  %s  [%s, %s]" % (
+                print()
+                say("  WITHHELD (%s)  %s  [%s, %s]" % (
                     evidence_unavailable, row["title"], row["kind"], row["source"]) + seam_suffix)
-                print("    reason: %s" % evidence_unavailable)
-                print("    %s" % row["path"])
+                say("    reason: %s" % evidence_unavailable)
+                say("    %s" % row["path"])
                 print(_WITHHELD_MARKER_LINE)
                 continue
             # MUTATION SEAM, never set in production: BM_VAULT_DISABLE_EVIDENCE_LOCATOR_CHECK
@@ -2866,17 +2887,19 @@ def _print_hits(con, fused, why, header, roots=None, ledger_hits=None, withheld_
                 withheld_label = ("policy-conflict"
                                   if tier_seam == contradiction.SEAM_SAFETY_PRECEDENCE
                                   else "refused")
-                print("\n  WITHHELD (%s)  %s  [%s, %s]" % (
+                print()
+                say("  WITHHELD (%s)  %s  [%s, %s]" % (
                     withheld_label, row["title"], row["kind"], row["source"]) + seam_suffix)
-                print("    reason: %s" % tier_reason)
-                print("    %s" % row["path"])
+                say("    reason: %s" % tier_reason)
+                say("    %s" % row["path"])
                 print(_WITHHELD_MARKER_LINE)
                 continue
-            print("\n  %s  [%s, %s]" % (row["title"], row["kind"], row["source"]) + seam_suffix)
+            print()
+            say("  %s  [%s, %s]" % (row["title"], row["kind"], row["source"]) + seam_suffix)
             if row["descr"]:
-                print("    %s" % row["descr"][:160])
+                say("    %s" % row["descr"][:160])
             note_id = _print_annotations(enrich, row["body"] or "")
-            print("    " + _verified_label(stale_mod, row["body"] or ""))
+            say("    " + _verified_label(stale_mod, row["body"] or ""))
             if ledger_hits is not None:
                 ledger_hits.append({
                     "id": note_id,
@@ -2885,14 +2908,14 @@ def _print_hits(con, fused, why, header, roots=None, ledger_hits=None, withheld_
                         (row["body"] or "").encode("utf-8")).hexdigest(),
                 })
             if conflicting and resolved_note is not None:
-                print("    RESOLVED (applies): %s" % resolved_note)
+                say("    RESOLVED (applies): %s" % resolved_note)
             elif conflicting:
-                print("    CONTRADICTS: %s (see both before treating this as settled)"
+                say("    CONTRADICTS: %s (see both before treating this as settled)"
                       % ", ".join(conflicting))
             if tier is not None:
-                print("    TIER: %s (%s)" % (tier, tier_reason))
-            print("    matched on: %s" % ", ".join(sorted(set(why.get(nid, ["wording"])))))
-            print("    %s" % row["path"])
+                say("    TIER: %s (%s)" % (tier, tier_reason))
+            say("    matched on: %s" % ", ".join(sorted(set(why.get(nid, ["wording"])))))
+            say("    %s" % row["path"])
         state_con.commit()
     finally:
         state_con.close()
@@ -3143,7 +3166,7 @@ def _policy_deny(args, con):
             principals = _load_bm_vault_principals()
         except Exception as e:
             msg = "principal registry unavailable (%s); revocation is NOT enforced" % e
-            print(msg, file=sys.stderr)
+            say(msg, file=sys.stderr)
             # S7 (2026-09-08 VN1 fix): an unreadable registry means a REVOKED identity
             # cannot be told apart from a clean one -- the exact case enterprise mode's
             # fail-closed policy branch below already refuses to treat as "nothing
@@ -3156,7 +3179,7 @@ def _policy_deny(args, con):
             # Outside enterprise mode the old behavior is unchanged (not trimmed by
             # this registry), but the failure now reaches stdout too: a model reading
             # only the recall output, never stderr, previously never saw it at all.
-            print("NOTE: %s" % msg)
+            say("NOTE: %s" % msg)
             principals = None
         if principals is not None:
             vault_for_registry = _default_vault()
@@ -3174,11 +3197,11 @@ def _policy_deny(args, con):
     except Exception as e:
         msg = "access policy unavailable (%s)" % e
         if enterprise:
-            print(msg + "; ENTERPRISE MODE fails CLOSED: restricted notes withheld, "
+            say(msg + "; ENTERPRISE MODE fails CLOSED: restricted notes withheld, "
                   "unrestricted notes still served", file=sys.stderr)
             degraded.append(msg)
             return (lambda path: _is_restricted(con, path)), None, None, degraded
-        print(msg + "; recall is NOT trimmed by identity", file=sys.stderr)
+        say(msg + "; recall is NOT trimmed by identity", file=sys.stderr)
         return None, None, None, degraded
     vault = _default_vault()
     override = args.get("policy")
@@ -3225,11 +3248,11 @@ def cmd_recall(args):
     _schema(con)
     deny, policy_error, refusal_reason, degraded = _policy_deny(args, con)
     if policy_error:
-        print("NO-DATA access policy: %s. Fix it (bm_vault_policy.py check) or "
+        say("NO-DATA access policy: %s. Fix it (bm_vault_policy.py check) or "
               "remove it; a broken policy fails closed, not open." % policy_error)
         return 2
     if refusal_reason:
-        print("REFUSED: %s; recall trimmed to zero notes" % refusal_reason)
+        say("REFUSED: %s; recall trimmed to zero notes" % refusal_reason)
     explain = [] if args.get("explain") else None
     fast = bool(args.get("fast"))
     # VN3: _search now also returns the pre-limit total; recall does not render
@@ -3250,7 +3273,7 @@ def cmd_recall(args):
     # withheld note can never leak through the audit trail either.
     withheld_by_policy = why.pop("__policy_withheld__", 0)
     for line in explain or []:
-        print("EXPLAIN %s" % line)
+        say("EXPLAIN %s" % line)
     ledger_hits = []
     withheld_out = []
     rc = _print_hits(con, fused, why,
@@ -3277,7 +3300,7 @@ def cmd_recall(args):
     # time the deny() closure caught decide_dual() raising (checked only after _search
     # above has actually run every candidate through it).
     if degraded:
-        print("NOTE: %s; enterprise mode served unrestricted notes only until this "
+        say("NOTE: %s; enterprise mode served unrestricted notes only until this "
               "is fixed" % degraded[0])
     # VB6-03: one id per answer, minted here and shared by both stores below. A caller
     # can pass --event-id to retry a specific answer idempotently. The id is resolved
@@ -3296,7 +3319,7 @@ def cmd_recall(args):
     if not forced:
         event_id = uuid.uuid4().hex
     if existing is None:
-        print("event: %s" % event_id)
+        say("event: %s" % event_id)
         _append_ledger(text, ledger_hits, "fast" if fast else "dense", event_id)
         # VB6-06: the self-echo provenance marker, printed only when this answer's audit
         # row actually appended (a retry or refused collision never re-marks the output).
@@ -3304,9 +3327,9 @@ def cmd_recall(args):
                                event_id, refusal_reason=refusal_reason,
                                degraded_reason=(degraded[0] if degraded else None))
         if marker:
-            print(marker)
+            say(marker)
     elif existing.get("query") == text:
-        print("event: %s" % event_id)
+        say("event: %s" % event_id)
         sys.stderr.write(
             "bm_vault: answer ledger already holds event %s; duplicate append skipped "
             "(ledger and audit both unchanged, 1 skipped)\n" % event_id)
@@ -3718,7 +3741,7 @@ def cmd_check(args):
             if explain is not None:
                 explain.append(order_note)
     for line in explain or []:
-        print("EXPLAIN %s" % line)
+        say("EXPLAIN %s" % line)
     roots = _freshness_roots(args)
     rc = _print_hits(con, fused, why,
                      "RECORDED FAILURES in the files you are about to touch:", roots=roots)
@@ -3728,7 +3751,7 @@ def cmd_check(args):
     # "the limit cut real matches" -- point-of-need memory that never says so is
     # indistinguishable from a small vault.
     if total > len(fused):
-        print("Vault: %d more lesson(s) matched %s and were not shown (limit %d)"
+        say("Vault: %d more lesson(s) matched %s and were not shown (limit %d)"
              % (total - len(fused), ", ".join(os.path.basename(p) for p in paths), limit))
     # Content fallback. The anchor pass above only matches a FILE NAME some note already names,
     # so a brand-new path finds nothing even when its actual code repeats a documented failure
@@ -3770,7 +3793,7 @@ def cmd_check(args):
             top = [(nid, 0.0) for nid in ordered[:2]]
             if top:
                 print()
-                print("possible pattern match (content, not filename): %s" % p)
+                say("possible pattern match (content, not filename): %s" % p)
                 _print_hits(con, top, {},
                            "RECORDED FAILURES matching this file's content:", roots=roots)
     return rc
@@ -3850,8 +3873,8 @@ def cmd_status(args):
     anchors = con.execute("SELECT COUNT(DISTINCT anchor) c FROM anchors").fetchone()["c"]
     links = con.execute("SELECT COUNT(*) c FROM links").fetchone()["c"]
     at = con.execute("SELECT v FROM meta WHERE k='indexed_at'").fetchone()
-    print("index: %s" % INDEX_PATH)
-    print("notes: %d (%s)" % (total, ", ".join("%s %d" % (r["source"], r["c"]) for r in by_src)
+    say("index: %s" % INDEX_PATH)
+    say("notes: %d (%s)" % (total, ", ".join("%s %d" % (r["source"], r["c"]) for r in by_src)
                               or "none"))
     vecs = con.execute("SELECT COUNT(*) c FROM vectors").fetchone()["c"]
     print("anchors: %d distinct file or symbol names; links: %d; dense vectors: %d of %d"
@@ -3863,7 +3886,7 @@ def cmd_status(args):
         print("last indexed: NEVER, run `bm_vault.py index` first")
     b = _embed_bin()
     if b:
-        print("dense signal: %s (English only; a note written mostly in another language embeds "
+        say("dense signal: %s (English only; a note written mostly in another language embeds "
               "poorly and leans on the lexical signals)" % os.path.basename(b))
     else:
         print("KNOWN LIMIT: no embed machine, so retrieval is lexical and anchors only; a note "
@@ -3873,7 +3896,7 @@ def cmd_status(args):
     # VN3 goal 5: one line naming what the estate's own memory actually did on
     # its most recent run, read from the run journal (VN3 goal 3's own
     # vault.recall events), never recomputed or guessed here.
-    print(_latest_run_memory_line())
+    say(_latest_run_memory_line())
     return 0
 
 

@@ -293,13 +293,19 @@ class BlockedAndBroken(unittest.TestCase):
         self.assertIsInstance(gl.plan(d, slots=4)['weight'], dict)
 
 
+needs_live_board = unittest.skipUnless(os.path.isfile(gl.ROADMAP), 'the live board is a private plan file the export tree does not ship')
+
+
 class RealRoadmap(unittest.TestCase):
+    @needs_live_board
     def test_the_real_roadmap_produces_a_plan(self):
         self.assertEqual(gl.main(['--slots', '2']), 0)
 
+    @needs_live_board
     def test_the_real_roadmap_has_no_dangling_dependency(self):
         self.assertEqual(gl.plan(gl.load(), slots=1)['unknown_deps'], [])
 
+    @needs_live_board
     def test_no_two_nodes_in_a_real_batch_share_a_path(self):
         """The invariant, asserted over the live board rather than a fixture."""
         p = gl.plan(gl.load(), slots=8)
@@ -404,6 +410,7 @@ class TheSchedulerCanBePointedAtAnyGraph(unittest.TestCase):
         self.assertEqual(rc, 2)
         self.assertNotIn('DISPATCH NOW', buf.getvalue())
 
+    @needs_live_board
     def test_omitting_the_flag_still_reads_the_DEFAULT_roadmap(self):
         """The flag ADDS a capability. A change that also moved the default
         would silently repoint every existing caller."""

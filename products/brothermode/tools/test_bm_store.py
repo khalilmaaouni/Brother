@@ -12283,7 +12283,7 @@ class TestP17InstructionTextMatchesTheInstalledLayout(unittest.TestCase):
                 # The console script exists on this machine, but it belongs to
                 # a DIFFERENT environment than the file being run. Naming it
                 # would point the founder at some other install's store code.
-                self.assertEqual("python3 %s" % mod,
+                self.assertEqual("python3 %s" % bs._quote_path_for_local_shell(mod),
                                  bs.invocation("bm-store", mod))
 
     def test_a_path_with_spaces_is_quoted_so_it_can_be_pasted(self):
@@ -24622,8 +24622,8 @@ class TestEveryProjectScopedTableIsPurged(unittest.TestCase):
 
 
 class Night0912BmStore(unittest.TestCase):
-    """Night sweep 2026-09-12, batch e-tools/bm_store: six confirmed defects
-    drafted by DeepSeek V4.1 Flash, reviewed and applied here."""
+    """Night sweep 2026-09-12, batch e-tools/bm_store: six confirmed defects,
+    reviewed and applied here."""
 
     def test_delete_autosave_receipts_removes_empty_string_sha(self):
         # 9d01b62d4508: the list comprehension's `if s` filter dropped an

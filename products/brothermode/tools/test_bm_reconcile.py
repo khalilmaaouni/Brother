@@ -25,8 +25,10 @@ import os
 import shutil
 import sqlite3
 import subprocess
+import sys
 import tempfile
 import unittest
+import unittest.mock
 
 # E100: one sandbox for every temp tree this process makes, removed at exit.
 import os as _e100_os, sys as _e100_sys  # noqa: E402
@@ -571,6 +573,235 @@ class TestCase14PushStateUnobservable(_RootFixture):
         self.assertIsNone(row,
                           "a non-git root should say nothing about push "
                           "state, not manufacture a finding: %r" % rows)
+
+
+# ---------------------------------------------------------------------------
+# classify_record_distance: an automatic, advisory row measuring distance
+# to the repository of record, built on scripts/record_distance.py's own
+# measure_distance()/DistanceUnknown (ported from PR 601's ACC4 triage:
+# hub is preferred over origin, since origin is this checkout's public
+# export mirror, never the source of truth for how stale a checkout is).
+# ---------------------------------------------------------------------------
+
+class TestRecordDistance(_RootFixture):
+    def _git(self, *args, **kw):
+        cwd = kw.pop("cwd", self.root)
+        return subprocess.run(["git"] + list(args), cwd=cwd,
+                              capture_output=True, text=True, timeout=15)
+
+    def _init_repo(self):
+        self._git("init", "-q")
+        self._git("config", "user.email", "test@example.com")
+        self._git("config", "user.name", "Test")
+
+    def _commit(self, name, msg):
+        with io.open(os.path.join(self.root, name), "w",
+                    encoding="utf-8") as fh:
+            fh.write(msg + "\n")
+        self._git("add", "-A")
+        return self._git("commit", "-q", "-m", msg)
+
+    def test_non_git_root_yields_no_row(self):
+        store = bs.Store(self.root, create=True)
+        store.close()
+        self.assertEqual(RC.classify_record_distance(self.root), [])
+
+    def test_git_repo_with_no_remote_yields_no_row(self):
+        # No hub or origin remote is not an actionable gap (many
+        # repositories legitimately carry neither): the check has nothing
+        # to say, same as the non-git-root case, never a NO-DATA row.
+        if shutil.which("git") is None:
+            self.skipTest("git is not installed on this machine")
+        self._init_repo()
+        if self._commit("a.txt", "init").returncode != 0:
+            self.skipTest("git commit failed in this environment")
+        self.assertEqual(RC.classify_record_distance(self.root), [])
+
+    def test_record_distance_module_absent_yields_no_row(self):
+        # The installed-copy path (bundle, plugin cache): scripts/
+        # record_distance.py is not shipped there, so _load_record_distance
+        # returns None. That is not a defect in the checkout, it has
+        # nothing to say, so no row, never a NO-DATA the installed user
+        # cannot act on. Mutation M4 (verify-601.md) is this path returning
+        # a row instead of [].
+        if shutil.which("git") is None:
+            self.skipTest("git is not installed on this machine")
+        self._init_repo()
+        if self._commit("a.txt", "init").returncode != 0:
+            self.skipTest("git commit failed in this environment")
+        self._git("remote", "add", "hub", "https://example.invalid/nowhere.git")
+        with unittest.mock.patch.object(RC, "_load_record_distance",
+                                        return_value=None):
+            self.assertEqual(RC.classify_record_distance(self.root), [])
+
+    def test_remote_known_but_never_fetched_is_no_data(self):
+        if shutil.which("git") is None:
+            self.skipTest("git is not installed on this machine")
+        self._init_repo()
+        if self._commit("a.txt", "init").returncode != 0:
+            self.skipTest("git commit failed in this environment")
+        # A remote nobody has ever fetched: no local remote-tracking ref
+        # exists for it, so this is never contacted.
+        self._git("remote", "add", "hub", "https://example.invalid/nowhere.git")
+        rows = RC.classify_record_distance(self.root)
+        self.assertEqual(len(rows), 1, rows)
+        self.assertEqual(rows[0]["class"], RC.NO_DATA)
+        self.assertIn("no local remote-tracking", rows[0]["reason"])
+
+    def test_hub_preferred_over_origin_when_both_present(self):
+        if shutil.which("git") is None:
+            self.skipTest("git is not installed on this machine")
+        hub_bare = os.path.join(self.tmp, "hub.git")
+        origin_bare = os.path.join(self.tmp, "origin.git")
+        self._git("init", "-q", "--bare", hub_bare, cwd=self.tmp)
+        self._git("init", "-q", "--bare", origin_bare, cwd=self.tmp)
+        self._init_repo()
+        if self._commit("a.txt", "init").returncode != 0:
+            self.skipTest("git commit failed in this environment")
+        branch = self._git("branch", "--show-current").stdout.strip()
+        self._git("remote", "add", "hub", hub_bare)
+        self._git("remote", "add", "origin", origin_bare)
+        self._git("push", "-q", "hub", "%s:main" % branch)
+        self._git("push", "-q", "origin", "%s:main" % branch)
+        rows = RC.classify_record_distance(self.root)
+        self.assertEqual(len(rows), 1, rows)
+        self.assertEqual(rows[0]["class"], RC.VALID)
+        self.assertIn("hub/main", rows[0]["reason"])
+
+    def test_far_behind_hub_is_stale_at_a_low_warn_threshold(self):
+        if shutil.which("git") is None:
+            self.skipTest("git is not installed on this machine")
+        hub_bare = os.path.join(self.tmp, "hub.git")
+        self._git("init", "-q", "--bare", hub_bare, cwd=self.tmp)
+        self._init_repo()
+        if self._commit("a.txt", "init").returncode != 0:
+            self.skipTest("git commit failed in this environment")
+        branch = self._git("branch", "--show-current").stdout.strip()
+        self._git("remote", "add", "hub", hub_bare)
+        self._git("push", "-q", "hub", "%s:main" % branch)
+        # A second writer advances hub's main without this checkout
+        # fetching first, then this checkout fetches (but never merges).
+        clone = os.path.join(self.tmp, "hub-writer")
+        self._git("clone", "-q", hub_bare, clone, cwd=self.tmp)
+        subprocess.run(["git", "config", "user.email", "w@example.com"],
+                      cwd=clone, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "Writer"],
+                      cwd=clone, capture_output=True)
+        with io.open(os.path.join(clone, "b.txt"), "w",
+                    encoding="utf-8") as fh:
+            fh.write("advance\n")
+        subprocess.run(["git", "add", "-A"], cwd=clone, capture_output=True)
+        subprocess.run(["git", "commit", "-q", "-m", "advance"], cwd=clone,
+                       capture_output=True)
+        subprocess.run(["git", "push", "-q", "origin", "HEAD:main"],
+                       cwd=clone, capture_output=True)
+        self._git("fetch", "-q", "hub")
+        rows = RC.classify_record_distance(self.root, warn_after=0)
+        self.assertEqual(len(rows), 1, rows)
+        self.assertEqual(rows[0]["class"], RC.STALE)
+        self.assertIn("behind hub/main", rows[0]["reason"])
+
+    def test_reconcile_wires_the_record_distance_row(self):
+        # No remote yields no row (asserted above), so wiring is proven
+        # with the one case that DOES produce a row: a known remote never
+        # fetched. This also proves reconcile() calls
+        # classify_record_distance() at all (mutation M2, verify-601.md).
+        if shutil.which("git") is None:
+            self.skipTest("git is not installed on this machine")
+        self._init_repo()
+        store = bs.Store(self.root, create=True)
+        store.close()
+        if self._commit("a.txt", "init").returncode != 0:
+            self.skipTest("git commit failed in this environment")
+        self._git("remote", "add", "hub", "https://example.invalid/nowhere.git")
+        rows = self._rows()
+        row = self._row_for(rows, "record-distance", self.root)
+        self.assertIsNotNone(row, "no record-distance row from reconcile: %r"
+                             % rows)
+        self.assertEqual(row["class"], RC.NO_DATA)
+        self.assertIn("no local remote-tracking", row["reason"])
+
+    def test_reconcile_with_no_known_remote_yields_no_record_distance_row(self):
+        # The exact installed-copy-adjacent shape defect 1/2 in verify-601.md
+        # named: a clean repository with a remote that is neither hub nor
+        # origin (e.g. upstream) gets no record-distance row and stays
+        # exit-clean, never a permanent unresolvable finding at session start.
+        if shutil.which("git") is None:
+            self.skipTest("git is not installed on this machine")
+        self._init_repo()
+        store = bs.Store(self.root, create=True)
+        store.close()
+        if self._commit("a.txt", "init").returncode != 0:
+            self.skipTest("git commit failed in this environment")
+        branch = self._git("branch", "--show-current").stdout.strip()
+        upstream_bare = os.path.join(self.tmp, "upstream.git")
+        self._git("init", "-q", "--bare", upstream_bare, cwd=self.tmp)
+        self._git("remote", "add", "upstream", upstream_bare)
+        self._git("push", "-q", "-u", "upstream", "%s:main" % branch)
+        rows = self._rows()
+        row = self._row_for(rows, "record-distance", self.root)
+        self.assertIsNone(row, "record-distance should say nothing when no "
+                          "hub or origin remote exists: %r" % rows)
+        self.assertEqual([r for r in rows if r["class"] != RC.VALID], [],
+                         "a clean repo with an unrecognised remote should "
+                         "stay exit-clean: %r" % rows)
+
+
+# ---------------------------------------------------------------------------
+# The installed-copy shape verify-601.md's defect 1 named: bundle/runtime
+# has no scripts/ three directories up (it is never a source checkout), so
+# _load_record_distance() returns None there by construction, not by a
+# fault. This runs the actual bundle file as a subprocess against a real
+# repository and reads its real exit code, rather than inferring it from
+# the source-checkout unit tests above.
+# ---------------------------------------------------------------------------
+
+class TestBundleCopyInstalledShape(_RootFixture):
+    def _bundle_reconcile_path(self):
+        repo_root = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
+        return os.path.join(repo_root, "bundle", "runtime", "hooks",
+                            "brothermode", "tools", "bm_reconcile.py")
+
+    def _git(self, *args, **kw):
+        cwd = kw.pop("cwd", self.root)
+        return subprocess.run(["git"] + list(args), cwd=cwd,
+                              capture_output=True, text=True, timeout=15)
+
+    def _init_repo(self):
+        self._git("init", "-q")
+        self._git("config", "user.email", "test@example.com")
+        self._git("config", "user.name", "Test")
+
+    def _commit(self, name, msg):
+        with io.open(os.path.join(self.root, name), "w",
+                    encoding="utf-8") as fh:
+            fh.write(msg + "\n")
+        self._git("add", "-A")
+        return self._git("commit", "-q", "-m", msg)
+
+    def test_bundle_copy_clean_repo_with_upstream_but_no_hub_or_origin_exits_0(self):
+        if shutil.which("git") is None:
+            self.skipTest("git is not installed on this machine")
+        bundle_path = self._bundle_reconcile_path()
+        if not os.path.isfile(bundle_path):
+            self.skipTest("bundle/runtime copy not built: %s" % bundle_path)
+        self._init_repo()
+        store = bs.Store(self.root, create=True)
+        store.close()
+        if self._commit("a.txt", "init").returncode != 0:
+            self.skipTest("git commit failed in this environment")
+        branch = self._git("branch", "--show-current").stdout.strip()
+        upstream_bare = os.path.join(self.tmp, "upstream.git")
+        self._git("init", "-q", "--bare", upstream_bare, cwd=self.tmp)
+        self._git("remote", "add", "upstream", upstream_bare)
+        self._git("push", "-q", "-u", "upstream", "%s:main" % branch)
+        result = subprocess.run(
+            [sys.executable, bundle_path, "sweep", "--root", self.root],
+            capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0,
+                         "bundle copy exit=%r\nstdout:\n%s\nstderr:\n%s"
+                         % (result.returncode, result.stdout, result.stderr))
+        self.assertNotIn("record-distance", result.stdout)
 
 
 # ---------------------------------------------------------------------------

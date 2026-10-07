@@ -1,0 +1,1019 @@
+{
+  "generated_at_note": "produced by U0 inventory worker E, read-only sweep, no files moved",
+  "duplicate_pairs_products_vs_bundle": [
+    {
+      "products_path": "products/brothermode/brotherme/core/schema.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/brotherme/core/schema.py",
+      "hash": "6a29a15c267a897e6acfd8a4dd1abb6f",
+      "size_bytes": 16411
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_provenance.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_provenance.py",
+      "hash": "7b6d820e884691bb9f5a77d2acec921e",
+      "size_bytes": 31671
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_project.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_project.py",
+      "hash": "62416ba4d451564e76b0b5a1f29337c1",
+      "size_bytes": 151436
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_docs_export.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_docs_export.py",
+      "hash": "d05f2b922648b6eaf727c8242982591e",
+      "size_bytes": 16699
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_realdata.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_realdata.py",
+      "hash": "48e46e944dd80fc3a712aee92ae1c5da",
+      "size_bytes": 13616
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_survivorship.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_survivorship.py",
+      "hash": "9ee8388675d1a2552b2acae0ec31e1ff",
+      "size_bytes": 13257
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_seams.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_seams.py",
+      "hash": "593823d2fd032663be07271d96bdec26",
+      "size_bytes": 7140
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_hookbench.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_hookbench.py",
+      "hash": "6e5e591801c66051acd1615845a78ae0",
+      "size_bytes": 56415
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_learn.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_learn.py",
+      "hash": "ad893ec3e2ef9389301de1ceabd56ce2",
+      "size_bytes": 104036
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_enrich_gate.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_enrich_gate.py",
+      "hash": "25a07c25db8b81485eef062af51dc127",
+      "size_bytes": 21752
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_heat_temporal.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_heat_temporal.py",
+      "hash": "e98166503c64fc0173b6b4a993baa98a",
+      "size_bytes": 12476
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_stall.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_stall.py",
+      "hash": "50d42cfca527f1523ea6b7051314df39",
+      "size_bytes": 35054
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_contract.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_contract.py",
+      "hash": "176790f579632d57b5e8659e303225cc",
+      "size_bytes": 18082
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_verify.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_verify.py",
+      "hash": "b95e6acc7e44f90cc42ba494b9e8af2c",
+      "size_bytes": 7198
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_promote.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_promote.py",
+      "hash": "eff34a26f7d66352211c7ff817c7103c",
+      "size_bytes": 7748
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_contradiction.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_contradiction.py",
+      "hash": "489359bbcfa3e4b554c1d529f48f5a11",
+      "size_bytes": 94085
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_bash_audit.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_bash_audit.py",
+      "hash": "a9419806f0bced0f38f2d7ec201a931f",
+      "size_bytes": 54502
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_cursor.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_cursor.py",
+      "hash": "b9ecd65ee364131850c9056a95112aad",
+      "size_bytes": 44637
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_bench.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_bench.py",
+      "hash": "ce20fce2bd92056f6b99026487799c4b",
+      "size_bytes": 12873
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_cli.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_cli.py",
+      "hash": "99ec046da84b2119de68c4fa3bad57eb",
+      "size_bytes": 25405
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_identity.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_identity.py",
+      "hash": "0c77c353158c11a7765820832fe5408a",
+      "size_bytes": 23783
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_autosave.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_autosave.py",
+      "hash": "03ae1a5f424acf7d2841279d07b00401",
+      "size_bytes": 89569
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_handover.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_handover.py",
+      "hash": "a094afbc10d1eef156c05e77ca83d720",
+      "size_bytes": 106781
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_session_cap.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_session_cap.py",
+      "hash": "56f3d8881ddc68c89b640a9f24baa44a",
+      "size_bytes": 16610
+    },
+    {
+      "products_path": "products/brothermode/tools/test_all.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/test_all.py",
+      "hash": "6f1d5e52e30df0a1c29e24eeb7925639",
+      "size_bytes": 86288
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_runtimes.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_runtimes.py",
+      "hash": "378cc13aece98e2fab6ac857aba2bc00",
+      "size_bytes": 87973
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault.py",
+      "hash": "2bb73ab1aa6334e32447b077cd8dfbf3",
+      "size_bytes": 210807
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_progress_check.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_progress_check.py",
+      "hash": "71fc58629794b4cb57d716a71cd7c3c6",
+      "size_bytes": 13150
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_fence_hook.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_fence_hook.py",
+      "hash": "36c7cb33202060df7b5e03e4dc3393e4",
+      "size_bytes": 66410
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_autonomy.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_autonomy.py",
+      "hash": "e01dd0081555d8824af78160ea2fb1b0",
+      "size_bytes": 43942
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_worker_spawn.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_worker_spawn.py",
+      "hash": "9ba279b325cac0f368bceb0c83038e23",
+      "size_bytes": 13060
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_view.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_view.py",
+      "hash": "2e1091c948f428346d5bacc0bf22308a",
+      "size_bytes": 61874
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_lead.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_lead.py",
+      "hash": "c3655229e923daafcb2e851598e53a1a",
+      "size_bytes": 121013
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_pack.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_pack.py",
+      "hash": "29ad7a258da58a5493e4e8668526df5f",
+      "size_bytes": 16364
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_packs.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_packs.py",
+      "hash": "32e2c08da94359190d910c0e1e9fd400",
+      "size_bytes": 55422
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_forecast.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_forecast.py",
+      "hash": "cfab3af4283f5d1f7d4a09c297489a59",
+      "size_bytes": 30132
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_reconcile.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_reconcile.py",
+      "hash": "c14f12f47f2ed73430c55d2495a557a7",
+      "size_bytes": 51025
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_compose.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_compose.py",
+      "hash": "db36b3d992dd8ed79cd1254a531a0c65",
+      "size_bytes": 20647
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_score.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_score.py",
+      "hash": "071c5699bafbc94991b952839678290b",
+      "size_bytes": 9310
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_passport.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_passport.py",
+      "hash": "9b49bcfe73a672e2a0216195d74f2f40",
+      "size_bytes": 65564
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_triage.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_triage.py",
+      "hash": "d8ced76977c79eedc4c237fbf3cd375a",
+      "size_bytes": 14090
+    },
+    {
+      "products_path": "products/brothermode/tools/find_out.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/find_out.py",
+      "hash": "4c83178215513cdf6d7715870a53cb9a",
+      "size_bytes": 9670
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_cite.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_cite.py",
+      "hash": "0f56ad31e40ae80d5e5298d5e8f71b19",
+      "size_bytes": 13291
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_playbook.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_playbook.py",
+      "hash": "a2f1c1df7ad372fbddd102d57f6e739d",
+      "size_bytes": 7978
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_reality.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_reality.py",
+      "hash": "08c8a78ccd8477f9de8148fdd64c3bbc",
+      "size_bytes": 34047
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_cursor_hook.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_cursor_hook.py",
+      "hash": "f7911ab00005eaf3e64f6d24535202a2",
+      "size_bytes": 20491
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_census_ext.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_census_ext.py",
+      "hash": "d38400dc1f676e356e42b0842f77b8b2",
+      "size_bytes": 23558
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_summary.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_summary.py",
+      "hash": "6e8161e0f41f4007308d4ba628d42117",
+      "size_bytes": 15349
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_sessionstart.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_sessionstart.py",
+      "hash": "a170a449ee7561a39cd3ab80c5ca3fd1",
+      "size_bytes": 17706
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_visual.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_visual.py",
+      "hash": "242c0926ce21eb1f985f09c228ec7138",
+      "size_bytes": 141993
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_threads.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_threads.py",
+      "hash": "1ab46781a8ffcfb7ecf0409bfc25e2bc",
+      "size_bytes": 52828
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_interchange.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_interchange.py",
+      "hash": "ae66d06176ec1353ac033b324c826405",
+      "size_bytes": 26526
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_tiers.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_tiers.py",
+      "hash": "1541d021c178db8f54be6e5081b004ed",
+      "size_bytes": 18928
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_memory_budget.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_memory_budget.py",
+      "hash": "05d4e98d5cfa9fef6d27c6a6d4b6a594",
+      "size_bytes": 3982
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_export_seam.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_export_seam.py",
+      "hash": "ce5f4f535255438600c78997abef85d7",
+      "size_bytes": 4830
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_ids.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_ids.py",
+      "hash": "168b7eadae083e21df7e5e4060d613ed",
+      "size_bytes": 9604
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_entity.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_entity.py",
+      "hash": "4e6a57cde99ad7ac0b8387d8ebed43c8",
+      "size_bytes": 11905
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_catalog.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_catalog.py",
+      "hash": "7a0bcf82a80d8ad9e942a4ed73e96461",
+      "size_bytes": 19476
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_lint_walltime.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_lint_walltime.py",
+      "hash": "f4db9d413a08de15b145e329dd9620b2",
+      "size_bytes": 14891
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_queue_numbers.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_queue_numbers.py",
+      "hash": "c6fd68bee7e0f6d1f617f66d606ac26b",
+      "size_bytes": 9396
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_gate.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_gate.py",
+      "hash": "b9ef616faa31ecd29176352c277a4e9e",
+      "size_bytes": 15770
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_retier.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_retier.py",
+      "hash": "d944b65f2ffb5019f971e5b3a654dfb1",
+      "size_bytes": 11642
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_sentinel.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_sentinel.py",
+      "hash": "9f6725520a4839eb21a0f4cf3d2fad3c",
+      "size_bytes": 34795
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_closure.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_closure.py",
+      "hash": "a85572bbf08e8b5a2f8cbd9feeafe6eb",
+      "size_bytes": 12460
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_events.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_events.py",
+      "hash": "231f2795b8b42127a406fb3f4c5202cf",
+      "size_bytes": 24681
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_staleness.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_staleness.py",
+      "hash": "f33cfd837a1d7f98cde204bdf0746c56",
+      "size_bytes": 12688
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_repo_scope.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_repo_scope.py",
+      "hash": "27cead894024c9f9190d31be38166a02",
+      "size_bytes": 13633
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_posture.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_posture.py",
+      "hash": "83ee0ba9399036955eee640161c9a2e2",
+      "size_bytes": 14786
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_bbstatus.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_bbstatus.py",
+      "hash": "3743fa27b93d9964774577e69edf97e8",
+      "size_bytes": 15228
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_embed_warm.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_embed_warm.py",
+      "hash": "9908cb193965ffcc3c949f16c6333c04",
+      "size_bytes": 13837
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_passport_validator.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_passport_validator.py",
+      "hash": "186933ddc394c21cee382a634dbe21ef",
+      "size_bytes": 18849
+    },
+    {
+      "products_path": "products/brothermode/tools/attempt_hook.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/attempt_hook.py",
+      "hash": "30805b1f448fd5b62372d9f793c8939a",
+      "size_bytes": 26996
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_reconcile_worktrees.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_reconcile_worktrees.py",
+      "hash": "b88163a89ea9caed0f99135ee23ad040",
+      "size_bytes": 14888
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_release_invariant.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_release_invariant.py",
+      "hash": "232f5cc5d395e61500520aacf047b40e",
+      "size_bytes": 17117
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_analyzer.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_analyzer.py",
+      "hash": "3a3cdca337b779167b0d7326a738b7e1",
+      "size_bytes": 34260
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_private_scan.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_private_scan.py",
+      "hash": "e74be5af63d6dec95c9dd4d9773feb0c",
+      "size_bytes": 14130
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_escalate.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_escalate.py",
+      "hash": "4e26a1ba00435376769b0ad9425cbc44",
+      "size_bytes": 24397
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_principals.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_principals.py",
+      "hash": "ccda4069fb40075497da53ff292f9eaf",
+      "size_bytes": 23928
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_controller.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_controller.py",
+      "hash": "49e0d89cad26ac1fa19bef02dab78e40",
+      "size_bytes": 343946
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_exchange.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_exchange.py",
+      "hash": "652594eaa8102ca13952f8a73107ba7d",
+      "size_bytes": 23023
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_learning.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_learning.py",
+      "hash": "df89ef7e510a96ed688746461e40b701",
+      "size_bytes": 75548
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_connectors.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_connectors.py",
+      "hash": "297bd4ce7056efa8bb684555cbb83083",
+      "size_bytes": 39610
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_profile.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_profile.py",
+      "hash": "ae54deddb28f9de52f75be90f324565e",
+      "size_bytes": 10310
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_policy.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_policy.py",
+      "hash": "33af10b38c8585419fda37507aa20aff",
+      "size_bytes": 12862
+    },
+    {
+      "products_path": "products/brothermode/tools/vault_recall_hook.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/vault_recall_hook.py",
+      "hash": "bb2d685bb8338702077b07e0c01e17c7",
+      "size_bytes": 101599
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_ledger.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_ledger.py",
+      "hash": "05f988767cc156878724ec6ce05099ce",
+      "size_bytes": 13496
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_lineage.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_lineage.py",
+      "hash": "3470cee9bd4a83ac5723b03bf289f8ef",
+      "size_bytes": 13556
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_freshness.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_freshness.py",
+      "hash": "16a2d0b748a1894d20638810074baa26",
+      "size_bytes": 28124
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_notify.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_notify.py",
+      "hash": "63e5ef1760ff1d25d78f4a9351d0fb6d",
+      "size_bytes": 31001
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_consolidate.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_consolidate.py",
+      "hash": "e54d3f63ebdf9954237c5214af35b6d2",
+      "size_bytes": 15667
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_attribute_provenance.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_attribute_provenance.py",
+      "hash": "068a2fdf3decc786ef7cf6e3c9f36253",
+      "size_bytes": 17844
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_crosswalk.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_crosswalk.py",
+      "hash": "3162b5ab7c05a9c284a67e7551ec9106",
+      "size_bytes": 17464
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_store.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_store.py",
+      "hash": "05732fd9f183ecdc7256cd8852990bde",
+      "size_bytes": 1095781
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_hierarchy_req.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_hierarchy_req.py",
+      "hash": "c19521213c16f883dc4a3c3ba02ea16e",
+      "size_bytes": 28909
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_docs.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_docs.py",
+      "hash": "859977260d804d47c57ff7293b94d157",
+      "size_bytes": 179314
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_export.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_export.py",
+      "hash": "0df854f0f3cbfe78632139ffd82f130c",
+      "size_bytes": 22607
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_ledger.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_ledger.py",
+      "hash": "eacc19cbc1fc68ad430c50e6020d4970",
+      "size_bytes": 15456
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_asof.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_asof.py",
+      "hash": "9ffe6e1c37f587a63009971b1f946038",
+      "size_bytes": 10192
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_lint.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_lint.py",
+      "hash": "e2f055a00ef009bcd43f94aca78b07ce",
+      "size_bytes": 27392
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_statusline.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_statusline.py",
+      "hash": "ebd818764e8009444dc5824c743b14e5",
+      "size_bytes": 8864
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_audit.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_audit.py",
+      "hash": "403b1ebc5960a206b40c40f1bad85e57",
+      "size_bytes": 16177
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_assertions.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_assertions.py",
+      "hash": "2f122fb6f120ceab2e6fabdf7dd95c8d",
+      "size_bytes": 30388
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_read_audit.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_read_audit.py",
+      "hash": "d94d866b9fa6bf9d950eed4ee771ef36",
+      "size_bytes": 17309
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_graph.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_graph.py",
+      "hash": "04892d62f5fdf9d5517bb6a7a42785f9",
+      "size_bytes": 41922
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_intake.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_intake.py",
+      "hash": "188b53049704ddb58b2b4f0fd46f052f",
+      "size_bytes": 44126
+    },
+    {
+      "products_path": "products/brothermode/tools/pattern_note.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/pattern_note.py",
+      "hash": "7240bcb8dc098d0a393970effb169673",
+      "size_bytes": 11269
+    },
+    {
+      "products_path": "products/brothermode/tools/brother_paths.py",
+      "bundle_path": "bundle/runtime/brother_paths.py",
+      "hash": "960d0dba1720e7361cdba6c6977683a0",
+      "size_bytes": 12163
+    },
+    {
+      "products_path": "products/brothermode/tools/brother_paths.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/brother_paths.py",
+      "hash": "960d0dba1720e7361cdba6c6977683a0",
+      "size_bytes": 12163
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_telemetry.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_telemetry.py",
+      "hash": "ba9a9247c47bdab7d2e53d72e0080497",
+      "size_bytes": 124683
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_project_facts.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_project_facts.py",
+      "hash": "bf4ff1b23066210c3ebff88ed4ffc4b0",
+      "size_bytes": 18870
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_plan.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_plan.py",
+      "hash": "d159d365c38649708bb47bfbfd3e05e2",
+      "size_bytes": 25970
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_authority.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_authority.py",
+      "hash": "8dcddf377dbd784f38e056ae4583f30a",
+      "size_bytes": 5293
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_retention.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_retention.py",
+      "hash": "14ad0b984dcd5069fc84a6640f7259c3",
+      "size_bytes": 46252
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_curate.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_curate.py",
+      "hash": "0a2fa8d79b49c0d0c93ba5239a07c3b1",
+      "size_bytes": 27788
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_digest.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_digest.py",
+      "hash": "d59c0e4eefab47e53cad89a480f96e79",
+      "size_bytes": 22544
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_hookchain.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_hookchain.py",
+      "hash": "b380ee5a3391784abc035e045fa88b49",
+      "size_bytes": 6404
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_promotions.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_promotions.py",
+      "hash": "99c69ade9374bc0c41d0693a495e92b3",
+      "size_bytes": 12747
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_lifecycle.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_lifecycle.py",
+      "hash": "6b4d340cc9d2b1d146724a2c42d89e66",
+      "size_bytes": 18909
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_route.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_route.py",
+      "hash": "25966267317c859c191923c8685dccaa",
+      "size_bytes": 15534
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_mock_mcp.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_mock_mcp.py",
+      "hash": "e125dd8f8bf98abff9a383fe7f0ed1fd",
+      "size_bytes": 11149
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_labels.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_labels.py",
+      "hash": "dde30e769e8cd66f96499fcb97e5195a",
+      "size_bytes": 14605
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_jbench.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_jbench.py",
+      "hash": "d37e7950ba95cb211593c95b2bbeeb86",
+      "size_bytes": 10935
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_decay.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_decay.py",
+      "hash": "090d6b12c2ff6d040cbd86715f978382",
+      "size_bytes": 9936
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_repair.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_repair.py",
+      "hash": "38470f5b71665af3628817000c73ac1f",
+      "size_bytes": 11483
+    },
+    {
+      "products_path": "products/brothermode/tools/attempt_ledger.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/attempt_ledger.py",
+      "hash": "3855c13a597c944fd65bfe75271e1fac",
+      "size_bytes": 20681
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_distill.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_distill.py",
+      "hash": "5757b553e9d128992d5113ebc963eddc",
+      "size_bytes": 16241
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_messages.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_messages.py",
+      "hash": "cb5fb3ca0c144abba52ff6ce26b016df",
+      "size_bytes": 7534
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_toolkit.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_toolkit.py",
+      "hash": "0b2bd616fb67edca172eed6154cc5e6c",
+      "size_bytes": 77142
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_temporal.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_temporal.py",
+      "hash": "eb65b44f9e4029462de55551bb49010f",
+      "size_bytes": 7311
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_recurrence.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_recurrence.py",
+      "hash": "5e22773913025aee1f6d24fb5c77ed71",
+      "size_bytes": 15198
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_idle.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_idle.py",
+      "hash": "a2c7030cfc8b4dd8a169804cb5687c3e",
+      "size_bytes": 29102
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_shapes.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_shapes.py",
+      "hash": "480b74b512704754c262b9baa2340a65",
+      "size_bytes": 20906
+    },
+    {
+      "products_path": "products/brothermode/tools/vault_client.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/vault_client.py",
+      "hash": "7eb754db86d19b1bd978b541f4e8d549",
+      "size_bytes": 5786
+    },
+    {
+      "products_path": "products/brothermode/tools/brothermode_cli.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/brothermode_cli.py",
+      "hash": "d1eb8a79c299083baafa80c10183917c",
+      "size_bytes": 24274
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_embed_bge.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_embed_bge.py",
+      "hash": "2653b31ab7551de4bedb2ad39e558fc8",
+      "size_bytes": 2457
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_lock.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_lock.py",
+      "hash": "c93dfcbf7a5ee5a287dedbcc6c6a289b",
+      "size_bytes": 5486
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_pane.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_pane.py",
+      "hash": "d0e2d9661dbb74e6ec6b09adc978d6ba",
+      "size_bytes": 18074
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_context.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_context.py",
+      "hash": "32f2a1e2dd55bd0b61120f9f3dd668ef",
+      "size_bytes": 14434
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_enrich_index.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_enrich_index.py",
+      "hash": "5aa1dd3a47ff0c46ae6e51b210cd911b",
+      "size_bytes": 18288
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_repomap.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_repomap.py",
+      "hash": "dac296bd9c976aa91731e0573b6c56fe",
+      "size_bytes": 6625
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_continue.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_continue.py",
+      "hash": "99eb33b508e6b4f5bcd4d5cc1b72e98f",
+      "size_bytes": 64426
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_effects.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_effects.py",
+      "hash": "8df0a96645136cb896d1c4c1947adc34",
+      "size_bytes": 43515
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_enrich.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_enrich.py",
+      "hash": "5c9899a2919209af83d183b7bfaf274e",
+      "size_bytes": 15534
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_attributes.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_attributes.py",
+      "hash": "533e85fedc79af95766429c4d270c394",
+      "size_bytes": 22144
+    },
+    {
+      "products_path": "products/brothermode/tools/bm_vault_serve.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/tools/bm_vault_serve.py",
+      "hash": "fef64ed4c950802490bc963f6d82225e",
+      "size_bytes": 34274
+    },
+    {
+      "products_path": "products/brothermode/mcp/bm_mcp_server.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/mcp/bm_mcp_server.py",
+      "hash": "62324a5c5f112edaf5ff92e51442efb8",
+      "size_bytes": 47091
+    },
+    {
+      "products_path": "products/brothermode/scripts/setup.py",
+      "bundle_path": "bundle/runtime/hooks/brothermode/scripts/setup.py",
+      "hash": "2844f2558b6553ff4b7ae9a5b089a0eb",
+      "size_bytes": 16431
+    },
+    {
+      "products_path": "products/brothersbe/tools/sbe_guard_common.py",
+      "bundle_path": "bundle/runtime/hooks/brothersbe/tools/sbe_guard_common.py",
+      "hash": "20dfb12b51dd83c9fd2dae881153f352",
+      "size_bytes": 7774
+    },
+    {
+      "products_path": "products/brothersbe/tools/sbe_profile.py",
+      "bundle_path": "bundle/runtime/hooks/brothersbe/tools/sbe_profile.py",
+      "hash": "b5b9dfbed0c9e45bd27a5b282cee98f1",
+      "size_bytes": 34410
+    },
+    {
+      "products_path": "products/brothersbe/tools/sbe_release_invariant.py",
+      "bundle_path": "bundle/runtime/hooks/brothersbe/tools/sbe_release_invariant.py",
+      "hash": "0696f81771c1060405f581b6a1bf42c7",
+      "size_bytes": 11842
+    },
+    {
+      "products_path": "products/brothersbe/tools/sbe_repo_scope.py",
+      "bundle_path": "bundle/runtime/hooks/brothersbe/tools/sbe_repo_scope.py",
+      "hash": "240f3e6d9bbba733366192b4b0e32bbc",
+      "size_bytes": 13227
+    },
+    {
+      "products_path": "products/brothersbe/tools/sbe_score.py",
+      "bundle_path": "bundle/runtime/hooks/brothersbe/tools/sbe_score.py",
+      "hash": "620c2adff06efade48cbe50f7ead1086",
+      "size_bytes": 125588
+    },
+    {
+      "products_path": "products/brothersbe/tools/sbe_authority_hook.py",
+      "bundle_path": "bundle/runtime/hooks/brothersbe/tools/sbe_authority_hook.py",
+      "hash": "3c22aa0f6c601d048a2fc7781f3837e7",
+      "size_bytes": 32545
+    },
+    {
+      "products_path": "products/brothersbe/tools/sbe_sessionstart.py",
+      "bundle_path": "bundle/runtime/hooks/brothersbe/tools/sbe_sessionstart.py",
+      "hash": "78f34f22233c794dcde82f32ee3723b2",
+      "size_bytes": 6672
+    },
+    {
+      "products_path": "products/brothersbe/tools/sbe_session_reconcile.py",
+      "bundle_path": "bundle/runtime/hooks/brothersbe/tools/sbe_session_reconcile.py",
+      "hash": "f5225183e59799475f3720ce3e55ec59",
+      "size_bytes": 45948
+    },
+    {
+      "products_path": "products/brothersbe/tools/sbe_bash_write_guard.py",
+      "bundle_path": "bundle/runtime/hooks/brothersbe/tools/sbe_bash_write_guard.py",
+      "hash": "e4a67efeec36099adad6148d6791ca0a",
+      "size_bytes": 79866
+    },
+    {
+      "products_path": "products/brothersbe/tools/sbe_instruction_surface.py",
+      "bundle_path": "bundle/runtime/hooks/brothersbe/tools/sbe_instruction_surface.py",
+      "hash": "3ec5ddfabf9df4705303f448af260c3e",
+      "size_bytes": 21394
+    },
+    {
+      "products_path": "products/brothersbe/tools/sbe_checks.py",
+      "bundle_path": "bundle/runtime/hooks/brothersbe/tools/sbe_checks.py",
+      "hash": "3837af5dab7aaf21cefca4dbf41a5477",
+      "size_bytes": 90306
+    },
+    {
+      "products_path": "products/brothersbe/tools/sbe_fence_hook.py",
+      "bundle_path": "bundle/runtime/hooks/brothersbe/tools/sbe_fence_hook.py",
+      "hash": "6381fa5a425032610b14aa071207d320",
+      "size_bytes": 96728
+    },
+    {
+      "products_path": "products/brothersbe/tools/sbe_session_baseline.py",
+      "bundle_path": "bundle/runtime/hooks/brothersbe/tools/sbe_session_baseline.py",
+      "hash": "b10697345d736bcbc8ba9e034af6e15b",
+      "size_bytes": 20516
+    },
+    {
+      "products_path": "products/brothersbe/tools/brother_paths.py",
+      "bundle_path": "bundle/runtime/hooks/brothersbe/tools/brother_paths.py",
+      "hash": "e998e8ed6cdb6056822d0ab33ac97cd3",
+      "size_bytes": 13665
+    },
+    {
+      "products_path": "products/brothersbe/tools/sbe_autosave.py",
+      "bundle_path": "bundle/runtime/hooks/brothersbe/tools/sbe_autosave.py",
+      "hash": "a1ac11bdc58993dbe659353f7ff77664",
+      "size_bytes": 34699
+    },
+    {
+      "products_path": "products/brothersbe/tools/sbe_telemetry.py",
+      "bundle_path": "bundle/runtime/hooks/brothersbe/tools/sbe_telemetry.py",
+      "hash": "3175923368f72b3728638220eb67759e",
+      "size_bytes": 107377
+    },
+    {
+      "products_path": "products/brothersbe/src/brothersbe/tasks.py",
+      "bundle_path": "bundle/runtime/hooks/brothersbe/src/brothersbe/tasks.py",
+      "hash": "3f15d26b24bd7e8d49b5f0f6fbfd835c",
+      "size_bytes": 77545
+    }
+  ],
+  "duplicate_pair_count": 164,
+  "duplicated_bytes_total": 6803081,
+  "plugin_dir_exists": false,
+  "internal_imports": {
+    "brothermode": {
+      "file_count": 0,
+      "files": []
+    },
+    "brothersbe": {
+      "file_count": 12,
+      "files": [
+        "./products/brothersbe/evals/run_evals.py",
+        "./products/brothersbe/tools/sbe_decision_record.py",
+        "./products/brothersbe/tools/sbe_decision_verify.py",
+        "./products/brothersbe/tools/sbe_tier_outcome.py",
+        "./products/brothersbe/tools/test_sbe_bbstatus.py",
+        "./products/brothersbe/tools/test_sbe_ci_handshake.py",
+        "./products/brothersbe/tools/test_sbe_decision_record.py",
+        "./products/brothersbe/tools/test_sbe_decisions.py",
+        "./products/brothersbe/tools/test_sbe_fieldbook.py",
+        "./products/brothersbe/tools/test_sbe_journey3_followups.py",
+        "./products/brothersbe/tools/test_sbe_program.py",
+        "./products/brothersbe/tools/test_sbe_proofplan.py"
+      ]
+    },
+    "brotherds": {
+      "file_count": 0,
+      "files": []
+    }
+  }
+}

@@ -425,6 +425,65 @@ class ARealRunParksTheRiskyPieceAndFinishesAfterTheRelease(unittest.TestCase):
                       "exited 0", out)
         self.assertIn("you answered the release screen", out)
 
+def setUpModule():
+    # Test-owned disk premise: worker admission reads this host's free
+    # disk, so a full disk would otherwise read as a failing suite.
+    from hermetic_worker_env import worker_environment
+    _disk = worker_environment()
+    _disk.__enter__()
+    unittest.addModuleCleanup(_disk.__exit__, None, None, None)
+    # Finding 31 (loop audit 2026-09-26), same fixture as test_board_status.py:
+    # unmocked production calls read the tracked data/jev-seams.json, where
+    # J030, J063, J064, J102 and J117 sit in shadow, and jev_decide resolves
+    # the machine's real bridge (~/.claude/bin/or_ask.py) at import. A spy on
+    # jev_seam.consult counted 6 calls (J063, J102, J117 2 each), all in child
+    # processes, reaching a live shadow entry in one run of this module on hub
+    # main under an empty HOME. Pin an all-off seams config and a bridge path
+    # that does not exist, so only a case that patches its own config and
+    # runner calls out.
+    import shutil
+    from unittest import mock
+    import jev_decide
+    import jev_seam
+    root = tempfile.mkdtemp(prefix="brother-jev-seams-test-")
+    unittest.addModuleCleanup(shutil.rmtree, root, ignore_errors=True)
+    seams = os.path.join(root, "jev-seams.json")
+    with open(seams, "w", encoding="utf-8") as fh:
+        json.dump({"modes": {}}, fh)
+    no_bridge = os.path.join(root, "no-bridge-in-tests")
+    for patcher in (mock.patch.object(jev_seam, "DEFAULT_SEAMS_CONFIG_PATH", seams),
+                    mock.patch.object(jev_decide, "DEFAULT_BRIDGE_PATH", no_bridge)):
+        patcher.start()
+        unittest.addModuleCleanup(patcher.stop)
+    # The processes these tests launch re-import jev_seam and read the
+    # tracked config afresh, out of reach of the patches above, and every
+    # consult, even an off one, writes attempt rows. So the children get
+    # BROTHER_JEV_SEAMS_OFF (the tracked file reads as every entry off), a
+    # temporary BROTHER_JEV_STATE_DIR (ledger and daily call budget) and a
+    # bridge command that cannot launch, quoted because the variable is
+    # parsed as a command line; this process gets the same ledger and
+    # budget paths, since its constants were fixed at import.
+    import shlex
+    import jev_checks
+    state = tempfile.mkdtemp(prefix="brother-jev-state-test-")
+    unittest.addModuleCleanup(shutil.rmtree, state, ignore_errors=True)
+    ledger = os.path.join(state, "ledger")
+    for patcher in (mock.patch.object(jev_seam, "DEFAULT_LEDGER_DIR", ledger),
+                    mock.patch.object(jev_checks, "DEFAULT_LEDGER_DIR", ledger),
+                    mock.patch.object(jev_seam, "DEFAULT_BUDGET_PATH",
+                                      os.path.join(state, "jev-budget.json")),
+                    mock.patch.dict(os.environ, {
+                        "BROTHER_JEV_SEAMS_OFF": "1",
+                        "BROTHER_JEV_STATE_DIR": state,
+                        "BROTHER_DECISION_BRIDGE": shlex.quote(jev_decide.DEFAULT_BRIDGE_PATH)})):
+        patcher.start()
+        unittest.addModuleCleanup(patcher.stop)
+
+
+def tearDownModule():
+    # Python 3.9's unittest runs the module cleanups above only when this
+    # hook exists (fixed in 3.10); without it the fixture roots leak per run.
+    pass
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

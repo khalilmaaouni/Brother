@@ -1,0 +1,267 @@
+{
+  "schema": "brother.loop model registry v1",
+  "note": "EDIT THIS FILE to add a model. No code change is needed. scripts/loop/model_router.py reads it at every call, validates it, and refuses to run on a malformed entry rather than silently ignoring it. Adding a row is how a new OpenRouter model, a new Codex model or a new Claude tier enters the loop.",
+  "fields": "DERIVED VIEWS (FX-31.6): every model table the loop once typed by hand is a projection of these rows, built by scripts/loop/model_router.py derive_model_views and checked by scripts/loop/registry_measure.py. Optional row fields: `aliases` (extra bridge CLI names for this row, the row's own name is always one), `spoken` (phrases the owner types at intake that mean this row), `answers_as` (the id the bridge's [usage] line reports when it differs from `id`, which the strict dispatcher compares against), `arm` ({keys, cost_usd, mix}: the ledger substrings that read as this build arm, its USD per build, and its share of the default worker mix). `fallback` (true on a bridge row the bridge itself tries, in row order, after the requested model fails: or_ask FALLBACK_MODELS), `stage` (seated when absent; retired or shadow never seat anywhere the loop builds a seating list: chain, the worker mix, the repair wave, the fan out's job allowlist and the dispatch aliases all read seated rows only, while the bridge itself may still reach the row as its own fallback). `read_on` at the top is the date the rows were last measured; registry_measure.py --check warns past 90 days and blocks nothing.",
+  "read_on": "2026-10-03",
+  "read_on_note": "the date of the newest MEASURED note below (sonnet55_live); not a guess. registry_measure.py --check reads it.",
+  "privacy_classes": {
+    "public": "may be published. Bridge and Codex vendors may retain prompts, so only this class may reach them.",
+    "internal": "not for publication, but not secret.",
+    "private": "repository source, client terms, personal data, credentials. First party Claude only."
+  },
+  "kinds": {
+    "build": "write or repair code from a brief",
+    "grade": "judge a returned build",
+    "prose": "write text for a human",
+    "plan": "architecture, orchestration, judging",
+    "decide": "answer a TYPED question and return a calibrated probability"
+  },
+  "transports": {
+    "bridge": "OpenRouter, via ~/.claude/bin/or_ask.py --model <alias>",
+    "claude": "first party, via `claude -p --model <id>`",
+    "codex": "via `codex exec -m <id> -C <trusted dir> --sandbox read-only <prompt> < /dev/null`"
+  },
+  "models": {
+    "deepseek": {
+      "id": "deepseek/deepseek-v4.1-flash",
+      "transport": "bridge",
+      "privacy": "public",
+      "quality": {
+        "build": 7,
+        "grade": 6,
+        "prose": 6
+      },
+      "cost": 1.0,
+      "spoken": [
+        "deep seek",
+        "deep-seek",
+        "deepseek flash"
+      ],
+      "arm": {
+        "keys": [
+          "deepseek"
+        ],
+        "cost_usd": 0.02,
+        "mix": 5
+      },
+      "note": "measured 2026-09-21: 21 completion tokens for a sum"
+    },
+    "muse": {
+      "id": "meta/muse-spark-1.3-contributor",
+      "transport": "bridge",
+      "privacy": "public",
+      "quality": {
+        "build": 8,
+        "grade": 7,
+        "prose": 8
+      },
+      "cost": 14.8,
+      "arm": {
+        "keys": [
+          "muse"
+        ],
+        "cost_usd": 0.02
+      },
+      "stage": "retired",
+      "note": "measured 2026-09-21: 310 completion tokens for the SAME sum; reasoning is mandatory. RETIRED 2026-10-05: the provider withdrew the model, OpenRouter answers HTTP 404 model_not_found on meta/muse-spark-1.3-contributor (loop_intake prepare CONFIG_WAIT). Row kept for history and ledger matching; it carries no mix share and never seats."
+    },
+    "jev": {
+      "id": "typesafe/jev-1.13",
+      "transport": "bridge",
+      "privacy": "public",
+      "quality": {
+        "decide": 9
+      },
+      "cost": 0.6,
+      "aliases": [
+        "typesafe"
+      ],
+      "answers_as": "typesafe/jev-1.13-20260917",
+      "note": "typed only. Refuses prose. Returns a probability, never a boolean."
+    },
+    "nemotron": {
+      "id": "nvidia/nemotron-3-ultra-550b-a55b:free",
+      "transport": "bridge",
+      "privacy": "public",
+      "quality": {
+        "build": 4,
+        "grade": 4,
+        "prose": 4
+      },
+      "cost": 0.0,
+      "stage": "shadow",
+      "fallback": true,
+      "note": "the bridge's own secondary (or_ask FALLBACK_MODELS, derived from `fallback` rows since FX-31.7): tried after the requested model fails, zero cost, proven live 2026-09-10. stage shadow: the loop never seats it, automatic or pinned; its quality is a prior like every other row's."
+    },
+    "fable": {
+      "id": "claude-fable-5-1",
+      "transport": "claude",
+      "privacy": "private",
+      "quality": {
+        "build": 9,
+        "grade": 9,
+        "prose": 9,
+        "plan": 10
+      },
+      "cost": 40.0,
+      "spoken": [
+        "claude fable"
+      ]
+    },
+    "opus": {
+      "id": "claude-opus-5",
+      "transport": "claude",
+      "privacy": "private",
+      "quality": {
+        "build": 10,
+        "grade": 9,
+        "prose": 9,
+        "plan": 10
+      },
+      "cost": 35.0,
+      "spoken": [
+        "claude opus"
+      ]
+    },
+    "sonnet": {
+      "id": "claude-sonnet-5",
+      "transport": "claude",
+      "privacy": "private",
+      "quality": {
+        "build": 8,
+        "grade": 8,
+        "prose": 8,
+        "plan": 7
+      },
+      "cost": 8.0,
+      "spoken": [
+        "claude sonnet"
+      ],
+      "arm": {
+        "keys": [
+          "sonnet",
+          "claude"
+        ],
+        "cost_usd": 0.1,
+        "mix": 1
+      }
+    },
+    "haiku": {
+      "id": "claude-haiku-4-5-20251001",
+      "transport": "claude",
+      "privacy": "private",
+      "quality": {
+        "build": 6,
+        "grade": 7,
+        "prose": 6
+      },
+      "cost": 2.0,
+      "spoken": [
+        "claude haiku"
+      ]
+    },
+    "astra": {
+      "id": "gpt-6-astra",
+      "transport": "codex",
+      "privacy": "public",
+      "quality": {
+        "build": 9,
+        "grade": 9,
+        "prose": 10,
+        "plan": 9
+      },
+      "cost": 30.0,
+      "spoken": [
+        "gpt-6 astra",
+        "gpt6 astra"
+      ],
+      "arm": {
+        "keys": [
+          "astra",
+          "codex"
+        ],
+        "cost_usd": 0.1
+      },
+      "note": "the owner's choice for documentation and orchestration work"
+    },
+    "luna": {
+      "id": "gpt-5.6-luna",
+      "transport": "codex",
+      "privacy": "public",
+      "quality": {
+        "build": 8,
+        "grade": 8,
+        "prose": 9,
+        "plan": 8
+      },
+      "cost": 12.0,
+      "note": "the Codex config default"
+    },
+    "sol": {
+      "id": "gpt-5.6-sol",
+      "transport": "codex",
+      "privacy": "public",
+      "quality": {
+        "build": 8,
+        "grade": 8,
+        "prose": 8,
+        "plan": 7
+      },
+      "cost": 12.0
+    },
+    "terra": {
+      "id": "gpt-5.6-terra",
+      "transport": "codex",
+      "privacy": "public",
+      "quality": {
+        "build": 8,
+        "grade": 8,
+        "prose": 8,
+        "plan": 7
+      },
+      "cost": 12.0
+    },
+    "gpt55": {
+      "id": "gpt-5.5",
+      "transport": "codex",
+      "privacy": "public",
+      "quality": {
+        "build": 7,
+        "grade": 7,
+        "prose": 7
+      },
+      "cost": 8.0
+    },
+    "opus55": {
+      "id": "claude-opus-5-5",
+      "transport": "claude",
+      "privacy": "private",
+      "quality": {
+        "build": 10,
+        "grade": 9,
+        "prose": 9,
+        "plan": 10
+      },
+      "cost": 35.0
+    },
+    "sonnet55": {
+      "id": "claude-sonnet-5-5",
+      "transport": "claude",
+      "privacy": "private",
+      "quality": {
+        "build": 8,
+        "grade": 8,
+        "prose": 8,
+        "plan": 7
+      },
+      "cost": 8.0
+    }
+  },
+  "quality_is_an_unmeasured_prior": "READ THIS BEFORE TRUSTING THE ORDER. Every `quality` number in this file is a PRIOR typed by hand on 2026-09-21, not a measurement. No benchmark on this estate has scored these models against each other for build, grade, prose or plan. They are stated as estimates rather than dressed up as data, because a ranking presented as measured when it is guessed is the fabrication this estate forbids absolutely. The MEASURED term is `reliability`, which model_router.py reads from the outcome ledger and which outranks cost within a quality tier. It returned nothing until 2026-09-21, because no outcome row carried a model id anywhere on this estate; record_outcome() now writes one on every call, so this prior gets corrected by evidence as the ledger fills. Until then, treat the order as a starting guess that is cheap to change: edit a number here, no code change, no deploy.",
+  "measured_notes": {
+    "deepseek_vs_muse_cost": "MEASURED 2026-09-21 on the same question (7 plus 5): deepseek used 21 completion tokens, muse used 310. The cost numbers below are anchored to that ratio.",
+    "all_twelve_live": "MEASURED 2026-09-21: every model in this file answered a checkable arithmetic probe through its real transport.",
+    "jev_returns_a_probability": "MEASURED 2026-09-21: jev answers a typed question with a probability (0.96), never a boolean and never prose.",
+    "sonnet55_live": "MEASURED 2026-10-03 for the delegated Sonnet trial: one minimal call through the installed CLI 2.1.286 (claude -p, --model claude-sonnet-5-5) returned subtype success, result OK, modelUsage naming claude-sonnet-5-5, total_cost_usd 0.4476 (trial setup cost). Its quality and cost here copy the sonnet row as a prior, not a measurement."
+  }
+}
